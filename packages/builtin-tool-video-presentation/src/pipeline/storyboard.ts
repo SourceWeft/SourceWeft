@@ -15,9 +15,20 @@ const {
   storyboardGenerationFailed: VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED,
 } = VIDEO_PRESENTATION_ERROR_CODES;
 
-// Word-count fallback only. Whenever a real audio track exists its measured
-// duration (probeAudioDurationSeconds) is authoritative — never use this
-// estimate in that case.
+/**
+ * How long a piece of narration will take to read aloud, from its text.
+ *
+ * PLANNING ONLY. Its single purpose is `narrationBudgetIssues`, which runs
+ * while the storyboard is being written — before any TTS call, when there is no
+ * audio in existence to measure — to push the model toward slides that pace
+ * well. It is a prompt-shaping heuristic, never a timeline input.
+ *
+ * It is deliberately unreachable from anything that sets a track's or a scene's
+ * length: `generateAudioTracks` fails outright rather than record a guess
+ * (`audio.ts`), because a scene is sized from the track and a guess that runs
+ * short clips the slide's speech with nothing able to notice. If this function
+ * ever turns up on that path again, that bug is back.
+ */
 export function estimateNarrationDurationSeconds(text: string) {
   const cjkChars = [...text].filter((char) =>
     /\p{Script=Han}/u.test(char),
@@ -30,6 +41,12 @@ export function estimateNarrationDurationSeconds(text: string) {
   return Math.max(4, Number((estimated + 1.25).toFixed(2)));
 }
 
+/**
+ * On-screen length for a slide that has no narration at all — a deck that opted
+ * out of speech. Not a fallback for a narrated slide: there is no audio to
+ * measure here, so this is the requested pacing being honoured, not a guess
+ * standing in for a measurement.
+ */
 export function durationTargetFallbackSeconds(
   target: VideoPresentationProjectPayload["renderProfile"]["durationTarget"],
 ) {

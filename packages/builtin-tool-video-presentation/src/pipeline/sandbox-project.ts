@@ -58,6 +58,14 @@ export type RenderVideoRequest = {
     slideNumber: number;
     fileName: string;
     data: Uint8Array;
+    /**
+     * The staged bytes' measured length (see `StagedNarrationTrack`). It is
+     * required, not optional: it is the only number in the generated manifest
+     * that was not derived from the same measurement the scene lengths were,
+     * which is the whole reason `render-smoke` can now catch a scene that is
+     * too short for its narration.
+     */
+    durationSeconds: number;
   }>;
 };
 
@@ -145,6 +153,7 @@ export async function runProjectInSession(input: {
     ).map((track) => ({
       slideNumber: track.slideNumber,
       fileName: track.fileName,
+      durationSeconds: track.durationSeconds,
     }));
     const projectCode = buildProjectCodePayload(
       input.payload,

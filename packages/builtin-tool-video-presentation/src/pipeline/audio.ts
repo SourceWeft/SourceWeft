@@ -9,10 +9,7 @@ import {
   type ArtifactStorage,
 } from "@sourceweft/contracts/artifact-storage";
 import type { VideoPipelineDeps } from "./deps";
-import {
-  estimateNarrationDurationSeconds,
-  requestNarrationEnabled,
-} from "./storyboard";
+import { requestNarrationEnabled } from "./storyboard";
 import { extensionForMimeType as artifactExtensionForMimeType } from "@sourceweft/contracts/artifact-files";
 import { safeStorageSegment } from "./util";
 
@@ -132,16 +129,35 @@ export async function generateAudioTracks(input: {
         contentType: mimeType,
         key: storageKey,
       });
-      const measuredDurationSeconds = await input.deps.audio.probeDurationSeconds({
-        buffer: speech.audio,
-        mimeType,
-      });
+      const measuredDurationSeconds = await input.deps.audio.probeDurationSeconds(
+        { buffer: speech.audio, mimeType },
+      );
       if (measuredDurationSeconds == null) {
-        input.deps.logger.warn("video_presentation_audio_duration_fallback_estimate", {
+        // A failed probe used to fall back to a word-count guess. It must not:
+        // this number becomes the scene's frame count (`scene-gen.ts`), so a
+        // guess that runs short leaves the scene short by the same amount and
+        // the slide's speech is cut off at the <Sequence> boundary — in the
+        // browser preview and, now that an mp4 is published, baked into the
+        // deliverable. Nothing downstream could catch it either, because every
+        // check compared the guess against a length derived from that same
+        // guess.
+        //
+        // The probe only returns null when the bytes are not decodable audio or
+        // imply an impossible byte rate (`probeAudioDurationSeconds`), i.e. the
+        // TTS response is broken — the same class of failure as the throw
+        // above, and treated the same way. There is no in-place retry because
+        // probing is deterministic on the bytes in hand; the retry that can
+        // help is a fresh TTS call, which is exactly what re-running this stage
+        // from its checkpoint does.
+        input.deps.logger.warn("video_presentation_audio_duration_unmeasurable", {
           artifactId: input.artifactId,
           slideNumber: slide.slideNumber,
           mimeType,
+          byteLength: speech.audio.byteLength,
         });
+        throw new Error(
+          `Narration duration could not be measured for slide ${slide.slideNumber} (${mimeType}, ${speech.audio.byteLength} bytes): the generated speech is not decodable audio.`,
+        );
       }
       const track = {
         slideNumber: slide.slideNumber,
@@ -152,12 +168,7 @@ export async function generateAudioTracks(input: {
         }),
         storageBucket: input.deps.storage.getBucketName(),
         storageKey,
-        durationSeconds:
-          measuredDurationSeconds ??
-          estimateNarrationDurationSeconds(transcript),
-        durationSource: (measuredDurationSeconds != null
-          ? "measured"
-          : "estimated") as "measured" | "estimated",
+        durationSeconds: measuredDurationSeconds,
         mimeType,
         fileName,
       } satisfies VideoPresentationAudioTrack;
@@ -187,6 +198,20 @@ export type StagedNarrationTrack = {
   /** Base name inside the project's `public/audio/`. */
   fileName: string;
   data: Uint8Array;
+  /**
+   * Length measured HERE, from the object that is about to be staged — not
+   * copied off `track.durationSeconds`.
+   *
+   * This is what makes the generated project's smoke check a real check. The
+   * scene's frame count came from the measurement taken at TTS time and
+   * persisted on the payload; this one is taken independently, at render time,
+   * from the bytes that will actually be mixed into the mp4. Comparing the two
+   * catches the case the manifest could never catch while both sides were the
+   * same number: the stored object no longer being the audio the timeline was
+   * built against (an edit run reusing a pointer whose bytes changed, a
+   * renumbered deck, a partially overwritten upload).
+   */
+  durationSeconds: number;
 };
 
 /**
@@ -205,7 +230,14 @@ export type NarrationStagingFailureReason =
   /** `ARTIFACT_ATTACHMENT_TOO_LARGE` — over the port's download ceiling. */
   | "oversized"
   /** Transport failure reading the object back. */
-  | "download_failed";
+  | "download_failed"
+  /**
+   * The bytes came back but their duration could not be measured. The mp4 is
+   * refused rather than rendered against an unverified timeline: an unmeasurable
+   * object is either not the audio it claims to be or is corrupt, and both ship
+   * as a video whose narration does not line up with its slides.
+   */
+  | "unmeasurable";
 
 export type NarrationStagingResult =
   | { ok: true; tracks: StagedNarrationTrack[] }
@@ -273,6 +305,16 @@ export async function stageNarrationForRender(input: {
   slideNumbers: readonly number[];
   storage: ArtifactStorage;
   /**
+   * `deps.audio.probeDurationSeconds`. Passed in rather than reached for so
+   * this stays a pure function of its ports — and so the re-measurement is
+   * visibly a requirement of staging, not an optional extra: without it the
+   * manifest would be back to comparing a number against itself.
+   */
+  probeDurationSeconds: (input: {
+    buffer: Uint8Array;
+    mimeType: string;
+  }) => Promise<number | null>;
+  /**
    * False when the request opted out of narration. A deck that was never meant
    * to speak renders silent legitimately; without this flag "no tracks" and
    * "the tracks vanished" would be indistinguishable.
@@ -321,10 +363,25 @@ export async function stageNarrationForRender(input: {
       return { ok: false, reason: "object_empty", slideNumber };
     }
     remainingBytes -= downloaded.body.byteLength;
+    // Second, independent measurement — see StagedNarrationTrack.durationSeconds
+    // for why the manifest must not reuse `track.durationSeconds` here.
+    const measuredDurationSeconds = await input.probeDurationSeconds({
+      buffer: downloaded.body,
+      mimeType: track.mimeType,
+    });
+    if (measuredDurationSeconds == null) {
+      return {
+        ok: false,
+        reason: "unmeasurable",
+        slideNumber,
+        detail: `${track.mimeType}, ${downloaded.body.byteLength} bytes`,
+      };
+    }
     tracks.push({
       slideNumber,
       fileName: narrationStagingFileName(track),
       data: downloaded.body,
+      durationSeconds: measuredDurationSeconds,
     });
   }
   return { ok: true, tracks };

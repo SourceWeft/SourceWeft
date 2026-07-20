@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { videoPresentationProjectPayloadSchema } from "@sourceweft/contracts/video-presentation";
+import {
+  videoPresentationProjectPayloadSchema,
+  VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS,
+} from "@sourceweft/contracts/video-presentation";
 import { videoPresentationArtifactViewHandler } from "../src/artifact-view";
 import { stageNarrationForRender } from "../src/pipeline/audio";
-import { buildProjectCodePayload } from "../src/pipeline/project-code";
+import {
+  buildProjectCodePayload,
+  PROJECT_NARRATION_DIR,
+} from "../src/pipeline/project-code";
 import {
   classifyRenderVideoFailure,
   parseRenderVideoReport,
@@ -254,7 +264,9 @@ test("without narration the composition is unchanged (no audio wiring)", () => {
 
 test("staged narration is wired into the composition through staticFile", () => {
   const project = buildProjectCodePayload(payloadFixture(), {
-    narrationFiles: [{ slideNumber: 1, fileName: "slide-1.mp3" }],
+    narrationFiles: [
+      { slideNumber: 1, fileName: "slide-1.mp3", durationSeconds: 2 },
+    ],
   });
   const scene = fileContent(project.files, "src/VideoScene.tsx");
   assert.match(scene, /Audio/);
@@ -318,6 +330,9 @@ function narrationFor(slideNumbers: readonly number[]) {
     slideNumber,
     fileName: `slide-${slideNumber}.mp3`,
     data: new Uint8Array([9]),
+    // Matches `narratedPayload`'s tracks, i.e. the staged bytes still measure
+    // what the payload said they did.
+    durationSeconds: 2,
   }));
 }
 
@@ -835,11 +850,19 @@ function narratedPayload(slideCount: number) {
       storageKey: `key-${slide.slideNumber}`,
       storageBucket: "content",
       durationSeconds: 2,
-      durationSource: "measured",
       mimeType: "audio/mpeg",
       fileName: `Quarterly-Review-slide-${slide.slideNumber}.mp3`,
     })),
   });
+}
+
+/**
+ * Stands in for `deps.audio.probeDurationSeconds`. No test decodes real audio;
+ * what is under test is which number reaches the manifest and what happens when
+ * there is none, not the decoder (that is `audio-duration.test.ts`).
+ */
+function fixedProbe(seconds: number | null) {
+  return async () => seconds;
 }
 
 const tooLarge = Object.assign(new Error("too large"), {
@@ -857,6 +880,7 @@ test("narration is re-fetched by storage key and staged one file per scene", asy
     payload,
     slideNumbers: renderVideoSlideNumbers(payload),
     storage: fake.storage,
+    probeDurationSeconds: fixedProbe(2),
     narrationExpected: true,
   });
 
@@ -891,6 +915,7 @@ test("a narration object that is gone refuses; it never renders silent", async (
     payload,
     slideNumbers: renderVideoSlideNumbers(payload),
     storage: fake.storage,
+    probeDurationSeconds: fixedProbe(2),
     narrationExpected: true,
   });
   assert.equal(result.ok, false);
@@ -911,11 +936,56 @@ test("each narration failure mode is refused, and named apart", async () => {
       payload,
       slideNumbers: renderVideoSlideNumbers(payload),
       storage: fakeNarrationStorage(objects).storage,
+      probeDurationSeconds: fixedProbe(2),
       narrationExpected: true,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok ? null : result.reason, reason);
   }
+});
+
+test("narration whose staged bytes cannot be measured is refused", async () => {
+  // The object is present and non-empty, but it does not decode. Staging it
+  // would put a scene length nothing verified into the mp4 — the exact gap the
+  // render-time re-probe closes — so it degrades to no video like the rest.
+  const payload = narratedPayload(1);
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fakeNarrationStorage({ "key-1": new Uint8Array([1]) }).storage,
+    probeDurationSeconds: fixedProbe(null),
+    narrationExpected: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok ? null : result.reason, "unmeasurable");
+  assert.equal(result.ok ? null : result.slideNumber, 1);
+});
+
+test("staged narration carries its own measurement, not the payload's", async () => {
+  // `narratedPayload` records 2s per track; the objects on disk measure 4.5s.
+  // The staged track must report what was measured here, because that number
+  // is what the manifest publishes for the smoke check to hold the scene to.
+  // Copying `track.durationSeconds` would restore the number-vs-itself compare.
+  const payload = narratedPayload(2);
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fakeNarrationStorage({
+      "key-1": new Uint8Array([1]),
+      "key-2": new Uint8Array([2]),
+    }).storage,
+    probeDurationSeconds: fixedProbe(4.5),
+    narrationExpected: true,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.ok ? result.tracks.map((track) => track.durationSeconds) : null,
+    [4.5, 4.5],
+  );
+  assert.deepEqual(
+    payload.audioTracks.map((track) => track.durationSeconds),
+    [2, 2],
+  );
 });
 
 test("a rendered scene with no narration track at all is refused", async () => {
@@ -932,6 +1002,7 @@ test("a rendered scene with no narration track at all is refused", async () => {
       "key-1": new Uint8Array([1]),
       "key-2": new Uint8Array([2]),
     }).storage,
+    probeDurationSeconds: fixedProbe(2),
     narrationExpected: true,
   });
   assert.equal(result.ok, false);
@@ -946,6 +1017,7 @@ test("a deck that opted out of narration stages nothing and reads no objects", a
     payload,
     slideNumbers: renderVideoSlideNumbers(payload),
     storage: fake.storage,
+    probeDurationSeconds: fixedProbe(2),
     narrationExpected: false,
   });
   assert.deepEqual(result, { ok: true, tracks: [] });
@@ -962,6 +1034,7 @@ test("the audio mix and the video chunks share one frame cursor", () => {
     narrationFiles: [1, 2, 3].map((slideNumber) => ({
       slideNumber,
       fileName: `slide-${slideNumber}.mp3`,
+      durationSeconds: 2,
     })),
   });
   const manifest = JSON.parse(
@@ -1127,4 +1200,163 @@ test("a silent deck still renders and is kept", async () => {
   });
   assert.equal(result.video?.report.hasAudio, false);
   assert.deepEqual([...(result.video?.data ?? [])], [7]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The smoke check, actually run                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Write a generated project to disk and run its `render-smoke` script for real.
+ *
+ * The script is plain node reading a JSON file — no renderer, no chromium, no
+ * audio decoding — so it is the one part of the generated project that can be
+ * executed in a test. Asserting the manifest's shape instead would re-implement
+ * the check and could not tell whether the script agrees with it.
+ */
+function runSmoke(project: ReturnType<typeof buildProjectCodePayload>) {
+  const root = mkdtempSync(join(tmpdir(), "video-smoke-"));
+  try {
+    for (const file of project.files) {
+      const target = join(root, file.path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, file.content);
+    }
+    // Narration files are uploaded alongside the project in the real run; the
+    // script checks they exist, so stand them up with a non-zero byte.
+    const manifest = JSON.parse(
+      fileContent(project.files, "video-presentation.manifest.json"),
+    ) as { scenes: Array<{ narrationFile?: string | null }> };
+    for (const scene of manifest.scenes) {
+      if (!scene.narrationFile) continue;
+      const audio = join(root, PROJECT_NARRATION_DIR, scene.narrationFile);
+      mkdirSync(dirname(audio), { recursive: true });
+      writeFileSync(audio, "audio-bytes");
+    }
+    try {
+      execFileSync(process.execPath, [join(root, "scripts/render-smoke.mjs")], {
+        stdio: "pipe",
+      });
+      return { ok: true, output: "" };
+    } catch (error) {
+      return {
+        ok: false,
+        output: String((error as { stderr?: Buffer }).stderr ?? error),
+      };
+    }
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+}
+
+/**
+ * A deck whose scenes were sized from `payload.audioTracks[].durationSeconds`,
+ * exactly as `scene-gen.ts` sizes them:
+ * `ceil((durationSeconds + tail padding) * fps)`.
+ */
+function deckSizedFor(payloadSeconds: number) {
+  const base = payloadFixture(1);
+  return videoPresentationProjectPayloadSchema.parse({
+    ...base,
+    audioTracks: [
+      {
+        slideNumber: 1,
+        assetUrl: "/assets/track-1.mp3",
+        storageKey: "key-1",
+        storageBucket: "content",
+        durationSeconds: payloadSeconds,
+        mimeType: "audio/mpeg",
+        fileName: "Quarterly-Review-slide-1.mp3",
+      },
+    ],
+    sceneModules: [
+      {
+        ...base.sceneModules[0],
+        durationInFrames: Math.max(
+          60,
+          Math.ceil(
+            (payloadSeconds +
+              VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS) *
+              base.project.fps,
+          ),
+        ),
+      },
+    ],
+  });
+}
+
+test("the smoke check passes when the staged audio is the audio the scene was sized for", () => {
+  const payload = deckSizedFor(2);
+  const result = runSmoke(
+    buildProjectCodePayload(payload, {
+      narrationFiles: [
+        { slideNumber: 1, fileName: "slide-1.mp3", durationSeconds: 2 },
+      ],
+    }),
+  );
+  assert.equal(result.ok, true, result.output);
+});
+
+test("the smoke check catches a scene too short for the audio actually staged", () => {
+  // THE CASE THAT USED TO PASS. The payload claims 2s of narration, so the
+  // scene was cut to 83 frames — but the file that will be mixed into the mp4
+  // is 5s long. The manifest used to publish the payload's 2s on both sides of
+  // the comparison, so the check compared 83 frames against 83 frames and was
+  // satisfied while the deliverable clipped 3 seconds of speech.
+  const payload = deckSizedFor(2);
+  assert.equal(payload.sceneModules[0]?.durationInFrames, 83);
+
+  // Old behaviour, reconstructed: the manifest carrying the payload's number.
+  // (`buildProjectCodePayload` with no staged narration publishes exactly that.)
+  const asItWas = JSON.parse(
+    fileContent(
+      buildProjectCodePayload(payload).files,
+      "video-presentation.manifest.json",
+    ),
+  );
+  assert.equal(asItWas.scenes[0].audioDurationSeconds, 2);
+  assert.equal(runSmoke(buildProjectCodePayload(payload)).ok, true);
+
+  // What happens now: the staged bytes are measured at render time and the
+  // manifest publishes THAT, so the two sides of the comparison no longer come
+  // from one number and the mismatch is caught before a frame is rendered.
+  const result = runSmoke(
+    buildProjectCodePayload(payload, {
+      narrationFiles: [
+        { slideNumber: 1, fileName: "slide-1.mp3", durationSeconds: 5 },
+      ],
+    }),
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.output, /slide 1: narration \(5s\) exceeds scene duration/);
+});
+
+test("the smoke check refuses a narrated scene whose staged file is missing", () => {
+  // Not reachable through `runProjectInSession` (it uploads what it names), but
+  // the script is the last gate before frames are rendered and must not assume
+  // its inputs. A missing file renders a silent slide.
+  const project = buildProjectCodePayload(deckSizedFor(2), {
+    narrationFiles: [
+      { slideNumber: 1, fileName: "slide-1.mp3", durationSeconds: 2 },
+    ],
+  });
+  const root = mkdtempSync(join(tmpdir(), "video-smoke-"));
+  try {
+    for (const file of project.files) {
+      const target = join(root, file.path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, file.content);
+    }
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [join(root, "scripts/render-smoke.mjs")],
+          { stdio: "pipe" },
+        ),
+      /missing staged narration slide-1\.mp3/,
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 });

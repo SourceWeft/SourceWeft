@@ -68,7 +68,9 @@ const report = {
   hasAudio: true,
 };
 
-function stageContext(options: { uploadFails?: boolean } = {}) {
+function stageContext(
+  options: { uploadFails?: boolean; probeSeconds?: number | null } = {},
+) {
   const uploads: Array<{ key: string; contentType: string; byteLength: number }> =
     [];
   const warnings: string[] = [];
@@ -109,7 +111,10 @@ function stageContext(options: { uploadFails?: boolean } = {}) {
           });
         },
       },
-      audio: { probeDurationSeconds: async () => null },
+      audio: {
+        probeDurationSeconds: async () =>
+          options.probeSeconds === undefined ? null : options.probeSeconds,
+      },
     } as never,
     api: {
       updateStageProgress: async () => undefined,
@@ -245,6 +250,8 @@ async function runInstallStage(input: {
   narrated: boolean;
   /** Storage answer for the narration read-back. */
   object?: Uint8Array | null;
+  /** What the render-time re-probe measures on those bytes; null = cannot. */
+  probeSeconds?: number | null;
 }) {
   const state = input.narrated
     ? videoPresentationProjectPayloadSchema.parse({
@@ -256,14 +263,15 @@ async function runInstallStage(input: {
             storageKey: "key-1",
             storageBucket: "content",
             durationSeconds: 2,
-            durationSource: "measured",
             mimeType: "audio/mpeg",
             fileName: "Quarterly-Review-slide-1.mp3",
           },
         ],
       })
     : payloadFixture();
-  const context = stageContext();
+  const context = stageContext({
+    probeSeconds: input.probeSeconds === undefined ? 2 : input.probeSeconds,
+  });
   const requests: Array<Record<string, unknown>> = [];
   const definition = createVideoPresentationPipelineDefinition({
     runProject: async (runInput) => {
@@ -300,12 +308,37 @@ test("the install stage stages narration bytes and asks for the mp4", async () =
   const { request } = await runInstallStage({
     narrated: true,
     object: new Uint8Array([1, 2, 3]),
+    // The staged object measures 2.4s where the payload recorded 2s. Both
+    // numbers ride along: the payload's sized the scene, this one is what the
+    // manifest publishes for the smoke check to hold the scene to.
+    probeSeconds: 2.4,
   });
   const renderVideo = (request as { renderVideo?: { narration?: unknown[] } })
     .renderVideo;
   assert.deepEqual(renderVideo?.narration, [
-    { slideNumber: 1, fileName: "slide-1.mp3", data: new Uint8Array([1, 2, 3]) },
+    {
+      slideNumber: 1,
+      fileName: "slide-1.mp3",
+      data: new Uint8Array([1, 2, 3]),
+      durationSeconds: 2.4,
+    },
   ]);
+});
+
+test("narration whose length cannot be measured means no render is asked for", async () => {
+  // The bytes are there but they do not decode. Staging them anyway would put
+  // an unverifiable timeline into the mp4 — the one thing the re-probe exists
+  // to prevent — so this degrades to "no video" like every other staging
+  // failure, and the browser preview still plays every track.
+  const { request, warnings } = await runInstallStage({
+    narrated: true,
+    object: new Uint8Array([1, 2, 3]),
+    probeSeconds: null,
+  });
+  assert.equal((request as { renderVideo?: unknown }).renderVideo, undefined);
+  assert.ok(
+    warnings.includes("video_presentation_render_narration_unavailable"),
+  );
 });
 
 test("narration that cannot be assembled means no render is asked for", async () => {

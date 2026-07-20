@@ -296,6 +296,8 @@ export function createVideoPresentationPipelineDefinition(options?: {
             payload: state,
             slideNumbers: renderVideoSlideNumbers(state),
             storage: deps.storage,
+            probeDurationSeconds: (probeInput) =>
+              deps.audio.probeDurationSeconds(probeInput),
             narrationExpected: requestNarrationEnabled(request),
           });
           if (!narration.ok) {

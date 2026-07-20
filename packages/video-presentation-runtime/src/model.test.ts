@@ -43,7 +43,6 @@ function payload(input: {
               assetUrl: "/assets/slide-1.mp3",
               storageKey: "slide-1.mp3",
               durationSeconds: input.audioSeconds,
-              durationSource: "measured",
               mimeType: "audio/mpeg",
               fileName: "slide-1.mp3",
             },
@@ -91,13 +90,18 @@ test("uses the scene duration untouched when there is no audio track", () => {
   assert.equal(getSlideDurationInFrames(value, 1), 42);
 });
 
-test("parses legacy payloads without durationSource", () => {
+test("parses payloads that still carry the retired durationSource field", () => {
+  // Every persisted payload written before durations became measurement-only
+  // has `durationSource` on its tracks. The schema is not strict, so the field
+  // is dropped on parse rather than rejecting an artifact that is otherwise
+  // perfectly playable — the timeline never read it, only `durationSeconds`.
   const legacy = payload({ sceneFrames: 90, audioSeconds: 5 }) as Record<
     string,
     unknown
   > & { audioTracks: Array<Record<string, unknown>> };
-  delete legacy.audioTracks[0]?.durationSource;
+  legacy.audioTracks[0]!.durationSource = "estimated";
   const parsed = parseVideoPresentationProject(legacy);
   assert.ok(parsed);
-  assert.equal(parsed.audioTracks[0]?.durationSource, "estimated");
+  assert.equal(parsed.audioTracks[0]?.durationSeconds, 5);
+  assert.equal("durationSource" in parsed.audioTracks[0]!, false);
 });

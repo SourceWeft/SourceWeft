@@ -180,8 +180,21 @@ export const videoPresentationAudioTrackSchema = z.object({
   assetUrl: z.string().trim().min(1),
   storageKey: z.string().trim().min(1),
   storageBucket: z.string().trim().min(1).optional(),
+  /**
+   * The track's real length, measured from the audio bytes themselves.
+   *
+   * There is no second provenance for this number and no `durationSource`
+   * discriminator any more: `generateAudioTracks` fails the stage when the
+   * probe cannot measure the speech it just generated, so nothing can write a
+   * text-length guess here. That matters because this value is not descriptive
+   * — the scene's frame count is derived from it (`scene-gen.ts`), so a guess
+   * that runs short silently clips the tail of the slide's speech at the
+   * <Sequence> boundary in both the browser preview and the rendered mp4.
+   *
+   * Legacy payloads carry `durationSource`; the schema is not strict, so the
+   * field is simply dropped on parse.
+   */
   durationSeconds: z.number().min(0),
-  durationSource: z.enum(["measured", "estimated"]).default("estimated"),
   mimeType: z.string().trim().min(1),
   fileName: z.string().trim().min(1),
 });

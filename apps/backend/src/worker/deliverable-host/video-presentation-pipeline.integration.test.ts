@@ -415,8 +415,14 @@ function makeDeps(
           throw new Error("TTS exploded");
         }
         return {
-          audio: input.ttsAudio ?? Buffer.from("real-audio-bytes"),
-          mimeType: input.ttsMimeType ?? "audio/mpeg",
+          // The default fixture is real, measurable audio because that is what
+          // a working TTS provider returns. It used to be an opaque byte string
+          // whose probe failed, which every test then silently ran against — so
+          // the default path exercised the estimate fallback rather than the
+          // path production takes. There is no estimate fallback now: an
+          // unmeasurable buffer fails the run (see the test that asserts it).
+          audio: input.ttsAudio ?? buildWavBuffer({ sampleRate: 16_000, seconds: 2 }),
+          mimeType: input.ttsMimeType ?? "audio/wav",
         };
       },
     },
@@ -593,7 +599,6 @@ test("uses measured audio duration for scene length with tail padding", async ()
   );
   const fps = payload.project.fps;
   for (const track of payload.audioTracks) {
-    assert.equal(track.durationSource, "measured");
     assert.equal(track.durationSeconds, 2.5);
   }
   for (const scene of payload.sceneModules) {
@@ -679,8 +684,6 @@ test("processVideoPresentationGenerateJob plans internally and publishes code-fi
   assert.equal(payload.audioTracks.length, 2);
   assert.equal(payload.audioTracks[0]?.storageBucket, "content");
   assert.match(payload.audioTracks[0]?.assetUrl ?? "", /\/assets\//);
-  // The mock TTS buffer is unparseable, so the probe falls back to estimate.
-  assert.equal(payload.audioTracks[0]?.durationSource, "estimated");
   // The tool-call idempotency key must survive every worker payload rewrite,
   // or retried tool calls create duplicate artifacts.
   assert.equal(payload.requestKey, "request-key-1");
@@ -899,6 +902,36 @@ test("processVideoPresentationGenerateJob fails artifact when TTS fails", async 
   assert.equal(repositoryState.readyPayload, null);
 });
 
+test("narration whose duration cannot be measured fails the run, never estimates", async () => {
+  // Speech that does not decode. This used to be swallowed: the track was
+  // recorded with `estimateNarrationDurationSeconds(transcript)` and
+  // `durationSource: "estimated"`, the scene was then cut to fit that guess,
+  // and every downstream check compared the guess against a length derived
+  // from it — so a short guess shipped a deck with the tail of its speech
+  // clipped and nothing to say so. The duration is load-bearing (it sets the
+  // scene's frame count), so an unmeasurable buffer is a failure, not a
+  // degradation, and it fails here where a stage retry can regenerate the
+  // speech rather than in a deliverable nobody can re-derive.
+  const processor = createVideoPresentationGenerateProcessor(async () =>
+    makeDeps({
+      ttsAudio: Buffer.from("not-decodable-audio"),
+      ttsMimeType: "audio/mpeg",
+    }),
+  );
+
+  await assert.rejects(
+    () => processor({ data: jobData() } as never),
+    /Narration duration could not be measured for slide/u,
+  );
+  const failedPayload = videoPresentationProjectPayloadSchema.parse(
+    repositoryState.failedPayload,
+  );
+  assert.equal(failedPayload.generation.status, "failed");
+  // Nothing was published, and no track carries a made-up number.
+  assert.equal(repositoryState.readyPayload, null);
+  assert.deepEqual(failedPayload.audioTracks, []);
+});
+
 test("processVideoPresentationGenerateJob records stage retry progress for audio", async () => {
   const processor = createVideoPresentationGenerateProcessor(async () =>
     makeDeps({ ttsFails: true }),
@@ -1060,7 +1093,6 @@ function readyBasePayload() {
     storageKey: `workspaces/workspace-1/artifacts/artifact-1/base-slide-${slideNumber}.wav`,
     storageBucket: "content",
     durationSeconds: seconds,
-    durationSource: "measured",
     mimeType: "audio/wav",
     fileName: `base-slide-${slideNumber}.wav`,
   });
@@ -1193,7 +1225,6 @@ test("edit run regenerates only targeted slides and never touches the published 
   // Slide 2 regenerated: new storyboard entry, new narration, new scene.
   assert.equal(payload.slides[1]?.title, "Close the Gaps");
   assert.equal(payload.audioTracks[1]?.durationSeconds, 3);
-  assert.equal(payload.audioTracks[1]?.durationSource, "measured");
   assert.match(payload.sceneModules[1]?.code ?? "", /EDITED_SCENE_TWO/u);
   // Themes reused (no theme LLM call): only the storyboard-edit structured call.
   assert.equal(repositoryState.llmStructuredCalls, 1);

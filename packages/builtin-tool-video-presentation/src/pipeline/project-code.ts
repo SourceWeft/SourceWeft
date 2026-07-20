@@ -13,6 +13,13 @@ export type ProjectNarrationFile = {
   slideNumber: number;
   /** Base name inside `public/audio/`, e.g. `slide-3.mp3`. */
   fileName: string;
+  /**
+   * The staged file's own measured length, taken at staging time from these
+   * exact bytes (`stageNarrationForRender`). The manifest publishes THIS, not
+   * `payload.audioTracks[].durationSeconds`, so the smoke check compares two
+   * independently obtained numbers — see the manifest's `audioDurationSeconds`.
+   */
+  durationSeconds: number;
 };
 
 /** Directory (relative to the project root) narration is staged into. */
@@ -264,29 +271,27 @@ export function buildProjectCodePayload(
             fps: payload.project.fps,
             height: payload.project.height,
             scenes: sceneModules.map((scene) => ({
-              // KNOWN GAP — this number is the same one the scene length was
-              // derived from, so `render-smoke`'s "scene is long enough for its
-              // narration" check cannot catch the case it most needs to.
-              // `scene.durationInFrames` is
-              // `ceil((track.durationSeconds + tail padding) * fps)`
-              // (`scene-gen.ts`), and `track.durationSeconds` is the *probed*
-              // length — except when probing failed, where `audio.ts` records
-              // `estimateNarrationDurationSeconds(transcript)` and
-              // `durationSource: "estimated"`. An estimate that is short leaves
-              // the scene short by exactly the same amount, both sides of the
-              // comparison agree, and the mp4 ships with the tail of that
-              // slide's speech cut off at the <Sequence> boundary.
+              // The length `render-smoke` holds the scene to. On an mp4 render
+              // this is the file staged under `public/audio/`, measured at
+              // staging time from those exact bytes — deliberately NOT
+              // `payload.audioTracks[].durationSeconds`, which is where
+              // `scene.durationInFrames` already came from
+              // (`ceil((durationSeconds + tail padding) * fps)` in
+              // `scene-gen.ts`). Two numbers from one measurement can only ever
+              // agree; these two are obtained independently, at different times,
+              // so a scene that no longer covers the audio it will be mixed with
+              // fails the check instead of shipping clipped.
               //
-              // Not fixed here because the fix belongs upstream, not in the
-              // manifest: either refuse to render an mp4 for a deck with any
-              // `durationSource: "estimated"` track, or probe the staged bytes
-              // again at render time (they are in hand by then) and re-derive
-              // the scene length from the measured value. Both change what the
-              // audio stage guarantees, which is a separate decision.
+              // A silent build (no `narrationFiles`) has nothing staged to
+              // measure, so it falls back to the payload's measurement. That
+              // build is the one the pipeline persists as `projectCode`; it is
+              // never the one an mp4 is rendered from.
               audioDurationSeconds:
+                narrationBySlide.get(scene.slideNumber)?.durationSeconds ??
                 payload.audioTracks.find(
                   (track) => track.slideNumber === scene.slideNumber,
-                )?.durationSeconds ?? null,
+                )?.durationSeconds ??
+                null,
               durationInFrames: scene.durationInFrames,
               file: `src/scenes/Slide${scene.slideNumber}.tsx`,
               // Only present on an mp4 render: the smoke check and the stills
@@ -310,9 +315,17 @@ export function buildProjectCodePayload(
         ),
       },
       {
+        // The one check that runs before any frame is rendered, and the only
+        // place a timeline/narration mismatch is caught. It is a real check
+        // now: `audioDurationSeconds` is measured from the staged audio file,
+        // while `durationInFrames` was derived from the measurement taken back
+        // at TTS time (see the manifest above). Failing it fails the run —
+        // correctly, because a scene shorter than its narration clips that
+        // slide's speech in the browser preview as well as in the mp4, so
+        // there is no degraded-but-honest output left to fall back to.
         path: "scripts/render-smoke.mjs",
         content: [
-          'import { existsSync, readFileSync } from "node:fs";',
+          'import { existsSync, readFileSync, statSync } from "node:fs";',
           "",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
           "if (!Array.isArray(manifest.scenes) || manifest.scenes.length === 0) {",
@@ -324,6 +337,18 @@ export function buildProjectCodePayload(
           "  }",
           "  if (!Number.isInteger(scene.durationInFrames) || scene.durationInFrames <= 0) {",
           "    throw new Error(`invalid duration for slide ${scene.slideNumber}`);",
+          "  }",
+          "  if (scene.narrationFile) {",
+          "    // A narrated scene must have the file it names, non-empty, and a",
+          "    // known narration length. An unmeasured narrated scene would slip",
+          "    // past the length check below by having nothing to compare.",
+          `    const audioFile = new URL(\`../${PROJECT_NARRATION_DIR}/\${scene.narrationFile}\`, import.meta.url);`,
+          "    if (!existsSync(audioFile) || statSync(audioFile).size === 0) {",
+          "      throw new Error(`slide ${scene.slideNumber}: missing staged narration ${scene.narrationFile}`);",
+          "    }",
+          '    if (typeof scene.audioDurationSeconds !== "number" || !(scene.audioDurationSeconds > 0)) {',
+          "      throw new Error(`slide ${scene.slideNumber}: narration ${scene.narrationFile} has no measured duration`);",
+          "    }",
           "  }",
           '  if (typeof scene.audioDurationSeconds === "number" && scene.durationInFrames < Math.ceil(scene.audioDurationSeconds * manifest.fps)) {',
           "    throw new Error(`slide ${scene.slideNumber}: narration (${scene.audioDurationSeconds}s) exceeds scene duration (${scene.durationInFrames} frames @ ${manifest.fps}fps)`);",
