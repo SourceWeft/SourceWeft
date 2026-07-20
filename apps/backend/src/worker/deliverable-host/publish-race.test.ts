@@ -6,11 +6,13 @@ import { createDeliverableProcessor } from "./host";
 import type { DeliverableStateLike } from "./stage-runner";
 
 /**
- * markArtifactReady compare-and-swaps on status, so a duplicate delivery of an
+ * The completion compare-and-swaps on status, so a duplicate delivery of an
  * already-published artifact loses the race and resolves null instead of
  * racing to insert the same versionNo (which the unique index
  * artifact_versions_artifact_version_uq would reject with an opaque
- * constraint violation).
+ * constraint violation). The host publishes through `completeArtifact`, the
+ * shared two-phase write path; the CAS arguments below are what it carries
+ * there.
  *
  * Edit runs deliberately republish an artifact that is already `ready`, so
  * status cannot distinguish a legitimate edit from a duplicate edit — both see
@@ -22,6 +24,10 @@ import type { DeliverableStateLike } from "./stage-runner";
  */
 
 type MarkReadyCall = {
+  artifactType?: string;
+  title?: string;
+  payload?: Record<string, unknown>;
+  preview?: { storageKey: string; metadata: Record<string, unknown> };
   expectedStatuses?: readonly string[];
   expectedVersionNo?: number;
 };
@@ -31,12 +37,16 @@ function buildProcessor(input: {
   mode?: "create" | "edit";
   /** The artifact's published version at the moment the run loads it. */
   currentVersionNo?: number;
+  /** The title the row was opened with, as the artifact load reports it. */
+  artifactTitle?: string;
+  /** A thumbnail a stage declares through api.setPreviewImage. */
+  previewImage?: { storageKey: string; metadata: Record<string, unknown> };
   calls: { markReady: MarkReadyCall[]; markFailed: number };
 }) {
   const definition = {
     id: "fake_pipeline",
     jobName: "fake-generate",
-    artifactType: "fake",
+    artifactType: "video_presentation",
     stages: [{ id: "one", label: "One", budgetMs: 1000, maxAttempts: 1 }],
     defaultErrorCode: "FAKE_FAILED",
     invalidPayloadErrorCode: "FAKE_INVALID",
@@ -53,7 +63,23 @@ function buildProcessor(input: {
         }
       : {}),
     buildStageView: () => ({}),
-    runStage: async ({ state }: { state: DeliverableStateLike }) => state,
+    runStage: async ({
+      state,
+      api,
+    }: {
+      state: DeliverableStateLike;
+      api: {
+        setPreviewImage: (image: {
+          storageKey: string;
+          metadata: Record<string, unknown>;
+        }) => void;
+      };
+    }) => {
+      if (input.previewImage) {
+        api.setPreviewImage(input.previewImage);
+      }
+      return state;
+    },
     finalize: () => ({ done: true }),
   } as never;
 
@@ -62,6 +88,9 @@ function buildProcessor(input: {
     artifacts: {
       find: async () => ({
         payloadJson: {},
+        ...(input.artifactTitle === undefined
+          ? {}
+          : { title: input.artifactTitle }),
         ...(input.currentVersionNo === undefined
           ? {}
           : { currentVersionNo: input.currentVersionNo }),
@@ -70,8 +99,12 @@ function buildProcessor(input: {
         input.calls.markFailed += 1;
         return true;
       },
-      markReady: async (markInput: MarkReadyCall) => {
+      completeArtifact: async (markInput: MarkReadyCall) => {
         input.calls.markReady.push({
+          artifactType: markInput.artifactType,
+          title: markInput.title,
+          payload: markInput.payload,
+          ...(markInput.preview ? { preview: markInput.preview } : {}),
           expectedStatuses: markInput.expectedStatuses,
           ...("expectedVersionNo" in markInput
             ? { expectedVersionNo: markInput.expectedVersionNo }
@@ -180,6 +213,87 @@ test("the second of two concurrent edits is superseded rather than colliding", a
   // The loser must not damage the winner's artifact, and must not die on the
   // artifact_versions unique index — the failure mode the version lock removes.
   assert.equal(calls.markFailed, 0);
+});
+
+test("the completion carries the pipeline's artifact type and finished payload", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    calls,
+  });
+
+  await processor(JOB);
+
+  // The type is the pipeline's own declaration, not host knowledge, and the
+  // payload is finalize()'s whole result — a completion republishes the entire
+  // artifact, never a patch onto the previous version.
+  assert.equal(calls.markReady[0]?.artifactType, "video_presentation");
+  assert.deepEqual(calls.markReady[0]?.payload, { done: true });
+});
+
+test("a stage's thumbnail reaches the completion as the pointer it uploaded", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    previewImage: {
+      storageKey: "workspace-1/artifact-1/cover.jpg",
+      metadata: { fileName: "cover.jpg", mimeType: "image/jpeg" },
+    },
+    calls,
+  });
+
+  await processor(JOB);
+
+  // The bytes were uploaded mid-run by the stage that rendered them, so what
+  // survives to publish time is a key. Losing it here would silently drop every
+  // pipeline's thumbnail.
+  assert.deepEqual(calls.markReady[0]?.preview, {
+    storageKey: "workspace-1/artifact-1/cover.jpg",
+    metadata: { fileName: "cover.jpg", mimeType: "image/jpeg" },
+  });
+});
+
+test("a run with no thumbnail keeps whatever the artifact already has", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    calls,
+  });
+
+  await processor(JOB);
+
+  // Omitted, not null: null would be "clear the thumbnail", which is not what
+  // "this run produced no still" means.
+  assert.equal("preview" in (calls.markReady[0] ?? {}), false);
+});
+
+test("the completion reports a title even when the job envelope carries none", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    artifactTitle: "Feynman Method",
+    calls,
+  });
+
+  await processor(JOB);
+
+  // The write path requires every spec to name a title; the completion does not
+  // write one, so the artifact's own title is the honest answer.
+  assert.equal(calls.markReady[0]?.title, "Feynman Method");
+});
+
+test("a pipeline whose artifact has no title still publishes", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    calls,
+  });
+
+  const result = (await processor(JOB)) as { status: string };
+
+  // A field nothing stores must never be the reason a finished render is lost.
+  assert.equal(result.status, "ready");
+  assert.equal(calls.markReady[0]?.title, "fake_pipeline");
 });
 
 test("create runs carry no version lock", async () => {

@@ -384,6 +384,72 @@ test("completeArtifact leaves storage pointers alone when there are no bytes", a
   assert.equal("storageBucket" in (completed[0] ?? {}), false);
 });
 
+test("completeArtifact stores a thumbnail the caller already uploaded", async () => {
+  await makeWriter().completeArtifact({
+    artifactId: "artifact-1",
+    context: CONTEXT,
+    spec: spec({ artifactType: "video_presentation" }),
+    storedPreview: {
+      storageKey: "workspaces/workspace-1/artifacts/artifact-1/cover.jpg",
+      metadata: { fileName: "cover.jpg", mimeType: "image/jpeg" },
+    },
+  });
+
+  // No bytes to upload — the producer uploaded them mid-run, which is the whole
+  // reason the pointer form exists — so the pointer must still reach the row.
+  assert.deepEqual(uploads, []);
+  assert.equal(
+    completed[0]?.previewStorageKey,
+    "workspaces/workspace-1/artifacts/artifact-1/cover.jpg",
+  );
+  assert.deepEqual(completed[0]?.previewMetadata, {
+    fileName: "cover.jpg",
+    mimeType: "image/jpeg",
+  });
+});
+
+test("a spec's own preview bytes win over a caller-uploaded pointer", async () => {
+  await makeWriter().completeArtifact({
+    artifactId: "artifact-1",
+    context: CONTEXT,
+    spec: spec({
+      artifactType: "video_presentation",
+      preview: {
+        bytes: new Uint8Array(4),
+        contentType: "image/png",
+        fileName: "preview.png",
+      },
+    }),
+    storedPreview: {
+      storageKey: "workspaces/workspace-1/artifacts/artifact-1/cover.jpg",
+      metadata: { fileName: "cover.jpg", mimeType: "image/jpeg" },
+    },
+  });
+
+  // One preview reaches the row, never a key from one source with metadata from
+  // the other — which is what describes an object that is not there.
+  assert.equal(
+    completed[0]?.previewStorageKey,
+    "workspaces/workspace-1/artifacts/artifact-1/preview.png",
+  );
+  assert.equal(
+    (completed[0]?.previewMetadata as { fileName?: string })?.fileName,
+    "preview.png",
+  );
+});
+
+test("completeArtifact keeps the existing thumbnail when neither form is given", async () => {
+  await makeWriter().completeArtifact({
+    artifactId: "artifact-1",
+    context: CONTEXT,
+    spec: spec({ artifactType: "video_presentation" }),
+  });
+
+  // Omitted rather than null: null would clear a thumbnail the artifact has.
+  assert.equal("previewStorageKey" in (completed[0] ?? {}), false);
+  assert.equal("previewMetadata" in (completed[0] ?? {}), false);
+});
+
 test("losing the completion race is a conflict, not a retryable failure", async () => {
   markReadyResult = null;
   await assert.rejects(

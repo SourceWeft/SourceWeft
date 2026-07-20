@@ -59,8 +59,14 @@ vi.mock("../../modules/billing", () => ({
   },
 }));
 
+// The completion adapter resolves through modules/artifacts/publish, which
+// constructs the shared writer at import time, so the mock has to cover every
+// repository function that writer binds — not just the ones this test calls.
 vi.mock("../../modules/artifacts/repository", () => ({
+  createPendingArtifactRecord: vi.fn(),
+  createReadyArtifactRecord: vi.fn(),
   findArtifactRecord: vi.fn(),
+  findArtifactRecordByRequestKey: vi.fn(),
   markArtifactFailed: vi.fn(),
   markArtifactReady: vi.fn(),
   markArtifactRunning: vi.fn(),

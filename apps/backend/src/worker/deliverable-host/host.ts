@@ -155,7 +155,7 @@ export function createDeliverableProcessor<
     const persistGeneration = async () => {
       // Edit runs keep the published version untouched while regenerating:
       // progress is reported via job progress only; the payload is written
-      // once at the end by markReady (new version).
+      // once at the end by the completion (new version).
       if (runMode !== "edit") {
         await runtime.artifacts.markRunning({
           artifactId: envelope.artifactId,
@@ -291,16 +291,29 @@ export function createDeliverableProcessor<
 
       const readyPayload = definition.finalize({ state, job: envelope });
 
-      const result = await runtime.artifacts.markReady({
+      const result = await runtime.artifacts.completeArtifact({
         artifactId: envelope.artifactId,
+        artifactType: definition.artifactType,
         teamId: envelope.teamId,
         workspaceId: envelope.workspaceId,
+        threadId: envelope.threadId,
         userId: envelope.userId,
+        // Not written by the completion — the row keeps the title it was
+        // opened with — but the write path requires every spec to name one, so
+        // the artifact's own title is what this reports. The envelope is the
+        // first source because an edit run carries the title the edit asked
+        // for; `definition.id` is the last resort so a pipeline that names
+        // neither still publishes rather than failing on a validation rule
+        // about a field nothing stores.
+        title:
+          envelope.title?.trim() || artifact.title?.trim() || definition.id,
         payload: readyPayload,
         ...(previewImageRef.current
           ? {
-              previewStorageKey: previewImageRef.current.storageKey,
-              previewMetadata: previewImageRef.current.metadata,
+              preview: {
+                storageKey: previewImageRef.current.storageKey,
+                metadata: previewImageRef.current.metadata,
+              },
             }
           : {}),
         // Create runs own the transition out of pending/running, so a status

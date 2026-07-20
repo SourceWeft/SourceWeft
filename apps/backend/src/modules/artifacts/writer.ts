@@ -396,6 +396,26 @@ export class ArtifactWriter {
     readonly artifactId: string;
     readonly context: ArtifactWriteContext;
     readonly spec: ArtifactPublishSpec;
+    /**
+     * A thumbnail the caller already put in storage itself, as a pointer.
+     *
+     * `spec.preview` is the ordinary form and carries bytes, because the writer
+     * owning the upload is what keeps key layout in one place. A long-running
+     * producer cannot always use it: a deliverable pipeline uploads its cover
+     * still mid-run, inside the stage that rendered it, and by the time the run
+     * completes the bytes are gone — only the key remains. Rejecting that would
+     * mean either holding every frame in memory until the end or re-downloading
+     * an object the writer itself would have written.
+     *
+     * The key is still the writer's layout: producers build it with
+     * `buildArtifactStorageKey` under the same artifact id, so this is the same
+     * object the bytes path would have produced, handed over one step later.
+     * `spec.preview` wins if both are present.
+     */
+    readonly storedPreview?: {
+      readonly storageKey: string;
+      readonly metadata: Record<string, unknown>;
+    };
     readonly expectedStatuses?: Parameters<
       typeof markArtifactReady
     >[0]["expectedStatuses"];
@@ -412,6 +432,17 @@ export class ArtifactWriter {
       spec: input.spec,
     });
 
+    // One preview reaches the row: uploaded bytes if the spec carried them,
+    // otherwise the pointer the caller uploaded for itself. Resolved before the
+    // repository call so the "omitted means keep what the row has" rule below
+    // stays a single condition rather than two overlapping ones.
+    const previewStorageKey =
+      prepared.previewStorageKey ?? input.storedPreview?.storageKey ?? null;
+    const previewMetadata =
+      prepared.previewStorageKey !== null
+        ? prepared.previewMetadata
+        : (input.storedPreview?.metadata ?? null);
+
     let record: Awaited<ReturnType<typeof markArtifactReady>>;
     try {
       record = await this.deps.repository.markReady({
@@ -426,12 +457,8 @@ export class ArtifactWriter {
           ? { storageBucket: prepared.storageBucket }
           : {}),
         ...(prepared.storageKey ? { storageKey: prepared.storageKey } : {}),
-        ...(prepared.previewStorageKey
-          ? { previewStorageKey: prepared.previewStorageKey }
-          : {}),
-        ...(prepared.previewMetadata
-          ? { previewMetadata: prepared.previewMetadata }
-          : {}),
+        ...(previewStorageKey ? { previewStorageKey } : {}),
+        ...(previewMetadata ? { previewMetadata } : {}),
         ...(input.expectedStatuses
           ? { expectedStatuses: input.expectedStatuses }
           : {}),
