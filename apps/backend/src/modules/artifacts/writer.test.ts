@@ -4,7 +4,6 @@ import { ARTIFACT_WRITE_ERROR_CODES } from "@sourceweft/contracts/artifact-error
 import {
   primaryArtifactAttachment,
   type ArtifactPublishSpec,
-  type ArtifactWriteHandler,
 } from "@sourceweft/contracts/artifact-write";
 
 /**
@@ -36,9 +35,6 @@ vi.mock("./repository", () => ({
   markArtifactReady: async () => null,
   markArtifactFailed: async () => false,
   findArtifactRecordByRequestKey: async () => null,
-}));
-vi.mock("./write-handlers", () => ({
-  loadArtifactWriteHandlerRegistry: async () => ({ handlerFor: () => null }),
 }));
 
 const { createArtifactWriter } = await import("./writer");
@@ -120,11 +116,10 @@ const CONTEXT = {
   userId: "user-1",
 };
 
-function makeWriter(handler: unknown = null) {
+function makeWriter() {
   return createArtifactWriter({
     storage,
     repository,
-    loadRegistry: async () => ({ handlerFor: () => handler as never }),
     newArtifactId: () => "artifact-1",
   });
 }
@@ -242,47 +237,6 @@ test("a spec the host rejects uploads nothing and writes no row", async () => {
   );
   assert.deepEqual(uploads, []);
   assert.deepEqual(created, []);
-});
-
-test("a spec the handler rejects uploads nothing either", async () => {
-  const handler = {
-    artifactType: "image",
-    validate: () => [{ code: "IMAGE_NEEDS_BYTES", message: "needs a file" }],
-  };
-  await assert.rejects(
-    makeWriter(handler).publishArtifact({
-      context: CONTEXT,
-      spec: spec({
-        attachments: [
-          {
-            fileName: "a.png",
-            contentType: "image/png",
-            bytes: new Uint8Array(4),
-          },
-        ],
-      }),
-    }),
-    (error: Error & { code?: string }) => {
-      assert.equal(error.code, "IMAGE_NEEDS_BYTES");
-      return true;
-    },
-  );
-  assert.deepEqual(uploads, []);
-});
-
-test("the handler shapes what is persisted as payload_json", async () => {
-  await makeWriter({
-    artifactType: "image",
-    buildPayload: (input: ArtifactPublishSpec) => ({
-      ...input.payload,
-      mimeType: "image/png",
-    }),
-  }).publishArtifact({ context: CONTEXT, spec: spec() });
-
-  assert.deepEqual(created[0]?.payload, {
-    prompt: "a cat",
-    mimeType: "image/png",
-  });
 });
 
 test("a storage failure is reported as infrastructure, not as bad input", async () => {
@@ -464,145 +418,6 @@ test("failArtifact stores a code the classification table knows", async () => {
   assert.equal(failed[0]?.errorCode, "ARTIFACT_RECORD_UNAVAILABLE");
   assert.equal(failed[0]?.errorMessage, "the provider returned no bytes");
   assert.equal(result.error.recoverable, false);
-});
-
-/* ========================================================================== */
-/* 5. The seam: with a handler and, just as importantly, without one           */
-/* ========================================================================== */
-
-/**
- * A stand-in for a capability-private type. Its handler is deliberately *not*
- * imported from a real capability package: the point under test is the seam
- * itself, and borrowing a real handler would quietly assert which package owns
- * which type — a separate decision, made on the read side, that this file must
- * not restate.
- *
- * The *name* must still be one the schema knows, because the writer now rejects
- * anything else before it can reach the artifact_type CHECK constraint. An
- * invented name would make this test assert a write production cannot perform.
- * `infographic` is real and claimed by no handler, which is exactly the shape
- * this test needs.
- */
-const FAKE_PRIVATE_TYPE = "infographic";
-
-const fakeHandler: ArtifactWriteHandler = {
-  artifactType: FAKE_PRIVATE_TYPE,
-  validate: (input) => {
-    const primary = primaryArtifactAttachment(input);
-    if (!primary) {
-      return [
-        {
-          code: ARTIFACT_WRITE_ERROR_CODES.payloadInvalid,
-          field: "attachments",
-          message: 'this type requires an attachment with role "primary"',
-        },
-      ];
-    }
-    return [];
-  },
-  buildPayload: (input) => {
-    const primary = primaryArtifactAttachment(input);
-    return primary
-      ? {
-          ...input.payload,
-          fileName: primary.fileName,
-          sizeBytes: primary.bytes.byteLength,
-        }
-      : input.payload;
-  },
-};
-
-test("a handler-less spec publishes end to end — the image/file path", async () => {
-  // `image` and `file` are top-level media, owned by no capability, so the
-  // registry hands back nothing for them. The generic writer must still carry
-  // the whole write: bytes uploaded, primary promoted to the row's own file,
-  // payload persisted exactly as the caller supplied it.
-  for (const artifactType of ["image", "file"]) {
-    created.length = 0;
-    uploads.length = 0;
-
-    const result = await makeWriter(null).publishArtifact({
-      context: CONTEXT,
-      spec: {
-        artifactType,
-        title: "A cat",
-        payload: { fileName: "a-cat.png", mimeType: "image/png" },
-        attachments: [
-          {
-            fileName: "a-cat.png",
-            contentType: "image/png",
-            bytes: new Uint8Array(64),
-            role: "primary",
-          },
-        ],
-      },
-    });
-
-    assert.equal(result.artifactId, "artifact-1");
-    assert.equal(uploads.length, 1);
-    assert.equal(created[0]?.artifactType, artifactType);
-    assert.equal(
-      created[0]?.storageKey,
-      "workspaces/workspace-1/artifacts/artifact-1/a-cat.png",
-    );
-    assert.equal(created[0]?.storageBucket, "content-bucket");
-    // No handler ran, so the payload is untouched.
-    assert.deepEqual(created[0]?.payload, {
-      fileName: "a-cat.png",
-      mimeType: "image/png",
-    });
-  }
-});
-
-test("a registered handler validates and shapes a capability-private type", async () => {
-  const result = await makeWriter(fakeHandler).publishArtifact({
-    context: CONTEXT,
-    spec: {
-      artifactType: FAKE_PRIVATE_TYPE,
-      title: "A deck",
-      payload: { source: "agent" },
-      attachments: [
-        {
-          fileName: "deck.bin",
-          contentType: "application/octet-stream",
-          bytes: new Uint8Array(64),
-          role: "primary",
-        },
-      ],
-    },
-  });
-
-  assert.equal(result.artifactId, "artifact-1");
-  assert.deepEqual(created[0]?.payload, {
-    source: "agent",
-    fileName: "deck.bin",
-    sizeBytes: 64,
-  });
-});
-
-test("the handler's own rule rejects a spec the host would have accepted", async () => {
-  // Nothing type-agnostic is wrong with this spec — a payload-only artifact is
-  // ordinary. Only the handler knows this particular type needs bytes.
-  await assert.rejects(
-    makeWriter(fakeHandler).publishArtifact({
-      context: CONTEXT,
-      spec: spec({ artifactType: FAKE_PRIVATE_TYPE }),
-    }),
-    (error: Error & { code?: string; recoverable?: boolean }) => {
-      assert.equal(error.code, "ARTIFACT_PAYLOAD_INVALID");
-      assert.equal(error.recoverable, true);
-      return true;
-    },
-  );
-  assert.deepEqual(created, []);
-
-  // The same spec with no handler registered publishes fine — proof the rule
-  // came from the handler and not from the host.
-  await makeWriter(null).publishArtifact({
-    context: CONTEXT,
-    spec: spec({ artifactType: FAKE_PRIVATE_TYPE }),
-  });
-  assert.equal(created.length, 1);
 });
 
 test("failArtifact preserves a code the thrower already chose", async () => {

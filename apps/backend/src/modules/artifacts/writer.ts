@@ -11,13 +11,11 @@ import {
 } from "@sourceweft/contracts/artifact-errors";
 import {
   artifactErrorFromIssues,
-  buildArtifactWritePayload,
-  collectArtifactWriteIssues,
   primaryArtifactAttachment,
+  validateArtifactPublishSpec,
   type ArtifactPreviewImage,
   type ArtifactPublishSpec,
   type ArtifactWriteContext,
-  type ArtifactWriteHandler,
 } from "@sourceweft/contracts/artifact-write";
 import { artifactTypeSchema } from "@sourceweft/contracts/artifacts";
 import { artifactStorage } from "../sources/storage";
@@ -28,10 +26,6 @@ import {
   markArtifactFailed,
   markArtifactReady,
 } from "./repository";
-import {
-  loadArtifactWriteHandlerRegistry,
-  type ArtifactWriteHandlerRegistry,
-} from "./write-handlers";
 
 /**
  * The one way an artifact is written.
@@ -44,20 +38,18 @@ import {
  *                                           can watch while it is produced
  *
  * What they share is everything between "here is a spec" and "the row is
- * committed": handler lookup, validation, payload shaping, byte upload, and the
- * transactional commit itself. `prepareArtifactWrite` is that shared middle;
+ * committed": validation, byte upload, and the transactional commit itself. `prepareArtifactWrite` is that shared middle;
  * the two entry points differ only in which committed state they ask for, and
  * both land in a repository function that writes the row and its version inside
  * one transaction.
  *
- * The host names no artifact type. Everything type-specific arrives through an
- * `ArtifactWriteHandler` collected from the capability packages, exactly as the
- * read side does with `ArtifactViewHandler`.
+ * The host names no artifact type, and there is no write-side handler registry:
+ * a producer validates its own type before it calls here, so the checks below
+ * are the type-agnostic ones only.
  */
 
 export type ArtifactWriterDeps = {
   readonly storage: ArtifactStorage;
-  readonly loadRegistry: () => Promise<ArtifactWriteHandlerRegistry>;
   readonly repository: {
     readonly createReady: typeof createReadyArtifactRecord;
     readonly createPending: typeof createPendingArtifactRecord;
@@ -130,13 +122,6 @@ function previewFileName(preview: ArtifactPreviewImage) {
 export class ArtifactWriter {
   constructor(private readonly deps: ArtifactWriterDeps) {}
 
-  private async handlerFor(
-    artifactType: string,
-  ): Promise<ArtifactWriteHandler | null> {
-    const registry = await this.deps.loadRegistry();
-    return registry.handlerFor(artifactType);
-  }
-
   private newId() {
     return (this.deps.newArtifactId ?? randomUUID)();
   }
@@ -206,9 +191,9 @@ export class ArtifactWriter {
    * Validate, shape the payload, and put every byte in object storage.
    *
    * Uploads happen here — before the row is touched — and validation happens
-   * before the uploads. Ordered the other way round, a spec rejected by a
-   * handler would already have left objects in the bucket that nothing
-   * references and nothing will ever collect.
+   * before the uploads. Ordered the other way round, a rejected spec would
+   * already have left objects in the bucket that nothing references and nothing
+   * will ever collect.
    */
   private async prepareArtifactWrite(input: {
     readonly artifactId: string;
@@ -216,17 +201,16 @@ export class ArtifactWriter {
     readonly spec: ArtifactPublishSpec;
   }): Promise<PreparedWrite> {
     const { artifactId, context, spec } = input;
-    const handler = await this.handlerFor(spec.artifactType);
 
     const issueError = artifactErrorFromIssues(
-      collectArtifactWriteIssues(spec, handler),
+      validateArtifactPublishSpec(spec),
     );
     if (issueError) {
       throw issueError;
     }
     this.assertKnownArtifactType(spec.artifactType);
 
-    const payload = buildArtifactWritePayload(spec, handler);
+    const payload = spec.payload;
     const primary = primaryArtifactAttachment(spec);
 
     let storageBucket: string | null = null;
@@ -254,7 +238,7 @@ export class ArtifactWriter {
 
       // A thumbnail is an enhancement, never the deliverable: an oversized one
       // is dropped rather than failing a write the user asked for. Malformed
-      // previews are a handler's business, so they are already gone by here.
+      // previews are the producer's business, so they are already gone by here.
       const preview = spec.preview;
       if (
         preview &&
@@ -373,9 +357,8 @@ export class ArtifactWriter {
     }
 
     const artifactId = input.artifactId ?? this.newId();
-    const handler = await this.handlerFor(input.spec.artifactType);
     const issueError = artifactErrorFromIssues(
-      collectArtifactWriteIssues(input.spec, handler),
+      validateArtifactPublishSpec(input.spec),
     );
     if (issueError) {
       throw issueError;
@@ -393,7 +376,7 @@ export class ArtifactWriter {
         userId: input.context.userId,
         title: input.spec.title,
         prompt: input.spec.prompt ?? input.spec.title,
-        payload: buildArtifactWritePayload(input.spec, handler),
+        payload: input.spec.payload,
       });
     } catch (error) {
       throw toArtifactError(error, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
@@ -508,7 +491,6 @@ export function createArtifactWriter(
 ): ArtifactWriter {
   return new ArtifactWriter({
     storage: overrides.storage ?? artifactStorage,
-    loadRegistry: overrides.loadRegistry ?? loadArtifactWriteHandlerRegistry,
     repository: overrides.repository ?? {
       createReady: createReadyArtifactRecord,
       createPending: createPendingArtifactRecord,

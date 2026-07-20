@@ -1,11 +1,12 @@
 /**
- * Write-side takeover contract for an artifact type — the mirror of
- * `ArtifactViewHandler` in `./artifacts.ts`.
+ * The write-side contract for an artifact.
  *
- * The read side already answers "how is this artifact served?" without the host
- * knowing any artifact type name: a capability registers a handler, and
- * registration *is* the declaration. This module is the same move for the other
- * direction, "how is this artifact written?".
+ * There is deliberately no write-side handler registry mirroring
+ * `ArtifactViewHandler`. One was built and no capability ever implemented it:
+ * type-specific validation already lives correctly with the producer, which
+ * checks its own bytes before it ever calls publish. So the write path is a
+ * plain function every producer calls, and the only thing the host owns is what
+ * is genuinely host business — storage keys, idempotency, versioning, the row.
  *
  * The model it fixes is deliberately not file-centric:
  *
@@ -21,10 +22,6 @@
  * part and bytes are optional, so a payload-only type is the ordinary case
  * rather than the exception.
  *
- * What a handler is allowed to do is narrow on purpose. It may reject a spec
- * (`validate`) and it may shape what lands in `payload_json` (`buildPayload`).
- * It may not touch storage, the row, ids, versioning or transactions — those
- * are the host's, exactly as on the read side.
  */
 
 import type { ArtifactErrorCategory } from "./artifact-errors";
@@ -148,32 +145,6 @@ export type ArtifactWriteIssue = {
   /** Dotted path into the spec, e.g. `payload.slides`. */
   readonly field?: string;
 };
-
-export type ArtifactWriteHandler = {
-  readonly artifactType: string;
-  /**
-   * Type-specific validation, living in the package that produces the type.
-   * Returning an empty list (or nothing) accepts the spec. The host runs its
-   * own type-agnostic checks either way; a handler never has to restate them.
-   */
-  readonly validate?: (
-    spec: ArtifactPublishSpec,
-  ) => readonly ArtifactWriteIssue[] | null | undefined;
-  /**
-   * Last chance to shape what is persisted as `payload_json` — normalize,
-   * drop transient fields, fold in attachment metadata. Returning nothing keeps
-   * `spec.payload` as-is. It must stay pure: it runs inside the host's write
-   * and may be re-run on a retry.
-   */
-  readonly buildPayload?: (
-    spec: ArtifactPublishSpec,
-  ) => Record<string, unknown> | null | undefined;
-};
-
-/** Factory a capability package exports so hosts can collect its handlers. */
-export type CreateArtifactWriteHandlers = () =>
-  | readonly ArtifactWriteHandler[]
-  | Promise<readonly ArtifactWriteHandler[]>;
 
 /* -------------------------------------------------------------------------- */
 /* Type-agnostic spec checks                                                   */
@@ -325,27 +296,4 @@ export function artifactErrorFromIssues(
       .join("; "),
     ...(worst.field ? { details: worst.field } : {}),
   });
-}
-
-/**
- * Run the host's checks and then the handler's, in that order. The host's come
- * first so a handler never receives a spec that is structurally broken.
- */
-export function collectArtifactWriteIssues(
-  spec: ArtifactPublishSpec,
-  handler?: ArtifactWriteHandler | null,
-): ArtifactWriteIssue[] {
-  const issues = validateArtifactPublishSpec(spec);
-  if (issues.length > 0) {
-    return issues;
-  }
-  return [...(handler?.validate?.(spec) ?? [])];
-}
-
-/** `buildPayload` if the handler has one, `spec.payload` otherwise. */
-export function buildArtifactWritePayload(
-  spec: ArtifactPublishSpec,
-  handler?: ArtifactWriteHandler | null,
-): Record<string, unknown> {
-  return handler?.buildPayload?.(spec) ?? spec.payload;
 }

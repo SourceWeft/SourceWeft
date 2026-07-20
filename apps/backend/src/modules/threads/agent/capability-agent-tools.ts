@@ -14,7 +14,7 @@ import {
   findArtifactRecord,
   findReusableArtifactRecord,
 } from "../../artifacts/repository";
-import { artifactWriter } from "../../artifacts/writer";
+import { publishArtifact } from "../../artifacts/publish";
 import { enqueueDeliverableJob } from "../../content/queue";
 import { artifactStorage } from "../../sources/storage";
 import { createDefaultWebProvider } from "../../sources/web-provider";
@@ -199,14 +199,10 @@ function createCapabilityAgentToolHostServices(
   return {
     artifacts: {
       /**
-       * The shared writer, offered to every capability as the one way to
-       * publish. It names no artifact type: what is written is whatever the
-       * spec says, validated by the write handler that claims that type — or by
-       * nobody, for a top-level medium like `image` that has no owner.
+       * The one way an artifact is published, handed to every capability. It
+       * names no artifact type: what is written is whatever the spec says.
        */
-      publishArtifact: (
-        publishInput: Parameters<typeof artifactWriter.publishArtifact>[0],
-      ) => artifactWriter.publishArtifact(publishInput),
+      publishArtifact,
       /**
        * The generic artifact-row primitives. Each takes the artifact type as a
        * parameter rather than carrying it in its name: a capability knows its

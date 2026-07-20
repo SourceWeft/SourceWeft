@@ -5,13 +5,10 @@ import { ARTIFACT_WRITE_ERROR_CODES } from "../src/artifact-errors";
 import {
   artifactErrorFromIssues,
   attachmentRole,
-  buildArtifactWritePayload,
-  collectArtifactWriteIssues,
   primaryArtifactAttachment,
   validateArtifactPublishSpec,
   type ArtifactAttachment,
   type ArtifactPublishSpec,
-  type ArtifactWriteHandler,
 } from "../src/artifact-write";
 
 const bytes = (length: number) => new Uint8Array(length);
@@ -153,58 +150,6 @@ test("every problem with one spec is reported in one pass", () => {
 });
 
 /* ========================================================================== */
-/* 3. Handler composition                                                     */
-/* ========================================================================== */
-
-const rejectingHandler: ArtifactWriteHandler = {
-  artifactType: "image",
-  validate: () => [
-    { code: "IMAGE_NEEDS_BYTES", message: "an image needs a file" },
-  ],
-};
-
-test("the host's checks run first, so a handler never sees a broken spec", () => {
-  let handlerRan = false;
-  const handler: ArtifactWriteHandler = {
-    artifactType: "image",
-    validate: () => {
-      handlerRan = true;
-      return [];
-    },
-  };
-  const issues = collectArtifactWriteIssues(spec({ title: "" }), handler);
-  assert.equal(handlerRan, false);
-  assert.equal(issues[0]?.field, "title");
-});
-
-test("a structurally valid spec reaches the handler", () => {
-  const issues = collectArtifactWriteIssues(spec(), rejectingHandler);
-  assert.deepEqual(
-    issues.map((issue) => issue.code),
-    ["IMAGE_NEEDS_BYTES"],
-  );
-});
-
-test("no handler means the type-agnostic write still applies", () => {
-  assert.deepEqual(collectArtifactWriteIssues(spec(), null), []);
-});
-
-test("buildPayload shapes what is persisted; absent means pass through", () => {
-  const handler: ArtifactWriteHandler = {
-    artifactType: "image",
-    buildPayload: (input) => ({ ...input.payload, normalized: true }),
-  };
-  assert.deepEqual(buildArtifactWritePayload(spec(), handler), {
-    prompt: "a cat",
-    normalized: true,
-  });
-  assert.deepEqual(buildArtifactWritePayload(spec(), null), { prompt: "a cat" });
-  assert.deepEqual(buildArtifactWritePayload(spec(), { artifactType: "image" }), {
-    prompt: "a cat",
-  });
-});
-
-/* ========================================================================== */
 /* 4. Issues collapse into the one error vocabulary                           */
 /* ========================================================================== */
 
@@ -240,7 +185,7 @@ test("fields are prefixed onto the message so the caller can find them", () => {
 
 test("a validation-only failure stays recoverable", () => {
   const error = artifactErrorFromIssues(
-    collectArtifactWriteIssues(spec({ title: "" })),
+    validateArtifactPublishSpec(spec({ title: "" })),
   );
   assert.equal(error?.code, ARTIFACT_WRITE_ERROR_CODES.payloadInvalid);
   assert.equal(error?.recoverable, true);
