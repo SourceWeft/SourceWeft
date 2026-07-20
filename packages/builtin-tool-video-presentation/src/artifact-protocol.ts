@@ -19,9 +19,9 @@ export const videoPresentationArtifactProgressDescriptor: ArtifactProgressDescri
   {
     title: "Video presentation",
     outputTypes: [
-      "video_presentation_processing_result",
-      "video_presentation_artifact_result",
-      "generate_video_presentation_progress",
+      { type: "video_presentation_processing_result", role: "processing" },
+      { type: "video_presentation_artifact_result", role: "terminal" },
+      { type: "generate_video_presentation_progress", role: "progress" },
     ],
     initialSteps: buildInitialVideoPresentationPipelineSteps,
   };

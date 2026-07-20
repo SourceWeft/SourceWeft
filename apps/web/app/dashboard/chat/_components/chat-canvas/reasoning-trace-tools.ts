@@ -5,11 +5,18 @@ import {
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { readArtifactOutputField } from "@sourceweft/contracts/artifact-progress";
-import { resolveArtifactPageUrl } from "../artifact-urls";
+// The image tool's output vocabulary (stages, aspect-ratio fields, title
+// fallbacks) is decoded inside the capability package that writes it. Re-exported
+// here so the app's existing call sites and tests keep one import path.
+export {
+  getGeneratedImagePrompt,
+  getGeneratedImageStatus,
+  getGeneratedImageTitle,
+} from "@sourceweft/agent-tool-registry/ui";
+import { getGeneratedImageTitle } from "@sourceweft/agent-tool-registry/ui";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import {
   compactText,
-  type GeneratedPresentationArtifactStatus,
   getToolOutputContent,
   normalizeAssetUrl,
 } from "./message-assets";
@@ -19,54 +26,17 @@ import {
 } from "./reasoning-trace-state";
 import {
   type DeliverableGenerationStatus,
+  isDeliverableToolName,
   resolveDeliverableStatus,
   shouldSuppressDeliverableOutputSummary,
 } from "./artifact-progress";
 import { resolveToolCallArtifactId } from "./artifact-work-state";
 import type {
-  ArtifactPreviewRecord,
   ArtifactStatusSnapshot,
   ThinkingStepRecord,
   ToolConfirmationResolution,
   ToolCallRecord,
 } from "./types";
-
-export function artifactPreviewCapabilities(input: {
-  fileBacked: boolean;
-  previewInline?: boolean;
-  renderClientVideo?: boolean;
-}) {
-  return {
-    canDownloadFile: input.fileBacked,
-    canOpenFile: input.fileBacked,
-    canPreviewInline: input.previewInline ?? input.fileBacked,
-    canRenderClientVideo: input.renderClientVideo ?? false,
-  };
-}
-
-const GENERATED_IMAGE_DEFAULT_ASPECT_RATIO = "4 / 3";
-const ILLEGAL_FILENAME_CHARS = new Set([
-  "<",
-  ">",
-  ":",
-  '"',
-  "/",
-  "\\",
-  "|",
-  "?",
-  "*",
-]);
-
-export function replaceIllegalFilenameCharacters(value: string) {
-  return Array.from(value)
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      return code <= 31 || code === 127 || ILLEGAL_FILENAME_CHARS.has(char)
-        ? "-"
-        : char;
-    })
-    .join("");
-}
 
 export function getRecordValue(
   record: Record<string, unknown> | undefined,
@@ -132,25 +102,6 @@ export function summarizeToolOutput(output: unknown, toolName: string) {
   return content ? compactText(content) : null;
 }
 
-export function parseAspectRatio(value: unknown) {
-  if (typeof value !== "string" || value === "auto") {
-    return null;
-  }
-
-  const match = value.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
-  if (!match) {
-    return null;
-  }
-
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || height <= 0) {
-    return null;
-  }
-
-  return `${width} / ${height}`;
-}
-
 export function formatToolName(toolName: string) {
   return toolName
     .replace(/[_-]+/g, " ")
@@ -183,89 +134,6 @@ export function getWebFetchStatusLabel(status: ToolCallRecord["status"]) {
   return "Fetched pages";
 }
 
-const GENERATED_IMAGE_STAGE_INDEX: Record<string, number> = {
-  preparing: 0,
-  generating: 1,
-  saving: 2,
-  billing: 3,
-  ready: 4,
-};
-
-export function getGeneratedImageStatus(toolCall: ToolCallRecord) {
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const input = toolCall.input;
-  const stage = getRecordValue(output, "stage");
-  const normalizedStage =
-    typeof stage === "string" && stage.trim().length > 0 ? stage.trim() : null;
-  const outputWidth = getRecordValue(output, "width");
-  const outputHeight = getRecordValue(output, "height");
-  const width =
-    typeof outputWidth === "number" && Number.isFinite(outputWidth)
-      ? outputWidth
-      : null;
-  const height =
-    typeof outputHeight === "number" && Number.isFinite(outputHeight)
-      ? outputHeight
-      : null;
-  const aspectRatio =
-    width && height && height > 0
-      ? `${width} / ${height}`
-      : (parseAspectRatio(getRecordValue(output, "aspectRatio")) ??
-        parseAspectRatio(getRecordValue(input, "aspectRatio")) ??
-        GENERATED_IMAGE_DEFAULT_ASPECT_RATIO);
-
-  // Display label lives on the capability (generateImagePresentation); this
-  // helper only feeds the progress meter's aspect ratio and step index.
-  return {
-    aspectRatio,
-    progress:
-      normalizedStage && normalizedStage in GENERATED_IMAGE_STAGE_INDEX
-        ? GENERATED_IMAGE_STAGE_INDEX[normalizedStage]
-        : null,
-    stage: normalizedStage,
-  };
-}
-
-export function getGeneratedImageTitle(toolCall: ToolCallRecord) {
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const outputTitle = getRecordValue(output, "title");
-  if (typeof outputTitle === "string" && outputTitle.trim().length > 0) {
-    return outputTitle.trim();
-  }
-
-  const inputTitle = getRecordValue(toolCall.input, "title");
-  if (typeof inputTitle === "string" && inputTitle.trim().length > 0) {
-    return inputTitle.trim();
-  }
-
-  const prompt = getRecordValue(toolCall.input, "prompt");
-  return typeof prompt === "string" && prompt.trim().length > 0
-    ? compactText(prompt, 72)
-    : null;
-}
-
-export function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
-  const prompt = getRecordValue(toolCall.input, "prompt");
-  if (typeof prompt === "string" && prompt.trim().length > 0) {
-    return prompt.trim();
-  }
-
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const outputPrompt = getRecordValue(output, "prompt");
-  return typeof outputPrompt === "string" && outputPrompt.trim().length > 0
-    ? outputPrompt.trim()
-    : null;
-}
-
 export function getGeneratedPresentationTitle(toolCall: ToolCallRecord) {
   const output =
     toolCall.output && typeof toolCall.output === "object"
@@ -282,155 +150,67 @@ export function getGeneratedPresentationTitle(toolCall: ToolCallRecord) {
     : null;
 }
 
-export function getGeneratedPresentationPrompt(toolCall: ToolCallRecord) {
-  const brief = getRecordValue(toolCall.input, "brief");
-  if (typeof brief === "string" && brief.trim().length > 0) {
-    return brief.trim();
-  }
-
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const outputPrompt = getRecordValue(output, "prompt");
-  return typeof outputPrompt === "string" && outputPrompt.trim().length > 0
-    ? outputPrompt.trim()
+/**
+ * The `generation` block every long-running artifact payload carries: which
+ * stage it is on, how far along, and whether it is retrying. The shape is part
+ * of the artifact payload contract — the *stage ids inside it* mean nothing
+ * here, they are the producing capability's vocabulary.
+ */
+function readArtifactGeneration(payload: Record<string, unknown> | undefined) {
+  return payload?.generation &&
+    typeof payload.generation === "object" &&
+    !Array.isArray(payload.generation)
+    ? (payload.generation as Record<string, unknown>)
     : null;
 }
 
-export function downloadPresentationFileName(title: string, extension = "pptx") {
-  const normalized = replaceIllegalFilenameCharacters(
-    title.normalize("NFKC").trim(),
-  )
-    .replace(/\s+/g, " ")
-    .replace(/\s*-\s*/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[\s.-]+|[\s.-]+$/g, "")
-    .slice(0, 120);
-  const fallback = normalized || "generated-presentation";
-  const suffix = `.${extension}`;
-  const lowerFallback = fallback.toLowerCase();
-  if (lowerFallback.endsWith(suffix)) {
-    return fallback;
-  }
-  const withoutPresentationExtension = fallback.replace(
-    /\.(?:pptx|html)$/i,
-    "",
-  );
-  return `${withoutPresentationExtension}${suffix}`;
-}
+/**
+ * Stage vocabulary shared by every deliverable capability. Generic code names a
+ * situation with these; the capability supplies the words for it.
+ */
+const SHARED_ARTIFACT_STAGE_IDS = {
+  failed: "failed",
+  preparing: "preparing",
+  retrying: "retrying",
+} as const;
 
-export function downloadVideoPresentationFileName(title: string) {
-  const normalized = replaceIllegalFilenameCharacters(
-    title.normalize("NFKC").trim(),
-  )
-    .replace(/\s+/g, " ")
-    .replace(/\s*-\s*/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[\s.-]+|[\s.-]+$/g, "")
-    .slice(0, 120);
-  const fallback = normalized || "generated-video-presentation";
-  return fallback.toLowerCase().endsWith(".mp4") ? fallback : `${fallback}.mp4`;
-}
+/** Last-resort copy when a tool declares no words at all for its stage. */
+const UNLABELLED_STAGE_FALLBACK = "Working";
 
-export function getGeneratedPresentationFileName(input: {
-  artifactFileName?: string | null;
-  generationMode?: "visual_html" | "editable_native" | null;
-  title?: string | null;
-  videoPresentation?: boolean;
-}) {
-  if (input.videoPresentation) {
-    return downloadVideoPresentationFileName(
-      input.title ?? input.artifactFileName ?? "",
-    );
-  }
-  return downloadPresentationFileName(
-    input.artifactFileName ?? input.title ?? "",
-    input.generationMode === "visual_html" ? "html" : "pptx",
-  );
-}
-
-export function getPresentationArtifactPreviewStatus(input: {
-  isVideoPresentation: boolean;
-  status?: GeneratedPresentationArtifactStatus | null;
-}): ArtifactPreviewRecord["status"] {
-  if (!input.isVideoPresentation) {
-    return "ready";
-  }
-  return input.status ?? "pending";
-}
-
-export function isPresentationArtifactPending(
-  status?: GeneratedPresentationArtifactStatus | null,
+/**
+ * Words for one stage, asked of the tool that produced it. Generic renderers
+ * pass along the stage id they were handed and never interpret it — a local
+ * copy of some capability's stage list is how the message trace and the preview
+ * panel ended up saying different things about one stage.
+ */
+export function getToolStageLabel(
+  toolName: string | null | undefined,
+  stageId: string | null | undefined,
 ) {
-  return status === "pending" || status === "running";
+  if (!toolName || !stageId) {
+    return null;
+  }
+  return (
+    getAgentToolPresentation(toolName)?.stageStep?.({ stageId })?.item ?? null
+  );
 }
 
-export function getVideoProjectStageLabel(
+/** The stage words for an artifact payload, as its producing tool words them. */
+export function getArtifactStageLabel(
+  toolName: string | null | undefined,
   payload: Record<string, unknown> | undefined,
 ) {
-  const generation =
-    payload?.generation &&
-    typeof payload.generation === "object" &&
-    !Array.isArray(payload.generation)
-      ? (payload.generation as Record<string, unknown>)
-      : null;
+  const generation = readArtifactGeneration(payload);
   const stage = typeof generation?.stage === "string" ? generation.stage : null;
-  if (stage === "planning") {
-    return "Planning video scenes...";
-  }
-  if (stage === "generating_project_code") {
-    return "Generating Remotion project code...";
-  }
-  if (stage === "installing_project") {
-    return "Installing project dependencies...";
-  }
-  if (stage === "typechecking_project") {
-    return "Typechecking generated project...";
-  }
-  if (stage === "rendering_smoke_preview") {
-    return "Rendering smoke preview...";
-  }
-  if (stage === "planning_storyboard" || stage === "normalizing_blueprint") {
-    return "Planning storyboard...";
-  }
-  if (stage === "materializing_assets") {
-    return "Preparing visual assets...";
-  }
-  if (stage === "generating_audio_tracks") {
-    return "Generating narration audio...";
-  }
-  if (stage === "assigning_slide_themes") {
-    return "Assigning visual themes...";
-  }
-  if (stage === "generating_scene_modules") {
-    return "Generating Remotion scene code...";
-  }
-  if (stage === "repairing_scene_modules") {
-    return "Repairing scene code...";
-  }
-  if (stage === "publishing_video_project") {
-    return "Finalizing video project...";
-  }
-  if (stage === "ready") {
-    return "Ready for browser video export.";
-  }
-  if (stage === "failed") {
-    return "Video project failed.";
-  }
-  return null;
+  return getToolStageLabel(toolName, stage);
 }
 
-export function getVideoProjectProgressLabel(
+export function getArtifactGenerationProgressLabel(
+  toolName: string | null | undefined,
   payload: Record<string, unknown> | undefined,
 ) {
-  const generation =
-    payload?.generation &&
-    typeof payload.generation === "object" &&
-    !Array.isArray(payload.generation)
-      ? (payload.generation as Record<string, unknown>)
-      : null;
-  const stageLabel = getVideoProjectStageLabel(payload);
+  const generation = readArtifactGeneration(payload);
+  const stageLabel = getArtifactStageLabel(toolName, payload);
   const progress =
     typeof generation?.progress === "number" &&
     Number.isFinite(generation.progress)
@@ -445,120 +225,25 @@ export function getVideoProjectProgressLabel(
     generation.errorMessage.trim().length > 0
       ? generation.errorMessage.trim()
       : null;
+  // "retrying", "failed" and "preparing" are shared stage vocabulary, so their
+  // words also come from the capability rather than from a list kept here.
+  const preparing = () =>
+    getToolStageLabel(toolName, SHARED_ARTIFACT_STAGE_IDS.preparing) ??
+    UNLABELLED_STAGE_FALLBACK;
   const label =
     generation?.retrying === true
-      ? "Retrying video generation..."
+      ? (getToolStageLabel(toolName, SHARED_ARTIFACT_STAGE_IDS.retrying) ??
+        preparing())
       : generation?.status === "failed"
-        ? "Video project failed."
-        : (stageLabel ?? "Video project preparing...");
+        ? (getToolStageLabel(toolName, SHARED_ARTIFACT_STAGE_IDS.failed) ??
+          preparing())
+        : (stageLabel ?? preparing());
   const progressSuffix =
     progress === null ? "" : ` ${progress}%`;
   const attemptSuffix =
     attempt && maxAttempts ? ` · attempt ${attempt}/${maxAttempts}` : "";
   const errorSuffix = retryError ? ` · ${compactText(retryError, 160)}` : "";
   return `${label}${progressSuffix}${attemptSuffix}${errorSuffix}`;
-}
-
-export function buildGeneratedPresentationPreviewArtifact(input: {
-  artifactId: string | null;
-  description?: string | null;
-  fileUrl: string | null;
-  generationMode: "visual_html" | "editable_native" | null;
-  isVideoPresentation: boolean;
-  source: {
-    editable?: boolean | null;
-    fileName?: string | null;
-    htmlUrl?: string | null;
-    previewImageUrl?: string | null;
-    pptxUrl?: string | null;
-    previewRenderer?: "html_iframe" | "pptxviewjs" | null;
-    renderStrategy?: string | null;
-    slideCount?: number | null;
-    status?: GeneratedPresentationArtifactStatus | null;
-  };
-  title: string | null;
-  workspaceId?: string | null;
-}): ArtifactPreviewRecord | null {
-  if (
-    !input.artifactId ||
-    !input.workspaceId ||
-    (!input.fileUrl && !input.isVideoPresentation)
-  ) {
-    return null;
-  }
-
-  const status = getPresentationArtifactPreviewStatus({
-    isVideoPresentation: input.isVideoPresentation,
-    status: input.source.status,
-  });
-  const generationMode =
-    input.generationMode ??
-    (input.source.htmlUrl ? "visual_html" : "editable_native");
-
-  return {
-    id: input.artifactId,
-    teamId: "",
-    workspaceId: input.workspaceId,
-    threadId: null,
-    artifactType: input.isVideoPresentation ? "video_presentation" : "slides",
-    status,
-    title: input.title,
-    promptText: input.description ?? null,
-    payloadJson: {
-      artifactKind: input.isVideoPresentation
-        ? "video_presentation"
-        : undefined,
-      editable: input.isVideoPresentation
-        ? false
-        : (input.source.editable ?? generationMode === "editable_native"),
-      generationMode,
-      renderStrategy: input.source.renderStrategy ?? undefined,
-      videoDownloadOnly: input.isVideoPresentation ? true : undefined,
-      html:
-        !input.isVideoPresentation &&
-        input.source.htmlUrl &&
-        input.source.fileName
-          ? {
-              assetUrl: input.source.htmlUrl,
-              fileName: input.source.fileName,
-            }
-          : undefined,
-      previewRenderer:
-        input.source.previewRenderer ??
-        (generationMode === "editable_native" ? "pptxviewjs" : "html_iframe"),
-      pptx:
-        input.source.pptxUrl && input.source.fileName
-          ? {
-              assetUrl: input.source.pptxUrl,
-              fileName: input.source.fileName,
-            }
-          : undefined,
-      slideCount: input.source.slideCount ?? undefined,
-    },
-    storageBucket: null,
-    storageKey: input.artifactId,
-    previewStorageKey: null,
-    previewMetadataJson: {},
-    errorCode: null,
-    errorMessage: null,
-    createdBy: null,
-    completedAt: status === "ready" ? new Date().toISOString() : null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    previewUrl:
-      input.fileUrl ??
-      (input.isVideoPresentation
-        ? resolveArtifactPageUrl({
-            artifactId: input.artifactId,
-            workspaceId: input.workspaceId,
-          })
-        : null),
-    capabilities: artifactPreviewCapabilities({
-      fileBacked: !input.isVideoPresentation,
-      previewInline: true,
-      renderClientVideo: input.isVideoPresentation && status === "ready",
-    }),
-  };
 }
 
 /**
@@ -620,17 +305,16 @@ export function getToolDisplayLabel(
     hasAgentToolCapability(toolCall.tool, "presentation_artifact") ||
     hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
   ) {
-    const isVideoPresentation = hasAgentToolCapability(
-      toolCall.tool,
-      "video_presentation_artifact",
-    );
-    const artifactId = isVideoPresentation
+    // Only a deliverable (a tool that reports artifact progress) has a live
+    // generation status to fold into its verb; a one-shot publisher does not.
+    const isDeliverable = isDeliverableToolName(toolCall.tool);
+    const artifactId = isDeliverable
       ? resolveToolCallArtifactId(toolCall.output)
       : undefined;
     const artifactSnapshot = artifactId
       ? artifactStatuses?.get(artifactId)
       : undefined;
-    const generationStatus = isVideoPresentation
+    const generationStatus = isDeliverable
       ? resolveDeliverableStatus({
           artifactSnapshot,
           toolCallOutput: toolCall.output,

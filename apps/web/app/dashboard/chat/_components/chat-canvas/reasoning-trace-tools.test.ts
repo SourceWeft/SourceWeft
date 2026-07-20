@@ -2,29 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import {
-  buildGeneratedPresentationPreviewArtifact,
-  downloadPresentationFileName,
   formatThinkingMetadataValue,
   getConnectorResultSummary,
   getConnectorToolResult,
   getGeneratedImagePrompt,
   getGeneratedImageStatus,
   getGeneratedImageTitle,
-  getGeneratedPresentationFileName,
-  getPresentationArtifactPreviewStatus,
   getThinkingMetadataParts,
   getToolFetchUrls,
   getToolQuery,
   getToolStepMetadataParts,
-  getVideoProjectProgressLabel,
-  getVideoProjectStageLabel,
+  getArtifactGenerationProgressLabel,
+  getArtifactStageLabel,
   getVisionFallbackImages,
-  isPresentationArtifactPending,
   normalizeConnectorPages,
   pluralize,
   summarizeToolOutput,
 } from "./reasoning-trace-tools";
+import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
 import type { ToolCallRecord } from "./types";
+
+const VIDEO_TOOL = GENERATE_VIDEO_PRESENTATION_TOOL_NAME;
 
 // Connector tools are registered at runtime rather than baked into the static
 // registry, so register a representative one before exercising connector paths.
@@ -253,84 +251,85 @@ test("getGeneratedImagePrompt prefers input prompt over output prompt", () => {
 });
 
 // ---------------------------------------------------------------------------
-// getVideoProjectStageLabel / progress label
+// artifact stage / progress labels (video presentation capability)
 // ---------------------------------------------------------------------------
 
-test("getVideoProjectStageLabel maps each known stage", () => {
+test("getArtifactStageLabel maps each known video stage", () => {
   const cases: Array<[string, string]> = [
-    ["planning", "Planning video scenes..."],
-    ["generating_project_code", "Generating Remotion project code..."],
-    ["installing_project", "Installing project dependencies..."],
-    ["typechecking_project", "Typechecking generated project..."],
-    ["rendering_smoke_preview", "Rendering smoke preview..."],
-    ["materializing_assets", "Preparing visual assets..."],
-    ["generating_audio_tracks", "Generating narration audio..."],
-    ["assigning_slide_themes", "Assigning visual themes..."],
-    ["generating_scene_modules", "Generating Remotion scene code..."],
-    ["repairing_scene_modules", "Repairing scene code..."],
-    ["publishing_video_project", "Finalizing video project..."],
-    ["ready", "Ready for browser video export."],
-    ["failed", "Video project failed."],
+    ["planning", "Planning video scenes"],
+    ["generating_project_code", "Generating Remotion project code"],
+    ["installing_project", "Installing project dependencies"],
+    ["typechecking_project", "Typechecking project"],
+    ["rendering_smoke_preview", "Rendering smoke preview"],
+    ["materializing_assets", "Preparing visual assets"],
+    ["generating_audio_tracks", "Generating narration audio"],
+    ["assigning_slide_themes", "Assigning slide themes"],
+    ["generating_scene_modules", "Generating Remotion scene code"],
+    ["repairing_scene_modules", "Repairing scene code"],
+    ["verifying_visual_quality", "Reviewing rendered slides"],
+    ["publishing_video_project", "Publishing video project"],
+    ["ready", "Ready for browser video export"],
+    ["failed", "Video project failed"],
   ];
   for (const [stage, label] of cases) {
     assert.equal(
-      getVideoProjectStageLabel({ generation: { stage } }),
+      getArtifactStageLabel(VIDEO_TOOL, { generation: { stage } }),
       label,
       `stage ${stage}`,
     );
   }
 });
 
-test("getVideoProjectStageLabel collapses the two storyboard stages", () => {
+test("getArtifactStageLabel collapses the two storyboard stages", () => {
   assert.equal(
-    getVideoProjectStageLabel({ generation: { stage: "planning_storyboard" } }),
-    "Planning storyboard...",
+    getArtifactStageLabel(VIDEO_TOOL, { generation: { stage: "planning_storyboard" } }),
+    "Planning storyboard",
   );
   assert.equal(
-    getVideoProjectStageLabel({
+    getArtifactStageLabel(VIDEO_TOOL, {
       generation: { stage: "normalizing_blueprint" },
     }),
-    "Planning storyboard...",
+    "Planning storyboard",
   );
 });
 
-test("getVideoProjectStageLabel returns null for unusable payloads", () => {
-  assert.equal(getVideoProjectStageLabel(undefined), null);
-  assert.equal(getVideoProjectStageLabel({}), null);
-  assert.equal(getVideoProjectStageLabel({ generation: null }), null);
+test("getArtifactStageLabel returns null for unusable payloads", () => {
+  assert.equal(getArtifactStageLabel(VIDEO_TOOL, undefined), null);
+  assert.equal(getArtifactStageLabel(VIDEO_TOOL, {}), null);
+  assert.equal(getArtifactStageLabel(VIDEO_TOOL, { generation: null }), null);
   // An array must not be treated as a generation record.
-  assert.equal(getVideoProjectStageLabel({ generation: [] }), null);
-  assert.equal(getVideoProjectStageLabel({ generation: { stage: 7 } }), null);
+  assert.equal(getArtifactStageLabel(VIDEO_TOOL, { generation: [] }), null);
+  assert.equal(getArtifactStageLabel(VIDEO_TOOL, { generation: { stage: 7 } }), null);
   assert.equal(
-    getVideoProjectStageLabel({ generation: { stage: "unknown_stage" } }),
+    getArtifactStageLabel(VIDEO_TOOL, { generation: { stage: "unknown_stage" } }),
     null,
   );
 });
 
-test("getVideoProjectProgressLabel clamps and rounds progress", () => {
+test("getArtifactGenerationProgressLabel clamps and rounds progress", () => {
   assert.equal(
-    getVideoProjectProgressLabel({
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, {
       generation: { stage: "planning", progress: 42.6 },
     }),
-    "Planning video scenes... 43%",
+    "Planning video scenes 43%",
   );
   assert.equal(
-    getVideoProjectProgressLabel({
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, {
       generation: { stage: "planning", progress: 140 },
     }),
-    "Planning video scenes... 100%",
+    "Planning video scenes 100%",
   );
   assert.equal(
-    getVideoProjectProgressLabel({
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, {
       generation: { stage: "planning", progress: -5 },
     }),
-    "Planning video scenes... 0%",
+    "Planning video scenes 0%",
   );
 });
 
-test("getVideoProjectProgressLabel appends attempt and error suffixes", () => {
+test("getArtifactGenerationProgressLabel appends attempt and error suffixes", () => {
   assert.equal(
-    getVideoProjectProgressLabel({
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, {
       generation: {
         retrying: true,
         progress: 10,
@@ -339,199 +338,19 @@ test("getVideoProjectProgressLabel appends attempt and error suffixes", () => {
         errorMessage: "  boom  ",
       },
     }),
-    "Retrying video generation... 10% · attempt 2/3 · boom",
+    "Retrying video generation 10% · attempt 2/3 · boom",
   );
 });
 
-test("getVideoProjectProgressLabel reports failure and default states", () => {
+test("getArtifactGenerationProgressLabel reports failure and default states", () => {
   assert.equal(
-    getVideoProjectProgressLabel({ generation: { status: "failed" } }),
-    "Video project failed.",
-  );
-  assert.equal(getVideoProjectProgressLabel(undefined), "Video project preparing...");
-});
-
-// ---------------------------------------------------------------------------
-// presentation file names + preview status
-// ---------------------------------------------------------------------------
-
-test("downloadPresentationFileName sanitizes and appends the extension", () => {
-  assert.equal(
-    // Illegal chars become "-", then surrounding whitespace is collapsed away.
-    downloadPresentationFileName("Q3 / Review: Draft"),
-    "Q3-Review-Draft.pptx",
-  );
-  assert.equal(downloadPresentationFileName("   "), "generated-presentation.pptx");
-  // Already-correct extension is preserved rather than doubled.
-  assert.equal(downloadPresentationFileName("deck.pptx"), "deck.pptx");
-  // A mismatched presentation extension is swapped, not appended.
-  assert.equal(downloadPresentationFileName("deck.html"), "deck.pptx");
-  assert.equal(downloadPresentationFileName("deck.pptx", "html"), "deck.html");
-});
-
-test("getGeneratedPresentationFileName routes by mode and video flag", () => {
-  assert.equal(
-    getGeneratedPresentationFileName({
-      artifactFileName: "deck",
-      generationMode: "visual_html",
-    }),
-    "deck.html",
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, { generation: { status: "failed" } }),
+    "Video project failed",
   );
   assert.equal(
-    getGeneratedPresentationFileName({
-      artifactFileName: "deck",
-      generationMode: "editable_native",
-    }),
-    "deck.pptx",
+    getArtifactGenerationProgressLabel(VIDEO_TOOL, undefined),
+    "Preparing video project",
   );
-  assert.equal(
-    getGeneratedPresentationFileName({ title: "My Talk", videoPresentation: true }),
-    "My Talk.mp4",
-  );
-  assert.equal(
-    getGeneratedPresentationFileName({ videoPresentation: true }),
-    "generated-video-presentation.mp4",
-  );
-});
-
-test("getGeneratedPresentationFileName prefers artifact file name over title", () => {
-  assert.equal(
-    getGeneratedPresentationFileName({
-      artifactFileName: "from-artifact",
-      title: "from-title",
-    }),
-    "from-artifact.pptx",
-  );
-});
-
-test("getPresentationArtifactPreviewStatus only defers to status for video", () => {
-  assert.equal(
-    getPresentationArtifactPreviewStatus({
-      isVideoPresentation: false,
-      status: "pending",
-    }),
-    "ready",
-  );
-  assert.equal(
-    getPresentationArtifactPreviewStatus({
-      isVideoPresentation: true,
-      status: "running",
-    }),
-    "running",
-  );
-  assert.equal(
-    getPresentationArtifactPreviewStatus({ isVideoPresentation: true }),
-    "pending",
-  );
-});
-
-test("isPresentationArtifactPending covers pending and running only", () => {
-  assert.equal(isPresentationArtifactPending("pending"), true);
-  assert.equal(isPresentationArtifactPending("running"), true);
-  assert.equal(isPresentationArtifactPending("ready"), false);
-  assert.equal(isPresentationArtifactPending(null), false);
-  assert.equal(isPresentationArtifactPending(undefined), false);
-});
-
-// ---------------------------------------------------------------------------
-// buildGeneratedPresentationPreviewArtifact
-// ---------------------------------------------------------------------------
-
-test("buildGeneratedPresentationPreviewArtifact requires ids and a file url", () => {
-  const base = {
-    artifactId: "artifact-1",
-    fileUrl: "https://cdn.example/deck.pptx",
-    generationMode: "editable_native" as const,
-    isVideoPresentation: false,
-    source: {},
-    title: "Deck",
-    workspaceId: "workspace-1",
-  };
-  assert.equal(
-    buildGeneratedPresentationPreviewArtifact({ ...base, artifactId: null }),
-    null,
-  );
-  assert.equal(
-    buildGeneratedPresentationPreviewArtifact({ ...base, workspaceId: null }),
-    null,
-  );
-  assert.equal(
-    buildGeneratedPresentationPreviewArtifact({ ...base, fileUrl: null }),
-    null,
-  );
-  // Video presentations are allowed to have no file url yet.
-  assert.notEqual(
-    buildGeneratedPresentationPreviewArtifact({
-      ...base,
-      fileUrl: null,
-      isVideoPresentation: true,
-    }),
-    null,
-  );
-});
-
-test("buildGeneratedPresentationPreviewArtifact builds a slides preview", () => {
-  const artifact = buildGeneratedPresentationPreviewArtifact({
-    artifactId: "artifact-1",
-    fileUrl: "https://cdn.example/deck.pptx",
-    generationMode: null,
-    isVideoPresentation: false,
-    source: {
-      fileName: "deck.pptx",
-      htmlUrl: "https://cdn.example/deck.html",
-      pptxUrl: "https://cdn.example/deck.pptx",
-      slideCount: 12,
-    },
-    title: "Deck",
-    workspaceId: "workspace-1",
-  });
-  assert.ok(artifact);
-  assert.equal(artifact.artifactType, "slides");
-  assert.equal(artifact.status, "ready");
-  assert.equal(artifact.workspaceId, "workspace-1");
-  // htmlUrl with no explicit mode implies visual_html + iframe rendering.
-  assert.equal(artifact.payloadJson.generationMode, "visual_html");
-  assert.equal(artifact.payloadJson.previewRenderer, "html_iframe");
-  assert.equal(artifact.payloadJson.slideCount, 12);
-  assert.equal(artifact.capabilities.canDownloadFile, true);
-  assert.equal(artifact.capabilities.canRenderClientVideo, false);
-});
-
-test("buildGeneratedPresentationPreviewArtifact marks video previews download-only", () => {
-  const artifact = buildGeneratedPresentationPreviewArtifact({
-    artifactId: "artifact-2",
-    fileUrl: null,
-    generationMode: null,
-    isVideoPresentation: true,
-    source: { status: "ready" },
-    title: "Explainer",
-    workspaceId: "workspace-1",
-  });
-  assert.ok(artifact);
-  assert.equal(artifact.artifactType, "video_presentation");
-  assert.equal(artifact.status, "ready");
-  assert.equal(artifact.payloadJson.videoDownloadOnly, true);
-  assert.equal(artifact.payloadJson.editable, false);
-  assert.equal(artifact.payloadJson.html, undefined);
-  // Video artifacts are not file-backed but can render inline once ready.
-  assert.equal(artifact.capabilities.canDownloadFile, false);
-  assert.equal(artifact.capabilities.canRenderClientVideo, true);
-});
-
-test("buildGeneratedPresentationPreviewArtifact omits pptx without a file name", () => {
-  const artifact = buildGeneratedPresentationPreviewArtifact({
-    artifactId: "artifact-3",
-    fileUrl: "https://cdn.example/deck.pptx",
-    generationMode: "editable_native",
-    isVideoPresentation: false,
-    source: { pptxUrl: "https://cdn.example/deck.pptx" },
-    title: "Deck",
-    workspaceId: "workspace-1",
-  });
-  assert.ok(artifact);
-  assert.equal(artifact.payloadJson.pptx, undefined);
-  assert.equal(artifact.payloadJson.previewRenderer, "pptxviewjs");
-  assert.equal(artifact.payloadJson.editable, true);
 });
 
 // ---------------------------------------------------------------------------

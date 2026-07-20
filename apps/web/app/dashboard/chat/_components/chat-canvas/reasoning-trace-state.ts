@@ -102,33 +102,6 @@ export function isReasoningTraceThinking(input: {
   return input.isStreaming;
 }
 
-export function shouldShowGeneratedPresentationItem(input: {
-  fileUrl?: string | null;
-  isArtifactPublisher: boolean;
-  isVideoPresentation: boolean;
-  previewArtifact?: unknown;
-  status: ToolCallRecord["status"];
-}) {
-  if (
-    input.isArtifactPublisher &&
-    (input.status === "running" ||
-      input.status === "approval_requested" ||
-      input.status === "error")
-  ) {
-    return false;
-  }
-  if (
-    input.status === "running" ||
-    input.status === "approval_requested" ||
-    input.status === "error"
-  ) {
-    return true;
-  }
-  return Boolean(
-    input.fileUrl || (input.isVideoPresentation && input.previewArtifact),
-  );
-}
-
 function getRecordValue(
   record: Record<string, unknown> | undefined,
   key: string,

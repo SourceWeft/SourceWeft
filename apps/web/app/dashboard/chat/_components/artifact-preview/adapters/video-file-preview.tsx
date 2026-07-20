@@ -43,10 +43,11 @@ function VideoFilePreview({
 
 export const videoFilePreviewRenderer: ArtifactPreviewRenderer = {
   id: "video-file",
+  // Purely a medium test: a stored file the browser can play. Artifact types a
+  // capability claims never reach here — the registry asks the owner first.
   match: ({ artifact, payload, proxyFileUrl }) =>
     artifact.status === "ready" &&
     Boolean(proxyFileUrl) &&
-    artifact.artifactType !== "video_presentation" &&
     isVideoFileArtifact({ artifactType: artifact.artifactType, payload }),
   render: ({ proxyFileUrl, title }) =>
     proxyFileUrl ? <VideoFilePreview fileUrl={proxyFileUrl} title={title} /> : null,

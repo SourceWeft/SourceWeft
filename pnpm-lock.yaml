@@ -445,6 +445,9 @@ importers:
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
+      '@sourceweft/builtin-tool-publish-artifact':
+        specifier: workspace:*
+        version: link:../../packages/builtin-tool-publish-artifact
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-video-presentation
@@ -490,12 +493,6 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
-      dom-to-pptx:
-        specifier: ^1.1.9
-        version: 1.1.9
-      html-to-image:
-        specifier: ^1.11.13
-        version: 1.11.13
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.7)
@@ -508,12 +505,6 @@ importers:
       pg:
         specifier: ^8.16.3
         version: 8.20.0
-      pptxgenjs:
-        specifier: ^3.12.0
-        version: 3.12.0
-      pptxviewjs:
-        specifier: ^1.1.9
-        version: 1.1.9(chart.js@4.5.1)(jszip@3.10.1)
       react:
         specifier: ^19.2.1
         version: 19.2.7
@@ -615,6 +606,12 @@ importers:
       '@types/node':
         specifier: ^22.15.30
         version: 22.20.1
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.2
+      react:
+        specifier: ^19.2.1
+        version: 19.2.7
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -804,9 +801,18 @@ importers:
       '@sourceweft/model-gateway':
         specifier: workspace:*
         version: link:../model-gateway
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../ui
       langchain:
         specifier: ^1.5.0
         version: 1.5.0(@langchain/core@1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.1)(zod-to-json-schema@3.25.2(zod@4.3.6))
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.7)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -817,6 +823,12 @@ importers:
       '@types/node':
         specifier: ^22.15.30
         version: 22.18.12
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.2
+      react:
+        specifier: ^19.2.1
+        version: 19.2.7
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -832,9 +844,30 @@ importers:
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../ui
+      dom-to-pptx:
+        specifier: ^1.1.9
+        version: 1.1.9
+      html-to-image:
+        specifier: ^1.11.13
+        version: 1.11.13
       langchain:
         specifier: ^1.5.0
         version: 1.5.0(@langchain/core@1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.1)(zod-to-json-schema@3.25.2(zod@4.3.6))
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.7)
+      pptxgenjs:
+        specifier: ^3.12.0
+        version: 3.12.0
+      pptxviewjs:
+        specifier: ^1.1.9
+        version: 1.1.9(chart.js@4.5.1)(jszip@3.10.1)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -845,6 +878,12 @@ importers:
       '@types/node':
         specifier: ^22.15.30
         version: 22.18.12
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.2
+      react:
+        specifier: ^19.2.1
+        version: 19.2.7
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -891,18 +930,30 @@ importers:
 
   packages/builtin-tool-video-presentation:
     dependencies:
+      '@remotion/web-renderer':
+        specifier: ^4.0.468
+        version: 4.0.468(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../ui
       '@sourceweft/video-presentation-runtime':
         specifier: workspace:*
         version: link:../video-presentation-runtime
       langchain:
         specifier: ^1.5.0
         version: 1.5.0(@langchain/core@1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.1)(zod-to-json-schema@3.25.2(zod@4.3.6))
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.7)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -916,6 +967,12 @@ importers:
       '@types/node':
         specifier: ^22.15.30
         version: 22.18.12
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.2
+      react:
+        specifier: ^19.2.1
+        version: 19.2.7
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -1023,6 +1080,9 @@ importers:
       '@types/node':
         specifier: ^22.15.30
         version: 22.20.1
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.2
       tsx:
         specifier: ^4.20.6
         version: 4.21.0

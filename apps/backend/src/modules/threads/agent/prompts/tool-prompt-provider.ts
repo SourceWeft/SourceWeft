@@ -3,7 +3,11 @@ export type RuntimePromptContext = {
   availableWebTools: string[];
   availableMcpTools: string[];
   currentDate: string;
-  artifactIntent?: unknown;
+  /**
+   * What each capability's turn preflight parked, keyed by tool name. Passed
+   * through untouched; a provider reads only its own entry.
+   */
+  turnState?: Readonly<Record<string, unknown>>;
   runtimeTools?: Readonly<
     Record<
       string,

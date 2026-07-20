@@ -1,20 +1,23 @@
 import {
   ARTIFACT_MIME_TYPES,
+  extensionForMimeType,
   isInlinePreviewableMimeType,
-} from "@sourceweft/builtin-tool-publish-artifact";
+} from "@sourceweft/contracts/artifact-files";
+import { buildArtifactPreviewUrl as buildArtifactPreviewPageUrl } from "@sourceweft/contracts/artifact-urls";
+import type {
+  ArtifactCapabilities,
+  ArtifactViewHandler,
+} from "@sourceweft/contracts";
 import { requireContentWorkspace } from "../workspace/guards";
 import { ContentError } from "../content/errors";
 import { downloadArtifactObject } from "../sources/storage";
 import {
-  sanitizeArtifactDownloadFileBaseName,
-  withFileExtension,
-} from "./filenames";
-import {
   findArtifactRecord,
   listArtifactRecords,
 } from "./repository";
+import { loadArtifactViewHandlerRegistry } from "./view-handlers";
 
-const VISUAL_HTML_DECK_RENDERER = "visual_html_deck";
+type ArtifactRecord = Awaited<ReturnType<typeof findArtifactRecord>>;
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -23,31 +26,30 @@ function toObjectRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+/**
+ * Every per-artifact-type decision below follows the same shape: ask the
+ * registered handler first, fall back to the generic answer (payload metadata,
+ * else the file's MIME type) when no capability takes the type over. `image`
+ * and `file` are top-level media the host may reason about; anything more
+ * specific belongs to the capability that produces it.
+ */
+
 function resolveArtifactFileName(
-  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
+  artifact: ArtifactRecord,
+  handler?: ArtifactViewHandler | null,
 ) {
+  if (artifact) {
+    const handled = handler?.resolveFileName?.({ artifact });
+    if (handled) {
+      return handled;
+    }
+  }
+
   const payload = toObjectRecord(artifact?.payloadJson);
   const fileName =
     payload && typeof payload.fileName === "string"
       ? payload.fileName.trim()
       : "";
-  const generationMode =
-    payload && typeof payload.generationMode === "string"
-      ? payload.generationMode.trim()
-      : "";
-  if (artifact?.artifactType === "slides") {
-    if (generationMode === "visual_html" && fileName) {
-      return fileName;
-    }
-    const title = artifact.title?.trim();
-    if (title) {
-      return withFileExtension(
-        sanitizeArtifactDownloadFileBaseName(title, "generated-presentation"),
-        generationMode === "visual_html" ? ".html" : ".pptx",
-      );
-    }
-  }
-
   if (fileName) {
     return fileName;
   }
@@ -55,14 +57,25 @@ function resolveArtifactFileName(
   const title = artifact?.title?.trim() || "artifact";
   const extension =
     artifact?.artifactType === "image"
-      ? ".png"
+      ? extensionForMimeType(
+          resolveArtifactContentType(artifact, handler),
+          ".png",
+        )
       : "";
   return `${title}${extension}`;
 }
 
 function resolveArtifactContentType(
-  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
+  artifact: ArtifactRecord,
+  handler?: ArtifactViewHandler | null,
 ) {
+  if (artifact) {
+    const handled = handler?.resolveContentType?.({ artifact });
+    if (handled) {
+      return handled;
+    }
+  }
+
   const payload = toObjectRecord(artifact?.payloadJson);
   const mimeType =
     payload && typeof payload.mimeType === "string"
@@ -82,53 +95,62 @@ function isInlinePreviewableContentType(contentType: string) {
 }
 
 function resolveArtifactRenderer(
-  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
+  artifact: ArtifactRecord,
+  handler?: ArtifactViewHandler | null,
 ) {
-  const payload = toObjectRecord(artifact?.payloadJson);
-  const generationMode =
-    payload && typeof payload.generationMode === "string"
-      ? payload.generationMode.trim()
-      : "";
-  return artifact?.artifactType === "slides" && generationMode === "visual_html"
-    ? VISUAL_HTML_DECK_RENDERER
-    : null;
+  if (!artifact) {
+    return null;
+  }
+  return handler?.resolveRenderer?.({ artifact }) ?? null;
 }
 
 function hasArtifactPreviewFile(
-  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
+  artifact: ArtifactRecord,
+  handler?: ArtifactViewHandler | null,
 ) {
   if (!artifact || !artifact.storageKey || artifact.status !== "ready") {
     return false;
   }
 
-  if (artifact.artifactType === "slides" || artifact.artifactType === "image") {
+  const contentType = resolveArtifactContentType(artifact, handler);
+  const handled = handler?.canPreviewInline?.({ artifact, contentType });
+  if (typeof handled === "boolean") {
+    return handled;
+  }
+
+  if (artifact.artifactType === "image") {
     return true;
   }
 
   if (artifact.artifactType === "file") {
-    return isInlinePreviewableContentType(resolveArtifactContentType(artifact));
+    return isInlinePreviewableContentType(contentType);
   }
 
   return false;
 }
 
+/**
+ * Generic fallback (a stored file, served by MIME type) plus one lookup: does a
+ * capability take this artifact type over? A registered handler means the
+ * client renders the artifact from its payload, so it is openable even before —
+ * or without ever — producing a file. A failed artifact renders nothing.
+ */
 function buildArtifactCapabilities(
-  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
-) {
+  artifact: ArtifactRecord,
+  handler?: ArtifactViewHandler | null,
+): ArtifactCapabilities {
   const hasFile = Boolean(
     artifact?.status === "ready" &&
       artifact.storageKey,
   );
-  const canRenderClientVideo = Boolean(
-    artifact &&
-      artifact.artifactType === "video_presentation" &&
-      artifact.status !== "failed",
+  const canRenderClientSide = Boolean(
+    artifact && handler && artifact.status !== "failed",
   );
   return {
-    canOpenFile: hasFile || canRenderClientVideo,
+    canOpenFile: hasFile || canRenderClientSide,
     canDownloadFile: hasFile,
-    canPreviewInline: hasArtifactPreviewFile(artifact),
-    canRenderClientVideo,
+    canPreviewInline: hasArtifactPreviewFile(artifact, handler),
+    canRenderClientSide,
   };
 }
 
@@ -157,6 +179,7 @@ function resolveSourceJsonStorageBucket(
 function resolveArtifactAsset(
   artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
   fileName: string,
+  handler?: ArtifactViewHandler | null,
 ) {
   const decodedFileName = decodeURIComponent(fileName).trim();
   if (!decodedFileName || !artifact) {
@@ -185,71 +208,19 @@ function resolveArtifactAsset(
     };
   }
 
-  if (artifact.artifactType === "video_presentation") {
-    const audioTracks = Array.isArray(payload.audioTracks)
-      ? payload.audioTracks
-      : [];
-    for (const track of audioTracks) {
-      const record = toObjectRecord(track);
-      if (
-        record &&
-        record.fileName === decodedFileName &&
-        typeof record.storageKey === "string"
-      ) {
-        return {
-          contentType:
-            typeof record.mimeType === "string"
-              ? record.mimeType
-              : ARTIFACT_MIME_TYPES.binary,
-          fileName: decodedFileName,
-          storageBucket:
-            typeof record.storageBucket === "string"
-              ? record.storageBucket
-              : artifact.storageBucket,
-          storageKey: record.storageKey,
-        };
-      }
-    }
-
-    const assets = Array.isArray(payload.assets) ? payload.assets : [];
-    for (const asset of assets) {
-      const record = toObjectRecord(asset);
-      const candidateFileName =
-        typeof record?.fileName === "string"
-          ? record.fileName
-          : typeof record?.storageKey === "string"
-            ? record.storageKey.split("/").pop()
-            : null;
-      if (
-        record &&
-        candidateFileName === decodedFileName &&
-        typeof record.storageKey === "string" &&
-        !record.storageKey.startsWith("external:")
-      ) {
-        return {
-          contentType: ARTIFACT_MIME_TYPES.binary,
-          fileName: decodedFileName,
-          storageBucket:
-            typeof record.storageBucket === "string"
-              ? record.storageBucket
-              : artifact.storageBucket,
-          storageKey: record.storageKey,
-        };
-      }
-    }
-  }
-
-  return null;
+  // Anything beyond the artifact's own stored file is payload-shaped knowledge
+  // owned by the capability that produced the artifact.
+  return (
+    handler?.resolveAsset?.({ artifact, fileName: decodedFileName }) ?? null
+  );
 }
 
 function resolveArtifactPreviewImage(
   artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
 ) {
-  if (
-    !artifact ||
-    artifact.status !== "ready" ||
-    artifact.artifactType !== "slides"
-  ) {
+  // Any artifact type may carry a thumbnail; having one stored is the only
+  // thing that qualifies it. Publishers/pipelines decide whether to write one.
+  if (!artifact || artifact.status !== "ready") {
     return null;
   }
   const storageKey =
@@ -302,6 +273,7 @@ export class ContentArtifactsService {
   private buildArtifactResponse(input: {
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>;
     workspaceId: string;
+    handler?: ArtifactViewHandler | null;
   }) {
     const { artifact, workspaceId } = input;
     return {
@@ -324,13 +296,13 @@ export class ContentArtifactsService {
       completedAt: artifact.completedAt,
       createdAt: artifact.createdAt,
       updatedAt: artifact.updatedAt,
-      previewUrl: hasArtifactPreviewFile(artifact)
+      previewUrl: hasArtifactPreviewFile(artifact, input.handler)
         ? this.buildArtifactPreviewUrl({
             workspaceId,
             artifactId: artifact.id,
           })
         : null,
-      capabilities: buildArtifactCapabilities(artifact),
+      capabilities: buildArtifactCapabilities(artifact, input.handler),
     };
   }
 
@@ -350,12 +322,14 @@ export class ContentArtifactsService {
       cursor: decodeArtifactCursor(input.cursor),
       limit: input.limit,
     });
+    const registry = await loadArtifactViewHandlerRegistry();
 
     return {
       items: artifacts.items.map((artifact) =>
         this.buildArtifactResponse({
           artifact,
           workspaceId: workspace.id,
+          handler: registry.handlerFor(artifact.artifactType),
         }),
       ),
       nextCursor: artifacts.nextCursor,
@@ -381,20 +355,19 @@ export class ContentArtifactsService {
       throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
     }
 
+    const registry = await loadArtifactViewHandlerRegistry();
+
     return {
       artifact: this.buildArtifactResponse({
         artifact,
         workspaceId: workspace.id,
+        handler: registry.handlerFor(artifact.artifactType),
       }),
     };
   }
 
   buildArtifactPreviewUrl(input: { workspaceId: string; artifactId: string }) {
-    const params = new URLSearchParams({
-      artifactId: input.artifactId,
-      workspaceId: input.workspaceId,
-    });
-    return `/artifact-preview?${params.toString()}`;
+    return buildArtifactPreviewPageUrl(input);
   }
 
   async getArtifactFile(input: {
@@ -423,14 +396,17 @@ export class ContentArtifactsService {
       );
     }
 
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+
     return {
       body: await downloadArtifactObject({
         bucket: artifact.storageBucket,
         key: artifact.storageKey,
       }),
-      contentType: resolveArtifactContentType(artifact),
-      fileName: resolveArtifactFileName(artifact),
-      renderer: resolveArtifactRenderer(artifact),
+      contentType: resolveArtifactContentType(artifact, handler),
+      fileName: resolveArtifactFileName(artifact, handler),
+      renderer: resolveArtifactRenderer(artifact, handler),
     };
   }
 
@@ -545,7 +521,12 @@ export class ContentArtifactsService {
     if (!artifact) {
       throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
     }
-    const asset = resolveArtifactAsset(artifact, input.fileName);
+    const registry = await loadArtifactViewHandlerRegistry();
+    const asset = resolveArtifactAsset(
+      artifact,
+      input.fileName,
+      registry.handlerFor(artifact.artifactType),
+    );
     if (!asset) {
       throw new ContentError(
         404,

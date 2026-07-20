@@ -166,6 +166,14 @@ export type DeliverableHostContext = {
       metadata: Record<string, unknown>;
     }): Promise<{ audio: Uint8Array; mimeType: string }>;
   };
+  /**
+   * Structural restatement of `ArtifactStorage` from
+   * `@sourceweft/contracts/artifact-storage`, which is the canonical
+   * declaration and the one every other site imports. It is inlined here only
+   * because this package deliberately carries no workspace dependencies (see
+   * the module header); keep the two in sync — they are assignable in both
+   * directions today.
+   */
   readonly storage: {
     buildArtifactStorageKey(input: {
       artifactId: string;
@@ -221,6 +229,28 @@ export type DeliverableStageRunInput<TState> = {
   scratch: Record<string, unknown>;
   api: {
     updateStageProgress(patch: DeliverableStageViewPatch): Promise<void>;
+    /**
+     * Declare the artifact's thumbnail. The stage must have uploaded the bytes
+     * to `storageKey` itself; the host persists the pointer onto the artifact
+     * record when the run publishes. Last call wins; never calling it leaves
+     * whatever thumbnail the artifact already has.
+     */
+    setPreviewImage(image: DeliverablePreviewImage): void;
+  };
+};
+
+/**
+ * Pointer to an already-uploaded artifact thumbnail. The same artifact columns
+ * back every artifact type, whether the bytes come from a publisher tool or a
+ * generation pipeline.
+ */
+export type DeliverablePreviewImage = {
+  storageKey: string;
+  metadata: {
+    altText?: string;
+    byteLength?: number;
+    fileName: string;
+    mimeType: string;
   };
 };
 

@@ -92,7 +92,12 @@ function createVideoPresentationGenerateProcessor(
   };
 }
 
+type CompleteArtifactCall = Parameters<
+  DeliverableArtifactsAdapter["completeArtifact"]
+>[0];
+
 const repositoryState = {
+  completed: [] as CompleteArtifactCall[],
   failedErrorCode: null as string | null,
   artifactPayload: null as unknown,
   failedPayload: null as unknown,
@@ -302,9 +307,10 @@ function makeDeps(
         repositoryState.failedPayload = markInput.payload;
         return true;
       },
-      markReady: async (markInput) => {
-        repositoryState.readyPayload = markInput.payload;
-        return { artifactId: markInput.artifactId, versionId: "version-1" };
+      completeArtifact: async (completeInput) => {
+        repositoryState.readyPayload = completeInput.payload;
+        repositoryState.completed.push(completeInput);
+        return { artifactId: completeInput.artifactId, versionId: "version-1" };
       },
       markRunning: async (markInput) => {
         const runningPayload = videoPresentationProjectPayloadSchema.parse(
@@ -445,6 +451,7 @@ function job(
 
 beforeEach(() => {
   repositoryState.artifactPayload = initialPayload();
+  repositoryState.completed = [];
   repositoryState.failedErrorCode = null;
   repositoryState.failedPayload = null;
   repositoryState.jobProgress = [];
@@ -594,6 +601,35 @@ test("uses measured audio duration for scene length with tail padding", async ()
       `slide ${scene.slideNumber}: scene ${scene.durationInFrames} frames must cover narration plus tail padding`,
     );
   }
+});
+
+test("the finished video presentation closes through the shared two-phase write", async () => {
+  const processor = createVideoPresentationGenerateProcessor(async () =>
+    makeDeps({
+      stills: [
+        { slideNumber: 2, data: new Uint8Array([2]) },
+        { slideNumber: 1, data: new Uint8Array([1]) },
+      ],
+    }),
+  );
+
+  await processor({ data: jobData() } as never);
+
+  const completion = repositoryState.completed[0];
+  assert.ok(completion);
+  // The type is the pipeline's own; the title is the artifact's; the payload is
+  // finalize()'s whole result. Nothing here is host knowledge about video.
+  assert.equal(completion.artifactType, "video_presentation");
+  assert.equal(completion.title, "Feynman Method");
+  assert.equal(completion.payload, repositoryState.readyPayload);
+  // Create runs own the pending → ready transition, so status alone identifies
+  // a duplicate delivery and no version lock is carried.
+  assert.deepEqual(completion.expectedStatuses, ["pending", "running"]);
+  assert.equal("expectedVersionNo" in completion, false);
+  // The cover still is uploaded inside the render stage that produced it, so
+  // what reaches the write path is the key, not the bytes.
+  assert.match(completion.preview?.storageKey ?? "", /-cover\.jpg$/u);
+  assert.equal(completion.preview?.metadata.mimeType, "image/jpeg");
 });
 
 test("processVideoPresentationGenerateJob plans internally and publishes code-first project", async () => {

@@ -71,6 +71,16 @@ export const VIDEO_PRESENTATION_STAGE_PROGRESS: Record<
 
 const STAGE_PROGRESS = VIDEO_PRESENTATION_STAGE_PROGRESS;
 
+/**
+ * The pipeline stage table's words. Nothing outside this file re-types them:
+ * the capability's stage-label module resolves every user-facing stage name
+ * through here, so a stage cannot read one way in the pipeline panel and
+ * another way in the message trace.
+ *
+ * These words are persisted into `pipelineSteps.label`, so they are the source
+ * a rendering path adopts rather than the one it overrides — rewording here
+ * leaves older rows saying something else, forever.
+ */
 export function getVideoPresentationPipelineStepLabel(
   stageId: VideoPresentationPipelineStageId,
 ) {

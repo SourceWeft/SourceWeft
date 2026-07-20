@@ -73,6 +73,28 @@ export type AgentToolPresentation = {
   readonly progressEventTypes?: readonly string[];
 
   /**
+   * Which phase an ended tool call left its artifact in, read from the
+   * capability's own output vocabulary.
+   *
+   * One reader rather than a set of booleans, because the hosts want different
+   * answers from the same judgement: the turn pipeline needs the phase to word
+   * the in-turn generation step ("completed" / "saving" / "repairing" /
+   * "failed"), while the web client only asks whether it equals "completed"
+   * before re-reading the artifact list. A host that derived either answer
+   * itself would be re-implementing one capability's wire format — which is
+   * exactly what "presentation_artifact || video_presentation_artifact"
+   * branching used to be.
+   *
+   * `context.status` carries where the call itself ended, so a capability whose
+   * artifact outlives the call can ignore it while one that publishes inline
+   * can require it. Omitted by capabilities that report no generation step at
+   * all; hosts read the absence as "the artifact exists once the call ends".
+   */
+  artifactCompletionPhase?(
+    context: AgentToolPresentationContext,
+  ): ArtifactGenerationPhase;
+
+  /**
    * The tool call's title. One method rather than start/end pair: callers that
    * know only the phase pass `status`, callers that also track a background job
    * pass `generationStatus`, and the capability decides what to say.

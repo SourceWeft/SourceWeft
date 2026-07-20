@@ -28,11 +28,7 @@ export type StreamingEventHandlerContext<
 > = {
   appendReasoningChunk: (current: string | undefined, next: string) => string;
   durableRunKey: string;
-  isCompletedImageArtifactToolCall: (
-    toolCall: ToolCallRecord,
-    event: TToolEvent,
-  ) => boolean;
-  isCompletedPresentationArtifactToolCall: (
+  isCompletedArtifactToolCall: (
     toolCall: ToolCallRecord,
     event: TToolEvent,
   ) => boolean;
@@ -369,14 +365,7 @@ export function handleStreamingToolCallEvent<
     setWorkfilesRefreshKey((value) => value + 1);
   }
   if (
-    context.isCompletedImageArtifactToolCall(nextToolCall, event) &&
-    !refreshedArtifactToolIds.has(nextToolCall.id)
-  ) {
-    refreshedArtifactToolIds.add(nextToolCall.id);
-    setArtifactsRefreshKey((value) => value + 1);
-  }
-  if (
-    context.isCompletedPresentationArtifactToolCall(nextToolCall, event) &&
+    context.isCompletedArtifactToolCall(nextToolCall, event) &&
     !refreshedArtifactToolIds.has(nextToolCall.id)
   ) {
     refreshedArtifactToolIds.add(nextToolCall.id);

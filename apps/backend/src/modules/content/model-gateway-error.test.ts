@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ModelGatewayError } from "@sourceweft/model-gateway";
+import { ModelGatewayError } from "../../shared/model-gateway/errors";
 import { test } from "vitest";
 import { ContentError } from "./errors";
 import {

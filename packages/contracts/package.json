@@ -9,8 +9,14 @@
     "./jobs": "./src/jobs.ts",
     "./billing": "./src/billing.ts",
     "./pricing": "./src/pricing.ts",
+    "./artifact-files": "./src/artifact-files.ts",
+    "./artifact-storage": "./src/artifact-storage.ts",
+    "./artifact-errors": "./src/artifact-errors.ts",
+    "./artifact-write": "./src/artifact-write.ts",
+    "./artifact-urls": "./src/artifact-urls.ts",
     "./artifact-pipeline": "./src/artifact-pipeline.ts",
     "./artifact-progress": "./src/artifact-progress.ts",
+    "./artifact-ui": "./src/artifact-ui.ts",
     "./video-presentation": "./src/video-presentation.ts",
     "./connectors": "./src/connectors.ts",
     "./dashboard": "./src/dashboard.ts",
@@ -41,6 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
+    "@types/react": "^19.1.0",
     "tsx": "^4.20.6",
     "typescript": "5.9.2"
   }

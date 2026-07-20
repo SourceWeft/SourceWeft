@@ -12,6 +12,20 @@ export const builtinGenerateVideoPresentationCapability = {
 } as const;
 
 export { createCapabilityAgentTools } from "./agent-tools";
+export {
+  createArtifactViewHandlers,
+  videoPresentationArtifactViewHandler,
+  VIDEO_PRESENTATION_ARTIFACT_TYPE,
+} from "./artifact-view";
+export {
+  videoPresentationReusableArtifactQuery,
+  VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
+  VIDEO_PRESENTATION_REUSABLE_STATUSES,
+} from "./artifact-records";
+export {
+  normalizeGenerateVideoPresentationToolSelection,
+  type GenerateVideoPresentationToolSelection,
+} from "./tool-selection";
 export { builtinGenerateVideoPresentationCapabilityManifest } from "./manifest";
 export { buildArtifactAssetUrl, buildArtifactPreviewUrl } from "./artifact-urls";
 export { buildVideoPresentationInitialPayload } from "./video-presentation-payload";
@@ -45,6 +59,10 @@ export {
   type VideoPresentationPipelineStageId,
   type VideoPresentationPipelineStep,
 } from "./pipeline-stages";
+export {
+  VIDEO_PRESENTATION_LABELLED_STAGE_IDS,
+  getVideoPresentationStageLabel,
+} from "./stage-labels";
 export {
   buildVideoPresentationProjectFileName,
   sanitizeVideoPresentationFileBase,

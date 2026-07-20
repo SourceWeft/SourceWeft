@@ -1,74 +1,33 @@
+import {
+  extensionForPath,
+  sanitizeArtifactFileBase,
+} from "@sourceweft/contracts/artifact-files";
+
+/**
+ * File naming for published artifacts.
+ *
+ * Sanitizing, the MIME/extension table and the size limits all live in
+ * `@sourceweft/contracts/artifact-files` now; this module keeps only the
+ * publish-specific composition of them — how a title plus a source path become
+ * a download name. The re-exports below let existing importers of this package
+ * keep working unchanged.
+ */
+export {
+  ARTIFACT_LIMITS,
+  ARTIFACT_MIME_TYPES,
+  extensionForPath,
+  isInlinePreviewableMimeType,
+  mimeTypeForPath,
+  normalizeMimeType,
+} from "@sourceweft/contracts/artifact-files";
+
+const PUBLISHED_FILE_BASE_FALLBACK = "artifact";
+
+/** Sanitized base name for a published artifact, minus its extension. */
 export function sanitizeFileBase(value: string) {
-  const normalized = value
-    .normalize("NFKC")
-    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, "-")
-    .replace(/\s+/g, " ")
-    .replace(/\s*-\s*/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[\s.-]+|[\s.-]+$/g, "")
-    .slice(0, 120);
-  return normalized.length > 0 ? normalized : "artifact";
-}
-
-export function extensionForPath(path: string) {
-  const fileName = path.split(/[\\/]/u).pop() ?? path;
-  const index = fileName.lastIndexOf(".");
-  return index >= 0 ? fileName.slice(index).toLowerCase() : "";
-}
-
-export const ARTIFACT_MIME_TYPES = {
-  binary: "application/octet-stream",
-  csv: "text/csv",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  html: "text/html",
-  jpeg: "image/jpeg",
-  json: "application/json",
-  pdf: "application/pdf",
-  png: "image/png",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  text: "text/plain",
-  webp: "image/webp",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  zip: "application/zip",
-} as const;
-
-const MIME_TYPE_BY_EXTENSION = new Map<string, string>([
-  [".pptx", ARTIFACT_MIME_TYPES.pptx],
-  [".pdf", ARTIFACT_MIME_TYPES.pdf],
-  [".html", ARTIFACT_MIME_TYPES.html],
-  [".htm", ARTIFACT_MIME_TYPES.html],
-  [".docx", ARTIFACT_MIME_TYPES.docx],
-  [".xlsx", ARTIFACT_MIME_TYPES.xlsx],
-  [".csv", ARTIFACT_MIME_TYPES.csv],
-  [".json", ARTIFACT_MIME_TYPES.json],
-  [".txt", ARTIFACT_MIME_TYPES.text],
-  [".md", ARTIFACT_MIME_TYPES.text],
-  [".zip", ARTIFACT_MIME_TYPES.zip],
-  [".png", ARTIFACT_MIME_TYPES.png],
-  [".jpg", ARTIFACT_MIME_TYPES.jpeg],
-  [".jpeg", ARTIFACT_MIME_TYPES.jpeg],
-  [".webp", ARTIFACT_MIME_TYPES.webp],
-]);
-
-export function mimeTypeForPath(path: string) {
-  return (
-    MIME_TYPE_BY_EXTENSION.get(extensionForPath(path)) ??
-    ARTIFACT_MIME_TYPES.binary
-  );
-}
-
-export function normalizeMimeType(value: string | undefined | null) {
-  return value?.toLowerCase().split(";")[0]?.trim() ?? "";
-}
-
-export function isInlinePreviewableMimeType(contentType: string) {
-  const normalized = normalizeMimeType(contentType);
-  return (
-    normalized.startsWith("image/") ||
-    normalized.startsWith("text/") ||
-    normalized === ARTIFACT_MIME_TYPES.pdf ||
-    normalized === ARTIFACT_MIME_TYPES.json
-  );
+  return sanitizeArtifactFileBase(value, {
+    fallback: PUBLISHED_FILE_BASE_FALLBACK,
+  });
 }
 
 export function fileNameForTitle(input: {
@@ -81,6 +40,10 @@ export function fileNameForTitle(input: {
   return `${sanitizeFileBase(input.title)}${extension}`;
 }
 
+/**
+ * Prefer the source path's own file name, falling back to the title when the
+ * path ends in nothing usable.
+ */
 export function fileNameForPathOrTitle(input: {
   readonly path: string;
   readonly title: string;

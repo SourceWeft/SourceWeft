@@ -23,7 +23,7 @@ import {
 } from "./context";
 import {
   readWebAccessOverride,
-  resolveGenerateImageToolSelection,
+  resolveTurnToolSelections,
 } from "./tool-selection";
 import type { MessageRecord } from "../../content/types";
 
@@ -142,7 +142,7 @@ test("turn options snapshot can be interpreted as request-shaped web tools", () 
 
 test("turn options snapshot can be interpreted as request-shaped image tools", () => {
   assert.deepEqual(
-    resolveGenerateImageToolSelection(
+    resolveTurnToolSelections(
       resolveTurnOptionsToolsFromMessage(
         message({
           options: {
@@ -159,9 +159,11 @@ test("turn options snapshot can be interpreted as request-shaped image tools", (
       ),
     ),
     {
-      enabled: false,
-      modelAlias: "snapshot-image-model",
-      config: { style: "cartoon" },
+      generate_image: {
+        enabled: false,
+        modelAlias: "snapshot-image-model",
+        config: { style: "cartoon" },
+      },
     },
   );
 });

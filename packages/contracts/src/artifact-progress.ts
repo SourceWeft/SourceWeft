@@ -47,6 +47,12 @@ export interface ArtifactProgressProtocol {
   readonly outputTypes: readonly string[];
 
   /**
+   * The role each of those `type` values plays, so generic callers can ask
+   * "is this the final result?" instead of matching capability-specific names.
+   */
+  readonly outputTypeRoles: Readonly<Record<string, ArtifactProgressOutputRole>>;
+
+  /**
    * Whether a structured tool output belongs to this capability. Lets the UI
    * suppress a raw output summary it is going to render as progress instead.
    */
@@ -96,14 +102,62 @@ export interface ArtifactProgressView {
   errorMessage?: string;
 }
 
+/**
+ * What a capability's structured output says about the job it reports on.
+ *
+ * Generic callers need this because the three questions they ask — "did the
+ * job finish?", "was it merely accepted for processing?", "is this just a
+ * progress tick?" — cannot be answered by membership alone. Naming the role
+ * here keeps the answer with the capability that knows it, instead of forcing
+ * every consumer to hardcode the capability's `type` strings.
+ *
+ * - `processing`: the job was accepted and is running in the background.
+ * - `terminal`: the job finished; the record carries the final status.
+ * - `progress`: an intermediate tick with no outcome of its own (the default
+ *   for a bare string, which claims nothing beyond membership).
+ */
+export type ArtifactProgressOutputRole = "progress" | "processing" | "terminal";
+
+/** An output `type` together with the role it plays, or just the type. */
+export type ArtifactProgressOutputTypeSpec =
+  | string
+  | { type: string; role: ArtifactProgressOutputRole };
+
 /** Capability-specific facts the generic reader cannot infer. */
 export interface ArtifactProgressDescriptor {
   /** Human-readable name of what is being produced, e.g. "Video presentation". */
   title: string;
-  /** Structured tool-output `type` values this capability emits. */
-  outputTypes: readonly string[];
+  /**
+   * Structured tool-output `type` values this capability emits. A bare string
+   * declares membership only; the object form additionally states the role.
+   */
+  outputTypes: readonly ArtifactProgressOutputTypeSpec[];
   /** Steps to show before the first payload arrives. */
   initialSteps(): ArtifactPipelineStep[];
+}
+
+/** The declared `type` values, stripped of their roles. */
+export function readArtifactProgressOutputTypes(
+  descriptor: ArtifactProgressDescriptor,
+): readonly string[] {
+  return descriptor.outputTypes.map((spec) =>
+    typeof spec === "string" ? spec : spec.type,
+  );
+}
+
+/** The declared `type` values keyed by role; bare strings default to `progress`. */
+export function readArtifactProgressOutputTypeRoles(
+  descriptor: ArtifactProgressDescriptor,
+): Readonly<Record<string, ArtifactProgressOutputRole>> {
+  const roles: Record<string, ArtifactProgressOutputRole> = {};
+  for (const spec of descriptor.outputTypes) {
+    if (typeof spec === "string") {
+      roles[spec] = "progress";
+    } else {
+      roles[spec.type] = spec.role;
+    }
+  }
+  return roles;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -358,14 +412,16 @@ export function resolveArtifactElapsedMs(
 export function createArtifactProgressProtocol(
   descriptor: ArtifactProgressDescriptor,
 ): ArtifactProgressProtocol & { descriptor: ArtifactProgressDescriptor } {
+  const outputTypes = readArtifactProgressOutputTypes(descriptor);
   return {
     descriptor,
     title: descriptor.title,
-    outputTypes: descriptor.outputTypes,
+    outputTypes,
+    outputTypeRoles: readArtifactProgressOutputTypeRoles(descriptor),
     extractArtifactId: extractArtifactIdFromOutput,
     matchesOutputType(output) {
       const outputType = readArtifactOutputField(output, "type");
-      return outputType !== null && descriptor.outputTypes.includes(outputType);
+      return outputType !== null && outputTypes.includes(outputType);
     },
     resolveProgressView(input) {
       return resolveArtifactProgressView({ ...input, descriptor });
@@ -385,7 +441,7 @@ export function createArtifactProgressProtocol(
         return status === "pending" || status === "running";
       }
       const outputType = readArtifactOutputField(output, "type");
-      return outputType !== null && descriptor.outputTypes.includes(outputType);
+      return outputType !== null && outputTypes.includes(outputType);
     },
     isTerminal(snapshot) {
       if (!snapshot) {

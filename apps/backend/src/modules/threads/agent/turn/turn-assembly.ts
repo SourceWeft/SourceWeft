@@ -338,7 +338,7 @@ export async function buildRuntimePromptContext(
     availableArtifactTools: artifactTools.map((tool) => tool.name),
     artifactToolRuntimePromptProviders: promptProviders,
     availableMcpTools: mcpTools.map((tool) => tool.name),
-    artifactIntent: prepared.artifactIntent,
+    turnState: prepared.turnState,
     runtimeTools: prepared.runtimeTools,
     commandSuccessCriteria: prepared.commandSuccessCriteria,
     enabledSkills: prepared.enabledSkills,

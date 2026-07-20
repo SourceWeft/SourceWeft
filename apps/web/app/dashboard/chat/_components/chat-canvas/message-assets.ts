@@ -1,16 +1,14 @@
 import {
-  getArtifactProgressProtocol,
   hasAgentToolCapability,
   isArtifactProgressOutputType,
 } from "@sourceweft/agent-tool-registry";
+import { resolveGeneratedImageArtifactRef } from "@sourceweft/agent-tool-registry/ui";
 import {
   normalizeWebAssetUrl,
-  resolveArtifactPreviewImageUrlFromArtifact,
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactProxyFileUrlFromArtifact,
 } from "../artifact-urls";
 import type {
-  ArtifactPreviewRecord,
   ChatMessageImagePart,
   MessageVersion,
   ThinkingStepRecord,
@@ -18,37 +16,12 @@ import type {
 } from "./types";
 
 const TOOL_ONLY_EMPTY_RESPONSE_TEXT = "Model returned an empty response.";
-const PUBLISH_ARTIFACT_TOOL_NAME = "publish_artifact";
 
 export type GeneratedImageArtifact = {
   artifactId: string | null;
   artifactUrl: string | null;
   title: string | null;
 };
-
-export type GeneratedPresentationArtifact = {
-  artifactId: string | null;
-  artifactUrl: string | null;
-  editable: boolean | null;
-  fileName: string | null;
-  generationMode: "visual_html" | "editable_native" | null;
-  htmlUrl: string | null;
-  previewImageUrl: string | null;
-  previewRenderer: "html_iframe" | "pptxviewjs" | null;
-  pptxUrl: string | null;
-  renderStrategy: string | null;
-  slideCount: number | null;
-  sourceJsonUrl: string | null;
-  status: GeneratedPresentationArtifactStatus | null;
-  title: string | null;
-};
-
-export type GeneratedPresentationArtifactStatus =
-  | "pending"
-  | "running"
-  | "ready"
-  | "failed"
-  | "archived";
 
 function extractArtifactIdFromUrl(value: string) {
   const match = value.match(/\/artifacts\/([^/?#]+)\/file(?:[?#].*)?$/);
@@ -273,7 +246,12 @@ export function normalizeVideoPresentationToolOutput(output: unknown) {
   return record;
 }
 
-function getToolOutputValue(output: unknown, key: string) {
+/**
+ * The raw value behind an output key. Exported as a host facility so capability
+ * UI can read its own non-string scalars without re-implementing the transport
+ * walk; `getToolOutputField` is the same lookup, stringified.
+ */
+export function getToolOutputValue(output: unknown, key: string) {
   const contentRecord = getToolOutputRecordFromContent(output);
   const preferContent =
     contentRecord !== null &&
@@ -335,184 +313,12 @@ export function resolveGeneratedImageArtifact(
     return null;
   }
 
-  const metadata = toolStep?.metadata;
-  const artifactId =
-    (typeof metadata?.artifactId === "string"
-      ? metadata.artifactId.trim()
-      : "") || getToolOutputField(toolCall.output, "artifact_id");
-  const artifactUrl =
-    (typeof metadata?.artifactUrl === "string"
-      ? metadata.artifactUrl.trim()
-      : "") ||
-    getToolOutputField(toolCall.output, "artifact_url") ||
-    getToolOutputField(toolCall.output, "preview_url");
-  const title = getToolOutputField(toolCall.output, "title");
-
-  if (!artifactId && !artifactUrl) {
-    return null;
-  }
-
-  return {
-    artifactId: artifactId || null,
-    artifactUrl: artifactUrl || null,
-    title,
-  };
-}
-
-function getToolOutputNumberField(output: unknown, key: string) {
-  const direct = getToolOutputValue(output, key);
-  if (typeof direct === "number" && Number.isFinite(direct)) {
-    return direct;
-  }
-  if (typeof direct === "string" && direct.trim().length > 0) {
-    const parsed = Number(direct);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  const text = getToolOutputField(output, key);
-  if (!text) {
-    return null;
-  }
-  const parsed = Number(text);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function normalizeGeneratedPresentationArtifactStatus(
-  value: string | null,
-): GeneratedPresentationArtifactStatus | null {
-  const normalized = value?.toLowerCase();
-  if (
-    normalized === "pending" ||
-    normalized === "running" ||
-    normalized === "ready" ||
-    normalized === "failed" ||
-    normalized === "archived"
-  ) {
-    return normalized;
-  }
-  if (normalized === "queued") {
-    return "pending";
-  }
-  if (normalized === "generating" || normalized === "rendering") {
-    return "running";
-  }
-  if (normalized === "completed" || normalized === "success") {
-    return "ready";
-  }
-  if (normalized === "error") {
-    return "failed";
-  }
-  return null;
-}
-
-export function resolveGeneratedPresentationArtifact(
-  toolCall: ToolCallRecord,
-  toolStep?: ThinkingStepRecord,
-): GeneratedPresentationArtifact | null {
-  if (
-    !hasAgentToolCapability(toolCall.tool, "presentation_artifact") &&
-    !hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
-  ) {
-    return null;
-  }
-
-  if (toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME && toolCall.error) {
-    return null;
-  }
-
-  // A deliverable's card is driven by its structured progress output; anything
-  // else it emits is not a card. Which types qualify comes from the capability.
-  const progressProtocol = getArtifactProgressProtocol(toolCall.tool);
-  if (progressProtocol && !progressProtocol.matchesOutputType(toolCall.output)) {
-    return null;
-  }
-
-  const metadata = toolStep?.metadata;
-  const artifactId =
-    (typeof metadata?.artifactId === "string"
-      ? metadata.artifactId.trim()
-      : "") ||
-    getToolOutputField(toolCall.output, "artifact_id") ||
-    getToolOutputField(toolCall.output, "artifactId");
-  const artifactUrl =
-    (typeof metadata?.artifactUrl === "string"
-      ? metadata.artifactUrl.trim()
-      : "") ||
-    getToolOutputField(toolCall.output, "artifact_url") ||
-    getToolOutputField(toolCall.output, "artifactUrl") ||
-    getToolOutputField(toolCall.output, "pptx_url");
-  const title =
-    getToolOutputField(toolCall.output, "title") ||
-    (typeof metadata?.title === "string" ? metadata.title.trim() : "");
-  const fileName =
-    getToolOutputField(toolCall.output, "file_name") ||
-    getToolOutputField(toolCall.output, "fileName");
-  const slideCount =
-    getToolOutputNumberField(toolCall.output, "slide_count") ??
-    getToolOutputNumberField(toolCall.output, "slideCount");
-  const sourceJsonUrl = getToolOutputField(toolCall.output, "source_json_url");
-  const generationModeValue =
-    getToolOutputField(toolCall.output, "generation_mode") ??
-    getToolOutputField(toolCall.output, "generationMode");
-  const generationMode =
-    generationModeValue === "visual_html" ||
-    generationModeValue === "editable_native"
-      ? generationModeValue
-      : null;
-  const previewRendererValue = getToolOutputField(
-    toolCall.output,
-    "preview_renderer",
-  );
-  const previewRenderer =
-    previewRendererValue === "html_iframe" ||
-    previewRendererValue === "pptxviewjs"
-      ? previewRendererValue
-      : null;
-  const editableValue = getToolOutputValue(toolCall.output, "editable");
-  const editable =
-    typeof editableValue === "boolean"
-      ? editableValue
-      : generationMode
-        ? generationMode === "editable_native"
-        : null;
-  const htmlUrl =
-    getToolOutputField(toolCall.output, "html_url") ||
-    getToolOutputField(toolCall.output, "htmlUrl");
-  const pptxUrl =
-    getToolOutputField(toolCall.output, "pptx_url") ||
-    getToolOutputField(toolCall.output, "pptxUrl");
-  const previewImageUrl =
-    getToolOutputField(toolCall.output, "preview_image_url") ||
-    getToolOutputField(toolCall.output, "previewImageUrl");
-  const renderStrategy = getToolOutputField(toolCall.output, "render_strategy");
-  const status = normalizeGeneratedPresentationArtifactStatus(
-    getToolOutputField(toolCall.output, "status"),
-  );
-
-  if (toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME && !artifactUrl) {
-    return null;
-  }
-
-  if (!artifactId && !artifactUrl) {
-    return null;
-  }
-
-  return {
-    artifactId: artifactId || null,
-    artifactUrl: artifactUrl || null,
-    editable,
-    fileName: fileName || null,
-    generationMode,
-    htmlUrl: htmlUrl || null,
-    previewImageUrl: previewImageUrl || null,
-    previewRenderer,
-    pptxUrl: pptxUrl || null,
-    renderStrategy: renderStrategy || null,
-    slideCount,
-    sourceJsonUrl: sourceJsonUrl || null,
-    status,
-    title: title || null,
-  };
+  // Which output keys carry the artifact reference is the image capability's
+  // business; this layer only supplies the transport-level field reader.
+  return resolveGeneratedImageArtifactRef({
+    metadata: toolStep?.metadata,
+    readField: (key) => getToolOutputField(toolCall.output, key),
+  });
 }
 
 export function resolveArtifactUrl(input: {
@@ -550,30 +356,6 @@ export function resolveArtifactDownloadUrl(input: {
     download: true,
     fallbackUrl: input.artifact.artifactUrl,
     workspaceId: input.workspaceId,
-  });
-}
-
-export function resolveGeneratedPresentationPreviewImageUrl(input: {
-  artifactPreview?: Pick<
-    ArtifactPreviewRecord,
-    "id" | "previewMetadataJson" | "previewStorageKey" | "workspaceId"
-  > | null;
-  previewImageUrl?: string | null;
-}) {
-  const previewImageUrl =
-    typeof input.previewImageUrl === "string" &&
-    input.previewImageUrl.trim().length > 0
-      ? input.previewImageUrl.trim()
-      : null;
-  if (previewImageUrl) {
-    return normalizeWebAssetUrl(previewImageUrl);
-  }
-
-  return resolveArtifactPreviewImageUrlFromArtifact({
-    artifactId: input.artifactPreview?.id,
-    previewMetadataJson: input.artifactPreview?.previewMetadataJson,
-    previewStorageKey: input.artifactPreview?.previewStorageKey,
-    workspaceId: input.artifactPreview?.workspaceId,
   });
 }
 

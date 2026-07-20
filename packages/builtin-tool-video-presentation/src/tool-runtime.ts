@@ -42,7 +42,17 @@ export interface VideoPresentationToolArtifacts {
     title: string;
     payloadJson?: unknown;
   } | null>;
-  createPending(input: {
+  /**
+   * Open the artifact row the worker will finish. The project outlives this
+   * call by minutes, and the row existing meanwhile is what the user watches,
+   * so this is the two-phase half of the host's write path — not a private
+   * primitive.
+   *
+   * Returns the id actually opened: an open that resolves to an already-open
+   * row for the same request hands that row's id back rather than starting a
+   * second project.
+   */
+  openArtifact(input: {
     artifactId: string;
     teamId: string;
     workspaceId: string;
@@ -50,8 +60,13 @@ export interface VideoPresentationToolArtifacts {
     userId: string;
     title: string;
     prompt: string;
-    payload: unknown;
-  }): Promise<void>;
+    payload: Record<string, unknown>;
+    /**
+     * Same value the payload carries, handed to the host as its own field so
+     * reuse can match a column instead of scanning payloads.
+     */
+    requestKey: string;
+  }): Promise<{ artifactId: string }>;
   findStatus(input: {
     teamId: string;
     workspaceId: string;
@@ -831,7 +846,7 @@ export function createGenerateVideoPresentationTool(
         workspaceId: ctx.workspaceId,
       });
 
-      await deps.artifacts.createPending({
+      await deps.artifacts.openArtifact({
         artifactId,
         teamId: ctx.teamId,
         workspaceId: ctx.workspaceId,
@@ -840,6 +855,7 @@ export function createGenerateVideoPresentationTool(
         title,
         prompt: payload.prompt,
         payload,
+        requestKey,
       });
 
       await deps.queue.enqueueRender(enqueuePayload);

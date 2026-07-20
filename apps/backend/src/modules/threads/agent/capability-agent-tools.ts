@@ -9,20 +9,14 @@ import type { ContentBillingPort } from "../../content/billing-port";
 import type { LlmExecutionConfig } from "../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "..";
 import {
-  createFileArtifactRecord,
-  createImageArtifactRecord,
-  createPendingVideoPresentationArtifactRecord,
+  createPendingArtifactRecord,
+  createReadyArtifactRecord,
   findArtifactRecord,
-  findReusableVideoPresentationArtifactRecord,
-  markArtifactReady,
-  createSlidesArtifactRecord,
+  findReusableArtifactRecord,
 } from "../../artifacts/repository";
-import { enqueueVideoPresentationGenerateJob } from "../../content/queue";
-import {
-  buildArtifactStorageKey,
-  getContentStorageBucketName,
-  uploadArtifactObject,
-} from "../../sources/storage";
+import { openArtifact, publishArtifact } from "../../artifacts/publish";
+import { enqueueDeliverableJob } from "../../content/queue";
+import { artifactStorage } from "../../sources/storage";
 import { createDefaultWebProvider } from "../../sources/web-provider";
 import { listCapabilityRecords } from "../turn/capability-command-workflows";
 import { loadBuiltinCapabilityModule } from "@sourceweft/agent-tool-registry";
@@ -33,7 +27,7 @@ import {
   withBilledModelGateway,
   type BilledModelGateway,
 } from "../../../shared/model-gateway";
-import type { ImageToolGenerateOptions } from "@sourceweft/builtin-tool-generate-image";
+import type { AgentToolModelCallOptions } from "@sourceweft/contracts/agent-tools";
 import type { ModelProfileKind } from "../../content/types";
 import type { ArtifactToolRuntimePromptProvider } from "./prompts/tool-prompt-provider";
 import { runToolRetrieval } from "./turn/retrieval-runner";
@@ -45,6 +39,11 @@ import {
   resolveSourceUserMessageId,
   shouldBindAgentTool,
 } from "./turn/tool-utils";
+
+type ReadyArtifactRecordInput = Parameters<typeof createReadyArtifactRecord>[0];
+type PendingArtifactRecordInput = Parameters<
+  typeof createPendingArtifactRecord
+>[0];
 
 type CapabilityAgentToolCategory = "artifact" | "retrieval" | "web";
 
@@ -165,8 +164,9 @@ function createCapabilityAgentToolTurnContext(
 ) {
   const { prepared, traceContext } = input;
   return {
-    artifactIntent: prepared.artifactIntent,
-    imageProfile: prepared.imageProfile,
+    // Handed over whole and unread: each capability takes its own entry out of
+    // it. The host carried three image-shaped fields here once.
+    turnState: prepared.turnState,
     isToolDenied: (toolName: string) => isToolDenied(prepared, toolName),
     parentSpanId: traceContext?.parentSpanId,
     runtimeTools: prepared.runtimeTools,
@@ -195,20 +195,43 @@ function createCapabilityAgentToolHostServices(
     sandboxRuntime,
     traceContext,
   } = input;
-  const fontAssetBaseUrl = config.visualDeck.fontAssetBaseUrl;
 
   return {
     artifacts: {
-      createFileArtifactRecord,
-      createImageArtifactRecord,
-      createPendingVideoPresentationArtifactRecord,
-      findVideoPresentationArtifactRecord: findArtifactRecord,
-      findReusableVideoPresentationArtifactRecord,
-      markArtifactReady,
-      createSlidesArtifactRecord,
+      /**
+       * The one way an artifact is published, handed to every capability. It
+       * names no artifact type: what is written is whatever the spec says.
+       */
+      publishArtifact,
+      /**
+       * The two-phase half of the same door, for a capability whose artifact
+       * outlives the call that asked for it.
+       */
+      openArtifact,
+      /**
+       * The generic artifact-row primitives. Each takes the artifact type as a
+       * parameter rather than carrying it in its name: a capability knows its
+       * own type (it declared it in the manifest it is handed), the host does
+       * not need to.
+       */
+      createPendingArtifact: (
+        artifactType: PendingArtifactRecordInput["artifactType"],
+        pendingInput: Omit<PendingArtifactRecordInput, "artifactType">,
+      ) => createPendingArtifactRecord({ ...pendingInput, artifactType }),
+      createReadyArtifact: (
+        artifactType: ReadyArtifactRecordInput["artifactType"],
+        recordInput: Omit<ReadyArtifactRecordInput, "artifactType">,
+      ) => createReadyArtifactRecord({ ...recordInput, artifactType }),
+      findArtifact: findArtifactRecord,
+      /**
+       * Reuse lookup. Which type, which statuses and what makes a row a match
+       * are the caller's query, not the host's knowledge.
+       */
+      findReusableArtifact: (
+        query: Parameters<typeof findReusableArtifactRecord>[0],
+      ) => findReusableArtifactRecord(query),
     },
     citationRegistry: runtime.citationRegistry,
-    fontAssetBaseUrl,
     filesystem: filesystemBackend
       ? {
           downloadFiles: (paths: readonly string[]) =>
@@ -233,7 +256,7 @@ function createCapabilityAgentToolHostServices(
         images: {
           generate: (
             request: Parameters<BilledModelGateway["images"]["generate"]>[0],
-            options: ImageToolGenerateOptions,
+            options: AgentToolModelCallOptions,
           ) =>
             withBilledModelGateway(
               {
@@ -270,7 +293,12 @@ function createCapabilityAgentToolHostServices(
       }),
     },
     queue: {
-      enqueueVideoPresentationRenderJob: enqueueVideoPresentationGenerateJob,
+      /**
+       * Dispatch counterpart of the worker's pipeline registry: the capability
+       * supplies the job name it declared in its manifest, the host supplies
+       * the queue and its retry/idempotency policy.
+       */
+      enqueueDeliverableJob,
     },
     retrieval: {
       searchSources: async (
@@ -312,11 +340,7 @@ function createCapabilityAgentToolHostServices(
             sandboxRuntime.downloadFile(downloadInput),
         }
       : undefined,
-    storage: {
-      buildArtifactStorageKey,
-      getContentStorageBucketName,
-      uploadArtifactObject,
-    },
+    storage: artifactStorage,
     webProvider: createDefaultWebProvider(),
   };
 }

@@ -5,11 +5,14 @@ import {
 } from "@sourceweft/sdk";
 import {
   getAgentToolConnectorType,
+  getAgentToolPresentation,
+  getAgentToolRenderAs,
   getArtifactProgressProtocol,
   hasAgentToolCapability,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
+import { readArtifactOutputField } from "@sourceweft/contracts/artifact-progress";
 import type {
   ChatSendInput,
   CitationRecord,
@@ -548,65 +551,6 @@ function normalizeToolCallStatus(
 
 function isConnectorToolName(toolName: string) {
   return isAgentToolDomain(toolName, "connector");
-}
-
-function hasPresentationArtifactUrl(output: unknown) {
-  const directRecord =
-    typeof output === "string" && output.trim().startsWith("{")
-      ? parseJsonObjectString(output)
-      : null;
-  const record = directRecord ?? toObjectRecord(output);
-  if (!record) {
-    return false;
-  }
-  const content =
-    typeof record.content === "string" && record.content.trim().startsWith("{")
-      ? (() => {
-          try {
-            return toObjectRecord(JSON.parse(record.content));
-          } catch {
-            return null;
-          }
-        })()
-      : null;
-  const outputRecord = content ?? record;
-  const artifactUrl = outputRecord.artifact_url ?? outputRecord.artifactUrl;
-  const pptxUrl = outputRecord.pptx_url ?? outputRecord.pptxUrl;
-  return (
-    (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) ||
-    (typeof pptxUrl === "string" && pptxUrl.trim().length > 0)
-  );
-}
-
-function extractPresentationArtifactStatus(output: unknown) {
-  const directRecord =
-    typeof output === "string" && output.trim().startsWith("{")
-      ? parseJsonObjectString(output)
-      : null;
-  const record = directRecord ?? toObjectRecord(output);
-  if (!record) {
-    return null;
-  }
-  const content =
-    typeof record.content === "string" && record.content.trim().startsWith("{")
-      ? (() => {
-          try {
-            return toObjectRecord(JSON.parse(record.content));
-          } catch {
-            return null;
-          }
-        })()
-      : null;
-  const outputRecord = content ?? record;
-  const status = outputRecord.status;
-  return typeof status === "string" ? status : null;
-}
-
-function isVideoPresentationArtifactReady(output: unknown) {
-  return (
-    hasPresentationArtifactUrl(output) &&
-    extractPresentationArtifactStatus(output) === "ready"
-  );
 }
 
 function normalizeToolCallRecord(
@@ -1411,40 +1355,46 @@ function isCompletedWorkfileWriteToolCall(
   );
 }
 
-function isCompletedImageArtifactToolCall(
+/**
+ * Whether this event just left a finished artifact behind, so the artifact list
+ * is worth re-reading.
+ *
+ * Capability-agnostic on purpose: a tool produces an artifact iff it declares a
+ * renderAs, and whether that artifact is *ready* is answered by the capability's
+ * own presentation. Adding a medium must not mean editing this file.
+ */
+function isCompletedArtifactToolCall(
   toolCall: ToolCallRecord,
   event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
 ) {
-  if (toolCall.status !== "completed") {
+  if (toolCall.status !== "completed" || toolCall.error) {
     return false;
+  }
+
+  if (
+    event.type !== "tool-call-result" &&
+    !(event.type === "tool-call-end" && toolCall.status === "completed")
+  ) {
+    return false;
+  }
+
+  if (!getAgentToolRenderAs(toolCall.tool)) {
+    return false;
+  }
+
+  const presentation = getAgentToolPresentation(toolCall.tool);
+  if (!presentation?.artifactCompletionPhase) {
+    // No opinion means the artifact exists as soon as the call completes.
+    return true;
   }
 
   return (
-    hasAgentToolCapability(toolCall.tool, "generated_image_artifact") &&
-    (event.type === "tool-call-result" ||
-      (event.type === "tool-call-end" && toolCall.status === "completed"))
-  );
-}
-
-function isCompletedPresentationArtifactToolCall(
-  toolCall: ToolCallRecord,
-  event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
-) {
-  if (toolCall.status !== "completed") {
-    return false;
-  }
-  if (toolCall.error) {
-    return false;
-  }
-
-  return (
-    (hasAgentToolCapability(toolCall.tool, "presentation_artifact") ||
-      hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")) &&
-    (hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
-      ? isVideoPresentationArtifactReady(toolCall.output)
-      : hasPresentationArtifactUrl(toolCall.output)) &&
-    (event.type === "tool-call-result" ||
-      (event.type === "tool-call-end" && toolCall.status === "completed"))
+    presentation.artifactCompletionPhase({
+      toolInput: toolCall.input,
+      toolOutput: toolCall.output,
+      readOutputField: readArtifactOutputField,
+      status: toolCall.status,
+    }) === "completed"
   );
 }
 
@@ -1712,8 +1662,7 @@ export {
   formatBytes,
   getDisplayErrorMessage,
   hasRenderBlocksMetadata,
-  isCompletedImageArtifactToolCall,
-  isCompletedPresentationArtifactToolCall,
+  isCompletedArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
   mapThreadMessagesToChatMessages,
   mergeThinkingStepRecords,

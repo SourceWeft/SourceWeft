@@ -58,7 +58,12 @@ import {
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
-import { getArtifactBlockRenderer } from "./artifact-block-registry";
+// The artifact-UI index is the only artifact-block dispatcher: a capability's
+// `renderAs` token maps straight to the component the capability registered.
+// Importing the render host installs the app-shell facilities that capability
+// components reach for.
+import { resolveArtifactBlock } from "@sourceweft/agent-tool-registry/ui";
+import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
 import { findLastAnswerSegmentId } from "./message-evidence";
 import {
@@ -564,7 +569,7 @@ function AssistantMessageBody({
     }
 
     if (block.type === "artifact") {
-      const ArtifactBody = getArtifactBlockRenderer(
+      const ArtifactBody = resolveArtifactBlock(
         getAgentToolRenderAs(toolCall.tool),
       );
       if (ArtifactBody) {
@@ -620,7 +625,7 @@ function AssistantMessageBody({
     }
 
     if (block.type === "artifact") {
-      const ArtifactBody = getArtifactBlockRenderer(
+      const ArtifactBody = resolveArtifactBlock(
         getAgentToolRenderAs(toolCall.tool),
       );
       if (ArtifactBody) {

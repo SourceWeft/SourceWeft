@@ -14,6 +14,13 @@ export {
 } from "./agent-tools";
 export { createArtifactId } from "./publisher";
 export {
+  createArtifactViewHandlers,
+  slidesArtifactViewHandler,
+  SLIDES_ARTIFACT_TYPE,
+} from "./artifact-view";
+export type { PublishArtifactToolSelection } from "./tool-selection";
+export { PUBLISH_ARTIFACT_TYPES } from "./artifact-type-handlers";
+export {
   buildArtifactDownloadUrl,
   buildArtifactPreviewImageUrl,
   buildArtifactPreviewUrl,

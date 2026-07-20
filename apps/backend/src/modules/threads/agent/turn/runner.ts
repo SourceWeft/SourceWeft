@@ -89,7 +89,6 @@ import {
   buildArtifactGenerationStep,
   buildPresentationProgressThinkingEvent,
   buildPresentationProgressThinkingStep,
-  isPresentationGenerationCommand,
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
 } from "./progress-events";
@@ -124,7 +123,6 @@ export const testExports = {
   isDeepAgentsWriteTodosTool,
   parseDeepAgentTodos,
   resolveDeepAgentTodosStepStatus,
-  isPresentationGenerationCommand,
   extractGeneratedImageArtifacts,
   finalizeMessageRenderBlocks,
   getFilesystemToolDescription,
@@ -385,7 +383,6 @@ export async function* invokeDeepAgentTurn(input: {
 
         if (event === "on_tool_start") {
           yield* handleToolStartStreamChunk({
-            artifactIntent: input.prepared.artifactIntent,
             prepared: input.prepared,
             runtime,
             snapshot: toolCallSnapshot,

@@ -8,15 +8,18 @@ import {
   estimateNarrationDurationSeconds,
   requestNarrationEnabled,
 } from "./storyboard";
+import { extensionForMimeType as artifactExtensionForMimeType } from "@sourceweft/contracts/artifact-files";
 import { safeStorageSegment } from "./util";
 
-export function extensionForMimeType(mimeType: string) {
-  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-  if (mimeType.includes("wav")) return "wav";
-  if (mimeType.includes("aac")) return "aac";
-  if (mimeType.includes("opus")) return "opus";
-  if (mimeType.includes("flac")) return "flac";
-  return "mp3";
+/**
+ * Extension (with leading dot) for a narration track.
+ *
+ * Substring matching used to classify `application/x-wav-container` as WAV;
+ * matching is exact now, with `.mp3` as the fallback because that is what every
+ * supported speech provider returns.
+ */
+export function extensionForMimeType(mimeType: string | undefined | null) {
+  return artifactExtensionForMimeType(mimeType, ".mp3");
 }
 
 export function audioAssetUrl(input: {
@@ -113,7 +116,7 @@ export async function generateAudioTracks(input: {
       }
       const mimeType = speech.mimeType || "audio/mpeg";
       const extension = extensionForMimeType(mimeType);
-      const fileName = `${baseName}-slide-${slide.slideNumber}.${extension}`;
+      const fileName = `${baseName}-slide-${slide.slideNumber}${extension}`;
       const storageKey = input.deps.storage.buildArtifactStorageKey({
         artifactId: input.artifactId,
         fileName,

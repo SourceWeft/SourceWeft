@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   ArtifactPublishError,
+  isRecoverableArtifactPublishErrorCode,
   PublishArtifactErrorOutputSchema,
   PublishArtifactInputSchema,
   PublishArtifactOutputSchema,
@@ -264,4 +265,44 @@ test("ArtifactPublishError remains compatible with legacy PptxOutputError checks
 
   assert.ok(error instanceof PptxOutputError);
   assert.equal(error.code, "ARTIFACT_SOURCE_NOT_FOUND");
+});
+
+test("infrastructure failures are classified unrecoverable so the agent stops retrying", () => {
+  for (const code of [
+    "ARTIFACT_STORAGE_UNAVAILABLE",
+    "ARTIFACT_RECORD_UNAVAILABLE",
+    "SANDBOX_UNAVAILABLE",
+  ] as const) {
+    assert.equal(
+      isRecoverableArtifactPublishErrorCode(code),
+      false,
+      `${code} must not be advertised as retryable`,
+    );
+  }
+});
+
+test("agent-fixable failures stay recoverable", () => {
+  for (const code of [
+    "PUBLISH_INPUT_INVALID",
+    "ARTIFACT_TYPE_UNSUPPORTED",
+    "ARTIFACT_SOURCE_NOT_FOUND",
+    "ARTIFACT_FILE_TOO_LARGE",
+    "ARTIFACT_PREVIEW_IMAGE_INVALID",
+    "PPTX_OUTPUT_INVALID_MIME",
+  ] as const) {
+    assert.equal(isRecoverableArtifactPublishErrorCode(code), true, code);
+  }
+});
+
+test("error output schema accepts unrecoverable failures", () => {
+  const parsed = PublishArtifactErrorOutputSchema.parse({
+    ok: false,
+    type: "presentation_artifact_error",
+    status: "failed",
+    code: "ARTIFACT_STORAGE_UNAVAILABLE",
+    message: "object store is down",
+    recoverable: false,
+  });
+
+  assert.equal(parsed.recoverable, false);
 });

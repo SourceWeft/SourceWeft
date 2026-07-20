@@ -5,23 +5,33 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./agent-tool-defs": "./src/agent-tool-defs.ts"
+    "./agent-tool-defs": "./src/agent-tool-defs.ts",
+    "./ui": "./src/ui/index.tsx"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@remotion/web-renderer": "^4.0.468",
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/ui-web": "workspace:*",
     "@sourceweft/video-presentation-runtime": "workspace:*",
     "langchain": "^1.5.0",
+    "lucide-react": "^0.562.0",
+    "sonner": "^2.0.7",
     "typescript": "5.9.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@sourceweft/capability-runtime": "workspace:*",
     "@types/node": "^22.15.30",
+    "@types/react": "^19.1.0",
+    "react": "^19.2.1",
     "tsx": "^4.20.6"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1"
   }
 }

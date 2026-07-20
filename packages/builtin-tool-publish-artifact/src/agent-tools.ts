@@ -2,13 +2,11 @@ import { tool, type ToolRuntime } from "langchain";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
 import {
   publishArtifact,
-  type FileArtifactRecord,
-  type ImageArtifactRecord,
   type PublishArtifactServices,
-  type SlidesArtifactRecord,
 } from "./publisher";
 import {
   ArtifactPublishError,
+  isRecoverableArtifactPublishErrorCode,
   PublishArtifactInputSchema,
   PublishArtifactToolInputSchema,
   PptxOutputError,
@@ -41,46 +39,7 @@ type CapabilityAgentToolFactoryInput = {
     readonly workspaceId?: string;
   };
   readonly services?: {
-    readonly artifacts?: {
-      readonly createSlidesArtifactRecord?: (input: {
-        artifactId: string;
-        teamId: string;
-        workspaceId: string;
-        threadId: string;
-        userId: string;
-        title: string;
-        prompt: string;
-        payload: Record<string, unknown>;
-        storageBucket: string;
-        storageKey: string;
-        previewStorageKey?: string | null;
-        previewMetadata?: Record<string, unknown> | null;
-      }) => Promise<SlidesArtifactRecord>;
-      readonly createFileArtifactRecord?: (input: {
-        artifactId: string;
-        teamId: string;
-        workspaceId: string;
-        threadId: string;
-        userId: string;
-        title: string;
-        prompt: string;
-        payload: Record<string, unknown>;
-        storageBucket: string;
-        storageKey: string;
-      }) => Promise<FileArtifactRecord>;
-      readonly createImageArtifactRecord?: (input: {
-        artifactId: string;
-        teamId: string;
-        workspaceId: string;
-        threadId: string;
-        userId: string;
-        title: string;
-        prompt: string;
-        payload: Record<string, unknown>;
-        storageBucket: string;
-        storageKey: string;
-      }) => Promise<ImageArtifactRecord>;
-    };
+    readonly artifacts?: PublishArtifactServices["artifacts"];
     readonly sandbox?: {
       readonly allowedReadRoots?: readonly string[];
       readonly downloadCurrentFile: (input: {
@@ -88,19 +47,7 @@ type CapabilityAgentToolFactoryInput = {
       }) => Promise<Buffer | Uint8Array>;
     };
     readonly filesystem?: PublishArtifactServices["filesystem"];
-    readonly storage?: {
-      readonly buildArtifactStorageKey: (input: {
-        workspaceId: string;
-        artifactId: string;
-        fileName: string;
-      }) => string;
-      readonly getContentStorageBucketName: () => string;
-      readonly uploadArtifactObject: (input: {
-        key: string;
-        body: Buffer;
-        contentType: string;
-      }) => Promise<unknown>;
-    };
+    readonly storage?: PublishArtifactServices["storage"];
     readonly logger?: {
       info: (msg: string, meta?: Record<string, unknown>) => void;
       warn: (msg: string, meta?: Record<string, unknown>) => void;
@@ -173,14 +120,16 @@ function langchainToolCallIdFromRuntime(runtime: ToolRuntime) {
     : undefined;
 }
 
-function toRecoverablePublishErrorOutput(error: PptxOutputError) {
+function toPublishErrorOutput(error: PptxOutputError) {
   return {
-    ok: false,
+    ok: false as const,
     type: "presentation_artifact_error" as const,
     status: "failed" as const,
     code: error.code,
     message: error.details ?? error.message,
-    recoverable: true as const,
+    // Infrastructure failures are reported as unrecoverable so the agent stops
+    // retrying instead of hammering a dependency that is down.
+    recoverable: isRecoverableArtifactPublishErrorCode(error.code),
   };
 }
 
@@ -444,7 +393,7 @@ export function createCapabilityAgentTools(
             toolCallId,
           });
           return JSON.stringify(
-            toRecoverablePublishErrorOutput(
+            toPublishErrorOutput(
               new PptxOutputError("PUBLISH_INPUT_INVALID", message),
             ),
           );
@@ -484,12 +433,14 @@ export function createCapabilityAgentTools(
             error instanceof PptxOutputError ||
             error instanceof ArtifactPublishError
           ) {
-            log.warn("publish_artifact recoverable failure", {
+            const output = toPublishErrorOutput(error);
+            log.warn("publish_artifact failure", {
               code: error.code,
               details: error.details,
+              recoverable: output.recoverable,
               sourcePath: parsed.source.path,
             });
-            return JSON.stringify(toRecoverablePublishErrorOutput(error));
+            return JSON.stringify(output);
           }
           throw error;
         }

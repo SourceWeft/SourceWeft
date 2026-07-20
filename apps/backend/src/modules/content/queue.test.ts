@@ -26,25 +26,32 @@ vi.mock("../../shared/queue", () => ({
 }));
 
 import {
-  enqueueVideoPresentationGenerateJob,
-  VIDEO_PRESENTATION_GENERATE_JOB,
+  enqueueDeliverableJob,
   DELIVERABLES_QUEUE_JOB_ATTEMPTS,
-  type VideoPresentationGenerateJobPayload,
+  type EnqueueDeliverableJobInput,
 } from "./queue";
 
-function payload(): VideoPresentationGenerateJobPayload {
+// A capability's job: the name comes from its manifest, the extra fields
+// (requestKey, narrationEnabled) are its own and pass through untouched.
+const CAPABILITY_JOB_NAME = "video-presentation-generate";
+
+function enqueueInput(): EnqueueDeliverableJobInput {
   return {
-    artifactId: "artifact-1",
+    jobName: CAPABILITY_JOB_NAME,
     jobId: "video-presentation-render_artifact-1",
-    narrationEnabled: true,
-    request: { brief: "Explain the Feynman technique" },
-    requestKey: "request-1",
-    teamId: "team-1",
-    threadId: "thread-1",
-    title: "Feynman technique",
-    userId: "user-1",
-    userMessageId: "message-1",
-    workspaceId: "workspace-1",
+    payload: {
+      artifactId: "artifact-1",
+      jobId: "video-presentation-render_artifact-1",
+      narrationEnabled: true,
+      request: { brief: "Explain the Feynman technique" },
+      requestKey: "request-1",
+      teamId: "team-1",
+      threadId: "thread-1",
+      title: "Feynman technique",
+      userId: "user-1",
+      userMessageId: "message-1",
+      workspaceId: "workspace-1",
+    },
   };
 }
 
@@ -55,25 +62,29 @@ beforeEach(() => {
   mocks.jobsGetJob.mockReset();
 });
 
-test("video presentation jobs use the dedicated deliverables queue", async () => {
+test("deliverable jobs use the dedicated deliverables queue under the capability's job name", async () => {
   const queuedJob = { id: "video-presentation-render_artifact-1" };
   mocks.deliverablesGetJob.mockResolvedValue(null);
   mocks.enqueueWithAudit.mockResolvedValue(queuedJob);
 
-  const result = await enqueueVideoPresentationGenerateJob(payload());
+  const result = await enqueueDeliverableJob(enqueueInput());
 
   assert.equal(result, queuedJob);
   assert.equal(mocks.jobsAdd.mock.calls.length, 0);
   assert.equal(mocks.enqueueWithAudit.mock.calls.length, 1);
   const [name, data, options, target] = mocks.enqueueWithAudit.mock.calls[0]!;
-  assert.equal(name, VIDEO_PRESENTATION_GENERATE_JOB);
+  assert.equal(name, CAPABILITY_JOB_NAME);
   assert.equal(data.artifactId, "artifact-1");
+  // Capability-private fields survive the generic hop verbatim.
+  assert.equal(data.requestKey, "request-1");
+  assert.equal(data.narrationEnabled, true);
+  assert.equal(options.jobId, "video-presentation-render_artifact-1");
   assert.equal(options.attempts, DELIVERABLES_QUEUE_JOB_ATTEMPTS);
   assert.equal(options.backoff.type, "exponential");
   assert.equal(target.queueName, "test-deliverables");
 });
 
-test("a retained failed video job is retried without remove-and-add races", async () => {
+test("a retained failed deliverable job is retried without remove-and-add races", async () => {
   const retry = vi.fn().mockResolvedValue(undefined);
   const existing = {
     getState: vi.fn().mockResolvedValue("failed"),
@@ -83,7 +94,7 @@ test("a retained failed video job is retried without remove-and-add races", asyn
     ...existing,
   });
 
-  const result = await enqueueVideoPresentationGenerateJob(payload());
+  const result = await enqueueDeliverableJob(enqueueInput());
 
   assert.equal(result.getState, existing.getState);
   assert.deepEqual(retry.mock.calls, [
@@ -92,14 +103,14 @@ test("a retained failed video job is retried without remove-and-add races", asyn
   assert.equal(mocks.enqueueWithAudit.mock.calls.length, 0);
 });
 
-test("an active video job is reused idempotently", async () => {
+test("an active deliverable job is reused idempotently", async () => {
   const existing = {
     getState: vi.fn().mockResolvedValue("active"),
     retry: vi.fn(),
   };
   mocks.deliverablesGetJob.mockResolvedValue(existing);
 
-  const result = await enqueueVideoPresentationGenerateJob(payload());
+  const result = await enqueueDeliverableJob(enqueueInput());
 
   assert.equal(result, existing);
   assert.equal(existing.retry.mock.calls.length, 0);

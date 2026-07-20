@@ -336,30 +336,30 @@ export function AssistantToolCard({
         (item) => item.confirmationId === confirmation.id,
       )
     : null;
-  const isVideoPresentationTool = isDeliverableToolName(toolCall.tool);
-  const videoPresentationArtifactId = isVideoPresentationTool
+  const isDeliverableTool = isDeliverableToolName(toolCall.tool);
+  const deliverableArtifactId = isDeliverableTool
     ? resolveToolCallArtifactId(toolCall.output)
     : undefined;
-  const parentVideoPresentationSnapshot = videoPresentationArtifactId
-    ? artifactStatuses?.get(videoPresentationArtifactId)
+  const parentVideoPresentationSnapshot = deliverableArtifactId
+    ? artifactStatuses?.get(deliverableArtifactId)
     : undefined;
-  const { snapshot: videoPresentationSnapshot } =
+  const { snapshot: deliverableSnapshot } =
     useArtifactSnapshot({
       artifactSnapshot: parentVideoPresentationSnapshot,
-      enabled: isVideoPresentationTool,
+      enabled: isDeliverableTool,
       toolCallOutput: toolCall.output,
       workspaceId,
     });
   const effectiveArtifactStatuses = (() => {
-    if (!videoPresentationArtifactId || !videoPresentationSnapshot) {
+    if (!deliverableArtifactId || !deliverableSnapshot) {
       return artifactStatuses;
     }
     const next = new Map(artifactStatuses ?? []);
-    next.set(videoPresentationArtifactId, videoPresentationSnapshot);
+    next.set(deliverableArtifactId, deliverableSnapshot);
     return next;
   })();
   const statusKey = getStatusKey({
-    artifactSnapshot: videoPresentationSnapshot,
+    artifactSnapshot: deliverableSnapshot,
     confirmationResolution,
     toolCall,
   });
@@ -414,9 +414,9 @@ export function AssistantToolCard({
     error: toolCall.error,
     toolName: toolCall.tool,
   });
-  const isVideoPresentationGenerating = isVideoPresentationTool
+  const isDeliverableGeneratingNow = isDeliverableTool
     ? isDeliverableGenerationActive({
-        artifactSnapshot: videoPresentationSnapshot,
+        artifactSnapshot: deliverableSnapshot,
         toolCallOutput: toolCall.output,
         toolCallStatus: toolCall.status,
         toolName: toolCall.tool,
@@ -424,7 +424,7 @@ export function AssistantToolCard({
     : false;
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (!isVideoPresentationGenerating) {
+    if (!isDeliverableGeneratingNow) {
       return;
     }
     setNowMs(Date.now());
@@ -432,10 +432,10 @@ export function AssistantToolCard({
       setNowMs(Date.now());
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isVideoPresentationGenerating]);
-  const videoPresentationElapsedMs = isVideoPresentationTool
+  }, [isDeliverableGeneratingNow]);
+  const deliverableElapsedMs = isDeliverableTool
     ? resolveDeliverableElapsedMs({
-        artifactSnapshot: videoPresentationSnapshot,
+        artifactSnapshot: deliverableSnapshot,
         nowMs,
         toolCallOutput: toolCall.output,
         toolName: toolCall.tool,
@@ -443,8 +443,8 @@ export function AssistantToolCard({
     : null;
   // Never show the fire-and-forget tool latency (~200ms) for video presentation.
   const duration = formatToolDuration(
-    isVideoPresentationTool
-      ? videoPresentationElapsedMs
+    isDeliverableTool
+      ? deliverableElapsedMs
       : toolCall.latencyMs,
   );
   const visibleStatus = statusKey === "done" ? null : statusLabel;
@@ -472,7 +472,7 @@ export function AssistantToolCard({
     (!isRedactedSkillRead && Boolean(toolStep?.detail)) ||
     Boolean(toolError) ||
     Boolean(resolvedConfirmationMessage) ||
-    Boolean(isVideoPresentationTool && videoPresentationArtifactId);
+    Boolean(isDeliverableTool && deliverableArtifactId);
   const hasExpandableContent = hasDetails || Boolean(children);
 
   useEffect(() => {
@@ -585,9 +585,9 @@ export function AssistantToolCard({
           {hasDetails && toolError ? (
             <p className="break-words text-destructive">{toolError}</p>
           ) : null}
-          {isVideoPresentationTool && videoPresentationArtifactId ? (
+          {isDeliverableTool && deliverableArtifactId ? (
             <DeliverablePipeline
-              artifactSnapshot={videoPresentationSnapshot}
+              artifactSnapshot={deliverableSnapshot}
               toolCallOutput={toolCall.output}
               toolCallStatus={toolCall.status}
               toolName={toolCall.tool}

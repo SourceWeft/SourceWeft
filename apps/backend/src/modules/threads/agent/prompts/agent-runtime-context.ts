@@ -162,7 +162,7 @@ export function buildAgentRuntimeContext(input: {
   availableArtifactTools?: string[];
   availableMcpTools?: string[];
   artifactToolRuntimePromptProviders?: ArtifactToolRuntimePromptProvider[];
-  artifactIntent?: PreparedThreadTurn["artifactIntent"];
+  turnState?: PreparedThreadTurn["turnState"];
   runtimeTools?: PreparedThreadTurn["runtimeTools"];
   commandSuccessCriteria?: PreparedThreadTurn["commandSuccessCriteria"];
   enabledSkills?: EnabledSkillDescriptor[];
@@ -221,7 +221,7 @@ export function buildAgentRuntimeContext(input: {
     availableWebTools,
     availableMcpTools: input.availableMcpTools ?? [],
     currentDate,
-    artifactIntent: input.artifactIntent,
+    turnState: input.turnState,
     runtimeTools: input.runtimeTools,
   };
   const artifactToolLines = (

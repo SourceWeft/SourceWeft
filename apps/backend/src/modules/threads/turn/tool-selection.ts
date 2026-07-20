@@ -1,15 +1,11 @@
 import {
   AGENT_TOOL_NAMES,
   agentToolNamesByCapability,
+  agentToolTurnSelections,
   hasAgentToolCapability,
   isAgentToolEnabledByDefault,
   isSkillActivatedAgentTool,
 } from "@sourceweft/agent-tool-registry";
-import {
-  normalizeGenerateImageToolSelection,
-  type GenerateImageToolSelection,
-} from "@sourceweft/builtin-tool-generate-image";
-import { normalizeGenerateVideoPresentationToolSelection } from "../../artifacts/types";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type {
   ConnectorToolSelection,
@@ -121,128 +117,27 @@ export function readSkillRuntimeConfig(
   );
 }
 
-export function resolveGenerateImageToolSelection(
+/**
+ * Ask every registered tool that owns a turn-selection hook to regularize its
+ * own slice of the request, keyed by tool name. The pipeline never names a
+ * capability: what a selection means, and which values survive, is decided
+ * inside the capability that will receive it.
+ *
+ * Tools that declare no hook are absent from the result, which the caller reads
+ * as "nothing to override" — their raw selection passes through untouched.
+ */
+export function resolveTurnToolSelections(
   tools?: ThreadToolsSelection,
-): GenerateImageToolSelection | undefined {
-  return normalizeGenerateImageToolSelection(
-    tools?.[AGENT_TOOL_NAMES.generateImage],
-  );
-}
-
-function setSelectionPath(
-  target: Record<string, unknown>,
-  path: string,
-  value: unknown,
-) {
-  const segments = path.split(".");
-  if (
-    segments.length === 0 ||
-    segments.some(
-      (segment) =>
-        !segment ||
-        segment === "__proto__" ||
-        segment === "constructor" ||
-        segment === "prototype",
-    )
-  ) {
-    return;
-  }
-  let current = target;
-  for (const segment of segments.slice(0, -1)) {
-    const child = current[segment];
-    if (!child || typeof child !== "object" || Array.isArray(child)) {
-      const next: Record<string, unknown> = {};
-      current[segment] = next;
-      current = next;
-      continue;
-    }
-    current = child as Record<string, unknown>;
-  }
-  const leaf = segments.at(-1);
-  if (leaf) {
-    current[leaf] = value;
-  }
-}
-
-function videoSelectionFromRuntimeConfig(config: Record<string, unknown>) {
-  const nestedConfig = toRecord(config.config);
-  const source = nestedConfig ? { ...nestedConfig, ...config } : config;
-  const selection: Record<string, unknown> = {};
-  const directPaths: Record<string, string> = {
-    canvasFps: "canvas.fps",
-    durationTarget: "renderProfile.durationTarget",
-    language: "renderProfile.language",
-    motionPacing: "motion.pacing",
-    narrationEnabled: "narration.enabled",
-    slideCount: "slideCount",
-    stylePreset: "renderProfile.stylePreset",
-    visualDensity: "renderProfile.visualDensity",
-    visualDirection: "visualDirection",
-  };
-  for (const [key, path] of Object.entries(directPaths)) {
-    if (source[key] !== undefined) {
-      setSelectionPath(selection, path, source[key]);
+): Record<string, unknown> {
+  const context = { skillRuntimeConfig: readSkillRuntimeConfig(tools) };
+  const selections: Record<string, unknown> = {};
+  for (const { name, turnSelection } of agentToolTurnSelections()) {
+    const normalized = turnSelection.normalize(tools?.[name], context);
+    if (normalized !== undefined) {
+      selections[name] = normalized;
     }
   }
-  for (const key of ["brand", "canvas", "motion", "renderProfile"]) {
-    if (source[key] !== undefined) {
-      selection[key] = source[key];
-    }
-  }
-  return normalizeGenerateVideoPresentationToolSelection(selection);
-}
-
-function mergeOptionalRecord(
-  first: Record<string, unknown> | undefined,
-  second: Record<string, unknown> | undefined,
-) {
-  const merged = { ...(first ?? {}), ...(second ?? {}) };
-  return Object.keys(merged).length > 0 ? merged : undefined;
-}
-
-export function resolveGenerateVideoPresentationToolSelection(
-  tools?: ThreadToolsSelection,
-): ThreadToolsSelection[typeof AGENT_TOOL_NAMES.generateVideoPresentation] {
-  const explicit = normalizeGenerateVideoPresentationToolSelection(
-    tools?.[AGENT_TOOL_NAMES.generateVideoPresentation],
-  );
-  const runtimeConfig = readSkillRuntimeConfig(tools);
-  const runtimeSelection = videoSelectionFromRuntimeConfig(
-    runtimeConfig["builtin:video-presentation"] ?? {},
-  );
-  if (!explicit && !runtimeSelection) {
-    return undefined;
-  }
-  return {
-    ...(runtimeSelection ?? {}),
-    ...(explicit ?? {}),
-    ...(() => {
-      const renderProfile = mergeOptionalRecord(
-        runtimeSelection?.renderProfile,
-        explicit?.renderProfile,
-      );
-      return renderProfile ? { renderProfile } : {};
-    })(),
-    ...(() => {
-      const brand = mergeOptionalRecord(runtimeSelection?.brand, explicit?.brand);
-      return brand ? { brand } : {};
-    })(),
-    ...(() => {
-      const motion = mergeOptionalRecord(runtimeSelection?.motion, explicit?.motion);
-      return motion ? { motion } : {};
-    })(),
-    ...(() => {
-      const canvas = mergeOptionalRecord(runtimeSelection?.canvas, explicit?.canvas);
-      return canvas ? { canvas } : {};
-    })(),
-    ...(() => {
-      const narration = mergeOptionalRecord(
-        runtimeSelection?.narration,
-        explicit?.narration,
-      );
-      return narration ? { narration } : {};
-    })(),
-  };
+  return selections;
 }
 
 export function buildEffectiveToolsSelection(input: {
@@ -406,5 +301,3 @@ export function enableConnectorToolSelection(
     },
   };
 }
-
-export const testExports = {};

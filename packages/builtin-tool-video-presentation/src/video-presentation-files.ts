@@ -1,4 +1,10 @@
-import { compactArtifactText } from "./artifact-text";
+import {
+  compactArtifactText,
+  sanitizeArtifactFileBase,
+} from "@sourceweft/contracts/artifact-files";
+
+/** Name used when a project title sanitizes down to nothing. */
+export const VIDEO_PRESENTATION_FILE_BASE_FALLBACK = "video-presentation";
 
 export function stripVideoPresentationMarkdown(value: string): string {
   return value
@@ -30,14 +36,10 @@ export function compactVideoPresentationSourceText(
 }
 
 export function sanitizeVideoPresentationFileBase(value: string): string {
-  const sanitized = value
-    .trim()
-    .replace(/[/\\?%*:|"<>]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 80);
-  return sanitized || "video-presentation";
+  return sanitizeArtifactFileBase(value, {
+    fallback: VIDEO_PRESENTATION_FILE_BASE_FALLBACK,
+    maxLength: 80,
+  });
 }
 
 export function buildVideoPresentationProjectFileName(value: string): string {

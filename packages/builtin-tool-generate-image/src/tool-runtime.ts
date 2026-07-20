@@ -1,15 +1,28 @@
+import { randomUUID } from "node:crypto";
 import { tool, type ToolRuntime } from "langchain";
-import { createArtifactId } from "@sourceweft/builtin-tool-publish-artifact";
 import type { ImageGenerateInput, ImageGenerateResult } from "@sourceweft/model-gateway";
-import { publishPreparedArtifact } from "@sourceweft/builtin-tool-publish-artifact";
 import { GENERATE_IMAGE_TOOL_NAME } from "./agent-tool-defs";
+import { readGenerateImageTurnState } from "./turn-preflight";
 import {
   buildImageToolResult,
   generateImageSchema,
+  generatedImageProvenance,
+  imageFileExtensionForMimeType,
   sanitizeImageArtifactFileBase,
 } from "./image-tools";
 import { buildImageRuntimePromptLines as buildPackageImageRuntimePromptLines } from "./image-tools";
 import { compactArtifactText } from "./artifact-text";
+import { buildArtifactPreviewUrl } from "./artifact-urls";
+import {
+  ARTIFACT_LIMITS,
+  isArtifactImageMimeType,
+} from "@sourceweft/contracts/artifact-files";
+import { ArtifactError } from "@sourceweft/contracts/artifact-errors";
+import type { AgentToolModelCallOptions } from "@sourceweft/contracts/agent-tools";
+import type {
+  ArtifactPublisher,
+  ArtifactPublishSpec,
+} from "@sourceweft/contracts/artifact-write";
 import type { ArtifactImageConfig } from "./image-types";
 
 export {
@@ -32,22 +45,11 @@ export const GENERATED_IMAGE_PROGRESS_EVENT_TYPE = "generate_image_progress";
  * identity alongside the request. The host supplies a gateway that charges;
  * this package no longer meters separately.
  */
-export interface ImageToolGenerateOptions {
-  traceId?: string;
-  operation: string;
-  modelKind: string;
-  gatewayConfigId: string;
-  profileAlias: string;
-  modelAlias?: string | null;
-  referenceId?: string;
-  /**
-   * Must be derived from an id allocated BEFORE this call, so that a retry of
-   * the same logical generation replays rather than charging twice.
-   */
-  idempotencyKey: string;
-  llm?: unknown;
-  billingMetadata?: Record<string, unknown>;
-}
+/**
+ * The billing identity for one model call. Shared host vocabulary, aliased
+ * under this package's own name so existing call sites keep reading naturally.
+ */
+export type ImageToolGenerateOptions = AgentToolModelCallOptions;
 
 export interface ImageToolModelGateway {
   images: {
@@ -58,45 +60,18 @@ export interface ImageToolModelGateway {
   };
 }
 
-export interface ImageToolStorage {
-  buildStorageKey(input: {
-    workspaceId: string;
-    artifactId: string;
-    fileName: string;
-  }): string;
-  getBucketName(): string;
-  upload(input: {
-    key: string;
-    body: Buffer;
-    contentType: string;
-  }): Promise<void>;
-}
-
-export interface ImageToolArtifactRecord {
-  artifactId: string;
-  versionId: string;
-}
-
 export interface ImageToolArtifacts {
-  createRecord(input: {
-    artifactId: string;
-    teamId: string;
-    workspaceId: string;
-    threadId: string;
-    userId: string;
-    title: string;
-    prompt: string;
-    storageBucket: string;
-    storageKey: string;
-    payload: Record<string, unknown>;
-  }): Promise<ImageToolArtifactRecord>;
+  /**
+   * The host's shared artifact writer, narrowed to the one call this tool
+   * makes. Object storage is no longer a dependency of this package: the writer
+   * owns key construction and upload, which is why an image artifact publishes
+   * through the generic, handler-less write path.
+   */
+  publishArtifact: ArtifactPublisher["publishArtifact"];
 }
-
-
 
 export interface ImageToolRuntimeDeps {
   modelGateway: ImageToolModelGateway;
-  storage: ImageToolStorage;
   artifacts: ImageToolArtifacts;
 }
 
@@ -136,18 +111,18 @@ export function buildImageRuntimePromptLines(input: {
 
 export const imageRuntimePromptProvider = {
   buildLines(context: {
-    artifactIntent?: {
-      kind: string;
-      shouldInjectTool?: boolean;
-      config: ArtifactImageConfig;
-      warnings?: readonly string[];
-    };
+    /** The turn's preflight state, keyed by tool name. Ours is in there. */
+    turnState?: Readonly<Record<string, unknown>>;
   }) {
-    if (context.artifactIntent?.kind !== "image") {
+    const artifactIntent = readGenerateImageTurnState(
+      context.turnState,
+      GENERATE_IMAGE_TOOL_NAME,
+    )?.artifactIntent;
+    if (artifactIntent?.kind !== "image") {
       return [];
     }
-    if (context.artifactIntent.shouldInjectTool !== true) {
-      const warnings = context.artifactIntent.warnings ?? [];
+    if (artifactIntent.shouldInjectTool !== true) {
+      const warnings = artifactIntent.warnings ?? [];
       return [
         "Image generation was requested or made available by a selected image skill, but generate_image is not available for this turn.",
         warnings.length > 0
@@ -157,7 +132,7 @@ export const imageRuntimePromptProvider = {
       ].filter((line): line is string => line !== null);
     }
     return buildImageRuntimePromptLines({
-      config: context.artifactIntent.config,
+      config: artifactIntent.config,
     });
   },
 };
@@ -256,6 +231,49 @@ async function decodeGeneratedImage(image: {
   };
 }
 
+/**
+ * The three content rules an image artifact has to pass, run before the writer
+ * is called at all.
+ *
+ * They used to live in `publishPreparedArtifact`'s image type handler. `image`
+ * is a top-level medium owned by no capability — it has no write handler, by
+ * design — so there is nowhere in the shared writer for a type-specific rule to
+ * live, and the package that produces the bytes is the one that must enforce
+ * them.
+ *
+ * The codes are reproduced verbatim rather than mapped onto the writer's own
+ * `ARTIFACT_ATTACHMENT_*` vocabulary: artifact error codes are a wire contract,
+ * so an oversized image keeps reporting `ARTIFACT_FILE_TOO_LARGE`. All three are
+ * already classified `validation` (i.e. recoverable) in
+ * `ARTIFACT_ERROR_CATEGORY_BY_CODE`, so what the agent is told is unchanged too.
+ *
+ * Running here, before the spec is built, also means the attachment never needs
+ * a `maxBytes`: nothing oversized reaches the writer.
+ */
+function assertPublishableImage(input: {
+  bytes: Buffer;
+  mimeType: string;
+}): void {
+  if (input.bytes.byteLength === 0) {
+    throw new ArtifactError({
+      code: "ARTIFACT_FILE_EMPTY",
+      details: "file is empty",
+    });
+  }
+  if (input.bytes.byteLength > ARTIFACT_LIMITS.imageBytes) {
+    throw new ArtifactError({
+      code: "ARTIFACT_FILE_TOO_LARGE",
+      details: `${input.bytes.byteLength} bytes exceeds limit of ${ARTIFACT_LIMITS.imageBytes} bytes`,
+    });
+  }
+  if (!isArtifactImageMimeType(input.mimeType)) {
+    throw new ArtifactError({
+      code: "ARTIFACT_SOURCE_INVALID",
+      details: `expected image MIME type, received ${input.mimeType}`,
+    });
+  }
+}
+
 export function createGenerateImageTool(
   ctx: ImageToolContext,
   deps: ImageToolRuntimeDeps,
@@ -335,7 +353,7 @@ export function createGenerateImageTool(
       // artifact used to mean a failure between generating and publishing left
       // the tokens burned and nothing charged, and a retry produced a fresh id
       // and therefore a fresh key.
-      const artifactId = createArtifactId();
+      const artifactId = randomUUID();
 
       const result = await deps.modelGateway.images.generate(request, {
         traceId: ctx.traceId,
@@ -373,9 +391,70 @@ export function createGenerateImageTool(
         providerModel: result.providerModel,
       });
       const decoded = await decodeGeneratedImage(image);
-      const fileName = `${sanitizeImageArtifactFileBase(title)}.png`;
+      const fileName = `${sanitizeImageArtifactFileBase(title)}${imageFileExtensionForMimeType(decoded.mimeType)}`;
+      assertPublishableImage({
+        bytes: decoded.body,
+        mimeType: decoded.mimeType,
+      });
 
-      const published = await publishPreparedArtifact({
+      /**
+       * The row this produces is field-for-field the one the old
+       * `publishPreparedArtifact` path wrote, with exactly one omission:
+       * `payload_json.storageKey`.
+       *
+       * The old publisher folded the object key into the payload after
+       * uploading. It cannot be reproduced here, because the real
+       * `buildArtifactStorageKey` embeds a `randomUUID()` — the caller cannot
+       * predict the key, and the writer commits the payload in the same
+       * transaction that sets the column. The only ways to keep it were to give
+       * `image` a write handler (it must not have one: `image` has two
+       * producers, so no single owner) or to let the generic writer mutate a
+       * caller's payload on the handler-less path — which would break the
+       * invariant that path is pinned on, "payload persisted exactly as the
+       * caller supplied it".
+       *
+       * Dropping it is safe because the field has no readers: every consumer —
+       * the artifacts service, the content routes, the web app — reads the
+       * row's own `storage_key` column, and the payload copy was only ever a
+       * duplicate of it. Existing rows keep theirs and stay readable.
+       */
+      const spec: ArtifactPublishSpec = {
+        artifactType: "image",
+        title,
+        prompt,
+        payload: {
+          artifactType: "image",
+          byteLength: decoded.body.byteLength,
+          description: prompt,
+          fileName,
+          mimeType: decoded.mimeType,
+          source: generatedImageProvenance(GENERATE_IMAGE_TOOL_NAME),
+          title,
+          prompt,
+          config: ctx.config,
+          sizeBytes: decoded.body.byteLength,
+          provider: result.provider,
+          providerModel: result.providerModel,
+          routeDecision: result.routeDecision,
+          revisedPrompt: image.revisedPrompt,
+          width: image.width,
+          height: image.height,
+          toolCallId,
+        },
+        // The generated bytes are the artifact's own stored file, so they are
+        // the primary attachment: that is what sets the row's storage_bucket /
+        // storage_key and what "download this artifact" serves.
+        attachments: [
+          {
+            fileName,
+            contentType: decoded.mimeType,
+            bytes: decoded.body,
+            role: "primary",
+          },
+        ],
+      };
+
+      const published = await deps.artifacts.publishArtifact({
         artifactId,
         context: {
           teamId: ctx.teamId,
@@ -383,45 +462,13 @@ export function createGenerateImageTool(
           threadId: ctx.threadId,
           userId: ctx.userId,
         },
-        descriptor: {
-          artifactType: "image",
-          title,
-          description: prompt,
-          source: {
-            kind: "generated_image",
-            tool: GENERATE_IMAGE_TOOL_NAME,
-          },
-        },
-        source: {
-          bytes: decoded.body,
-          mimeType: decoded.mimeType,
-          path: fileName,
-          payload: {
-            prompt,
-            config: ctx.config,
-            sizeBytes: decoded.body.byteLength,
-            provider: result.provider,
-            providerModel: result.providerModel,
-            routeDecision: result.routeDecision,
-            revisedPrompt: image.revisedPrompt,
-            width: image.width,
-            height: image.height,
-          },
-        },
-        services: {
-          artifacts: {
-            createImageArtifactRecord: deps.artifacts.createRecord,
-          },
-          storage: {
-            buildArtifactStorageKey: deps.storage.buildStorageKey,
-            getContentStorageBucketName: deps.storage.getBucketName,
-            uploadArtifactObject: deps.storage.upload,
-          },
-        },
-        toolCallId,
+        spec,
       });
-      const versionId = published.record.versionId;
-      const artifactUrl = published.output.artifactUrl;
+      const versionId = published.versionId;
+      const artifactUrl = buildArtifactPreviewUrl({
+        artifactId,
+        workspaceId: ctx.workspaceId,
+      });
 
       emitProgress("billing", {
         artifactId,

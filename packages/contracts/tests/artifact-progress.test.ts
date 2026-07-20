@@ -16,6 +16,7 @@ const INITIAL_STEPS: ArtifactPipelineStep[] = [
 ];
 
 const protocol = createArtifactProgressProtocol({
+  title: "Fake deliverable",
   outputTypes: ["fake_processing_result", "fake_artifact_result"],
   initialSteps: () => INITIAL_STEPS.map((step) => ({ ...step })),
 });

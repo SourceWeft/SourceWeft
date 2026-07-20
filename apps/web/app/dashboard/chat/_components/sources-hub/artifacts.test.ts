@@ -26,7 +26,7 @@ function artifact(overrides: Partial<ArtifactListItem> = {}) {
       canDownloadFile: true,
       canOpenFile: true,
       canPreviewInline: true,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
     ...overrides,
   } as ArtifactListItem;
@@ -108,7 +108,7 @@ test("artifact URL helpers return null when there is no artifact file", () => {
       canDownloadFile: false,
       canOpenFile: false,
       canPreviewInline: false,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   });
 
@@ -126,7 +126,7 @@ test("artifact URL helpers respect file capabilities", () => {
       canDownloadFile: false,
       canOpenFile: false,
       canPreviewInline: true,
-      canRenderClientVideo: true,
+      canRenderClientSide: true,
     },
   });
 

@@ -17,11 +17,16 @@ import {
   buildArtifactPreviewUrl,
 } from "./artifact-urls";
 import {
+  ARTIFACT_LIMITS,
   ARTIFACT_MIME_TYPES,
+  extensionForMimeType,
   extensionForPath,
+  isArtifactPreviewImageMimeType,
   mimeTypeForPath,
   normalizeMimeType,
-} from "./artifact-files";
+} from "@sourceweft/contracts/artifact-files";
+import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
+import type { ArtifactPublisher } from "@sourceweft/contracts/artifact-write";
 import {
   artifactSourceTypeHandlers,
   artifactTypeHandlers,
@@ -44,20 +49,22 @@ import {
   type PreviewImageInput,
 } from "./schemas";
 
-export type SlidesArtifactRecord = {
+/**
+ * What the host returns when it has inserted a ready artifact row. One shape
+ * for every type this capability publishes: the row is generic, only the
+ * artifact type passed to the host differs.
+ */
+export type PublishedArtifactRecord = {
   readonly artifactId: string;
   readonly versionId: string;
 };
 
-export type FileArtifactRecord = {
-  readonly artifactId: string;
-  readonly versionId: string;
-};
-
-export type ImageArtifactRecord = {
-  readonly artifactId: string;
-  readonly versionId: string;
-};
+/** @deprecated Use {@link PublishedArtifactRecord}; kept as an alias. */
+export type SlidesArtifactRecord = PublishedArtifactRecord;
+/** @deprecated Use {@link PublishedArtifactRecord}; kept as an alias. */
+export type FileArtifactRecord = PublishedArtifactRecord;
+/** @deprecated Use {@link PublishedArtifactRecord}; kept as an alias. */
+export type ImageArtifactRecord = PublishedArtifactRecord;
 
 export type PublishArtifactContext = {
   readonly teamId: string;
@@ -67,59 +74,8 @@ export type PublishArtifactContext = {
 };
 
 export type PublishArtifactServices = ArtifactSourceServices & {
-  readonly artifacts?: {
-    readonly createSlidesArtifactRecord?: (input: {
-      artifactId: string;
-      teamId: string;
-      workspaceId: string;
-      threadId: string;
-      userId: string;
-      title: string;
-      prompt: string;
-      payload: Record<string, unknown>;
-      storageBucket: string;
-      storageKey: string;
-      previewStorageKey?: string | null;
-      previewMetadata?: Record<string, unknown> | null;
-    }) => Promise<SlidesArtifactRecord>;
-    readonly createFileArtifactRecord?: (input: {
-      artifactId: string;
-      teamId: string;
-      workspaceId: string;
-      threadId: string;
-      userId: string;
-      title: string;
-      prompt: string;
-      payload: Record<string, unknown>;
-      storageBucket: string;
-      storageKey: string;
-    }) => Promise<FileArtifactRecord>;
-    readonly createImageArtifactRecord?: (input: {
-      artifactId: string;
-      teamId: string;
-      workspaceId: string;
-      threadId: string;
-      userId: string;
-      title: string;
-      prompt: string;
-      payload: Record<string, unknown>;
-      storageBucket: string;
-      storageKey: string;
-    }) => Promise<ImageArtifactRecord>;
-  };
-  readonly storage?: {
-    readonly buildArtifactStorageKey: (input: {
-      workspaceId: string;
-      artifactId: string;
-      fileName: string;
-    }) => string;
-    readonly getContentStorageBucketName: () => string;
-    readonly uploadArtifactObject: (input: {
-      key: string;
-      body: Buffer;
-      contentType: string;
-    }) => Promise<unknown>;
-  };
+  readonly artifacts?: Partial<ArtifactPublisher>;
+  readonly storage?: ArtifactStorage;
 };
 
 export type PublishArtifactOperationInput = {
@@ -135,6 +91,12 @@ export type PublishPreparedArtifactOperationInput = {
   readonly context: PublishArtifactContext;
   readonly descriptor: ArtifactPublishDescriptor;
   readonly previewImage?: PreparedPreviewImage;
+  /**
+   * Whether the caller asked for a preview image, which is not the same as
+   * whether one survived preparation: an oversized preview is dropped rather
+   * than failing the publish. Defaults to `previewImage !== undefined`.
+   */
+  readonly previewImageRequested?: boolean;
   readonly source: ArtifactBytes;
   readonly services: PublishArtifactServices;
   readonly typeHandlers?: readonly ArtifactTypeHandler[];
@@ -145,26 +107,29 @@ export type PublishPreparedArtifactOperationInput = {
    * Defaults to a freshly allocated id.
    */
   readonly artifactId?: string;
+  /**
+   * Makes a retry of the same request return the artifact the first attempt
+   * produced instead of publishing a second one. The key is the caller's to
+   * derive, because only the caller knows what "the same request" means.
+   */
+  readonly requestKey?: string;
 };
 
 export type PublishPreparedArtifactResult = {
   readonly artifactId: string;
   readonly output: PublishArtifactSuccessOutput;
-  readonly record: SlidesArtifactRecord | FileArtifactRecord | ImageArtifactRecord;
-  readonly storageBucket: string;
-  readonly storageKey: string;
+  readonly record: PublishedArtifactRecord;
 };
 
-const MAX_PREVIEW_IMAGE_BYTES = 5 * 1024 * 1024;
-const PREVIEW_IMAGE_MIME_TYPE_BY_EXTENSION = new Map<string, string>([
-  [".jpg", ARTIFACT_MIME_TYPES.jpeg],
-  [".jpeg", ARTIFACT_MIME_TYPES.jpeg],
-  [".png", ARTIFACT_MIME_TYPES.png],
-  [".webp", ARTIFACT_MIME_TYPES.webp],
-]);
-const SUPPORTED_PREVIEW_IMAGE_MIME_TYPES = new Set<string>(
-  PREVIEW_IMAGE_MIME_TYPE_BY_EXTENSION.values(),
-);
+/**
+ * The extension a preview image path must carry to be believed. Narrower than
+ * the shared extension table on purpose: only formats on the preview allowlist
+ * count, so a `.gif` path is rejected rather than silently retyped.
+ */
+function previewImageMimeTypeForExtension(extension: string) {
+  const mimeType = mimeTypeForPath(`preview${extension}`, "");
+  return isArtifactPreviewImageMimeType(mimeType) ? mimeType : "";
+}
 
 export type PreparedPreviewImage = {
   readonly altText: string | null;
@@ -174,22 +139,9 @@ export type PreparedPreviewImage = {
   readonly fileName: string;
 };
 
-type UploadedPreviewImage = {
-  readonly altText: string | null;
-  readonly byteLength: number;
-  readonly fileName: string;
-  readonly mimeType: string;
-  readonly storageKey: string;
-};
 
 function previewImageFileNameForContentType(contentType: string) {
-  if (contentType === ARTIFACT_MIME_TYPES.png) {
-    return "preview.png";
-  }
-  if (contentType === ARTIFACT_MIME_TYPES.webp) {
-    return "preview.webp";
-  }
-  return "preview.jpg";
+  return `preview${extensionForMimeType(contentType, ".jpg")}`;
 }
 
 function preparePreviewImage(input: {
@@ -199,10 +151,9 @@ function preparePreviewImage(input: {
     readonly mimeType?: string;
     readonly path: string;
   };
-}): PreparedPreviewImage {
+}): PreparedPreviewImage | null {
   const extension = extensionForPath(input.image.path);
-  const mimeTypeFromExtension =
-    PREVIEW_IMAGE_MIME_TYPE_BY_EXTENSION.get(extension) ?? "";
+  const mimeTypeFromExtension = previewImageMimeTypeForExtension(extension);
   const normalizedMimeType = normalizeMimeType(input.image.mimeType);
   const contentType =
     normalizedMimeType && normalizedMimeType !== ARTIFACT_MIME_TYPES.binary
@@ -210,7 +161,7 @@ function preparePreviewImage(input: {
       : mimeTypeFromExtension ||
         normalizeMimeType(mimeTypeForPath(input.image.path));
 
-  if (!SUPPORTED_PREVIEW_IMAGE_MIME_TYPES.has(contentType)) {
+  if (!isArtifactPreviewImageMimeType(contentType)) {
     throw new ArtifactPublishError(
       "ARTIFACT_PREVIEW_IMAGE_INVALID",
       `expected preview image MIME type image/jpeg, image/png, or image/webp; received ${contentType || "unknown"}`,
@@ -233,11 +184,12 @@ function preparePreviewImage(input: {
       "preview image is empty",
     );
   }
-  if (input.image.bytes.byteLength > MAX_PREVIEW_IMAGE_BYTES) {
-    throw new ArtifactPublishError(
-      "ARTIFACT_PREVIEW_IMAGE_TOO_LARGE",
-      `${input.image.bytes.byteLength} bytes exceeds limit of ${MAX_PREVIEW_IMAGE_BYTES} bytes`,
-    );
+  if (input.image.bytes.byteLength > ARTIFACT_LIMITS.previewImageBytes) {
+    // A thumbnail is an enhancement, not the deliverable. Failing the whole
+    // publish because the preview was oversized threw away work the user asked
+    // for to protect a decoration, so the artifact now publishes without one.
+    // Malformed previews still throw: those are input errors worth reporting.
+    return null;
   }
 
   return {
@@ -315,12 +267,12 @@ export async function publishArtifact(
     services: input.services,
   });
   const previewImage = parsed.previewImage
-    ? await readPreviewImage({
+    ? (await readPreviewImage({
         previewImage: parsed.previewImage,
         publishInput: parsed,
         services: input.services,
         sourceAdapters: input.sourceAdapters,
-      })
+      })) ?? undefined
     : undefined;
 
   return (
@@ -328,6 +280,7 @@ export async function publishArtifact(
       context: input.context,
       descriptor: parsed,
       previewImage,
+      previewImageRequested: parsed.previewImage !== undefined,
       source,
       services: input.services,
       typeHandlers: handler ? [handler] : input.typeHandlers,
@@ -354,84 +307,71 @@ export async function publishPreparedArtifact(
     publishInput: input.descriptor,
     source: input.source,
   });
-  if (preparedArtifact.artifactType === "slides" && !input.previewImage) {
+  // These two invariants are about the *request*: slides publishing is gated on
+  // the caller having run visual QA and passed the frame. Whether that frame
+  // then survives the size check is a separate, best-effort concern.
+  const previewImageRequested =
+    input.previewImageRequested ?? input.previewImage !== undefined;
+  if (preparedArtifact.artifactType === "slides" && !previewImageRequested) {
     throw new ArtifactPublishError(
       "ARTIFACT_PREVIEW_IMAGE_INVALID",
       "previewImage is required for slides artifacts; use PREVIEW_IMAGE_PATH from final PPTX visual QA",
     );
   }
-  if (input.previewImage && preparedArtifact.artifactType !== "slides") {
+  if (previewImageRequested && preparedArtifact.artifactType !== "slides") {
     throw new ArtifactPublishError(
       "ARTIFACT_PREVIEW_IMAGE_INVALID",
       "previewImage is only supported for slides artifacts",
     );
   }
 
-  const storage = input.services.storage;
-  if (!storage) {
-    throw new ArtifactPublishError(
-      "ARTIFACT_STORAGE_UNAVAILABLE",
-      "artifact storage service is not available",
-    );
-  }
-  const createSlidesArtifactRecord =
-    input.services.artifacts?.createSlidesArtifactRecord;
-  if (preparedArtifact.artifactType === "slides" && !createSlidesArtifactRecord) {
+  const publish = input.services.artifacts?.publishArtifact;
+  if (!publish) {
     throw new ArtifactPublishError(
       "ARTIFACT_RECORD_UNAVAILABLE",
-      "slides artifact record service is not available",
-    );
-  }
-  const createFileArtifactRecord =
-    input.services.artifacts?.createFileArtifactRecord;
-  if (preparedArtifact.artifactType === "file" && !createFileArtifactRecord) {
-    throw new ArtifactPublishError(
-      "ARTIFACT_RECORD_UNAVAILABLE",
-      "file artifact record service is not available",
-    );
-  }
-  const createImageArtifactRecord =
-    input.services.artifacts?.createImageArtifactRecord;
-  if (preparedArtifact.artifactType === "image" && !createImageArtifactRecord) {
-    throw new ArtifactPublishError(
-      "ARTIFACT_RECORD_UNAVAILABLE",
-      "image artifact record service is not available",
+      `${preparedArtifact.artifactType} artifact record service is not available`,
     );
   }
 
-  const artifactId = input.artifactId ?? createArtifactId();
-  const storageKey = storage.buildArtifactStorageKey({
-    workspaceId: input.context.workspaceId,
-    artifactId,
-    fileName: preparedArtifact.fileName,
-  });
-
-  await storage.uploadArtifactObject({
-    key: storageKey,
-    body: input.source.bytes,
-    contentType: preparedArtifact.contentType,
-  });
-  const uploadedPreviewImage = input.previewImage
-    ? await uploadPreviewImage({
-        artifactId,
-        previewImage: input.previewImage,
-        storage,
-        workspaceId: input.context.workspaceId,
-      })
-    : undefined;
-
-  const storageBucket = storage.getContentStorageBucketName();
-  const record = await createArtifactRecord({
-    artifactId,
+  // Everything type-specific is already settled: the handler has checked the
+  // extension, the MIME type, the size and — for a deck — that the PPTX package
+  // really unpacks. What is left is the write itself, which is the host's, so
+  // the bytes go across as attachments rather than being uploaded here.
+  const record = await publish({
     context: input.context,
-    descriptor: input.descriptor,
-    preparedArtifact,
-    services: input.services,
-    storageBucket,
-    storageKey,
-    toolCallId: input.toolCallId,
-    previewImage: uploadedPreviewImage,
+    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+    spec: {
+      artifactType: preparedArtifact.artifactType,
+      title: input.descriptor.title,
+      prompt: input.descriptor.description ?? input.descriptor.title,
+      payload: {
+        ...preparedArtifact.payload,
+        toolCallId: input.toolCallId,
+      },
+      attachments: [
+        {
+          fileName: preparedArtifact.fileName,
+          contentType: preparedArtifact.contentType,
+          bytes: input.source.bytes,
+          role: "primary",
+        },
+      ],
+      ...(input.previewImage
+        ? {
+            preview: {
+              bytes: input.previewImage.bytes,
+              contentType: input.previewImage.contentType,
+              fileName: input.previewImage.fileName,
+              altText: input.previewImage.altText,
+            },
+          }
+        : {}),
+      ...(input.requestKey
+        ? { idempotency: { requestKey: input.requestKey } }
+        : {}),
+    },
   });
+  const artifactId = record.artifactId;
 
   const artifactUrl = buildArtifactPreviewUrl({
     artifactId,
@@ -448,7 +388,7 @@ export async function publishPreparedArtifact(
     title: input.descriptor.title,
   });
   const previewImageUrl =
-    uploadedPreviewImage && output.artifactType === "slides"
+    input.previewImage && output.artifactType === "slides"
       ? buildArtifactPreviewImageUrl({
           artifactId,
           workspaceId: input.context.workspaceId,
@@ -466,86 +406,6 @@ export async function publishPreparedArtifact(
     artifactId,
     output: outputWithPreviewImage,
     record,
-    storageBucket,
-    storageKey,
   };
 }
 
-async function uploadPreviewImage(input: {
-  readonly artifactId: string;
-  readonly previewImage: PreparedPreviewImage;
-  readonly storage: NonNullable<PublishArtifactServices["storage"]>;
-  readonly workspaceId: string;
-}): Promise<UploadedPreviewImage> {
-  const storageKey = input.storage.buildArtifactStorageKey({
-    workspaceId: input.workspaceId,
-    artifactId: input.artifactId,
-    fileName: input.previewImage.fileName,
-  });
-  await input.storage.uploadArtifactObject({
-    key: storageKey,
-    body: input.previewImage.bytes,
-    contentType: input.previewImage.contentType,
-  });
-  return {
-    altText: input.previewImage.altText,
-    byteLength: input.previewImage.byteLength,
-    fileName: input.previewImage.fileName,
-    mimeType: input.previewImage.contentType,
-    storageKey,
-  };
-}
-
-async function createArtifactRecord(input: {
-  readonly artifactId: string;
-  readonly context: PublishArtifactContext;
-  readonly descriptor: ArtifactPublishDescriptor;
-  readonly preparedArtifact: ReturnType<ArtifactTypeHandler["prepare"]>;
-  readonly services: PublishArtifactServices;
-  readonly storageBucket: string;
-  readonly storageKey: string;
-  readonly toolCallId?: string;
-  readonly previewImage?: UploadedPreviewImage;
-}): Promise<SlidesArtifactRecord | FileArtifactRecord | ImageArtifactRecord> {
-  const createRecord =
-    input.preparedArtifact.artifactType === "slides"
-      ? input.services.artifacts!.createSlidesArtifactRecord
-      : input.preparedArtifact.artifactType === "file"
-        ? input.services.artifacts!.createFileArtifactRecord
-        : input.preparedArtifact.artifactType === "image"
-          ? input.services.artifacts!.createImageArtifactRecord
-          : null;
-
-  if (!createRecord) {
-    throw new ArtifactPublishError(
-      "ARTIFACT_TYPE_UNSUPPORTED",
-      `artifact record creation is not implemented for ${input.preparedArtifact.artifactType}`,
-    );
-  }
-
-  return createRecord({
-    artifactId: input.artifactId,
-    teamId: input.context.teamId,
-    workspaceId: input.context.workspaceId,
-    threadId: input.context.threadId,
-    userId: input.context.userId,
-    title: input.descriptor.title,
-    prompt: input.descriptor.description ?? input.descriptor.title,
-    storageBucket: input.storageBucket,
-    storageKey: input.storageKey,
-    previewStorageKey: input.previewImage?.storageKey ?? null,
-    previewMetadata: input.previewImage
-      ? {
-          altText: input.previewImage.altText,
-          byteLength: input.previewImage.byteLength,
-          fileName: input.previewImage.fileName,
-          mimeType: input.previewImage.mimeType,
-        }
-      : null,
-    payload: {
-      ...input.preparedArtifact.payload,
-      storageKey: input.storageKey,
-      toolCallId: input.toolCallId,
-    },
-  });
-}

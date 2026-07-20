@@ -1,5 +1,8 @@
 import type { ArtifactProgressProtocol } from "../artifact-progress";
+import type { AgentToolModelCatalogAnnotation } from "./model-catalog";
 import type { AgentToolPresentation } from "./presentation";
+import type { AgentToolTurnPreflight } from "./turn-preflight";
+import type { AgentToolTurnSelection } from "./turn-selection";
 
 export type AgentToolDomain =
   | "filesystem"
@@ -88,6 +91,24 @@ export type AgentToolDefinitionShape = {
   artifactProgress?: ArtifactProgressProtocol;
   /** User-facing titles and summaries owned by the capability. */
   presentation?: AgentToolPresentation;
+  /**
+   * How the capability regularizes the user's per-turn options into its tool
+   * input. Declared here — like `presentation` — so the turn pipeline can ask
+   * every registered tool the same question instead of naming capabilities.
+   */
+  turnSelection?: AgentToolTurnSelection;
+  /**
+   * The asynchronous half of the same story: what the capability must settle
+   * against the workspace before the agent runs. Separate from `turnSelection`
+   * because it awaits host lookups instead of rewriting a record in place.
+   */
+  turnPreflight?: AgentToolTurnPreflight;
+  /**
+   * What the capability contributes to model-catalog rows of its declared
+   * model kind, so the catalog builder never imports a capability to describe
+   * what a model of that kind can do.
+   */
+  modelCatalog?: AgentToolModelCatalogAnnotation;
 };
 
 export function defineAgentTool<const Tool extends AgentToolDefinitionShape>(

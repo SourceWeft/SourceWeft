@@ -6,9 +6,12 @@
  *   pnpm exec tsx src/scripts/smoke-video-presentation-job.ts
  */
 import { randomUUID } from "node:crypto";
-import { buildVideoPresentationInitialPayload } from "@sourceweft/builtin-tool-video-presentation";
+import {
+  buildVideoPresentationInitialPayload,
+  VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
+} from "@sourceweft/builtin-tool-video-presentation";
 import { database } from "@sourceweft/db";
-import { enqueueVideoPresentationGenerateJob } from "../modules/content/queue";
+import { enqueueDeliverableJob } from "../modules/content/queue";
 
 const WORKSPACE_ID = "add6b488-3ca7-4617-9eac-b163a9196f4e";
 const TEAM_ID = "07b177a1-a271-4e66-bce6-39ffc42f5b1d";
@@ -65,19 +68,23 @@ async function main() {
     ],
   );
 
-  const job = await enqueueVideoPresentationGenerateJob({
-    artifactId,
+  const job = await enqueueDeliverableJob({
+    jobName: VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
     jobId,
-    requestKey,
-    teamId: TEAM_ID,
-    workspaceId: WORKSPACE_ID,
-    threadId: THREAD_ID,
-    userId: USER_ID,
-    // Must reference a real messages.id — sandbox ops FK-enforce message_id.
-    userMessageId: "run-user-4ee0edcd-8c76-40cf-b65a-30dad1760715",
-    title,
-    narrationEnabled: true,
-    request,
+    payload: {
+      artifactId,
+      jobId,
+      requestKey,
+      teamId: TEAM_ID,
+      workspaceId: WORKSPACE_ID,
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      // Must reference a real messages.id — sandbox ops FK-enforce message_id.
+      userMessageId: "run-user-4ee0edcd-8c76-40cf-b65a-30dad1760715",
+      title,
+      narrationEnabled: true,
+      request,
+    },
   });
 
   console.log(

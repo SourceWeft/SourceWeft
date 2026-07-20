@@ -1,5 +1,6 @@
 import type { DeepAgentTurnEvent } from "../agent/turn/runner";
 import { toolConfirmationRequestSchema } from "@sourceweft/contracts";
+import { isArtifactProgressOutputType } from "@sourceweft/agent-tool-registry";
 import type { ToolCallTrace } from "../turn/types";
 import { toSseData } from "./helpers";
 
@@ -69,12 +70,16 @@ function isRedactedSkillInstructionRead(output: unknown) {
   return record?.type === "skill_instruction_read" && record.redacted === true;
 }
 
-function isVideoPresentationToolOutputRecord(record: Record<string, unknown>) {
-  const type = typeof record.type === "string" ? record.type : null;
-  return (
-    type === "video_presentation_processing_result" ||
-    type === "video_presentation_artifact_result" ||
-    type === "generate_video_presentation_progress"
+/**
+ * Whether a structured tool output belongs to a capability that reports
+ * artifact progress. Such records are forwarded to the client verbatim instead
+ * of being summarized, because the client renders them as a progress block.
+ * The registry answers which `type` values those are, so adding a deliverable
+ * capability needs no edit here.
+ */
+function isArtifactProgressToolOutputRecord(record: Record<string, unknown>) {
+  return isArtifactProgressOutputType(
+    typeof record.type === "string" ? record.type : null,
   );
 }
 
@@ -110,7 +115,7 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
 
   if (typeof output === "string") {
     const parsedString = parseJsonObjectStringForSse(output);
-    if (parsedString && isVideoPresentationToolOutputRecord(parsedString)) {
+    if (parsedString && isArtifactProgressToolOutputRecord(parsedString)) {
       return parsedString;
     }
     return truncateTextForSse(output);
@@ -131,13 +136,13 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
     return output;
   }
 
-  if (isVideoPresentationToolOutputRecord(record)) {
+  if (isArtifactProgressToolOutputRecord(record)) {
     return record;
   }
 
   if (typeof record.content === "string") {
     const parsedContent = parseJsonObjectStringForSse(record.content);
-    if (parsedContent && isVideoPresentationToolOutputRecord(parsedContent)) {
+    if (parsedContent && isArtifactProgressToolOutputRecord(parsedContent)) {
       return parsedContent;
     }
     return {

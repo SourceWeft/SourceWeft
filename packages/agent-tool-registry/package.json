@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ui": "./src/ui.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -22,8 +23,10 @@
     "@sourceweft/contracts": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "5.9.2",
     "@types/node": "^22.15.30",
-    "tsx": "^4.20.6"
+    "@types/react": "^19.1.0",
+    "react": "^19.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2"
   }
 }

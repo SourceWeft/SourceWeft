@@ -483,7 +483,7 @@ async function storeAssetBytes(input: {
   mimeType: string;
   workspaceId: string;
 }) {
-  const fileName = `asset-${safeStorageSegment(input.assetId)}.${imageExtensionForMimeType(input.mimeType)}`;
+  const fileName = `asset-${safeStorageSegment(input.assetId)}${imageExtensionForMimeType(input.mimeType)}`;
   const storageKey = input.deps.storage.buildArtifactStorageKey({
     artifactId: input.artifactId,
     fileName,

@@ -116,8 +116,8 @@ test("generate_video_presentation returns input-required for empty brief", async
     },
     {
       artifacts: {
-        createPending: async () => {
-          throw new Error("should not create pending artifact");
+        openArtifact: async () => {
+          throw new Error("should not open an artifact");
         },
         findReusable: async () => null,
         findStatus: async () => null,
@@ -188,7 +188,7 @@ test("generate_video_presentation waits for ready artifact from brief request", 
     },
     {
       artifacts: {
-        createPending: async () => undefined,
+        openArtifact: async ({ artifactId }) => ({ artifactId }),
         findReusable: async () => null,
         findStatus: async () =>
           (artifactSnapshots.shift() ?? readySnapshot) as never,
@@ -281,7 +281,7 @@ test("generate_video_presentation applies runtime option defaults to brief-only 
     },
     {
       artifacts: {
-        createPending: async () => undefined,
+        openArtifact: async ({ artifactId }) => ({ artifactId }),
         findReusable: async () => null,
         findStatus: async () => ({
           id: "artifact-1",
@@ -340,7 +340,7 @@ test("generate_video_presentation returns a failed artifact result when worker f
     },
     {
       artifacts: {
-        createPending: async () => undefined,
+        openArtifact: async ({ artifactId }) => ({ artifactId }),
         findReusable: async () => null,
         findStatus: async () => ({
           id: "artifact-1",
@@ -387,7 +387,7 @@ test("generate_video_presentation timeout returns processing result instead of a
     },
     {
       artifacts: {
-        createPending: async () => undefined,
+        openArtifact: async ({ artifactId }) => ({ artifactId }),
         findReusable: async () => null,
         findStatus: async () => ({
           id: "artifact-1",

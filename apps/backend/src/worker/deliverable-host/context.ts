@@ -1,3 +1,11 @@
+import {
+  ARTIFACT_MIME_TYPES,
+  mimeTypeForPath,
+} from "@sourceweft/contracts/artifact-files";
+import {
+  ARTIFACT_WRITE_ERROR_CODES,
+  isArtifactError,
+} from "@sourceweft/contracts/artifact-errors";
 import type {
   DeliverableHostContext,
   DeliverableJobEnvelope,
@@ -51,7 +59,18 @@ export type DeliverableArtifactsAdapter = {
     artifactId: string;
     teamId: string;
     workspaceId: string;
-  }): Promise<{ payloadJson?: unknown } | null>;
+  }): Promise<{
+    payloadJson?: unknown;
+    /**
+     * The artifact's published version pointer, read in the same row read that
+     * supplies the payload. An edit run carries it to the completion as its
+     * optimistic lock, so the base it regenerated from and the base it
+     * republishes onto are guaranteed to be the same one.
+     */
+    currentVersionNo?: number;
+    /** The artifact's own title, used to complete it through the write path. */
+    title?: string | null;
+  } | null>;
   markFailed(input: {
     artifactId: string;
     teamId?: string;
@@ -61,14 +80,37 @@ export type DeliverableArtifactsAdapter = {
     errorMessage: string;
     payload?: Record<string, unknown>;
   }): Promise<unknown>;
-  /** Resolves null when expectedStatuses is given and another writer won. */
-  markReady(input: {
+  /**
+   * Phase two of the artifact this job is finishing: the same
+   * `completeArtifact` every producer closes a two-phase write with.
+   *
+   * The pipeline hands over what only it knows — the finished payload, its
+   * artifact type, its thumbnail — and the host keeps what is host business:
+   * the row, the version, the compare-and-swap.
+   *
+   * Resolves null when the artifact left `expectedStatuses`, or moved past
+   * `expectedVersionNo`, before this run got here. That is a lost race, not a
+   * failure: the writer raises it as an `ARTIFACT_STATE_CONFLICT`, and this
+   * adapter turns it back into the null the host treats as "superseded" so a
+   * duplicate delivery never damages the winner's artifact.
+   */
+  completeArtifact(input: {
     artifactId: string;
+    artifactType: string;
     teamId: string;
     workspaceId: string;
+    threadId: string;
     userId: string;
+    title: string;
     payload: Record<string, unknown>;
+    /**
+     * A thumbnail the pipeline uploaded itself, mid-run, in the stage that
+     * produced it. Omitted means "keep whatever thumbnail the artifact has".
+     */
+    preview?: { storageKey: string; metadata: Record<string, unknown> };
     expectedStatuses?: Array<"pending" | "running" | "ready" | "failed">;
+    /** Optimistic lock on the artifact's published version (edit runs). */
+    expectedVersionNo?: number;
   }): Promise<{ artifactId: string; versionId: string } | null>;
   markRunning(input: {
     artifactId: string;
@@ -87,6 +129,24 @@ export type DeliverableHostRuntime = {
 export type DeliverableRuntimeResolver = (
   job: DeliverableHostJobPayload,
 ) => Promise<DeliverableHostRuntime>;
+
+/**
+ * "Someone else already finished this artifact", as the writer reports it.
+ *
+ * The repository's compare-and-swap answers with null and the writer raises
+ * that as an error, because a one-shot publisher losing a race genuinely is
+ * exceptional. A pipeline is the case where it is not: a duplicate BullMQ
+ * delivery of an already-published job is ordinary, and the host's answer to it
+ * is `superseded`, not a failure. So the code is recognized here and turned
+ * back into the null the host was already written against — structurally, since
+ * the error may cross a module boundary.
+ */
+function isArtifactStateConflict(error: unknown) {
+  return (
+    isArtifactError(error) &&
+    error.code === ARTIFACT_WRITE_ERROR_CODES.stateConflict
+  );
+}
 
 function extractTextContent(value: unknown): string {
   if (typeof value === "string") return value;
@@ -144,11 +204,13 @@ export function createDefaultDeliverableRuntimeResolver(input: {
   feature: string;
 }): DeliverableRuntimeResolver {
   return async (job) => {
-    const [repository, storage, modelGateway] = await Promise.all([
-      import("../../modules/artifacts/repository"),
-      import("../../modules/sources/storage"),
-      import("../../shared/model-gateway"),
-    ]);
+    const [repository, artifactPublish, storage, modelGateway] =
+      await Promise.all([
+        import("../../modules/artifacts/repository"),
+        import("../../modules/artifacts/publish"),
+        import("../../modules/sources/storage"),
+        import("../../shared/model-gateway"),
+      ]);
     const feature = input.feature;
 
     /**
@@ -505,17 +567,7 @@ export function createDefaultDeliverableRuntimeResolver(input: {
           };
         },
       },
-      storage: {
-        buildArtifactStorageKey: storage.buildArtifactStorageKey,
-        getBucketName: storage.getContentStorageBucketName,
-        upload: async (uploadInput) => {
-          await storage.uploadArtifactObject({
-            body: Buffer.from(uploadInput.body),
-            contentType: uploadInput.contentType,
-            key: uploadInput.key,
-          });
-        },
-      },
+      storage: storage.artifactStorage,
       audio: {
         probeDurationSeconds: (probeInput) =>
           probeAudioDurationSeconds({
@@ -561,9 +613,10 @@ export function createDefaultDeliverableRuntimeResolver(input: {
             const mimeType =
               typeof payload?.mimeType === "string"
                 ? payload.mimeType
-                : recordShape.storageKey.endsWith(".png")
-                  ? "image/png"
-                  : "image/jpeg";
+                : mimeTypeForPath(
+                    recordShape.storageKey,
+                    ARTIFACT_MIME_TYPES.jpeg,
+                  );
             return {
               data: Buffer.isBuffer(body) ? body : Buffer.from(body as never),
               mimeType,
@@ -655,7 +708,51 @@ export function createDefaultDeliverableRuntimeResolver(input: {
       artifacts: {
         find: repository.findArtifactRecord,
         markFailed: repository.markArtifactFailed,
-        markReady: repository.markArtifactReady,
+        completeArtifact: async (input) => {
+          try {
+            const result = await artifactPublish.completeArtifact({
+              artifactId: input.artifactId,
+              context: {
+                teamId: input.teamId,
+                workspaceId: input.workspaceId,
+                threadId: input.threadId,
+                userId: input.userId,
+              },
+              spec: {
+                artifactType: input.artifactType,
+                title: input.title,
+                // The payload is handed over whole and written whole: a
+                // deliverable's finalize() returns the complete artifact, not a
+                // patch, and republishing a subset would silently drop
+                // everything the previous version carried.
+                payload: input.payload,
+              },
+              ...(input.preview
+                ? {
+                    storedPreview: {
+                      storageKey: input.preview.storageKey,
+                      metadata: input.preview.metadata,
+                    },
+                  }
+                : {}),
+              ...(input.expectedStatuses
+                ? { expectedStatuses: input.expectedStatuses }
+                : {}),
+              ...(input.expectedVersionNo === undefined
+                ? {}
+                : { expectedVersionNo: input.expectedVersionNo }),
+            });
+            return {
+              artifactId: result.artifactId,
+              versionId: result.versionId,
+            };
+          } catch (error) {
+            if (isArtifactStateConflict(error)) {
+              return null;
+            }
+            throw error;
+          }
+        },
         markRunning: repository.markArtifactRunning,
       },
     };

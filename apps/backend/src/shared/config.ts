@@ -349,22 +349,6 @@ function resolvePasskeyOrigin() {
   return resolveWebBaseUrl();
 }
 
-function resolveFontAssetBaseUrl() {
-  const configured = process.env.VISUAL_DECK_FONT_BASE_URL?.trim();
-  if (configured) {
-    return configured.replace(/\/+$/g, "");
-  }
-
-  const publicS3BaseUrl = stripTrailingSlash(
-    process.env.PUBLIC_S3_BASE_URL || "",
-  );
-  if (publicS3BaseUrl) {
-    return publicS3BaseUrl;
-  }
-
-  return "https://assets.sourceweft.com";
-}
-
 const saasEnabled = parseBoolean(process.env.SOURCEWEFT_SAAS_ENABLED, false);
 const requestedBillingProvider = parseBillingProvider(
   process.env.BACKEND_BILLING_PROVIDER,
@@ -742,9 +726,6 @@ export const config = {
       clientSecret: process.env.NOTION_CLIENT_SECRET?.trim() ?? "",
       webhookSecret: process.env.NOTION_WEBHOOK_SECRET?.trim() ?? "",
     },
-  },
-  visualDeck: {
-    fontAssetBaseUrl: resolveFontAssetBaseUrl(),
   },
   ops: {
     alertsEnabled: parseBoolean(process.env.BACKEND_ALERTS_ENABLED, true),
