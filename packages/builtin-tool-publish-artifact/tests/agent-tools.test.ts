@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import { downloadPptxFromSandbox } from "../src/sandbox-output";
 import {
   createCapabilityAgentTools,
   publishArtifact,
@@ -1112,5 +1114,365 @@ test("publishArtifactFromSource rejects invalid OOXML PPTX files", async () => {
       }),
     (error) =>
       error instanceof PptxOutputError && error.code === "PPTX_PACKAGE_INVALID",
+  );
+});
+
+/** The spec the writer is handed, as these assertions need to read it. */
+type PublishedSpec = {
+  readonly artifactType: string;
+  readonly title: string;
+  readonly prompt?: string;
+  readonly payload: Record<string, unknown>;
+  readonly attachments?: readonly {
+    readonly fileName: string;
+    readonly contentType: string;
+    readonly bytes: Buffer;
+    readonly role?: string;
+    readonly maxBytes?: number;
+  }[];
+  readonly preview?: {
+    readonly bytes: Buffer;
+    readonly contentType: string;
+    readonly fileName?: string;
+    readonly altText?: string | null;
+  };
+  readonly idempotency?: { readonly requestKey: string };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Row shape through the shared writer                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Field for field what the pre-writer `createReadyArtifact` path persisted for
+ * a `slides` artifact. deepEqual here is the whole `payload_json`, so a key that
+ * appears or disappears fails rather than passing unnoticed.
+ *
+ * One key is deliberately absent: `payload.storageKey`, which the old path
+ * copied from the column it had just built. The writer builds the key itself
+ * (it contains a `randomUUID()`), so the copy cannot be reproduced — and no
+ * reader ever wanted it: every read of a slides/file artifact's bytes goes
+ * through the row's own `storage_key` column.
+ */
+test("slides publish hands the writer the payload the old path persisted", async () => {
+  const mockedServices = services();
+
+  await publishArtifactFromSource({
+    context,
+    services: mockedServices,
+    toolCallId: "call-1",
+    input: slidesInput({
+      title: "Feynman Method",
+      description: "Learning deck",
+      source: {
+        kind: "sandbox_path",
+        path: "/workspace/Presentation.pptx",
+      },
+      qa: {
+        contentChecked: true,
+        visualChecked: true,
+        warnings: ["check fonts"],
+      },
+    }),
+  });
+
+  const call = mockedServices.artifacts.publishArtifact.mock.calls[0]?.[0];
+  assert.ok(call);
+  const spec = call.spec as unknown as PublishedSpec;
+
+  assert.deepEqual(spec.payload, {
+    artifactType: "slides",
+    byteLength: validPptxBuffer().byteLength,
+    description: "Learning deck",
+    fileName: "Feynman-Method.pptx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    qa: {
+      contentChecked: true,
+      visualChecked: true,
+      warnings: ["check fonts"],
+    },
+    source: {
+      kind: "sandbox_path",
+      path: "/workspace/Presentation.pptx",
+    },
+    title: "Feynman Method",
+    toolCallId: "call-1",
+  });
+
+  // The rest of the row: the columns the writer fills from the spec.
+  assert.equal(spec.artifactType, "slides");
+  assert.equal(spec.title, "Feynman Method");
+  // prompt_text was `description ?? title` on the old path and still is.
+  assert.equal(spec.prompt, "Learning deck");
+  assert.equal(spec.attachments?.length, 1);
+  assert.equal(spec.attachments?.[0]?.role, "primary");
+  assert.equal(spec.attachments?.[0]?.fileName, "Feynman-Method.pptx");
+  assert.equal(
+    spec.attachments?.[0]?.contentType,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  );
+  // No maxBytes: the ceiling is checked here, so the code stays PPTX_OUTPUT_TOO_LARGE
+  // rather than becoming the writer's ARTIFACT_ATTACHMENT_TOO_LARGE.
+  assert.equal(spec.attachments?.[0]?.maxBytes, undefined);
+  assert.deepEqual(spec.preview, {
+    bytes: Buffer.from("preview-bytes"),
+    contentType: "image/jpeg",
+    fileName: "preview.jpg",
+    altText: "First slide preview",
+  });
+  assert.equal("idempotency" in spec, false);
+  assert.equal("storageKey" in spec.payload, false);
+});
+
+/** The same pin for `file`, whose payload carries no `qa` key at all. */
+test("file publish hands the writer the payload the old path persisted", async () => {
+  const mockedServices = services({
+    download: vi.fn().mockResolvedValue(Buffer.from("a,b\n1,2\n")),
+  });
+
+  await publishArtifactFromSource({
+    context,
+    services: mockedServices,
+    toolCallId: "call-2",
+    input: {
+      artifactType: "file",
+      title: "Table Export",
+      description: "Quarterly numbers",
+      source: {
+        kind: "sandbox_path",
+        path: "/workspace/output/table.csv",
+      },
+    },
+  });
+
+  const call = mockedServices.artifacts.publishArtifact.mock.calls[0]?.[0];
+  assert.ok(call);
+  const spec = call.spec as unknown as PublishedSpec;
+
+  assert.deepEqual(spec.payload, {
+    artifactType: "file",
+    byteLength: "a,b\n1,2\n".length,
+    description: "Quarterly numbers",
+    fileName: "table.csv",
+    mimeType: "text/csv",
+    source: {
+      kind: "sandbox_path",
+      path: "/workspace/output/table.csv",
+    },
+    title: "Table Export",
+    toolCallId: "call-2",
+  });
+
+  assert.equal(spec.artifactType, "file");
+  assert.equal(spec.title, "Table Export");
+  assert.equal(spec.prompt, "Quarterly numbers");
+  assert.equal(spec.attachments?.length, 1);
+  assert.equal(spec.attachments?.[0]?.role, "primary");
+  assert.equal(spec.attachments?.[0]?.fileName, "table.csv");
+  assert.equal(spec.attachments?.[0]?.contentType, "text/csv");
+  assert.equal(spec.attachments?.[0]?.maxBytes, undefined);
+  assert.equal(spec.preview, undefined);
+  assert.equal("idempotency" in spec, false);
+  assert.equal("storageKey" in spec.payload, false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The live PPTX_* codes stay this package's, thrown before the writer         */
+/* -------------------------------------------------------------------------- */
+
+test("PPTX_OUTPUT_INVALID_EXTENSION is thrown here, before the writer is reached", async () => {
+  const mockedServices = services({
+    download: vi.fn().mockResolvedValue(validPptxBuffer()),
+  });
+
+  await assert.rejects(
+    () =>
+      publishArtifactFromSource({
+        context,
+        services: mockedServices,
+        input: slidesInput({
+          title: "Wrong Extension",
+          source: {
+            kind: "sandbox_path",
+            path: "/workspace/deck.pdf",
+          },
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_OUTPUT_INVALID_EXTENSION");
+      assert.equal(
+        error.message,
+        "PPTX_OUTPUT_INVALID_EXTENSION: path must end with .pptx: /workspace/deck.pdf",
+      );
+      return true;
+    },
+  );
+  assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 0);
+});
+
+test("PPTX_OUTPUT_INVALID_MIME is thrown here, before the writer is reached", async () => {
+  const mockedServices = services({
+    filesystem: {
+      readRaw: vi.fn().mockResolvedValue({
+        data: { content: validPptxBuffer(), mimeType: "text/plain" },
+      }),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      publishArtifactFromSource({
+        context,
+        services: mockedServices,
+        input: slidesInput({
+          title: "Wrong Mime",
+          source: {
+            kind: "work_file",
+            path: "/workfiles/deck.pptx",
+          },
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_OUTPUT_INVALID_MIME");
+      assert.equal(
+        error.message,
+        "PPTX_OUTPUT_INVALID_MIME: expected PPTX MIME type, received text/plain",
+      );
+      return true;
+    },
+  );
+  assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 0);
+});
+
+test("PPTX_PACKAGE_INVALID is thrown here, before the writer is reached", async () => {
+  const emptyServices = services({
+    download: vi.fn(async ({ sandboxPath }: { sandboxPath: string }) =>
+      sandboxPath.endsWith(".jpg")
+        ? Buffer.from("preview-bytes")
+        : Buffer.alloc(0),
+    ),
+  });
+
+  await assert.rejects(
+    () =>
+      publishArtifactFromSource({
+        context,
+        services: emptyServices,
+        input: slidesInput({
+          title: "Empty Deck",
+          source: {
+            kind: "sandbox_path",
+            path: "/workspace/empty.pptx",
+          },
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_PACKAGE_INVALID");
+      assert.equal(error.message, "PPTX_PACKAGE_INVALID: file is empty");
+      return true;
+    },
+  );
+  assert.equal(emptyServices.artifacts.publishArtifact.mock.calls.length, 0);
+
+  const notZipServices = services({
+    download: vi.fn(async ({ sandboxPath }: { sandboxPath: string }) =>
+      sandboxPath.endsWith(".jpg")
+        ? Buffer.from("preview-bytes")
+        : Buffer.from("not-a-zip-archive"),
+    ),
+  });
+
+  await assert.rejects(
+    () =>
+      publishArtifactFromSource({
+        context,
+        services: notZipServices,
+        input: slidesInput({
+          title: "Not A Zip",
+          source: {
+            kind: "sandbox_path",
+            path: "/workspace/not-a-zip.pptx",
+          },
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_PACKAGE_INVALID");
+      assert.equal(
+        error.message,
+        "PPTX_PACKAGE_INVALID: file is not a valid ZIP archive (missing PK magic bytes)",
+      );
+      return true;
+    },
+  );
+  assert.equal(notZipServices.artifacts.publishArtifact.mock.calls.length, 0);
+});
+
+test("PPTX_OUTPUT_TOO_LARGE is thrown here, before the writer is reached", async () => {
+  const oversized = Buffer.allocUnsafe(ARTIFACT_LIMITS.pptxBytes + 1);
+  const mockedServices = services({
+    download: vi.fn(async ({ sandboxPath }: { sandboxPath: string }) =>
+      sandboxPath.endsWith(".jpg") ? Buffer.from("preview-bytes") : oversized,
+    ),
+  });
+
+  await assert.rejects(
+    () =>
+      publishArtifactFromSource({
+        context,
+        services: mockedServices,
+        input: slidesInput({
+          title: "Huge Deck",
+          source: {
+            kind: "sandbox_path",
+            path: "/workspace/huge.pptx",
+          },
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_OUTPUT_TOO_LARGE");
+      assert.equal(
+        error.message,
+        `PPTX_OUTPUT_TOO_LARGE: ${ARTIFACT_LIMITS.pptxBytes + 1} bytes exceeds limit of ${ARTIFACT_LIMITS.pptxBytes} bytes`,
+      );
+      return true;
+    },
+  );
+  assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 0);
+});
+
+/**
+ * The fifth live code has no publish-path caller: `downloadPptxFromSandbox` is
+ * the only thrower, and the publish path reads its bytes through the source
+ * adapters (which raise `ARTIFACT_SOURCE_NOT_FOUND`). Pinned at its own entry
+ * point so the string stays a contract either way.
+ */
+test("PPTX_OUTPUT_NOT_FOUND keeps its code and message", async () => {
+  await assert.rejects(
+    () =>
+      downloadPptxFromSandbox({
+        provider: {
+          downloadFile: async () => {
+            throw new Error("no such file");
+          },
+        },
+        providerSandboxId: "sandbox-1",
+        sandboxPath: "/workspace/missing.pptx",
+        maxBytes: ARTIFACT_LIMITS.pptxBytes,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof PptxOutputError);
+      assert.equal(error.code, "PPTX_OUTPUT_NOT_FOUND");
+      assert.equal(
+        error.message,
+        "PPTX_OUTPUT_NOT_FOUND: sandbox download failed for /workspace/missing.pptx: no such file",
+      );
+      return true;
+    },
   );
 });
