@@ -103,16 +103,6 @@ export function resolveThreadInvocation(input: {
       },
     );
   }
-  if (output.status === "direct_execute_ready") {
-    throw new ContentError(
-      400,
-      "INVOCATION_UNSUPPORTED_PLAN",
-      "Direct MCP invocation execution is not available in thread turns",
-      {
-        sourceRef: output.plan.sourceRef,
-      },
-    );
-  }
   if (output.plan.kind === "bind_tool_choice") {
     return {
       kind: "fixed_tool_choice",

@@ -82,18 +82,6 @@ const mcpResourceDefinition: SelectableInvocationDefinition = {
   semantics: { kind: "mcp_resource", uri: "github://issues/1" },
 };
 
-const directExecuteDefinition: SelectableInvocationDefinition = {
-  id: "mcp_tool.mcp_install_1.direct_create_issue",
-  label: "Create issue directly",
-  enabled: true,
-  sourceRef: mcpToolDefinition.sourceRef,
-  semantics: {
-    kind: "direct_execute",
-    inputSchema: {},
-    requiresCompleteStructuredArgs: true,
-  },
-};
-
 test("resolver resolves capability tool selection to bind tool choice", () => {
   const registry = createSelectableInvocationRegistry({ providers: [provider([capabilityToolDefinition])] });
   const result = resolveInvocationSelection({
@@ -127,52 +115,6 @@ test("resolver resolves MCP tool without structured args to bind tool choice", (
   assert.equal(result.ok, true);
   assert.equal(result.ok ? result.plan.kind : null, "bind_tool_choice");
   assert.equal(result.ok ? result.plan.sourceRef.kind : null, "mcp_tool");
-});
-
-test("resolver resolves MCP tool with complete structured args to direct execute when eligible", () => {
-  const registry = createSelectableInvocationRegistry({ providers: [provider([mcpToolDefinition])] });
-  const result = resolveInvocationSelection({
-    registry,
-    envelope: {
-      selectableId: mcpToolDefinition.id,
-      userInput: "create an issue",
-      structuredArgs: { title: "Bug" },
-    },
-    directExecuteEligible: true,
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.ok ? result.plan.kind : null, "direct_execute");
-});
-
-test("resolver quarantines direct execute definitions unless explicitly eligible", () => {
-  const registry = createSelectableInvocationRegistry({
-    providers: [provider([directExecuteDefinition])],
-  });
-  const blocked = resolveInvocationSelection({
-    registry,
-    envelope: {
-      selectableId: directExecuteDefinition.id,
-      userInput: "create an issue",
-      structuredArgs: { title: "Bug" },
-    },
-  });
-  const allowed = resolveInvocationSelection({
-    registry,
-    envelope: {
-      selectableId: directExecuteDefinition.id,
-      userInput: "create an issue",
-      structuredArgs: { title: "Bug" },
-    },
-    directExecuteEligible: true,
-  });
-
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.ok ? null : blocked.error.code, "INVOCATION_UNAVAILABLE");
-  assert.equal(blocked.ok ? null : blocked.error.sourceRef?.kind, "mcp_tool");
-  assert.equal(blocked.ok ? null : blocked.error.recoverable, false);
-  assert.equal(allowed.ok, true);
-  assert.equal(allowed.ok ? allowed.plan.kind : null, "direct_execute");
 });
 
 test("resolver resolves MCP prompt and resource to typed planned states", () => {

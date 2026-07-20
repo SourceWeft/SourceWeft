@@ -60,11 +60,6 @@ export type InvocationSemantics =
       workflow: string;
     }
   | {
-      kind: "direct_execute";
-      requiresCompleteStructuredArgs: true;
-      inputSchema: Record<string, unknown>;
-    }
-  | {
       kind: "mcp_prompt";
       promptName: string;
     }
@@ -108,14 +103,6 @@ export type InvocationPlan =
       metadata?: Record<string, unknown>;
     }
   | {
-      kind: "direct_execute";
-      selectableId: string;
-      sourceRef: InvocationSourceRef;
-      semantics: Extract<InvocationSemantics, { kind: "direct_execute" }>;
-      structuredArgs?: Record<string, unknown>;
-      metadata?: Record<string, unknown>;
-    }
-  | {
       kind: "mcp_prompt";
       selectableId: string;
       sourceRef: Extract<InvocationSourceRef, { kind: "mcp_prompt" }>;
@@ -155,7 +142,6 @@ export type InvocationEventType =
   | "approval_required"
   | "tool_choice_bound"
   | "context_injected"
-  | "direct_execute"
   | "deepagents_handoff"
   | "result"
   | "error";
@@ -183,7 +169,6 @@ export type InvocationEvent =
       type: "context_injected";
       instruction: string;
     })
-  | (InvocationEventBase & { type: "direct_execute" })
   | (InvocationEventBase & { type: "deepagents_handoff"; boundary: "deepagents" })
   | (InvocationEventBase & { type: "result"; result: unknown })
   | (InvocationEventBase & {

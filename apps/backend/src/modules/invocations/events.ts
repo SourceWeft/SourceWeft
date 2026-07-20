@@ -12,7 +12,6 @@ export const INVOCATION_EVENT_TYPES: InvocationEventType[] = [
   "approval_required",
   "tool_choice_bound",
   "context_injected",
-  "direct_execute",
   "deepagents_handoff",
   "result",
   "error",

@@ -9,9 +9,9 @@ import {
 } from "./policy";
 import type { InvocationPlan } from "./types";
 
-function mcpDirectPlan(): InvocationPlan {
+function mcpToolPlan(): InvocationPlan {
   return {
-    kind: "direct_execute",
+    kind: "bind_tool_choice",
     selectableId: "mcp.mcp_install_1.tool.create_issue",
     sourceRef: {
       kind: "mcp_tool",
@@ -19,11 +19,11 @@ function mcpDirectPlan(): InvocationPlan {
       serverToolName: "create_issue",
     },
     semantics: {
-      kind: "direct_execute",
-      requiresCompleteStructuredArgs: true,
-      inputSchema: { type: "object" },
+      kind: "fixed_tool_choice",
+      target: "mcp_tool",
+      toolName: "mcp__mcp_install_1__create_issue",
     },
-    structuredArgs: { title: "Bug" },
+    userInput: "create an issue",
   };
 }
 
@@ -36,7 +36,7 @@ test("policy decisions model allow, deny, and ask without throwing", () => {
   const ask = askInvocationApproval({
     reason: "High-risk MCP tool requires approval",
     approvalRef: "approval_1",
-    sourceRef: mcpDirectPlan().sourceRef,
+    sourceRef: mcpToolPlan().sourceRef,
   });
 
   assert.equal(allow.decision, "allow");
@@ -51,7 +51,7 @@ test("ask includes approval reason and source metadata", () => {
   const ask = askInvocationApproval({
     reason: "High-risk MCP tool requires approval",
     approvalRef: "approval_1",
-    sourceRef: mcpDirectPlan().sourceRef,
+    sourceRef: mcpToolPlan().sourceRef,
     metadata: { risk: "high" },
   });
 
@@ -67,9 +67,9 @@ test("ask includes approval reason and source metadata", () => {
 test("normal deny and ask flows are evaluator outputs, not generic exceptions", async () => {
   const evaluator: InvocationPolicyEvaluator = {
     evaluate(input: InvocationPolicyContext) {
-      if (input.plan.kind === "direct_execute") {
+      if (input.plan.kind === "bind_tool_choice") {
         return askInvocationApproval({
-          reason: "Direct execution requires approval",
+          reason: "MCP tool execution requires approval",
           approvalRef: "approval_1",
           sourceRef: input.plan.sourceRef,
         });
@@ -81,7 +81,7 @@ test("normal deny and ask flows are evaluator outputs, not generic exceptions", 
   const decision = await evaluator.evaluate({
     workspaceId: "workspace_1",
     userId: "user_1",
-    plan: mcpDirectPlan(),
+    plan: mcpToolPlan(),
   });
 
   assert.equal(decision.decision, "ask");

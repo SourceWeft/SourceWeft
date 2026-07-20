@@ -4,7 +4,6 @@ import { createLangChainMcpClient } from "../../mcp/langchain-client";
 import { createDeepAgentsRuntimeHandoff } from "../deepagents-runtime";
 import {
   createCapabilityToolChoiceAdapter,
-  createDirectExecuteAdapter,
   createMcpToolChoiceAdapter,
   createSkillContextAdapter,
 } from "./strategy";
@@ -115,26 +114,4 @@ test("skill adapter returns context instruction payload only", () => {
     selectableId: "skill_command.research.summarize",
     instruction: "Summarize sources.",
   });
-});
-
-test("direct adapter rejects incomplete args and preserves policy gate result", () => {
-  const adapter = createDirectExecuteAdapter();
-  assert.throws(
-    () =>
-      adapter.prepare({
-        kind: "direct_execute",
-        selectableId: "mcp_tool.mcp_install_1.github_create_issue",
-        sourceRef: {
-          kind: "mcp_tool",
-          serverInstallId: "mcp_install_1",
-          serverToolName: "create_issue",
-        },
-        semantics: {
-          kind: "direct_execute",
-          requiresCompleteStructuredArgs: true,
-          inputSchema: {},
-        },
-      }),
-    /Direct execution requires complete structured args/,
-  );
 });

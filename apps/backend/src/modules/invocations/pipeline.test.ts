@@ -94,37 +94,3 @@ test("pipeline returns unavailable selection errors without policy or handoff", 
   assert.equal(output.status === "error" ? output.error.code : null, "INVOCATION_NOT_FOUND");
   assert.deepEqual(output.events.map((event) => event.type), ["error"]);
 });
-
-test("pipeline handles direct execution by plan kind, not concrete tool name", () => {
-  const mcpDefinition: SelectableInvocationDefinition = {
-    id: "mcp_tool.mcp_install_1.github_create_issue",
-    label: "Create issue",
-    enabled: true,
-    sourceRef: {
-      kind: "mcp_tool",
-      serverInstallId: "mcp_install_1",
-      serverToolName: "create_issue",
-    },
-    semantics: {
-      kind: "fixed_tool_choice",
-      target: "mcp_tool",
-      toolName: "mcp__mcp_install_1__github_create_issue",
-    },
-  };
-  const output = runInvocationPipeline({
-    registry: registry(mcpDefinition),
-    envelope: {
-      selectableId: mcpDefinition.id,
-      userInput: "create issue",
-      structuredArgs: { title: "Bug" },
-    },
-    directExecuteEligible: true,
-    policyEvaluator: () => allowInvocation({ reason: "Allowed" }),
-  });
-
-  assert.equal(output.status, "direct_execute_ready");
-  assert.deepEqual(
-    output.events.map((event) => event.type),
-    ["resolve", "policy", "direct_execute"],
-  );
-});

@@ -19,11 +19,6 @@ export type InvocationPipelineOutput =
       events: InvocationEvent[];
     }
   | {
-      status: "direct_execute_ready";
-      plan: Extract<InvocationPlan, { kind: "direct_execute" }>;
-      events: InvocationEvent[];
-    }
-  | {
       status: "approval_required";
       decision: Extract<InvocationPolicyDecision, { decision: "ask" }>;
       events: InvocationEvent[];
@@ -37,7 +32,6 @@ export type InvocationPipelineOutput =
 export function runInvocationPipeline(input: {
   registry: SelectableInvocationRegistry;
   envelope: InvocationEnvelope;
-  directExecuteEligible?: boolean;
   policyEvaluator: (
     context: InvocationPolicyContext,
   ) => InvocationPolicyDecision;
@@ -48,7 +42,6 @@ export function runInvocationPipeline(input: {
   const resolved = resolveInvocationSelection({
     registry: input.registry,
     envelope: input.envelope,
-    directExecuteEligible: input.directExecuteEligible,
   });
   if (!resolved.ok) {
     events.push(
@@ -106,16 +99,6 @@ export function runInvocationPipeline(input: {
     return { status: "error", error: decision.error, events };
   }
 
-  if (resolved.plan.kind === "direct_execute") {
-    events.push(
-      createInvocationEvent({
-        type: "direct_execute",
-        selectableId: input.envelope.selectableId,
-        sourceRef: resolved.plan.sourceRef,
-      }),
-    );
-    return { status: "direct_execute_ready", plan: resolved.plan, events };
-  }
   if (resolved.plan.kind === "bind_tool_choice") {
     events.push(
       createInvocationEvent({

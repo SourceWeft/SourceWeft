@@ -12,7 +12,6 @@ export type DeepAgentsHandoffAdapterOutput = {
 
 type ToolChoicePlan = Extract<InvocationPlan, { kind: "bind_tool_choice" }>;
 type ContextPlan = Extract<InvocationPlan, { kind: "inject_context" }>;
-type DirectExecutePlan = Extract<InvocationPlan, { kind: "direct_execute" }>;
 
 export function createCapabilityToolChoiceAdapter(input: {
   tools: DeepAgentsRuntimeTool[];
@@ -77,22 +76,6 @@ export function createSkillContextAdapter() {
         kind: "context_payload" as const,
         selectableId: plan.selectableId,
         instruction: plan.semantics.workflow,
-      };
-    },
-  };
-}
-
-export function createDirectExecuteAdapter() {
-  return {
-    prepare(plan: DirectExecutePlan) {
-      if (!plan.structuredArgs || Object.keys(plan.structuredArgs).length === 0) {
-        throw new Error("Direct execution requires complete structured args");
-      }
-      return {
-        kind: "direct_execute_payload" as const,
-        selectableId: plan.selectableId,
-        sourceRef: plan.sourceRef,
-        structuredArgs: plan.structuredArgs,
       };
     },
   };
