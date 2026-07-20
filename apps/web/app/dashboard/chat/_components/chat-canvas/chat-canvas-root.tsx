@@ -52,7 +52,6 @@ import type {
   ChatToolName,
   CapabilityCatalog,
   CitationRecord,
-  ImageModelCapabilities,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
   ToolConfirmationInterventionSignal,
@@ -174,7 +173,7 @@ export function ChatCanvas({
   thinkingSettings,
   toolConfirmationInterventionSignal = null,
   onThinkingSettingsChange,
-  imageCapabilities,
+  modelCapabilities,
   imageModelAvailable,
   imageModelAlias,
   notionConnectorId = null,
@@ -254,7 +253,7 @@ export function ChatCanvas({
   thinkingSettings?: PromptThinkingSettings;
   toolConfirmationInterventionSignal?: ToolConfirmationInterventionSignal | null;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
-  imageCapabilities?: ImageModelCapabilities;
+  modelCapabilities?: Record<string, unknown>;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
@@ -615,7 +614,7 @@ export function ChatCanvas({
         selectedSources={selectedSources}
         thinkingCapabilities={thinkingCapabilities}
         thinkingSettings={thinkingSettings}
-        imageCapabilities={imageCapabilities}
+        modelCapabilities={modelCapabilities}
         imageModelAvailable={imageModelAvailable}
         imageModelAlias={imageModelAlias}
         notionConnectorId={notionConnectorId}
@@ -791,7 +790,7 @@ export function ChatCanvas({
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}
-            imageCapabilities={imageCapabilities}
+            modelCapabilities={modelCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
             notionConnectorId={notionConnectorId}

@@ -35,6 +35,7 @@ import {
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   resolveSelectedModelsWithByok,
+  selectedModelCapabilities,
   type ModelItem,
   type SelectedModels,
   type ModelType,
@@ -1142,9 +1143,7 @@ export function DashboardChatPageClient() {
             selectedMcpToolIds={activeMcpToolIds}
             sourcesVisible={sourcesVisible}
             thinkingCapabilities={selectedModels.llm?.capabilities}
-            imageCapabilities={
-              selectedModels.image?.capabilities?.imageGeneration
-            }
+            modelCapabilities={selectedModelCapabilities(selectedModels)}
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
             notionConnectorId={activeConnectorTools.notionConnectorId}

@@ -16,7 +16,6 @@ import type {
   ChatSkillItem,
   ChatToolName,
   CapabilityCatalog,
-  ImageModelCapabilities,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
 } from "./types";
@@ -70,7 +69,7 @@ export function EmptyState({
   thinkingCapabilities,
   thinkingSettings,
   onThinkingSettingsChange,
-  imageCapabilities,
+  modelCapabilities,
   imageModelAvailable,
   imageModelAlias,
   notionConnectorId = null,
@@ -101,7 +100,7 @@ export function EmptyState({
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
-  imageCapabilities?: ImageModelCapabilities;
+  modelCapabilities?: Record<string, unknown>;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
@@ -192,7 +191,7 @@ export function EmptyState({
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}
-            imageCapabilities={imageCapabilities}
+            modelCapabilities={modelCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
             notionConnectorId={notionConnectorId}

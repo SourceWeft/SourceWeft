@@ -172,6 +172,10 @@ function capabilityOptionsToSkillOptions(
       ...(option.target.toolName ? { toolName: option.target.toolName } : {}),
       path: option.target.path,
     },
+    // Forwarded verbatim. The host never reads `key`/`path` — they name a
+    // capability's own model-catalog annotation, and the composer resolves
+    // them.
+    ...(option.modelValues ? { modelValues: option.modelValues } : {}),
     values: option.values.map((value) => ({
       value: value.value,
       ...(value.label ? { label: value.label } : {}),

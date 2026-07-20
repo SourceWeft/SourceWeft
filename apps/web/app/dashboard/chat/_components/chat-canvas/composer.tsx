@@ -94,6 +94,7 @@ import {
   buildCapabilityToolToggleSelection,
   buildComposerToolsSelection,
   buildSkillOptionToolsSelection,
+  composerOptionValues,
   getConnectorAgentToolNames,
   isCapabilityToolVisibleInComposerOptions,
   isSkillViable,
@@ -111,7 +112,6 @@ import type {
   ChatToolSelection,
   ChatToolsSelection,
   CapabilityCatalog,
-  ImageModelCapabilities,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
   ThinkingEffort,
@@ -413,7 +413,7 @@ export function Composer({
   thinkingCapabilities,
   thinkingSettings = { mode: "auto" as const, effort: "medium" as const },
   onThinkingSettingsChange,
-  imageCapabilities,
+  modelCapabilities,
   imageModelAvailable = false,
   imageModelAlias,
   notionConnectorId = null,
@@ -458,7 +458,12 @@ export function Composer({
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
-  imageCapabilities?: ImageModelCapabilities;
+  /**
+   * What the selected models advertise, keyed by the annotation key each
+   * capability chose. Opaque to the composer — it is only ever walked by the
+   * path an option's `modelValues` pointer names.
+   */
+  modelCapabilities?: Record<string, unknown>;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
@@ -1058,54 +1063,21 @@ export function Composer({
     }
   }
 
-  function getCapabilityOptionValues(
-    tool: CapabilityCatalogTool,
-    option: CapabilityToolOption,
+  /**
+   * The values to offer for one option, narrowed to what the selected model
+   * supports.
+   *
+   * One function for both the capability-tool picker and the skill picker,
+   * because neither has anything capability-specific left to say: the option
+   * carries a `modelValues` pointer into the model's advertised capabilities,
+   * and this resolves it. Nothing here knows which tool the option belongs to
+   * or what the option means, so a new capability with model-constrained
+   * options needs no edit in this file.
+   */
+  function getComposerOptionValues(
+    option: CapabilityToolOption | SkillOption,
   ) {
-    const configuredValues = option.values ?? [];
-    if (tool.toolName !== AGENT_TOOL_NAMES.generateImage) {
-      return configuredValues;
-    }
-    const supportedValues =
-      option.id === "aspectRatio"
-        ? imageCapabilities?.controls?.aspectRatio?.values
-        : option.id === "quality"
-          ? imageCapabilities?.controls?.quality?.values
-          : option.id === "style"
-            ? imageCapabilities?.controls?.style?.values
-            : undefined;
-    if (!supportedValues?.length) {
-      return configuredValues;
-    }
-    const supported = new Set<string>(supportedValues as readonly string[]);
-    return configuredValues.filter(
-      (candidate) =>
-        typeof candidate.value !== "string" || supported.has(candidate.value),
-    );
-  }
-
-  function getSkillOptionValues(option: SkillOption) {
-    const configuredValues = option.values ?? [];
-    if (option.target.toolName !== AGENT_TOOL_NAMES.generateImage) {
-      return configuredValues;
-    }
-    const targetConfigKey = option.target.path.split(".").at(-1);
-    const supportedValues =
-      targetConfigKey === "aspectRatio"
-        ? imageCapabilities?.controls?.aspectRatio?.values
-        : targetConfigKey === "quality"
-          ? imageCapabilities?.controls?.quality?.values
-          : targetConfigKey === "style"
-            ? imageCapabilities?.controls?.style?.values
-            : undefined;
-    if (!supportedValues?.length) {
-      return configuredValues;
-    }
-    const supported = new Set<string>(supportedValues as readonly string[]);
-    return configuredValues.filter(
-      (candidate) =>
-        typeof candidate.value !== "string" || supported.has(candidate.value),
-    );
+    return composerOptionValues(option, modelCapabilities);
   }
 
   function getCapabilityOptionValue(
@@ -1855,10 +1827,8 @@ export function Composer({
                                         tool,
                                         option,
                                       );
-                                      const values = getCapabilityOptionValues(
-                                        tool,
-                                        option,
-                                      );
+                                      const values =
+                                        getComposerOptionValues(option);
                                       const optionChanged =
                                         overrides[option.id] !== undefined;
                                       const valueLabel =
@@ -2126,7 +2096,7 @@ export function Composer({
                                           option,
                                         );
                                         const values =
-                                          getSkillOptionValues(option);
+                                          getComposerOptionValues(option);
                                         const optionChanged =
                                           overrides[option.id] !== undefined;
                                         const valueLabel =

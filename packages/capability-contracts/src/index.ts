@@ -156,6 +156,24 @@ export const capabilityOptionSchema = z.object({
       path: capabilityOptionTargetPathSchema,
     })
     .optional(),
+  /**
+   * "The values I can offer depend on the selected model." `key` names the
+   * model-catalog annotation this capability contributes (see
+   * `AgentToolModelCatalogAnnotation` in @sourceweft/contracts) and `path` is a
+   * dotted path inside it to the array of values that model supports.
+   *
+   * Declared here so the option itself carries the rule. The client resolving
+   * it — the composer's option picker — then narrows any option the same way,
+   * instead of carrying one hardcoded branch per capability that happens to
+   * have model-constrained options.
+   */
+  modelValues: z
+    .object({
+      key: z.string().min(1),
+      path: z.string().min(1),
+    })
+    .strict()
+    .optional(),
   values: z
     .array(
       z.object({

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 import {
   AGENT_TOOL_NAMES,
@@ -10,10 +13,12 @@ import {
   buildCapabilityToolToggleSelection,
   buildComposerToolsSelection,
   buildSkillOptionToolsSelection,
+  composerOptionValues,
   isCapabilityToolVisibleInComposerOptions,
   resolveDefaultActiveSkillIds,
   toggleSkillSelection,
 } from "./tool-selection";
+import type { CapabilityToolOption } from "@sourceweft/sdk";
 
 const TEST_NOTION_TOOL = "test_notion_pages";
 
@@ -464,4 +469,97 @@ test("buildCapabilityToolToggleSelection maps tool enabled overrides", () => {
   assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
     enabled: false,
   });
+});
+
+/**
+ * The image capability's real option declarations, read off the manifest it
+ * ships rather than restated here.
+ *
+ * This is deliberate. The point of the declared `modelValues` pointer is that
+ * the composer no longer hardcodes "the image tool's aspectRatio option is
+ * constrained by the model's advertised aspect ratios" — the capability says
+ * so. A test that restated the pointer inline would still pass if the
+ * capability stopped declaring it, and the picker would silently stop being
+ * narrowed. Reading the shipped manifest makes that failure visible.
+ */
+const imageToolOptions = (
+  JSON.parse(
+    readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "../../../../../../../packages/builtin-tool-generate-image/sourceweft.capability.json",
+      ),
+      "utf8",
+    ),
+  ) as {
+    tools: { options: (CapabilityToolOption & { id: string })[] }[];
+  }
+).tools[0]!.options;
+
+function imageOption(id: string) {
+  const option = imageToolOptions.find((candidate) => candidate.id === id);
+  assert.ok(option, `generate_image no longer declares an "${id}" option`);
+  return option;
+}
+
+/** Shaped like a model-catalog row's `capabilities` record. */
+const IMAGE_MODEL_CAPABILITIES = {
+  imageGeneration: {
+    supported: true,
+    controls: {
+      aspectRatio: { values: ["auto", "1:1", "16:9"] },
+      style: { values: ["auto", "ghibli"] },
+    },
+  },
+};
+
+test("composerOptionValues narrows image options to what the model advertises", () => {
+  // Behaviour parity check for the refactor that replaced the composer's
+  // hardcoded `toolName === generateImage` branch with the declared pointer:
+  // the same three options must still be filtered the same way.
+  assert.deepEqual(
+    composerOptionValues(
+      imageOption("aspectRatio"),
+      IMAGE_MODEL_CAPABILITIES,
+    ).map((value) => value.value),
+    ["auto", "1:1", "16:9"],
+  );
+  assert.deepEqual(
+    composerOptionValues(imageOption("style"), IMAGE_MODEL_CAPABILITIES).map(
+      (value) => value.value,
+    ),
+    ["auto", "ghibli"],
+  );
+});
+
+test("composerOptionValues leaves an option the model says nothing about alone", () => {
+  // The model above advertises no `quality` control at all. Silence means
+  // "unconstrained", not "nothing supported" — the picker keeps every declared
+  // value rather than going empty.
+  const quality = imageOption("quality");
+  assert.deepEqual(
+    composerOptionValues(quality, IMAGE_MODEL_CAPABILITIES),
+    quality.values,
+  );
+  assert.deepEqual(
+    composerOptionValues(imageOption("aspectRatio"), undefined),
+    imageOption("aspectRatio").values,
+  );
+});
+
+test("composerOptionValues leaves an option with no declaration alone", () => {
+  // A capability that never says its values depend on the model gets the full
+  // list back, whatever the selected model happens to advertise. This is the
+  // property that lets the composer run one code path over every option.
+  const undeclared = {
+    id: "tone",
+    title: "Tone",
+    valueType: "string" as const,
+    values: [{ value: "warm" }, { value: "cool" }],
+  };
+
+  assert.deepEqual(
+    composerOptionValues(undeclared, IMAGE_MODEL_CAPABILITIES),
+    undeclared.values,
+  );
 });

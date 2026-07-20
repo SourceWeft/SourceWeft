@@ -2,7 +2,10 @@ import { z } from "zod";
 import { toolApprovalResumeSchema } from "./agent-confirmations";
 import { APPEND_NOTION_PAGE_TOOL_NAME, CREATE_NOTION_PAGE_TOOL_NAME, DELETE_NOTION_PAGE_TOOL_NAME, GENERATE_IMAGE_TOOL_NAME, GENERATE_VIDEO_PRESENTATION_TOOL_NAME, PUBLISH_ARTIFACT_TOOL_NAME, READ_NOTION_PAGE_TOOL_NAME, SAVE_ARTIFACT_TO_NOTION_TOOL_NAME, SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME, SEARCH_NOTION_PAGES_TOOL_NAME, UPDATE_NOTION_PAGE_TOOL_NAME, WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from "./agent-tools";
 import { meterConsumeResponseSchema } from "./billing";
-import { capabilityOptionValueSchema } from "./capabilities";
+import {
+  capabilityOptionModelValuesSchema,
+  capabilityOptionValueSchema,
+} from "./capabilities";
 import { messageSchema } from "./messages";
 import { skillRuntimeConfigSelectionSchema } from "./skills";
 import { retrievalResponseSchema } from "./sources";
@@ -197,6 +200,10 @@ const capabilityToolOptionSchema = z
         path: z.string(),
       })
       .optional(),
+    // Present when the capability says this option's values depend on the
+    // selected model; the client narrows the picker through it without knowing
+    // what the option is.
+    modelValues: capabilityOptionModelValuesSchema.optional(),
     values: z.array(
       z.object({
         value: capabilityOptionValueSchema,

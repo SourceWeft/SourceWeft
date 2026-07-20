@@ -76,6 +76,14 @@ export type ArtifactIntentDecision = {
   readonly warnings: readonly string[];
 };
 
+/**
+ * The key this capability's model-catalog annotation occupies inside a model
+ * row's `capabilities` record. Declared here rather than inline in
+ * `agent-tool-defs.ts` because the option declarations in `options.ts` point
+ * back at the same annotation, and the two must not drift.
+ */
+export const IMAGE_MODEL_CATALOG_KEY = "imageGeneration";
+
 export type ImageToolOption = {
   readonly id: "aspectRatio" | "quality" | "style";
   readonly title: string;
@@ -85,6 +93,15 @@ export type ImageToolOption = {
   readonly target: {
     readonly toolId: GenerateImageToolId;
     readonly path: `config.${string}`;
+  };
+  /**
+   * Not every image model honours every ratio/quality/style, so the picker is
+   * narrowed to what the selected model advertises. This says where that answer
+   * lives inside {@link ImageModelCapabilities}; the client walks it blind.
+   */
+  readonly modelValues: {
+    readonly key: typeof IMAGE_MODEL_CATALOG_KEY;
+    readonly path: `controls.${string}.values`;
   };
   readonly values: readonly {
     readonly value: string;

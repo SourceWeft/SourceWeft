@@ -7,8 +7,13 @@ import {
   isAgentToolUserDisableSupported,
   isAgentToolUserEnableSupported,
 } from "@sourceweft/agent-tool-registry";
+import { filterModelSupportedOptionValues } from "@sourceweft/contracts/agent-tools";
 import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
-import type { CapabilityCatalogTool } from "@sourceweft/sdk";
+import type {
+  CapabilityCatalogTool,
+  CapabilityToolOption,
+  SkillOption,
+} from "@sourceweft/sdk";
 import type {
   ChatSkillItem,
   ChatToolSelection,
@@ -20,6 +25,31 @@ const WEB_ACCESS_TOOL_NAMES = new Set<string>([
   AGENT_TOOL_NAMES.webSearch,
   AGENT_TOOL_NAMES.webFetch,
 ]);
+
+/**
+ * The values the composer should offer for one configurable option.
+ *
+ * Capability-tool options and skill-targeted options are the same problem and
+ * get the same answer: start from everything the capability declared, then drop
+ * whatever the selected model does not advertise. Which annotation holds that
+ * answer, and where inside it, is stated by the option's own `modelValues`
+ * pointer — so this stays blind to what any option means. An option without the
+ * pointer, or a model that advertises nothing for it, is simply unconstrained.
+ *
+ * This wrapper exists so both composer call sites and this module's tests share
+ * one path; the resolution itself lives in @sourceweft/contracts next to the
+ * model-catalog annotation it reads.
+ */
+export function composerOptionValues(
+  option: CapabilityToolOption | SkillOption,
+  modelCapabilities: Record<string, unknown> | undefined,
+) {
+  return filterModelSupportedOptionValues(
+    option.values ?? [],
+    option.modelValues,
+    modelCapabilities,
+  );
+}
 
 /** Re-exported so the composer and the API boundary cannot drift apart. */
 export const MAX_SELECTED_SKILL_IDS_PER_TURN = MAX_SELECTED_SKILLS_PER_TURN;

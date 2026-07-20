@@ -24,6 +24,7 @@ export const builtinGenerateImageCapabilityManifest: CapabilityManifestInput = {
           valueType: option.valueType,
           defaultValue: option.defaultValue,
           target: { path: option.target.path },
+          modelValues: option.modelValues,
           values: option.values.map((value) => ({
             value: value.value,
             label: value.label,

@@ -288,6 +288,15 @@ export type SkillManifestJson = {
       toolName?: string;
       path: string;
     };
+    /**
+     * Pointer to the model-catalog annotation that narrows this option's
+     * values for the selected model. Opaque here — it is capability vocabulary
+     * that the manifest carries through to the client unread.
+     */
+    modelValues?: {
+      key: string;
+      path: string;
+    };
     values: {
       value: string | number | boolean;
       label?: string;

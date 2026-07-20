@@ -13,6 +13,15 @@ export type SkillOptionDescriptor = {
     toolName?: string;
     path: string;
   };
+  /**
+   * Set when the option's values are narrowed by the selected model. The host
+   * only forwards it; resolving it is the client's job and the meaning is the
+   * capability's.
+   */
+  modelValues?: {
+    key: string;
+    path: string;
+  };
   values: Array<{
     value: string | number | boolean;
     label?: string;

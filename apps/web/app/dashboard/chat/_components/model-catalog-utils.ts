@@ -81,6 +81,30 @@ export type ModelAliasSettings = {
 
 export type SelectedModels = Record<ModelType, ModelItem | null>;
 
+/**
+ * Everything the models the user has selected advertise about themselves, as
+ * one opaque record.
+ *
+ * Capabilities annotate model-catalog rows under a key they choose, and a row
+ * only carries annotations for its own model kind, so the keys of the three
+ * selections do not collide. Merging rather than routing by kind is deliberate:
+ * a client resolving an option's `modelValues` pointer names a key, not a kind,
+ * so a capability that annotates a different model kind than the ones we happen
+ * to have in mind today needs no edit here.
+ *
+ * Values stay `unknown`. Nothing on this side of the boundary reads them; they
+ * are only walked by path on behalf of the capability that wrote them.
+ */
+export function selectedModelCapabilities(
+  selectedModels: SelectedModels,
+): Record<string, unknown> {
+  return {
+    ...(selectedModels.llm?.capabilities ?? {}),
+    ...(selectedModels.vision?.capabilities ?? {}),
+    ...(selectedModels.image?.capabilities ?? {}),
+  };
+}
+
 type CatalogModelEntry = {
   profileAlias: string;
   modelAlias: string;

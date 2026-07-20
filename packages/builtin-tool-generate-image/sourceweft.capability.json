@@ -27,6 +27,10 @@
           "target": {
             "path": "config.aspectRatio"
           },
+          "modelValues": {
+            "key": "imageGeneration",
+            "path": "controls.aspectRatio.values"
+          },
           "values": [
             {
               "value": "auto",
@@ -99,6 +103,10 @@
           "target": {
             "path": "config.quality"
           },
+          "modelValues": {
+            "key": "imageGeneration",
+            "path": "controls.quality.values"
+          },
           "values": [
             {
               "value": "auto",
@@ -130,6 +138,10 @@
           "defaultValue": "auto",
           "target": {
             "path": "config.style"
+          },
+          "modelValues": {
+            "key": "imageGeneration",
+            "path": "controls.style.values"
           },
           "values": [
             {

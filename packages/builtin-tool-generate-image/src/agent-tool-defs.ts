@@ -1,6 +1,7 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 import { normalizeGenerateImageToolSelection } from "./image-config";
 import { resolveImageModelCapabilities } from "./image-capabilities";
+import { IMAGE_MODEL_CATALOG_KEY } from "./image-types";
 import { generateImagePresentation } from "./presentation";
 import { generateImageTurnPreflight } from "./turn-preflight";
 
@@ -37,7 +38,8 @@ export const generateImageAgentTool = defineAgentTool({
   // image models and the user's key, which only an async host lookup answers.
   turnPreflight: generateImageTurnPreflight,
   modelCatalog: {
-    key: "imageGeneration",
+    // Same key the tool's options point at from `options.ts`.
+    key: IMAGE_MODEL_CATALOG_KEY,
     describe: (input) =>
       resolveImageModelCapabilities({
         configJson: input.configJson,

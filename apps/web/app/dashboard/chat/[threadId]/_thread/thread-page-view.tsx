@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { ChatCanvas } from "../../_components/chat-canvas";
+import { selectedModelCapabilities } from "../../_components/model-catalog-utils";
 import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-skeleton";
 import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
@@ -316,9 +317,7 @@ export function DashboardChatThreadPageView({
             toolConfirmationInterventionSignal={
               toolConfirmationInterventionSignal
             }
-            imageCapabilities={
-              selectedModels.image?.capabilities?.imageGeneration
-            }
+            modelCapabilities={selectedModelCapabilities(selectedModels)}
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
             notionConnectorId={activeConnectorTools.notionConnectorId}

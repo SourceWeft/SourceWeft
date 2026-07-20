@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { capabilityOptionValueSchema } from "./capabilities";
+import {
+  capabilityOptionModelValuesSchema,
+  capabilityOptionValueSchema,
+} from "./capabilities";
 
 const skillSlashConfigSchema = z
   .object({
@@ -44,6 +47,10 @@ const skillOptionSchema = z
       toolName: z.string().optional(),
       path: z.string(),
     }),
+    // See capabilityToolOptionSchema in stream.ts — same pointer, same reason:
+    // a skill-targeted option is narrowed by the selected model too, and the
+    // composer must not have to know which option that applies to.
+    modelValues: capabilityOptionModelValuesSchema.optional(),
     values: z.array(
       z.object({
         value: capabilityOptionValueSchema,
