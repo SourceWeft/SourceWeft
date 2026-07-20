@@ -5,6 +5,7 @@ import {
   SANDBOX_OPERATION_STALE_GRACE_MS,
   SANDBOX_OPERATION_STALE_RELEASED_CODE,
   SANDBOX_RELEASE_LEASE_GRACE_MS,
+  maxSandboxCommandTimeoutMs,
   type AgentSandboxRuntimeForTurn,
   type SandboxRuntimeName,
   type SandboxRuntimeRequest,
@@ -28,7 +29,11 @@ function currentSandboxServiceConfig(): SandboxServiceConfig {
     provider: config.sandbox.provider,
     limits: {
       ttlSeconds: config.sandbox.ttlSeconds,
-      commandTimeoutMs: config.sandbox.commandTimeoutMs,
+      commandBudgetsMs: {
+        interactive: config.sandbox.commandTimeoutMs,
+        batch: config.sandbox.batchCommandTimeoutMs,
+      },
+      maxCommandTimeoutMs: config.sandbox.maxCommandTimeoutMs,
       maxOutputChars: config.sandbox.maxOutputChars,
       maxPrepareFileBytes: config.sandbox.maxPrepareFileBytes,
       maxPrepareTotalBytes: config.sandbox.maxPrepareTotalBytes,
@@ -237,9 +242,13 @@ export const agentSandboxService = {
       return { released: 0 };
     }
 
+    // An operation row is only presumed dead once no command class could still
+    // have it running, so this subtracts the *longest* budget, not the
+    // interactive one. Using the interactive budget here would fail live
+    // long-running host commands mid-flight and release their sandbox lease.
     const staleBefore = new Date(
       Date.now() -
-        runtimeConfig.limits.commandTimeoutMs -
+        maxSandboxCommandTimeoutMs(runtimeConfig.limits) -
         SANDBOX_OPERATION_STALE_GRACE_MS,
     );
     const rows = await db.query.agentSandboxOperations.findMany({

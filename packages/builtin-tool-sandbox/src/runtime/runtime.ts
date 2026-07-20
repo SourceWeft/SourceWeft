@@ -7,6 +7,11 @@ import type {
   SandboxRuntimeLimits,
   SandboxStore,
 } from "./types";
+import type { SandboxCommandBudget } from "./command-budgets";
+import {
+  maxSandboxCommandTimeoutMs,
+  resolveSandboxCommandTimeoutMs,
+} from "./command-budgets";
 import { SandboxManager } from "./sandbox-manager";
 import { SourceWeftSandboxBackend } from "./sourceweft-sandbox-backend";
 import { createSandboxTools } from "./sandbox-tools";
@@ -32,19 +37,39 @@ export function createSandboxRuntimeForTurn(input: {
   operationStore: SandboxOperationStore;
   toolApprovalEnabled: boolean;
   environment?: string;
+  /**
+   * Class of operation this runtime's commands belong to. Chosen once, here,
+   * by whoever constructs the runtime — host code names `batch` as a literal;
+   * the agent turn names nothing and gets the interactive default.
+   *
+   * SECURITY: this is the only place a command timeout is selected. It is
+   * deliberately not a per-call argument, because the model reaches
+   * `backend.execute` through a tool whose input is just a command string —
+   * with no per-call knob there is nothing for tool input to set. Move this to
+   * an `execute()` option and a longer timeout becomes self-serve for the
+   * model, which defeats the point of having a ceiling at all.
+   */
+  commandBudget?: SandboxCommandBudget;
 }): SandboxRuntimeForTurn {
+  const commandTimeoutMs = resolveSandboxCommandTimeoutMs({
+    limits: input.limits,
+    budget: input.commandBudget,
+  });
   const manager = new SandboxManager({
     provider: input.provider,
     sandboxStore: input.sandboxStore,
     operationStore: input.operationStore,
     ttlSeconds: input.limits.ttlSeconds,
-    commandTimeoutMs: input.limits.commandTimeoutMs,
+    // Staleness is swept against the longest budget, not this runtime's — see
+    // maxSandboxCommandTimeoutMs.
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(input.limits),
     environment: input.environment,
   });
   const backend = new SourceWeftSandboxBackend({
     manager,
     context: input.context,
     limits: input.limits,
+    commandTimeoutMs,
     toolApprovalEnabled: input.toolApprovalEnabled,
   });
   return {

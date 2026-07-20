@@ -23,6 +23,13 @@ import {
   resolveSandboxToolOperationReplay,
   stableSandboxRequestJson,
 } from "./runtime/sandbox-manager";
+import {
+  DEFAULT_SANDBOX_COMMAND_BUDGET,
+  SANDBOX_COMMAND_BUDGETS,
+  maxSandboxCommandTimeoutMs,
+  resolveSandboxCommandTimeoutMs,
+} from "./runtime/command-budgets";
+import type { SandboxCommandBudget } from "./runtime/command-budgets";
 import { createSandboxRuntimeForTurn } from "./runtime/runtime";
 import { createSandboxTools } from "./runtime/sandbox-tools";
 import { SourceWeftSandboxBackend } from "./runtime/sourceweft-sandbox-backend";
@@ -87,6 +94,10 @@ export {
   sandboxToolInterruptDescriptions,
 };
 export {
+  DEFAULT_SANDBOX_COMMAND_BUDGET,
+  SANDBOX_COMMAND_BUDGETS,
+  maxSandboxCommandTimeoutMs,
+  resolveSandboxCommandTimeoutMs,
   createSandboxInterruptConfigs,
   SANDBOX_OPERATION_STALE_GRACE_MS,
   SANDBOX_OPERATION_STALE_RELEASED_CODE,
@@ -114,6 +125,7 @@ export {
   sandboxRequestFingerprint,
 };
 export type {
+  SandboxCommandBudget,
   CollectSandboxOutputsInput,
   PrepareSandboxWorkspaceInput,
   SandboxRuntimePromptCapabilities,

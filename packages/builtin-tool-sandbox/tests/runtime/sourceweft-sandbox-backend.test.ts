@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SourceWeftSandboxBackend } from "../../src/runtime/sourceweft-sandbox-backend";
 import { SandboxManager } from "../../src/runtime/sandbox-manager";
+import {
+  maxSandboxCommandTimeoutMs,
+  resolveSandboxCommandTimeoutMs,
+} from "../../src/runtime/command-budgets";
 import type {
   SandboxOperationStore,
   SandboxProvider,
@@ -36,7 +40,8 @@ const contextWithoutExecuteToolCallId: SandboxRuntimeContext = {
 
 const limits: SandboxRuntimeLimits = {
   ttlSeconds: 3600,
-  commandTimeoutMs: 1000,
+  commandBudgetsMs: { interactive: 1000, batch: 4000 },
+  maxCommandTimeoutMs: 10000,
   maxOutputChars: 10000,
   maxPrepareFileBytes: 10000,
   maxPrepareTotalBytes: 10000,
@@ -333,12 +338,13 @@ function createBackend() {
     sandboxStore: createSandboxStore(),
     operationStore: createNullOperationStore(),
     ttlSeconds: limits.ttlSeconds,
-    commandTimeoutMs: limits.commandTimeoutMs,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
   });
   const backend = new SourceWeftSandboxBackend({
     manager,
     context,
     limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
     toolApprovalEnabled: true,
   });
   return { backend, files, provider };
@@ -357,12 +363,13 @@ function createBackendWithOperationStore(
     sandboxStore: createSandboxStore(),
     operationStore,
     ttlSeconds: limits.ttlSeconds,
-    commandTimeoutMs: limits.commandTimeoutMs,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
   });
   const backend = new SourceWeftSandboxBackend({
     manager,
     context: input.runtimeContext ?? context,
     limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
     toolApprovalEnabled: input.toolApprovalEnabled ?? true,
   });
   return { backend, files, provider };
@@ -380,12 +387,13 @@ function createBackendWithProvider(
     sandboxStore,
     operationStore,
     ttlSeconds: limits.ttlSeconds,
-    commandTimeoutMs: limits.commandTimeoutMs,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
   });
   const backend = new SourceWeftSandboxBackend({
     manager,
     context: runtimeContext,
     limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
     toolApprovalEnabled,
   });
   return { backend, sandboxStore };
@@ -493,7 +501,7 @@ test("SourceWeftSandboxBackend passes raw execute commands with backend-controll
       providerSandboxId: "provider-sandbox-1",
       command,
       cwd: "/workspace",
-      timeoutMs: limits.commandTimeoutMs,
+      timeoutMs: limits.commandBudgetsMs.interactive,
       maxOutputChars: limits.maxOutputChars,
     },
   ]);
@@ -514,7 +522,7 @@ test("SourceWeftSandboxBackend passes multiline execute commands through unchang
       providerSandboxId: "provider-sandbox-1",
       command,
       cwd: "/workspace",
-      timeoutMs: limits.commandTimeoutMs,
+      timeoutMs: limits.commandBudgetsMs.interactive,
       maxOutputChars: limits.maxOutputChars,
     },
   ]);

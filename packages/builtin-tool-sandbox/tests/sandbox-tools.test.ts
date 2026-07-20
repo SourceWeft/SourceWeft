@@ -8,6 +8,7 @@ import {
   buildSandboxRuntimePrompt,
   collectSandboxOutputsSchema,
   createSandboxTools,
+  maxSandboxCommandTimeoutMs,
   prepareSandboxWorkspaceSchema,
   SandboxManager,
   sandboxToolDescriptions,
@@ -41,7 +42,8 @@ const TEST_CONTEXT: SandboxRuntimeContext = {
 
 const TEST_LIMITS: SandboxRuntimeLimits = {
   ttlSeconds: 3600,
-  commandTimeoutMs: 1000,
+  commandBudgetsMs: { interactive: 1000, batch: 4000 },
+  maxCommandTimeoutMs: 10000,
   maxOutputChars: 10000,
   maxPrepareFileBytes: 10000,
   maxPrepareTotalBytes: 10000,
@@ -386,7 +388,7 @@ test("collect_sandbox_outputs returns a recoverable error for binary PPTX output
     sandboxStore: createSandboxStore(),
     operationStore,
     ttlSeconds: TEST_LIMITS.ttlSeconds,
-    commandTimeoutMs: TEST_LIMITS.commandTimeoutMs,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(TEST_LIMITS),
   });
   const tools = createSandboxTools({
     filesystem: {
@@ -481,7 +483,7 @@ test("prepare_sandbox_workspace returns a recoverable error instead of throwing"
     sandboxStore: createSandboxStore(),
     operationStore,
     ttlSeconds: TEST_LIMITS.ttlSeconds,
-    commandTimeoutMs: TEST_LIMITS.commandTimeoutMs,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(TEST_LIMITS),
   });
   const tools = createSandboxTools({
     filesystem: {

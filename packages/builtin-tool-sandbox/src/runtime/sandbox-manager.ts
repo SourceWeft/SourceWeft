@@ -128,7 +128,13 @@ export class SandboxManager {
       sandboxStore: SandboxStore;
       operationStore: SandboxOperationStore;
       ttlSeconds: number;
-      commandTimeoutMs: number;
+      /**
+       * Longest timeout any command class can be granted — not this runtime's
+       * own budget. Staleness must be swept against the maximum, or a
+       * legitimately long host command gets marked failed while it is still
+       * running.
+       */
+      maxCommandTimeoutMs: number;
       environment?: string;
     },
   ) {}
@@ -140,7 +146,7 @@ export class SandboxManager {
   private staleOperationBefore() {
     return new Date(
       Date.now() -
-        this.input.commandTimeoutMs -
+        this.input.maxCommandTimeoutMs -
         SANDBOX_OPERATION_STALE_GRACE_MS,
     );
   }

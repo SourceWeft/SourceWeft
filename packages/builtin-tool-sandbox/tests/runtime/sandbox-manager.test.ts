@@ -177,7 +177,7 @@ function createSandboxManager(operationStore: SandboxOperationStore) {
     sandboxStore: createTestSandboxStore(),
     operationStore,
     ttlSeconds: 3600,
-    commandTimeoutMs: 1,
+    maxCommandTimeoutMs: 1,
   });
 }
 
@@ -370,7 +370,7 @@ test("beginToolOperation releases stale running operation and claims a new one",
     sandboxStore,
     operationStore,
     ttlSeconds: 3600,
-    commandTimeoutMs: 1,
+    maxCommandTimeoutMs: 1,
   });
 
   const claim = await manager.beginToolOperation({
@@ -450,7 +450,7 @@ test("getOrCreateThreadSandbox checks newly created sandbox health before markin
     },
     operationStore: createMessageScopedOperationStore(),
     ttlSeconds: 3600,
-    commandTimeoutMs: 1,
+    maxCommandTimeoutMs: 1,
   });
 
   const sandbox = await manager.getOrCreateThreadSandbox({
@@ -508,7 +508,7 @@ test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fre
     },
     operationStore: createMessageScopedOperationStore(),
     ttlSeconds: 3600,
-    commandTimeoutMs: 1,
+    maxCommandTimeoutMs: 1,
   });
 
   const sandbox = await manager.getOrCreateThreadSandbox({
@@ -563,7 +563,7 @@ test("getOrCreateThreadSandbox waits for concurrent sandbox creation and reuses 
     },
     operationStore: createMessageScopedOperationStore(),
     ttlSeconds: 3600,
-    commandTimeoutMs: 1,
+    maxCommandTimeoutMs: 1,
   });
 
   const sandbox = await manager.getOrCreateThreadSandbox(

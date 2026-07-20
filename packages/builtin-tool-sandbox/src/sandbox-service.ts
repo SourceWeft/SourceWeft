@@ -6,6 +6,11 @@ import {
   COLLECT_SANDBOX_OUTPUTS_TOOL_NAME,
 } from "./agent-tool-defs";
 import type { BackendProtocolV2 } from "deepagents";
+import {
+  SANDBOX_COMMAND_BUDGETS,
+  resolveSandboxCommandTimeoutMs,
+} from "./runtime/command-budgets";
+import type { SandboxCommandBudget } from "./runtime/command-budgets";
 import type { SandboxRuntimeForTurn } from "./runtime/runtime";
 import type {
   SandboxOperationStore,
@@ -20,6 +25,16 @@ export type SandboxRuntimeName = "api" | "worker" | "scheduler";
 export type SandboxRuntimeRequest = {
   filesystem: BackendProtocolV2;
   context: SandboxRuntimeContext;
+  /**
+   * Class of operation the caller's commands belong to (default
+   * `interactive`). Host pipelines that legitimately run for minutes name
+   * `batch` here; the agent turn omits it.
+   *
+   * SECURITY: this is a construction-time argument, so its only possible
+   * sources are host call sites written by us. Nothing in an agent tool's input
+   * schema reaches it — see `createSandboxRuntimeForTurn`.
+   */
+  commandBudget?: SandboxCommandBudget;
 };
 
 export type AgentSandboxRuntimeForTurn = SandboxRuntimeForTurn & {
@@ -83,6 +98,7 @@ export class AgentSandboxService {
       operationStore,
       toolApprovalEnabled: config.toolApprovalEnabled,
       environment: process.env.NODE_ENV || "development",
+      commandBudget: input.commandBudget,
     });
 
     const agentRuntime: AgentSandboxRuntimeForTurn = {
@@ -126,7 +142,15 @@ export class AgentSandboxService {
         runtime,
         provider: config.provider,
         ttlSeconds: config.limits.ttlSeconds,
-        commandTimeoutMs: config.limits.commandTimeoutMs,
+        // Effective (post-clamp) budgets, so an operator can see at boot when a
+        // configured budget was cut down to the ceiling.
+        commandBudgetsMs: Object.fromEntries(
+          SANDBOX_COMMAND_BUDGETS.map((budget) => [
+            budget,
+            resolveSandboxCommandTimeoutMs({ limits: config.limits, budget }),
+          ]),
+        ),
+        maxCommandTimeoutMs: config.limits.maxCommandTimeoutMs,
         maxOutputChars: config.limits.maxOutputChars,
         maxPrepareFileBytes: config.limits.maxPrepareFileBytes,
         maxPrepareTotalBytes: config.limits.maxPrepareTotalBytes,

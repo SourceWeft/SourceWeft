@@ -130,8 +130,8 @@ function isNonRetryableDeliverableError(error: unknown) {
  * N ms".
  *
  * That is deliberate rather than an oversight: every blocking call inside a
- * stage carries its own timeout — sandbox commands at
- * `config.sandbox.limits.commandTimeoutMs` (120s default) and model calls at
+ * stage carries its own timeout — sandbox commands at the batch command budget
+ * (`config.sandbox.batchCommandTimeoutMs`, 8min default) and model calls at
  * the gateway's `DEFAULT_TIMEOUT_MS` (30s) — so a wedged stage is bounded from
  * below, not here. Note the practical consequence: the declared budgets
  * (minutes) are mostly larger than those per-call timeouts, so `budgetMs`

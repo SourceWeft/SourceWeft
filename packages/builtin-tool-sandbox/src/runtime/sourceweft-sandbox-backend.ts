@@ -275,6 +275,18 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       manager: SandboxManager;
       context: SandboxRuntimeContext;
       limits: SandboxRuntimeLimits;
+      /**
+       * Wall-clock timeout for every command this backend runs, already
+       * resolved and clamped from a named budget by
+       * `createSandboxRuntimeForTurn`.
+       *
+       * SECURITY: it is a constructor field, not an `execute()` option, so the
+       * value is fixed for the lifetime of the backend and no argument that
+       * originates in a model tool call can change it. Turning this into a
+       * per-call parameter would put the sandbox holding-time limit under model
+       * control.
+       */
+      commandTimeoutMs: number;
       toolApprovalEnabled: boolean;
     },
   ) {
@@ -299,7 +311,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       providerSandboxId: sandbox.providerSandboxId,
       command,
       cwd: assertExecuteCwd(undefined, provider.pathPolicy),
-      timeoutMs: this.input.limits.commandTimeoutMs,
+      timeoutMs: this.input.commandTimeoutMs,
       maxOutputChars: this.input.limits.maxOutputChars,
     });
   }
@@ -765,7 +777,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           undefined,
           this.input.manager.providerForSandbox().pathPolicy,
         ),
-        timeoutMs: this.input.limits.commandTimeoutMs,
+        timeoutMs: this.input.commandTimeoutMs,
         maxOutputChars: this.input.limits.maxOutputChars,
       });
       const redactedResult = redactExecuteResult(result);

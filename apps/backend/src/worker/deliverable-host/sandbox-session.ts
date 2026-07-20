@@ -23,6 +23,7 @@ type AgentSandboxServiceLike = {
       runId: string;
       sandboxExecuteToolCallId?: string;
     };
+    commandBudget?: "interactive" | "batch";
   }): {
     pathPolicy: { defaultCwd: string };
     backend: {
@@ -91,6 +92,13 @@ export function createDeliverableSandboxAdapter(input: {
           runId: job.traceId ?? job.jobId,
           sandboxExecuteToolCallId: job.toolCallId,
         },
+        // Deliverable stages are host-issued and deterministic — installs, type
+        // checks and renders run for minutes with no model in the loop — so
+        // they run on the batch command budget rather than the short
+        // interactive one. This literal is the *only* thing that grants the
+        // longer timeout: pipelines cannot ask for it per command, and neither
+        // can the model, whose execute tool input is a command string.
+        commandBudget: "batch",
       });
       if (!runtime) {
         return null;

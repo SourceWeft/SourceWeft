@@ -1,4 +1,5 @@
 import type { ExecuteResponse } from "deepagents";
+import type { SandboxCommandBudget } from "./command-budgets";
 
 export const SOURCEWEFT_WORK_ROOT = "/workfiles";
 export const SOURCEWEFT_KB_ROOT = "/kb";
@@ -69,7 +70,15 @@ export type SandboxRuntimeContext = {
 
 export type SandboxRuntimeLimits = {
   ttlSeconds: number;
-  commandTimeoutMs: number;
+  /**
+   * One timeout per class of operation (see `command-budgets.ts`) rather than
+   * one number plus overrides: a caller picks a class, it cannot pick a
+   * duration. There is deliberately no per-command timeout anywhere in this
+   * type — that is what keeps the budget out of reach of tool input.
+   */
+  commandBudgetsMs: Readonly<Record<SandboxCommandBudget, number>>;
+  /** Absolute cap applied to every budget, however it was configured. */
+  maxCommandTimeoutMs: number;
   maxOutputChars: number;
   maxPrepareFileBytes: number;
   maxPrepareTotalBytes: number;
