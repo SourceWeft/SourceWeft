@@ -2,11 +2,15 @@ import type {
   ParsedDocument as PackageParsedDocument,
   ParsedPage,
   ParseInput as PackageParseInput,
-  SourceParser as PackageSourceParser,
 } from "@sourceweft/builtin-document-parsers";
 import type { ContentBillingPort } from "../../content/billing-port";
 
-export type ParseInput = Omit<PackageParseInput, "billing"> & {
+/**
+ * The package's parse input plus the one thing the backend adds: a billing
+ * port. The widening is type-only — a package parser reads only the fields it
+ * declares, so it accepts this input unchanged and no adapter is needed.
+ */
+export type ParseInput = PackageParseInput & {
   readonly billing?: ContentBillingPort;
 };
 
@@ -22,34 +26,3 @@ export interface SourceParser {
 }
 
 export type { ParsedPage };
-
-export function toBackendParsedDocument(
-  document: PackageParsedDocument,
-): ParsedDocument {
-  return {
-    title: document.title,
-    content: document.content,
-    metadata: document.metadata,
-    pages: document.pages,
-    chunks: document.chunks.map((chunk) => ({
-      text: chunk.text,
-      startIndex: chunk.startIndex,
-      endIndex: chunk.endIndex,
-      tokenCount: chunk.tokenCount,
-      ...(chunk.embedding ? { embedding: [...chunk.embedding] } : {}),
-    })),
-  };
-}
-
-export function toBackendSourceParser(
-  parser: PackageSourceParser,
-): SourceParser {
-  return {
-    id: parser.id,
-    name: parser.name,
-    supportedMimeTypes: parser.supportedMimeTypes,
-    async parse(input: ParseInput) {
-      return toBackendParsedDocument(await parser.parse(input));
-    },
-  };
-}

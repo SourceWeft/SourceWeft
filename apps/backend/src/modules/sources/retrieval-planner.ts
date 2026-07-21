@@ -1,6 +1,6 @@
 import { planRetrievalStrategy as planStrategy } from "@sourceweft/builtin-retrieval";
 import type { RetrievalPlannerResult, EmbeddingProfile } from "@sourceweft/builtin-retrieval";
-import { vectorSearchProvider } from "./vector";
+import { supportsAnnSearch, validateEmbeddingDimensions } from "./vector";
 
 /**
  * Fallback map for profiles that predate `annIndexName`. New embedding models
@@ -35,7 +35,7 @@ export function planRetrievalStrategy(
     vectorStrategy: profile.vectorStrategy,
     dimensions,
     resolveAnnIndex: (dims) => resolveAnnIndexName(profile, dims),
-    validateDimensions: (dims) => vectorSearchProvider.validateDimensions(dims),
-    supportsAnn: (dims) => vectorSearchProvider.supportsAnn(dims),
+    validateDimensions: validateEmbeddingDimensions,
+    supportsAnn: supportsAnnSearch,
   });
 }

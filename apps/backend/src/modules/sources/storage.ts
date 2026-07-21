@@ -85,22 +85,11 @@ export function buildChatImageStorageKey(input: {
   return `workspaces/${input.workspaceId}/chat-images/${input.messageId}/${input.imageId}-${randomUUID()}-${sanitizedName}`;
 }
 
-export async function uploadSourceObject(input: {
-  key: string;
-  body: Buffer;
-  contentType: string;
-}) {
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: getConfiguredBucket(),
-      Key: input.key,
-      Body: input.body,
-      ContentType: input.contentType,
-    }),
-  );
-}
-
-export async function uploadArtifactObject(input: {
+/**
+ * The one write. Every named upload below is this call with a different name,
+ * which is all the callers ever needed them to be.
+ */
+async function putObject(input: {
   key: string;
   body: Uint8Array;
   contentType: string;
@@ -115,6 +104,39 @@ export async function uploadArtifactObject(input: {
     }),
     { abortSignal: input.signal },
   );
+}
+
+/**
+ * The one read. `bucket` falls back to the configured one so callers can pass
+ * through a stored bucket column that may predate the current configuration.
+ */
+async function getObjectBuffer(input: { bucket?: string | null; key: string }) {
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+    }),
+  );
+
+  const bytes = await response.Body?.transformToByteArray();
+  return Buffer.from(bytes ?? []);
+}
+
+export async function uploadSourceObject(input: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}) {
+  await putObject(input);
+}
+
+export async function uploadArtifactObject(input: {
+  key: string;
+  body: Uint8Array;
+  contentType: string;
+  signal?: AbortSignal;
+}) {
+  await putObject(input);
 }
 
 /**
@@ -134,38 +156,15 @@ export async function uploadChatImageObject(input: {
   body: Buffer;
   contentType: string;
 }) {
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: getConfiguredBucket(),
-      Key: input.key,
-      Body: input.body,
-      ContentType: input.contentType,
-    }),
-  );
+  await putObject(input);
 }
 
-export async function downloadSourceObject(input: { bucket?: string | null; key: string }) {
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: input.bucket || getConfiguredBucket(),
-      Key: input.key,
-    }),
-  );
-
-  const bytes = await response.Body?.transformToByteArray();
-  return Buffer.from(bytes ?? []);
+export function downloadSourceObject(input: { bucket?: string | null; key: string }) {
+  return getObjectBuffer(input);
 }
 
-export async function downloadArtifactObject(input: { bucket?: string | null; key: string }) {
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: input.bucket || getConfiguredBucket(),
-      Key: input.key,
-    }),
-  );
-
-  const bytes = await response.Body?.transformToByteArray();
-  return Buffer.from(bytes ?? []);
+export function downloadArtifactObject(input: { bucket?: string | null; key: string }) {
+  return getObjectBuffer(input);
 }
 
 /** What the store recorded no content type for. Never left absent — see the port. */
@@ -281,27 +280,21 @@ function tooLargeToDownload(input: {
   });
 }
 
-export async function downloadChatImageObject(input: {
+export function downloadChatImageObject(input: {
   bucket?: string | null;
   key: string;
 }) {
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: input.bucket || getConfiguredBucket(),
-      Key: input.key,
-    }),
-  );
-
-  const bytes = await response.Body?.transformToByteArray();
-  return Buffer.from(bytes ?? []);
+  return getObjectBuffer(input);
 }
+
+/** How long every presigned source URL this module hands out stays valid. */
+const PRESIGNED_URL_TTL_SECONDS = 15 * 60;
 
 export function getSourceObjectDownloadUrl(input: {
   bucket?: string | null;
   key: string;
   fileName: string;
   contentType: string;
-  expiresInSeconds?: number;
 }) {
   return getSignedUrl(
     s3Client,
@@ -311,7 +304,7 @@ export function getSourceObjectDownloadUrl(input: {
       ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
       ResponseContentType: input.contentType,
     }),
-    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
+    { expiresIn: PRESIGNED_URL_TTL_SECONDS },
   );
 }
 
@@ -320,7 +313,6 @@ export function getSourceObjectPreviewUrl(input: {
   key: string;
   fileName: string;
   contentType: string;
-  expiresInSeconds?: number;
 }) {
   return getSignedUrl(
     s3Client,
@@ -330,25 +322,6 @@ export function getSourceObjectPreviewUrl(input: {
       ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
       ResponseContentType: input.contentType,
     }),
-    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
-  );
-}
-
-export function getArtifactObjectDownloadUrl(input: {
-  bucket?: string | null;
-  key: string;
-  fileName: string;
-  contentType: string;
-  expiresInSeconds?: number;
-}) {
-  return getSignedUrl(
-    s3Client,
-    new GetObjectCommand({
-      Bucket: input.bucket || getConfiguredBucket(),
-      Key: input.key,
-      ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
-      ResponseContentType: input.contentType,
-    }),
-    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
+    { expiresIn: PRESIGNED_URL_TTL_SECONDS },
   );
 }

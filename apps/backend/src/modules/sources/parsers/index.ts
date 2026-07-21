@@ -1,13 +1,15 @@
-import { createSourceParserRegistry } from "@sourceweft/builtin-document-parsers";
+import {
+  createSourceParserRegistry,
+  csvSourceParser,
+  docxSourceParser,
+  epubSourceParser,
+  jsonSourceParser,
+  pptxSourceParser,
+  srtSourceParser,
+} from "@sourceweft/builtin-document-parsers";
 import { audioSourceParser } from "./audio";
-import { csvSourceParser } from "./csv";
 import { documentProviderParser } from "./document-provider-parser";
-import { docxSourceParser } from "./docx";
-import { epubSourceParser } from "./epub";
-import { jsonSourceParser } from "./json";
 import { pdfSourceParser } from "./pdf";
-import { pptxSourceParser } from "./pptx";
-import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
 import type { SourceParser } from "./types";
 import { webFetchSourceParser } from "./web-fetch";
@@ -44,7 +46,6 @@ export {
   textSourceParser,
   webFetchSourceParser,
 };
-export { toBackendParsedDocument } from "./types";
 export type {
   ParsedDocument,
   ParsedPage,

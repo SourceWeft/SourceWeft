@@ -1,3 +1,7 @@
+import {
+  assertTextLikeSourceContent,
+  ParserContentError,
+} from "@sourceweft/builtin-document-parsers";
 import { ContentError } from "../content/errors";
 
 export type SourceFileKind =
@@ -663,38 +667,28 @@ export function requireSupportedSourceFile(input: {
   );
 }
 
-export function assertTextLikeSourceContent(content: Buffer, fileName: string) {
-  const sampleLength = Math.min(content.length, 8192);
-  let nullBytes = 0;
-  let controlBytes = 0;
-
-  for (let index = 0; index < sampleLength; index += 1) {
-    const byte = content[index] ?? 0;
-    if (byte === 0) {
-      nullBytes += 1;
-    } else if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 12 && byte !== 13) {
-      controlBytes += 1;
-    }
-  }
-
-  if (nullBytes > 0 || (sampleLength > 0 && controlBytes / sampleLength > 0.3)) {
-    throw new ContentError(
-      400,
-      "UNSUPPORTED_SOURCE_TYPE",
-      `File '${fileName}' appears to be binary and cannot be parsed as text`,
-    );
-  }
-}
-
 export function assertSourceContentCanBeParsed(input: {
   classification: SourceFileClassification;
   content: Buffer;
   fileName: string;
 }) {
   if (
-    ["text", "table", "json", "transcript"].includes(input.classification.kind)
+    !["text", "table", "json", "transcript"].includes(input.classification.kind)
   ) {
+    return;
+  }
+
+  // The binary-content check is the parser package's, so upload-time rejection
+  // and parse-time rejection cannot disagree. This is an upload path rather
+  // than a parse, so the parser's error is translated here — the translation in
+  // `parsers/text.ts` only covers calls made through the parser itself.
+  try {
     assertTextLikeSourceContent(input.content, input.fileName);
+  } catch (error) {
+    if (error instanceof ParserContentError) {
+      throw new ContentError(error.statusCode, error.code, error.message);
+    }
+    throw error;
   }
 }
 

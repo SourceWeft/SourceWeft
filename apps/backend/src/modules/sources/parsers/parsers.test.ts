@@ -10,13 +10,15 @@ import { test, vi } from "vitest";
 import assert from "node:assert/strict";
 import { estimateAsrPageCount, formatAsrTranscriptMarkdown } from "./audio";
 import { WebFetchSourceParser } from "./web-fetch";
-import { csvSourceParser } from "./csv";
-import { docxSourceParser } from "./docx";
-import { epubSourceParser } from "./epub";
-import { jsonSourceParser } from "./json";
+import {
+  csvSourceParser,
+  docxSourceParser,
+  epubSourceParser,
+  jsonSourceParser,
+  pptxSourceParser,
+  srtSourceParser,
+} from "@sourceweft/builtin-document-parsers";
 import { pdfSourceParser } from "./pdf";
-import { pptxSourceParser } from "./pptx";
-import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
 import { getSourceParser, listSupportedSourceMimeTypes } from "./index";
 import { extractPdf2MarkdownResult } from "./providers/pdf2markdown-result";

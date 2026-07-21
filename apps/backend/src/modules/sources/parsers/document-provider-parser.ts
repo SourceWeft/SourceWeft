@@ -1,9 +1,5 @@
 import { BaseSourceParser } from "@sourceweft/builtin-document-parsers";
-import {
-  toBackendParsedDocument,
-  type ParsedDocument,
-  type ParseInput,
-} from "./types";
+import type { ParsedDocument, ParseInput } from "./types";
 import { startDocumentParse } from "./providers/document-parse-orchestrator";
 
 export class AsyncProviderPendingError extends Error {
@@ -41,7 +37,7 @@ export class DocumentProviderParser extends BaseSourceParser {
       throw new AsyncProviderPendingError();
     }
 
-    return toBackendParsedDocument(outcome.document);
+    return outcome.document;
   }
 }
 

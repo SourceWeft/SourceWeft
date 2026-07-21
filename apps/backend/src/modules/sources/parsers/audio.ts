@@ -14,11 +14,7 @@ import {
 } from "../../../shared/model-gateway/index";
 import { BaseSourceParser } from "@sourceweft/builtin-document-parsers";
 import { buildParsedDocument } from "./providers/utils";
-import {
-  toBackendParsedDocument,
-  type ParsedDocument,
-  type ParseInput,
-} from "./types";
+import type { ParsedDocument, ParseInput } from "./types";
 
 function requireDefaultAsrProfile() {
   return requireDefaultModelGatewayProfile("asr").catch(() => {
@@ -271,26 +267,24 @@ export class AudioSourceParser extends BaseSourceParser {
     }
     const pageCount = estimateAsrPageCount(result);
 
-    return toBackendParsedDocument(
-      await buildParsedDocument({
-        parseInput: input,
-        title: input.fileName,
-        content,
-        metadata: {
-          pageCount,
-          sourceFileKind: "audio",
-          asrModelAlias: profile.modelAlias,
-          asrProfileAlias: profile.profileAlias,
-          asrProvider: result.provider,
-          asrProviderModel: result.providerModel,
-          language: result.language,
-          duration: result.duration,
-          inputLengthMs: result.inputLengthMs,
-          segmentCount: result.segments?.length ?? 0,
-          wordTimestampCount: result.words?.length ?? 0,
-        },
-      }),
-    );
+    return buildParsedDocument({
+      parseInput: input,
+      title: input.fileName,
+      content,
+      metadata: {
+        pageCount,
+        sourceFileKind: "audio",
+        asrModelAlias: profile.modelAlias,
+        asrProfileAlias: profile.profileAlias,
+        asrProvider: result.provider,
+        asrProviderModel: result.providerModel,
+        language: result.language,
+        duration: result.duration,
+        inputLengthMs: result.inputLengthMs,
+        segmentCount: result.segments?.length ?? 0,
+        wordTimestampCount: result.words?.length ?? 0,
+      },
+    });
   }
 }
 

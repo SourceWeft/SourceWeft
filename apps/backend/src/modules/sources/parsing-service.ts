@@ -3,11 +3,7 @@ import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import type { ContentBillingPort } from "../content/billing-port";
 import { ContentError } from "../content/errors";
-import {
-  getSourceParser,
-  toBackendParsedDocument,
-  type ParsedDocument,
-} from "./parsers";
+import { getSourceParser, type ParsedDocument } from "./parsers";
 import {
   webFetchSourceParser,
   WEB_FETCH_SOURCE_MIME_TYPE,
@@ -342,8 +338,8 @@ export class SourceParsingService {
 
       const parsed =
         providerOutcome?.kind === "completed"
-          ? toBackendParsedDocument(providerOutcome.document)
-          : toBackendParsedDocument(await parser.parse(parseInput));
+          ? providerOutcome.document
+          : await parser.parse(parseInput);
 
       await this.completeParsedSource({ input, source, parsed, parsingConfig });
     } catch (error) {
@@ -503,7 +499,7 @@ export class SourceParsingService {
       await this.completeParsedSource({
         input,
         source,
-        parsed: toBackendParsedDocument(outcome.document),
+        parsed: outcome.document,
         parsingConfig: input.parsingConfig,
       });
     } catch (error) {
