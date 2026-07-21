@@ -158,15 +158,12 @@ export function useChatHubContext() {
   return useContext(ChatHubContext);
 }
 
-export function useRegisterChatHub(
-  registration: ChatHubRegistration,
-  enabled = true,
-) {
+export function useRegisterChatHub(registration: ChatHubRegistration) {
   const context = useChatHubContext();
   const setRegistration = context?.setRegistration;
 
   useBrowserLayoutEffect(() => {
-    if (!enabled || !setRegistration) return;
+    if (!setRegistration) return;
     setRegistration(registration);
-  }, [enabled, registration, setRegistration]);
+  }, [registration, setRegistration]);
 }

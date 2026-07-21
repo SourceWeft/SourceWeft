@@ -14,17 +14,6 @@ export const SUPPORTED_LOCALES = [
 
 export type AppLocale = (typeof SUPPORTED_LOCALES)[number];
 
-export type LocaleScript =
-  | "latin"
-  | "cjk-sc"
-  | "cjk-tc"
-  | "cjk-jp"
-  | "cjk-kr"
-  | "arabic"
-  | "hebrew"
-  | "devanagari"
-  | "thai";
-
 export type LocaleDirection = "ltr" | "rtl";
 
 export const DEFAULT_LOCALE: AppLocale = "en";
@@ -40,18 +29,6 @@ const BASE_LANGUAGE_MAP: Record<string, AppLocale> = {
   ne: "hi",
   th: "th",
   zh: "zh-CN",
-};
-
-const SCRIPT_BY_LOCALE: Record<AppLocale, LocaleScript> = {
-  en: "latin",
-  "zh-CN": "cjk-sc",
-  "zh-TW": "cjk-tc",
-  ja: "cjk-jp",
-  ko: "cjk-kr",
-  ar: "arabic",
-  he: "hebrew",
-  hi: "devanagari",
-  th: "thai",
 };
 
 const DIRECTION_BY_LOCALE: Record<AppLocale, LocaleDirection> = {
@@ -181,8 +158,4 @@ export function resolveRequestLocale({
 
 export function getLocaleDirection(locale: AppLocale): LocaleDirection {
   return DIRECTION_BY_LOCALE[locale];
-}
-
-export function getLocaleScript(locale: AppLocale): LocaleScript {
-  return SCRIPT_BY_LOCALE[locale];
 }

@@ -38,17 +38,6 @@ export function isDeliverableToolName(toolName: string) {
   return getArtifactProgressProtocol(toolName) !== null;
 }
 
-export function resolveDeliverableArtifactId(input: {
-  toolName: string;
-  toolCallOutput?: unknown;
-}) {
-  return (
-    getArtifactProgressProtocol(input.toolName)?.extractArtifactId(
-      input.toolCallOutput,
-    ) ?? undefined
-  );
-}
-
 export function resolveDeliverableStatus(
   input: DeliverableProgressInput,
 ): DeliverableGenerationStatus | null {

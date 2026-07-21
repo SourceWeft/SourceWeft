@@ -10,7 +10,6 @@ import {
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { ChatHubProvider, useChatHubContext } from "./chat-hub-context";
 import type { ChatHubMode } from "./chat-hub-context";
-import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
 import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
@@ -158,10 +157,6 @@ export default function ChatWorkspaceShell({
 }) {
   const pathname = usePathname();
   const mode: ChatHubMode = pathname?.endsWith("/chat") ? "new" : "thread";
-
-  if (!HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
-    return <>{children}</>;
-  }
 
   return <ChatHubScaffold mode={mode}>{children}</ChatHubScaffold>;
 }

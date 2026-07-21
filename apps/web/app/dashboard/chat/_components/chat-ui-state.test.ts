@@ -29,8 +29,6 @@ test("direct /dashboard/chat uses route bootstrap skeleton during initial route 
 
   assert.equal(state.status, "route-bootstrap");
   assert.equal(state.skeletonPolicy, "route");
-  assert.equal(state.regions.shell, "loading");
-  assert.equal(state.regions.newChat, "loading");
 });
 
 test("direct /dashboard/chat/[threadId] bootstraps thread canvas after shell is ready", () => {
@@ -44,8 +42,6 @@ test("direct /dashboard/chat/[threadId] bootstraps thread canvas after shell is 
 
   assert.equal(state.status, "thread-bootstrap");
   assert.equal(state.skeletonPolicy, "canvas");
-  assert.equal(state.regions.shell, "ready");
-  assert.equal(state.regions.thread, "loading");
 });
 
 test("thread loading keeps message list visible when messages are already present", () => {
@@ -60,8 +56,6 @@ test("thread loading keeps message list visible when messages are already presen
 
   assert.equal(state.status, "thread-ready");
   assert.equal(state.skeletonPolicy, "none");
-  assert.equal(state.regions.thread, "ready");
-  assert.equal(state.regions.composer, "ready");
 });
 
 test("thread switching still hides stale messages behind overlay skeleton", () => {
@@ -76,8 +70,6 @@ test("thread switching still hides stale messages behind overlay skeleton", () =
 
   assert.equal(state.status, "thread-switching");
   assert.equal(state.skeletonPolicy, "overlay");
-  assert.equal(state.regions.thread, "loading");
-  assert.equal(state.regions.composer, "idle");
 });
 
 test("normal new chat after shell ready uses no route skeleton", () => {
@@ -90,8 +82,6 @@ test("normal new chat after shell ready uses no route skeleton", () => {
   assert.equal(state.status, "new-ready");
   assert.notEqual(state.skeletonPolicy, "route");
   assert.equal(state.skeletonPolicy, "none");
-  assert.equal(state.regions.newChat, "empty");
-  assert.equal(state.regions.composer, "ready");
 });
 
 test("first-message create success pending uses inline creating-thread state", () => {
@@ -103,8 +93,6 @@ test("first-message create success pending uses inline creating-thread state", (
 
   assert.equal(state.status, "creating-thread");
   assert.equal(state.skeletonPolicy, "inline");
-  assert.equal(state.regions.creation, "loading");
-  assert.equal(state.regions.streaming, "streaming");
 });
 
 test("create failure resolves to explicit creation error instead of loading", () => {
@@ -117,7 +105,6 @@ test("create failure resolves to explicit creation error instead of loading", ()
   assert.equal(state.status, "fatal-error");
   assert.equal(state.skeletonPolicy, "inline");
   assert.equal(state.errorKind, "creation");
-  assert.equal(state.regions.creation, "error");
 });
 
 test("thread A to B switch keeps route skeleton off and uses overlay policy", () => {
@@ -132,8 +119,6 @@ test("thread A to B switch keeps route skeleton off and uses overlay policy", ()
   assert.equal(state.status, "thread-switching");
   assert.equal(state.skeletonPolicy, "overlay");
   assert.notEqual(state.skeletonPolicy, "route");
-  assert.equal(state.regions.shell, "ready");
-  assert.equal(state.regions.thread, "loading");
 });
 
 test("workspace shortcut pending uses workspace loading without route skeleton", () => {
@@ -147,7 +132,6 @@ test("workspace shortcut pending uses workspace loading without route skeleton",
   assert.equal(state.status, "workspace-loading");
   assert.equal(state.skeletonPolicy, "overlay");
   assert.notEqual(state.skeletonPolicy, "route");
-  assert.equal(state.regions.workspace, "loading");
 });
 
 test("model catalog error returns error state rather than loading state", () => {
@@ -163,7 +147,6 @@ test("model catalog error returns error state rather than loading state", () => 
   assert.equal(state.status, "model-error");
   assert.equal(state.skeletonPolicy, "none");
   assert.equal(state.errorKind, "model-catalog");
-  assert.equal(state.regions.modelCatalog, "error");
   assert.notEqual(state.status, "model-loading");
 });
 
@@ -176,8 +159,6 @@ test("source loading uses source skeleton policy without blocking canvas", () =>
 
   assert.equal(state.status, "sources-loading");
   assert.equal(state.skeletonPolicy, "sources");
-  assert.equal(state.regions.sources, "loading");
-  assert.equal(state.regions.newChat, "ready");
 });
 
 test("source error returns error state rather than loading state", () => {
@@ -192,7 +173,6 @@ test("source error returns error state rather than loading state", () => {
   assert.equal(state.status, "sources-error");
   assert.equal(state.skeletonPolicy, "none");
   assert.equal(state.errorKind, "sources");
-  assert.equal(state.regions.sources, "error");
   assert.notEqual(state.status, "sources-loading");
 });
 
@@ -208,7 +188,6 @@ test("invalid thread resolves to explicit empty/error state", () => {
   assert.equal(state.status, "empty");
   assert.equal(state.skeletonPolicy, "none");
   assert.equal(state.errorKind, "thread");
-  assert.equal(state.regions.thread, "empty");
 });
 
 test("streaming state is inline and keeps the active route region stable", () => {
@@ -222,8 +201,6 @@ test("streaming state is inline and keeps the active route region stable", () =>
 
   assert.equal(state.status, "streaming");
   assert.equal(state.skeletonPolicy, "inline");
-  assert.equal(state.regions.thread, "streaming");
-  assert.equal(state.regions.streaming, "streaming");
 });
 
 test("helper status names are covered by state derivation fixtures", () => {

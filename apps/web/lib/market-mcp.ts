@@ -56,10 +56,6 @@ export async function listPublicMcpCategories(): Promise<ListMarketCategoriesRes
   }
 }
 
-export async function getPublicMcp(identifier: string) {
-  return marketClient().getMcp(identifier);
-}
-
 export async function getPublicMcpManifest(
   identifier: string,
 ): Promise<GetMarketMcpManifestResponse> {

@@ -201,14 +201,6 @@ export function DashboardContentRouteSkeleton({
   return <div className="min-h-0 flex-1">{children}</div>;
 }
 
-export function DashboardHomeRouteSkeleton() {
-  return (
-    <DashboardFrame>
-      <DashboardHomeSkeletonContent />
-    </DashboardFrame>
-  );
-}
-
 function DashboardHomeHeaderSkeleton() {
   return (
     <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
@@ -717,92 +709,6 @@ export function ObservabilityRouteSkeleton() {
   );
 }
 
-function SkillsFilterSkeleton() {
-  return (
-    <aside className="hidden w-72 shrink-0 border-r border-border bg-background p-3 md:block">
-      <div className="mb-4 flex items-center justify-between">
-        <SkeletonLine className="h-4 w-20" />
-        <SkeletonLine className="w-10" />
-      </div>
-      <SkeletonBlock className="mb-4 h-9 rounded-xl" />
-      <div className="space-y-4">
-        {Array.from({ length: 4 }).map((_, groupIndex) => (
-          <section className="space-y-2" key={groupIndex}>
-            <SkeletonLine className="w-24" />
-            {Array.from({ length: groupIndex === 0 ? 5 : 2 }).map(
-              (_, rowIndex) => (
-                <SkeletonBlock
-                  className={cx(
-                    "h-8 rounded-lg",
-                    rowIndex % 2 ? "w-11/12" : "w-full",
-                  )}
-                  key={rowIndex}
-                />
-              ),
-            )}
-          </section>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function SkillsSkeletonContent() {
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <SkillsFilterSkeleton />
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <div className="px-4 py-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <SkeletonBlock className="h-8 w-24 rounded-md md:hidden" />
-                  <SkeletonBlock className="h-8 w-44 rounded-full" />
-                </div>
-                <SkeletonBlock className="h-8 w-32 rounded-md" />
-              </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 2xl:grid-cols-4">
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <div
-                    className="rounded-lg border border-border bg-background p-4 shadow-xs"
-                    key={index}
-                  >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <SkeletonBlock className="size-10 shrink-0 rounded-lg" />
-                        <div className="min-w-0 space-y-2">
-                          <SkeletonLine className="w-36" />
-                          <SkeletonLine className="w-20" />
-                        </div>
-                      </div>
-                      <SkeletonBlock className="h-7 w-20 rounded-md" />
-                    </div>
-                    <SkeletonLine className="mb-2 w-full" />
-                    <SkeletonLine className="mb-5 w-4/5" />
-                    <div className="flex flex-wrap gap-1.5">
-                      <SkeletonBlock className="h-5 w-16 rounded-full" />
-                      <SkeletonBlock className="h-5 w-20 rounded-full" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-export function SkillsRouteSkeleton() {
-  return (
-    <DashboardFrame>
-      <SkillsSkeletonContent />
-    </DashboardFrame>
-  );
-}
-
 function SkillDetailSkeletonContent() {
   return (
     <main className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
@@ -911,14 +817,6 @@ export function AuthRouteSkeleton() {
         </div>
       </section>
     </main>
-  );
-}
-
-export function SettingsRouteSkeleton() {
-  return (
-    <DashboardFrame>
-      <SettingsSkeletonContent />
-    </DashboardFrame>
   );
 }
 

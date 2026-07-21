@@ -236,35 +236,3 @@ export function UserMessageText({
   return parts.length > 0 ? <>{parts}</> : <>{children}</>;
 }
 
-export function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
-  if (sources.length === 0) {
-    return null;
-  }
-
-  const showCountOnly = sources.length > 2;
-  const visible = showCountOnly ? [] : sources;
-
-  return (
-    <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-1.5 pb-1 text-xs text-muted-foreground">
-      <span className="inline-flex items-center px-1 font-medium text-foreground/70">
-        Referenced sources
-      </span>
-      {showCountOnly ? (
-        <span className="rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs">
-          {sources.length} sources
-        </span>
-      ) : (
-        visible.map((source) => (
-          <span
-            className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs"
-            key={source.id}
-            title={source.title}
-          >
-            <SourceIcon className="size-3" source={source} />
-            <span className="truncate">{source.title}</span>
-          </span>
-        ))
-      )}
-    </div>
-  );
-}

@@ -36,10 +36,6 @@ async function loadGoogleAuthModule() {
   ) as Promise<GoogleAuthModule>;
 }
 
-export function isMobileGoogleSignInConfigured() {
-  return Boolean(resolveMobileGoogleClientId());
-}
-
 export async function signInWithMobileGoogle() {
   const clientId = resolveMobileGoogleClientId();
   if (!clientId) {

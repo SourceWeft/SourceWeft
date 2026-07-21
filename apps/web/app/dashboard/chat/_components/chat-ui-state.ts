@@ -9,14 +9,6 @@ export type ChatSkeletonPolicy =
 export type ChatUiRouteKind = "new" | "thread";
 export type ChatLoadStatus = "idle" | "loading" | "ready" | "error";
 
-export type ChatUiRegionState =
-  | "idle"
-  | "loading"
-  | "ready"
-  | "error"
-  | "empty"
-  | "streaming";
-
 export type ChatUiStatus =
   | "route-bootstrap"
   | "workspace-loading"
@@ -61,38 +53,11 @@ export type ChatUiStateInput = {
   errorKind?: ChatUiErrorKind | null;
 };
 
-export type ChatUiRegions = {
-  shell: ChatUiRegionState;
-  workspace: ChatUiRegionState;
-  newChat: ChatUiRegionState;
-  thread: ChatUiRegionState;
-  modelCatalog: ChatUiRegionState;
-  sources: ChatUiRegionState;
-  composer: ChatUiRegionState;
-  creation: ChatUiRegionState;
-  streaming: ChatUiRegionState;
-  error: ChatUiRegionState;
-};
-
 export type ChatUiState = {
   status: ChatUiStatus;
   skeletonPolicy: ChatSkeletonPolicy;
-  regions: ChatUiRegions;
   routeKind: ChatUiRouteKind;
   errorKind: ChatUiErrorKind | null;
-};
-
-const readyRegions: ChatUiRegions = {
-  shell: "ready",
-  workspace: "ready",
-  newChat: "idle",
-  thread: "idle",
-  modelCatalog: "ready",
-  sources: "ready",
-  composer: "ready",
-  creation: "idle",
-  streaming: "idle",
-  error: "idle",
 };
 
 function normalizeStatus(status: ChatLoadStatus | undefined): ChatLoadStatus {
@@ -102,14 +67,12 @@ function normalizeStatus(status: ChatLoadStatus | undefined): ChatLoadStatus {
 function buildState(input: {
   status: ChatUiStatus;
   skeletonPolicy: ChatSkeletonPolicy;
-  regions: Partial<ChatUiRegions>;
   routeKind: ChatUiRouteKind;
   errorKind?: ChatUiErrorKind | null;
 }): ChatUiState {
   return {
     status: input.status,
     skeletonPolicy: input.skeletonPolicy,
-    regions: { ...readyRegions, ...input.regions },
     routeKind: input.routeKind,
     errorKind: input.errorKind ?? null,
   };
@@ -146,18 +109,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "none",
       routeKind: input.routeKind,
       errorKind: input.errorKind ?? "route",
-      regions: {
-        shell: "error",
-        workspace: "idle",
-        newChat: input.routeKind === "new" ? "error" : "idle",
-        thread: isThreadRoute ? "error" : "idle",
-        modelCatalog: "idle",
-        sources: "idle",
-        composer: "idle",
-        creation: "idle",
-        streaming: "idle",
-        error: "error",
-      },
     });
   }
 
@@ -166,15 +117,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "route-bootstrap",
       skeletonPolicy: "route",
       routeKind: input.routeKind,
-      regions: {
-        shell: "loading",
-        workspace: "loading",
-        newChat: input.routeKind === "new" ? "loading" : "idle",
-        thread: isThreadRoute ? "loading" : "idle",
-        modelCatalog: "loading",
-        sources: "loading",
-        composer: "loading",
-      },
     });
   }
 
@@ -188,15 +130,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "none",
       routeKind: input.routeKind,
       errorKind: input.errorKind ?? "workspace",
-      regions: {
-        workspace: "error",
-        newChat: input.routeKind === "new" ? "error" : "idle",
-        thread: isThreadRoute ? "error" : "idle",
-        modelCatalog: "idle",
-        sources: "idle",
-        composer: "idle",
-        error: "error",
-      },
     });
   }
 
@@ -205,14 +138,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "workspace-loading",
       skeletonPolicy: input.isInitialRouteLoad ? "route" : "overlay",
       routeKind: input.routeKind,
-      regions: {
-        workspace: "loading",
-        newChat: input.routeKind === "new" ? "loading" : "idle",
-        thread: isThreadRoute ? "loading" : "idle",
-        modelCatalog: "idle",
-        sources: "idle",
-        composer: "idle",
-      },
     });
   }
 
@@ -222,13 +147,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "none",
       routeKind: input.routeKind,
       errorKind: "model-catalog",
-      regions: {
-        modelCatalog: "error",
-        newChat: input.routeKind === "new" ? "error" : "idle",
-        thread: isThreadRoute ? "error" : "idle",
-        composer: "idle",
-        error: "error",
-      },
     });
   }
 
@@ -238,12 +156,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "none",
       routeKind: input.routeKind,
       errorKind: "sources",
-      regions: {
-        sources: "error",
-        newChat: input.routeKind === "new" ? "ready" : "idle",
-        thread: isThreadRoute ? "ready" : "idle",
-        error: "error",
-      },
     });
   }
 
@@ -253,11 +165,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "none",
       routeKind: input.routeKind,
       errorKind: input.errorKind ?? "thread",
-      regions: {
-        thread: "empty",
-        composer: "idle",
-        error: "error",
-      },
     });
   }
 
@@ -267,12 +174,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       skeletonPolicy: "inline",
       routeKind: input.routeKind,
       errorKind: "creation",
-      regions: {
-        newChat: input.routeKind === "new" ? "error" : "idle",
-        creation: "error",
-        composer: "ready",
-        error: "error",
-      },
     });
   }
 
@@ -281,11 +182,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "creating-thread",
       skeletonPolicy: "inline",
       routeKind: input.routeKind,
-      regions: {
-        newChat: input.routeKind === "new" ? "streaming" : "idle",
-        creation: "loading",
-        streaming: "streaming",
-      },
     });
   }
 
@@ -294,11 +190,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "model-loading",
       skeletonPolicy: "inline",
       routeKind: input.routeKind,
-      regions: {
-        modelCatalog: "loading",
-        newChat: input.routeKind === "new" ? "ready" : "idle",
-        thread: isThreadRoute ? "ready" : "idle",
-      },
     });
   }
 
@@ -307,10 +198,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "thread-switching",
       skeletonPolicy: "overlay",
       routeKind: input.routeKind,
-      regions: {
-        thread: "loading",
-        composer: "idle",
-      },
     });
   }
 
@@ -327,10 +214,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
         status: "thread-ready",
         skeletonPolicy: "none",
         routeKind: input.routeKind,
-        regions: {
-          thread: "ready",
-          composer: "ready",
-        },
       });
     }
 
@@ -338,10 +221,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "thread-bootstrap",
       skeletonPolicy: "canvas",
       routeKind: input.routeKind,
-      regions: {
-        thread: "loading",
-        composer: "idle",
-      },
     });
   }
 
@@ -350,11 +229,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "sources-loading",
       skeletonPolicy: "sources",
       routeKind: input.routeKind,
-      regions: {
-        newChat: input.routeKind === "new" ? "ready" : "idle",
-        thread: isThreadRoute ? "ready" : "idle",
-        sources: "loading",
-      },
     });
   }
 
@@ -363,11 +237,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "streaming",
       skeletonPolicy: "inline",
       routeKind: input.routeKind,
-      regions: {
-        newChat: input.routeKind === "new" ? "streaming" : "idle",
-        thread: isThreadRoute ? "streaming" : "idle",
-        streaming: "streaming",
-      },
     });
   }
 
@@ -376,10 +245,6 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
       status: "thread-ready",
       skeletonPolicy: "none",
       routeKind: input.routeKind,
-      regions: {
-        thread: input.hasThread === false ? "empty" : "ready",
-        composer: "ready",
-      },
     });
   }
 
@@ -387,10 +252,5 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
     status: "new-ready",
     skeletonPolicy: "none",
     routeKind: input.routeKind,
-    regions: {
-      newChat: input.hasMessages ? "ready" : "empty",
-      thread: "idle",
-      composer: "ready",
-    },
   });
 }

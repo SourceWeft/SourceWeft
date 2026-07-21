@@ -1,10 +1,7 @@
 "use client";
 
 import type { ContentClient } from "@sourceweft/sdk";
-import type {
-  ModelThinkingCapabilities,
-  ModelType,
-} from "./model-catalog-utils";
+import type { ModelThinkingCapabilities } from "./model-catalog-utils";
 
 type CreateByokCredentialRequest = Parameters<
   ContentClient["createByokCredential"]
@@ -42,8 +39,6 @@ export type ByokModelSelection = {
   capabilities?: ModelThinkingCapabilities | null;
   source: "catalog" | "custom";
 };
-
-export type ByokLlmSelection = ByokModelSelection;
 
 export type PendingByokModelState = {
   llmByok?: ByokModelSelection | null;
@@ -215,8 +210,6 @@ export function buildByokModelExecution(input: {
   return llm;
 }
 
-export const buildThreadLlmExecution = buildByokModelExecution;
-
 export function buildThreadCreateModelSettings(input: {
   byokSelection?: ByokModelSelection | null | undefined;
   globalProfileAlias?: string | null;
@@ -328,13 +321,6 @@ export function copyStoredByokState(input: {
   writeStoredByokState(input.workspaceId, value, input.toBucket);
 }
 
-export function clearStoredByokState(workspaceId: string, threadId?: string | null) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.sessionStorage.removeItem(getByokStorageKey(workspaceId, threadId));
-}
-
 export function toCreateByokCredentialPayload(input: {
   apiKey: string;
   baseUrl?: string;
@@ -355,16 +341,3 @@ export function toCreateByokCredentialPayload(input: {
   };
 }
 
-export function selectionSupportsThinking(
-  selection: ByokModelSelection | null | undefined,
-  fallbackCapabilities?: ModelThinkingCapabilities | undefined,
-) {
-  return (
-    selection?.capabilities?.supportsThinking === true ||
-    fallbackCapabilities?.supportsThinking === true
-  );
-}
-
-export function modelTypeSupportsByok(type: ModelType) {
-  return type === "llm" || type === "image" || type === "vision";
-}

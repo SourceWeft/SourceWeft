@@ -79,10 +79,6 @@ function parseOrganizationMetadata(metadata: unknown) {
   }
 }
 
-export function createTeamOrganizationMetadata() {
-  return { sourceweft: { kind: "team" } };
-}
-
 export function isPersonalOrganization(org: { metadata?: unknown }) {
   return parseOrganizationMetadata(org.metadata).sourceweft?.kind === "personal";
 }

@@ -14,7 +14,6 @@ import {
   useRegisterChatHub,
   type ChatHubRegistration,
 } from "../../_components/chat-hub-context";
-import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "../../_components/chat-workspace-shell-feature-flag";
 
 function ModelCatalogErrorState() {
   return (
@@ -107,7 +106,6 @@ export function DashboardChatThreadPageView({
   handleWorkfilePreview,
   hasCachedWorkspaceSources,
   highlightedMessageId,
-  hubDrawerOpen,
   initialSourcesForWorkspace,
   isDesktopPanel,
   isLoadingOlderMessages,
@@ -136,7 +134,6 @@ export function DashboardChatThreadPageView({
   setByokModels,
   setByokProviders,
   setDisabledToolNames,
-  setHubDrawerOpen,
   setPreviewArtifact,
   setPreviewCitation,
   setPreviewSource,
@@ -226,10 +223,7 @@ export function DashboardChatThreadPageView({
       workspaceName,
     ],
   );
-  useRegisterChatHub(
-    chatHubRegistration,
-    HUB_STABILITY_PERSISTENT_SHELL_ENABLED,
-  );
+  useRegisterChatHub(chatHubRegistration);
 
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden">
@@ -246,11 +240,7 @@ export function DashboardChatThreadPageView({
           onByokSelect={handleThreadByokSelect}
           onModelSelect={handleModelSelect}
           onOpenHub={() => {
-            if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
-              chatHubContext?.setMobileHubOpen(true);
-              return;
-            }
-            setHubDrawerOpen(true);
+            chatHubContext?.setMobileHubOpen(true);
           }}
           onToggleSources={toggleSourcesVisible}
           selectedModels={selectedModels}
@@ -335,43 +325,11 @@ export function DashboardChatThreadPageView({
       </div>
 
       <ThreadSidePanels
-        activeCitationIndex={activeCitationIndex}
-        activeCitationMessageId={activeAssistantVersion?.id ?? null}
-        activeMcpInstallIds={activeMcpInstallIds}
-        activeMcpToolIds={activeMcpToolIds}
-        activeSkillIds={activeSkillIds}
-        activeSourceIds={activeSourceIds}
-        artifactsRefreshKey={artifactsRefreshKey}
-        availableSkills={availableSkills}
-        hubSkills={hubSkills}
-        capabilityCatalog={capabilityCatalog}
-        disabledToolNames={disabledToolNames}
-        displayedCitations={displayedCitations}
-        hubDrawerOpen={hubDrawerOpen}
-        initialSourcesForWorkspace={initialSourcesForWorkspace}
-        initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
         isDesktopPanel={isDesktopPanel}
-        isPersistentLayout={isPersistentLayout}
-        loadAvailableSkills={loadAvailableSkills}
-        onConnectorsChange={handleConnectorsChange}
-        onArtifactOpen={setPreviewArtifact}
         onArtifactPreviewClose={() => setPreviewArtifact(null)}
-        onCitationLocate={scrollToMessage}
-        onCitationOpen={handleSourceHubCitationOpen}
-        onHubDrawerOpenChange={setHubDrawerOpen}
-        onLibrarySourcesLoad={handleLibrarySourcesLoad}
-        onLibrarySourcesMerge={handleLibrarySourcesMerge}
-        onMcpSelectionChange={handleMcpSelectionChange}
-        onSelectionChange={persistActiveSourceIds}
-        onSkillSelectionChange={handleSkillSelectionChange}
         previewArtifact={previewArtifact}
         sourcesVisible={sourcesVisible}
-        threadCitations={threadCitations}
-        threadId={threadId}
-        workfilesRefreshKey={workfilesRefreshKey}
         workspaceId={workspaceId}
-        workspaceName={workspaceName}
-        usePersistentHub={HUB_STABILITY_PERSISTENT_SHELL_ENABLED}
       />
 
       <ThreadDialogs

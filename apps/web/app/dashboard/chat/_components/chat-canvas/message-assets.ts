@@ -237,15 +237,6 @@ export function parseStructuredToolOutputRecord(
   return fromContent;
 }
 
-export function normalizeVideoPresentationToolOutput(output: unknown) {
-  const record = parseStructuredToolOutputRecord(output);
-  const type = typeof record?.type === "string" ? record.type : null;
-  if (!record || !isArtifactProgressToolOutputType(type)) {
-    return output;
-  }
-  return record;
-}
-
 /**
  * The raw value behind an output key. Exported as a host facility so capability
  * UI can read its own non-string scalars without re-implementing the transport

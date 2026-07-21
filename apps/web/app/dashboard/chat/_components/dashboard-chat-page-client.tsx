@@ -95,7 +95,6 @@ import {
   useRegisterChatHub,
   type ChatHubRegistration,
 } from "./chat-hub-context";
-import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
 import { useThreadSources } from "../[threadId]/_thread/use-thread-sources";
 import {
   normalizeComposerOptionsState,
@@ -128,14 +127,6 @@ const ChatCanvas = dynamic(
   () => import("./chat-canvas/chat-canvas-root").then((mod) => mod.ChatCanvas),
   {
     loading: () => <ChatCanvasSkeleton />,
-    ssr: false,
-  },
-);
-
-const SourcesHub = dynamic(
-  () => import("./sources-hub").then((mod) => mod.SourcesHub),
-  {
-    loading: () => <SourcesHubSkeleton />,
     ssr: false,
   },
 );
@@ -369,7 +360,6 @@ export function DashboardChatPageClient() {
   );
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
-  const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const shortcutPlatform = useDashboardShortcutPlatform();
 
   useEffect(() => {
@@ -385,11 +375,7 @@ export function DashboardChatPageClient() {
         }
         return;
       }
-      if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
-        chatHubContext?.setMobileHubOpen(true);
-        return;
-      }
-      setHubDrawerOpen(true);
+      chatHubContext?.setMobileHubOpen(true);
     }
   }, [chatHubContext, sourcesVisible, toggleSourcesVisible]);
 
@@ -823,10 +809,7 @@ export function DashboardChatPageClient() {
       workspaceName,
     ],
   );
-  useRegisterChatHub(
-    chatHubRegistration,
-    HUB_STABILITY_PERSISTENT_SHELL_ENABLED,
-  );
+  useRegisterChatHub(chatHubRegistration);
 
   useEffect(() => {
     if (!workspaceId || !mcpInstallIdFromQuery) {
@@ -1083,11 +1066,7 @@ export function DashboardChatPageClient() {
                     toggleSourcesVisible();
                     return;
                   }
-                  if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
-                    chatHubContext?.setMobileHubOpen(true);
-                    return;
-                  }
-                  setHubDrawerOpen(true);
+                  chatHubContext?.setMobileHubOpen(true);
                 }}
                 size="icon-sm"
                 title={
@@ -1159,47 +1138,6 @@ export function DashboardChatPageClient() {
           />
         )}
       </div>
-
-      {sourcesVisible &&
-      isPersistentLayout &&
-      !previewArtifact &&
-      !HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? (
-        <SourcesHub
-          mode="new"
-          capabilityCatalog={capabilityCatalog}
-          disabledToolNames={disabledToolNames}
-          installedSkills={availableSkills}
-          hubSkills={hubSkills}
-          selectedMcpInstallIds={activeMcpInstallIds}
-          selectedMcpToolIds={activeMcpToolIds}
-          onMcpSelectionChange={handleMcpSelectionChange}
-          onArtifactOpen={setPreviewArtifact}
-          onSkillSelectionChange={handleSkillSelectionChange}
-          onSelectionChange={persistActiveSourceIds}
-          onSkillsCatalogChange={loadAvailableSkills}
-          initialSources={initialSourcesForWorkspace}
-          initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
-          onSourceLoad={handleLibrarySourcesLoad}
-          onSourceMerge={handleLibrarySourcesMerge}
-          onConnectorsChange={handleConnectorsChange}
-          selectedIds={activeSourceIds}
-          selectedSkillIds={activeSkillIds}
-          workspaceId={workspaceId}
-          workspaceName={workspaceName}
-        />
-      ) : null}
-
-      {sourcesVisible &&
-      previewArtifact &&
-      isDesktopPanel &&
-      !HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? (
-        <ArtifactPreviewPanel
-          artifact={previewArtifact}
-          className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
-          onClose={() => setPreviewArtifact(null)}
-          workspaceId={workspaceId}
-        />
-      ) : null}
 
       <ByokModelConfigDialog
         defaults={byokModelConfig}
@@ -1274,46 +1212,6 @@ export function DashboardChatPageClient() {
               workspaceId={workspaceId}
             />
           ) : null}
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
-        open={HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? false : hubDrawerOpen}
-        onOpenChange={setHubDrawerOpen}
-      >
-        <SheetContent
-          className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
-          side="right"
-        >
-          <SheetTitle className="sr-only">Hub</SheetTitle>
-          <SourcesHub
-            mode="new"
-            capabilityCatalog={capabilityCatalog}
-            onClose={() => setHubDrawerOpen(false)}
-            disabledToolNames={disabledToolNames}
-            installedSkills={availableSkills}
-            hubSkills={hubSkills}
-            selectedMcpInstallIds={activeMcpInstallIds}
-            selectedMcpToolIds={activeMcpToolIds}
-            onMcpSelectionChange={handleMcpSelectionChange}
-            onArtifactOpen={(artifact) => {
-              setPreviewArtifact(artifact);
-              setHubDrawerOpen(false);
-            }}
-            onSkillSelectionChange={handleSkillSelectionChange}
-            onSelectionChange={persistActiveSourceIds}
-            onSkillsCatalogChange={loadAvailableSkills}
-            initialSources={initialSourcesForWorkspace}
-            initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
-            onSourceLoad={handleLibrarySourcesLoad}
-            onSourceMerge={handleLibrarySourcesMerge}
-            onConnectorsChange={handleConnectorsChange}
-            selectedIds={activeSourceIds}
-            selectedSkillIds={activeSkillIds}
-            variant="drawer"
-            workspaceId={workspaceId}
-            workspaceName={workspaceName}
-          />
         </SheetContent>
       </Sheet>
     </div>

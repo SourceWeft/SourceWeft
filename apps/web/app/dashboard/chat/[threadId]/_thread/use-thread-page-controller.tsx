@@ -130,7 +130,6 @@ export function useThreadPageController({
     ChatSendInput["command"] | null
   >(null);
   const [composerResetKey, setComposerResetKey] = useState(0);
-  const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [loadedThreadMessagesKey, setLoadedThreadMessagesKey] = useState<
     string | null
@@ -157,9 +156,7 @@ export function useThreadPageController({
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
-        return;
       }
-      setHubDrawerOpen(true);
     }
   }, [sourcesVisible, toggleSourcesVisible]);
 
@@ -1074,7 +1071,6 @@ export function useThreadPageController({
     handleWorkfilePreview,
     hasCachedWorkspaceSources,
     highlightedMessageId,
-    hubDrawerOpen,
     initialSourcesForWorkspace,
     isDesktopPanel,
     isLoadingOlderMessages,
@@ -1105,7 +1101,6 @@ export function useThreadPageController({
     setByokModels,
     setByokProviders,
     setDisabledToolNames,
-    setHubDrawerOpen,
     setPreviewArtifact,
     setPreviewCitation,
     setPreviewSource,
