@@ -1,9 +1,6 @@
 export const INVOCATION_SOURCE_KINDS = [
   "capability_tool",
   "skill_command",
-  "mcp_tool",
-  "mcp_prompt",
-  "mcp_resource",
 ] as const;
 
 export type InvocationSourceKind = (typeof INVOCATION_SOURCE_KINDS)[number];
@@ -22,50 +19,19 @@ export type SkillCommandSourceRef = {
   commandName: string;
 };
 
-export type McpToolSourceRef = {
-  kind: "mcp_tool";
-  serverInstallId: string;
-  serverToolName: string;
-  normalizedToolName?: string;
-  toolId?: string;
-};
-
-export type McpPromptSourceRef = {
-  kind: "mcp_prompt";
-  serverInstallId: string;
-  promptName: string;
-};
-
-export type McpResourceSourceRef = {
-  kind: "mcp_resource";
-  serverInstallId: string;
-  uri: string;
-};
-
 export type InvocationSourceRef =
   | CapabilityToolSourceRef
-  | SkillCommandSourceRef
-  | McpToolSourceRef
-  | McpPromptSourceRef
-  | McpResourceSourceRef;
+  | SkillCommandSourceRef;
 
 export type InvocationSemantics =
   | {
       kind: "fixed_tool_choice";
-      target: "capability_tool" | "mcp_tool";
+      target: "capability_tool";
       toolName: string;
     }
   | {
       kind: "context_injection";
       workflow: string;
-    }
-  | {
-      kind: "mcp_prompt";
-      promptName: string;
-    }
-  | {
-      kind: "mcp_resource";
-      uri: string;
     };
 
 export type SelectableInvocationDefinition = {
@@ -101,25 +67,9 @@ export type InvocationPlan =
       semantics: Extract<InvocationSemantics, { kind: "context_injection" }>;
       userInput: string;
       metadata?: Record<string, unknown>;
-    }
-  | {
-      kind: "mcp_prompt";
-      selectableId: string;
-      sourceRef: Extract<InvocationSourceRef, { kind: "mcp_prompt" }>;
-      semantics: Extract<InvocationSemantics, { kind: "mcp_prompt" }>;
-      metadata?: Record<string, unknown>;
-    }
-  | {
-      kind: "mcp_resource";
-      selectableId: string;
-      sourceRef: Extract<InvocationSourceRef, { kind: "mcp_resource" }>;
-      semantics: Extract<InvocationSemantics, { kind: "mcp_resource" }>;
-      metadata?: Record<string, unknown>;
     };
 
 export type NormalizedInvocationErrorCode =
-  | "MCP_TRANSPORT_UNSUPPORTED"
-  | "MCP_MANIFEST_STALE"
   | "SKILL_NOT_ENABLED"
   | "SCHEMA_MISMATCH"
   | "RUNTIME_HANDOFF_UNAVAILABLE"

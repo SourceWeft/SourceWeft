@@ -7,7 +7,6 @@ import { ContentError } from "../../content/errors";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import { evaluateInvocationPolicy } from "../../invocations/policy-evaluator";
 import { runInvocationPipeline } from "../../invocations/pipeline";
-import type { WorkspaceMcpInstall } from "../../invocations/mcp-install";
 import { createSelectableInvocationRegistry } from "../../invocations/registry";
 import type {
   SelectableInvocationProvider,
@@ -15,7 +14,6 @@ import type {
 } from "../../invocations/registry";
 import type { InvocationEnvelope } from "../../invocations/types";
 import { createCapabilityToolInvocationProvider } from "../../invocations/providers/capability-tools";
-import { createWorkspaceMcpInvocationProvider } from "../../invocations/providers/workspace-mcp";
 import { listCapabilityCommands } from "./capability-command-workflows";
 import type { ResolvedThreadInvocation } from "./types";
 
@@ -37,7 +35,6 @@ export function buildTurnInvocationRegistry(input: {
   readonly capabilityConfig?: CapabilityCommandListConfig;
   readonly enabledSkills: readonly EnabledSkillDescriptor[];
   readonly providers?: readonly SelectableInvocationProvider[];
-  readonly workspaceMcpInstalls?: readonly WorkspaceMcpInstall[];
 }) {
   const capabilityCommands =
     input.capabilityCommands ??
@@ -48,9 +45,6 @@ export function buildTurnInvocationRegistry(input: {
         createCapabilityToolInvocationProvider({
           commands: capabilityCommands,
         }),
-        createWorkspaceMcpInvocationProvider({
-          installs: [...(input.workspaceMcpInstalls ?? [])],
-        }),
       ]),
     ],
   });
@@ -59,13 +53,11 @@ export function buildTurnInvocationRegistry(input: {
 export async function buildDefaultTurnInvocationRegistry(input: {
   readonly capabilityConfig?: CapabilityCommandListConfig;
   readonly enabledSkills: readonly EnabledSkillDescriptor[];
-  readonly workspaceMcpInstalls?: readonly WorkspaceMcpInstall[];
 }) {
   return buildTurnInvocationRegistry({
     capabilityCommands: await listCapabilityCommands(input.capabilityConfig),
     capabilityConfig: input.capabilityConfig,
     enabledSkills: input.enabledSkills,
-    workspaceMcpInstalls: input.workspaceMcpInstalls,
   });
 }
 
@@ -114,25 +106,15 @@ export function resolveThreadInvocation(input: {
       events: output.events,
     };
   }
-  if (output.plan.kind === "inject_context") {
-    return {
-      kind: "context_injection",
-      selectableId: output.plan.selectableId,
-      sourceRef: output.plan.sourceRef,
-      instruction: output.plan.semantics.workflow.replaceAll(
-        "$ARGUMENTS",
-        output.plan.userInput,
-      ),
-      userInput: output.plan.userInput,
-      events: output.events,
-    };
-  }
-  throw new ContentError(
-    400,
-    "INVOCATION_UNSUPPORTED_PLAN",
-    "Invocation selection cannot be prepared for a thread turn",
-    {
-      sourceRef: output.plan.sourceRef,
-    },
-  );
+  return {
+    kind: "context_injection",
+    selectableId: output.plan.selectableId,
+    sourceRef: output.plan.sourceRef,
+    instruction: output.plan.semantics.workflow.replaceAll(
+      "$ARGUMENTS",
+      output.plan.userInput,
+    ),
+    userInput: output.plan.userInput,
+    events: output.events,
+  };
 }

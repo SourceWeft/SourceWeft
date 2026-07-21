@@ -35,38 +35,6 @@ function createPlan(input: {
         userInput: envelope.userInput,
         metadata: definition.metadata,
       };
-    case "mcp_prompt":
-      if (definition.sourceRef.kind !== "mcp_prompt") {
-        throw createNormalizedInvocationError({
-          code: "SCHEMA_MISMATCH",
-          message: "MCP prompt semantics require mcp_prompt source ref",
-          sourceRef: definition.sourceRef,
-          recoverable: false,
-        });
-      }
-      return {
-        kind: "mcp_prompt",
-        selectableId: envelope.selectableId,
-        sourceRef: definition.sourceRef,
-        semantics: definition.semantics,
-        metadata: definition.metadata,
-      };
-    case "mcp_resource":
-      if (definition.sourceRef.kind !== "mcp_resource") {
-        throw createNormalizedInvocationError({
-          code: "SCHEMA_MISMATCH",
-          message: "MCP resource semantics require mcp_resource source ref",
-          sourceRef: definition.sourceRef,
-          recoverable: false,
-        });
-      }
-      return {
-        kind: "mcp_resource",
-        selectableId: envelope.selectableId,
-        sourceRef: definition.sourceRef,
-        semantics: definition.semantics,
-        metadata: definition.metadata,
-      };
   }
 }
 

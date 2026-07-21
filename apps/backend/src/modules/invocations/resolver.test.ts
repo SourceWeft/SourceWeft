@@ -41,47 +41,6 @@ const skillDefinition: SelectableInvocationDefinition = {
   },
 };
 
-const mcpToolDefinition: SelectableInvocationDefinition = {
-  id: "mcp_tool.mcp_install_1.github_create_issue",
-  label: "Create issue",
-  enabled: true,
-  sourceRef: {
-    kind: "mcp_tool",
-    serverInstallId: "mcp_install_1",
-    serverToolName: "create_issue",
-    normalizedToolName: "github_create_issue",
-  },
-  semantics: {
-    kind: "fixed_tool_choice",
-    target: "mcp_tool",
-    toolName: "mcp__mcp_install_1__github_create_issue",
-  },
-};
-
-const mcpPromptDefinition: SelectableInvocationDefinition = {
-  id: "mcp_prompt.mcp_install_1.triage_issue",
-  label: "Triage issue",
-  enabled: true,
-  sourceRef: {
-    kind: "mcp_prompt",
-    serverInstallId: "mcp_install_1",
-    promptName: "triage_issue",
-  },
-  semantics: { kind: "mcp_prompt", promptName: "triage_issue" },
-};
-
-const mcpResourceDefinition: SelectableInvocationDefinition = {
-  id: "mcp_resource.mcp_install_1.resource_1",
-  label: "Issue 1",
-  enabled: true,
-  sourceRef: {
-    kind: "mcp_resource",
-    serverInstallId: "mcp_install_1",
-    uri: "github://issues/1",
-  },
-  semantics: { kind: "mcp_resource", uri: "github://issues/1" },
-};
-
 test("resolver resolves capability tool selection to bind tool choice", () => {
   const registry = createSelectableInvocationRegistry({ providers: [provider([capabilityToolDefinition])] });
   const result = resolveInvocationSelection({
@@ -103,35 +62,6 @@ test("resolver resolves skill command to context injection only", () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.ok ? result.plan.kind : null, "inject_context");
-});
-
-test("resolver resolves MCP tool without structured args to bind tool choice", () => {
-  const registry = createSelectableInvocationRegistry({ providers: [provider([mcpToolDefinition])] });
-  const result = resolveInvocationSelection({
-    registry,
-    envelope: { selectableId: mcpToolDefinition.id, userInput: "create an issue" },
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.ok ? result.plan.kind : null, "bind_tool_choice");
-  assert.equal(result.ok ? result.plan.sourceRef.kind : null, "mcp_tool");
-});
-
-test("resolver resolves MCP prompt and resource to typed planned states", () => {
-  const registry = createSelectableInvocationRegistry({
-    providers: [provider([mcpPromptDefinition, mcpResourceDefinition])],
-  });
-  const prompt = resolveInvocationSelection({
-    registry,
-    envelope: { selectableId: mcpPromptDefinition.id, userInput: "triage" },
-  });
-  const resource = resolveInvocationSelection({
-    registry,
-    envelope: { selectableId: mcpResourceDefinition.id, userInput: "read" },
-  });
-
-  assert.equal(prompt.ok ? prompt.plan.kind : null, "mcp_prompt");
-  assert.equal(resource.ok ? resource.plan.kind : null, "mcp_resource");
 });
 
 test("resolver returns normalized error for unavailable or missing explicit selection", () => {

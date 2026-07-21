@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import {
-  createInvocationEvent,
-  INVOCATION_EVENT_TYPES,
-} from "./events";
-import {
-  createNormalizedInvocationError,
-  INVOCATION_ERROR_CODES,
-} from "./errors";
+import { createInvocationEvent } from "./events";
+import { createNormalizedInvocationError } from "./errors";
 import {
   INVOCATION_SOURCE_KINDS,
   type InvocationEvent,
@@ -17,15 +11,7 @@ import {
   type SelectableInvocationDefinition,
 } from "./types";
 
-test("invocation source refs distinguish capability, skill, and MCP capabilities", () => {
-  assert.deepEqual(INVOCATION_SOURCE_KINDS, [
-    "capability_tool",
-    "skill_command",
-    "mcp_tool",
-    "mcp_prompt",
-    "mcp_resource",
-  ]);
-
+test("invocation source refs distinguish capability and skill capabilities", () => {
   const refs: InvocationSourceRef[] = [
     {
       kind: "capability_tool",
@@ -39,30 +25,12 @@ test("invocation source refs distinguish capability, skill, and MCP capabilities
       skillSlug: "research",
       commandName: "summarize",
     },
-    {
-      kind: "mcp_tool",
-      serverInstallId: "mcp_install_1",
-      serverToolName: "create_issue",
-      normalizedToolName: "github_create_issue",
-      toolId: "tool_1",
-    },
-    {
-      kind: "mcp_prompt",
-      serverInstallId: "mcp_install_1",
-      promptName: "triage_issue",
-    },
-    {
-      kind: "mcp_resource",
-      serverInstallId: "mcp_install_1",
-      uri: "github://issues/1",
-    },
   ];
 
   assert.deepEqual(
     refs.map((ref) => ref.kind),
     INVOCATION_SOURCE_KINDS,
   );
-  assert.equal(refs[2]?.kind === "mcp_tool" ? refs[2].serverInstallId : null, "mcp_install_1");
 });
 
 test("selectable definitions model supported invocation semantics without execution", () => {
@@ -73,16 +41,9 @@ test("selectable definitions model supported invocation semantics without execut
       toolName: "generate_image",
     },
     {
-      kind: "fixed_tool_choice",
-      target: "mcp_tool",
-      toolName: "mcp__github__create_issue",
-    },
-    {
       kind: "context_injection",
       workflow: "Use the skill workflow before answering.",
     },
-    { kind: "mcp_prompt", promptName: "triage_issue" },
-    { kind: "mcp_resource", uri: "github://issues/1" },
   ];
 
   const definition: SelectableInvocationDefinition = {
@@ -107,50 +68,30 @@ test("selectable definitions model supported invocation semantics without execut
   assert.equal(definition.semantics.kind, "fixed_tool_choice");
   assert.deepEqual(
     semantics.map((item) => item.kind),
-    [
-      "fixed_tool_choice",
-      "fixed_tool_choice",
-      "context_injection",
-      "mcp_prompt",
-      "mcp_resource",
-    ],
+    ["fixed_tool_choice", "context_injection"],
   );
 });
 
 test("normalized invocation errors expose required error codes and source identity", () => {
-  assert.ok(INVOCATION_ERROR_CODES.includes("MCP_TRANSPORT_UNSUPPORTED"));
-  assert.ok(INVOCATION_ERROR_CODES.includes("MCP_MANIFEST_STALE"));
-  assert.ok(INVOCATION_ERROR_CODES.includes("SKILL_NOT_ENABLED"));
-  assert.ok(INVOCATION_ERROR_CODES.includes("SCHEMA_MISMATCH"));
-  assert.ok(INVOCATION_ERROR_CODES.includes("RUNTIME_HANDOFF_UNAVAILABLE"));
-
   const error: NormalizedInvocationError = createNormalizedInvocationError({
-    code: "MCP_MANIFEST_STALE",
-    message: "Manifest snapshot is stale",
+    code: "SCHEMA_MISMATCH",
+    message: "Structured args do not match the tool schema",
     sourceRef: {
-      kind: "mcp_tool",
-      serverInstallId: "mcp_install_1",
-      serverToolName: "create_issue",
+      kind: "capability_tool",
+      capabilityId: "sourceweft/generate-image",
+      contributionId: "generate_image",
+      sourcePackageName: null,
+      toolName: "generate_image",
     },
     recoverable: false,
   });
 
-  assert.equal(error.code, "MCP_MANIFEST_STALE");
-  assert.equal(error.sourceRef?.kind, "mcp_tool");
+  assert.equal(error.code, "SCHEMA_MISMATCH");
+  assert.equal(error.sourceRef?.kind, "capability_tool");
+  assert.equal(error.recoverable, false);
 });
 
 test("invocation events cover resolution, policy, approval, handoff, result, and error states", () => {
-  assert.deepEqual(INVOCATION_EVENT_TYPES, [
-    "resolve",
-    "policy",
-    "approval_required",
-    "tool_choice_bound",
-    "context_injected",
-    "deepagents_handoff",
-    "result",
-    "error",
-  ]);
-
   const sourceRef: InvocationSourceRef = {
     kind: "capability_tool",
     capabilityId: "sourceweft/generate-image",
@@ -161,7 +102,7 @@ test("invocation events cover resolution, policy, approval, handoff, result, and
   const events: InvocationEvent[] = [
     createInvocationEvent({ type: "resolve", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef }),
     createInvocationEvent({ type: "policy", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, decision: "allow" }),
-    createInvocationEvent({ type: "approval_required", selectableId: "mcp.tool", sourceRef, approvalRef: "approval_1", reason: "High risk MCP tool" }),
+    createInvocationEvent({ type: "approval_required", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, approvalRef: "approval_1", reason: "High risk tool" }),
     createInvocationEvent({ type: "tool_choice_bound", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, toolName: "generate_image" }),
     createInvocationEvent({ type: "context_injected", selectableId: "skill.research.summarize", sourceRef, instruction: "Follow the workflow." }),
     createInvocationEvent({ type: "deepagents_handoff", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, boundary: "deepagents" }),
@@ -171,7 +112,16 @@ test("invocation events cover resolution, policy, approval, handoff, result, and
 
   assert.deepEqual(
     events.map((event) => event.type),
-    INVOCATION_EVENT_TYPES,
+    [
+      "resolve",
+      "policy",
+      "approval_required",
+      "tool_choice_bound",
+      "context_injected",
+      "deepagents_handoff",
+      "result",
+      "error",
+    ],
   );
   assert.ok(events.every((event) => typeof event.timestamp === "string"));
 });

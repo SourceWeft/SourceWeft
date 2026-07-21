@@ -9,21 +9,23 @@ import {
 } from "./policy";
 import type { InvocationPlan } from "./types";
 
-function mcpToolPlan(): InvocationPlan {
+function capabilityToolPlan(): InvocationPlan {
   return {
     kind: "bind_tool_choice",
-    selectableId: "mcp.mcp_install_1.tool.create_issue",
+    selectableId: "cap:sourceweft/generate-image:generate_image",
     sourceRef: {
-      kind: "mcp_tool",
-      serverInstallId: "mcp_install_1",
-      serverToolName: "create_issue",
+      kind: "capability_tool",
+      capabilityId: "sourceweft/generate-image",
+      contributionId: "generate_image",
+      sourcePackageName: null,
+      toolName: "generate_image",
     },
     semantics: {
       kind: "fixed_tool_choice",
-      target: "mcp_tool",
-      toolName: "mcp__mcp_install_1__create_issue",
+      target: "capability_tool",
+      toolName: "generate_image",
     },
-    userInput: "create an issue",
+    userInput: "make an image",
   };
 }
 
@@ -34,9 +36,9 @@ test("policy decisions model allow, deny, and ask without throwing", () => {
     code: "SKILL_NOT_ENABLED",
   });
   const ask = askInvocationApproval({
-    reason: "High-risk MCP tool requires approval",
+    reason: "High-risk capability tool requires approval",
     approvalRef: "approval_1",
-    sourceRef: mcpToolPlan().sourceRef,
+    sourceRef: capabilityToolPlan().sourceRef,
   });
 
   assert.equal(allow.decision, "allow");
@@ -44,23 +46,23 @@ test("policy decisions model allow, deny, and ask without throwing", () => {
   assert.equal(deny.error.code, "SKILL_NOT_ENABLED");
   assert.equal(ask.decision, "ask");
   assert.equal(ask.approvalRef, "approval_1");
-  assert.equal(ask.sourceRef?.kind, "mcp_tool");
+  assert.equal(ask.sourceRef?.kind, "capability_tool");
 });
 
 test("ask includes approval reason and source metadata", () => {
   const ask = askInvocationApproval({
-    reason: "High-risk MCP tool requires approval",
+    reason: "High-risk capability tool requires approval",
     approvalRef: "approval_1",
-    sourceRef: mcpToolPlan().sourceRef,
+    sourceRef: capabilityToolPlan().sourceRef,
     metadata: { risk: "high" },
   });
 
   assert.equal(ask.decision, "ask");
-  assert.equal(ask.reason, "High-risk MCP tool requires approval");
+  assert.equal(ask.reason, "High-risk capability tool requires approval");
   assert.deepEqual(ask.metadata, { risk: "high" });
   assert.equal(
-    ask.sourceRef?.kind === "mcp_tool" ? ask.sourceRef.serverInstallId : null,
-    "mcp_install_1",
+    ask.sourceRef?.kind === "capability_tool" ? ask.sourceRef.capabilityId : null,
+    "sourceweft/generate-image",
   );
 });
 
@@ -69,7 +71,7 @@ test("normal deny and ask flows are evaluator outputs, not generic exceptions", 
     evaluate(input: InvocationPolicyContext) {
       if (input.plan.kind === "bind_tool_choice") {
         return askInvocationApproval({
-          reason: "MCP tool execution requires approval",
+          reason: "Tool execution requires approval",
           approvalRef: "approval_1",
           sourceRef: input.plan.sourceRef,
         });
@@ -81,7 +83,7 @@ test("normal deny and ask flows are evaluator outputs, not generic exceptions", 
   const decision = await evaluator.evaluate({
     workspaceId: "workspace_1",
     userId: "user_1",
-    plan: mcpToolPlan(),
+    plan: capabilityToolPlan(),
   });
 
   assert.equal(decision.decision, "ask");
