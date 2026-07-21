@@ -21,7 +21,6 @@ import { MAX_ERROR_MESSAGE_LENGTH } from "./config";
 import { createVideoPipelineDeps, type VideoPipelineDeps } from "./deps";
 import { attachReadySourceJson } from "./finalize";
 import { uploadCoverImage } from "./preview-images";
-import { buildProjectCodePayload } from "./project-code";
 import { renderVideoSlideNumbers, uploadRenderedVideo } from "./render-video";
 import {
   runGeneratedProject,
@@ -34,7 +33,6 @@ import {
 } from "./scene-gen";
 import {
   editTargetSlideNumbers,
-  isSlideTargeted,
   resolveVideoEditPlan,
 } from "./edit-plan";
 import { videoPipelineStages } from "./stages";
@@ -324,7 +322,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             projectCode: {
-              ...buildProjectCodePayload(state),
               install: run.install,
               typecheck: {
                 ok: false,
@@ -358,7 +355,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
             ...state,
             projectCode: {
               ...state.projectCode,
-              ...buildProjectCodePayload(state),
               install: projectRun.install,
               typecheck: projectRun.typecheck,
               smoke: {
@@ -388,7 +384,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             projectCode: {
-              ...buildProjectCodePayload(state),
               install: projectRun.install,
               typecheck: projectRun.typecheck,
               smoke: {
@@ -437,9 +432,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
               ...withRepairedScenes,
               projectCode: {
                 ...state.projectCode,
-                ...buildProjectCodePayload(
-                  withRepairedScenes as VideoPresentationProjectPayload,
-                ),
                 install: projectRun.install,
                 typecheck: projectRun.typecheck,
                 smoke: { checked: true, ...projectRun.smoke },

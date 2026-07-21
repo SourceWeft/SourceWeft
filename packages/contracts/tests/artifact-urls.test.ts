@@ -5,7 +5,6 @@ import {
   ARTIFACT_PREVIEW_PAGE_ROUTE,
   buildArtifactAssetUrl,
   buildArtifactDownloadUrl,
-  buildArtifactFileUrl,
   buildArtifactPreviewImageUrl,
   buildArtifactPreviewUrl,
   buildArtifactProxyUrl,
@@ -90,7 +89,7 @@ test("REST path segments are percent-encoded, not form-encoded", () => {
 test("proxy family mirrors the REST resources onto the web route", () => {
   assert.equal(ARTIFACT_FILE_PROXY_ROUTE, "/api/artifact-file");
   assert.equal(
-    buildArtifactFileUrl(target),
+    buildArtifactProxyUrl({ ...target, resource: { kind: "file" } }),
     "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1",
   );
   assert.equal(

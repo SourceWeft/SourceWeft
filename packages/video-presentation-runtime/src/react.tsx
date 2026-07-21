@@ -17,41 +17,6 @@ export type CompiledVideoPresentationScene = {
   audioUrl?: string;
 };
 
-export type RuntimeSceneModuleExports = {
-  default?: React.ComponentType<Record<string, unknown>>;
-  [key: string]: unknown;
-};
-
-export function buildCompiledScenes(
-  payload: VideoPresentationProjectPayload,
-  input: {
-    compile: (
-      sceneCode: string,
-      componentName: string,
-      slideNumber: number,
-    ) => React.ComponentType<Record<string, unknown>>;
-    resolveAudioUrl?: (assetUrl: string) => string;
-  },
-) {
-  return payload.sceneModules.map((scene) => {
-    const audioTrack = getAudioTrackForSlide(payload, scene.slideNumber);
-    return {
-      slideNumber: scene.slideNumber,
-      component: input.compile(
-        scene.code,
-        scene.componentName,
-        scene.slideNumber,
-      ),
-      durationInFrames: getSlideDurationInFrames(payload, scene.slideNumber),
-      title: scene.title,
-      audioUrl:
-        audioTrack?.assetUrl && input.resolveAudioUrl
-          ? input.resolveAudioUrl(audioTrack.assetUrl)
-          : audioTrack?.assetUrl,
-    } satisfies CompiledVideoPresentationScene;
-  });
-}
-
 function CombinedComposition({
   scenes,
 }: {
@@ -86,15 +51,6 @@ export function VideoPresentationComposition({
   scenes: CompiledVideoPresentationScene[];
 }) {
   return <CombinedComposition scenes={scenes} />;
-}
-
-export function buildVideoPresentationComposition(
-  scenes: CompiledVideoPresentationScene[],
-) {
-  const snapshot = [...scenes];
-  return function VideoPresentationComposition() {
-    return <CombinedComposition scenes={snapshot} />;
-  };
 }
 
 function RuntimePlaceholderScene({

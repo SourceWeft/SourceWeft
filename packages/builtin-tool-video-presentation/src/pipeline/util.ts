@@ -6,14 +6,6 @@ import { VIDEO_PRESENTATION_FILE_BASE_FALLBACK } from "../video-presentation-fil
 import { MAX_DIAGNOSTIC_LENGTH } from "./config";
 import type { ProjectExecutionResult } from "./deps";
 
-export function toObjectRecordOrUndefined(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 export function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 }

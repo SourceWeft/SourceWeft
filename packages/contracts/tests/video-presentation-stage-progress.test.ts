@@ -55,7 +55,7 @@ test("terminal stages report full progress, pipeline stages stay below it", () =
 
 test("every pipeline stage id is also a generation stage", () => {
   // Guards the two enums drifting apart: a pipeline id with no matching
-  // generation stage would break normalizeWorkerStageToPipelineStage.
+  // generation stage would have no progress weight to resolve against.
   const generationStages = new Set<string>(
     videoPresentationGenerationStageSchema.options,
   );

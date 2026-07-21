@@ -705,12 +705,9 @@ test("processVideoPresentationGenerateJob plans internally and publishes code-fi
   assert.equal(payload.projectCode?.install.ok, true);
   assert.equal(payload.projectCode?.typecheck.ok, true);
   assert.equal(payload.projectCode?.smoke.ok, true);
-  assert.match(
-    payload.projectCode?.files.find(
-      (file) => file.path === "src/scenes/Slide1.tsx",
-    )?.content ?? "",
-    /@ts-nocheck/u,
-  );
+  // The generated project's files are no longer persisted onto the payload;
+  // that scene files carry `// @ts-nocheck` is covered directly against the
+  // builder in builtin-tool-video-presentation's `tests/project-code.test.ts`.
   assert.equal(
     payload.preview.durationSeconds,
     payload.project.durationSeconds,

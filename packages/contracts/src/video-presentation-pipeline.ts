@@ -130,7 +130,6 @@ export function computeVideoPresentationOverallProgress(
   if (steps.length === 0) {
     return 0;
   }
-  const completed = steps.filter((step) => step.status === "completed").length;
   const running = steps.find((step) => step.status === "running");
   if (running) {
     const base = resolveVideoPresentationPipelineStageProgress(running.id);
@@ -141,37 +140,10 @@ export function computeVideoPresentationOverallProgress(
   if (steps.every((step) => step.status === "completed")) {
     return 100;
   }
-  void completed;
   const lastCompleted = [...steps]
     .reverse()
     .find((step) => step.status === "completed");
   return lastCompleted
     ? resolveVideoPresentationPipelineStageProgress(lastCompleted.id)
     : 0;
-}
-
-export function normalizeWorkerStageToPipelineStage(
-  stage: string,
-): VideoPresentationPipelineStageId | null {
-  if (stage === "generating_project_code") {
-    return "planning_storyboard";
-  }
-  return VIDEO_PRESENTATION_PIPELINE_STAGE_IDS.includes(
-    stage as VideoPresentationPipelineStageId,
-  )
-    ? (stage as VideoPresentationPipelineStageId)
-    : null;
-}
-
-export function isPipelineStageCompleted(
-  checkpointStage: VideoPresentationPipelineStageId | undefined,
-  stageId: VideoPresentationPipelineStageId,
-) {
-  if (!checkpointStage) {
-    return false;
-  }
-  const checkpointIndex =
-    VIDEO_PRESENTATION_PIPELINE_STAGE_IDS.indexOf(checkpointStage);
-  const stageIndex = VIDEO_PRESENTATION_PIPELINE_STAGE_IDS.indexOf(stageId);
-  return checkpointIndex >= stageIndex;
 }

@@ -37,7 +37,6 @@ export const updateUserSettingsRequestSchema = z
 
 export const updateUserSettingsResponseSchema = getUserSettingsResponseSchema;
 
-export type UserTheme = z.infer<typeof userThemeSchema>;
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 export type GetUserSettingsResponse = z.infer<
   typeof getUserSettingsResponseSchema

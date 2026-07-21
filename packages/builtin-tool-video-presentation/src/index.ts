@@ -7,10 +7,6 @@ import { narrationBudgetIssues, planVideoProject } from "./pipeline/storyboard";
 
 export { generateVideoPresentationAgentTool, generateVideoPresentationAgentToolDefs } from "./agent-tool-defs";
 
-export const builtinGenerateVideoPresentationCapability = {
-  id: "sourceweft/video-presentation-tool",
-} as const;
-
 export { createCapabilityAgentTools } from "./agent-tools";
 export {
   createArtifactViewHandlers,
@@ -53,8 +49,6 @@ export {
   buildInitialVideoPresentationPipelineSteps,
   computeVideoPresentationOverallProgress,
   getVideoPresentationPipelineStepLabel,
-  isPipelineStageCompleted,
-  normalizeWorkerStageToPipelineStage,
   resolveVideoPresentationPipelineStageProgress,
   type VideoPresentationPipelineStageId,
   type VideoPresentationPipelineStep,
@@ -87,7 +81,6 @@ export {
   GENERATED_VIDEO_PRESENTATION_PROGRESS_EVENT_TYPE,
   videoPresentationRuntimePromptProvider,
   buildVideoPresentationRuntimePromptLines as buildVideoPresentationAgentRuntimePromptLines,
-  looksLikeVideoPresentationSpecText,
   type VideoPresentationToolContext,
   type VideoPresentationToolRuntimeDeps,
 } from "./tool-runtime";

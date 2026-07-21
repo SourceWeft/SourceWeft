@@ -11,7 +11,7 @@ import {
 import type { VideoPipelineDeps } from "./deps";
 import { requestNarrationEnabled } from "./storyboard";
 import { extensionForMimeType as artifactExtensionForMimeType } from "@sourceweft/contracts/artifact-files";
-import { safeStorageSegment } from "./util";
+import { artifactAssetUrl, safeStorageSegment } from "./util";
 
 /**
  * Extension (with leading dot) for a narration track.
@@ -22,14 +22,6 @@ import { safeStorageSegment } from "./util";
  */
 export function extensionForMimeType(mimeType: string | undefined | null) {
   return artifactExtensionForMimeType(mimeType, ".mp3");
-}
-
-export function audioAssetUrl(input: {
-  artifactId: string;
-  fileName: string;
-  workspaceId: string;
-}) {
-  return `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifactId)}/assets/${encodeURIComponent(input.fileName)}`;
 }
 
 export async function generateAudioTracks(input: {
@@ -161,7 +153,7 @@ export async function generateAudioTracks(input: {
       }
       const track = {
         slideNumber: slide.slideNumber,
-        assetUrl: audioAssetUrl({
+        assetUrl: artifactAssetUrl({
           artifactId: input.artifactId,
           fileName,
           workspaceId: input.workspaceId,

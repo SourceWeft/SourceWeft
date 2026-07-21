@@ -10,8 +10,6 @@ export {
   buildInitialVideoPresentationPipelineSteps,
   computeVideoPresentationOverallProgress,
   getVideoPresentationPipelineStepLabel,
-  isPipelineStageCompleted,
-  normalizeWorkerStageToPipelineStage,
   resolveVideoPresentationPipelineStageProgress,
   videoPresentationPipelineStageIdSchema,
   videoPresentationPipelineStepSchema,
@@ -328,22 +326,15 @@ export const videoPresentationProjectPayloadSchema = z.object({
   renderProfile: videoPresentationRenderProfileSchema,
   themeAssignments: z.array(videoPresentationThemeAssignmentSchema).default([]),
   sourceDigest: z.string().trim().min(1).max(50_000),
+  // Only the sandbox run's verdicts are persisted. The generated Remotion
+  // project itself (`files`/`entryFile`) is deliberately NOT stored: it was
+  // tens of KB per row — layout primitives, a second copy of every scene's
+  // source, and the `scripts/*.mjs` templates — and `buildProjectCodePayload`
+  // regenerates all of it from `sceneModules` on every run anyway. This object
+  // is non-strict, so legacy rows still carrying those keys parse fine and
+  // simply drop them.
   projectCode: z
     .object({
-      entryFile: z
-        .string()
-        .trim()
-        .min(1)
-        .max(240)
-        .default("src/VideoScene.tsx"),
-      files: z
-        .array(
-          z.object({
-            path: z.string().trim().min(1).max(240),
-            content: z.string().trim().min(1),
-          }),
-        )
-        .default([]),
       install: videoPresentationProjectExecutionResultSchema.default({
         ok: false,
         diagnostics: [],

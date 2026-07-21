@@ -296,7 +296,7 @@ export function buildVideoPresentationStageView(
               ].join("\n"),
         ),
         input: {
-          fileCount: payload.projectCode?.files?.length ?? 0,
+          sceneCount: payload.sceneModules.length,
         },
         output: { ok, diagnostics: install?.diagnostics?.slice(0, 12) },
         logTail: sandboxLogTail(install),

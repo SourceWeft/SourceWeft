@@ -2,21 +2,11 @@ import {
   buildInitialVideoPresentationPipelineSteps,
   videoPresentationProjectPayloadSchema,
   type VideoPresentationCreateRequest,
-  type VideoPresentationGenerationStage,
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
 import { buildArtifactPreviewUrl } from "./artifact-urls";
-import { getVideoPresentationStageLabel } from "./stage-labels";
 import { compactArtifactText } from "./artifact-text";
 import { stripVideoPresentationMarkdown } from "./video-presentation-files";
-
-/**
- * Stage words come from the capability's one stage-label source; this used to
- * be a hand-maintained switch and drifted from what the UI showed.
- */
-function buildGenerationStageSummary(stage: VideoPresentationGenerationStage) {
-  return getVideoPresentationStageLabel(stage) ?? "Preparing video project";
-}
 
 export function buildVideoPresentationInitialPayload(input: {
   readonly artifactId: string;
@@ -34,7 +24,6 @@ export function buildVideoPresentationInitialPayload(input: {
   prompt: string;
   renderStrategy: "frontend_remotion_project_to_video";
   requestKey: string;
-  stageSummary: string;
   videoDownloadOnly: true;
 } {
   const title = input.request.title ?? "Video Presentation";
@@ -93,24 +82,11 @@ export function buildVideoPresentationInitialPayload(input: {
     renderProfile,
     themeAssignments: [],
     sourceDigest: brief,
-    artifactKind: "video_presentation",
-    artifactUrl: buildArtifactPreviewUrl({
-      workspaceId: input.workspaceId,
-      artifactId: input.artifactId,
-    }),
-    fileName: input.fileName,
-    jobId: input.jobId,
-    mimeType: "application/vnd.sourceweft.video-presentation+json",
-    prompt: compactArtifactText(
-      stripVideoPresentationMarkdown(brief),
-      1200,
-    ),
-    renderStrategy: "frontend_remotion_project_to_video",
-    requestKey: input.requestKey,
-    stageSummary: buildGenerationStageSummary("planning_storyboard"),
-    videoDownloadOnly: true,
   };
 
+  // The schema is a plain `z.object`, so it strips every key it does not
+  // declare; the artifact-envelope fields below are re-attached after parsing
+  // rather than listed twice.
   const normalized = videoPresentationProjectPayloadSchema.parse(payload);
   return {
     ...normalized,
@@ -128,53 +104,6 @@ export function buildVideoPresentationInitialPayload(input: {
     ),
     renderStrategy: "frontend_remotion_project_to_video",
     requestKey: input.requestKey,
-    stageSummary: buildGenerationStageSummary("planning_storyboard"),
     videoDownloadOnly: true,
-  };
-}
-
-export function updateVideoPresentationPayloadGeneration(
-  payload: VideoPresentationProjectPayload & Record<string, unknown>,
-  input: {
-    errorCode?: string;
-    errorMessage?: string;
-    progress: number;
-    stage: VideoPresentationGenerationStage;
-    status: VideoPresentationProjectPayload["generation"]["status"];
-  },
-): VideoPresentationProjectPayload & Record<string, unknown> {
-  const normalized = videoPresentationProjectPayloadSchema.parse({
-    ...payload,
-    generation: {
-      ...payload.generation,
-      status: input.status,
-      stage: input.stage,
-      progress: input.progress,
-      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
-      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
-    },
-    preview: {
-      ...payload.preview,
-      slideCount: payload.slides.length,
-    },
-  });
-  return {
-    ...normalized,
-    ...Object.fromEntries(
-      Object.entries(payload).filter(([key]) =>
-        [
-          "artifactKind",
-          "artifactUrl",
-          "fileName",
-          "jobId",
-          "mimeType",
-          "prompt",
-          "renderStrategy",
-          "requestKey",
-          "stageSummary",
-          "videoDownloadOnly",
-        ].includes(key),
-      ),
-    ),
   };
 }

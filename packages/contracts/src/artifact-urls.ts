@@ -220,14 +220,6 @@ export function buildArtifactDownloadUrl(input: {
   return proxyUrlFor(input, "download");
 }
 
-/** Proxy URL for an artifact's primary file, rendered inline. */
-export function buildArtifactFileUrl(input: {
-  readonly workspaceId: string;
-  readonly artifactId: string;
-}): string {
-  return proxyUrlFor(input, "file");
-}
-
 /* -------------------------------------------------------------------------- */
 /* Page family                                                                 */
 /* -------------------------------------------------------------------------- */

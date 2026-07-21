@@ -7,8 +7,6 @@ export {
   buildInitialVideoPresentationPipelineSteps,
   computeVideoPresentationOverallProgress,
   getVideoPresentationPipelineStepLabel,
-  isPipelineStageCompleted,
-  normalizeWorkerStageToPipelineStage,
   resolveVideoPresentationPipelineStageProgress,
   videoPresentationPipelineStageIdSchema,
   videoPresentationPipelineStepSchema,
