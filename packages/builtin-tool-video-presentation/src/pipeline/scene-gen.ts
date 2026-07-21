@@ -7,6 +7,7 @@ import {
   type VideoPresentationSceneModule,
   type VideoPresentationThemeAssignment,
 } from "@sourceweft/contracts/video-presentation";
+import { VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES } from "@sourceweft/video-presentation-runtime/layout-source";
 import { lintSceneLayout } from "../scene-lint";
 import {
   buildVisualQaJudgePrompt,
@@ -26,6 +27,19 @@ import { VIDEO_STYLE_PRESET_DIRECTIONS } from "./style-directions";
 const {
   themeAssignmentFailed: VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED,
 } = VIDEO_PRESENTATION_ERROR_CODES;
+
+/**
+ * The layout-primitives surface, spelled out once. Both prompts and the import
+ * statement injected into every generated scene derive from this, so the model
+ * can never be told about a primitive the sandbox project does not import.
+ */
+const LAYOUT_PRIMITIVE_LIST = VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES.join(", ");
+
+export const LAYOUT_PRIMITIVES_PROMPT_LINE =
+  `These layout globals are also available (no import needed): ${LAYOUT_PRIMITIVE_LIST}.`;
+
+export const LAYOUT_PRIMITIVES_IMPORT_STATEMENT =
+  `import { ${LAYOUT_PRIMITIVE_LIST} } from "./layout-primitives";`;
 
 function sceneAssetUrls(payload: VideoPresentationProjectPayload): string[] {
   return payload.assets
@@ -84,7 +98,7 @@ export function sceneSystemPrompt() {
     `Generate ONE self-contained React component exported as: export default function ${VIDEO_SCENE_COMPONENT_NAME}() { ... }`,
     "The code must be raw TSX/JSX only. Do not include markdown fences or explanations.",
     "Use only React and these Remotion globals/imports: AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig.",
-    "These layout globals are also available (no import needed): SafeArea, TitleBlock, BulletList, SplitLayout, StatHero, QuoteBlock, AssetImage, SAFE_MARGIN_RATIO.",
+    LAYOUT_PRIMITIVES_PROMPT_LINE,
     "Provided images: when the slide lists available assets (with urls), you may display them via <AssetImage src=\"...\"> using EXACTLY those urls, inside SafeArea (e.g. one pane of a SplitLayout). NEVER invent, guess, or construct any other image URL; with no assets listed, use no images.",
     "Imports from 'react' and 'remotion' are allowed. Do not import any external dependency, CSS, font, data file, or package.",
     "Use inline styles only. No className, no DOM APIs, no fetch, no timers, no random values.",
@@ -278,7 +292,7 @@ export function normalizeSceneProjectCode(code: string) {
   return [
     'import React, { type CSSProperties } from "react";',
     'import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";',
-    'import { SafeArea, TitleBlock, BulletList, SplitLayout, StatHero, QuoteBlock, SAFE_MARGIN_RATIO } from "./layout-primitives";',
+    LAYOUT_PRIMITIVES_IMPORT_STATEMENT,
     "",
     withoutAllowedImports.trim(),
   ].join("\n");
@@ -315,7 +329,7 @@ export async function repairSceneModule(input: {
             `The component must export default function ${VIDEO_SCENE_COMPONENT_NAME}().`,
             "Preserve the visual intent, but fix syntax, missing exports, unsupported imports, and invalid runtime usage.",
             "Keep the scene's established brand palette and style preset direction intact: do not change its colors, typography treatment, or motion character while repairing.",
-            "These layout globals are available (no import needed): SafeArea, TitleBlock, BulletList, SplitLayout, StatHero, QuoteBlock, SAFE_MARGIN_RATIO. Keep all text content inside one <SafeArea>; do not remove it while repairing.",
+            `${LAYOUT_PRIMITIVES_PROMPT_LINE} Keep all text content inside one <SafeArea>; do not remove it while repairing.`,
           ].join("\n"),
         },
         {

@@ -265,7 +265,9 @@ function buildCandidateFromLiteLLM(input: {
     pricing: buildLiteLLMPricingEntry(match.entry),
     providerCatalogSource: input.source,
     providerCatalogGatewaySlug: input.gateway.slug,
-    supportedEfforts: capabilities.supportedEfforts,
+    // No supportedEfforts: the LiteLLM dataset carries no reasoning-effort
+    // information. Leaving it absent keeps it out of configJson and out of
+    // protectedFields, so the sync never freezes a wrong value.
     supportedParameters: capabilities.supportedParameters,
     supportsImageInput: capabilities.supportsImageInput,
     maxCompletionTokens: capabilities.max_completion_tokens ?? null,

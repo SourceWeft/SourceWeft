@@ -6,6 +6,37 @@
  * The sandbox copy is plain-JS-friendly TSX so it survives strict typecheck
  * regardless of the generated scenes around it.
  */
+/**
+ * The layout primitive components exported by VIDEO_LAYOUT_PRIMITIVES_TSX below
+ * (and, identically, by layout.tsx — layout.test.ts asserts the parity).
+ *
+ * This is the single source of truth for the primitive name list. Every place
+ * that has to spell the primitives out — the scene system prompt, the repair
+ * prompt, the `import … from "./layout-primitives"` line injected into
+ * generated scenes, and the browser compiler's runtime globals — derives from
+ * it, so a primitive can never be advertised to the model without also being
+ * imported into the sandbox project.
+ */
+export const VIDEO_LAYOUT_PRIMITIVE_NAMES = [
+  "SafeArea",
+  "TitleBlock",
+  "BulletList",
+  "SplitLayout",
+  "StatHero",
+  "AssetImage",
+  "QuoteBlock",
+] as const;
+
+/**
+ * The complete export surface of the layout-primitives module: the components
+ * plus the SAFE_MARGIN_RATIO constant. This is what scenes may reference and
+ * what the injected import statement pulls in.
+ */
+export const VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES = [
+  ...VIDEO_LAYOUT_PRIMITIVE_NAMES,
+  "SAFE_MARGIN_RATIO",
+] as const;
+
 export const VIDEO_LAYOUT_PRIMITIVES_TSX = `// @ts-nocheck
 import React from "react";
 import { Img, useVideoConfig } from "remotion";

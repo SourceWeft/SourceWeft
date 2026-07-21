@@ -4,6 +4,11 @@ import {
   buildRouteConstraintsJson,
   mergeGlobalProfileConfigJson,
 } from "./config-sync";
+import { resolveLiteLLMCapabilities } from "./litellm-capabilities";
+import {
+  readProtectedProfileConfigFields,
+  withProtectedProfileConfigFields,
+} from "./profile-config-priority";
 
 const now = new Date("2026-05-21T00:00:00.000Z");
 
@@ -115,4 +120,73 @@ test("mergeGlobalProfileConfigJson keeps manual pricing explicit", () => {
   assert.equal(configValue(merged, "input_cost_per_token"), 0.3);
   assert.equal(configValue(merged, "output_cost_per_token"), 0.6);
   assert.equal(configValue(merged, "price_updated_at"), now.toISOString());
+});
+
+test("an unknown supportedEfforts value never enters protectedFields", () => {
+  // LiteLLM carries no reasoning-effort information, so the catalog path leaves
+  // supportedEfforts absent. It must not be written as an empty array and must
+  // not be marked user-protected — that froze `[]` on every non-OpenRouter
+  // model and blocked every later sync from correcting it.
+  const merged = mergeGlobalProfileConfigJson({
+    existing: false,
+    existingConfigJson: {},
+    entry: {
+      supportedParameters: ["tools", "tool_choice"],
+      targetModel: "gpt-test",
+    },
+    now,
+  });
+
+  assert.equal("supportedEfforts" in merged, false);
+  assert.deepEqual(
+    [...readProtectedProfileConfigFields(merged)],
+    ["supportedParameters"],
+  );
+});
+
+test("a known supportedEfforts value is still written and protected", () => {
+  const merged = mergeGlobalProfileConfigJson({
+    existing: false,
+    existingConfigJson: {},
+    entry: {
+      supportedEfforts: ["low", "medium", "high"],
+      targetModel: "gpt-test",
+    },
+    now,
+  });
+
+  assert.deepEqual(configValue(merged, "supportedEfforts"), [
+    "low",
+    "medium",
+    "high",
+  ]);
+  assert.ok(readProtectedProfileConfigFields(merged).has("supportedEfforts"));
+});
+
+test("dropping supportedEfforts from the sync clears a previously frozen value", () => {
+  const merged = mergeGlobalProfileConfigJson({
+    existing: true,
+    existingConfigJson: withProtectedProfileConfigFields(
+      { supportedEfforts: [], targetModel: "gpt-test" },
+      ["supportedEfforts"],
+    ),
+    entry: {
+      targetModel: "gpt-test",
+    },
+    now,
+  });
+
+  assert.equal("supportedEfforts" in merged, false);
+  assert.equal(readProtectedProfileConfigFields(merged).size, 0);
+});
+
+test("resolveLiteLLMCapabilities never reports supported efforts", () => {
+  const capabilities = resolveLiteLLMCapabilities({
+    mode: "chat",
+    supports_function_calling: true,
+    output_cost_per_reasoning_token: 0.000003,
+  });
+
+  assert.equal("supportedEfforts" in capabilities, false);
+  assert.deepEqual(capabilities.supportedParameters, ["tools", "tool_choice"]);
 });

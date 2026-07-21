@@ -68,7 +68,16 @@ export type LiteLLMResolvedCapabilities = Pick<
   | "max_completion_tokens"
 > & {
   supportedParameters: string[];
-  supportedEfforts: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  /**
+   * Always absent: the LiteLLM pricing dataset carries no reasoning-effort
+   * information (see LiteLLMEntry — the only reasoning-adjacent field is the
+   * `output_cost_per_reasoning_token` price). Resolving it to `[]` would write
+   * an empty list into configJson and mark it user-protected, permanently
+   * freezing a wrong value; leaving the key absent keeps sync out of it.
+   * Declared optional only so consumers can read it off a merged capability
+   * object without a cast.
+   */
+  supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
 };
 
 function normalizeModelPart(alias: string): string {
@@ -448,12 +457,6 @@ export function deriveSupportedParameters(
   return dedupeParameters(parameters);
 }
 
-export function deriveSupportedEfforts(
-  _entry: LiteLLMEntry,
-): LiteLLMResolvedCapabilities["supportedEfforts"] {
-  return [];
-}
-
 export function resolveLiteLLMCapabilities(
   entry: LiteLLMEntry,
 ): LiteLLMResolvedCapabilities {
@@ -481,6 +484,5 @@ export function resolveLiteLLMCapabilities(
     max_output_tokens: normalizeFiniteNumber(entry.max_output_tokens),
     max_completion_tokens: normalizeFiniteNumber(entry.max_completion_tokens),
     supportedParameters: deriveSupportedParameters(entry),
-    supportedEfforts: deriveSupportedEfforts(entry),
   };
 }

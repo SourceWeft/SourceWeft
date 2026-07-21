@@ -291,12 +291,10 @@ export function AssetImage({
   );
 }
 
-export const VIDEO_LAYOUT_PRIMITIVE_NAMES = [
-  "SafeArea",
-  "TitleBlock",
-  "BulletList",
-  "SplitLayout",
-  "StatHero",
-  "QuoteBlock",
-  "AssetImage",
-] as const;
+// The primitive name list lives in layout-source.ts (the React-free module the
+// backend pipeline can import); re-exported here so this module stays the one
+// import site for the browser runtime's layout surface.
+export {
+  VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES,
+  VIDEO_LAYOUT_PRIMITIVE_NAMES,
+} from "./layout-source";

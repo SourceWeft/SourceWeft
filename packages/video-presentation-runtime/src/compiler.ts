@@ -15,16 +15,8 @@ import {
   type CompiledVideoPresentationScene,
 } from "./react";
 import { getAudioTrackForSlide, getSlideDurationInFrames } from "./model";
-import {
-  AssetImage,
-  BulletList,
-  QuoteBlock,
-  SAFE_MARGIN_RATIO,
-  SafeArea,
-  SplitLayout,
-  StatHero,
-  TitleBlock,
-} from "./layout";
+import * as layoutPrimitives from "./layout";
+import { VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES } from "./layout-source";
 
 type SceneRuntimeGlobals = Record<string, unknown>;
 
@@ -63,22 +55,20 @@ function stripImportsAndExports(code: string) {
 function sceneRuntimeGlobals(): SceneRuntimeGlobals {
   return {
     AbsoluteFill,
-    AssetImage,
     Audio,
-    BulletList,
     Img,
-    QuoteBlock,
     React,
-    SAFE_MARGIN_RATIO,
-    SafeArea,
-    SplitLayout,
-    StatHero,
-    TitleBlock,
     interpolate,
     spring,
     staticFile,
     useCurrentFrame,
     useVideoConfig,
+    ...Object.fromEntries(
+      VIDEO_LAYOUT_PRIMITIVE_EXPORT_NAMES.map((name) => [
+        name,
+        (layoutPrimitives as Record<string, unknown>)[name],
+      ]),
+    ),
   };
 }
 
