@@ -30,7 +30,4 @@ test("document parsers manifest exposes workspace parser contribution", () => {
     manifest.contributes.documentParsers?.map((entry) => entry.id),
     ["workspace-documents"],
   );
-  assert.ok(
-    (manifest.contributes.documentParsers?.[0]?.mimeTypes.length ?? 0) > 0,
-  );
 });

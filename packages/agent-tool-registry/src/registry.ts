@@ -50,7 +50,7 @@ export const AGENT_TOOL_NAMES = Object.fromEntries(
   [Tool in AgentToolDefinition as Tool["id"]]: Tool["name"];
 };
 
-export const AGENT_TOOL_REGISTRY = Object.fromEntries(
+const AGENT_TOOL_REGISTRY = Object.fromEntries(
   AGENT_TOOLS.map((tool) => [tool.name, tool]),
 ) as {
   [Tool in AgentToolDefinition as Tool["name"]]: Tool;
@@ -128,10 +128,6 @@ export function getAgentToolSlashCommand(
   };
 }
 
-export function isAgentToolSlashCommandSupported(value: string) {
-  return getAgentToolSlashCommand(value) !== null;
-}
-
 export function isConfigurableAgentTool(value: string) {
   return getAgentToolConfiguration(getAgentToolDefinition(value))?.configurable === true;
 }
@@ -169,12 +165,6 @@ export function isAgentToolEnabledByDefault(
   value: string,
 ): value is AgentToolName {
   return getAgentToolDefinition(value)?.activation.default === "always";
-}
-
-export function agentToolNamesEnabledByDefault() {
-  return allAgentTools()
-    .filter((tool) => tool.activation.default === "always")
-    .map((tool) => tool.name);
 }
 
 export function isAgentToolUserDisableSupported(
@@ -286,7 +276,7 @@ export function isArtifactProgressOutputType(
  * tell a finished job from a queued one ask for the role instead of matching
  * a capability's `type` names, so adding a deliverable needs no edit here.
  */
-export function getArtifactProgressOutputRole(
+function getArtifactProgressOutputRole(
   type: string | null | undefined,
 ): ArtifactProgressOutputRole | null {
   if (!type) {

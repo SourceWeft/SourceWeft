@@ -264,7 +264,7 @@ test("commands.manifest-contributions include skill parent display metadata", ()
   assert.equal(search?.displayTitle, "Search Docs");
 });
 
-test("commands.config controls enablement aliases visibility and order", () => {
+test("scaffolding: commands.config controls enablement aliases visibility and order (reserved workspace config; no production constructor)", () => {
   const commands = buildCapabilityCommandList(normalizedFixtureRecords, {
     packages: {
       "local/disabled": {
@@ -311,7 +311,7 @@ test("commands.config controls enablement aliases visibility and order", () => {
   assert.deepEqual(commands[1]?.aliases, ["lookup"]);
 });
 
-test("commands.manifest hidden visibility cannot be promoted into command list", () => {
+test("scaffolding: commands.manifest hidden visibility cannot be promoted by reserved workspace config", () => {
   const records: DiscoveredCapabilityRecord[] = structuredClone(
     normalizedFixtureRecords,
   );

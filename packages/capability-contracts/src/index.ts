@@ -9,15 +9,20 @@ export const capabilityDiagnosticLevelSchema = z.enum([
   "info",
 ]);
 
+/**
+ * Every member here must have a producer.
+ *
+ * The value of an enum member is that exhaustiveness checking forces callers to
+ * handle it; a member nothing ever emits forces nothing, so it buys no safety
+ * and only implies a reporting path that does not exist. Add a code in the same
+ * change that starts emitting it.
+ *
+ * Note that entry-module load failures are reported via `logger.warn` rather
+ * than as a diagnostic, so they are not a reserved code here either.
+ */
 export const capabilityDiagnosticCodeSchema = z.enum([
   "manifest.invalid",
   "path.escape",
-  "duplicate.id",
-  "config.invalid",
-  "entry.load_failed",
-  "executor.missing",
-  "provider.missing",
-  "writer.missing",
 ]);
 
 export const capabilityKindSchema = z.enum([
@@ -43,8 +48,20 @@ export const capabilityKindSchema = z.enum([
  * Connector adapters are deliberately absent: a connector capability already
  * declares itself through its `connectors` contributions, so re-declaring it
  * here would be a second source of truth for the same fact.
+ *
+ * A service is either resolve-one or collect-many, and which one it is belongs
+ * to the host that consumes it, not to this list:
+ *  - `web_provider` is resolve-one — the host has a single web port, so the
+ *    first declaring capability wins and a second is logged and ignored.
+ *  - `sandbox_provider` is collect-many keyed by provider id — the host picks
+ *    by configured id, so several providers must be able to coexist, and two
+ *    capabilities claiming the same id is a startup failure rather than a
+ *    silent shadowing.
  */
-export const capabilityHostServiceSchema = z.enum(["web_provider"]);
+export const capabilityHostServiceSchema = z.enum([
+  "web_provider",
+  "sandbox_provider",
+]);
 
 export const capabilityRiskSchema = z.enum([
   "read",
@@ -256,8 +273,6 @@ export const skillContributionSchema = z.object({
 export const vfsContributionSchema = z.object({
   id: contributionIdSchema,
   title: z.string().min(1),
-  mounts: z.array(z.string().min(1)).default([]),
-  operations: z.array(z.enum(["read", "write", "search"])).default(["read"]),
   command: capabilityCommandSchema.optional(),
 });
 
@@ -270,7 +285,6 @@ export const retrievalContributionSchema = z.object({
 export const documentParserContributionSchema = z.object({
   id: contributionIdSchema,
   title: z.string().min(1),
-  mimeTypes: z.array(z.string().min(1)).default([]),
   command: capabilityCommandSchema.optional(),
 });
 
@@ -298,7 +312,6 @@ export const connectorActionSchema = z.object({
   visibility: z.enum(["agent", "internal"]).default("internal"),
   capabilities: z.array(z.string().min(1)).default([]),
   inputSchema: jsonObjectSchema.default({}),
-  resultSchema: jsonObjectSchema.optional(),
   agentToolName: z.string().min(1).optional(),
 });
 

@@ -142,50 +142,6 @@ function collectCommands(
         : null,
     );
   }
-  for (const provider of contributions.vfs) {
-    pushContributionCommand(
-      commands,
-      "vfs",
-      provider.id,
-      provider.title,
-      provider.command,
-      provider.title,
-      null,
-    );
-  }
-  for (const provider of contributions.retrieval) {
-    pushContributionCommand(
-      commands,
-      "retrieval",
-      provider.id,
-      provider.title,
-      provider.command,
-      provider.title,
-      null,
-    );
-  }
-  for (const parser of contributions.documentParsers) {
-    pushContributionCommand(
-      commands,
-      "document_parser",
-      parser.id,
-      parser.title,
-      parser.command,
-      parser.title,
-      null,
-    );
-  }
-  for (const connector of contributions.connectors) {
-    pushContributionCommand(
-      commands,
-      "connector",
-      connector.id,
-      connector.title,
-      connector.command,
-      connector.title,
-      null,
-    );
-  }
   return commands;
 }
 

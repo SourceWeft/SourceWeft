@@ -58,7 +58,6 @@ function toBackendConnectorAction(action: ConnectorActionContribution) {
     ...(action.description ? { description: action.description } : {}),
     visibility: action.visibility,
     capabilities: action.capabilities.filter(isConnectorActionCapability),
-    ...(action.resultSchema ? { resultSchema: action.resultSchema } : {}),
   };
 }
 

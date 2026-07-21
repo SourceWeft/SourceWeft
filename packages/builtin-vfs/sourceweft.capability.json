@@ -8,17 +8,7 @@
   "vfs": [
     {
       "id": "workspace",
-      "title": "Workspace VFS",
-      "mounts": [
-        "/kb",
-        "/workfiles",
-        "/skills"
-      ],
-      "operations": [
-        "read",
-        "write",
-        "search"
-      ]
+      "title": "Workspace VFS"
     }
   ]
 }

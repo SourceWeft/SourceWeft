@@ -4,13 +4,9 @@ export {
   findCapabilityToolCommand,
   findCapabilityToolCommandWorkflow,
 } from "./runtime/command-registry";
-export {
-  getCapabilityContributions,
-  getContributionDisplayTitle,
-} from "./runtime/contributions";
+export { getCapabilityContributions } from "./runtime/contributions";
 export { buildCapabilityToolList } from "./runtime/tool-catalog";
 export { discoverCapabilities } from "./runtime/discovery";
-export { summarizeCapabilityRegistry } from "./runtime/summary";
 export type { CapabilityCommandWorkflow } from "@sourceweft/capability-contracts";
 export type {
   CapabilityCommandAction,

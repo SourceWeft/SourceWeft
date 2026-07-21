@@ -19,14 +19,11 @@ export type CapabilityDiscoveryResult = {
 };
 
 export type CapabilityContributionActionKind =
-  | "command"
   | "skill"
   | "tool"
   | "vfs"
-  | "artifact"
   | "retrieval"
   | "document_parser"
-  | "mcp"
   | "connector";
 
 export type CapabilityCommandAction = {
@@ -68,6 +65,15 @@ export type CapabilityToolListItem = {
   readonly toolName: string;
 };
 
+/**
+ * Reserved scaffolding for workspace-level capability configuration —
+ * per-workspace enable/disable, reorder, and alias of contributed commands.
+ *
+ * Nothing in production constructs one of these today: every call path forwards
+ * an `undefined` config, so the branches that read it are exercised only by
+ * tests. Kept deliberately as the shape that surface will use; treat a value
+ * arriving here as new, not as an existing feature.
+ */
 export type CapabilityCommandContributionConfig = {
   readonly enabled?: boolean;
   readonly aliases?: readonly string[];

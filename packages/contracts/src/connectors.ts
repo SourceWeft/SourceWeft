@@ -94,7 +94,6 @@ export const connectorActionSpecSchema = z.object({
   description: z.string().min(1).optional(),
   visibility: connectorActionVisibilitySchema.optional(),
   capabilities: z.array(connectorActionCapabilitySchema).optional(),
-  resultSchema: jsonObjectSchema.optional(),
 });
 
 export const connectorManifestSchema = z.object({
