@@ -165,6 +165,11 @@ export type {
   SandboxProviderFactory,
   SandboxServiceConfig,
 } from "./runtime/types";
+export type {
+  CreateSandboxProviderFactories,
+  CreateSandboxProviderFactoriesInput,
+  SandboxProviderHostLimits,
+} from "./capability-host-service";
 export {
   EXECUTE_TOOL_NAME,
   PREPARE_SANDBOX_TOOL_NAME,

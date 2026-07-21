@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import type { BackendProtocolV2, SandboxBackendProtocolV2 } from "deepagents";
-import { afterEach, beforeEach, describe, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, test } from "vitest";
 import { config } from "../../../../shared/config";
 import type { PreparedThreadTurn } from "../..";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { SelectedSkillsBackend } from "../../../skills/backend";
 import type { FilesystemBackend, ToolCollection } from "./turn-assembly";
+import { initializeSandboxProviderRegistry } from "../sandbox-service/provider-registry";
+import {
+  createSyntheticSandboxProviderFactory,
+  createSyntheticSandboxProviderRecord,
+  SYNTHETIC_SANDBOX_PROVIDER_ID,
+} from "../../../../test/synthetic-capability";
 import {
   buildAgentBackend,
   buildAgentBackendFactory,
@@ -23,6 +29,29 @@ const SANDBOX_PATH_POLICY_STUB = {
 } as const;
 
 const originalSandboxConfig = structuredClone(config.sandbox);
+
+/**
+ * The sandbox tests below run against a synthetic provider supplied through the
+ * capability path, not against whichever real provider happens to be
+ * configured in the developer's `.env`. Turn assembly's behaviour — which tools
+ * bind, what the prompt says, which mounts appear — is provider-independent,
+ * and asserting it against a real provider made these tests depend on that
+ * provider's credentials being present.
+ */
+beforeAll(async () => {
+  await initializeSandboxProviderRegistry({
+    recordsProvider: async () => [
+      createSyntheticSandboxProviderRecord() as never,
+    ],
+    loadModule: async () => ({
+      createSandboxProviderFactories: () => [
+        createSyntheticSandboxProviderFactory(),
+      ],
+    }),
+  });
+  config.sandbox.enabled = true;
+  config.sandbox.provider = SYNTHETIC_SANDBOX_PROVIDER_ID;
+});
 
 const filesystemBackend = {
   backend: {} as BackendProtocolV2,
@@ -163,7 +192,7 @@ function createPreparedTurn(
 }
 
 async function promptFor(prepared: PreparedThreadTurn) {
-  const sandboxRuntime = buildSandboxRuntimeForPreparedTurn({
+  const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
     prepared,
     filesystemBackend,
   });
@@ -176,7 +205,9 @@ async function promptFor(prepared: PreparedThreadTurn) {
 }
 
 function toolNames(
-  runtime: NonNullable<ReturnType<typeof buildSandboxRuntimeForPreparedTurn>>,
+  runtime: NonNullable<
+    Awaited<ReturnType<typeof buildSandboxRuntimeForPreparedTurn>>
+  >,
 ) {
   return runtime.tools.map((tool) => tool.name).sort();
 }
@@ -324,7 +355,7 @@ Read this before creating slides.`;
   );
 });
 
-test("filesystem prompt mounts include sandbox workspace only when sandbox runtime is enabled", () => {
+test("filesystem prompt mounts include sandbox workspace only when sandbox runtime is enabled", async () => {
   const withoutSandbox = filesystemMountsForPrompt({
     filesystemBackend,
     sandboxRuntime: null,
@@ -334,7 +365,7 @@ test("filesystem prompt mounts include sandbox workspace only when sandbox runti
     filesystemBackend.filesystemMounts.map((mount) => mount.root),
   );
 
-  const sandboxRuntime = buildSandboxRuntimeForPreparedTurn({
+  const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
     prepared: createPreparedTurn(),
     filesystemBackend,
   });
@@ -355,11 +386,7 @@ describe("sandbox runtime assembly tool permissions", () => {
   beforeEach(() => {
     Object.assign(config.sandbox, structuredClone(originalSandboxConfig));
     config.sandbox.enabled = true;
-    config.sandbox.provider = "daytona";
-    config.sandbox.daytona.apiUrl = "http://daytona-turn-assembly-test";
-    config.sandbox.daytona.apiKey = "turn-assembly-test-key";
-    config.sandbox.daytona.snapshot = "sourceweft-runtime-test";
-    config.sandbox.daytona.image = "";
+    config.sandbox.provider = SYNTHETIC_SANDBOX_PROVIDER_ID;
   });
 
   afterEach(() => {

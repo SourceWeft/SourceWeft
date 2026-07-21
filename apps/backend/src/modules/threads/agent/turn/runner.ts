@@ -178,15 +178,16 @@ export async function* invokeDeepAgentTurn(input: {
   let beforeInputCheckpoint: AgentCheckpointRef | null = null;
   let finalCheckpoint: AgentCheckpointRef | null = null;
   let runConfig!: ThreadAgentAssembly["runConfig"];
-  let sandboxRuntime: ReturnType<typeof buildSandboxRuntimeForPreparedTurn> =
-    null;
+  let sandboxRuntime: Awaited<
+    ReturnType<typeof buildSandboxRuntimeForPreparedTurn>
+  > = null;
 
   try {
     const filesystemBackend = buildFilesystemBackend({
       prepared: input.prepared,
       runtime,
     });
-    sandboxRuntime = buildSandboxRuntimeForPreparedTurn({
+    sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
       prepared: input.prepared,
       filesystemBackend,
     });

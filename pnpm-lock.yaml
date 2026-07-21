@@ -146,9 +146,6 @@ importers:
       '@sourceweft/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway
-      '@sourceweft/sandbox-provider-daytona':
-        specifier: workspace:*
-        version: link:../../packages/sandbox-provider-daytona
       '@sourceweft/video-presentation-runtime':
         specifier: workspace:*
         version: link:../../packages/video-presentation-runtime
@@ -596,6 +593,9 @@ importers:
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@sourceweft/sandbox-provider-daytona':
+        specifier: workspace:*
+        version: link:../sandbox-provider-daytona
     devDependencies:
       '@types/node':
         specifier: ^22.15.30

@@ -32,6 +32,7 @@ const ENTRY_FACTORIES = [
   "createArtifactViewHandlers",
   "createConnectorAdapters",
   "createHostWebProvider",
+  "createSandboxProviderFactories",
 ];
 
 /**

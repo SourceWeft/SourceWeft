@@ -73,6 +73,14 @@ export type CreateHostWebProvider = (input: CreateHostWebProviderInput) =>
  * The shape of a capability entry module as far as host services are
  * concerned. Every member is optional: the host probes for the factory it
  * needs and skips modules that do not export it.
+ *
+ * Not every host-service port can live in this file. `sandbox_provider`'s
+ * factory returns a `SandboxProvider`, an interface owned by
+ * `@sourceweft/builtin-tool-sandbox` — which already depends on this package,
+ * so declaring the port here would invert that dependency. It is declared as
+ * `CreateSandboxProviderFactories` there instead, and the host narrows the
+ * module to it directly. The rule is the same either way: the port is a shared
+ * shape, and the capability that fills it is never named by the host.
  */
 export type CapabilityHostServiceModule = {
   readonly createConnectorAdapters?: CreateConnectorAdapters;

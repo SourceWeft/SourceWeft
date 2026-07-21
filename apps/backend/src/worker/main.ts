@@ -101,7 +101,6 @@ function registerWorkerListeners(
   worker.on("active", (job: Job<JobPayload>) => {
     void recordJobAudit(
       buildAuditInputFromJob({
-        jobId: String(job.id),
         jobType: job.name,
         queueName,
         data: job.data,
@@ -119,7 +118,6 @@ function registerWorkerListeners(
     });
     void recordJobAudit(
       buildAuditInputFromJob({
-        jobId: String(job.id),
         jobType: job.name,
         queueName,
         data: job.data,
@@ -137,7 +135,6 @@ function registerWorkerListeners(
     if (job) {
       void recordJobAudit(
         buildAuditInputFromJob({
-          jobId: String(job.id),
           jobType: job.name,
           queueName,
           data: job.data,
@@ -175,9 +172,10 @@ deliverablesWorker.on("failed", (job: Job<JobPayload> | undefined, error: Error)
     return;
   }
   void (async () => {
-    const { markArtifactFailed } = await import(
-      "../modules/artifacts/repository"
-    );
+    const [{ failArtifact }, { ArtifactError }] = await Promise.all([
+      import("../modules/artifacts/publish"),
+      import("@sourceweft/contracts/artifact-errors"),
+    ]);
     await handleDeliverableJobFailure({
       jobName: job.name,
       attemptsMade: job.attemptsMade ?? 0,
@@ -185,7 +183,24 @@ deliverablesWorker.on("failed", (job: Job<JobPayload> | undefined, error: Error)
       data: job.data,
       error,
       failureCodes: deliverableFailureCodes,
-      markFailed: markArtifactFailed,
+      // Same door the in-processor failure path uses. Team/workspace come out
+      // of an untyped job payload here and may be absent, which is why the
+      // writer's tenancy scoping is optional.
+      markFailed: (input) =>
+        failArtifact({
+          artifactId: input.artifactId,
+          context: {
+            ...(input.teamId ? { teamId: input.teamId } : {}),
+            ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+          },
+          error: new ArtifactError({
+            code: input.errorCode,
+            message: input.errorMessage,
+          }),
+          ...(input.expectedStatuses
+            ? { expectedStatuses: input.expectedStatuses }
+            : {}),
+        }),
     });
   })();
 });
@@ -198,7 +213,7 @@ logger.info("Deliverables worker started", {
   queueName: config.deliverablesQueueName,
   concurrency: config.deliverablesWorkerConcurrency,
 });
-agentSandboxService.logStartupWarning("worker");
+void agentSandboxService.logStartupWarning("worker");
 
 async function shutdown() {
   logger.info("Worker shutting down");

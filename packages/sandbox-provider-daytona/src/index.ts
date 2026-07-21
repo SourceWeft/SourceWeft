@@ -35,3 +35,5 @@ export {
 export type {
   DaytonaProviderFactoryConfig,
 } from "./provider-factory";
+/** The `sandbox_provider` host-service entry point (see sourceweft.capability.json). */
+export { createSandboxProviderFactories } from "./host-services";

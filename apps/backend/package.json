@@ -71,7 +71,6 @@
     "@sourceweft/db": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
-    "@sourceweft/sandbox-provider-daytona": "workspace:*",
     "@sourceweft/video-presentation-runtime": "workspace:*",
     "better-auth": "1.6.10",
     "bullmq": "^5.63.0",

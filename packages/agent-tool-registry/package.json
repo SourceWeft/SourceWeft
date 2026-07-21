@@ -20,7 +20,8 @@
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
     "@sourceweft/builtin-tool-web-search": "workspace:*",
     "@sourceweft/builtin-vfs": "workspace:*",
-    "@sourceweft/contracts": "workspace:*"
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/sandbox-provider-daytona": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

@@ -476,12 +476,12 @@ export const config = {
       process.env.SOURCEWEFT_SANDBOX_MAX_COLLECT_TOTAL_BYTES,
       50 * 1024 * 1024,
     ),
-    daytona: {
-      apiUrl: stripTrailingSlash(process.env.DAYTONA_API_URL || ""),
-      apiKey: process.env.DAYTONA_API_KEY?.trim() || "",
-      snapshot: process.env.DAYTONA_SANDBOX_SNAPSHOT?.trim() || "",
-      image: process.env.DAYTONA_SANDBOX_IMAGE?.trim() || "",
-    },
+    // No per-provider block lives here. Which provider a deployment runs on is
+    // `provider` above — an opaque id the host matches against whatever
+    // capabilities declare `sandbox_provider` — and every setting a particular
+    // provider needs is read by that provider's own capability package. A
+    // `daytona: { apiUrl, apiKey, … }` block here made the generic host carry
+    // one vendor's identity, and would have grown a sibling per provider.
   },
   s3: {
     region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",

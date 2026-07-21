@@ -104,7 +104,7 @@ logger.info("Scheduler started", {
   billingReconcileEnabled:
     config.billing.teamBillingEnabled && config.billing.reconcileEnabled,
 });
-agentSandboxService.logStartupWarning("scheduler");
+void agentSandboxService.logStartupWarning("scheduler");
 
 async function shutdown() {
   clearInterval(timer);

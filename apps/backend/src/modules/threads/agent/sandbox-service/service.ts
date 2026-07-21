@@ -15,7 +15,10 @@ import { agentSandboxes, agentSandboxOperations, db } from "@sourceweft/db";
 import { config } from "../../../../shared/config";
 import { logger } from "../../../../shared/logger";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
-import { getSandboxProviderFactory } from "./provider-registry";
+import {
+  getSandboxProviderFactory,
+  initializeSandboxProviderRegistry,
+} from "./provider-registry";
 import { DrizzleSandboxOperationStore, DrizzleSandboxStore } from "./stores";
 
 
@@ -54,10 +57,21 @@ function isProviderNotFoundOrExpired(error: unknown) {
   return message.includes("SANDBOX_NOT_FOUND_OR_EXPIRED");
 }
 
+/**
+ * Every entry point that can reach a provider awaits provider discovery first.
+ *
+ * Discovery is asynchronous (a filesystem scan plus an entry-module import)
+ * while the underlying service's lookup is synchronous, and the two are
+ * reconciled here rather than at each call site: awaiting the memoised
+ * initialisation on the way in means no caller can observe a half-built
+ * registry, and no code path can mistake "discovery has not run yet" for "that
+ * provider is not installed".
+ */
 export const agentSandboxService = {
-  createRuntimeForTurn(
+  async createRuntimeForTurn(
     input: SandboxRuntimeRequest,
-  ): AgentSandboxRuntimeForTurn | null {
+  ): Promise<AgentSandboxRuntimeForTurn | null> {
+    await initializeSandboxProviderRegistry();
     return sandboxService.createRuntimeForTurn(
       input,
       new DrizzleSandboxStore(),
@@ -65,8 +79,20 @@ export const agentSandboxService = {
     );
   },
 
-  logStartupWarning(runtime: SandboxRuntimeName) {
-    sandboxService.logStartupWarning(runtime);
+  /**
+   * Fire-and-forget from the three process entrypoints, so it swallows its own
+   * failure: a boot-time log line must not be able to take the process down.
+   */
+  async logStartupWarning(runtime: SandboxRuntimeName) {
+    try {
+      await initializeSandboxProviderRegistry();
+      sandboxService.logStartupWarning(runtime);
+    } catch (error) {
+      logger.warn("Sandbox provider discovery failed at startup", {
+        runtime,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   },
 
   warnIfHitlBypassed(input: {
@@ -109,6 +135,7 @@ export const agentSandboxService = {
       return { cleaned: 0 };
     }
 
+    await initializeSandboxProviderRegistry();
     const factory = getSandboxProviderFactory(runtimeConfig.provider);
     const providerStatus = factory?.getConfigurationStatus();
     if (!factory || !providerStatus?.configured) {
@@ -220,6 +247,7 @@ export const agentSandboxService = {
       return { released: 0 };
     }
 
+    await initializeSandboxProviderRegistry();
     const factory = getSandboxProviderFactory(runtimeConfig.provider);
     const providerStatus = factory?.getConfigurationStatus();
     if (!factory || !providerStatus?.configured) {

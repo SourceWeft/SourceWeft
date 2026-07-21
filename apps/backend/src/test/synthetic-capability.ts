@@ -4,6 +4,7 @@ import type {
   ArtifactViewRecord,
 } from "@sourceweft/contracts";
 import type { AgentToolDefinitionShape } from "@sourceweft/contracts/agent-tools";
+import type { SandboxProviderFactory } from "@sourceweft/builtin-tool-sandbox";
 import type { ArtifactToolRuntimePromptProvider } from "../modules/threads/agent/prompts/tool-prompt-provider";
 
 /**
@@ -182,6 +183,83 @@ export function createSyntheticCapabilityRecord(overrides?: {
         documentParsers: [],
         connectors: [],
       },
+    },
+  };
+}
+
+/**
+ * A sandbox provider a synthetic capability supplies.
+ *
+ * The provider id is deliberately not any real provider's, so a host behaviour
+ * that only works for `daytona` fails here — which is the point of the socket.
+ * Nothing on it does real work: the host tests that use it are about selection,
+ * configuration reporting and prompt assembly, none of which start a sandbox.
+ */
+export const SYNTHETIC_SANDBOX_PROVIDER_ID = "synthetic-sandbox";
+export const SYNTHETIC_SANDBOX_MISSING_CONFIG = "SYNTHETIC_SANDBOX_TARGET";
+
+export const syntheticSandboxPathPolicy = {
+  workspaceRoot: "/workspace",
+  defaultCwd: "/workspace",
+  prepareTargetRoots: ["/workspace/input", "/workspace"],
+  collectSourceRoots: ["/workspace/output", "/workspace"],
+  readWriteRoots: ["/workspace"],
+} as const;
+
+export function createSyntheticSandboxProviderFactory(overrides?: {
+  id?: string;
+  configured?: boolean;
+  missing?: readonly string[];
+  defaultSandboxEnvironmentAvailable?: boolean;
+}): SandboxProviderFactory {
+  const id = overrides?.id ?? SYNTHETIC_SANDBOX_PROVIDER_ID;
+  const configured = overrides?.configured ?? true;
+  return {
+    id,
+    createProvider: () => ({
+      id,
+      pathPolicy: { ...syntheticSandboxPathPolicy },
+      createSandbox: async () => ({ id: "synthetic-sandbox-instance" }),
+      getSandbox: async () => ({}),
+      deleteSandbox: async () => ({}),
+      execute: async () => ({ exitCode: 0, output: "", truncated: false }),
+      uploadFile: async () => ({}),
+      downloadFile: async () => Buffer.from(""),
+      ensureDirectory: async () => ({}),
+    }),
+    getConfigurationStatus: () => ({
+      configured,
+      missing: [
+        ...(overrides?.missing ??
+          (configured ? [] : [SYNTHETIC_SANDBOX_MISSING_CONFIG])),
+      ],
+      metadata: {
+        defaultSandboxEnvironmentAvailable:
+          overrides?.defaultSandboxEnvironmentAvailable ?? configured,
+      },
+    }),
+  };
+}
+
+/**
+ * The discovery record for a capability whose only contribution is a sandbox
+ * provider — a capability that supplies a host service and no agent-facing
+ * tool at all.
+ */
+export function createSyntheticSandboxProviderRecord(overrides?: {
+  capabilityId?: string;
+  packageName?: string;
+}) {
+  const record = createSyntheticCapabilityRecord({
+    jobName: null,
+    hostServices: ["sandbox_provider"],
+  });
+  return {
+    ...record,
+    packageName: overrides?.packageName ?? record.packageName,
+    manifest: {
+      ...record.manifest,
+      id: overrides?.capabilityId ?? record.manifest.id,
     },
   };
 }

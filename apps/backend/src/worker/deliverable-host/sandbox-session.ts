@@ -24,7 +24,7 @@ type AgentSandboxServiceLike = {
       sandboxExecuteToolCallId?: string;
     };
     commandBudget?: "interactive" | "batch";
-  }): {
+  }): Promise<{
     pathPolicy: { defaultCwd: string };
     backend: {
       uploadFiles(
@@ -40,7 +40,7 @@ type AgentSandboxServiceLike = {
         Array<{ path: string; content: Uint8Array | null; error?: string | null }>
       >;
     };
-  } | null;
+  } | null>;
 };
 
 function createEmptySandboxFilesystemBackend() {
@@ -81,7 +81,7 @@ export function createDeliverableSandboxAdapter(input: {
       job: DeliverableJobEnvelope;
     }): Promise<DeliverableSandboxSession | null> => {
       const job = sessionInput.job;
-      const runtime = input.sandboxService.createRuntimeForTurn({
+      const runtime = await input.sandboxService.createRuntimeForTurn({
         filesystem: createEmptySandboxFilesystemBackend() as never,
         context: {
           teamId: job.teamId,

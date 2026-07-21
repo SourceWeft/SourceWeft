@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/sandbox-provider-daytona",
+  "kind": "composite",
+  "name": "Daytona Sandbox Provider",
+  "description": "Supplies the 'daytona' sandbox provider to the host's sandbox runtime.",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "hostServices": ["sandbox_provider"]
+}

@@ -45,6 +45,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-tool-video-presentation"),
   "@sourceweft/builtin-tool-web-search": () =>
     import("@sourceweft/builtin-tool-web-search"),
+  "@sourceweft/sandbox-provider-daytona": () =>
+    import("@sourceweft/sandbox-provider-daytona"),
 };
 
 export function loadBuiltinCapabilityModule(packageName: string | null | undefined) {

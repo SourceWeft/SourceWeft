@@ -432,29 +432,14 @@ export interface ThreadAgentAssembly {
   ) => Promise<AsyncGenerator<unknown>>;
 }
 
-export interface TurnAssemblyInput {
-  prepared: PreparedThreadTurn;
-  billing: ContentBillingPort;
-  llm?: LlmExecutionConfig;
-  traceContext?: TraceContext;
-  runtime: TurnRuntime;
-}
-
-export interface TurnAssembly {
-  toolCollection: ToolCollection;
-  runtimePromptContext: RuntimePromptContext;
-  filesystemBackend: FilesystemBackend;
-  agentAssembly: ThreadAgentAssembly;
-}
-
-export function buildSandboxRuntimeForPreparedTurn(input: {
+export async function buildSandboxRuntimeForPreparedTurn(input: {
   prepared: PreparedThreadTurn;
   filesystemBackend: FilesystemBackend;
-}): AgentSandboxRuntimeForTurn | null {
+}): Promise<AgentSandboxRuntimeForTurn | null> {
   const { prepared, filesystemBackend } = input;
   const sandboxRuntime = isToolDenied(prepared, AGENT_TOOL_NAMES.execute)
     ? null
-    : agentSandboxService.createRuntimeForTurn({
+    : await agentSandboxService.createRuntimeForTurn({
         filesystem: filesystemBackend.backend,
         context: {
           teamId: prepared.workspace.organizationId,

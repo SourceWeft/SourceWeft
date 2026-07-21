@@ -32,7 +32,7 @@ serve(
       host: config.apiHost,
       port: config.apiPort,
     });
-    agentSandboxService.logStartupWarning("api");
+    void agentSandboxService.logStartupWarning("api");
   },
 );
 
