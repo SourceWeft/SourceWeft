@@ -10,6 +10,7 @@ import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
 import { DeepInfraImagesGenerationTransport } from "./deepinfra-images";
 import { DeepInfraRerankTransport } from "./deepinfra-rerank";
 import { DeepInfraTtsTransport } from "./deepinfra-tts";
+import { DeepSeekChatAdapter } from "./deepseek-chat";
 import { GeminiEmbeddingsAdapter } from "./gemini-embeddings";
 import { GeminiChatAdapter } from "./gemini-chat";
 import { OpenAICompatibleEmbeddingsAdapter } from "./openai-compatible-embeddings";
@@ -45,6 +46,7 @@ const deepInfraImages = new DeepInfraImagesGenerationTransport();
 const openRouterImages = new OpenRouterImageGenerationTransport();
 const openRouterTts = new OpenRouterTtsTransport();
 const deepInfraChat = new DeepInfraChatAdapter();
+const deepSeekChat = new DeepSeekChatAdapter();
 const deepInfraEmbeddings = new DeepInfraEmbeddingsAdapter();
 const deepInfraRerank = new DeepInfraRerankTransport();
 const deepInfraAsr = new DeepInfraAsrTransport();
@@ -60,6 +62,7 @@ const chatAdapters = new Map<ProviderKind, ChatAdapter>([
   ["cloudflare-aig", cloudflareAIGChat],
   ["openrouter", openRouterChat],
   ["deepinfra", deepInfraChat],
+  ["deepseek", deepSeekChat],
   ["siliconflow-cn", siliconflowCNChat],
   ["openai", openAICompatibleChat],
   ["azure-openai", new AzureChatAdapter()],

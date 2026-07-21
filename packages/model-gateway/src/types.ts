@@ -48,6 +48,7 @@ export type ProviderKind =
   | "cloudflare-aig"
   | "openrouter"
   | "deepinfra"
+  | "deepseek"
   | "siliconflow-cn"
   | "openai"
   | "anthropic"

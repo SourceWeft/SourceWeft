@@ -119,6 +119,7 @@ export type ModelGatewayProviderKind =
   | "cloudflare-aig"
   | "openrouter"
   | "deepinfra"
+  | "deepseek"
   | "siliconflow-cn"
   | "openai"
   | "anthropic"
@@ -1161,7 +1162,7 @@ export const modelGatewayProviderConfigs = pgTable(
     ),
     check(
       "model_gateway_provider_configs_kind_check",
-      sql`${table.providerKind} in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
+      sql`${table.providerKind} in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'deepseek', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
     ),
     index("model_gateway_provider_configs_active_idx").on(
       table.configVersionId,
@@ -1224,7 +1225,7 @@ export const modelGatewayByokCredentials = pgTable(
     ),
     check(
       "model_gateway_byok_credentials_kind_check",
-      sql`${table.providerKind} in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
+      sql`${table.providerKind} in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'deepseek', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
     ),
   ],
 );

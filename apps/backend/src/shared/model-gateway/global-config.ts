@@ -478,6 +478,7 @@ function asProviderKind(
     value === "cloudflare-aig" ||
     value === "openrouter" ||
     value === "deepinfra" ||
+    value === "deepseek" ||
     value === "siliconflow-cn" ||
     value === "openai" ||
     value === "anthropic" ||

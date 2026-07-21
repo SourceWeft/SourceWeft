@@ -1,0 +1,4 @@
+ALTER TABLE "model_gateway_byok_credentials" DROP CONSTRAINT "model_gateway_byok_credentials_kind_check";--> statement-breakpoint
+ALTER TABLE "model_gateway_provider_configs" DROP CONSTRAINT "model_gateway_provider_configs_kind_check";--> statement-breakpoint
+ALTER TABLE "model_gateway_byok_credentials" ADD CONSTRAINT "model_gateway_byok_credentials_kind_check" CHECK ("model_gateway_byok_credentials"."provider_kind" in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'deepseek', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai'));--> statement-breakpoint
+ALTER TABLE "model_gateway_provider_configs" ADD CONSTRAINT "model_gateway_provider_configs_kind_check" CHECK ("model_gateway_provider_configs"."provider_kind" in ('openai-compatible', 'cloudflare-aig', 'openrouter', 'deepinfra', 'deepseek', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai'));
