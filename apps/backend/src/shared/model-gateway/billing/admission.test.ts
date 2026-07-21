@@ -19,7 +19,7 @@ function billingWith(billingMode: string, available: number): ContentBillingPort
   } as unknown as ContentBillingPort;
 }
 
-const scope = { teamId: "team_1", feature: "chat", scopeId: "trace_1" };
+const scope = { teamId: "team_1" };
 
 test("enforced mode denies a team with no credits", async () => {
   const decision = await billingAdmission.admit({

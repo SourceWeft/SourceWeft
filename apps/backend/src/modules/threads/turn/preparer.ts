@@ -15,7 +15,6 @@ import type {
   BilledRequestOptions,
   MeteredModelCallTrace,
 } from "../../../shared/model-gateway";
-import type { BillingAdmissionPort } from "../../../shared/model-gateway/billing/admission";
 import type { MeterUsageFn } from "../../../shared/model-gateway/billing/settle";
 import { ContentError } from "../../content/errors";
 import { contentByokService } from "../../byok";
@@ -855,7 +854,6 @@ async function buildVisionFallback(input: {
   visionExecution?: LlmExecutionConfig;
   /** Injected for tests so metering can be driven without a database. */
   meterUsage?: MeterUsageFn;
-  admission?: BillingAdmissionPort;
 }): Promise<VisionFallbackResult> {
   let visionProfile;
   const shouldUseDefaultVisionProfile =
@@ -903,7 +901,6 @@ async function buildVisionFallback(input: {
   const { gateway, scope } = await openBilledModelGateway({
     billing: input.billing,
     gatewayConfigId: visionProfile.gatewayConfigId,
-    admission: input.admission,
     meterUsage: input.meterUsage,
     context: {
       teamId: input.workspace.organizationId,
@@ -1272,7 +1269,6 @@ export async function prepareThreadTurn(
     invocationRegistry?: SelectableInvocationRegistry;
     /** Test seams for the vision fallback's billing; production uses defaults. */
     meterUsage?: MeterUsageFn;
-    billingAdmission?: BillingAdmissionPort;
   } = {},
 ): Promise<PreparedThreadTurn> {
   const displayMessageContent =
@@ -1714,7 +1710,6 @@ export async function prepareThreadTurn(
           userMessageId,
           traceId: runTraceId,
           meterUsage: dependencies.meterUsage,
-          admission: dependencies.billingAdmission,
           text: agentText,
           images: savedImages,
           onThinkingStep: input.onPreflightThinkingStep,

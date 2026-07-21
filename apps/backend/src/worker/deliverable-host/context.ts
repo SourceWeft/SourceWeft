@@ -4,6 +4,7 @@ import {
 } from "@sourceweft/contracts/artifact-files";
 import {
   ARTIFACT_WRITE_ERROR_CODES,
+  ArtifactError,
   isArtifactError,
 } from "@sourceweft/contracts/artifact-errors";
 import type {
@@ -707,7 +708,28 @@ export function createDefaultDeliverableRuntimeResolver(input: {
       ctx,
       artifacts: {
         find: repository.findArtifactRecord,
-        markFailed: repository.markArtifactFailed,
+        // Failure closes the same two-phase write `completeArtifact` closes, so
+        // it goes through the same door. The host has already classified and
+        // truncated the failure against its pipeline definition, which is
+        // knowledge the writer does not have, so the code/message arrive
+        // finished and `failArtifact` normalizes an error it built rather than
+        // one it has to guess at.
+        markFailed: (input) =>
+          artifactPublish.failArtifact({
+            artifactId: input.artifactId,
+            context: {
+              ...(input.teamId ? { teamId: input.teamId } : {}),
+              ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+            },
+            error: new ArtifactError({
+              code: input.errorCode,
+              message: input.errorMessage,
+            }),
+            ...(input.expectedStatuses
+              ? { expectedStatuses: input.expectedStatuses }
+              : {}),
+            ...(input.payload ? { payload: input.payload } : {}),
+          }),
         completeArtifact: async (input) => {
           try {
             const result = await artifactPublish.completeArtifact({

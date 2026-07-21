@@ -26,7 +26,6 @@ import {
   admitCoveredScope,
   billingAdmission,
   BillingAdmissionError,
-  type BillingAdmissionPort,
 } from "./billing/admission";
 import type { ModelCallBillingOptions, ModelUsageContext } from "./billing/context";
 import { openBillingScope, type BillingScope } from "./billing/scope";
@@ -151,7 +150,6 @@ export type OpenBilledModelGatewayInput = {
   billing: ContentBillingPort;
   context: ModelUsageContext;
   gatewayConfigId?: string | null;
-  admission?: BillingAdmissionPort;
   /** Injected for tests; production uses the real metering funnel. */
   meterUsage?: MeterUsageFn;
 };
@@ -187,11 +185,9 @@ async function openBilledGateway(
   const decision =
     input.context.intent.mode === "covered"
       ? await admitCoveredScope(input.billing, input.context.teamId)
-      : await (input.admission ?? billingAdmission).admit({
+      : await billingAdmission.admit({
           billing: input.billing,
           teamId: input.context.teamId,
-          feature: input.context.feature,
-          scopeId: input.context.scopeId,
         });
 
   if (!decision.allowed) {

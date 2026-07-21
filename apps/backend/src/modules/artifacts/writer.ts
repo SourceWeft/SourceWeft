@@ -487,10 +487,18 @@ export class ArtifactWriter {
    * Terminal failure for a two-phase artifact. Anything thrown is normalized
    * into the one vocabulary first, so the stored `error_code` is always a code
    * the classification table knows.
+   *
+   * Tenancy is optional because one caller genuinely cannot always supply it:
+   * the BullMQ failure boundary runs on a job that died outside the processor
+   * and reads team/workspace out of an untyped job payload. Omitting a field
+   * drops it from the WHERE clause, so the row is addressed by id alone —
+   * every caller that knows its tenant must pass it, and all of them do.
    */
   async failArtifact(input: {
     readonly artifactId: string;
-    readonly context: Pick<ArtifactWriteContext, "teamId" | "workspaceId">;
+    readonly context: Partial<
+      Pick<ArtifactWriteContext, "teamId" | "workspaceId">
+    >;
     readonly error: unknown;
     readonly expectedStatuses?: Parameters<
       typeof markArtifactFailed
@@ -500,8 +508,10 @@ export class ArtifactWriter {
     const error = toArtifactError(input.error);
     const recorded = await this.deps.repository.markFailed({
       artifactId: input.artifactId,
-      teamId: input.context.teamId,
-      workspaceId: input.context.workspaceId,
+      ...(input.context.teamId ? { teamId: input.context.teamId } : {}),
+      ...(input.context.workspaceId
+        ? { workspaceId: input.context.workspaceId }
+        : {}),
       errorCode: error.code,
       errorMessage: error.message,
       ...(input.expectedStatuses

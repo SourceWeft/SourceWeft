@@ -14,15 +14,6 @@ export type AdmissionDecision =
       readonly billingMode: BillingMode;
     };
 
-export interface BillingAdmissionPort {
-  admit(input: {
-    billing: ContentBillingPort;
-    teamId: string;
-    feature: string;
-    scopeId: string;
-  }): Promise<AdmissionDecision>;
-}
-
 export class BillingAdmissionError extends Error {
   readonly code = "BILLING_ADMISSION_DENIED";
   readonly statusCode = 402;
@@ -37,18 +28,6 @@ export class BillingAdmissionError extends Error {
   }
 }
 
-/**
- * Pre-flight balance gate, evaluated once per scope rather than per model call.
- *
- * This is admission control, not accounting: it stops a team that is already
- * out of credits from starting new work, instead of discovering the shortfall
- * after the tokens have been burned. It deliberately does not reserve credits —
- * `billing_accounts.credits_reserved` stays untouched — so there is nothing to
- * leak when a worker dies mid-scope. The trade-off is a race: concurrent scopes
- * can each pass the gate and jointly overspend. That is strictly better than
- * the previous behaviour of no gate at all, and the post-hoc capacity check
- * inside meterConsume still backstops it.
- */
 /**
  * Admission for a scope that spends nothing.
  *
@@ -74,8 +53,30 @@ export async function admitCoveredScope(
   }
 }
 
-export const billingAdmission: BillingAdmissionPort = {
-  async admit({ billing, teamId }) {
+/**
+ * Pre-flight balance gate, evaluated once per scope rather than per model call.
+ *
+ * This is admission control, not accounting: it stops a team that is already
+ * out of credits from starting new work, instead of discovering the shortfall
+ * after the tokens have been burned. It deliberately does not reserve credits —
+ * `billing_accounts.credits_reserved` stays untouched — so there is nothing to
+ * leak when a worker dies mid-scope. The trade-off is a race: concurrent scopes
+ * can each pass the gate and jointly overspend. That is strictly better than
+ * the previous behaviour of no gate at all, and the post-hoc capacity check
+ * inside meterConsume still backstops it.
+ *
+ * The decision is a function of the team's balance and billing mode alone. It
+ * takes no feature or scope id: nothing here has ever varied by either, and
+ * accepting them made every caller compute values that were then dropped.
+ */
+export const billingAdmission = {
+  async admit({
+    billing,
+    teamId,
+  }: {
+    billing: ContentBillingPort;
+    teamId: string;
+  }): Promise<AdmissionDecision> {
     const summary = await billing.getSummary(teamId);
     const billingMode = summary.billingMode;
     const availableCredits = summary.credits.available;
