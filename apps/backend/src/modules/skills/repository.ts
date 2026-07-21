@@ -11,7 +11,6 @@ import {
 } from "@sourceweft/db";
 import type { SkillBundleFile } from "./builtin";
 import type {
-  SkillSourceType,
   WorkspaceInstalledSkillItem,
   WorkspaceSkillRecord,
 } from "./types";
@@ -21,10 +20,6 @@ type WorkspaceSkillRow = typeof workspaceSkills.$inferSelect;
 type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
 type SkillVersionRow = typeof skillVersions.$inferSelect;
 type SkillVersionFileRow = typeof skillVersionFiles.$inferSelect;
-
-export type SkillDefinitionRecord = ReturnType<typeof mapSkillDefinition>;
-export type SkillVersionRecord = ReturnType<typeof mapSkillVersion>;
-export type SkillVersionFileRecord = ReturnType<typeof mapSkillVersionFile>;
 
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -170,22 +165,6 @@ function visibleSkillCondition(input: {
   );
 }
 
-export async function listWorkspaceSkillRecords(input: {
-  teamId: string;
-  workspaceId: string;
-}) {
-  const rows = await db
-    .select()
-    .from(workspaceSkills)
-    .where(
-      and(
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-      ),
-    );
-  return rows.map(mapWorkspaceSkill);
-}
-
 export async function listWorkspaceInstalledSkills(input: {
   teamId: string;
   workspaceId: string;
@@ -215,53 +194,6 @@ export async function listWorkspaceInstalledSkills(input: {
       ),
     );
   return rows.map(mapWorkspaceInstalledSkill);
-}
-
-export async function findWorkspaceSkillRecord(input: {
-  teamId: string;
-  workspaceId: string;
-  workspaceSkillId: string;
-}) {
-  const [row] = await db
-    .select()
-    .from(workspaceSkills)
-    .where(
-      and(
-        eq(workspaceSkills.id, input.workspaceSkillId),
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-      ),
-    )
-    .limit(1);
-  return row ? mapWorkspaceSkill(row) : null;
-}
-
-export async function findWorkspaceSkillRecordWithDefinition(input: {
-  teamId: string;
-  workspaceId: string;
-  workspaceSkillId: string;
-}) {
-  const [row] = await db
-    .select({
-      definition: skillDefinitions,
-      workspaceSkill: workspaceSkills,
-    })
-    .from(workspaceSkills)
-    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
-    .where(
-      and(
-        eq(workspaceSkills.id, input.workspaceSkillId),
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-      ),
-    )
-    .limit(1);
-  return row
-    ? {
-        definition: mapSkillDefinition(row.definition),
-        workspaceSkill: mapWorkspaceSkill(row.workspaceSkill),
-      }
-    : null;
 }
 
 export async function listWorkspaceSkillRecordsByIds(input: {
@@ -327,36 +259,6 @@ export async function findEnabledWorkspaceSkillRecordBySlug(input: {
     )
     .limit(1);
   return row ? mapWorkspaceSkill(row.workspaceSkill) : null;
-}
-
-export async function findWorkspaceSkillRecordBySlug(input: {
-  teamId: string;
-  workspaceId: string;
-  slug: string;
-}) {
-  const [row] = await db
-    .select({
-      definition: skillDefinitions,
-      workspaceSkill: workspaceSkills,
-    })
-    .from(workspaceSkills)
-    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
-    .where(
-      and(
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-        eq(skillDefinitions.slug, input.slug),
-        eq(skillDefinitions.status, "active"),
-        visibleSkillCondition(input),
-      ),
-    )
-    .limit(1);
-  return row
-    ? {
-        definition: mapSkillDefinition(row.definition),
-        workspaceSkill: mapWorkspaceSkill(row.workspaceSkill),
-      }
-    : null;
 }
 
 export async function listCatalogSkillVersionsForWorkspace(input: {
@@ -1078,28 +980,4 @@ export async function publishWorkspaceCustomSkillVersion(input: {
       version: mapSkillVersion(version),
     };
   });
-}
-
-export async function hasSkillEntitlement(input: {
-  skillId: string;
-  teamId: string;
-  workspaceId: string;
-}) {
-  const now = new Date();
-  const [row] = await db
-    .select({ id: skillEntitlements.id })
-    .from(skillEntitlements)
-    .where(
-      and(
-        eq(skillEntitlements.skillId, input.skillId),
-        sql`(${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})`,
-        sql`(${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > ${now})`,
-      ),
-    )
-    .limit(1);
-  return Boolean(row);
-}
-
-export function isCustomSourceType(value: SkillSourceType) {
-  return value === "workspace_custom" || value === "team_custom";
 }

@@ -11,7 +11,7 @@ let deliverablesQueueInstance: Queue<QueueJobPayload, unknown, string> | null =
 
 let jobsQueueEvents: QueueEvents | null = null;
 
-export function getJobsQueue() {
+function getJobsQueue() {
   jobsQueueInstance ??= new Queue<QueueJobPayload, unknown, string>(
     config.queueName,
     {
@@ -33,7 +33,7 @@ export const jobsQueue = new Proxy(
   },
 );
 
-export function getDeliverablesQueue() {
+function getDeliverablesQueue() {
   deliverablesQueueInstance ??= new Queue<QueueJobPayload, unknown, string>(
     config.deliverablesQueueName,
     {
@@ -76,7 +76,6 @@ export async function enqueueWithAudit(
 
   void recordJobAudit(
     buildAuditInputFromJob({
-      jobId: String(job.id),
       jobType: type,
       data: payload,
       queueName: target.queueName ?? config.queueName,

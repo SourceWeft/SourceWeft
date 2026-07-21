@@ -205,7 +205,6 @@ export async function recordJobAudit(input: RecordJobAuditInput) {
  * Extracts teamId/workspaceId/userId/entityId from the job data.
  */
 export function buildAuditInputFromJob(params: {
-  jobId: string;
   jobType: string;
   queueName?: string;
   data: Record<string, unknown>;

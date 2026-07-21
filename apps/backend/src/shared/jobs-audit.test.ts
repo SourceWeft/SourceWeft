@@ -44,7 +44,6 @@ beforeEach(() => {
 
 test("recordJobAudit redacts BYOK credentials from the persisted payload", async () => {
   const input = buildAuditInputFromJob({
-    jobId: "job-secret",
     jobType: "video-presentation-generate",
     data: {
       teamId: "team-1",
@@ -98,7 +97,6 @@ test("recordJobAudit preserves an error summary built from a worker failure", as
     },
   );
   const input = buildAuditInputFromJob({
-    jobId: "job-1",
     jobType: "video-presentation-generate",
     data: {
       teamId: "team-1",

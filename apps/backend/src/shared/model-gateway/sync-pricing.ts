@@ -1,4 +1,4 @@
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   db,
   modelGatewayConfigVersions,
@@ -293,13 +293,13 @@ function buildLiteLLMSyncUpdates(input: {
   };
 }
 
-async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void> {
+export async function syncModelPricing(): Promise<void> {
   const litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
   const litellmKeys = Object.keys(litellmData);
   const activeRouteTargetsByKindAndAlias =
     await loadActiveRouteTargetsByKindAndAlias();
 
-  let query = db
+  const profiles = await db
     .select({
       id: modelGatewayProfiles.id,
       kind: modelGatewayProfiles.kind,
@@ -309,26 +309,6 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
     })
     .from(modelGatewayProfiles)
     .where(eq(modelGatewayProfiles.isActive, true));
-
-  if (profileIds && profileIds.length > 0) {
-    query = db
-      .select({
-        id: modelGatewayProfiles.id,
-        kind: modelGatewayProfiles.kind,
-        profileAlias: modelGatewayProfiles.profileAlias,
-        modelAlias: modelGatewayProfiles.modelAlias,
-        configJson: modelGatewayProfiles.configJson,
-      })
-      .from(modelGatewayProfiles)
-      .where(
-        and(
-          eq(modelGatewayProfiles.isActive, true),
-          inArray(modelGatewayProfiles.id, profileIds),
-        ),
-      );
-  }
-
-  const profiles = await query;
 
   let updated = 0;
   let matched = 0;
@@ -513,12 +493,6 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
     autoMatched,
     invalidPresetKey,
   });
-}
-
-export async function syncModelPricing(options?: {
-  modelProfileIds?: string[];
-}): Promise<void> {
-  await syncModelPricingForProfiles(options?.modelProfileIds);
 }
 
 export async function resolveModelCapabilitiesFromLitellm(modelName: string) {

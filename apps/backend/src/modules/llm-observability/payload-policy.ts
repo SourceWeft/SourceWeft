@@ -6,8 +6,6 @@ import type { AuditPayloadMode } from "./types";
 export const DEFAULT_AUDIT_PAYLOAD_MODE: AuditPayloadMode = "preview";
 export const DEFAULT_MAX_JSON_BYTES = 64 * 1024;
 export const DEFAULT_PREVIEW_CHARS = 4000;
-export const DEFAULT_FULL_PAYLOAD_RETENTION_DAYS = 30;
-export const DEFAULT_METADATA_RETENTION_DAYS = 90;
 
 function stableStringify(value: unknown): string {
   if (value === null || value === undefined) {

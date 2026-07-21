@@ -176,10 +176,6 @@ export function getAvailablePages(account: BillingAccountState) {
   return Math.max(getTotalPagesBalance(account), 0);
 }
 
-export function getPagesRemaining(account: BillingAccountState) {
-  return getAvailablePages(account);
-}
-
 export function toSummary(input: {
   account: BillingAccountState;
   billingMode: BillingRuntimeConfig["mode"];

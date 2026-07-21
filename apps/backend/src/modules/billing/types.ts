@@ -5,7 +5,6 @@ import type {
   PlanFamily,
 } from "@sourceweft/credits-core";
 import type {
-  PreviewTeamSubscriptionSeatsResponse,
   BillingCycleSource,
   BillingInterval,
   BillingOrderKind,
@@ -15,16 +14,7 @@ import type {
   SubscriptionPlanFamily,
   BillingSubscriptionStatus,
   BillingLedgerEntry,
-  BillingSubscriptionResponse,
-  CancelTeamSubscriptionResponse,
-  CreateTeamBillingPortalResponse,
-  CreatePricingCheckoutRequest,
-  CreatePricingCheckoutResponse,
-  CreateTeamSubscriptionCheckoutRequest,
-  CreateTeamSubscriptionCheckoutResponse,
   TopupUnitType,
-  UpdateTeamSubscriptionSeatsRequest,
-  UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
 
 export type BillingRuntimeConfig = {
@@ -276,17 +266,3 @@ export type BillingProviderAdapter = {
     input: BillingProviderUpdateSeatsInput,
   ): Promise<BillingProviderUpdateSeatsResult>;
 };
-
-export type TeamSubscriptionSummary = BillingSubscriptionResponse;
-export type PricingCheckoutInput = CreatePricingCheckoutRequest;
-export type PricingCheckoutResult = CreatePricingCheckoutResponse;
-export type TeamSubscriptionCheckoutInput =
-  CreateTeamSubscriptionCheckoutRequest;
-export type TeamSubscriptionCheckoutResult =
-  CreateTeamSubscriptionCheckoutResponse;
-export type TeamSubscriptionSeatsInput = UpdateTeamSubscriptionSeatsRequest;
-export type TeamSubscriptionSeatsResult = UpdateTeamSubscriptionSeatsResponse;
-export type TeamSubscriptionSeatsPreview =
-  PreviewTeamSubscriptionSeatsResponse;
-export type TeamSubscriptionPortalResult = CreateTeamBillingPortalResponse;
-export type TeamSubscriptionCancelResult = CancelTeamSubscriptionResponse;

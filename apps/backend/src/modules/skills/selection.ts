@@ -2,7 +2,6 @@ import { ContentError } from "../content/errors";
 import {
   getBuiltinSkillBySlug,
   loadBuiltinSkillBundle,
-  listBuiltinSkills,
 } from "./builtin";
 import {
   findEnabledWorkspaceSkillRecordBySlug,
@@ -63,46 +62,6 @@ export async function resolveSkillIdsWithSlashCommand(input: {
     return skillIds;
   }
   return [...skillIds, record.id].slice(0, MAX_SELECTED_SKILLS_PER_TURN + 1);
-}
-
-export async function resolveSkillIdsForSlashCommands(input: {
-  teamId: string;
-  workspaceId: string;
-  commandNames: string[];
-  findSkillBySlug?: typeof findEnabledWorkspaceSkillRecordBySlug;
-}) {
-  const findSkillBySlug =
-    input.findSkillBySlug ?? findEnabledWorkspaceSkillRecordBySlug;
-  const result: string[] = [];
-  for (const commandName of input.commandNames) {
-    const slug = skillSlugFromSlashCommand(commandName);
-    if (!slug) {
-      continue;
-    }
-    const builtinSelectionId = await runtimeBuiltinSkillSelectionId(slug);
-    if (builtinSelectionId) {
-      if (!result.includes(builtinSelectionId)) {
-        result.push(builtinSelectionId);
-      }
-      if (result.length > MAX_SELECTED_SKILLS_PER_TURN) {
-        break;
-      }
-      continue;
-    }
-    const record = await findSkillBySlug({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      slug,
-    });
-    if (!record || result.includes(record.id)) {
-      continue;
-    }
-    result.push(record.id);
-    if (result.length > MAX_SELECTED_SKILLS_PER_TURN) {
-      break;
-    }
-  }
-  return result;
 }
 
 export async function resolveSelectedSkills(input: {
@@ -191,10 +150,6 @@ export async function resolveSelectedSkills(input: {
   }
 
   return result;
-}
-
-export async function builtinCatalogKeys() {
-  return new Set((await listBuiltinSkills()).map((skill) => skill.slug));
 }
 
 export function builtinSkillSelectionId(slug: string) {

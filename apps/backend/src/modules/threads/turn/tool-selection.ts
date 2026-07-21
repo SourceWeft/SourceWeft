@@ -265,39 +265,3 @@ export function resolveConnectorToolSelections(
   }
   return selections;
 }
-
-export function resolveConnectorToolSelectionsFromToolsMetadata(
-  value: unknown,
-  connectorType: string,
-): Record<string, ConnectorToolSelection> {
-  const tools = toRecord(value);
-  const selections: Record<string, ConnectorToolSelection> = {};
-  if (!tools) {
-    return selections;
-  }
-  for (const toolName of agentToolNamesByCapability(connectorType)) {
-    const selection = normalizeConnectorToolSelection(tools[toolName]);
-    if (selection) {
-      selections[toolName] = selection;
-    }
-  }
-  return selections;
-}
-
-export function enableConnectorToolSelection(
-  tools: ThreadToolsSelection | undefined,
-  toolName: string,
-  connectorType: string,
-) {
-  if (!hasAgentToolCapability(toolName, connectorType)) {
-    return tools;
-  }
-  const rawTools = (tools ?? {}) as Record<string, unknown>;
-  return {
-    ...(tools ?? {}),
-    [toolName]: {
-      ...normalizeConnectorToolSelection(rawTools[toolName]),
-      enabled: true,
-    },
-  };
-}

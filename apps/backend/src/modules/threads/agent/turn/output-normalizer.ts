@@ -825,18 +825,6 @@ export function extractGeneratedImageArtifacts(
     });
 }
 
-export function isPresentationArtifactInputRequiredOutput(output: unknown) {
-  if (output === undefined) {
-    return false;
-  }
-  const type = extractToolOutputField(output, "type")?.toLowerCase().trim();
-  const status = extractToolOutputField(output, "status")?.toLowerCase().trim();
-  return (
-    type === "presentation_artifact_input_required" ||
-    status === "needs_content"
-  );
-}
-
 export function hasPresentationArtifactUrl(output: unknown) {
   return Boolean(
     extractToolOutputField(output, "artifact_url") ??

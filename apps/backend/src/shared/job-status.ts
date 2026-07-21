@@ -5,7 +5,7 @@ export type ApiJobStatus =
   | "failed"
   | "cancelled";
 
-export function mapBullMqStateToStatus(state: string): ApiJobStatus {
+function mapBullMqStateToStatus(state: string): ApiJobStatus {
   switch (state) {
     case "active":
       return "running";

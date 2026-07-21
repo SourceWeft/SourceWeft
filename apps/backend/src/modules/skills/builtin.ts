@@ -413,16 +413,6 @@ export async function getBuiltinSkillBySlug(slug: string) {
   );
 }
 
-export async function readBuiltinSkillFile(
-  storagePointer: string,
-  filePath: string,
-) {
-  const file = (await loadBuiltinSkillBundle(storagePointer))?.files.find(
-    (item) => item.path === filePath,
-  );
-  return file ?? null;
-}
-
 export async function validateBuiltinSkills() {
   const seenSlugs = new Set<string>();
   for (const skill of await listBuiltinSkills()) {

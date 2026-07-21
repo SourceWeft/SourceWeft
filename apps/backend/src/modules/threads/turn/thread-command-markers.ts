@@ -84,10 +84,6 @@ function sourceMarkers(markers: readonly ParsedPromptMarker[]) {
   );
 }
 
-export function markerCommandNames(markers: readonly ParsedPromptMarker[]) {
-  return commandMarkers(markers).map((marker) => marker.value);
-}
-
 export function markerSourceIds(markers: readonly ParsedPromptMarker[]) {
   return sourceMarkers(markers)
     .filter((marker) => Boolean(marker.sourceId))

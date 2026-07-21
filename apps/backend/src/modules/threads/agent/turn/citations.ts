@@ -1,35 +1,7 @@
 import type { AgentCitation } from "../citation-registry";
 
-const CITATION_MARKER_PATTERN = /\[citation:([^\]\s]+)\]/g;
 const CITATION_LIKE_MARKER_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
-
-export function extractCitationKeys(text: string) {
-  return [...text.matchAll(CITATION_MARKER_PATTERN)].map(
-    (match) => match[1] ?? "",
-  );
-}
-
-export function validateAssistantCitations(input: {
-  assistantText: string;
-  citations: AgentCitation[];
-}) {
-  const referencedKeys = extractCitationKeys(input.assistantText);
-  if (referencedKeys.length === 0) {
-    return { valid: true, invalidKeys: [] as string[] };
-  }
-
-  const allowed = new Set(
-    input.citations.flatMap((citation) => [citation.citation, citation.chunkId]),
-  );
-  const invalidKeys = [
-    ...new Set(referencedKeys.filter((key) => !allowed.has(key))),
-  ];
-  return {
-    valid: invalidKeys.length === 0,
-    invalidKeys,
-  };
-}
 
 export function normalizeAssistantCitations(input: {
   assistantText: string;

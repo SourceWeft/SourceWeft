@@ -49,11 +49,6 @@ export function loadCapabilityEntryModule(
   return promise;
 }
 
-/** Test seam: forget every cached entry module. */
-export function resetCapabilityEntryModuleCache() {
-  entryModuleCache.clear();
-}
-
 async function importCapabilityEntryModule(
   record: DiscoveredCapabilityRecord,
 ): Promise<CapabilityEntryModule | null> {

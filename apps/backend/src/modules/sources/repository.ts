@@ -20,7 +20,6 @@ import type {
 import { buildSearchParts } from "./search-tokenizer";
 import { currentDocumentCondition } from "./current-document-condition";
 import {
-  mapChunk,
   mapSource,
   mapSourceDocument,
   mapSourceEmbedding,
@@ -372,30 +371,6 @@ export async function listSourceRecordsByTitles(input: {
         ne(sources.status, "archived"),
       ),
     );
-
-  return rows.map(mapSource);
-}
-
-export async function listSourceChildren(input: {
-  teamId: string;
-  workspaceId: string;
-  parentSourceId: string | null;
-}) {
-  const parentCondition = input.parentSourceId === null
-    ? sql`${sources.parentSourceId} is null`
-    : eq(sources.parentSourceId, input.parentSourceId);
-  const rows = await db
-    .select()
-    .from(sources)
-    .where(
-      and(
-        eq(sources.teamId, input.teamId),
-        eq(sources.workspaceId, input.workspaceId),
-        ne(sources.status, "archived"),
-        parentCondition,
-      ),
-    )
-    .orderBy(asc(sources.sourceType), asc(sources.title), asc(sources.createdAt));
 
   return rows.map(mapSource);
 }
@@ -970,28 +945,6 @@ export async function getSourceDocumentDetailRecord(input: {
     embeddings: embeddingRows.map((row) => mapSourceEmbedding(row.embedding)),
     revisions: revisionRows.map(mapSourceRevision),
   };
-}
-
-export async function listSourceChunks(input: {
-  teamId: string;
-  workspaceId: string;
-  sourceId: string;
-}) {
-  const rows = await db
-    .select({ chunk: chunks })
-    .from(chunks)
-    .innerJoin(documents, eq(documents.id, chunks.documentId))
-    .where(
-      and(
-        eq(chunks.teamId, input.teamId),
-        eq(chunks.workspaceId, input.workspaceId),
-        eq(chunks.sourceId, input.sourceId),
-        currentDocumentCondition(),
-      ),
-    )
-    .orderBy(asc(chunks.chunkNo));
-
-  return rows.map((row) => mapChunk(row.chunk));
 }
 
 export async function getSourceStatusDetail(input: {

@@ -1,6 +1,5 @@
 import {
   advanceArtifactPipelineSteps,
-  type AdvanceArtifactPipelineStepAction,
   type AdvanceArtifactPipelineStepInput,
 } from "../../modules/artifacts/pipeline-advance";
 import type { DeliverableStageDefinition } from "@sourceweft/capability-contracts";
@@ -43,12 +42,10 @@ export type DeliverableStateLike = {
 };
 
 /**
- * Aliases of the artifact-pipeline advance contract this module delegates to
- * (`advanceArtifactPipelineSteps`). Kept as re-exports rather than parallel
- * declarations so a new action cannot be added to one and missed by the other.
+ * Alias of the artifact-pipeline advance contract this module delegates to
+ * (`advanceArtifactPipelineSteps`). Kept as a re-export rather than a parallel
+ * declaration so a new field cannot be added to one and missed by the other.
  */
-export type AdvanceDeliverableStepAction = AdvanceArtifactPipelineStepAction;
-
 export type AdvanceDeliverableStepInput = AdvanceArtifactPipelineStepInput;
 
 export type StageBudgetConfig = {
@@ -183,10 +180,6 @@ export async function runStageWithBudget<T>(input: {
         `Stage ${input.stageId} failed after ${input.config.maxAttempts} attempts`,
       );
 }
-
-export type DeliverableStageRunner = ReturnType<
-  typeof createDeliverableStageRunner
->;
 
 export function createDeliverableStageRunner(input: {
   stages: readonly DeliverableStageDescriptor[];

@@ -24,11 +24,6 @@ export function connectorAdaptersReady(): Promise<void> {
   return registerBuiltinConnectorAdapters();
 }
 
-/** Test seam: forget the registration so the next call rediscovers. */
-export function resetBuiltinConnectorAdapterRegistration() {
-  registration = null;
-}
-
 async function register(): Promise<void> {
   try {
     const { adapters, agentToolDefs } =

@@ -1,4 +1,3 @@
-import type { Job } from "bullmq";
 import type { DeliverableJobEnvelope } from "@sourceweft/capability-contracts";
 import { config } from "../../shared/config";
 import {
@@ -281,10 +280,4 @@ export async function enqueueDeliverableJob({
     }
     throw error;
   }
-}
-
-export function isSourceParseJob(
-  job: Job<Record<string, unknown>>,
-): job is Job<SourceParseJobPayload> {
-  return job.name === SOURCE_PARSE_JOB;
 }

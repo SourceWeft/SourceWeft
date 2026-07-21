@@ -555,26 +555,6 @@ export async function isOrganizationMember(input: {
   return Boolean(membership);
 }
 
-export async function findFirstWorkspaceByOrganization(input: {
-  organizationId: string;
-}) {
-  const [row] = await db
-    .select({
-      id: workspaces.id,
-      organizationId: workspaces.organizationId,
-      name: workspaces.name,
-      slug: workspaces.slug,
-      createdBy: workspaces.createdBy,
-      createdAt: workspaces.createdAt,
-    })
-    .from(workspaces)
-    .where(eq(workspaces.organizationId, input.organizationId))
-    .orderBy(asc(workspaces.createdAt))
-    .limit(1);
-
-  return row ? mapWorkspaceRow(row) : null;
-}
-
 export async function findMembershipByUser(userId: string) {
   const [row] = await db
     .select()

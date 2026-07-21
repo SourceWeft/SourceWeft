@@ -336,31 +336,6 @@ export async function resolveThreadModelSettingsSnapshots(
   return next;
 }
 
-export async function ensureModelAliasExists(input: {
-  profileKind: ModelProfileKind;
-  modelAlias: string;
-}) {
-  const [row] = await db
-    .select({ id: modelGatewayProfiles.id })
-    .from(modelGatewayProfiles)
-    .where(
-      and(
-        eq(modelGatewayProfiles.kind, input.profileKind),
-        eq(modelGatewayProfiles.modelAlias, input.modelAlias),
-        eq(modelGatewayProfiles.isActive, true),
-      ),
-    )
-    .limit(1);
-
-  if (!row) {
-    throw new ContentError(
-      400,
-      "MODEL_ALIAS_INVALID",
-      `Model alias '${input.modelAlias}' is not available for ${input.profileKind}`,
-    );
-  }
-}
-
 export async function hasActiveProfileAlias(input: {
   profileKind: ModelProfileKind;
   profileAlias: string;
@@ -372,25 +347,6 @@ export async function hasActiveProfileAlias(input: {
       and(
         eq(modelGatewayProfiles.kind, input.profileKind),
         eq(modelGatewayProfiles.profileAlias, input.profileAlias),
-        eq(modelGatewayProfiles.isActive, true),
-      ),
-    )
-    .limit(1);
-
-  return Boolean(row);
-}
-
-export async function hasActiveModelAlias(input: {
-  profileKind: ModelProfileKind;
-  modelAlias: string;
-}) {
-  const [row] = await db
-    .select({ id: modelGatewayProfiles.id })
-    .from(modelGatewayProfiles)
-    .where(
-      and(
-        eq(modelGatewayProfiles.kind, input.profileKind),
-        eq(modelGatewayProfiles.modelAlias, input.modelAlias),
         eq(modelGatewayProfiles.isActive, true),
       ),
     )
