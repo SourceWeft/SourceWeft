@@ -52,5 +52,8 @@ export const resolveObservedGenerationCost: GenerationCostResolver = async (
     lookups: cachedLookups,
   });
 
-  return cost.providerCostUsd;
+  return {
+    providerCostUsd: cost.providerCostUsd,
+    costSource: cost.costSource,
+  };
 };

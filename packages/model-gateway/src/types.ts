@@ -1,4 +1,5 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
+import type { TargetHealthRegistry } from "./target-health";
 
 export type ModelKind =
   | "chat"
@@ -308,6 +309,21 @@ export type ProviderRoutingSort =
 export interface ProviderRoutingConfig {
   only?: string[];
   sort?: ProviderRoutingSort;
+}
+
+/**
+ * Per-model request-shaping capabilities (see model-capabilities.ts), resolved
+ * at request time from {@link ModelCapabilityRule}s on the gateway config.
+ * Grows as the gateway takes on more model-specific adaptations.
+ */
+export interface ModelCapabilities {
+  supportsForcedToolChoice: boolean;
+}
+
+/** A capability rule matched by a case-insensitive substring of the model name. */
+export interface ModelCapabilityRule {
+  modelMatch: string;
+  capabilities: Partial<ModelCapabilities>;
 }
 
 export interface ModelRouteTarget {
@@ -740,9 +756,16 @@ export interface ModelGatewayConfig {
   timeoutMs?: number;
   maxRetries?: number;
   defaultHeaders?: Record<string, string>;
+  /** Per-model capability rules, matched by model name at request time. */
+  modelCapabilities?: readonly ModelCapabilityRule[];
   allowNonDefaultAliases?: boolean;
   allowedModelAliases?: readonly string[];
   allowedBaseUrls?: readonly string[];
+  /**
+   * Overrides the process-wide target health registry — pass a fresh instance
+   * to isolate health state (tests) or share one across configs deliberately.
+   */
+  targetHealth?: TargetHealthRegistry;
   logger?: GatewayLogger;
   requestMetadata?: Record<string, unknown>;
   observeSink?: ObserveSink;
@@ -802,6 +825,8 @@ export interface ResolvedModelGatewayConfig {
   timeoutMs: number;
   maxRetries: number;
   defaultHeaders: Record<string, string>;
+  /** Per-model capability rules, matched by model name at request time. */
+  modelCapabilities: readonly ModelCapabilityRule[];
   allowNonDefaultAliases: boolean;
   allowedModelAliases: readonly string[];
   allowedBaseUrls: readonly string[];
@@ -814,6 +839,7 @@ export interface ResolvedModelGatewayConfig {
   requestMetadata: Record<string, unknown>;
   observeSink?: ObserveSink;
   langchainFactories?: LangChainFactories;
+  targetHealth: TargetHealthRegistry;
 }
 
 export interface ResolvedRequestTarget {
@@ -834,17 +860,3 @@ export interface ResolvedRequestTarget {
   maxRetries?: number;
 }
 
-export interface ResolvedRequestConfig {
-  baseUrl: string;
-  apiKey?: string;
-  apiKeyHeaderName?: string;
-  apiKeyHeaderPrefix?: string;
-  fetch: typeof fetch;
-  timeoutMs: number;
-  maxRetries: number;
-  defaultHeaders: Record<string, string>;
-  logger: GatewayLogger;
-  requestMetadata: Record<string, unknown>;
-  observeSink?: ObserveSink;
-  langchainFactories?: LangChainFactories;
-}

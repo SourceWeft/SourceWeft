@@ -1,6 +1,6 @@
-import { resolveRequestTarget } from "../config";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeEmbedding, runBridgeEmbeddingBatch } from "../bridge/embeddings";
+import { runWithTargetFailover } from "./failover";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -16,6 +16,7 @@ import type {
   EmbedResult,
   RequestOptions,
   ResolvedModelGatewayConfig,
+  ResolvedRequestTarget,
 } from "../types";
 
 export class ModelGatewayEmbeddingsEndpoint {
@@ -25,7 +26,20 @@ export class ModelGatewayEmbeddingsEndpoint {
     input: EmbedInput,
     options?: RequestOptions,
   ): Promise<EmbedResult> {
-    const target = await resolveRequestTarget(this.config, input);
+    return runWithTargetFailover({
+      config: this.config,
+      payload: input,
+      operation: "embeddings.embed",
+      callerSignal: options?.signal,
+      attempt: (target) => this.embedWithTarget(input, options, target),
+    });
+  }
+
+  private async embedWithTarget(
+    input: EmbedInput,
+    options: RequestOptions | undefined,
+    target: ResolvedRequestTarget,
+  ): Promise<EmbedResult> {
     const generation = createGenerationObservation({
       operation: "embeddings.embed",
       payload: input,
@@ -78,7 +92,20 @@ export class ModelGatewayEmbeddingsEndpoint {
     input: EmbedBatchInput,
     options?: RequestOptions,
   ): Promise<EmbedBatchResult> {
-    const target = await resolveRequestTarget(this.config, input);
+    return runWithTargetFailover({
+      config: this.config,
+      payload: input,
+      operation: "embeddings.embedBatch",
+      callerSignal: options?.signal,
+      attempt: (target) => this.embedBatchWithTarget(input, options, target),
+    });
+  }
+
+  private async embedBatchWithTarget(
+    input: EmbedBatchInput,
+    options: RequestOptions | undefined,
+    target: ResolvedRequestTarget,
+  ): Promise<EmbedBatchResult> {
     const generation = createGenerationObservation({
       operation: "embeddings.embedBatch",
       payload: input,

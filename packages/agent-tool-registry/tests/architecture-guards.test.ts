@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { AGENT_TOOLS } from "../src/registry";
 
 /**
- * Architecture guards for the two hand-written static tables in this package.
+ * Architecture guards for this package's hand-written static tables, and for
+ * the entry boundary that decides which of them a given host can see.
  *
  * `capability-modules.test.ts` guards `BUILTIN_CAPABILITY_MODULES` against a
  * failure mode that no other test in the repo can see: a capability that is
@@ -18,6 +19,9 @@ import { AGENT_TOOLS } from "../src/registry";
  * spreads; forgetting a line in either compiles, type-checks and passes every
  * existing test, while the capability quietly loses its presentation or its
  * entire UI. These two guards close both holes structurally.
+ *
+ * Guard 3 is about the third table by another name: the package's `exports`
+ * map. Its failure mode is louder but no more local — see the guard.
  */
 
 const PACKAGES_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -262,5 +266,96 @@ test("every capability package with a \"./ui\" export is listed in ARTIFACT_UI_M
     `These packages are listed in ARTIFACT_UI_MODULES but no longer declare a ` +
       `"./ui" export in their package.json, so the import cannot resolve: ` +
       `${stale.join(", ")}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Guard 3 — the main entry stays out of the server-only graph (src/server.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * The package has three entries with three audiences: `.` is isomorphic, `./ui`
+ * is the browser's, `./server` is the node-only one. Only the first is imported
+ * by both hosts, so only the first has to be kept honest by a test.
+ *
+ * The failure this catches is a build break, not a silent degradation — but a
+ * remote one. `./server` reaches capability entry modules, and one of those
+ * (the Daytona sandbox provider) transitively requires `async_hooks`. Re-export
+ * it from `src/index.ts` and every client component that imports this package
+ * for a tool name drags that graph into the browser bundle, and the app's own
+ * pages start failing to compile with a module-not-found error naming a package
+ * nobody touched. Being lazy does not help: a bundler must still emit the chunk
+ * behind an `import()`, so it still resolves the node-only graph.
+ *
+ * Relative imports are followed transitively, because the offending re-export
+ * is as likely to be added one module deep as in the index itself.
+ */
+function relativeImportsFrom(filePath: string): string[] {
+  const source = readFileSync(filePath, "utf8");
+  const specifiers: string[] = [];
+  const pattern = /(?:^|\s)(?:import|export)[\s\S]*?from\s*"(\.[^"]*)"/g;
+  for (const match of source.matchAll(pattern)) {
+    if (match[1]) {
+      specifiers.push(match[1]);
+    }
+  }
+  return specifiers;
+}
+
+function resolveLocalModule(fromFile: string, specifier: string): string | null {
+  const base = join(dirname(fromFile), specifier);
+  // Extensions first, then the directory form: `existsSync(base)` is true for a
+  // directory too, so probing it bare would resolve `./foo` to the folder.
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Every module reachable from `entry` through relative imports, entry included. */
+function localModuleGraph(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    if (!current || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    for (const specifier of relativeImportsFrom(current)) {
+      const resolved = resolveLocalModule(current, specifier);
+      if (resolved) {
+        queue.push(resolved);
+      }
+    }
+  }
+  return seen;
+}
+
+test("the main entry does not reach the server-only modules", () => {
+  const srcDir = join(REGISTRY_ROOT, "src");
+  const serverOnly = localModuleGraph(join(srcDir, "server.ts"));
+  serverOnly.delete(join(srcDir, "server.ts"));
+
+  const leaked = [...localModuleGraph(join(srcDir, "index.ts"))]
+    .filter((module) => serverOnly.has(module))
+    .map((module) => `src/${module.slice(srcDir.length + 1)}`)
+    .sort();
+
+  assert.deepEqual(
+    leaked,
+    [],
+    `These modules are reachable from BOTH src/index.ts and src/server.ts. ` +
+      `src/index.ts is imported by the web app's client components; ` +
+      `src/server.ts reaches capability entry modules whose graph is ` +
+      `node-only (the Daytona provider pulls in the OpenTelemetry node SDK, ` +
+      `which requires "async_hooks"). Sharing a module between the two puts ` +
+      `that graph in the browser bundle and breaks the app build with a ` +
+      `module-not-found error naming a package nobody edited. A lazy ` +
+      `import() does not help — the bundler still has to resolve the chunk. ` +
+      `Import from "@sourceweft/agent-tool-registry/server" instead: ` +
+      `${leaked.join(", ")}`,
   );
 });

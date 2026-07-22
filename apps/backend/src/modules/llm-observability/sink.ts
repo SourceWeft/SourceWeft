@@ -188,12 +188,22 @@ export type GenerationCostResolver = (input: {
   profileAlias: string;
   usage?: ObserveGenerationEnd["usage"];
   executionMode?: string | null;
-}) => Promise<number | null>;
+}) => Promise<{
+  providerCostUsd: number | null;
+  /**
+   * How the cost figure was obtained — e.g. `provider_actual` (reported by the
+   * provider for this exact call) vs `price_book` (estimated from the alias's
+   * price entry). With one alias fanning out to several targets, the estimate
+   * is priced at the alias's primary target, so margin analysis must be able
+   * to tell real cost from estimate.
+   */
+  costSource: string;
+} | null>;
 
 async function resolveGenerationCost(
   resolveCost: GenerationCostResolver | undefined,
   generation: ObserveGenerationEnd,
-): Promise<number | null> {
+): Promise<{ providerCostUsd: number | null; costSource: string } | null> {
   if (!resolveCost) {
     return null;
   }
@@ -284,7 +294,7 @@ export function createLlmObservabilitySink(options?: {
       if (!generation.traceId || !scope) {
         return;
       }
-      const providerCostUsd = await resolveGenerationCost(
+      const cost = await resolveGenerationCost(
         options?.resolveCost,
         generation,
       );
@@ -293,7 +303,7 @@ export function createLlmObservabilitySink(options?: {
         teamId: scope.teamId,
         workspaceId: scope.workspaceId,
         spanId: generation.spanId,
-        providerCostUsd,
+        providerCostUsd: cost?.providerCostUsd ?? null,
         output: generation.output,
         outputText: generation.outputText,
         finishReason: generation.finishReason,
@@ -305,7 +315,10 @@ export function createLlmObservabilitySink(options?: {
         providerRequestId: generation.providerRequestId,
         rawCaptureError: generation.rawCaptureError,
         latencyMs: generation.latencyMs,
-        metadata: buildEventAttributes(generation.attributes ?? {}),
+        metadata: {
+          ...buildEventAttributes(generation.attributes ?? {}),
+          ...(cost ? { costSource: cost.costSource } : {}),
+        },
         endedAt: new Date(generation.endedAt),
       });
     },

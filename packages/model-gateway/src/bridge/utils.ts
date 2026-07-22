@@ -7,6 +7,10 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { getChatAdapter, getEmbeddingsAdapter } from "../adapters/registry";
+import {
+  downgradeForcedToolChoiceInKwargs,
+  resolveModelCapabilities,
+} from "../model-capabilities";
 import type {
   ChatCompleteInput,
   EmbedBatchInput,
@@ -21,7 +25,12 @@ import type {
   ToolBindingOptions,
   ToolCall,
 } from "../types";
-import { resolveModelGatewayConfig, resolveRequestTarget } from "../config";
+import { resolveModelGatewayConfig, resolveRequestCandidates } from "../config";
+import {
+  isFailoverableError,
+  ModelGatewayError,
+  normalizeGatewayError,
+} from "../errors";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -98,10 +107,18 @@ export function createChatModel(input: {
     ? model
     : model.bindTools(
         input.payload.tools,
-        resolveBindToolsKwargs({
-          toolBindingOptions: input.payload.toolBindingOptions,
-          toolChoice: input.payload.toolChoice,
-        }),
+        // Downgrade a forced tool_choice the model can't take (DeepSeek V4) —
+        // the request-wide counterpart of the structured-output strategy.
+        downgradeForcedToolChoiceInKwargs(
+          resolveBindToolsKwargs({
+            toolBindingOptions: input.payload.toolBindingOptions,
+            toolChoice: input.payload.toolChoice,
+          }),
+          resolveModelCapabilities(
+            input.target.providerModel,
+            input.config.modelCapabilities,
+          ),
+        ),
       ) as LangChainChatModelLike;
 
   const modelWithDefaultToolBindingOptions =
@@ -213,11 +230,19 @@ function createObservedLangChainChatModel(input: {
   const getName = () => input.model.getName?.() ?? input.target.providerModel;
 
   const bindTools: LangChainChatModelLike["bindTools"] = (tools, kwargs) => {
-    const resolvedKwargs = resolveBindToolsKwargs({
-      kwargs,
-      toolBindingOptions: input.payload.toolBindingOptions,
-      toolChoice: input.payload.toolChoice,
-    });
+    // Runtime bind path (e.g. the agent's command-tool-choice middleware forcing
+    // a specific tool). Downgrade a forced tool_choice the model can't take.
+    const resolvedKwargs = downgradeForcedToolChoiceInKwargs(
+      resolveBindToolsKwargs({
+        kwargs,
+        toolBindingOptions: input.payload.toolBindingOptions,
+        toolChoice: input.payload.toolChoice,
+      }),
+      resolveModelCapabilities(
+        input.target.providerModel,
+        input.config.modelCapabilities,
+      ),
+    );
     return createObservedLangChainChatModel({
       ...input,
       payload: {
@@ -637,13 +662,185 @@ export async function createLangChainChatModel(input: {
     toolBindingOptions: input.execution?.toolBindingOptions,
   };
 
-  const target = await resolveRequestTarget(resolvedConfig, payload);
-  const model = createChatModel({
-    config: resolvedConfig,
-    target,
-    payload,
-  });
+  const candidates = await resolveRequestCandidates(resolvedConfig, payload);
+  if (candidates.length === 1) {
+    const model = createChatModel({
+      config: resolvedConfig,
+      target: candidates[0]!,
+      payload,
+    });
+    return model as unknown as BaseLanguageModel;
+  }
 
-  return model as unknown as BaseLanguageModel;
+  return createFailoverLangChainChatModel({
+    config: resolvedConfig,
+    candidates,
+    buildModel: (target) =>
+      createChatModel({ config: resolvedConfig, target, payload }),
+  }) as unknown as BaseLanguageModel;
+}
+
+/**
+ * LangChain-facing counterpart of `runWithTargetFailover`: one model per
+ * candidate target, built lazily, with the same failover policy — move to the
+ * next target only on a failoverable error, never after the caller aborted,
+ * and for streams only while no chunk has reached the consumer.
+ *
+ * `bindTools` returns a new facade whose model factory re-applies the binding
+ * per candidate, so a fallback model carries the same tools as the one it
+ * replaces. Each candidate model keeps its own observation shim, so every
+ * attempt — failed or successful — records its own generation.
+ */
+function createFailoverLangChainChatModel(input: {
+  config: ResolvedModelGatewayConfig;
+  candidates: ResolvedRequestTarget[];
+  buildModel: (target: ResolvedRequestTarget) => LangChainChatModelLike;
+}): LangChainChatModelLike {
+  const models: LangChainChatModelLike[] = [];
+  const getModel = (index: number) =>
+    (models[index] ??= input.buildModel(input.candidates[index]!));
+
+  const callerAborted = (options?: Record<string, unknown>) =>
+    Boolean(
+      (options as { signal?: AbortSignal } | undefined)?.signal?.aborted,
+    );
+
+  const logFailover = (operation: string, index: number, error: unknown) => {
+    const target = input.candidates[index]!;
+    input.config.logger.warn?.("model-gateway.failover", {
+      operation,
+      alias: target.routeDecision.alias,
+      failedProvider: target.provider,
+      failedProviderModel: target.providerModel,
+      errorCode: normalizeGatewayError(error).code,
+      nextProvider: input.candidates[index + 1]?.provider,
+      attempt: index + 1,
+      candidates: input.candidates.length,
+    });
+  };
+
+  async function runWithFailover<T>(
+    operation: string,
+    options: Record<string, unknown> | undefined,
+    run: (model: LangChainChatModelLike) => Promise<T>,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let index = 0; index < input.candidates.length; index++) {
+      const target = input.candidates[index]!;
+      try {
+        const result = await run(getModel(index));
+        input.config.targetHealth.markSuccess(target);
+        return result;
+      } catch (error) {
+        lastError = error;
+        const aborted = callerAborted(options);
+        if (!aborted && isFailoverableError(error)) {
+          input.config.targetHealth.markFailure(target);
+        }
+        const isLast = index === input.candidates.length - 1;
+        if (isLast || aborted || !isFailoverableError(error)) {
+          throw error;
+        }
+        logFailover(operation, index, error);
+      }
+    }
+    throw lastError;
+  }
+
+  async function* streamWithFailover(
+    messages: unknown,
+    options?: Record<string, unknown>,
+  ): AsyncGenerator<unknown> {
+    for (let index = 0; index < input.candidates.length; index++) {
+      const target = input.candidates[index]!;
+      const isLast = index === input.candidates.length - 1;
+      let iterator: AsyncIterator<unknown>;
+      let first: IteratorResult<unknown>;
+      try {
+        const stream = await getModel(index).stream(messages, options);
+        iterator = stream[Symbol.asyncIterator]();
+        // The failover window closes at the first chunk: until it arrives the
+        // consumer has seen nothing, so retrying on the next target is
+        // invisible. After it, the attempt is committed — a mid-stream failure
+        // ends the stream rather than replaying half an answer elsewhere.
+        first = await iterator.next();
+      } catch (error) {
+        const aborted = callerAborted(options);
+        if (!aborted && isFailoverableError(error)) {
+          input.config.targetHealth.markFailure(target);
+        }
+        if (isLast || aborted || !isFailoverableError(error)) {
+          throw error;
+        }
+        logFailover("chat.stream", index, error);
+        continue;
+      }
+      input.config.targetHealth.markSuccess(target);
+      if (first.done) {
+        return;
+      }
+      yield first.value;
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) {
+          return;
+        }
+        yield next.value;
+      }
+    }
+  }
+
+  const facade: LangChainChatModelLike = {
+    getName: () =>
+      getModel(0).getName?.() ?? input.candidates[0]!.providerModel,
+    invoke: (messages, options) =>
+      runWithFailover("chat.complete", options, (model) =>
+        model.invoke(messages, options),
+      ),
+    stream: async (messages, options) => streamWithFailover(messages, options),
+    bindTools: (tools, kwargs) =>
+      createFailoverLangChainChatModel({
+        ...input,
+        buildModel: (target) => {
+          const model = input.buildModel(target);
+          return model.bindTools ? model.bindTools(tools, kwargs) : model;
+        },
+      }),
+    withStructuredOutput: (schema, config) => ({
+      invoke: (structuredInput, options) =>
+        runWithFailover("chat.complete", options, (model) => {
+          if (typeof model.withStructuredOutput !== "function") {
+            throw new ModelGatewayError({
+              code: "BAD_REQUEST",
+              message:
+                `Model for provider '${model.getName?.() ?? "unknown"}' does not support structured output`,
+              retryable: false,
+            });
+          }
+          return model
+            .withStructuredOutput(schema, config)
+            .invoke(structuredInput, options);
+        }),
+    }),
+  };
+
+  // Same pass-through contract as the observation shim: unknown properties
+  // fall through to the primary model with `this` bound to the real instance.
+  return new Proxy(getModel(0), {
+    get(target, prop) {
+      if (typeof prop === "string" && prop in facade) {
+        // Only advertise withStructuredOutput when the primary model does —
+        // mirroring the observation shim's conditional surface.
+        if (
+          prop !== "withStructuredOutput" ||
+          typeof target.withStructuredOutput === "function"
+        ) {
+          return (facade as unknown as Record<string, unknown>)[prop];
+        }
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as LangChainChatModelLike;
 }
 

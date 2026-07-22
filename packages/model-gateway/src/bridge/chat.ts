@@ -7,10 +7,15 @@ import {
 } from "../errors";
 import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 import { createChatModel, toLangChainMessages } from "./utils";
+import {
+  planStructuredOutput,
+  resolveModelCapabilities,
+} from "../model-capabilities";
 import type {
   ChatCompleteInput,
   ChatCompleteResult,
   ChatStreamEvent,
+  LangChainChatModelLike,
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
@@ -309,6 +314,74 @@ export function extractReasoning(raw: {
   );
 }
 
+/**
+ * Structured output by binding the schema as an *available* tool — the strategy
+ * {@link planStructuredOutput} selects for models that reject a forced
+ * `tool_choice` (e.g. DeepSeek V4, always in thinking mode).
+ *
+ * This is the JS equivalent of what Python LangChain's
+ * `ChatOpenAI.with_structured_output(method="function_calling")` produces once a
+ * disabled `tool_choice` is filtered out (`disabled_params`): bind the schema as
+ * a single tool with `parallel_tool_calls: false` and *no* `tool_choice` (the
+ * API default, auto, applies), then take the first matching tool call — the
+ * `JsonOutputKeyToolsParser(key_name=..., first_tool_only=True)` behavior.
+ * `@langchain/openai` (JS) ships no `disabled_params`, so the bridge assembles
+ * it here. The decision is the planner's; this only executes it. The model may
+ * occasionally answer without calling the tool; the caller's repair loop covers
+ * that turn.
+ */
+async function invokeStructuredViaAvailableTool(input: {
+  model: LangChainChatModelLike;
+  schema: Record<string, unknown>;
+  config: StructuredOutputConfig;
+  messages: unknown;
+  target: ResolvedRequestTarget;
+  options?: RequestOptions;
+  strict?: boolean;
+}): Promise<{ rawMessage: AIMessage; structuredOutput: Record<string, unknown> }> {
+  if (typeof input.model.bindTools !== "function") {
+    throw new ModelGatewayError({
+      code: "BAD_REQUEST",
+      message: `Provider adapter '${input.target.providerKind}' cannot bind tools for structured output`,
+      retryable: false,
+      provider: input.target.provider,
+    });
+  }
+  const tool = {
+    type: "function",
+    function: {
+      name: input.config.name,
+      ...(typeof input.schema.description === "string"
+        ? { description: input.schema.description }
+        : {}),
+      parameters: input.schema,
+    },
+  };
+  // No tool_choice (Python filters the forced one out; the API defaults to
+  // auto); parallel_tool_calls: false to keep it to a single structured call.
+  const bound = input.model.bindTools([tool], {
+    parallel_tool_calls: false,
+    ...(typeof input.strict === "boolean" ? { strict: input.strict } : {}),
+  });
+  const rawMessage = (await bound.invoke(
+    input.messages,
+    langChainInvokeOptions(input.options),
+  )) as AIMessage;
+  // first_tool_only, keyed by the schema tool name.
+  const call = rawMessage.tool_calls?.find(
+    (toolCall) => toolCall.name === input.config.name,
+  );
+  if (
+    !call ||
+    !call.args ||
+    typeof call.args !== "object" ||
+    Array.isArray(call.args)
+  ) {
+    throw invalidStructuredOutputError(rawMessage);
+  }
+  return { rawMessage, structuredOutput: call.args as Record<string, unknown> };
+}
+
 export async function runBridgeChatComplete(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -323,51 +396,78 @@ export async function runBridgeChatComplete(input: {
 
     if (input.payload.structuredOutput) {
       const config = input.payload.structuredOutput;
-      assertStructuredOutputSupported({
-        config,
-        model,
-        target: input.target,
-      });
       const schema =
         config.description && typeof config.schema.description !== "string"
           ? { ...config.schema, description: config.description }
           : config.schema;
-      // When the caller pins a method, use it; otherwise LangChain selects a
-      // default per model. `strict` only applies when a method is pinned.
-      const structuredModel = model.withStructuredOutput!(schema, {
-        includeRaw: true,
-        name: config.name,
-        ...(config.method
-          ? {
-              method: langChainStructuredOutputMethod(config.method),
-              ...(config.strict !== undefined ? { strict: config.strict } : {}),
-            }
-          : {}),
+      // Resolve the structured-output strategy from model capabilities ahead of
+      // execution, so the branch below follows a plan instead of judging inline.
+      const capabilities = resolveModelCapabilities(
+        input.target.providerModel,
+        input.config.modelCapabilities,
+      );
+      const plan = planStructuredOutput({
+        method: config.method,
+        strict: config.strict,
+        supportsForcedToolChoice: capabilities.supportsForcedToolChoice,
       });
-      let structuredResult: unknown;
-      try {
-        structuredResult = await structuredModel.invoke(
+      if (plan.strategy === "availableTool") {
+        const structured = await invokeStructuredViaAvailableTool({
+          model,
+          schema,
+          config,
           messages,
-          langChainInvokeOptions(input.options),
-        );
-      } catch (error) {
-        if (isStructuredOutputParseError(error)) {
-          throw invalidStructuredOutputError(undefined);
+          target: input.target,
+          options: input.options,
+          ...(plan.strict !== undefined ? { strict: plan.strict } : {}),
+        });
+        rawMessage = structured.rawMessage;
+        structuredOutput = structured.structuredOutput;
+      } else {
+        assertStructuredOutputSupported({
+          config,
+          model,
+          target: input.target,
+        });
+        // `method` undefined lets LangChain select per model; a pinned method is
+        // passed through. `strict` only applies alongside a pinned method.
+        const structuredModel = model.withStructuredOutput!(schema, {
+          includeRaw: true,
+          name: config.name,
+          ...(plan.method
+            ? {
+                method: langChainStructuredOutputMethod(plan.method),
+                ...(plan.strict !== undefined
+                  ? { strict: plan.strict }
+                  : {}),
+              }
+            : {}),
+        });
+        let structuredResult: unknown;
+        try {
+          structuredResult = await structuredModel.invoke(
+            messages,
+            langChainInvokeOptions(input.options),
+          );
+        } catch (error) {
+          if (isStructuredOutputParseError(error)) {
+            throw invalidStructuredOutputError(undefined);
+          }
+          throw error;
         }
-        throw error;
+        const result = extractObjectRecord(structuredResult);
+        rawMessage = result?.raw as AIMessage;
+        const parsed = result?.parsed;
+        if (
+          !rawMessage ||
+          !parsed ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed)
+        ) {
+          throw invalidStructuredOutputError(result?.raw);
+        }
+        structuredOutput = parsed as Record<string, unknown>;
       }
-      const result = extractObjectRecord(structuredResult);
-      rawMessage = result?.raw as AIMessage;
-      const parsed = result?.parsed;
-      if (
-        !rawMessage ||
-        !parsed ||
-        typeof parsed !== "object" ||
-        Array.isArray(parsed)
-      ) {
-        throw invalidStructuredOutputError(result?.raw);
-      }
-      structuredOutput = parsed as Record<string, unknown>;
     } else {
       rawMessage = (await model.invoke(
         messages,

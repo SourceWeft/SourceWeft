@@ -1,6 +1,6 @@
-import { resolveRequestTarget } from "../config";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeTtsSpeech } from "../bridge/tts";
+import { runWithTargetFailover } from "./failover";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -12,6 +12,7 @@ import {
 import type {
   RequestOptions,
   ResolvedModelGatewayConfig,
+  ResolvedRequestTarget,
   TtsSpeechInput,
   TtsSpeechResult,
 } from "../types";
@@ -23,7 +24,20 @@ export class ModelGatewayTtsEndpoint {
     input: TtsSpeechInput,
     options?: RequestOptions,
   ): Promise<TtsSpeechResult> {
-    const target = await resolveRequestTarget(this.config, input);
+    return runWithTargetFailover({
+      config: this.config,
+      payload: input,
+      operation: "tts.speech",
+      callerSignal: options?.signal,
+      attempt: (target) => this.speechWithTarget(input, options, target),
+    });
+  }
+
+  private async speechWithTarget(
+    input: TtsSpeechInput,
+    options: RequestOptions | undefined,
+    target: ResolvedRequestTarget,
+  ): Promise<TtsSpeechResult> {
     const generation = createGenerationObservation({
       operation: "tts.speech",
       payload: input,

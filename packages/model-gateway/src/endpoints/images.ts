@@ -1,6 +1,6 @@
-import { resolveRequestTarget } from "../config";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeImageGeneration } from "../bridge/images";
+import { runWithTargetFailover } from "./failover";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -14,6 +14,7 @@ import type {
   ImageGenerateResult,
   RequestOptions,
   ResolvedModelGatewayConfig,
+  ResolvedRequestTarget,
 } from "../types";
 
 export class ModelGatewayImagesEndpoint {
@@ -23,7 +24,20 @@ export class ModelGatewayImagesEndpoint {
     input: ImageGenerateInput,
     options?: RequestOptions,
   ): Promise<ImageGenerateResult> {
-    const target = await resolveRequestTarget(this.config, input);
+    return runWithTargetFailover({
+      config: this.config,
+      payload: input,
+      operation: "images.generate",
+      callerSignal: options?.signal,
+      attempt: (target) => this.generateWithTarget(input, options, target),
+    });
+  }
+
+  private async generateWithTarget(
+    input: ImageGenerateInput,
+    options: RequestOptions | undefined,
+    target: ResolvedRequestTarget,
+  ): Promise<ImageGenerateResult> {
     const generation = createGenerationObservation({
       operation: "images.generate",
       payload: input,

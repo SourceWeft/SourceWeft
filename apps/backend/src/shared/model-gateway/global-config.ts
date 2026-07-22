@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type {
+  ModelCapabilityRule,
   ProviderRoutingConfig,
   ProviderRoutingSort,
 } from "@sourceweft/model-gateway";
@@ -50,16 +51,30 @@ export type GlobalProfilePricingEntry = {
   outputCostPerImage?: number | null;
 };
 
+/**
+ * One execution target behind a profile alias. The alias is the product-facing
+ * model — it carries the price the user is charged — while targets are the
+ * interchangeable places we can actually run it. Config files may still write a
+ * single target inline (`gatewaySlug`/`targetModel`/... on the entry itself);
+ * `parseProfileTargets` folds that form into a one-element array so nothing
+ * downstream has to know both shapes exist.
+ */
+export type GlobalProfileTarget = {
+  gatewaySlug: string;
+  providerName: string;
+  targetModel: string;
+  priority: number;
+  weight: number;
+  providerRouting?: ProviderRoutingConfig;
+};
+
 export type GlobalModelProfileEntry = {
   profileId?: string;
   profileAlias: string;
   modelAlias: string;
-  gatewaySlug: string;
-  providerName: string;
-  targetModel: string;
+  /** Ordered by ascending priority; `targets[0]` is the primary target. */
+  targets: GlobalProfileTarget[];
   routingStrategy: ModelGatewayRoutingStrategy;
-  priority: number;
-  weight: number;
   isDefault: boolean;
   isActive: boolean;
   pricing?: GlobalProfilePricingEntry | null;
@@ -72,13 +87,14 @@ export type GlobalModelProfileEntry = {
 export type GlobalEmbeddingProfileEntry = {
   profileId?: string;
   profileAlias: string;
-  gatewaySlug: string;
-  providerName: string;
   modelAlias: string;
-  targetModel: string;
+  /**
+   * Always exactly one target: two embedding models behind one alias would mix
+   * incompatible vector spaces in the same index. `parseEmbeddingProfileEntry`
+   * rejects the multi-target form outright.
+   */
+  targets: GlobalProfileTarget[];
   routingStrategy: ModelGatewayRoutingStrategy;
-  priority: number;
-  weight: number;
   requestedDimensions: number | null;
   vectorStrategy: "auto" | "exact" | "disabled";
   isDefault: boolean;
@@ -90,6 +106,13 @@ export type GlobalModelGatewayConfig = {
   versionHash: string;
   sourceJson: Record<string, unknown>;
   gateways: GlobalGatewayEntry[];
+  /**
+   * Deployment-declared capability rules (optional override layer). The shipped
+   * defaults (model-capability-db.ts) are merged in at runtime, not here, so a
+   * code change to them applies on redeploy without a re-sync. Matched by model
+   * name at request time — see docs/architecture/model-capabilities.md.
+   */
+  modelCapabilities: ModelCapabilityRule[];
   chatProfiles: GlobalModelProfileEntry[];
   imageProfiles: GlobalModelProfileEntry[];
   visionProfiles: GlobalModelProfileEntry[];
@@ -125,6 +148,7 @@ type RawGlobalModelProfileEntry = {
   gatewaySlug?: unknown;
   providerName?: unknown;
   targetModel?: unknown;
+  targets?: unknown;
   routingStrategy?: unknown;
   priority?: unknown;
   weight?: unknown;
@@ -213,6 +237,7 @@ type RawGlobalEmbeddingProfileEntry = {
   providerName?: unknown;
   modelAlias?: unknown;
   targetModel?: unknown;
+  targets?: unknown;
   routingStrategy?: unknown;
   priority?: unknown;
   weight?: unknown;
@@ -226,6 +251,7 @@ type RawGlobalEmbeddingProfileEntry = {
 type RawGlobalModelGatewayConfig = {
   _comment?: unknown;
   gateways?: unknown;
+  modelCapabilities?: unknown;
   chatProfiles?: unknown;
   imageProfiles?: unknown;
   visionProfiles?: unknown;
@@ -299,6 +325,16 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
     return fallback;
   }
 
+  return value;
+}
+
+function asOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
   return value;
 }
 
@@ -528,6 +564,38 @@ function asOptionalNullableNumber(
   return normalizePriceNumber(value);
 }
 
+const PRICING_COST_FIELDS = [
+  "inputCostPerToken",
+  "outputCostPerToken",
+  "cacheReadInputTokenCost",
+  "cacheCreationInputTokenCost",
+  "outputCostPerReasoningToken",
+  "inputCostPerImageToken",
+  "outputCostPerImageToken",
+  "inputCostPerAudioToken",
+  "outputCostPerAudioToken",
+  "inputCostPerImage",
+  "outputCostPerImage",
+] as const satisfies ReadonlyArray<keyof GlobalProfilePricingEntry>;
+
+/**
+ * True when the config states the price itself — either a LiteLLM key to read it
+ * from, or at least one cost field — rather than leaving it to alias auto-match.
+ */
+function hasExplicitPricing(
+  pricing: GlobalProfilePricingEntry | null | undefined,
+): boolean {
+  if (!pricing) {
+    return false;
+  }
+  if (typeof pricing.litellmKey === "string" && pricing.litellmKey.trim().length > 0) {
+    return true;
+  }
+  return PRICING_COST_FIELDS.some(
+    (name) => typeof pricing[name] === "number",
+  );
+}
+
 function parsePricingEntry(
   value: unknown,
   fieldName: string,
@@ -683,6 +751,136 @@ function parseGatewayEntry(
   };
 }
 
+const INLINE_TARGET_FIELDS = [
+  "gatewaySlug",
+  "providerName",
+  "targetModel",
+  "priority",
+  "weight",
+] as const;
+
+function parseModelCapabilities(value: unknown): ModelCapabilityRule[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid global model gateway config field: modelCapabilities");
+  }
+  return value.map((raw, index) => {
+    const field = `modelCapabilities[${index}]`;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(`Invalid global model gateway config field: ${field}`);
+    }
+    const record = raw as Record<string, unknown>;
+    const capabilities = record.capabilities;
+    if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+      throw new Error(`Invalid global model gateway config field: ${field}.capabilities`);
+    }
+    const caps = capabilities as Record<string, unknown>;
+    const supportsForcedToolChoice = asOptionalBoolean(
+      caps.supportsForcedToolChoice,
+      `${field}.capabilities.supportsForcedToolChoice`,
+    );
+    return {
+      modelMatch: asNonEmptyString(record.modelMatch, `${field}.modelMatch`),
+      capabilities: {
+        ...(supportsForcedToolChoice !== undefined
+          ? { supportsForcedToolChoice }
+          : {}),
+      },
+    };
+  });
+}
+
+function parseProfileTarget(input: {
+  raw: Record<string, unknown>;
+  field: string;
+  modelAlias: string;
+}): GlobalProfileTarget {
+  const providerRouting = asOptionalProviderRouting(
+    input.raw.providerRouting,
+    `${input.field}.providerRouting`,
+  );
+
+  return {
+    gatewaySlug: asNonEmptyString(input.raw.gatewaySlug, `${input.field}.gatewaySlug`),
+    providerName:
+      typeof input.raw.providerName === "string" &&
+      input.raw.providerName.trim().length > 0
+        ? input.raw.providerName.trim()
+        : input.modelAlias,
+    targetModel:
+      typeof input.raw.targetModel === "string" &&
+      input.raw.targetModel.trim().length > 0
+        ? input.raw.targetModel.trim()
+        : input.modelAlias,
+    priority:
+      asOptionalPositiveNumber(input.raw.priority, `${input.field}.priority`) ?? 1,
+    weight:
+      asOptionalNonNegativeNumber(input.raw.weight, `${input.field}.weight`) ?? 0,
+    ...(providerRouting !== undefined ? { providerRouting } : {}),
+  };
+}
+
+/**
+ * Folds both accepted file shapes into one internal shape. Either the entry
+ * carries a single target inline, or it carries a `targets` array — mixing the
+ * two is rejected rather than resolved by precedence, so a config can never
+ * silently mean something other than it looks like.
+ */
+function parseProfileTargets(input: {
+  entry: { targets?: unknown } & Record<string, unknown>;
+  field: string;
+  modelAlias: string;
+}): GlobalProfileTarget[] {
+  const { entry, field, modelAlias } = input;
+
+  if (entry.targets === undefined || entry.targets === null) {
+    return [parseProfileTarget({ raw: entry, field, modelAlias })];
+  }
+
+  const conflicting = INLINE_TARGET_FIELDS.filter(
+    (name) => entry[name] !== undefined && entry[name] !== null,
+  );
+  if (conflicting.length > 0) {
+    throw new Error(
+      `Global model gateway config entry '${field}' sets both 'targets' and inline target fields (${conflicting.join(
+        ", ",
+      )}); use one form or the other`,
+    );
+  }
+
+  if (!Array.isArray(entry.targets) || entry.targets.length === 0) {
+    throw new Error(`Invalid global model gateway config field: ${field}.targets`);
+  }
+
+  const targets = entry.targets.map((raw, targetIndex) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(
+        `Invalid global model gateway config field: ${field}.targets[${targetIndex}]`,
+      );
+    }
+    return parseProfileTarget({
+      raw: raw as Record<string, unknown>,
+      field: `${field}.targets[${targetIndex}]`,
+      modelAlias,
+    });
+  });
+
+  const seen = new Set<string>();
+  for (const target of targets) {
+    const key = `${target.gatewaySlug}\u0000${target.targetModel}`;
+    if (seen.has(key)) {
+      throw new Error(
+        `Global model gateway config entry '${field}' repeats target '${target.gatewaySlug}/${target.targetModel}'`,
+      );
+    }
+    seen.add(key);
+  }
+
+  return [...targets].sort((left, right) => left.priority - right.priority);
+}
+
 function parseModelProfileEntry(
   entry: RawGlobalModelProfileEntry,
   index: number,
@@ -712,6 +910,20 @@ function parseModelProfileEntry(
     entry.providerRouting,
     `${field}[${index}].providerRouting`,
   );
+  const targets = parseProfileTargets({
+    entry: entry as Record<string, unknown>,
+    field: `${field}[${index}]`,
+    modelAlias,
+  });
+
+  // A single alias spanning several providers is priced once, at the alias.
+  // Leaving that price to be auto-derived would let a mis-derivation go unnoticed
+  // across every provider behind it, so multi-target opts out of guessing.
+  if (targets.length > 1 && !hasExplicitPricing(pricing)) {
+    throw new Error(
+      `Global model gateway config entry '${field}[${index}]' declares multiple targets and must set an explicit 'pricing' block or 'pricing.litellmKey'`,
+    );
+  }
 
   return {
     profileId:
@@ -723,30 +935,11 @@ function parseModelProfileEntry(
         ? entry.profileAlias.trim()
         : modelAlias,
     modelAlias,
-    gatewaySlug: asNonEmptyString(
-      entry.gatewaySlug,
-      `${field}[${index}].gatewaySlug`,
-    ),
-    providerName:
-      typeof entry.providerName === "string" && entry.providerName.trim().length > 0
-        ? entry.providerName.trim()
-        : modelAlias,
-    targetModel:
-      typeof entry.targetModel === "string" && entry.targetModel.trim().length > 0
-        ? entry.targetModel.trim()
-        : modelAlias,
+    targets,
     routingStrategy: asRoutingStrategy(
       entry.routingStrategy,
       `${field}[${index}].routingStrategy`,
     ),
-    priority: asOptionalPositiveNumber(
-      entry.priority,
-      `${field}[${index}].priority`,
-    ) ?? 1,
-    weight: asOptionalNonNegativeNumber(
-      entry.weight,
-      `${field}[${index}].weight`,
-    ) ?? 0,
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
     ...(pricing !== undefined ? { pricing } : {}),
@@ -795,6 +988,12 @@ function parseEmbeddingProfileEntry(
     `embeddingProfiles[${index}].modelAlias`,
   );
 
+  if (entry.targets !== undefined && entry.targets !== null) {
+    throw new Error(
+      `Global model gateway config entry 'embeddingProfiles[${index}]' cannot declare multiple targets: embeddings behind one alias must stay on a single model to keep one vector space`,
+    );
+  }
+
   return {
     profileId:
       typeof entry.profileId === "string" && entry.profileId.trim().length > 0
@@ -804,31 +1003,16 @@ function parseEmbeddingProfileEntry(
       entry.profileAlias,
       `embeddingProfiles[${index}].profileAlias`,
     ),
-    gatewaySlug: asNonEmptyString(
-      entry.gatewaySlug,
-      `embeddingProfiles[${index}].gatewaySlug`,
-    ),
-    providerName:
-      typeof entry.providerName === "string" && entry.providerName.trim().length > 0
-        ? entry.providerName.trim()
-        : modelAlias,
     modelAlias,
-    targetModel:
-      typeof entry.targetModel === "string" && entry.targetModel.trim().length > 0
-        ? entry.targetModel.trim()
-        : modelAlias,
+    targets: parseProfileTargets({
+      entry: entry as Record<string, unknown>,
+      field: `embeddingProfiles[${index}]`,
+      modelAlias,
+    }),
     routingStrategy: asRoutingStrategy(
       entry.routingStrategy,
       `embeddingProfiles[${index}].routingStrategy`,
     ),
-    priority: asOptionalPositiveNumber(
-      entry.priority,
-      `embeddingProfiles[${index}].priority`,
-    ) ?? 1,
-    weight: asOptionalNonNegativeNumber(
-      entry.weight,
-      `embeddingProfiles[${index}].weight`,
-    ) ?? 0,
     requestedDimensions,
     vectorStrategy,
     isDefault: asBoolean(entry.isDefault, false),
@@ -1003,15 +1187,17 @@ function parseGlobalModelGatewayConfig(
     ...ttsProfiles,
     ...embeddingProfiles,
   ]) {
-    if (!gatewaySlugSet.has(profile.gatewaySlug)) {
-      throw new Error(
-        `Global model gateway config references unknown gatewaySlug '${profile.gatewaySlug}'`,
-      );
-    }
-    if (!providerNameSet.has(profile.providerName)) {
-      throw new Error(
-        `Global model gateway config references unknown providerName '${profile.providerName}'`,
-      );
+    for (const target of profile.targets) {
+      if (!gatewaySlugSet.has(target.gatewaySlug)) {
+        throw new Error(
+          `Global model gateway config references unknown gatewaySlug '${target.gatewaySlug}'`,
+        );
+      }
+      if (!providerNameSet.has(target.providerName)) {
+        throw new Error(
+          `Global model gateway config references unknown providerName '${target.providerName}'`,
+        );
+      }
     }
   }
 
@@ -1034,6 +1220,10 @@ function parseGlobalModelGatewayConfig(
   }
   assertSingleDefault(embeddingProfiles, "embeddingProfiles");
 
+  // Deployment override rules only; the shipped defaults are merged at runtime
+  // (runtime.ts) so a code-DB change applies on redeploy without a re-sync.
+  const modelCapabilities = parseModelCapabilities(raw.modelCapabilities);
+
   return {
     versionHash: createVersionHash({ rawContent, gateways }),
     sourceJson: {
@@ -1045,6 +1235,7 @@ function parseGlobalModelGatewayConfig(
       })),
     },
     gateways,
+    modelCapabilities,
     chatProfiles,
     imageProfiles,
     visionProfiles,

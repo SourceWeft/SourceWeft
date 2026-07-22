@@ -82,18 +82,24 @@ test("presentGenerationSummary omits payload fields", () => {
   assert.equal(summary.usageDetails.totalTokens, 3);
 });
 
-test("presentGeneration exposes explicit model routing fields", () => {
+test("presentGeneration hides routing identity behind a profile alias", () => {
   const presented = presentGeneration(
     {
       id: "generation-1",
       modelAlias: "chat-default",
+      provider: "openrouter",
       providerModel: "minimax/minimax-m2.7",
       routeDecisionJson: { provider: "openrouter", alias: "chat-default" },
       keySource: "rawApiKey",
-      metadataJson: {
-        modelAlias: "chat-default",
+      outputJson: {
+        usage: { totalTokens: 3 },
+        provider: "openrouter",
         providerModel: "minimax/minimax-m2.7",
         routeDecision: { provider: "openrouter" },
+        finishReason: "stop",
+      },
+      metadataJson: {
+        modelAlias: "chat-default",
         providerHint: "openrouter",
         observationName: "chat.answer",
       },
@@ -103,20 +109,57 @@ test("presentGeneration exposes explicit model routing fields", () => {
     access,
   );
 
+  // An alias is one model with one price, wherever it actually ran. Which
+  // target served this call is an internal placement decision, so every
+  // channel that carries it must present as null/stripped.
   assert.equal(presented.model, "chat-default");
   assert.equal(presented.modelAlias, "chat-default");
+  assert.equal(presented.provider, null);
   assert.equal(presented.providerModel, null);
-  assert.equal(presented.keySource, "rawApiKey");
-  assert.deepEqual(presented.routeDecision, {
-    provider: "openrouter",
-    alias: "chat-default",
+  assert.equal(presented.routeDecision, null);
+  assert.deepEqual(presented.output, {
+    usage: { totalTokens: 3 },
+    finishReason: "stop",
   });
+  assert.equal(presented.keySource, "rawApiKey");
+  // Caller-declared request metadata is an echo of the caller's own input,
+  // not an internal routing decision — it passes through untouched.
   assert.deepEqual(presented.metadata, {
     modelAlias: "chat-default",
-    providerModel: "minimax/minimax-m2.7",
-    routeDecision: { provider: "openrouter" },
     providerHint: "openrouter",
     observationName: "chat.answer",
+  });
+});
+
+test("presentGeneration keeps routing identity for un-aliased calls", () => {
+  const presented = presentGeneration(
+    {
+      id: "generation-2",
+      modelAlias: null,
+      provider: "openrouter",
+      providerModel: "minimax/minimax-m2.7",
+      routeDecisionJson: { provider: "openrouter", alias: "byok" },
+      outputJson: {
+        usage: { totalTokens: 3 },
+        provider: "openrouter",
+        providerModel: "minimax/minimax-m2.7",
+      },
+      startedAt: new Date(0),
+      endedAt: null,
+    },
+    access,
+  );
+
+  assert.equal(presented.provider, "openrouter");
+  assert.equal(presented.providerModel, "minimax/minimax-m2.7");
+  assert.deepEqual(presented.routeDecision, {
+    provider: "openrouter",
+    alias: "byok",
+  });
+  assert.deepEqual(presented.output, {
+    usage: { totalTokens: 3 },
+    provider: "openrouter",
+    providerModel: "minimax/minimax-m2.7",
   });
 });
 

@@ -7,6 +7,23 @@ const RETRYABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
   "UPSTREAM",
 ]);
 
+/**
+ * Orthogonal to `retryable`. `retryable` asks "would the same provider succeed
+ * on a second attempt?" — true for transient faults (timeouts, 429s, 5xx),
+ * false for a drained balance. This set asks "could a *different* provider
+ * serve this request?" — which is also true for QUOTA (the other provider has
+ * its own balance) and AUTH (its own key). Only errors caused by the request
+ * itself (BAD_REQUEST, POLICY) fail everywhere, so they must not burn a
+ * wasted attempt against every target in the route.
+ */
+const FAILOVERABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
+  "TIMEOUT",
+  "RATE_LIMIT",
+  "UPSTREAM",
+  "QUOTA",
+  "AUTH",
+]);
+
 export class ModelGatewayError extends Error {
   readonly code: GatewayErrorCode;
 
@@ -136,6 +153,20 @@ export function normalizeGatewayError(error: unknown): ModelGatewayError {
     });
   }
 
+  // Provider SDK errors (OpenAI-compatible clients, LangChain wrappers) carry
+  // the HTTP status but are not ModelGatewayErrors. Without this extraction a
+  // 402 or 400 would fall through to the generic branch below and be labelled
+  // a retryable UPSTREAM fault — misclassifying both retry and failover.
+  const statusCode = extractStatusCode(error);
+  if (statusCode !== undefined && isRecord(error) && typeof error.message === "string") {
+    return new ModelGatewayError({
+      code: mapStatusCodeToErrorCode(statusCode),
+      message: error.message,
+      statusCode,
+      cause: error,
+    });
+  }
+
   if (isRecord(error) && typeof error.message === "string") {
     return new ModelGatewayError({
       code: "UPSTREAM",
@@ -153,8 +184,49 @@ export function normalizeGatewayError(error: unknown): ModelGatewayError {
   });
 }
 
+function extractStatusCode(error: unknown): number | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+  const candidates = [
+    error.status,
+    error.statusCode,
+    isRecord(error.response) ? error.response.status : undefined,
+  ];
+  for (const candidate of candidates) {
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate >= 100 &&
+      candidate < 600
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 export function isRetryableError(error: unknown): boolean {
   return normalizeGatewayError(error).retryable;
+}
+
+/**
+ * Whether switching to another route target could rescue this request. See
+ * FAILOVERABLE_CODES for the retryable-vs-failoverable distinction. Callers
+ * must additionally check that the failure is not a caller-initiated abort
+ * (`options.signal.aborted`) — a cancelled request must never be replayed
+ * against another provider.
+ */
+export function isFailoverableError(error: unknown): boolean {
+  return isFailoverableCode(normalizeGatewayError(error).code);
+}
+
+/**
+ * Code-level variant for failures that arrive as already-classified data
+ * rather than thrown errors — e.g. a chat stream's terminal error event.
+ */
+export function isFailoverableCode(code: GatewayErrorCode): boolean {
+  return FAILOVERABLE_CODES.has(code);
 }
 
 export function toGatewayErrorData(error: unknown): GatewayErrorData {

@@ -67,6 +67,154 @@ async function loadConfig(config: Record<string, unknown>) {
   }
 }
 
+test("loadGlobalModelGatewayConfig folds an inline target into a one-element targets array", async () => {
+  const loaded = await loadConfig(baseConfig());
+
+  assert.deepEqual(loaded?.chatProfiles[0]?.targets, [
+    {
+      gatewaySlug: "test",
+      providerName: "Test",
+      targetModel: "test-chat",
+      priority: 1,
+      weight: 0,
+    },
+  ]);
+});
+
+test("parses deployment modelCapabilities rules (override layer)", async () => {
+  const config = baseConfig();
+  config.modelCapabilities = [
+    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+  ];
+  const loaded = await loadConfig(config);
+  // Held as-is; the shipped DB is merged in at runtime, not here.
+  assert.deepEqual(loaded?.modelCapabilities, [
+    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+  ]);
+});
+
+test("modelCapabilities defaults to empty when the config omits it", async () => {
+  const loaded = await loadConfig(baseConfig());
+  assert.deepEqual(loaded?.modelCapabilities, []);
+});
+
+test("rejects a modelCapabilities entry missing capabilities", async () => {
+  const config = baseConfig();
+  config.modelCapabilities = [{ modelMatch: "x" }];
+  await assert.rejects(loadConfig(config), /capabilities/);
+});
+
+test("loadGlobalModelGatewayConfig accepts multiple targets and orders them by priority", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "backup",
+    baseUrl: "https://backup.test/v1",
+    providerName: "Backup",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: true,
+  });
+  config.chatProfiles[0] = {
+    profileAlias: "chat",
+    modelAlias: "test-chat",
+    isDefault: true,
+    isActive: true,
+    pricing: { litellmKey: "test-chat" },
+    targets: [
+      {
+        gatewaySlug: "backup",
+        providerName: "Backup",
+        targetModel: "backup/test-chat",
+        priority: 2,
+      },
+      {
+        gatewaySlug: "test",
+        providerName: "Test",
+        targetModel: "test-chat",
+        priority: 1,
+      },
+    ],
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(
+    loaded?.chatProfiles[0]?.targets.map((target) => target.targetModel),
+    ["test-chat", "backup/test-chat"],
+  );
+});
+
+test("loadGlobalModelGatewayConfig rejects mixing inline target fields with targets", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    pricing: { litellmKey: "test-chat" },
+    targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "test-chat" },
+    ],
+  };
+
+  await assert.rejects(loadConfig(config), /both 'targets' and inline target fields/);
+});
+
+test("loadGlobalModelGatewayConfig rejects multiple targets without explicit pricing", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "backup",
+    baseUrl: "https://backup.test/v1",
+    providerName: "Backup",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: true,
+  });
+  config.chatProfiles[0] = {
+    profileAlias: "chat",
+    modelAlias: "test-chat",
+    isDefault: true,
+    isActive: true,
+    targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "test-chat" },
+      { gatewaySlug: "backup", providerName: "Backup", targetModel: "backup/test-chat" },
+    ],
+  };
+
+  await assert.rejects(loadConfig(config), /must set an explicit 'pricing' block/);
+});
+
+test("loadGlobalModelGatewayConfig rejects a repeated target within one alias", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    profileAlias: "chat",
+    modelAlias: "test-chat",
+    isDefault: true,
+    isActive: true,
+    pricing: { litellmKey: "test-chat" },
+    targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "test-chat" },
+      { gatewaySlug: "test", providerName: "Test", targetModel: "test-chat" },
+    ],
+  };
+
+  await assert.rejects(loadConfig(config), /repeats target 'test\/test-chat'/);
+});
+
+test("loadGlobalModelGatewayConfig rejects multi-target embedding profiles", async () => {
+  const config = baseConfig();
+  config.embeddingProfiles[0] = {
+    profileAlias: "embedding",
+    modelAlias: "test-embedding",
+    isDefault: true,
+    isActive: true,
+    targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "test-embedding" },
+    ],
+  };
+
+  await assert.rejects(loadConfig(config), /must stay on a single model/);
+});
+
 test("loadGlobalModelGatewayConfig preserves omitted pricing as undefined", async () => {
   const loaded = await loadConfig(baseConfig());
 
@@ -417,13 +565,25 @@ test("default global config is OpenRouter-only with OSS default models", async (
   ]);
   assert.deepEqual(loaded?.rerankProfiles, []);
   assert.deepEqual(loaded?.asrProfiles, []);
-  assert.equal(chatDefault?.targetModel, "deepseek/deepseek-v4-pro");
+  // The shipped config writes targets inline; parsing folds each into a
+  // one-element targets array. Capabilities are resolved at request time from
+  // the model DB, not baked onto the target.
+  assert.deepEqual(chatDefault?.targets, [
+    {
+      gatewaySlug: "openrouter-default",
+      providerName: "openrouter",
+      targetModel: "deepseek/deepseek-v4-pro",
+      priority: 1,
+      weight: 100,
+    },
+  ]);
   assert.equal(chatDefault?.providerRouting, undefined);
-  assert.equal(ttsDefault?.targetModel, "microsoft/mai-voice-2");
-  assert.equal(ttsDefault?.gatewaySlug, "openrouter-default");
-  assert.equal(ttsDefault?.providerName, "openrouter");
-  assert.equal(embeddingDefault?.targetModel, "baai/bge-m3");
-  assert.equal(embeddingDefault?.gatewaySlug, "openrouter-default");
-  assert.equal(embeddingDefault?.providerName, "openrouter");
+  assert.equal(ttsDefault?.targets[0]?.targetModel, "microsoft/mai-voice-2");
+  assert.equal(ttsDefault?.targets[0]?.gatewaySlug, "openrouter-default");
+  assert.equal(ttsDefault?.targets[0]?.providerName, "openrouter");
+  assert.equal(embeddingDefault?.targets.length, 1);
+  assert.equal(embeddingDefault?.targets[0]?.targetModel, "baai/bge-m3");
+  assert.equal(embeddingDefault?.targets[0]?.gatewaySlug, "openrouter-default");
+  assert.equal(embeddingDefault?.targets[0]?.providerName, "openrouter");
   assert.equal(embeddingDefault?.requestedDimensions, 1024);
 });

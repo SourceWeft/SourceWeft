@@ -22,7 +22,18 @@ function toRouteKey(kind: string, alias: string) {
   return `${kind}:${alias}`;
 }
 
-async function loadActiveRouteTargetsByKindAndAlias(): Promise<Map<string, string[]>> {
+/**
+ * Only the primary target (lowest priority number) is returned per alias.
+ *
+ * An alias is priced once, at the alias, because that is what the user is
+ * charged regardless of which target serves the request. Feeding every target
+ * into the LiteLLM auto-match would make a multi-target alias resolve
+ * `ambiguous`, which downgrades it to `price_source: "unknown"` and quietly
+ * bills every call at the one-credit floor. Deriving from a single, stable
+ * target keeps the alias priced or explicitly unmatched — never accidentally
+ * free.
+ */
+async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, string>> {
   const [activeVersion] = await db
     .select({ id: modelGatewayConfigVersions.id })
     .from(modelGatewayConfigVersions)
@@ -38,6 +49,7 @@ async function loadActiveRouteTargetsByKindAndAlias(): Promise<Map<string, strin
       routeKind: modelGatewayRoutes.routeKind,
       alias: modelGatewayRoutes.alias,
       targetModel: modelGatewayRoutes.targetModel,
+      priority: modelGatewayRoutes.priority,
     })
     .from(modelGatewayRoutes)
     .where(
@@ -47,7 +59,7 @@ async function loadActiveRouteTargetsByKindAndAlias(): Promise<Map<string, strin
       ),
     );
 
-  const targetsByRoute = new Map<string, Set<string>>();
+  const primaryByRoute = new Map<string, { targetModel: string; priority: number }>();
   for (const row of routeRows) {
     const routeKind = row.routeKind.trim();
     const alias = row.alias.trim();
@@ -56,15 +68,21 @@ async function loadActiveRouteTargetsByKindAndAlias(): Promise<Map<string, strin
       continue;
     }
     const routeKey = toRouteKey(routeKind, alias);
-    const existing = targetsByRoute.get(routeKey) ?? new Set<string>();
-    existing.add(targetModel);
-    targetsByRoute.set(routeKey, existing);
+    const current = primaryByRoute.get(routeKey);
+    // Ties break on target model so the derived price never depends on row order.
+    if (
+      !current ||
+      row.priority < current.priority ||
+      (row.priority === current.priority && targetModel < current.targetModel)
+    ) {
+      primaryByRoute.set(routeKey, { targetModel, priority: row.priority });
+    }
   }
 
   return new Map(
-    Array.from(targetsByRoute.entries()).map(([routeKey, targets]) => [
+    Array.from(primaryByRoute.entries()).map(([routeKey, primary]) => [
       routeKey,
-      Array.from(targets),
+      primary.targetModel,
     ]),
   );
 }
@@ -296,8 +314,8 @@ function buildLiteLLMSyncUpdates(input: {
 export async function syncModelPricing(): Promise<void> {
   const litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
   const litellmKeys = Object.keys(litellmData);
-  const activeRouteTargetsByKindAndAlias =
-    await loadActiveRouteTargetsByKindAndAlias();
+  const primaryRouteTargetByKindAndAlias =
+    await loadPrimaryRouteTargetByKindAndAlias();
 
   const profiles = await db
     .select({
@@ -319,10 +337,9 @@ export async function syncModelPricing(): Promise<void> {
   let invalidPresetKey = 0;
 
   for (const profile of profiles) {
-    const routeTargets =
-      activeRouteTargetsByKindAndAlias.get(
-        toRouteKey(profile.kind, profile.profileAlias),
-      ) ?? [];
+    const primaryRouteTarget = primaryRouteTargetByKindAndAlias.get(
+      toRouteKey(profile.kind, profile.profileAlias),
+    );
     const existingConfigJson =
       profile.configJson && typeof profile.configJson === "object"
         ? (profile.configJson as Record<string, unknown>)
@@ -376,7 +393,9 @@ export async function syncModelPricing(): Promise<void> {
       }
     } else {
       match = resolveMatchFromCandidates(
-        [profile.modelAlias, ...routeTargets],
+        primaryRouteTarget
+          ? [profile.modelAlias, primaryRouteTarget]
+          : [profile.modelAlias],
         litellmKeys,
       );
       if (match.type === "matched") {
@@ -439,7 +458,7 @@ export async function syncModelPricing(): Promise<void> {
             kind: profile.kind,
             profileAlias: profile.profileAlias,
             modelAlias: profile.modelAlias,
-            routeTargets,
+            primaryRouteTarget,
             candidates: match.candidates,
           },
         );
@@ -477,7 +496,7 @@ export async function syncModelPricing(): Promise<void> {
           kind: profile.kind,
           profileAlias: profile.profileAlias,
           modelAlias: profile.modelAlias,
-          routeTargets,
+          primaryRouteTarget,
         });
       }
     }

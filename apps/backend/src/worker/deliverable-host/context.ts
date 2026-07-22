@@ -167,6 +167,24 @@ function extractTextContent(value: unknown): string {
   return "";
 }
 
+/**
+ * Whether an error means "the model produced no structured result" — either the
+ * gateway parsed none, or (for a model bound with tool_choice "auto") it
+ * answered without calling the schema tool. Distinguished from real gateway
+ * faults so only this case is nudged-and-retried.
+ */
+function isMissingStructuredOutputError(error: unknown): boolean {
+  if (
+    error instanceof Error &&
+    error.message.includes("no parsed structured output")
+  ) {
+    return true;
+  }
+  const metadata = (error as { metadata?: Record<string, unknown> } | null)
+    ?.metadata;
+  return Boolean(metadata && "structuredOutputDiagnostics" in metadata);
+}
+
 function resolveWorkerThinking(input: {
   llm?: LlmExecutionConfig;
   profileConfig?: Record<string, unknown>;
@@ -478,7 +496,33 @@ export function createDefaultDeliverableRuntimeResolver(input: {
             return result.structuredOutput;
           };
 
-          const first = await runOnce(llmInput.messages);
+          // A model bound with tool_choice "auto" (DeepSeek V4 is always in
+          // thinking mode and rejects a forced tool_choice) may answer without
+          // calling the schema tool. Nudge the tool call once before failing, so
+          // a single skipped call does not sink the stage.
+          const runWithToolNudge = async (
+            messages: DeliverableStructuredLlmInput["messages"],
+          ) => {
+            try {
+              return await runOnce(messages);
+            } catch (error) {
+              if (!isMissingStructuredOutputError(error)) {
+                throw error;
+              }
+              return runOnce([
+                ...messages,
+                {
+                  role: "user",
+                  content: [
+                    "You did not return the required structured result.",
+                    `Call the "${llmInput.schemaName}" tool with arguments that satisfy the schema, and output only that structured result.`,
+                  ].join("\n\n"),
+                },
+              ]);
+            }
+          };
+
+          const first = await runWithToolNudge(llmInput.messages);
           if (!llmInput.validate) {
             return first;
           }
@@ -488,7 +532,7 @@ export function createDefaultDeliverableRuntimeResolver(input: {
           }
           // One repair attempt on the same model/method, showing the model
           // its previous output and the validation feedback.
-          const repaired = await runOnce([
+          const repaired = await runWithToolNudge([
             ...llmInput.messages,
             { role: "assistant", content: JSON.stringify(first) },
             {

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --filter=@sourceweft/ui-web --filter=web --filter=@sourceweft/backend",
+    "dev": "turbo run dev --continue --filter=@sourceweft/ui-web --filter=web --filter=@sourceweft/backend",
     "dev:web": "turbo run dev --filter=@sourceweft/ui-web --filter=web",
     "dev:backend": "pnpm --filter @sourceweft/backend dev",
     "dev:chrome": "pnpm --filter @sourceweft/extension dev",

@@ -14,6 +14,7 @@ import {
   type GlobalGatewayEntry,
   type GlobalProfilePricingEntry,
   type GlobalModelProfileEntry,
+  type GlobalProfileTarget,
   loadGlobalModelGatewayConfig,
 } from "./global-config";
 import { buildProfilePricingConfigJson } from "./profiles";
@@ -57,19 +58,31 @@ function assertUniqueProfiles(
   }
 }
 
+/**
+ * An alias may fan out to several targets, so the route identity is the target
+ * it points at, not the alias alone. Alias-level uniqueness is still enforced
+ * separately by `assertUniqueProfiles` — one alias, one profile, one price.
+ */
 function assertUniqueRoutes(
   kind: ModelGatewayProfileKind,
-  entries: Array<{ profileAlias: string }>,
+  entries: Array<{ profileAlias: string; targets: GlobalProfileTarget[] }>,
 ) {
-  const aliases = new Set<string>();
+  const routes = new Set<string>();
   for (const entry of entries) {
     const alias = entry.profileAlias.trim().toLowerCase();
-    if (aliases.has(alias)) {
-      throw new Error(
-        `Global model gateway config resolved duplicate ${kind} route alias '${entry.profileAlias}'`,
-      );
+    for (const target of entry.targets) {
+      const routeKey = [
+        alias,
+        target.gatewaySlug.trim().toLowerCase(),
+        target.targetModel.trim().toLowerCase(),
+      ].join("\u0000");
+      if (routes.has(routeKey)) {
+        throw new Error(
+          `Global model gateway config resolved duplicate ${kind} route '${entry.profileAlias}' -> '${target.gatewaySlug}/${target.targetModel}'`,
+        );
+      }
+      routes.add(routeKey);
     }
-    aliases.add(alias);
   }
 }
 
@@ -95,7 +108,10 @@ export function mergeGlobalProfileConfigJson(input: {
   existingConfigJson: Record<string, unknown>;
   entry: {
     pricing?: GlobalProfilePricingEntry | null;
+    /** The primary target's model — the representative value for catalog and UI. */
     targetModel: string;
+    /** Present only when the alias fans out to more than one target. */
+    targets?: Array<{ provider: string; targetModel: string }>;
     providerCatalogSource?: string;
     providerCatalogGatewaySlug?: string;
     litellmKey?: string;
@@ -123,6 +139,7 @@ export function mergeGlobalProfileConfigJson(input: {
   const globalConfigJson = {
     ...pricingConfigJson,
     targetModel: input.entry.targetModel,
+    ...(input.entry.targets ? { targets: input.entry.targets } : {}),
     ...(input.entry.displayName ? { displayName: input.entry.displayName } : {}),
     ...(input.entry.subtitle ? { subtitle: input.entry.subtitle } : {}),
     ...(input.entry.badges && input.entry.badges.length > 0
@@ -190,7 +207,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     profileId?: string;
     profileAlias: string;
     modelAlias: string;
-    targetModel: string;
+    targets: GlobalProfileTarget[];
     isDefault: boolean;
     isActive: boolean;
     requestedDimensions?: number | null;
@@ -216,6 +233,13 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   now: Date,
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 ) {
+  const [primaryTarget] = entry.targets;
+  if (!primaryTarget) {
+    throw new Error(
+      `Global model gateway config ${kind} profile '${entry.profileAlias}' has no targets`,
+    );
+  }
+
   const [existing] = await tx
     .select({
       id: modelGatewayProfiles.id,
@@ -233,9 +257,21 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     existing?.configJson && typeof existing.configJson === "object"
       ? (existing.configJson as Record<string, unknown>)
       : {};
+  const { targets, ...entryWithoutTargets } = entry;
   const mergedConfigJson = mergeGlobalProfileConfigJson({
     existingConfigJson,
-    entry,
+    entry: {
+      ...entryWithoutTargets,
+      targetModel: primaryTarget.targetModel,
+      ...(targets.length > 1
+        ? {
+            targets: targets.map((target) => ({
+              provider: target.providerName,
+              targetModel: target.targetModel,
+            })),
+          }
+        : {}),
+    },
     existing: Boolean(existing),
     now,
   });
@@ -304,7 +340,6 @@ function toDynamicProfileEntry(input: {
     contextLength: input.candidate.contextLength,
     defaultParameters: input.candidate.defaultParameters,
     displayName: input.candidate.displayName,
-    gatewaySlug: input.gateway.slug,
     isActive: true,
     isDefault: false,
     kind: input.candidate.kind,
@@ -312,7 +347,6 @@ function toDynamicProfileEntry(input: {
     maxCompletionTokens: input.candidate.maxCompletionTokens,
     modelAlias: input.candidate.modelId,
     pricing: input.candidate.pricing,
-    priority: 100,
     profileAlias: dynamicProfileAlias({
       kind: input.candidate.kind,
       modelId: input.candidate.modelId,
@@ -321,13 +355,21 @@ function toDynamicProfileEntry(input: {
     }),
     providerCatalogGatewaySlug: input.candidate.providerCatalogGatewaySlug,
     providerCatalogSource: input.candidate.providerCatalogSource,
-    providerName: input.gateway.providerName,
     routingStrategy: "priority",
     supportedEfforts: input.candidate.supportedEfforts,
     supportedParameters: input.candidate.supportedParameters,
     supportsImageInput: input.candidate.supportsImageInput,
-    targetModel: input.candidate.modelId,
-    weight: 100,
+    // Discovered catalog models are always a single target: they exist because
+    // one gateway advertised them.
+    targets: [
+      {
+        gatewaySlug: input.gateway.slug,
+        providerName: input.gateway.providerName,
+        targetModel: input.candidate.modelId,
+        priority: 100,
+        weight: 100,
+      },
+    ],
   };
 }
 
@@ -582,35 +624,54 @@ async function syncProfileKind(input: {
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
 }) {
   for (const entry of input.entries) {
-    const gatewayConfigId = input.gatewayIdBySlug.get(entry.gatewaySlug);
-    if (!gatewayConfigId) {
+    const resolveGatewayConfigId = (gatewaySlug: string) => {
+      const gatewayConfigId = input.gatewayIdBySlug.get(gatewaySlug);
+      if (!gatewayConfigId) {
+        throw new Error(
+          `Global model gateway config references missing gateway slug '${gatewaySlug}' for ${input.kind} profile '${entry.modelAlias}'`,
+        );
+      }
+      return gatewayConfigId;
+    };
+
+    // The profile row holds a single gatewayConfigId, so it follows the primary
+    // target. Every target gets its own route row.
+    const [primaryTarget] = entry.targets;
+    if (!primaryTarget) {
       throw new Error(
-        `Global model gateway config references missing gateway slug '${entry.gatewaySlug}' for ${input.kind} profile '${entry.modelAlias}'`,
+        `Global model gateway config ${input.kind} profile '${entry.modelAlias}' has no targets`,
       );
     }
+
     await upsertModelGatewayProfileFromGlobalConfig(
       input.kind,
       entry,
-      gatewayConfigId,
+      resolveGatewayConfigId(primaryTarget.gatewaySlug),
       input.now,
       input.tx,
     );
-    await input.tx.insert(modelGatewayRoutes).values({
-      id: randomUUID(),
-      configVersionId: input.configVersionId,
-      alias: entry.profileAlias,
-      routeKind: input.kind,
-      strategy: entry.routingStrategy,
-      targetProviderName: entry.providerName,
-      targetModel: entry.targetModel,
-      priority: entry.priority,
-      weight: entry.weight,
-      constraintsJson: buildRouteConstraintsJson(entry),
-      isDefault: entry.isDefault,
-      isActive: entry.isActive,
-      createdAt: input.now,
-      updatedAt: input.now,
-    });
+
+    for (const target of entry.targets) {
+      resolveGatewayConfigId(target.gatewaySlug);
+      await input.tx.insert(modelGatewayRoutes).values({
+        id: randomUUID(),
+        configVersionId: input.configVersionId,
+        alias: entry.profileAlias,
+        routeKind: input.kind,
+        strategy: entry.routingStrategy,
+        targetProviderName: target.providerName,
+        targetModel: target.targetModel,
+        priority: target.priority,
+        weight: target.weight,
+        constraintsJson: buildRouteConstraintsJson({
+          providerRouting: target.providerRouting ?? entry.providerRouting,
+        }),
+        isDefault: entry.isDefault,
+        isActive: entry.isActive,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+    }
   }
 }
 

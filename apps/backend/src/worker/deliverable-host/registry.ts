@@ -4,7 +4,7 @@ import type {
   CreateDeliverablePipelines,
   DeliverablePipelineDefinition,
 } from "@sourceweft/capability-contracts";
-import { BUILTIN_CAPABILITY_MODULES } from "@sourceweft/agent-tool-registry";
+import { BUILTIN_CAPABILITY_MODULES } from "@sourceweft/agent-tool-registry/server";
 import type { Job } from "bullmq";
 import { logger } from "../../shared/logger";
 import {

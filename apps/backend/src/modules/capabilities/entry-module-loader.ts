@@ -1,4 +1,4 @@
-import { loadBuiltinCapabilityModule } from "@sourceweft/agent-tool-registry";
+import { loadBuiltinCapabilityModule } from "@sourceweft/agent-tool-registry/server";
 import type { DiscoveredCapabilityRecord } from "@sourceweft/capability-runtime";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";

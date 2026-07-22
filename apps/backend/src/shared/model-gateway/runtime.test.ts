@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
-  createRequestConfig,
   resolveModelGatewayConfig,
   resolveRequestTarget,
 } from "@sourceweft/model-gateway";
@@ -153,9 +152,9 @@ test("per-provider limits survive resolution into the request config", async () 
 
   const resolved = resolveModelGatewayConfig(built);
   const target = await resolveRequestTarget(resolved, { model: "slow-alias" });
-  // Guards the full chain: input config -> normalize -> target -> request
-  // config. A drop anywhere in between silently reverts to the gateway default.
-  assert.equal(createRequestConfig(resolved, target).timeoutMs, 120_000);
+  // Guards the full chain: input config -> normalize -> resolved target. A drop
+  // anywhere in between silently reverts to the gateway default.
+  assert.equal(target.timeoutMs, 120_000);
 });
 
 test("getOrCreateRoutedGatewayClient reuses the client for an unchanged config version", () => {

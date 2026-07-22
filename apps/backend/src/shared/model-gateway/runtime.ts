@@ -2,6 +2,7 @@ import {
   createModelGateway,
   DEFAULT_MAX_RETRIES,
   DEFAULT_TIMEOUT_MS,
+  type ModelCapabilityRule,
   type ModelGateway,
   type ModelGatewayConfig,
   type ProviderRoutingConfig,
@@ -21,6 +22,7 @@ import { createLlmObservabilitySink } from "../../modules/llm-observability/sink
 import { resolveObservedGenerationCost } from "./observed-cost";
 import { decryptSecret } from "../secrets";
 import type { RoutedGatewayConfig } from "./types";
+import { MODEL_CAPABILITY_DB } from "./model-capability-db";
 import { resolveCustomByokProvider } from "./byok-provider-resolver";
 
 import { OPENROUTER_APP_TITLE } from "./attribution";
@@ -308,7 +310,49 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
     versionId: activeVersion.id,
     providers,
     modelRoutes,
+    modelCapabilities: readDeploymentModelCapabilities(activeVersion.payloadJson),
   };
+}
+
+/**
+ * Deployment-declared capability rules from the stored config payload. Read
+ * leniently (skipping malformed entries) — global-config already validated them
+ * at sync time; a stored config should not fail the runtime load.
+ */
+function readDeploymentModelCapabilities(
+  payloadJson: unknown,
+): ModelCapabilityRule[] {
+  if (!payloadJson || typeof payloadJson !== "object") {
+    return [];
+  }
+  const raw = (payloadJson as Record<string, unknown>).modelCapabilities;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const rules: ModelCapabilityRule[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const modelMatch = record.modelMatch;
+    const capabilities =
+      record.capabilities && typeof record.capabilities === "object"
+        ? (record.capabilities as Record<string, unknown>)
+        : {};
+    if (typeof modelMatch !== "string" || modelMatch.trim().length === 0) {
+      continue;
+    }
+    rules.push({
+      modelMatch,
+      capabilities: {
+        ...(typeof capabilities.supportsForcedToolChoice === "boolean"
+          ? { supportsForcedToolChoice: capabilities.supportsForcedToolChoice }
+          : {}),
+      },
+    });
+  }
+  return rules;
 }
 
 function getRoutedGatewayCacheSignature(config: RoutedGatewayConfig) {
@@ -362,6 +406,12 @@ export function buildRoutedModelGatewayConfig(
       ]),
     ),
     modelRoutes: configInput.modelRoutes,
+    // Deployment overrides first, then the code-shipped DB — merged here at
+    // runtime so a DB change applies on redeploy without re-syncing the config.
+    modelCapabilities: [
+      ...(configInput.modelCapabilities ?? []),
+      ...MODEL_CAPABILITY_DB,
+    ],
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxRetries: DEFAULT_MAX_RETRIES,
     allowNonDefaultAliases: false,

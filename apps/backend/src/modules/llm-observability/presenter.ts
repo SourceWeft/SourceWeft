@@ -57,6 +57,50 @@ function providerModelValue(generation: Record<string, unknown>) {
   return generation.modelAlias ? null : generation.providerModel ?? null;
 }
 
+/**
+ * Aliased generations hide their routing identity, same rule as
+ * `providerModelValue`: the alias is the product-facing model — one name, one
+ * price — and which provider/target actually served a given request is an
+ * internal placement decision. Now that one alias can fan out to several
+ * targets, exposing it would let callers observe (and depend on) per-request
+ * routing. Only un-aliased calls (BYOK/direct) show their provider.
+ */
+function providerValue(generation: Record<string, unknown>) {
+  return generation.modelAlias ? null : generation.provider ?? null;
+}
+
+function routeDecisionValue(generation: Record<string, unknown>) {
+  return generation.modelAlias ? null : generation.routeDecisionJson ?? null;
+}
+
+const ROUTING_IDENTITY_KEYS = ["provider", "providerModel", "routeDecision"];
+
+/**
+ * Gateway endpoints echo provider/providerModel/routeDecision into the output
+ * payload (`buildUsageOutput`); scrub those for aliased generations so the
+ * payload column cannot leak what the top-level fields above deliberately hide.
+ */
+function stripRoutingIdentity(
+  generation: Record<string, unknown>,
+  value: unknown,
+) {
+  if (
+    !generation.modelAlias ||
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  if (!ROUTING_IDENTITY_KEYS.some((key) => key in record)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => !ROUTING_IDENTITY_KEYS.includes(key)),
+  );
+}
+
 function generationOperation(generation: Record<string, unknown>) {
   return metadataString(generation, ["observationOperation", "operation"])
     ?? generation.operation;
@@ -294,15 +338,18 @@ export function presentGeneration(
     type: "generation",
     model: modelValue(generation),
     modelAlias: generation.modelAlias,
-    provider: generation.provider,
+    provider: providerValue(generation),
     providerModel: providerModelValue(generation),
     executionMode: generation.executionMode,
     keySource: generation.keySource,
     routeStrategy: generation.routeStrategy,
-    routeDecision: generation.routeDecisionJson,
+    routeDecision: routeDecisionValue(generation),
     modelParameters: generation.modelParametersJson,
     input: payload(generation.inputJson, access, startedAt, options),
-    output: payload(generation.outputJson, access, startedAt, options),
+    output: stripRoutingIdentity(
+      generation,
+      payload(generation.outputJson, access, startedAt, options),
+    ),
     outputText: payload(generation.outputText, access, startedAt, options),
     finishReason: generation.finishReason,
     reasoningText: payload(generation.reasoningText, access, startedAt, options),
@@ -357,7 +404,7 @@ export function presentGenerationSummary(generation: Record<string, unknown>) {
     type: "generation",
     model: modelValue(generation),
     modelAlias: generation.modelAlias,
-    provider: generation.provider,
+    provider: providerValue(generation),
     providerModel: providerModelValue(generation),
     status: generation.status,
     level: levelValue(generation.status),

@@ -4,7 +4,7 @@ import {
   EMPTY_ARTIFACT_VIEW_HANDLER_REGISTRY,
   type ArtifactViewHandlerRegistry,
   type ArtifactViewHandlerWarning,
-} from "@sourceweft/agent-tool-registry";
+} from "@sourceweft/agent-tool-registry/server";
 import type { ArtifactViewHandler } from "@sourceweft/contracts";
 import { logger } from "../../shared/logger";
 

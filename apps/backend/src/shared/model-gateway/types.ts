@@ -1,4 +1,7 @@
-import type { ProviderRoutingConfig } from "@sourceweft/model-gateway";
+import type {
+  ModelCapabilityRule,
+  ProviderRoutingConfig,
+} from "@sourceweft/model-gateway";
 import type {
   ModelGatewayProviderKind,
   ModelGatewayRoutingStrategy,
@@ -69,4 +72,6 @@ export type RoutedGatewayConfig = {
       }>;
     }
   >;
+  /** Deployment-declared capability rules; the shipped DB is merged in later. */
+  modelCapabilities?: ModelCapabilityRule[];
 };

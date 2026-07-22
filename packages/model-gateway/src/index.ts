@@ -3,6 +3,8 @@ export { createModelGateway, ModelGatewayClient } from "./client";
 export {
   ModelGatewayError,
   createHttpGatewayError,
+  isFailoverableCode,
+  isFailoverableError,
   isRetryableError,
   normalizeGatewayError,
   toGatewayErrorData,
@@ -13,10 +15,17 @@ export {
   DEFAULT_MAX_RETRIES,
   DEFAULT_TIMEOUT_MS,
   assertModelAliasAllowed,
-  createRequestConfig,
   resolveModelGatewayConfig,
+  resolveRequestCandidates,
   resolveRequestTarget,
 } from "./config";
+
+export {
+  TargetHealthRegistry,
+  defaultTargetHealthRegistry,
+  orderByTargetHealth,
+  targetHealthKey,
+} from "./target-health";
 
 export { createLangChainChatModel } from "./bridge/utils";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
@@ -71,6 +80,8 @@ export type {
   ModelRouteTarget,
   ObserveSink,
   ObserveGenerationEnd,
+  ModelCapabilities,
+  ModelCapabilityRule,
   ObserveGenerationError,
   ObserveGenerationStart,
   ObserveRawCaptureMode,
@@ -83,7 +94,6 @@ export type {
   ResolvedGatewayProviderConfig,
   ResolvedModelGatewayConfig,
   ResolvedModelRouteConfig,
-  ResolvedRequestConfig,
   ResolvedRequestTarget,
   RerankInput,
   RerankItem,

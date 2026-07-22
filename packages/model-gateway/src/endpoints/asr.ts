@@ -1,6 +1,6 @@
-import { resolveRequestTarget } from "../config";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeAsrTranscription } from "../bridge/asr";
+import { runWithTargetFailover } from "./failover";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -14,6 +14,7 @@ import type {
   AsrTranscribeResult,
   RequestOptions,
   ResolvedModelGatewayConfig,
+  ResolvedRequestTarget,
 } from "../types";
 
 export class ModelGatewayAsrEndpoint {
@@ -23,7 +24,20 @@ export class ModelGatewayAsrEndpoint {
     input: AsrTranscribeInput,
     options?: RequestOptions,
   ): Promise<AsrTranscribeResult> {
-    const target = await resolveRequestTarget(this.config, input);
+    return runWithTargetFailover({
+      config: this.config,
+      payload: input,
+      operation: "asr.transcribe",
+      callerSignal: options?.signal,
+      attempt: (target) => this.transcribeWithTarget(input, options, target),
+    });
+  }
+
+  private async transcribeWithTarget(
+    input: AsrTranscribeInput,
+    options: RequestOptions | undefined,
+    target: ResolvedRequestTarget,
+  ): Promise<AsrTranscribeResult> {
     const generation = createGenerationObservation({
       operation: "asr.transcribe",
       payload: input,

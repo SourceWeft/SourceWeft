@@ -6,10 +6,8 @@ import {
   resolveModelGatewayConfig,
   resolveRequestTarget,
 } from "../src/index";
-import {
-  assertModelAliasAllowed,
-  buildRequestHeaders,
-} from "../src/config";
+import { assertModelAliasAllowed } from "../src/config";
+import { buildProviderAuthHeaders } from "../src/auth-headers";
 
 const fetchStub: typeof fetch = async () => new Response("{}", { status: 200 });
 
@@ -32,16 +30,13 @@ test("resolveModelGatewayConfig normalizes values and applies defaults", () => {
     "X-App": "model-gateway-test",
   });
 
-  assert.deepEqual(buildRequestHeaders(resolved, { idempotencyKey: "idem-1" }), {
-    "Content-Type": "application/json",
-    "X-App": "model-gateway-test",
+  assert.deepEqual(buildProviderAuthHeaders(resolved), {
     Authorization: "Bearer secret-token",
-    "Idempotency-Key": "idem-1",
   });
 });
 
-test("buildRequestHeaders supports custom API key headers", () => {
-  const headers = buildRequestHeaders({
+test("buildProviderAuthHeaders supports custom API key headers", () => {
+  const headers = buildProviderAuthHeaders({
     defaultHeaders: {
       "Content-Type": "application/json",
     },
@@ -51,7 +46,6 @@ test("buildRequestHeaders supports custom API key headers", () => {
   });
 
   assert.deepEqual(headers, {
-    "Content-Type": "application/json",
     "cf-aig-authorization": "Bearer cf-token",
   });
 });

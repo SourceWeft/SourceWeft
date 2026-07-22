@@ -1,5 +1,5 @@
 {
-  "_comment": "OSS defaults use OpenRouter only. SaaS and self-hosted deployments can replace this file by setting MODEL_GATEWAY_GLOBAL_CONFIG_PATH to an external config with additional providers.",
+  "_comment": "OSS defaults use OpenRouter only. SaaS and self-hosted deployments can replace this file by setting MODEL_GATEWAY_GLOBAL_CONFIG_PATH to an external config with additional providers. Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
   "gateways": [
     {
       "slug": "openrouter-default",

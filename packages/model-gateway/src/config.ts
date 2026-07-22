@@ -1,14 +1,15 @@
 import { ModelGatewayError } from "./errors";
-import { buildProviderAuthHeaders } from "./auth-headers";
+import {
+  defaultTargetHealthRegistry,
+  orderByTargetHealth,
+} from "./target-health";
 import type {
   CustomByokProviderConfig,
   GatewayExecutionInput,
   ModelGatewayConfig,
-  RequestOptions,
   ResolvedGatewayProviderConfig,
   ResolvedModelGatewayConfig,
   ResolvedModelRouteConfig,
-  ResolvedRequestConfig,
   ResolvedRequestTarget,
   RoutingStrategy,
 } from "./types";
@@ -224,6 +225,7 @@ export function resolveModelGatewayConfig(
       "Content-Type": "application/json",
       ...(config.defaultHeaders ?? {}),
     },
+    modelCapabilities: config.modelCapabilities ?? [],
     allowNonDefaultAliases: config.allowNonDefaultAliases ?? false,
     allowedModelAliases: Object.keys(routes),
     allowedBaseUrls: config.allowedBaseUrls ?? [],
@@ -236,6 +238,7 @@ export function resolveModelGatewayConfig(
     requestMetadata: config.requestMetadata ?? {},
     observeSink: config.observeSink,
     langchainFactories: config.langchainFactories,
+    targetHealth: config.targetHealth ?? defaultTargetHealthRegistry,
   };
 }
 
@@ -389,28 +392,48 @@ function normalizeCustomByokProvider(
   };
 }
 
-function selectTargetByStrategy(
+/**
+ * Orders route targets into a try-first-then-fail-over sequence. The head of
+ * the list preserves each strategy's existing selection semantics — so a
+ * request that succeeds on the first target behaves exactly as before — and
+ * the tail is the failover order.
+ *
+ * For `weighted-random` the ordering is a weighted draw without replacement:
+ * the first pick follows today's traffic distribution, later picks
+ * redistribute the failed target's share proportionally. Zero-weight targets
+ * are never drawn while positive weight remains, then join tail-end by
+ * priority — making `weight: 0` a natural "failover-only" configuration.
+ */
+function orderTargetsByStrategy(
   strategy: RoutingStrategy,
   candidates: ResolvedModelRouteConfig["targets"],
 ) {
   if (strategy === "weighted-random") {
-    const weighted = candidates.filter((item) => item.weight > 0);
-    const total = weighted.reduce((sum, item) => sum + item.weight, 0);
-    if (total > 0) {
+    const pool = [...candidates];
+    const ordered: ResolvedModelRouteConfig["targets"] = [];
+    for (;;) {
+      const weighted = pool.filter((item) => item.weight > 0);
+      const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+      if (total <= 0) {
+        ordered.push(...pool.sort((a, b) => a.priority - b.priority));
+        return ordered;
+      }
       let cursor = Math.random() * total;
+      let picked = weighted[weighted.length - 1]!;
       for (const item of weighted) {
         cursor -= item.weight;
         if (cursor <= 0) {
-          return item;
+          picked = item;
+          break;
         }
       }
+      ordered.push(picked);
+      pool.splice(pool.indexOf(picked), 1);
     }
-
-    return [...candidates].sort((a, b) => a.priority - b.priority)[0];
   }
 
   if (strategy === "priority") {
-    return [...candidates].sort((a, b) => a.priority - b.priority)[0];
+    return [...candidates].sort((a, b) => a.priority - b.priority);
   }
 
   throw new ModelGatewayError({
@@ -422,6 +445,11 @@ function selectTargetByStrategy(
   });
 }
 
+/**
+ * Resolves the single target a request will run against. Callers that can
+ * fail over should use `resolveRequestCandidates` instead — this returns the
+ * head of that list and preserves the pre-failover single-target semantics.
+ */
 export async function resolveRequestTarget(
   config: ResolvedModelGatewayConfig,
   execution: GatewayExecutionInput & {
@@ -429,6 +457,24 @@ export async function resolveRequestTarget(
     metadata?: Record<string, unknown>;
   },
 ): Promise<ResolvedRequestTarget> {
+  const [first] = await resolveRequestCandidates(config, execution);
+  return first!;
+}
+
+/**
+ * Resolves the ordered list of targets a request may run against: try the
+ * first; if it fails with a failoverable error before any output reached the
+ * caller, try the next. BYOK and unrouted aliases always resolve to exactly
+ * one candidate — a user's own key must never silently fail over to another
+ * account.
+ */
+export async function resolveRequestCandidates(
+  config: ResolvedModelGatewayConfig,
+  execution: GatewayExecutionInput & {
+    model: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<ResolvedRequestTarget[]> {
   const mode = execution.executionMode ?? config.modeDefault;
 
   if (mode === "BYOK") {
@@ -488,7 +534,7 @@ export async function resolveRequestTarget(
       });
     }
 
-    return {
+    return [{
       provider: provider.name,
       providerKind: provider.kind,
       providerModel: execution.model,
@@ -512,7 +558,7 @@ export async function resolveRequestTarget(
         providerKind: provider.kind,
       },
       requestMetadata: config.requestMetadata,
-    };
+    }];
   }
 
   const routeKey = execution.profileAlias ?? execution.model;
@@ -527,7 +573,7 @@ export async function resolveRequestTarget(
         retryable: false,
       });
     }
-    return {
+    return [{
       provider: provider.name,
       providerKind: provider.kind,
       providerModel: execution.model,
@@ -551,7 +597,7 @@ export async function resolveRequestTarget(
         providerKind: provider.kind,
       },
       requestMetadata: config.requestMetadata,
-    };
+    }];
   }
 
   const candidates = route.targets.filter((target) => {
@@ -576,8 +622,8 @@ export async function resolveRequestTarget(
     });
   }
 
-  const selected = selectTargetByStrategy(route.strategy, candidates);
-  if (!selected) {
+  const ordered = orderTargetsByStrategy(route.strategy, candidates);
+  if (ordered.length === 0) {
     throw new ModelGatewayError({
       code: "UPSTREAM",
       message: `Failed to select route target for alias '${routeKey}'`,
@@ -585,81 +631,45 @@ export async function resolveRequestTarget(
     });
   }
 
-  const provider = config.providers[selected.provider]!;
-  return {
-    provider: provider.name,
-    providerKind: provider.kind,
-    providerModel: selected.model,
-    baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
-    apiKeyHeaderName: provider.apiKeyHeaderName,
-    apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
-    defaultHeaders: provider.defaultHeaders,
-    supports: provider.supports,
-    ...(provider.timeoutMs !== undefined
-      ? { timeoutMs: provider.timeoutMs }
-      : {}),
-    ...(provider.maxRetries !== undefined
-      ? { maxRetries: provider.maxRetries }
-      : {}),
-    ...(selected.providerRouting
-      ? { providerRouting: selected.providerRouting }
-      : {}),
-    routeDecision: {
-      alias: routeKey,
-      mode,
-      strategy: route.strategy,
+  const targets = ordered.map((selected) => {
+    const provider = config.providers[selected.provider]!;
+    return {
       provider: provider.name,
       providerKind: provider.kind,
+      providerModel: selected.model,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      apiKeyHeaderName: provider.apiKeyHeaderName,
+      apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
+      defaultHeaders: provider.defaultHeaders,
+      supports: provider.supports,
+      ...(provider.timeoutMs !== undefined
+        ? { timeoutMs: provider.timeoutMs }
+        : {}),
+      ...(provider.maxRetries !== undefined
+        ? { maxRetries: provider.maxRetries }
+        : {}),
       ...(selected.providerRouting
         ? { providerRouting: selected.providerRouting }
         : {}),
-    },
-    requestMetadata: config.requestMetadata,
-  };
+      routeDecision: {
+        alias: routeKey,
+        mode,
+        strategy: route.strategy,
+        provider: provider.name,
+        providerKind: provider.kind,
+        ...(selected.providerRouting
+          ? { providerRouting: selected.providerRouting }
+          : {}),
+      },
+      requestMetadata: config.requestMetadata,
+    };
+  });
+
+  // Demote targets in failure cooldown to the tail so requests stop paying a
+  // known-dead target's failed round-trip on every call. This reorders, never
+  // removes: with every target cooling down the strategy order is preserved
+  // and the request still has its full failover chain.
+  return orderByTargetHealth(targets, config.targetHealth);
 }
 
-export function createRequestConfig(
-  config: ResolvedModelGatewayConfig,
-  target: ResolvedRequestTarget,
-): ResolvedRequestConfig {
-  return {
-    baseUrl: target.baseUrl,
-    apiKey: target.apiKey,
-    apiKeyHeaderName: target.apiKeyHeaderName,
-    apiKeyHeaderPrefix: target.apiKeyHeaderPrefix,
-    fetch: config.fetch,
-    // Prefer the selected provider's own limits. Hoisting a gateway-wide
-    // maximum would let one slow provider (e.g. a long-running video gateway)
-    // stretch the timeout for every other provider's requests.
-    timeoutMs: target.timeoutMs ?? config.timeoutMs,
-    maxRetries: target.maxRetries ?? config.maxRetries,
-    defaultHeaders: {
-      ...config.defaultHeaders,
-      ...target.defaultHeaders,
-    },
-    logger: config.logger,
-    requestMetadata: config.requestMetadata,
-    observeSink: config.observeSink,
-  };
-}
-
-export function buildRequestHeaders(
-  config: Pick<
-    ResolvedRequestConfig,
-    "defaultHeaders" | "apiKey" | "apiKeyHeaderName" | "apiKeyHeaderPrefix"
-  >,
-  options?: RequestOptions,
-): Record<string, string> {
-  const headers: Record<string, string> = {
-    ...config.defaultHeaders,
-  };
-
-  Object.assign(headers, buildProviderAuthHeaders(config));
-
-  if (options?.idempotencyKey) {
-    headers["Idempotency-Key"] = options.idempotencyKey;
-  }
-
-  return headers;
-}
