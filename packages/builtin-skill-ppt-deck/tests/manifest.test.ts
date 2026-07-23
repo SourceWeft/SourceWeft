@@ -23,3 +23,38 @@ test("sourceweft.capability.json parses as a valid ppt-deck skill manifest", asy
     path: "config.stylePreset",
   });
 });
+
+test("every stylePreset value maps to a documented theme preset", async () => {
+  const rawManifest = await readFile(
+    join(packageRoot, "sourceweft.capability.json"),
+    "utf8",
+  );
+  const manifest = capabilityManifestSchema.parse(JSON.parse(rawManifest));
+  const skill = getCapabilityContributions(manifest).skills[0];
+  const stylePreset = skill?.options?.find(
+    (option) => option.id === "stylePreset",
+  );
+  assert.ok(stylePreset, "ppt-deck manifest no longer declares stylePreset");
+
+  const skillMd = await readFile(join(packageRoot, "SKILL.md"), "utf8");
+  const designSystem = await readFile(
+    join(packageRoot, "references", "design-system.md"),
+    "utf8",
+  );
+
+  for (const { value } of stylePreset.values ?? []) {
+    const row = skillMd
+      .split("\n")
+      .find((line) => line.startsWith(`| ${String(value)} | `));
+    assert.ok(
+      row,
+      `stylePreset "${String(value)}" has no mapping row in SKILL.md`,
+    );
+    if (value === "auto") continue;
+    const themePreset = row.split("|")[2]?.trim();
+    assert.ok(
+      themePreset && designSystem.includes(`### ${themePreset}`),
+      `SKILL.md maps stylePreset "${String(value)}" to "${themePreset}", which has no preset section in design-system.md`,
+    );
+  }
+});

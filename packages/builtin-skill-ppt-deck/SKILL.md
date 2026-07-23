@@ -30,6 +30,23 @@ context, treat those values as user-selected generation constraints:
 - `visualDensity`: how much information each slide should carry.
 - `stylePreset`: visual direction for layout, typography, and tone.
 
+When `stylePreset` is set, map it to a design-system theme preset:
+
+| stylePreset | Theme preset | Palette anchor |
+| --- | --- | --- |
+| auto | Pick by topic via the Topic-to-Preset Map in design-system.md | — |
+| executive | Executive Strategy | charcoal/navy + gold accent |
+| product | Product Launch | launch navy + coral accent |
+| academic | Academic Explainer | deep teal + warm cream surfaces |
+| training | Learning Studio | blackboard green + sticky yellow |
+| minimal | Minimal Focus | white + ink + one topic accent |
+| editorial | Editorial Print | paper white + ink + serif display |
+
+With `auto`, keep the default reading path. With any other value, read the
+mapped preset's section in [design-system.md](references/design-system.md)
+and apply its palette, motif, background rhythm, and layout mix; the user
+picked it, so it outranks topic-based preset selection.
+
 Follow these options unless they conflict with higher-priority system rules or
 the user's latest explicit request.
 

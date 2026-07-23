@@ -91,6 +91,28 @@ Choose the closest preset, then adapt details to the topic.
 - Layout mix: architecture diagram, process pipeline, concept map, data callout, comparison.
 - Avoid: low-contrast gray text, generic cyber gradients, decorative nodes with no meaning.
 
+### Minimal Focus
+
+- Good for: keynote-style talks, vision statements, portfolios, single-idea pitches.
+- Palette: `FFFFFF` white, `111827` ink, one topic-chosen accent (for example `0F766E` teal or `B45309` amber), `F4F4F5` hairline gray for structure.
+- Dominant: white. Accent: exactly one, on key numbers and focal words only.
+- Fonts: Arial or Calibri throughout; hero statements 54-84 pt.
+- Motif: one oversized focal element per slide — a number, a word, a single diagram, a thin-line geometric figure.
+- Backgrounds: white fields with generous margins; occasional full-ink slide for section breaks.
+- Layout mix: principle poster, hero number, split comparison, single diagram.
+- Avoid: more than one accent color, texture fields, dense grids, piles of cards.
+
+### Editorial Print
+
+- Good for: reports with narrative, culture/brand decks, essays-as-slides, research storytelling.
+- Palette: `1A1A1A` ink, `FAFAF9` paper white, `C1121F` editorial red or `1D4ED8` cobalt accent, `D6D3D1` rule gray.
+- Dominant: paper white. Accent: red/cobalt for pull quotes and key stats.
+- Fonts: Cambria for display headings (QA-safe serif); Calibri body; wide-tracked uppercase kickers 12-14 pt.
+- Motif: magazine grid, pull quotes, duotone image blocks, numbered sections.
+- Backgrounds: paper surfaces on a visible column grid; occasional full-bleed duotone image; ink section dividers.
+- Layout mix: pull-quote poster, mixed media, annotated diagram, data insight, case/example.
+- Avoid: centered body text, cream drift (keep the paper near-white), stripe ornaments, more than two accent uses per slide.
+
 ## Palette Rules
 
 - One dominant color should carry 60-70% of visual weight.
@@ -186,6 +208,8 @@ Do not repeat the same layout key on three consecutive slides.
 | Science / academic | Academic Explainer | Premium Dark Tech | annotated diagram, evidence board |
 | AI / technical | Premium Dark Tech | Data Report | nodes, pipeline, model cards |
 | Wellness / growth | Learning Studio | Academic Explainer | habit loop, calendar, reflection cards |
+| Vision / keynote | Minimal Focus | Executive Strategy | hero number, single statement, focal diagram |
+| Narrative report / brand | Editorial Print | Data Report | magazine grid, pull quotes, duotone imagery |
 
 ## Avoid
 
