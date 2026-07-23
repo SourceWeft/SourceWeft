@@ -31,6 +31,7 @@
 
 import type { ArtifactStorage } from "../artifact-storage";
 import type {
+  ArtifactPublishResult,
   ArtifactPublishSpec,
   ArtifactPublisher,
   ArtifactWriteContext,
@@ -110,6 +111,10 @@ export type AgentToolArtifactRecord = {
   readonly payloadJson?: unknown;
   /** Why a failed artifact failed, when the host recorded a reason. */
   readonly errorMessage?: string | null;
+  /** The row's artifact type, so a republisher can refuse a type mismatch. */
+  readonly artifactType?: string;
+  /** The version a republish read, for the concurrency check on the write. */
+  readonly currentVersionNo?: number;
 };
 
 /** Row primitives take the artifact type as an argument — see below. */
@@ -166,6 +171,18 @@ export type AgentToolArtifactServices = {
     readonly spec: ArtifactPublishSpec;
     readonly artifactId?: string;
   }) => Promise<{ readonly artifactId: string }>;
+  /**
+   * Publish over an existing ready artifact as its next version — an edit
+   * republishing over itself. The caller passes the `currentVersionNo` it read
+   * so two concurrent republishes cannot both win; a failed republish never
+   * touches the published version.
+   */
+  readonly republishArtifact: (input: {
+    readonly context: ArtifactWriteContext;
+    readonly artifactId: string;
+    readonly spec: ArtifactPublishSpec;
+    readonly expectedVersionNo?: number;
+  }) => Promise<ArtifactPublishResult>;
   /** The generic artifact-row primitives, artifact type first. */
   readonly createPendingArtifact: (
     artifactType: string,

@@ -27,6 +27,7 @@ import {
 } from "@sourceweft/contracts/artifact-files";
 import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
 import type { ArtifactPublisher } from "@sourceweft/contracts/artifact-write";
+import type { AgentToolArtifactServices } from "@sourceweft/contracts/agent-tools";
 import {
   artifactSourceTypeHandlers,
   artifactTypeHandlers,
@@ -74,7 +75,10 @@ export type PublishArtifactContext = {
 };
 
 export type PublishArtifactServices = ArtifactSourceServices & {
-  readonly artifacts?: Partial<ArtifactPublisher>;
+  readonly artifacts?: Partial<ArtifactPublisher> &
+    Partial<
+      Pick<AgentToolArtifactServices, "findArtifact" | "republishArtifact">
+    >;
   readonly storage?: ArtifactStorage;
 };
 
@@ -333,14 +337,69 @@ export async function publishPreparedArtifact(
     );
   }
 
+  const republishArtifactId = input.descriptor.republishArtifactId;
+  let republishExpectedVersionNo: number | undefined;
+  if (republishArtifactId) {
+    const findArtifact = input.services.artifacts?.findArtifact;
+    const republish = input.services.artifacts?.republishArtifact;
+    if (!findArtifact || !republish) {
+      throw new ArtifactPublishError(
+        "ARTIFACT_RECORD_UNAVAILABLE",
+        "republishArtifactId was given but the republish service is not available",
+      );
+    }
+    const existing = await findArtifact({
+      teamId: input.context.teamId,
+      workspaceId: input.context.workspaceId,
+      artifactId: republishArtifactId,
+    });
+    if (!existing) {
+      throw new ArtifactPublishError(
+        "ARTIFACT_REPUBLISH_INVALID",
+        `republishArtifactId ${republishArtifactId} does not name an artifact in this workspace`,
+      );
+    }
+    if (existing.status !== "ready") {
+      throw new ArtifactPublishError(
+        "ARTIFACT_REPUBLISH_INVALID",
+        `artifact ${republishArtifactId} is ${existing.status}; only a ready artifact can be republished`,
+      );
+    }
+    if (
+      existing.artifactType !== undefined &&
+      existing.artifactType !== preparedArtifact.artifactType
+    ) {
+      throw new ArtifactPublishError(
+        "ARTIFACT_REPUBLISH_INVALID",
+        `artifact ${republishArtifactId} is ${existing.artifactType}, not ${preparedArtifact.artifactType}`,
+      );
+    }
+    republishExpectedVersionNo =
+      typeof existing.currentVersionNo === "number"
+        ? existing.currentVersionNo
+        : undefined;
+  }
+
   // Everything type-specific is already settled: the handler has checked the
   // extension, the MIME type, the size and — for a deck — that the PPTX package
   // really unpacks. What is left is the write itself, which is the host's, so
   // the bytes go across as attachments rather than being uploaded here.
-  const record = await publish({
-    context: input.context,
-    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-    spec: {
+  const publishRecord = (spec: Parameters<typeof publish>[0]["spec"]) =>
+    republishArtifactId
+      ? input.services.artifacts!.republishArtifact!({
+          context: input.context,
+          artifactId: republishArtifactId,
+          spec,
+          ...(republishExpectedVersionNo !== undefined
+            ? { expectedVersionNo: republishExpectedVersionNo }
+            : {}),
+        })
+      : publish({
+          context: input.context,
+          ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+          spec,
+        });
+  const record = await publishRecord({
       artifactType: preparedArtifact.artifactType,
       title: input.descriptor.title,
       prompt: input.descriptor.description ?? input.descriptor.title,
@@ -369,7 +428,6 @@ export async function publishPreparedArtifact(
       ...(input.requestKey
         ? { idempotency: { requestKey: input.requestKey } }
         : {}),
-    },
   });
   const artifactId = record.artifactId;
 

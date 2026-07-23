@@ -22,6 +22,8 @@ export type ArtifactPublishDescriptor = {
   readonly description?: string;
   readonly previewImage?: unknown;
   readonly source?: unknown;
+  /** Set when this publish is an edit landing as a new version of an existing artifact. */
+  readonly republishArtifactId?: string;
   readonly qa?: {
     readonly warnings?: readonly string[];
   } | null;

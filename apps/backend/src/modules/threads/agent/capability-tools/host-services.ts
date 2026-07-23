@@ -8,7 +8,11 @@ import {
   findArtifactRecord,
   findReusableArtifactRecord,
 } from "../../../artifacts/repository";
-import { openArtifact, publishArtifact } from "../../../artifacts/publish";
+import {
+  completeArtifact,
+  openArtifact,
+  publishArtifact,
+} from "../../../artifacts/publish";
 import {
   enqueueDeliverableJob,
   type DeliverableJobPayload,
@@ -75,6 +79,26 @@ export function createCapabilityAgentToolHostServices(
        * outlives the call that asked for it.
        */
       openArtifact,
+      /**
+       * Publish over an existing ready artifact as its next version — an edit
+       * republishing over itself. `expectedStatuses: ["ready"]` is what keeps
+       * this from closing someone else's pending row.
+       */
+      republishArtifact: (republishInput: {
+        context: Parameters<typeof completeArtifact>[0]["context"];
+        artifactId: string;
+        spec: Parameters<typeof completeArtifact>[0]["spec"];
+        expectedVersionNo?: number;
+      }) =>
+        completeArtifact({
+          artifactId: republishInput.artifactId,
+          context: republishInput.context,
+          spec: republishInput.spec,
+          expectedStatuses: ["ready"],
+          ...(republishInput.expectedVersionNo !== undefined
+            ? { expectedVersionNo: republishInput.expectedVersionNo }
+            : {}),
+        }),
       /**
        * The generic artifact-row primitives. Each takes the artifact type as a
        * parameter rather than carrying it in its name: a capability knows its

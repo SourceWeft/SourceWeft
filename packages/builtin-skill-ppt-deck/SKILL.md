@@ -110,7 +110,11 @@ title-and-bullet pages.
 5. Make the smallest reliable edit that satisfies the request.
 6. Run content QA, File QA, and `review_deck_visuals` on the final file. For
    template-derived decks, pass `--original` to `validate_pptx.py`.
-7. Publish only the final edited PPTX.
+7. Publish only the final edited PPTX. When the deck being edited is an
+   artifact SourceWeft already published, pass its id as `republishArtifactId`
+   so the edit lands as a new version of the same artifact instead of creating
+   a duplicate. Only user-uploaded or otherwise unpublished decks publish as
+   new artifacts.
 
 For source-grounded decks, use the available source tools first and keep factual
 claims traceable to the user's provided material.

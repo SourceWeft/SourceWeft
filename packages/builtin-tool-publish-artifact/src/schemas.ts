@@ -57,6 +57,13 @@ export const PublishArtifactInputSchema = z
         "Required preview image for slides artifacts, usually PREVIEW_IMAGE_PATH from final PPTX visual QA.",
       ),
     qa: QaSummarySchema.optional(),
+    republishArtifactId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Publish as a new version of this existing ready artifact instead of creating a new one. Use when editing a previously published artifact.",
+      ),
   })
   .superRefine((value, ctx) => {
     if (value.artifactType === "slides" && !value.previewImage) {
@@ -138,6 +145,12 @@ export const PublishArtifactToolInputSchema = z.object({
       "Required for slides. Use PREVIEW_IMAGE_PATH from final PPTX visual QA, for example { source: { kind: 'sandbox_path', path: '/workspace/qa/preview.jpg' }, altText: 'First slide preview' }.",
     ),
   qa: ToolQaSchema.optional(),
+  republishArtifactId: z
+    .string()
+    .optional()
+    .describe(
+      "When editing an already-published artifact, its id — the edit publishes as a new version of the same artifact. Omit for new artifacts.",
+    ),
 });
 
 export type PublishArtifactToolInput = z.infer<
@@ -216,6 +229,7 @@ export type PublishArtifactSuccessOutput = z.infer<
 
 export const ARTIFACT_PUBLISH_ERROR_CODES = [
   "PUBLISH_INPUT_INVALID",
+  "ARTIFACT_REPUBLISH_INVALID",
   "ARTIFACT_TYPE_UNSUPPORTED",
   "ARTIFACT_SOURCE_UNAVAILABLE",
   "ARTIFACT_SOURCE_NOT_FOUND",
