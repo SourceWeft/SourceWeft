@@ -4,13 +4,26 @@ import {
   listMarketMcpRequestSchema,
   marketMcpManifestSchema,
 } from "@sourceweft/market-contracts";
+import { isMarketAdmin } from "../../modules/market/admin";
 import { listMcpCategories } from "../../modules/market/read-categories";
 import {
   findMcp,
   findMcpVersion,
   listMcp,
 } from "../../modules/market/read-repository";
-import { ApiError } from "../response/api-response";
+import {
+  listReviewQueue,
+  setSubmissionStatus,
+} from "../../modules/market/review";
+import {
+  MarketSubmissionError,
+  submitMcpFromGitHub,
+} from "../../modules/market/submission";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../middleware/auth-session";
+import { ApiError, ApiResponse } from "../response/api-response";
 
 function booleanQuery(value: string | undefined) {
   if (value === undefined) {
@@ -121,5 +134,71 @@ export function registerMarketRoutes(app: Hono) {
       },
       { maxAge: 3600, immutable: true },
     );
+  });
+
+  // --- Submission (any signed-in user) ---
+  app.post("/v1/market/submissions", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const userId = getSessionUserId(session);
+    const body = (await c.req.json().catch(() => null)) as {
+      repoUrl?: unknown;
+    } | null;
+    const repoUrl = typeof body?.repoUrl === "string" ? body.repoUrl.trim() : "";
+    if (!repoUrl) {
+      throw ApiError.validation({ repoUrl: ["A GitHub repository URL is required"] });
+    }
+    try {
+      const result = await submitMcpFromGitHub({ repoUrl, userId });
+      return ApiResponse.success(c, result, 201);
+    } catch (error) {
+      if (error instanceof MarketSubmissionError) {
+        throw new ApiError(422, error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  // --- Review (market admins only) ---
+  async function requireMarketAdmin(c: Parameters<typeof requireSession>[0]) {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    if (!isMarketAdmin(getSessionUserId(session))) {
+      throw ApiError.forbidden("Market admin access required");
+    }
+    return session;
+  }
+
+  app.get("/v1/market/admin/submissions", async (c) => {
+    await requireMarketAdmin(c);
+    return ApiResponse.success(c, { items: await listReviewQueue() });
+  });
+
+  app.post("/v1/market/admin/submissions/:identifier/publish", async (c) => {
+    await requireMarketAdmin(c);
+    const result = await setSubmissionStatus(
+      decodeURIComponent(c.req.param("identifier")),
+      "published",
+    );
+    if (!result) {
+      throw ApiError.notFound("No submission awaiting review for that identifier");
+    }
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/v1/market/admin/submissions/:identifier/reject", async (c) => {
+    await requireMarketAdmin(c);
+    const result = await setSubmissionStatus(
+      decodeURIComponent(c.req.param("identifier")),
+      "archived",
+    );
+    if (!result) {
+      throw ApiError.notFound("No submission awaiting review for that identifier");
+    }
+    return ApiResponse.success(c, result);
   });
 }

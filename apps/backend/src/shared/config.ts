@@ -573,6 +573,10 @@ export const config = {
       process.env.MARKET_FEDERATION_INTERVAL_MS,
       6 * 60 * 60 * 1000,
     ),
+    // Users allowed to review/publish/reject submitted MCP servers. A v1
+    // allowlist; the gate is abstracted (requireMarketAdmin) so this can later
+    // become a DB-backed role without touching the endpoints.
+    adminUserIds: parseCsv(process.env.MARKET_ADMIN_USER_IDS),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
