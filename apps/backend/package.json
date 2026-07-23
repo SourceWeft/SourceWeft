@@ -30,6 +30,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.47",
     "@anycrawl/js-sdk": "^0.0.5",
     "@aws-sdk/client-s3": "^3.1057.0",
     "@aws-sdk/s3-request-presigner": "^3.1057.0",
@@ -51,6 +52,8 @@
     "@langchain/openai": "1.5.5",
     "@langchain/tavily": "^1.2.0",
     "@langchain/textsplitters": "^1.0.1",
+    "ai": "^6.0.190",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
@@ -69,6 +72,7 @@
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/credits-core": "workspace:*",
     "@sourceweft/db": "workspace:*",
+    "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
     "@sourceweft/video-presentation-runtime": "workspace:*",

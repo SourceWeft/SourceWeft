@@ -11,7 +11,6 @@ import { config } from "../../shared/config";
 import { decryptSecret, encryptSecret } from "../../shared/secrets";
 import { McpError } from "./errors";
 import { createLangChainMcpClient } from "./langchain-client";
-import { verifyMarketManifestSignature } from "./market-signature";
 import { marketService } from "./market-service";
 import { requireMcpWorkspace } from "./permissions";
 import {
@@ -488,10 +487,6 @@ export class McpService {
     const response = await marketService.getMcpManifest(input.identifier, {
       version: input.version,
     });
-    // Verify the signature over the ORIGINAL, unmodified manifest. Applying an
-    // endpoint override before this would change canonicalJson(manifest) and
-    // break verification, so the override is treated as local install config
-    // that lives outside the signed set and is applied afterwards.
     const parsed = marketMcpManifestSchema.safeParse(response.manifest);
     if (!parsed.success) {
       throw new McpError(
@@ -501,15 +496,6 @@ export class McpService {
         parsed.error.flatten() as Record<string, unknown>,
       );
     }
-
-    const verification = verifyMarketManifestSignature({
-      manifest: parsed.data,
-      signature: response.signature,
-      signingKeyId: response.signingKeyId,
-      trustedPublicKeys: config.market.trustedPublicKeys,
-      allowUnsigned: config.market.allowUnsigned,
-      envelope: response.version?.provenanceJson?.marketSignatureEnvelope,
-    });
 
     // Downgrade protection: refuse to replace an installed version with an
     // older one. Only enforced when both versions are comparable dotted-numeric
@@ -554,9 +540,9 @@ export class McpService {
       workspaceId: workspace.id,
       userId: input.userId,
       manifest: manifestForInstall,
-      verified: verification.verified,
-      signature: response.signature,
-      signingKeyId: response.signingKeyId,
+      // Trust comes from the catalog/upstream registry, not per-manifest
+      // signatures (which were removed with sourceweft-api).
+      verified: parsed.data.verified,
     });
     if (!install) {
       throw new McpError(500, "MCP_INSTALL_FAILED", "Failed to install MCP");

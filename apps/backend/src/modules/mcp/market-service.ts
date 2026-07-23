@@ -1,61 +1,35 @@
-import {
-  MarketClient,
-  MarketClientError,
-  type ListMarketMcpRequest,
-} from "@sourceweft/market-sdk";
+import type { ListMarketMcpRequest } from "@sourceweft/market-contracts";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
+import { listMcpCategories as readMcpCategories } from "../market/read-categories";
+import {
+  findMcp,
+  findMcpVersion,
+  listMcp as readListMcp,
+} from "../market/read-repository";
 import { McpError } from "./errors";
-
-function marketError(error: unknown) {
-  if (error instanceof MarketClientError) {
-    return new McpError(
-      error.status,
-      error.code,
-      error.message,
-      error.details,
-    );
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return new McpError(
-    503,
-    "MARKET_API_UNAVAILABLE",
-    `Market API is unavailable: ${message}`,
-  );
-}
 
 function emptyMcpList() {
   return { items: [], nextCursor: null };
 }
 
+/**
+ * Reads the MCP catalog directly from the in-process market module (the
+ * publisher was folded into this backend when sourceweft-api was retired), so
+ * there is no longer an HTTP hop or a separate market service to reach.
+ */
 export class MarketService {
-  private readonly client = new MarketClient({
-    baseUrl: config.market.baseUrl,
-    getToken: () => config.market.serviceToken || undefined,
-  });
-
   isEnabled() {
-    return config.market.mode !== "disabled";
-  }
-
-  isApiBacked() {
-    return (
-      config.market.mode === "official_api" ||
-      config.market.mode === "private_api"
-    );
+    return config.market.enabled;
   }
 
   async listMcp(input: ListMarketMcpRequest = {}) {
-    if (!this.isApiBacked()) {
+    if (!this.isEnabled()) {
       return emptyMcpList();
     }
     try {
-      // Forward the full filter set (transport/official/verified/runtime/cursor)
-      // rather than dropping facets the API and contract support.
-      return await this.client.listMcp(input);
+      return await readListMcp(input);
     } catch (error) {
-      // An outage must be observable, not silently indistinguishable from an
-      // empty catalog. We still degrade to empty so the dashboard renders.
       logger.warn("Market listMcp failed; returning empty catalog", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -64,11 +38,11 @@ export class MarketService {
   }
 
   async listMcpCategories() {
-    if (!this.isApiBacked()) {
+    if (!this.isEnabled()) {
       return { items: [] };
     }
     try {
-      return await this.client.listMcpCategories();
+      return await readMcpCategories();
     } catch (error) {
       logger.warn("Market listMcpCategories failed; returning empty list", {
         error: error instanceof Error ? error.message : String(error),
@@ -78,25 +52,33 @@ export class MarketService {
   }
 
   async getMcp(identifier: string) {
-    if (!this.isApiBacked()) {
-      throw new McpError(404, "MARKET_DISABLED", "Market API is not enabled");
+    if (!this.isEnabled()) {
+      throw new McpError(404, "MARKET_DISABLED", "MCP market is not enabled");
     }
-    try {
-      return await this.client.getMcp(identifier);
-    } catch (error) {
-      throw marketError(error);
+    const record = await findMcp(identifier);
+    if (!record) {
+      throw new McpError(404, "MCP_ITEM_NOT_FOUND", "MCP item not found");
     }
+    return { item: record.item, versions: record.versions };
   }
 
   async getMcpManifest(identifier: string, input: { version?: string } = {}) {
-    if (!this.isApiBacked()) {
-      throw new McpError(404, "MARKET_DISABLED", "Market API is not enabled");
+    if (!this.isEnabled()) {
+      throw new McpError(404, "MARKET_DISABLED", "MCP market is not enabled");
     }
-    try {
-      return await this.client.getMcpManifest(identifier, input);
-    } catch (error) {
-      throw marketError(error);
+    const found = await findMcpVersion(identifier, input.version);
+    if (!found) {
+      throw new McpError(
+        404,
+        "MCP_MANIFEST_NOT_FOUND",
+        "MCP manifest not found",
+      );
     }
+    return {
+      item: found.record.item,
+      version: found.itemVersion,
+      manifest: found.itemVersion.manifestJson,
+    };
   }
 }
 

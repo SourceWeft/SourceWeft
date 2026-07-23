@@ -91,12 +91,6 @@ const documentParseStrategies = new Set([
 ]);
 
 const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
-const marketModes = new Set([
-  "official_api",
-  "private_api",
-  "local_only",
-  "disabled",
-]);
 
 const planFamilies: ReadonlySet<PlanFamily> = new Set([
   "individual_free",
@@ -204,15 +198,6 @@ function parsePdf2MarkdownOutput(value: string | undefined, fallback: string) {
 
   const normalized = value.trim().toLowerCase();
   return pdf2MarkdownOutputs.has(normalized) ? normalized : fallback;
-}
-
-function parseMarketMode(value: string | undefined, fallback: string) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return marketModes.has(normalized) ? normalized : fallback;
 }
 
 function requireEnv(name: string): string {
@@ -579,13 +564,10 @@ export const config = {
     ),
   },
   market: {
-    mode: parseMarketMode(process.env.MARKET_MODE, "disabled"),
-    baseUrl: stripTrailingSlash(
-      process.env.MARKET_API_BASE_URL || "http://localhost:3011",
-    ),
-    serviceToken: process.env.MARKET_SERVICE_TOKEN?.trim() || "",
-    trustedPublicKeys: parseCsv(process.env.MARKET_TRUSTED_PUBLIC_KEYS),
-    allowUnsigned: parseBoolean(process.env.MARKET_ALLOW_UNSIGNED, false),
+    // The MCP catalog now lives in-process (sourceweft-api retired). This flag
+    // just feature-gates the market; there is no external service, signing, or
+    // trust-key configuration anymore.
+    enabled: parseBoolean(process.env.MARKET_ENABLED, true),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
@@ -745,19 +727,3 @@ export const config = {
     alertMinLevel: parseAlertLevel(process.env.OPS_ALERT_MIN_LEVEL, "warn"),
   },
 };
-
-// Fail closed: an API-backed market must have at least one trusted signing key,
-// otherwise manifest signatures cannot be verified and trust badges would be
-// self-asserted by the catalog. Operators can opt out explicitly for local/dev.
-if (
-  (config.market.mode === "official_api" ||
-    config.market.mode === "private_api") &&
-  config.market.trustedPublicKeys.length === 0 &&
-  !config.market.allowUnsigned
-) {
-  throw new Error(
-    "MARKET_MODE is API-backed but MARKET_TRUSTED_PUBLIC_KEYS is empty. " +
-      "Configure trusted signing keys, or set MARKET_ALLOW_UNSIGNED=true to " +
-      "explicitly accept unsigned manifests (not recommended in production).",
-  );
-}

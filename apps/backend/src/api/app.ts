@@ -20,6 +20,7 @@ import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
+import { registerMarketRoutes } from "./routes/market";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerUserSettingsRoutes } from "./routes/user-settings";
 import { registerWorkspaceRoutes } from "./routes/workspace";
@@ -100,6 +101,7 @@ export function createApp() {
   registerUserSettingsRoutes(app);
   registerBillingRoutes(app);
   registerContentRoutes(app);
+  registerMarketRoutes(app);
   registerJobRoutes(app);
   registerTeamLlmObservabilityRoutes(app);
 
