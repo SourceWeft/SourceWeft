@@ -35,7 +35,7 @@ test("market module does not import sibling backend modules", () => {
     let match: RegExpExecArray | null;
     while ((match = importRe.exec(source)) !== null) {
       const spec = match[1];
-      if (!spec.startsWith(".")) {
+      if (!spec || !spec.startsWith(".")) {
         continue; // packages + node builtins are fine
       }
       const resolved = path.resolve(path.dirname(file), spec);
