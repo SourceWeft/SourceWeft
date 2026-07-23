@@ -85,6 +85,13 @@
       "when": 1784668301234,
       "tag": "0011_volatile_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784802777897,
+      "tag": "0012_smiling_iron_monger",
+      "breakpoints": true
     }
   ]
 }

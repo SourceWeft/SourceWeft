@@ -4449,3 +4449,146 @@ export const jobsAudit = pgTable(
     ),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Market (publisher side) — the MCP/skill catalog. Migrated from the retired
+// sourceweft-api service so the catalog lives in the main app database. We are a
+// downstream discovery catalog: rows point to public GitHub repos, sourced by
+// federating upstream registries (origin=upstream) or direct submission
+// (origin=submitted). No per-manifest signing (registry is the trust anchor).
+// ---------------------------------------------------------------------------
+
+type MarketItemKind = "skill" | "mcp";
+type MarketItemStatus =
+  | "draft"
+  | "reviewing"
+  | "published"
+  | "unlisted"
+  | "archived";
+type MarketItemVisibility = "public" | "private" | "internal";
+type MarketItemVersionOrigin = "upstream" | "submitted";
+
+export const marketItems = pgTable(
+  "market_items",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").$type<MarketItemKind>().notNull(),
+    identifier: text("identifier").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    description: text("description").notNull().default(""),
+    status: text("status").$type<MarketItemStatus>().notNull(),
+    visibility: text("visibility").$type<MarketItemVisibility>().notNull(),
+    owner: text("owner"),
+    sourceUrl: text("source_url"),
+    repoUrl: text("repo_url"),
+    metadataJson: jsonb("metadata_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("market_items_identifier_uq").on(table.identifier),
+    index("market_items_kind_status_visibility_idx").on(
+      table.kind,
+      table.status,
+      table.visibility,
+    ),
+    check("market_items_kind_check", sql`${table.kind} in ('skill', 'mcp')`),
+    check(
+      "market_items_status_check",
+      sql`${table.status} in ('draft', 'reviewing', 'published', 'unlisted', 'archived')`,
+    ),
+    check(
+      "market_items_visibility_check",
+      sql`${table.visibility} in ('public', 'private', 'internal')`,
+    ),
+  ],
+);
+
+export const marketItemVersions = pgTable(
+  "market_item_versions",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => marketItems.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    status: text("status").$type<MarketItemStatus>().notNull(),
+    // How this version entered the catalog, and which upstream/source produced
+    // it (e.g. "registry.modelcontextprotocol.io", "github", "submission").
+    origin: text("origin")
+      .$type<MarketItemVersionOrigin>()
+      .notNull()
+      .default("submitted"),
+    source: text("source"),
+    manifestJson: jsonb("manifest_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    readmeMd: text("readme_md"),
+    packageObjectKey: text("package_object_key"),
+    packageSha256: text("package_sha256"),
+    provenanceJson: jsonb("provenance_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("market_item_versions_item_version_uq").on(
+      table.itemId,
+      table.version,
+    ),
+    index("market_item_versions_item_status_idx").on(
+      table.itemId,
+      table.status,
+    ),
+    check(
+      "market_item_versions_status_check",
+      sql`${table.status} in ('draft', 'reviewing', 'published', 'unlisted', 'archived')`,
+    ),
+    check(
+      "market_item_versions_origin_check",
+      sql`${table.origin} in ('upstream', 'submitted')`,
+    ),
+  ],
+);
+
+export const marketCategories = pgTable("market_categories", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+export const marketItemCategories = pgTable(
+  "market_item_categories",
+  {
+    itemId: text("item_id")
+      .notNull()
+      .references(() => marketItems.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => marketCategories.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.itemId, table.categoryId],
+      name: "market_item_categories_pk",
+    }),
+  ],
+);
