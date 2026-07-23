@@ -10,6 +10,12 @@
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
+  "dependencies": {
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/model-gateway": "workspace:*",
+    "langchain": "^1.5.0",
+    "zod": "^4.3.6"
+  },
   "devDependencies": {
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/capability-runtime": "workspace:*",

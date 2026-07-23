@@ -70,11 +70,12 @@ only when the request or a concrete failure requires them:
    `scripts/validate_pptx.py`, convert the PPTX to PDF with LibreOffice, render
    images with `pdftoppm`, create the preview image contract from the first
    rendered slide, then print explicit stage markers, `QA_IMAGE_COUNT`,
-   `PREVIEW_IMAGE_PATH`, the discovered slide image paths, and a visible visual
-   QA summary.
-6. Use the actual generated PPTX path for QA and publishing.
-7. Fix concrete issues only. If QA passes, publish without an extra repair loop.
-8. Publish with the configured artifact publisher using the actual generated
+   `PREVIEW_IMAGE_PATH`, and the discovered slide image paths.
+6. Call `review_deck_visuals` with the slide image paths from final QA; repair
+   severe verdicts once as described in the QA section.
+7. Use the actual generated PPTX path for QA and publishing.
+8. Fix concrete issues only. If QA passes, publish without an extra repair loop.
+9. Publish with the configured artifact publisher using the actual generated
    PPTX path and the `PREVIEW_IMAGE_PATH` from final QA.
 
 Build a coherent narrative with one point per slide. Prefer process diagrams,
@@ -90,8 +91,8 @@ title-and-bullet pages.
 4. Preserve useful formatting, images, and layout logic unless the user asks for
    a redesign.
 5. Make the smallest reliable edit that satisfies the request.
-6. Run content QA, File QA, and visual QA on the final file. For template-derived
-   decks, pass `--original` to `validate_pptx.py`.
+6. Run content QA, File QA, and `review_deck_visuals` on the final file. For
+   template-derived decks, pass `--original` to `validate_pptx.py`.
 7. Publish only the final edited PPTX.
 
 For source-grounded decks, use the available source tools first and keep factual
@@ -179,32 +180,33 @@ PREVIEW_SOURCE_PATH="$(head -n 1 "$QA_DIR/slide-images.txt")"
 test -s "$PREVIEW_SOURCE_PATH"
 cp "$PREVIEW_SOURCE_PATH" "$QA_DIR/preview.jpg"
 echo "PREVIEW_IMAGE_PATH=$QA_DIR/preview.jpg"
-
-echo "===VISUAL_QA_SUMMARY==="
-echo "Inspect the rendered slide JPG files listed above for text overflow/clipping first, then overlap, gaps/margins/alignment, low contrast, missing promised visuals, AI-filler stripes/underlines, and cream-default backgrounds before publishing."
 ```
+
+After the QA execute completes, call `review_deck_visuals` with the image
+paths from `$QA_DIR/slide-images.txt`, in deck order. This judges the rendered
+slides with the workspace's vision model against the deck rubric (overflow,
+overlap, low contrast, decorative stripes, cream defaults, bullet-only pages,
+missing promised visuals, repeated layouts):
+
+- Severe issues: fix the deck builder, then rerun generation + QA once.
+- Minor issues and deck findings: fix them if a repair round is happening
+  anyway; otherwise note them in the publish `qa` summary.
+- `{skipped, reason}`: visual QA is unavailable; record the reason in the
+  publish `qa` summary and proceed.
 
 The slides preview image is the first slide image rendered from the final PPTX
 during final QA. Always provide the printed `PREVIEW_IMAGE_PATH` to the
 configured artifact publisher; do not use a preview image from an earlier render
 or an unverified intermediate PPTX.
 
-Inspect the rendered slide images or a contact sheet in this order:
-
-1. Text overflow or clipping at box/slide edges
-2. Overlapping or colliding elements
-3. Gaps, margins, and alignment
-4. Low contrast
-5. Missing promised visuals
-6. AI filler: title underlines, decorative stripes, cream-as-default backgrounds,
-   repeated title-and-bullet pages
-
 Do not assume a fixed filename such as `slide-01.jpg`; use the files returned by
 `find`. The QA log must make the conversion visible with `===CONTENT_QA===`,
 `===FILE_QA===`, `===PPTX_TO_PDF===`, `===PDF_TO_JPG===`, `QA_IMAGE_COUNT=<n>`,
-`PREVIEW_IMAGE_PATH=<path>`, and `===VISUAL_QA_SUMMARY===`; do not publish when
-File QA fails, `QA_IMAGE_COUNT` is zero, `PREVIEW_IMAGE_PATH` is missing, or the
-visual QA summary is missing.
+and `PREVIEW_IMAGE_PATH=<path>`. Do not publish when File QA fails,
+`QA_IMAGE_COUNT` is zero, `PREVIEW_IMAGE_PATH` is missing, or
+`review_deck_visuals` reported severe issues that have not been repaired. A
+`skipped` visual QA does not block publishing, but its reason must appear in
+the publish `qa` summary.
 
 Do not run `file` against slide JPGs on the happy path. If a concrete debugging
 failure needs MIME diagnostics, make that optional and non-blocking, and use the
@@ -242,9 +244,10 @@ rerun the deck program with the required stdout protocol instead of guessing.
 - File QA failure: fix chart options or package structure in the generator, then
   regenerate; do not hand-edit packed XML to silence validate.
 - QA failure: patch only affected slides/layouts, then rerun QA once.
-- If visual QA finds overflow, overlap, odd wrapping, decorative stripes through
-  text, or clipped content, fix the deck builder first and rerender the affected
-  slides or the full deck before publishing.
+- If `review_deck_visuals` returns severe verdicts (overflow, overlap, clipped
+  or unreadable content, stripes through text), fix the deck builder first and
+  rerender the affected slides or the full deck before publishing. One repair
+  round, then publish with remaining findings recorded in the `qa` summary.
 - Optional inspection tool missing: record a warning; do not probe repeatedly.
 - Do not redesign slides while repairing syntax or sandbox path problems.
 

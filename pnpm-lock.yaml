@@ -572,6 +572,9 @@ importers:
       '@sourceweft/builtin-retrieval':
         specifier: workspace:*
         version: link:../builtin-retrieval
+      '@sourceweft/builtin-skill-ppt-deck':
+        specifier: workspace:*
+        version: link:../builtin-skill-ppt-deck
       '@sourceweft/builtin-tool-generate-image':
         specifier: workspace:*
         version: link:../builtin-tool-generate-image
@@ -746,6 +749,19 @@ importers:
         version: 5.9.2
 
   packages/builtin-skill-ppt-deck:
+    dependencies:
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sourceweft/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
+      langchain:
+        specifier: ^1.5.0
+        version: 1.5.0(@langchain/core@1.2.3(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.1)(zod-to-json-schema@3.25.2(zod@4.3.6))
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@sourceweft/capability-contracts':
         specifier: workspace:*
@@ -16104,7 +16120,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.7(@opentelemetry/api@1.9.0)(@types/node@22.18.12)(@vitest/coverage-v8@4.1.7)(jsdom@26.1.0)(msw@2.12.14(@types/node@22.18.12)(typescript@5.9.2))(vite@8.0.2(@types/node@22.18.12)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.7(@opentelemetry/api@1.9.0)(@types/node@22.18.12)(@vitest/coverage-v8@4.1.7)(jsdom@26.1.0)(msw@2.12.14(@types/node@22.18.12)(typescript@5.9.2))(vite@8.0.2(@types/node@22.18.12)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))
 
   '@vitest/expect@4.1.7':
     dependencies:
@@ -18597,7 +18613,7 @@ snapshots:
       jsonwebtoken: 9.0.3
       load-esm: 1.0.3
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.15.0)
+      retry-axios: 2.6.0(axios@1.15.0(debug@4.4.3))
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -21137,7 +21153,7 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
-  retry-axios@2.6.0(axios@1.15.0):
+  retry-axios@2.6.0(axios@1.15.0(debug@4.4.3)):
     dependencies:
       axios: 1.15.0(debug@4.4.3)
 

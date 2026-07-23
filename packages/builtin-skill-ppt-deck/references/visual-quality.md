@@ -4,6 +4,10 @@ Use this when a from-scratch deck still looks weak, when doing a visual
 redesign, or when you need a stricter review before publishing. This is a QA
 scorecard, not a replacement for the Design Brief and Storyboard in `SKILL.md`.
 
+The enforced defect standard lives in the `review_deck_visuals` rubric; that
+tool's verdicts decide what blocks publishing. This file is design guidance for
+authoring and repair — use it to decide *how* to fix what the verdicts flag.
+
 ## Scorecard
 
 Score each item from 0-2. A polished deck should usually score 12+ out of 16.

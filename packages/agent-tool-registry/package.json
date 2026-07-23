@@ -15,6 +15,7 @@
   "dependencies": {
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
+    "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-publish-artifact": "workspace:*",

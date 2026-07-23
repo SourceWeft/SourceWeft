@@ -73,8 +73,10 @@
         "tools": [
           "prepare_sandbox_workspace",
           "execute",
+          "review_deck_visuals",
           "publish_artifact"
         ],
+        "permissionOverrides": { "review_deck_visuals": "allow" },
         "output": {
           "kind": "artifact",
           "artifactType": "slides",

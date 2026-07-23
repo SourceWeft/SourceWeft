@@ -37,6 +37,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-notion"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
+  "@sourceweft/builtin-skill-ppt-deck": () =>
+    import("@sourceweft/builtin-skill-ppt-deck"),
   "@sourceweft/builtin-tool-generate-image": () =>
     import("@sourceweft/builtin-tool-generate-image"),
   "@sourceweft/builtin-tool-publish-artifact": () =>

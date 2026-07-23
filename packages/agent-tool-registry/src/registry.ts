@@ -25,6 +25,7 @@ import { retrievalAgentToolDefs } from "@sourceweft/builtin-retrieval";
 import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-image";
 import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact";
 import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation";
+import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck";
 export const AGENT_TOOLS = [
   ...filesystemAgentToolDefs,
   ...generateImageAgentToolDefs,
@@ -32,6 +33,7 @@ export const AGENT_TOOLS = [
   ...webAgentToolDefs,
   ...publishArtifactAgentToolDefs,
   ...generateVideoPresentationAgentToolDefs,
+  ...pptDeckAgentToolDefs,
   ...sandboxAgentToolDefs,
 ] as const;
 

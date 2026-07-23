@@ -40,7 +40,7 @@ export type AgentToolCapability =
 
 export type AgentToolRequirements = {
   provider?: "web";
-  modelKind?: "image" | "tts";
+  modelKind?: "image" | "tts" | "vision";
 };
 
 export type AgentToolActivation = {
