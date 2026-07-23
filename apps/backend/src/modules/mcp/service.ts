@@ -55,7 +55,7 @@ function encryptionSecret() {
   return config.modelGatewayEncryptionSecret;
 }
 
-function assertWebTransport(manifest: MarketMcpManifest) {
+async function assertWebTransport(manifest: MarketMcpManifest) {
   if (manifest.transport === "stdio") {
     return;
   }
@@ -66,7 +66,7 @@ function assertWebTransport(manifest: MarketMcpManifest) {
       "HTTP/SSE MCP manifest must include endpointUrl",
     );
   }
-  assertSafeMcpEndpoint(manifest.endpointUrl, {
+  await assertSafeMcpEndpoint(manifest.endpointUrl, {
     allowLocalhost: isDevelopment(),
   });
 }
@@ -399,12 +399,11 @@ export class McpService {
     const response = await marketService.getMcpManifest(input.identifier, {
       version: input.version,
     });
-    const parsed = marketMcpManifestSchema.safeParse({
-      ...response.manifest,
-      ...(input.endpointUrlOverride
-        ? { endpointUrl: input.endpointUrlOverride }
-        : {}),
-    });
+    // Verify the signature over the ORIGINAL, unmodified manifest. Applying an
+    // endpoint override before this would change canonicalJson(manifest) and
+    // break verification, so the override is treated as local install config
+    // that lives outside the signed set and is applied afterwards.
+    const parsed = marketMcpManifestSchema.safeParse(response.manifest);
     if (!parsed.success) {
       throw new McpError(
         422,
@@ -414,19 +413,39 @@ export class McpService {
       );
     }
 
-    assertWebTransport(parsed.data);
-    verifyMarketManifestSignature({
+    const verification = verifyMarketManifestSignature({
       manifest: parsed.data,
       signature: response.signature,
       signingKeyId: response.signingKeyId,
       trustedPublicKeys: config.market.trustedPublicKeys,
+      allowUnsigned: config.market.allowUnsigned,
     });
+
+    let manifestForInstall = parsed.data;
+    if (input.endpointUrlOverride) {
+      const overridden = marketMcpManifestSchema.safeParse({
+        ...parsed.data,
+        endpointUrl: input.endpointUrlOverride,
+      });
+      if (!overridden.success) {
+        throw new McpError(
+          422,
+          "MCP_MARKET_MANIFEST_INVALID",
+          "Market MCP manifest is invalid",
+          overridden.error.flatten() as Record<string, unknown>,
+        );
+      }
+      manifestForInstall = overridden.data;
+    }
+
+    await assertWebTransport(manifestForInstall);
 
     const install = await createOrUpdateMarketMcpInstall({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       userId: input.userId,
-      manifest: parsed.data,
+      manifest: manifestForInstall,
+      verified: verification.verified,
       signature: response.signature,
       signingKeyId: response.signingKeyId,
     });
@@ -583,7 +602,9 @@ export class McpService {
     if (!install.endpointUrl) {
       throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
     }
-    assertSafeMcpEndpoint(install.endpointUrl, { allowLocalhost: isDevelopment() });
+    await assertSafeMcpEndpoint(install.endpointUrl, {
+      allowLocalhost: isDevelopment(),
+    });
 
     const credential = await findWorkspaceMcpCredential({
       teamId: workspace.organizationId,
@@ -681,6 +702,19 @@ export class McpService {
         installId: install.id,
       });
       const headers = credential ? headersFromCredential(credential) : {};
+      // Re-validate the stored endpoint at execution time. The install-time
+      // check is not enough on its own: a hostname can be repointed at an
+      // internal/metadata address after install (DNS rebinding). Skip — rather
+      // than connect to — any install whose endpoint now resolves unsafely.
+      if (install.endpointUrl) {
+        try {
+          await assertSafeMcpEndpoint(install.endpointUrl, {
+            allowLocalhost: isDevelopment(),
+          });
+        } catch {
+          continue;
+        }
+      }
       const client = createLangChainMcpClient({ install, headers });
       clients.push(client);
       const installTools = await client.getTools();

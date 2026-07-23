@@ -585,6 +585,7 @@ export const config = {
     ),
     serviceToken: process.env.MARKET_SERVICE_TOKEN?.trim() || "",
     trustedPublicKeys: parseCsv(process.env.MARKET_TRUSTED_PUBLIC_KEYS),
+    allowUnsigned: parseBoolean(process.env.MARKET_ALLOW_UNSIGNED, false),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
@@ -744,3 +745,19 @@ export const config = {
     alertMinLevel: parseAlertLevel(process.env.OPS_ALERT_MIN_LEVEL, "warn"),
   },
 };
+
+// Fail closed: an API-backed market must have at least one trusted signing key,
+// otherwise manifest signatures cannot be verified and trust badges would be
+// self-asserted by the catalog. Operators can opt out explicitly for local/dev.
+if (
+  (config.market.mode === "official_api" ||
+    config.market.mode === "private_api") &&
+  config.market.trustedPublicKeys.length === 0 &&
+  !config.market.allowUnsigned
+) {
+  throw new Error(
+    "MARKET_MODE is API-backed but MARKET_TRUSTED_PUBLIC_KEYS is empty. " +
+      "Configure trusted signing keys, or set MARKET_ALLOW_UNSIGNED=true to " +
+      "explicitly accept unsigned manifests (not recommended in production).",
+  );
+}

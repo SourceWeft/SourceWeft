@@ -310,6 +310,11 @@ export async function createOrUpdateMarketMcpInstall(input: {
   workspaceId: string;
   userId: string;
   manifest: MarketMcpManifest;
+  /**
+   * Trust badge derived from signature verification — NOT the manifest's own
+   * self-asserted `verified` flag, which is attacker/catalog-controlled.
+   */
+  verified: boolean;
   signature?: string | null;
   signingKeyId?: string | null;
 }) {
@@ -336,7 +341,7 @@ export async function createOrUpdateMarketMcpInstall(input: {
             transport: input.manifest.transport,
             endpointUrl,
             official: input.manifest.official,
-            verified: input.manifest.verified,
+            verified: input.verified,
             desktopOnly: input.manifest.desktopOnly,
             webExecutable: input.manifest.webExecutable,
             authType: input.manifest.auth.type,
@@ -370,7 +375,7 @@ export async function createOrUpdateMarketMcpInstall(input: {
             endpointUrl,
             status: "active",
             official: input.manifest.official,
-            verified: input.manifest.verified,
+            verified: input.verified,
             desktopOnly: input.manifest.desktopOnly,
             webExecutable: input.manifest.webExecutable,
             authType: input.manifest.auth.type,

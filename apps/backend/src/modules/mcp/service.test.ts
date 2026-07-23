@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../shared/config", () => ({
   config: {
-    market: { trustedPublicKeys: [] },
+    market: { trustedPublicKeys: [], allowUnsigned: true },
     modelGatewayEncryptionSecret: "test-encryption-secret",
   },
 }));
@@ -44,6 +44,16 @@ vi.mock("../../shared/secrets", () => ({
   decryptSecret: mocks.decryptSecret,
   encryptSecret: mocks.encryptSecret,
 }));
+
+// Keep the real security helpers, but stub the endpoint SSRF check so tests
+// don't perform live DNS resolution against fixture hostnames.
+vi.mock("./security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./security")>();
+  return {
+    ...actual,
+    assertSafeMcpEndpoint: vi.fn(async (value: string) => value),
+  };
+});
 
 vi.mock("./langchain-client", () => ({
   createLangChainMcpClient: mocks.createLangChainMcpClient,
