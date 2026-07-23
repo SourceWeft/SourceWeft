@@ -133,6 +133,37 @@ export function stripLangChainMcpToolPrefix(input: {
     : input.toolName;
 }
 
+/**
+ * Resolve the stored tool record for a LangChain tool name. LangChain names a
+ * tool `mcp__<serverKey>__<rawServerToolName>`; the reliable join key is the raw
+ * server tool name, which we also persist as `serverToolName`. Matching on the
+ * lossy `normalizedToolName` (lowercased/slugified) fails for camelCase or
+ * otherwise non-slug-safe names, so it is only a fallback for manifest-sourced
+ * tools. Using one helper everywhere keeps discovery and approval in agreement.
+ */
+function findInstallToolByLangChainName(
+  install: WorkspaceMcpInstallRecord,
+  langChainToolName: string,
+) {
+  const rawName = stripLangChainMcpToolPrefix({
+    serverKey: install.marketIdentifier ?? install.id,
+    toolName: langChainToolName,
+  });
+  return (
+    install.tools.find((candidate) => candidate.serverToolName === rawName) ??
+    install.tools.find(
+      (candidate) => candidate.normalizedToolName === langChainToolName,
+    ) ??
+    install.tools.find(
+      (candidate) =>
+        normalizedMcpToolName({
+          serverSlug: install.marketIdentifier ?? install.id,
+          toolName: candidate.serverToolName,
+        }) === langChainToolName,
+    )
+  );
+}
+
 function buildMcpRequestPreview(input: {
   install: WorkspaceMcpInstallRecord;
   tool: WorkspaceMcpToolRecord;
@@ -260,6 +291,35 @@ function normalizeMcpOutputForAudit(value: unknown): Record<string, unknown> {
     return { items: value.slice(0, 50) };
   }
   return toObject(value);
+}
+
+// A hostile or buggy MCP server can return multi-MB output. The audit copy is
+// already truncated; this caps the value handed back to the model so a single
+// tool result can't blow up the context window (and cost) mid-turn.
+const MCP_MODEL_OUTPUT_CHAR_LIMIT =
+  Number(process.env.MCP_MAX_TOOL_OUTPUT_CHARS) || 100_000;
+
+function capMcpModelText(value: string) {
+  return value.length > MCP_MODEL_OUTPUT_CHAR_LIMIT
+    ? `${value.slice(0, MCP_MODEL_OUTPUT_CHAR_LIMIT).trimEnd()}\n\n[MCP tool output truncated: ${value.length} characters]`
+    : value;
+}
+
+function capMcpModelOutput(value: unknown): unknown {
+  if (typeof value === "string") {
+    return capMcpModelText(value);
+  }
+  // Preserve the shape of standard content-block arrays, capping only big text.
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item &&
+      typeof item === "object" &&
+      typeof (item as { text?: unknown }).text === "string"
+        ? { ...item, text: capMcpModelText((item as { text: string }).text) }
+        : item,
+    );
+  }
+  return value;
 }
 
 export class McpService {
@@ -620,6 +680,7 @@ export class McpService {
         workspaceId: workspace.id,
         installId: install.id,
         serverSlug: install.marketIdentifier ?? install.id,
+        preserveExistingMetadata: true,
         tools: tools.map((tool) => ({
           name: stripLangChainMcpToolPrefix({
             serverKey: install.marketIdentifier ?? install.id,
@@ -715,18 +776,25 @@ export class McpService {
           continue;
         }
       }
+      // Each install is isolated: one server being unreachable (getTools throws,
+      // since onConnectionError is "throw") must neither leak its transport nor
+      // abort the whole turn. Close the client and move on.
       const client = createLangChainMcpClient({ install, headers });
+      let installTools: DynamicStructuredTool[];
+      try {
+        installTools = await client.getTools();
+      } catch {
+        await client.close().catch(() => undefined);
+        continue;
+      }
       clients.push(client);
-      const installTools = await client.getTools();
       for (const tool of installTools) {
-        const knownTool = install.tools.find(
-          (candidate) =>
-            candidate.normalizedToolName === tool.name ||
-            normalizedMcpToolName({
-              serverSlug: install.marketIdentifier ?? install.id,
-              toolName: candidate.serverToolName,
-            }) === tool.name,
-        );
+        const knownTool = findInstallToolByLangChainName(install, tool.name);
+        // A tool disabled via updateInstall/setWorkspaceMcpToolsEnabled must not
+        // be bound, regardless of whether an explicit toolIds filter is present.
+        if (knownTool && !knownTool.enabled) {
+          continue;
+        }
         if (input.toolIds?.length && (!knownTool || !input.toolIds.includes(knownTool.id))) {
           continue;
         }
@@ -876,7 +944,7 @@ export class McpService {
               executedBy: input.userId,
             }),
           ]);
-          return output;
+          return capMcpModelOutput(output);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const latencyMs = Date.now() - startedAt;
@@ -923,12 +991,19 @@ export class McpService {
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
-    const install = installs.find((candidate) =>
-      candidate.tools.some((tool) => tool.normalizedToolName === input.toolName),
-    );
-    const tool = install?.tools.find(
-      (candidate) => candidate.normalizedToolName === input.toolName,
-    );
+    // input.toolName is the LangChain tool name from the interrupt; resolve it
+    // with the same matcher discovery uses so camelCase/non-slug-safe tools
+    // aren't left un-approvable (which would hard-fail the turn).
+    let install: (typeof installs)[number] | undefined;
+    let tool: WorkspaceMcpToolRecord | undefined;
+    for (const candidate of installs) {
+      const match = findInstallToolByLangChainName(candidate, input.toolName);
+      if (match) {
+        install = candidate;
+        tool = match;
+        break;
+      }
+    }
     if (!install || !tool) {
       return null;
     }

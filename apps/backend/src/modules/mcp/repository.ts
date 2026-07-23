@@ -423,6 +423,14 @@ export async function upsertWorkspaceMcpTools(input: {
   installId: string;
   serverSlug: string;
   tools: MarketMcpToolManifest[];
+  /**
+   * When true, an existing tool row keeps its richer metadata (title,
+   * inputSchema, outputSchema, annotations, risk) instead of being overwritten.
+   * Used by connection tests, which only confirm a tool still exists and have
+   * no schema/risk of their own — overwriting would downgrade signed-manifest
+   * tools to risk:"unknown" with an empty schema.
+   */
+  preserveExistingMetadata?: boolean;
 }) {
   for (const tool of input.tools) {
     const normalizedToolName = normalizedMcpToolName({
@@ -430,6 +438,24 @@ export async function upsertWorkspaceMcpTools(input: {
       toolName: tool.name,
     });
     const lastDiscoveredHash = hashJson(tool);
+    const conflictSet = input.preserveExistingMetadata
+      ? {
+          normalizedToolName,
+          description: tool.description ?? null,
+          lastDiscoveredHash,
+          updatedAt: new Date(),
+        }
+      : {
+          normalizedToolName,
+          title: tool.title ?? null,
+          description: tool.description ?? null,
+          inputSchema: tool.inputSchema ?? {},
+          outputSchema: tool.outputSchema ?? null,
+          annotations: tool.annotations ?? {},
+          risk: tool.risk ?? "unknown",
+          lastDiscoveredHash,
+          updatedAt: new Date(),
+        };
     await db
       .insert(workspaceMcpTools)
       .values({
@@ -450,17 +476,7 @@ export async function upsertWorkspaceMcpTools(input: {
       })
       .onConflictDoUpdate({
         target: [workspaceMcpTools.installId, workspaceMcpTools.serverToolName],
-        set: {
-          normalizedToolName,
-          title: tool.title ?? null,
-          description: tool.description ?? null,
-          inputSchema: tool.inputSchema ?? {},
-          outputSchema: tool.outputSchema ?? null,
-          annotations: tool.annotations ?? {},
-          risk: tool.risk ?? "unknown",
-          lastDiscoveredHash,
-          updatedAt: new Date(),
-        },
+        set: conflictSet,
       });
   }
 }
@@ -630,21 +646,24 @@ export async function createMcpActionRun(input: {
   requestPreview: string;
   idempotencyKey: string;
 }) {
+  const idempotencyWhere = and(
+    eq(mcpActionRuns.workspaceId, input.workspaceId),
+    eq(mcpActionRuns.installId, input.installId),
+    eq(mcpActionRuns.idempotencyKey, input.idempotencyKey),
+  );
+
   const [existing] = await db
     .select()
     .from(mcpActionRuns)
-    .where(
-      and(
-        eq(mcpActionRuns.workspaceId, input.workspaceId),
-        eq(mcpActionRuns.installId, input.installId),
-        eq(mcpActionRuns.idempotencyKey, input.idempotencyKey),
-      ),
-    )
+    .where(idempotencyWhere)
     .limit(1);
   if (existing) {
     return mapActionRun(existing);
   }
 
+  // Insert defensively: a concurrent call with the same idempotency key would
+  // otherwise pass the SELECT above and then hit the unique constraint with a
+  // raw DB error. onConflictDoNothing + re-select returns the winner's row.
   const [row] = await db
     .insert(mcpActionRuns)
     .values({
@@ -661,11 +680,27 @@ export async function createMcpActionRun(input: {
       requestPreview: input.requestPreview,
       idempotencyKey: input.idempotencyKey,
     })
+    .onConflictDoNothing({
+      target: [
+        mcpActionRuns.workspaceId,
+        mcpActionRuns.installId,
+        mcpActionRuns.idempotencyKey,
+      ],
+    })
     .returning();
-  if (!row) {
+  if (row) {
+    return mapActionRun(row);
+  }
+
+  const [conflicting] = await db
+    .select()
+    .from(mcpActionRuns)
+    .where(idempotencyWhere)
+    .limit(1);
+  if (!conflicting) {
     throw new Error("Failed to create MCP action run");
   }
-  return mapActionRun(row);
+  return mapActionRun(conflicting);
 }
 
 export async function findMcpActionRun(input: {
