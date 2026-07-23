@@ -50,15 +50,31 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
   };
 }
 
-export async function upsertMcpIngestResult(
-  manifest: MarketMcpManifest,
-  provenanceJson: McpParserReport,
-  options: McpRepositoryIngestOptions,
-) {
+type MarketItemStatus = McpRepositoryIngestOptions["status"];
+type MarketItemVisibility = McpRepositoryIngestOptions["visibility"];
+
+/**
+ * Shared upsert for a market MCP item + version + categories. Both the
+ * submission path (a parsed GitHub repo) and the federation path (an upstream
+ * registry entry) call this; they differ only in origin/source/owner and the
+ * provenance blob.
+ */
+export async function upsertMarketMcp(input: {
+  manifest: MarketMcpManifest;
+  status: MarketItemStatus;
+  visibility: MarketItemVisibility;
+  origin: "upstream" | "submitted";
+  source?: string | null;
+  owner?: string | null;
+  provenanceJson?: Record<string, unknown>;
+}) {
+  const { manifest } = input;
   const itemId = hashId("mcp", manifest.identifier);
   const versionId = hashId("mcpv", `${manifest.identifier}@${manifest.version}`);
   const now = new Date();
-  const publishedAt = options.status === "published" ? now : null;
+  const publishedAt = input.status === "published" ? now : null;
+  const owner = input.owner ?? null;
+  const provenanceJson = input.provenanceJson ?? {};
 
   await db
     .insert(marketItems)
@@ -69,9 +85,9 @@ export async function upsertMcpIngestResult(
       name: manifest.name,
       summary: manifest.summary,
       description: manifest.description ?? manifest.summary,
-      status: options.status,
-      visibility: options.visibility,
-      owner: provenanceJson.github.owner,
+      status: input.status,
+      visibility: input.visibility,
+      owner,
       sourceUrl: manifest.sourceUrl,
       repoUrl: manifest.repoUrl,
       metadataJson: metadataFromManifest(manifest),
@@ -84,9 +100,9 @@ export async function upsertMcpIngestResult(
         name: manifest.name,
         summary: manifest.summary,
         description: manifest.description ?? manifest.summary,
-        status: options.status,
-        visibility: options.visibility,
-        owner: provenanceJson.github.owner,
+        status: input.status,
+        visibility: input.visibility,
+        owner,
         sourceUrl: manifest.sourceUrl,
         repoUrl: manifest.repoUrl,
         metadataJson: metadataFromManifest(manifest),
@@ -101,18 +117,22 @@ export async function upsertMcpIngestResult(
       id: versionId,
       itemId,
       version: manifest.version,
-      status: options.status,
+      status: input.status,
+      origin: input.origin,
+      source: input.source ?? null,
       manifestJson: manifest,
       readmeMd: undefined,
-      provenanceJson: provenanceJson,
+      provenanceJson,
       publishedAt,
     })
     .onConflictDoUpdate({
       target: [marketItemVersions.itemId, marketItemVersions.version],
       set: {
-        status: options.status,
+        status: input.status,
+        origin: input.origin,
+        source: input.source ?? null,
         manifestJson: manifest,
-        provenanceJson: provenanceJson,
+        provenanceJson,
         publishedAt,
       },
     });
@@ -146,5 +166,21 @@ export async function upsertMcpIngestResult(
       });
   }
 
+  return itemId;
+}
+
+export async function upsertMcpIngestResult(
+  manifest: MarketMcpManifest,
+  provenanceJson: McpParserReport,
+  options: McpRepositoryIngestOptions,
+) {
+  await upsertMarketMcp({
+    manifest,
+    status: options.status,
+    visibility: options.visibility,
+    origin: "submitted",
+    owner: provenanceJson.github.owner,
+    provenanceJson,
+  });
   return buildDryRunIngestResult(manifest, provenanceJson, options);
 }
