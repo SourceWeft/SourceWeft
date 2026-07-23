@@ -7,7 +7,7 @@ import {
   parseTrustedMarketPublicKeys,
   verifyMarketManifestSignature,
 } from "./market-signature";
-import { canonicalJson } from "./security";
+import { canonicalJson, hashJson } from "./security";
 
 const manifest: MarketMcpManifest = {
   schemaVersion: 1,
@@ -168,6 +168,90 @@ test("verifyMarketManifestSignature rejects modified manifests", () => {
         trustedPublicKeys: [fixture.publicKeyEntry],
       }),
     "MCP_MARKET_SIGNATURE_INVALID",
+  );
+});
+
+function envelopeFixture(
+  overrides: Partial<Record<string, unknown>> = {},
+  keyId = "sourceweft-test",
+) {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyBase64 = publicKey
+    .export({ format: "der", type: "spki" })
+    .toString("base64");
+  const envelope = {
+    alg: "ed25519",
+    v: 1,
+    identifier: manifest.identifier,
+    version: manifest.version,
+    packageSha256: null,
+    manifestHash: hashJson(manifest),
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    notAfter: null,
+    ...overrides,
+  };
+  const signature = sign(
+    null,
+    Buffer.from(canonicalJson(envelope)),
+    privateKey,
+  ).toString("base64");
+  return {
+    publicKeyEntry: `${keyId}:${publicKeyBase64}`,
+    signingKeyId: keyId,
+    signature,
+    envelope,
+  };
+}
+
+test("verifyMarketManifestSignature verifies a valid signed envelope", () => {
+  const fixture = envelopeFixture();
+
+  const result = verifyMarketManifestSignature({
+    manifest,
+    signature: fixture.signature,
+    signingKeyId: fixture.signingKeyId,
+    trustedPublicKeys: [fixture.publicKeyEntry],
+    envelope: fixture.envelope,
+  });
+
+  assert.equal(result.verified, true);
+  assert.equal(result.signatureVerified, true);
+});
+
+test("verifyMarketManifestSignature rejects an envelope whose manifestHash does not match", () => {
+  // A validly-signed envelope, but bound to a different manifest hash — i.e.
+  // the manifest was swapped after signing.
+  const fixture = envelopeFixture({
+    manifestHash: hashJson({ ...manifest, name: "Evil" }),
+  });
+
+  assertMcpError(
+    () =>
+      verifyMarketManifestSignature({
+        manifest,
+        signature: fixture.signature,
+        signingKeyId: fixture.signingKeyId,
+        trustedPublicKeys: [fixture.publicKeyEntry],
+        envelope: fixture.envelope,
+      }),
+    "MCP_MARKET_SIGNATURE_INVALID",
+  );
+});
+
+test("verifyMarketManifestSignature rejects an expired envelope", () => {
+  const fixture = envelopeFixture({ notAfter: "2020-01-01T00:00:00.000Z" });
+
+  assertMcpError(
+    () =>
+      verifyMarketManifestSignature({
+        manifest,
+        signature: fixture.signature,
+        signingKeyId: fixture.signingKeyId,
+        trustedPublicKeys: [fixture.publicKeyEntry],
+        envelope: fixture.envelope,
+        now: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+    "MCP_MARKET_SIGNATURE_EXPIRED",
   );
 });
 

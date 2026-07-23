@@ -164,6 +164,35 @@ function findInstallToolByLangChainName(
   );
 }
 
+/**
+ * Compare two dotted-numeric version strings. Returns <0 if a<b, >0 if a>b, and
+ * 0 when equal OR when either side isn't cleanly comparable (so non-semver tags
+ * never trigger a false downgrade block).
+ */
+function compareDottedVersions(a: string, b: string): number {
+  const parse = (value: string) => {
+    const core = value.trim().replace(/^v/i, "").split(/[-+]/)[0] ?? "";
+    const parts = core.split(".");
+    if (parts.length === 0 || !parts.every((part) => /^\d+$/.test(part))) {
+      return null;
+    }
+    return parts.map((part) => Number(part));
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) {
+    return 0;
+  }
+  const length = Math.max(pa.length, pb.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (pa[index] ?? 0) - (pb[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+}
+
 function buildMcpRequestPreview(input: {
   install: WorkspaceMcpInstallRecord;
   tool: WorkspaceMcpToolRecord;
@@ -479,7 +508,27 @@ export class McpService {
       signingKeyId: response.signingKeyId,
       trustedPublicKeys: config.market.trustedPublicKeys,
       allowUnsigned: config.market.allowUnsigned,
+      envelope: response.version?.provenanceJson?.marketSignatureEnvelope,
     });
+
+    // Downgrade protection: refuse to replace an installed version with an
+    // older one. Only enforced when both versions are comparable dotted-numeric
+    // strings, to avoid false rejections on non-semver tags.
+    const existingInstall = await findWorkspaceMcpInstallByMarketIdentifier({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      marketIdentifier: parsed.data.identifier,
+    });
+    if (
+      existingInstall?.marketVersion &&
+      compareDottedVersions(parsed.data.version, existingInstall.marketVersion) < 0
+    ) {
+      throw new McpError(
+        409,
+        "MCP_MARKET_VERSION_DOWNGRADE",
+        `Refusing to install ${parsed.data.identifier}@${parsed.data.version}; a newer version (${existingInstall.marketVersion}) is already installed.`,
+      );
+    }
 
     let manifestForInstall = parsed.data;
     if (input.endpointUrlOverride) {

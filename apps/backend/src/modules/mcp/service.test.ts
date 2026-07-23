@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   findWorkspaceMcpCredential: vi.fn(),
   findWorkspaceMcpInstall: vi.fn(),
   findWorkspaceMcpInstallByMarketIdentifier: vi.fn(),
+  getMcpManifest: vi.fn(),
   listMcpActionRuns: vi.fn(),
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
@@ -62,7 +63,7 @@ vi.mock("./langchain-client", () => ({
 vi.mock("./market-service", () => ({
   marketService: {
     getMcp: vi.fn(),
-    getMcpManifest: vi.fn(),
+    getMcpManifest: mocks.getMcpManifest,
     listMcp: vi.fn(),
   },
 }));
@@ -495,6 +496,49 @@ test("testInstall preserves existing tool metadata instead of clobbering it", as
     mocks.upsertWorkspaceMcpTools.mock.calls[0]?.[0]?.preserveExistingMetadata,
     true,
   );
+});
+
+test("installMarketMcp refuses to downgrade an already-installed newer version", async () => {
+  resetMcpServiceMocks();
+  mocks.getMcpManifest.mockResolvedValue({
+    manifest: {
+      schemaVersion: 1,
+      identifier: "github",
+      name: "GitHub",
+      summary: "GitHub MCP",
+      version: "1.0.0",
+      categories: ["developer-tools"],
+      transport: "streamable_http",
+      endpointUrl: "https://mcp.example.com/mcp",
+      auth: { required: false, type: "none", allowedHeaderNames: [] },
+      tools: [],
+      official: true,
+      verified: false,
+      desktopOnly: false,
+      webExecutable: true,
+    },
+    version: { provenanceJson: {} },
+    signature: null,
+    signingKeyId: null,
+  });
+  // A newer version (2.0.0) is already installed.
+  mocks.findWorkspaceMcpInstallByMarketIdentifier.mockResolvedValue(
+    mcpInstall({ id: "mcp_install_1", marketVersion: "2.0.0" }),
+  );
+
+  await assert.rejects(
+    () =>
+      new McpService().installMarketMcp({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        identifier: "github",
+      }),
+    (error) =>
+      error instanceof McpError &&
+      error.code === "MCP_MARKET_VERSION_DOWNGRADE",
+  );
+  // The downgrade is rejected before any install write happens.
+  assert.equal(mocks.createOrUpdateMarketMcpInstall.mock.calls.length, 0);
 });
 
 test("deleteInstall removes a workspace MCP install with manage permission", async () => {

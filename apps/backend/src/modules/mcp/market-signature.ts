@@ -66,6 +66,33 @@ export type MarketManifestVerification = {
   manifestHash: string;
 };
 
+type MarketSignatureEnvelope = {
+  identifier: string;
+  version: string;
+  manifestHash: string;
+  notAfter: string | null;
+};
+
+/**
+ * Return the signed envelope object if `value` carries the expected fields, or
+ * null for legacy (manifest-only) signatures. The ORIGINAL object is returned
+ * so its exact canonical form — the bytes that were signed — is reconstructed.
+ */
+function asSignatureEnvelope(value: unknown): MarketSignatureEnvelope | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.identifier === "string" &&
+    typeof candidate.version === "string" &&
+    typeof candidate.manifestHash === "string"
+  ) {
+    return value as MarketSignatureEnvelope;
+  }
+  return null;
+}
+
 export function verifyMarketManifestSignature(input: {
   manifest: MarketMcpManifest;
   signature?: string | null;
@@ -73,6 +100,10 @@ export function verifyMarketManifestSignature(input: {
   trustedPublicKeys: readonly string[];
   /** When no trusted keys are configured, allow the install to proceed unsigned. */
   allowUnsigned?: boolean;
+  /** The signed envelope shipped in the version's provenanceJson, if any. */
+  envelope?: unknown;
+  /** Injectable clock for expiry checks. */
+  now?: Date;
 }): MarketManifestVerification {
   const trustedPublicKeys = parseTrustedMarketPublicKeys(input.trustedPublicKeys);
   if (trustedPublicKeys.length === 0) {
@@ -109,10 +140,61 @@ export function verifyMarketManifestSignature(input: {
       "MCP manifest signing key is not trusted by this SourceWeft deployment",
     );
   }
+  const publicKey = createEd25519PublicKey(key.publicKey);
+  const manifestHash = hashJson(input.manifest);
+
+  const envelope = asSignatureEnvelope(input.envelope);
+  if (envelope) {
+    // Envelope path: the signature covers the envelope, which binds
+    // identifier + version + manifestHash (+ optional expiry).
+    const valid = verify(
+      null,
+      Buffer.from(canonicalJson(input.envelope)),
+      publicKey,
+      decodeBase64(input.signature),
+    );
+    if (!valid) {
+      throw new McpError(
+        422,
+        "MCP_MARKET_SIGNATURE_INVALID",
+        "MCP manifest signature is invalid",
+      );
+    }
+    if (
+      envelope.manifestHash !== manifestHash ||
+      envelope.identifier !== input.manifest.identifier ||
+      envelope.version !== input.manifest.version
+    ) {
+      throw new McpError(
+        422,
+        "MCP_MARKET_SIGNATURE_INVALID",
+        "MCP manifest does not match its signed envelope (identifier, version, or content mismatch)",
+      );
+    }
+    if (envelope.notAfter) {
+      const now = input.now ?? new Date();
+      const expiry = Date.parse(envelope.notAfter);
+      if (Number.isFinite(expiry) && now.getTime() > expiry) {
+        throw new McpError(
+          422,
+          "MCP_MARKET_SIGNATURE_EXPIRED",
+          "MCP manifest signature has expired",
+        );
+      }
+    }
+    return {
+      signatureVerified: true,
+      verified: true,
+      signingKeyId: input.signingKeyId,
+      manifestHash,
+    };
+  }
+
+  // Legacy path: the signature covers the bare manifest.
   const valid = verify(
     null,
     Buffer.from(canonicalJson(input.manifest)),
-    createEd25519PublicKey(key.publicKey),
+    publicKey,
     decodeBase64(input.signature),
   );
   if (!valid) {
@@ -126,6 +208,6 @@ export function verifyMarketManifestSignature(input: {
     signatureVerified: true,
     verified: true,
     signingKeyId: input.signingKeyId,
-    manifestHash: hashJson(input.manifest),
+    manifestHash,
   };
 }

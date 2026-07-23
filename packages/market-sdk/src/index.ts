@@ -2,6 +2,7 @@ import {
   getMarketMcpManifestResponseSchema,
   getMarketMcpResponseSchema,
   listMarketCategoriesResponseSchema,
+  listMarketKeysResponseSchema,
   listMarketMcpResponseSchema,
   type ListMarketMcpRequest,
 } from "@sourceweft/market-contracts";
@@ -98,6 +99,14 @@ export class MarketClient {
       "/v1/mcp/categories",
       { method: "GET" },
       listMarketCategoriesResponseSchema,
+    );
+  }
+
+  listKeys() {
+    return this.request(
+      "/v1/mcp/keys",
+      { method: "GET" },
+      listMarketKeysResponseSchema,
     );
   }
 
