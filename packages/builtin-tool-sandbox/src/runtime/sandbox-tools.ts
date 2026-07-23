@@ -145,11 +145,24 @@ function decodeSandboxTextOutput(content: Buffer, sandboxPath: string) {
   }
 }
 
+/**
+ * Reads a ready workspace artifact's primary bytes for staging into the
+ * sandbox. Host-provided and workspace-scoped: the closure carries the turn's
+ * team/workspace, so an artifactId from tool input can only reach rows the
+ * turn could already see. Absent in runtimes that have no artifact store.
+ */
+export type SandboxArtifactReader = {
+  readPrimaryBytes(input: {
+    artifactId: string;
+  }): Promise<{ bytes: Uint8Array; fileName?: string } | null>;
+};
+
 export function createSandboxTools(input: {
   filesystem: BackendProtocolV2;
   manager: SandboxManager;
   context: SandboxRuntimeContext;
   limits: SandboxRuntimeLimits;
+  artifacts?: SandboxArtifactReader;
 }) {
   const toolDescriptions = buildSandboxToolDescriptions(
     input.manager.providerForSandbox().pathPolicy,
@@ -185,22 +198,43 @@ export function createSandboxTools(input: {
         );
         sandboxId = sandbox.id;
         for (const file of args.files) {
-          const sourcePath = assertSourceWorkPath(file.sourcePath);
           const sandboxPath = assertPrepareSandboxPath(
             file.sandboxPath,
             input.manager.providerForSandbox().pathPolicy,
           );
-          const raw = await input.filesystem.readRaw(sourcePath);
-          if (raw.error || !raw.data) {
-            throw new Error(
-              raw.error ||
-                `Could not read ${sourcePath}. Create the Workfile first, or use a provider sandbox path when the file already exists inside the sandbox.`,
-            );
+          let content: Uint8Array;
+          let sourceLabel: string;
+          if (file.artifactId) {
+            const reader = input.artifacts?.readPrimaryBytes;
+            if (!reader) {
+              throw new Error(
+                "SANDBOX_ARTIFACT_SOURCE_UNAVAILABLE: artifact staging is not available in this runtime.",
+              );
+            }
+            const artifact = await reader({ artifactId: file.artifactId });
+            if (!artifact) {
+              throw new Error(
+                `SANDBOX_ARTIFACT_NOT_FOUND: ${file.artifactId} is not a ready artifact in this workspace.`,
+              );
+            }
+            content = artifact.bytes;
+            sourceLabel = `artifact:${file.artifactId}`;
+          } else {
+            const sourcePath = assertSourceWorkPath(file.sourcePath ?? "");
+            const raw = await input.filesystem.readRaw(sourcePath);
+            if (raw.error || !raw.data) {
+              throw new Error(
+                raw.error ||
+                  `Could not read ${sourcePath}. Create the Workfile first, or use a provider sandbox path when the file already exists inside the sandbox.`,
+              );
+            }
+            content = toBytes(raw.data.content);
+            sourceLabel = sourcePath;
           }
-          const sizeBytes = byteLength(raw.data.content);
+          const sizeBytes = byteLength(content);
           if (sizeBytes > input.limits.maxPrepareFileBytes) {
             throw new Error(
-              `SANDBOX_FILE_TOO_LARGE: ${sourcePath} exceeds prepare file limit.`,
+              `SANDBOX_FILE_TOO_LARGE: ${sourceLabel} exceeds prepare file limit.`,
             );
           }
           totalBytes += sizeBytes;
@@ -210,8 +244,8 @@ export function createSandboxTools(input: {
             );
           }
           prepared.push({
-            content: toBytes(raw.data.content),
-            sourcePath,
+            content,
+            sourcePath: sourceLabel,
             sandboxPath,
             sizeBytes,
           });

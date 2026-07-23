@@ -50,6 +50,8 @@ export function createSandboxRuntimeForTurn(input: {
    * model, which defeats the point of having a ceiling at all.
    */
   commandBudget?: SandboxCommandBudget;
+  /** Host-provided artifact byte reader for artifact staging in prepare. */
+  artifacts?: import("./sandbox-tools").SandboxArtifactReader;
 }): SandboxRuntimeForTurn {
   const commandTimeoutMs = resolveSandboxCommandTimeoutMs({
     limits: input.limits,
@@ -92,6 +94,7 @@ export function createSandboxRuntimeForTurn(input: {
       manager,
       context: input.context,
       limits: input.limits,
+      ...(input.artifacts ? { artifacts: input.artifacts } : {}),
     }),
     interruptOn: input.toolApprovalEnabled
       ? createSandboxInterruptConfigs()

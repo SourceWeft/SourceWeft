@@ -25,7 +25,11 @@ Prefer assets in this order:
 
 1. User-provided files or source-deck assets.
 2. Official or provenance-safe source assets when identity matters.
-3. Generated raster assets for illustrative/editorial visuals when available.
+3. Generated raster assets via `generate_image` for illustrative/editorial
+   visuals — at most 3 per deck, cover/hero and editorial illustration first.
+   Stage each generated artifact into the sandbox with
+   `prepare_sandbox_workspace` `{ artifactId, sandboxPath }` before `deck.js`
+   references it.
 4. Procedural SVG/PNG textures, icons, diagrams, and abstract motifs.
 5. Native PptxGenJS shapes, charts, and text as editable fallbacks.
 

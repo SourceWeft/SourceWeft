@@ -35,6 +35,8 @@ export type SandboxRuntimeRequest = {
    * schema reaches it — see `createSandboxRuntimeForTurn`.
    */
   commandBudget?: SandboxCommandBudget;
+  /** Host-provided artifact byte reader for artifact staging in prepare. */
+  artifacts?: import("./runtime/sandbox-tools").SandboxArtifactReader;
 };
 
 export type AgentSandboxRuntimeForTurn = SandboxRuntimeForTurn & {
@@ -99,6 +101,7 @@ export class AgentSandboxService {
       toolApprovalEnabled: config.toolApprovalEnabled,
       environment: process.env.NODE_ENV || "development",
       commandBudget: input.commandBudget,
+      ...(input.artifacts ? { artifacts: input.artifacts } : {}),
     });
 
     const agentRuntime: AgentSandboxRuntimeForTurn = {

@@ -41,6 +41,8 @@ import {
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
+import { findArtifactRecord } from "../../../artifacts/repository";
+import { artifactStorage } from "../../../sources/storage";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
@@ -451,6 +453,25 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
           sandboxExecuteToolCallId: sandboxExecuteToolCallIdFromResume(
             prepared.toolApprovalResume,
           ),
+        },
+        artifacts: {
+          // Workspace-scoped on purpose: an artifactId arriving from tool
+          // input can only reach rows this turn's workspace could already see.
+          readPrimaryBytes: async ({ artifactId }) => {
+            const record = await findArtifactRecord({
+              teamId: prepared.workspace.organizationId,
+              workspaceId: prepared.workspace.id,
+              artifactId,
+            });
+            if (!record || record.status !== "ready" || !record.storageKey) {
+              return null;
+            }
+            const download = await artifactStorage.download({
+              key: record.storageKey,
+              bucket: record.storageBucket,
+            });
+            return download ? { bytes: download.body } : null;
+          },
         },
       });
 

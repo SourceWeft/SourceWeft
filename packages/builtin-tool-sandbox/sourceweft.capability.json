@@ -9,7 +9,7 @@
     {
       "id": "prepare_sandbox_workspace",
       "title": "Prepare Sandbox Workspace",
-      "description": "Materialize explicitly selected SourceWeft DB-backed VFS /workfiles Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in /workfiles first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources.",
+      "description": "Materialize explicitly selected SourceWeft DB-backed VFS /workfiles Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in /workfiles first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources. A file entry may instead name a ready workspace artifact by artifactId to stage its primary bytes (for example a generated image) into the sandbox.",
       "inputSchema": {
         "type": "object"
       },

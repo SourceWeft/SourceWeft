@@ -14,7 +14,7 @@ function formatRoots(roots: readonly string[]) {
 }
 
 export const sandboxToolDescriptions = {
-  prepareSandboxWorkspace: `Materialize explicitly selected SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources.`,
+  prepareSandboxWorkspace: `Materialize explicitly selected SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources. A file entry may instead name a ready workspace artifact by artifactId to stage its primary bytes (for example a generated image) into the sandbox.`,
   execute: `Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as ${SOURCEWEFT_WORK_ROOT}, /kb, or /skills in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Workfiles under provider sandbox paths before execution. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.`,
   collectSandboxOutputs: `Persist explicitly selected provider sandbox text outputs from provider-allowed collect source roots into SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use this tool for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
 } as const;
@@ -42,10 +42,24 @@ export const sandboxToolInterruptDescriptions = {
 export const prepareSandboxWorkspaceSchema = z.object({
   files: z
     .array(
-      z.object({
-        sourcePath: z.string().min(1),
-        sandboxPath: z.string().min(1),
-      }),
+      z
+        .object({
+          sourcePath: z.string().min(1).optional(),
+          /**
+           * Stage a ready workspace artifact's primary bytes instead of a
+           * Workfile — the only route binary outputs (generated images) have
+           * into the sandbox, since the DB-backed VFS is text-oriented.
+           */
+          artifactId: z.string().min(1).optional(),
+          sandboxPath: z.string().min(1),
+        })
+        .refine(
+          (file) => Boolean(file.sourcePath) !== Boolean(file.artifactId),
+          {
+            message:
+              "each file names exactly one of sourcePath or artifactId",
+          },
+        ),
     )
     .min(1)
     .max(20),

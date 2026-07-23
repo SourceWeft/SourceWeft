@@ -79,20 +79,27 @@ only when the request or a concrete failure requires them:
 1. Read [pptxgenjs.md](references/pptxgenjs.md).
 2. Draft the storyboard mentally or in the response; do not create planning
    files, QA ledgers, or manifests unless the user asks.
-3. Create one deck builder script as a Workfile, then prepare it into the
+3. If the asset plan calls for generated raster imagery (cover hero,
+   editorial illustration, topic texture), call `generate_image` for at most
+   3 images, then stage each result into the sandbox with
+   `prepare_sandbox_workspace` using `{ artifactId, sandboxPath }` entries.
+   Reference the staged files in `deck.js` with `addImage` and real pixel
+   dimensions. If generation fails, fall back to procedural SVG/PNG; never
+   leave a promised image missing.
+4. Create one deck builder script as a Workfile, then prepare it into the
    sandbox workspace according to the sandbox runtime rules.
-4. Run one generation `execute`: confirm the prepared builder exists, run
+5. Run one generation `execute`: confirm the prepared builder exists, run
    `node --check`, then run the builder.
-5. Run one QA `execute`: extract content with `markitdown`, run File QA with
+6. Run one QA `execute`: extract content with `markitdown`, run File QA with
    `scripts/validate_pptx.py`, convert the PPTX to PDF with LibreOffice, render
    images with `pdftoppm`, create the preview image contract from the first
    rendered slide, then print explicit stage markers, `QA_IMAGE_COUNT`,
    `PREVIEW_IMAGE_PATH`, and the discovered slide image paths.
-6. Call `review_deck_visuals` with the slide image paths from final QA; repair
+7. Call `review_deck_visuals` with the slide image paths from final QA; repair
    severe verdicts once as described in the QA section.
-7. Use the actual generated PPTX path for QA and publishing.
-8. Fix concrete issues only. If QA passes, publish without an extra repair loop.
-9. Publish with the configured artifact publisher using the actual generated
+8. Use the actual generated PPTX path for QA and publishing.
+9. Fix concrete issues only. If QA passes, publish without an extra repair loop.
+10. Publish with the configured artifact publisher using the actual generated
    PPTX path and the `PREVIEW_IMAGE_PATH` from final QA.
 
 Build a coherent narrative with one point per slide. Prefer process diagrams,
