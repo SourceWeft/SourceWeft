@@ -7,6 +7,7 @@ import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleExampleJob } from "./schedules/example-schedule";
+import { scheduleMarketFederation } from "./schedules/market-federation";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 
@@ -88,6 +89,18 @@ async function scheduleModelPricingSyncTick() {
   }
 }
 
+async function marketFederationTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleMarketFederation();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to run market federation sync", { message });
+  }
+}
+
 void tick();
 const timer = setInterval(() => {
   void tick();
@@ -96,6 +109,11 @@ const timer = setInterval(() => {
 const modelPricingSyncTimer = setInterval(() => {
   void scheduleModelPricingSyncTick();
 }, config.modelPricingSyncIntervalMs);
+
+void marketFederationTick();
+const marketFederationTimer = setInterval(() => {
+  void marketFederationTick();
+}, config.market.federationIntervalMs);
 
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
@@ -109,6 +127,7 @@ void agentSandboxService.logStartupWarning("scheduler");
 async function shutdown() {
   clearInterval(timer);
   clearInterval(modelPricingSyncTimer);
+  clearInterval(marketFederationTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);

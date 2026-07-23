@@ -568,6 +568,11 @@ export const config = {
     // just feature-gates the market; there is no external service, signing, or
     // trust-key configuration anymore.
     enabled: parseBoolean(process.env.MARKET_ENABLED, true),
+    // How often to federate the catalog from upstream MCP registries.
+    federationIntervalMs: parsePositiveNumber(
+      process.env.MARKET_FEDERATION_INTERVAL_MS,
+      6 * 60 * 60 * 1000,
+    ),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
