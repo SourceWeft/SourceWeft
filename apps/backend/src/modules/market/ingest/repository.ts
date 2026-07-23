@@ -7,14 +7,9 @@ import {
   marketItems,
   marketItemVersions,
 } from "@sourceweft/db";
-import type {
-  McpParserReport,
-  McpRepositoryIngestOptions,
-} from "../types";
+import type { McpRepositoryIngestOptions } from "../types";
 import { getMcpCategoryDefinition } from "../parser/categories";
-import { buildDryRunIngestResult, hashId } from "./plan";
-
-export { buildDryRunIngestResult } from "./plan";
+import { hashId } from "./plan";
 
 function categoryName(slug: string) {
   const definition = getMcpCategoryDefinition(slug);
@@ -207,18 +202,3 @@ export async function upsertMarketMcp(input: {
   return itemId;
 }
 
-export async function upsertMcpIngestResult(
-  manifest: MarketMcpManifest,
-  provenanceJson: McpParserReport,
-  options: McpRepositoryIngestOptions,
-) {
-  await upsertMarketMcp({
-    manifest,
-    status: options.status,
-    visibility: options.visibility,
-    origin: "submitted",
-    owner: provenanceJson.github.owner,
-    provenanceJson,
-  });
-  return buildDryRunIngestResult(manifest, provenanceJson, options);
-}

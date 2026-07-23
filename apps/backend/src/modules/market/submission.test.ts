@@ -107,3 +107,26 @@ test("a submission cannot hijack another submitter's published listing", async (
   );
   assert.equal(mocks.upsert.mock.calls.length, 0);
 });
+
+test("a submission cannot poison another submitter's IN-REVIEW item", async () => {
+  vi.clearAllMocks();
+  primeParse("io.github.acme/pending");
+  // Victim's flagged submission is sitting in review, owned by someone else.
+  mocks.getExisting.mockResolvedValue({
+    hasUpstream: false,
+    status: "reviewing",
+    submittedBy: "victim",
+  });
+
+  await assert.rejects(
+    () =>
+      submitMcpFromGitHub({
+        repoUrl: "https://github.com/attacker/pending",
+        userId: "attacker",
+      }),
+    (error) =>
+      error instanceof MarketSubmissionError &&
+      error.code === "MARKET_SUBMISSION_CONFLICT",
+  );
+  assert.equal(mocks.upsert.mock.calls.length, 0);
+});

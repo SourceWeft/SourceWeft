@@ -540,9 +540,12 @@ export class McpService {
       workspaceId: workspace.id,
       userId: input.userId,
       manifest: manifestForInstall,
-      // Trust comes from the catalog/upstream registry, not per-manifest
-      // signatures (which were removed with sourceweft-api).
-      verified: parsed.data.verified,
+      // Trust comes from the catalog ROW (federation forces upstream-verified;
+      // submissions are forced unverified at ingest), never from the submitted
+      // manifest's self-asserted flag. Reading response.item — not the manifest
+      // — is what makes the "submissions can't self-assert verified" guarantee
+      // robust instead of relying on a coincidental parser hardcode.
+      verified: response.item.verified,
     });
     if (!install) {
       throw new McpError(500, "MCP_INSTALL_FAILED", "Failed to install MCP");

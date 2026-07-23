@@ -56,14 +56,14 @@ export async function submitMcpFromGitHub(input: {
       `${identifier} is already provided by an upstream registry and cannot be overwritten by a submission.`,
     );
   }
-  if (
-    existing?.status === "published" &&
-    existing.submittedBy &&
-    existing.submittedBy !== input.userId
-  ) {
+  if (existing?.submittedBy && existing.submittedBy !== input.userId) {
+    // Any state — published, under review, or rejected — belonging to a
+    // different submitter is off-limits; otherwise an attacker could overwrite a
+    // victim's in-review submission (which the admin then approves) or hijack a
+    // published listing.
     throw new MarketSubmissionError(
       "MARKET_SUBMISSION_CONFLICT",
-      `${identifier} is already published by another submitter.`,
+      `${identifier} was already submitted by another user.`,
     );
   }
 
