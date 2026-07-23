@@ -1,9 +1,9 @@
-import type {
-  GetMarketMcpManifestResponse,
-  GetMarketMcpResponse,
-  ListMarketCategoriesResponse,
-  ListMarketMcpRequest,
-  ListMarketMcpResponse,
+import {
+  getMarketMcpManifestResponseSchema,
+  getMarketMcpResponseSchema,
+  listMarketCategoriesResponseSchema,
+  listMarketMcpResponseSchema,
+  type ListMarketMcpRequest,
 } from "@sourceweft/market-contracts";
 
 export type MarketClientOptions = {
@@ -86,22 +86,27 @@ export class MarketClient {
     if (input.cursor) {
       params.set("cursor", input.cursor);
     }
-    return this.request<ListMarketMcpResponse>(
+    return this.request(
       appendQuery("/v1/mcp", params),
       { method: "GET" },
+      listMarketMcpResponseSchema,
     );
   }
 
   listMcpCategories() {
-    return this.request<ListMarketCategoriesResponse>("/v1/mcp/categories", {
-      method: "GET",
-    });
+    return this.request(
+      "/v1/mcp/categories",
+      { method: "GET" },
+      listMarketCategoriesResponseSchema,
+    );
   }
 
   getMcp(identifier: string) {
-    return this.request<GetMarketMcpResponse>(`/v1/mcp/${encode(identifier)}`, {
-      method: "GET",
-    });
+    return this.request(
+      `/v1/mcp/${encode(identifier)}`,
+      { method: "GET" },
+      getMarketMcpResponseSchema,
+    );
   }
 
   getMcpManifest(identifier: string, input: { version?: string } = {}) {
@@ -109,13 +114,18 @@ export class MarketClient {
     if (input.version) {
       params.set("version", input.version);
     }
-    return this.request<GetMarketMcpManifestResponse>(
+    return this.request(
       appendQuery(`/v1/mcp/${encode(identifier)}/manifest`, params),
       { method: "GET" },
+      getMarketMcpManifestResponseSchema,
     );
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
+  private async request<T>(
+    path: string,
+    init: RequestInit,
+    schema: { parse(value: unknown): T },
+  ): Promise<T> {
     const headers = new Headers(init.headers);
     const token = await this.getToken?.();
     if (token) {
@@ -131,7 +141,22 @@ export class MarketClient {
       throw await this.toError(response);
     }
 
-    return (await response.json()) as T;
+    const data = (await response.json()) as unknown;
+    // Validate the response against the shared contract so schema drift between
+    // the market API and this client surfaces immediately instead of leaking a
+    // malformed object downstream.
+    try {
+      return schema.parse(data);
+    } catch (error) {
+      throw new MarketClientError({
+        status: response.status,
+        code: "MARKET_RESPONSE_INVALID",
+        message:
+          error instanceof Error
+            ? `Market response failed schema validation: ${error.message}`
+            : "Market response failed schema validation",
+      });
+    }
   }
 
   private async toError(response: Response) {

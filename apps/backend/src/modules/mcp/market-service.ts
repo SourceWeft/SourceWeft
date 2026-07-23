@@ -1,5 +1,10 @@
-import { MarketClient, MarketClientError } from "@sourceweft/market-sdk";
+import {
+  MarketClient,
+  MarketClientError,
+  type ListMarketMcpRequest,
+} from "@sourceweft/market-sdk";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import { McpError } from "./errors";
 
 function marketError(error: unknown) {
@@ -40,18 +45,20 @@ export class MarketService {
     );
   }
 
-  async listMcp(input: {
-    query?: string;
-    category?: string;
-    includeDesktopOnly?: boolean;
-    limit?: number;
-  }) {
+  async listMcp(input: ListMarketMcpRequest = {}) {
     if (!this.isApiBacked()) {
       return emptyMcpList();
     }
     try {
+      // Forward the full filter set (transport/official/verified/runtime/cursor)
+      // rather than dropping facets the API and contract support.
       return await this.client.listMcp(input);
     } catch (error) {
+      // An outage must be observable, not silently indistinguishable from an
+      // empty catalog. We still degrade to empty so the dashboard renders.
+      logger.warn("Market listMcp failed; returning empty catalog", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return emptyMcpList();
     }
   }
@@ -62,7 +69,10 @@ export class MarketService {
     }
     try {
       return await this.client.listMcpCategories();
-    } catch {
+    } catch (error) {
+      logger.warn("Market listMcpCategories failed; returning empty list", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return { items: [] };
     }
   }
