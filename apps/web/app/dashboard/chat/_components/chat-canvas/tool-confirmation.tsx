@@ -318,7 +318,8 @@ function ToolConfirmationPanel({
               {commandText ? (
                 <details className="mt-1">
                   <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                    查看命令 ({commandText.split("\n").length} 行, {commandText.length} 字符)
+                    View command ({commandText.split("\n").length} lines,{" "}
+                    {commandText.length} characters)
                   </summary>
                   <pre className="mt-1 max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs leading-5">
                     {commandText}

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Check,
@@ -24,6 +24,7 @@ import type {
   ListWorkspaceMarketMcpResponse,
   McpAuthType,
   WorkspaceMcpInstall,
+  WorkspaceMcpInstallStatus,
 } from "@sourceweft/sdk";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -53,8 +54,10 @@ import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { McpIcon } from "../../_components/dashboard-icons";
+import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpSummary = MarketMcpItem["market"];
@@ -198,6 +201,41 @@ function authTypeLabel(authType: McpAuthType) {
   if (authType === "api_key_header") return "API key header";
   if (authType === "custom_headers") return "Custom headers";
   return "No auth";
+}
+
+function installStatusMeta(status: WorkspaceMcpInstallStatus): {
+  dotClass: string;
+  label: string;
+} {
+  if (status === "error") {
+    return { dotClass: "bg-red-500", label: "Error" };
+  }
+  if (status === "disabled") {
+    return { dotClass: "bg-muted-foreground/50", label: "Disabled" };
+  }
+  return { dotClass: "bg-emerald-500", label: "Active" };
+}
+
+function McpStatusIndicator({ install }: { install: WorkspaceMcpInstall }) {
+  const meta = installStatusMeta(install.status);
+  const testedLabel = install.lastTestedAt
+    ? `Tested ${formatShortRelativeTime(install.lastTestedAt)}`
+    : "Not tested yet";
+  return (
+    <span
+      className="inline-flex min-w-0 items-center gap-1.5"
+      title={install.lastError ?? undefined}
+    >
+      <span
+        aria-label={meta.label}
+        className={cn("size-1.5 shrink-0 rounded-full", meta.dotClass)}
+      />
+      <span className="truncate">{testedLabel}</span>
+      {install.lastError ? (
+        <AlertTriangle className="h-3 w-3 shrink-0 text-red-500" />
+      ) : null}
+    </span>
+  );
 }
 
 function parseCustomHeaders(value: string) {
@@ -577,6 +615,7 @@ function McpSkeletonGrid() {
 
 function McpCard({
   categories,
+  highlight = false,
   isDesktopHost,
   item,
   onConfigure,
@@ -585,9 +624,10 @@ function McpCard({
   onTest,
   onToggleEnabled,
   onUninstall,
-  pendingAction,
+  pendingActions,
 }: {
   categories: Array<{ key: CategoryKey; label: string }>;
+  highlight?: boolean;
   isDesktopHost: boolean;
   item: MarketMcpItem;
   onConfigure: (install: WorkspaceMcpInstall) => void;
@@ -596,14 +636,16 @@ function McpCard({
   onTest: (install: WorkspaceMcpInstall) => void;
   onToggleEnabled: (install: WorkspaceMcpInstall, enabled: boolean) => void;
   onUninstall: (item: MarketMcpItem) => void;
-  pendingAction: string | null;
+  pendingActions: ReadonlySet<string>;
 }) {
   const install = item.install;
   const market = item.market;
   const trusted = isTrustedMcp(market);
   const desktopOnly = market.desktopOnly || !market.webExecutable;
   const installed = Boolean(install);
-  const pending = pendingAction === market.identifier || pendingAction === install?.id;
+  const pending =
+    pendingActions.has(market.identifier) ||
+    (install ? pendingActions.has(install.id) : false);
   const canExecuteHere = !desktopOnly || isDesktopHost;
   const itemCategory = categoryForMcp(market, categories);
   const itemCategoryLabel =
@@ -614,7 +656,14 @@ function McpCard({
     install.credentialStatus !== "configured";
 
   return (
-    <article className="group flex min-h-[230px] flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20">
+    <article
+      className={cn(
+        "group flex min-h-[230px] flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
+        highlight &&
+          "ring-2 ring-primary ring-offset-2 ring-offset-background",
+      )}
+      id={`mcp-card-${market.identifier}`}
+    >
       <div className="flex items-start gap-3">
         <span
           className={cn(
@@ -687,6 +736,9 @@ function McpCard({
             <div className="min-w-0">
               <div className="truncate">
                 {install.tools.length} tool{install.tools.length === 1 ? "" : "s"} synced
+              </div>
+              <div className="mt-1">
+                <McpStatusIndicator install={install} />
               </div>
               {needsCredentials ? (
                 <button
@@ -985,11 +1037,36 @@ function CredentialsDialog({
 
 export function McpMarket() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkIdentifier = searchParams.get("mcp");
   const dashboardState = useDashboardChatState();
   const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(null);
   const [items, setItems] = React.useState<MarketMcpItem[]>([]);
   const [categories, setCategories] = React.useState(fallbackCategories);
-  const [pendingAction, setPendingAction] = React.useState<string | null>(null);
+  const [pendingActions, setPendingActions] = React.useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [highlightIdentifier, setHighlightIdentifier] = React.useState<
+    string | null
+  >(null);
+  const deepLinkHandledRef = React.useRef(false);
+
+  const startPendingAction = React.useCallback((key: string) => {
+    setPendingActions((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }, []);
+
+  const endPendingAction = React.useCallback((key: string) => {
+    setPendingActions((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState<CategoryKey>("all");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
@@ -1093,6 +1170,32 @@ export function McpMarket() {
     void loadCatalog();
   }, [loadCatalog]);
 
+  // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
+  // once the catalog is loaded, scroll the matching card into view and give it
+  // a brief highlight. Runs once per identifier value.
+  React.useEffect(() => {
+    if (!deepLinkIdentifier || deepLinkHandledRef.current) return;
+    if (catalogStatus !== "ready") return;
+    const exists = items.some(
+      (item) => item.market.identifier === deepLinkIdentifier,
+    );
+    if (!exists) return;
+    deepLinkHandledRef.current = true;
+    setHighlightIdentifier(deepLinkIdentifier);
+    const frame = window.requestAnimationFrame(() => {
+      const card = document.getElementById(`mcp-card-${deepLinkIdentifier}`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const timeout = window.setTimeout(
+      () => setHighlightIdentifier(null),
+      2600,
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
+  }, [catalogStatus, deepLinkIdentifier, items]);
+
   async function handleWorkspaceChange(nextWorkspaceId: string, nextWorkspaceName: string) {
     if (nextWorkspaceId === workspace?.id) return;
     workspaceIdRef.current = nextWorkspaceId;
@@ -1135,14 +1238,17 @@ export function McpMarket() {
 
   async function installMcp(item: MarketMcpItem, options: { runAfterInstall?: boolean } = {}) {
     if (!workspace || item.install) return;
-    setPendingAction(item.market.identifier);
+    const workspaceId = workspace.id;
+    const pendingKey = item.market.identifier;
+    startPendingAction(pendingKey);
     try {
       const result = await contentClient.installMarketMcp(
-        workspace.id,
+        workspaceId,
         item.market.identifier,
         {},
       );
       updateInstallInItems(result.install);
+      invalidateWorkspaceMcpCache(workspaceId);
       toast.success("MCP installed");
       if (result.install.authType !== "none") {
         setCredentialsInstall(result.install);
@@ -1154,16 +1260,17 @@ export function McpMarket() {
         installError instanceof Error ? installError.message : "Failed to install MCP.",
       );
     } finally {
-      setPendingAction(null);
+      endPendingAction(pendingKey);
     }
   }
 
   async function uninstallMcp(item: MarketMcpItem) {
     if (!workspace || !item.install) return;
+    const workspaceId = workspace.id;
     const installId = item.install.id;
-    setPendingAction(installId);
+    startPendingAction(installId);
     try {
-      await contentClient.deleteWorkspaceMcpInstall(workspace.id, installId);
+      await contentClient.deleteWorkspaceMcpInstall(workspaceId, installId);
       setItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.install?.id === installId ||
@@ -1172,6 +1279,7 @@ export function McpMarket() {
             : currentItem,
         ),
       );
+      invalidateWorkspaceMcpCache(workspaceId);
       toast.success("MCP uninstalled");
     } catch (uninstallError) {
       toast.error(
@@ -1180,7 +1288,7 @@ export function McpMarket() {
           : "Failed to uninstall MCP.",
       );
     } finally {
-      setPendingAction(null);
+      endPendingAction(installId);
     }
   }
 
@@ -1202,37 +1310,41 @@ export function McpMarket() {
 
   async function toggleInstall(install: WorkspaceMcpInstall, enabled: boolean) {
     if (!workspace) return;
-    setPendingAction(install.id);
+    const workspaceId = workspace.id;
+    startPendingAction(install.id);
     try {
       const result = await contentClient.updateWorkspaceMcpInstall(
-        workspace.id,
+        workspaceId,
         install.id,
         { enabled },
       );
       updateInstallInItems(result.install);
+      invalidateWorkspaceMcpCache(workspaceId);
       toast.success(enabled ? "MCP enabled" : "MCP disabled");
     } catch (toggleError) {
       toast.error(
         toggleError instanceof Error ? toggleError.message : "Failed to update MCP.",
       );
     } finally {
-      setPendingAction(null);
+      endPendingAction(install.id);
     }
   }
 
   async function testInstall(install: WorkspaceMcpInstall) {
     if (!workspace) return;
-    setPendingAction(install.id);
+    const workspaceId = workspace.id;
+    startPendingAction(install.id);
     try {
-      const result = await contentClient.testWorkspaceMcpInstall(workspace.id, install.id);
+      const result = await contentClient.testWorkspaceMcpInstall(workspaceId, install.id);
       updateInstallInItems(result.install);
+      invalidateWorkspaceMcpCache(workspaceId);
       toast.success(`MCP connection tested: ${result.toolCount} tools`);
     } catch (testError) {
       toast.error(
         testError instanceof Error ? testError.message : "Failed to test MCP.",
       );
     } finally {
-      setPendingAction(null);
+      endPendingAction(install.id);
     }
   }
 
@@ -1426,6 +1538,7 @@ export function McpMarket() {
                   {filteredItems.map((item) => (
                     <McpCard
                       categories={categories}
+                      highlight={item.market.identifier === highlightIdentifier}
                       isDesktopHost={isDesktopHost}
                       item={item}
                       key={item.market.identifier}
@@ -1437,7 +1550,7 @@ export function McpMarket() {
                         void toggleInstall(install, enabled)
                       }
                       onUninstall={(next) => void uninstallMcp(next)}
-                      pendingAction={pendingAction}
+                      pendingActions={pendingActions}
                     />
                   ))}
                 </div>
