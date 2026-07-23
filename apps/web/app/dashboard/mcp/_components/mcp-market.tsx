@@ -58,6 +58,7 @@ import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { McpIcon } from "../../_components/dashboard-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
+import { SubmitMcpDialog } from "./submit-mcp-dialog";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpSummary = MarketMcpItem["market"];
@@ -1508,6 +1509,7 @@ export function McpMarket() {
                       Web runtime
                     </Badge>
                   )}
+                  <SubmitMcpDialog />
                   <SortMenu onChange={setSort} value={sort} />
                 </div>
               </div>
