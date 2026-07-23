@@ -5,9 +5,16 @@ import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { formatShortRelativeTime } from "../../../../../../lib/relative-time";
 import { McpIcon } from "../../../../_components/dashboard-icons";
 import { HubEmptyState } from "../components/hub-empty-state";
 import { TypeBadge } from "../type-badge";
+
+function installStatusDotClass(status: WorkspaceMcpInstall["status"]): string {
+  if (status === "error") return "bg-red-500";
+  if (status === "disabled") return "bg-muted-foreground/50";
+  return "bg-emerald-500";
+}
 
 function McpRow({
   install,
@@ -125,6 +132,20 @@ function McpRow({
               <TypeBadge label="Desktop only" />
             ) : null}
             {!install.enabled ? <TypeBadge label="Disabled" /> : null}
+            <span
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+              title={install.lastError ?? undefined}
+            >
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  installStatusDotClass(install.status),
+                )}
+              />
+              {install.lastTestedAt
+                ? `Tested ${formatShortRelativeTime(install.lastTestedAt)}`
+                : "Not tested"}
+            </span>
           </div>
         </div>
       </div>

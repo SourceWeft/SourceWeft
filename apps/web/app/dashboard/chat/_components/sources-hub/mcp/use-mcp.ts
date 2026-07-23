@@ -4,6 +4,7 @@ import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { contentClient } from "../../../../../../lib/sdk";
 import { getErrorMessage } from "../lib/errors";
 import {
+  clearWorkspaceHubCache,
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../workspace-hub-cache";
@@ -13,6 +14,18 @@ const WORKSPACE_MCP_CACHE_BUCKET = "mcp";
 type WorkspaceMcpCacheValue = {
   installs: WorkspaceMcpInstall[];
 };
+
+/**
+ * Drops the persisted chat-hub MCP cache for a workspace so the chat picker
+ * re-fetches fresh installs. Call this from other surfaces (e.g. the MCP
+ * Market) after mutating installs so the two views stay in sync.
+ */
+export function invalidateWorkspaceMcpCache(
+  workspaceId: string | null | undefined,
+) {
+  if (!workspaceId) return;
+  clearWorkspaceHubCache(WORKSPACE_MCP_CACHE_BUCKET, workspaceId);
+}
 
 export function useMcp(input: {
   workspaceId: string | null | undefined;

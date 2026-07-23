@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   findWorkspaceMcpCredential: vi.fn(),
   findWorkspaceMcpInstall: vi.fn(),
   findWorkspaceMcpInstallByMarketIdentifier: vi.fn(),
+  getMcpManifest: vi.fn(),
   listMcpActionRuns: vi.fn(),
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
@@ -35,7 +36,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../shared/config", () => ({
   config: {
-    market: { trustedPublicKeys: [] },
+    market: { trustedPublicKeys: [], allowUnsigned: true },
     modelGatewayEncryptionSecret: "test-encryption-secret",
   },
 }));
@@ -45,6 +46,16 @@ vi.mock("../../shared/secrets", () => ({
   encryptSecret: mocks.encryptSecret,
 }));
 
+// Keep the real security helpers, but stub the endpoint SSRF check so tests
+// don't perform live DNS resolution against fixture hostnames.
+vi.mock("./security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./security")>();
+  return {
+    ...actual,
+    assertSafeMcpEndpoint: vi.fn(async (value: string) => value),
+  };
+});
+
 vi.mock("./langchain-client", () => ({
   createLangChainMcpClient: mocks.createLangChainMcpClient,
 }));
@@ -52,7 +63,7 @@ vi.mock("./langchain-client", () => ({
 vi.mock("./market-service", () => ({
   marketService: {
     getMcp: vi.fn(),
-    getMcpManifest: vi.fn(),
+    getMcpManifest: mocks.getMcpManifest,
     listMcp: vi.fn(),
   },
 }));
@@ -358,6 +369,176 @@ test("buildLangChainToolsForTurn only loads active web-executable installs", asy
   assert.equal(runtime.tools.length, 1);
   await runtime.close();
   assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
+});
+
+test("buildLangChainToolsForTurn isolates a failing install without leaking or aborting", async () => {
+  resetMcpServiceMocks();
+  const healthy = mcpInstall({ id: "healthy" });
+  const broken = mcpInstall({ id: "broken", marketIdentifier: "broken" });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([healthy, broken]);
+  toolsByInstallId.set(healthy.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+  ]);
+  // Override the client factory so the broken install throws on getTools.
+  mocks.createLangChainMcpClient.mockImplementation(
+    ({ install }: { install: WorkspaceMcpInstallRecord }) => {
+      const close = vi.fn(async () => undefined);
+      clientCloseMocks.push(close);
+      return {
+        close,
+        getTools: vi.fn(async () => {
+          if (install.id === "broken") {
+            throw new Error("connection refused");
+          }
+          return toolsByInstallId.get(install.id) ?? [];
+        }),
+      };
+    },
+  );
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [healthy.id, broken.id] }),
+  );
+
+  // The healthy install still produced its tool; the turn did not throw.
+  assert.equal(runtime.tools.length, 1);
+  // The broken install's client was closed immediately (not leaked).
+  assert.equal(clientCloseMocks[1]?.mock.calls.length, 1);
+  await runtime.close();
+  // The healthy client is closed via the returned handle exactly once.
+  assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
+});
+
+test("buildLangChainToolsForTurn does not bind tools disabled per-tool", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_install_1",
+    tools: [
+      mcpTool({ id: "t_read", serverToolName: "read_repo", enabled: true }),
+      mcpTool({ id: "t_write", serverToolName: "write_repo", enabled: false }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+    originalTool({ name: "mcp__github__write_repo" }),
+  ]);
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  // Only the enabled tool is bound even though the server exposes both.
+  assert.equal(runtime.tools.length, 1);
+  await runtime.close();
+});
+
+test("createApprovalForInterruptedTool resolves camelCase LangChain tool names", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_install_1",
+    tools: [
+      mcpTool({
+        id: "t_create",
+        serverToolName: "createIssue",
+        normalizedToolName: "mcp__github__createissue",
+        risk: "write",
+      }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+
+  const payload = await new McpService().createApprovalForInterruptedTool({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    // The interrupt carries the raw LangChain name, not the normalized slug.
+    toolName: "mcp__github__createIssue",
+    args: { title: "bug" },
+    toolCallId: "call_42",
+  });
+
+  // Previously this returned null (normalized-name mismatch) and hard-failed
+  // the turn; now it resolves the tool and creates an approval.
+  assert.notEqual(payload, null);
+  assert.equal(
+    mocks.createMcpActionRun.mock.calls[0]?.[0]?.serverToolName,
+    "createIssue",
+  );
+});
+
+test("testInstall preserves existing tool metadata instead of clobbering it", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({ id: "mcp_install_1" });
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
+  mocks.updateWorkspaceMcpInstall.mockResolvedValue(install);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+  ]);
+  mocks.createLangChainMcpClient.mockImplementation(
+    ({ install: target }: { install: WorkspaceMcpInstallRecord }) => {
+      const close = vi.fn(async () => undefined);
+      clientCloseMocks.push(close);
+      return {
+        close,
+        getTools: vi.fn(async () => toolsByInstallId.get(target.id) ?? []),
+      };
+    },
+  );
+
+  await new McpService().testInstall({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+
+  assert.equal(
+    mocks.upsertWorkspaceMcpTools.mock.calls[0]?.[0]?.preserveExistingMetadata,
+    true,
+  );
+});
+
+test("installMarketMcp refuses to downgrade an already-installed newer version", async () => {
+  resetMcpServiceMocks();
+  mocks.getMcpManifest.mockResolvedValue({
+    manifest: {
+      schemaVersion: 1,
+      identifier: "github",
+      name: "GitHub",
+      summary: "GitHub MCP",
+      version: "1.0.0",
+      categories: ["developer-tools"],
+      transport: "streamable_http",
+      endpointUrl: "https://mcp.example.com/mcp",
+      auth: { required: false, type: "none", allowedHeaderNames: [] },
+      tools: [],
+      official: true,
+      verified: false,
+      desktopOnly: false,
+      webExecutable: true,
+    },
+    version: { provenanceJson: {} },
+    signature: null,
+    signingKeyId: null,
+  });
+  // A newer version (2.0.0) is already installed.
+  mocks.findWorkspaceMcpInstallByMarketIdentifier.mockResolvedValue(
+    mcpInstall({ id: "mcp_install_1", marketVersion: "2.0.0" }),
+  );
+
+  await assert.rejects(
+    () =>
+      new McpService().installMarketMcp({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        identifier: "github",
+      }),
+    (error) =>
+      error instanceof McpError &&
+      error.code === "MCP_MARKET_VERSION_DOWNGRADE",
+  );
+  // The downgrade is rejected before any install write happens.
+  assert.equal(mocks.createOrUpdateMarketMcpInstall.mock.calls.length, 0);
 });
 
 test("deleteInstall removes a workspace MCP install with manage permission", async () => {

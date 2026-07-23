@@ -55,7 +55,7 @@ function encryptionSecret() {
   return config.modelGatewayEncryptionSecret;
 }
 
-function assertWebTransport(manifest: MarketMcpManifest) {
+async function assertWebTransport(manifest: MarketMcpManifest) {
   if (manifest.transport === "stdio") {
     return;
   }
@@ -66,7 +66,7 @@ function assertWebTransport(manifest: MarketMcpManifest) {
       "HTTP/SSE MCP manifest must include endpointUrl",
     );
   }
-  assertSafeMcpEndpoint(manifest.endpointUrl, {
+  await assertSafeMcpEndpoint(manifest.endpointUrl, {
     allowLocalhost: isDevelopment(),
   });
 }
@@ -131,6 +131,66 @@ export function stripLangChainMcpToolPrefix(input: {
   return input.toolName.startsWith(prefix)
     ? input.toolName.slice(prefix.length)
     : input.toolName;
+}
+
+/**
+ * Resolve the stored tool record for a LangChain tool name. LangChain names a
+ * tool `mcp__<serverKey>__<rawServerToolName>`; the reliable join key is the raw
+ * server tool name, which we also persist as `serverToolName`. Matching on the
+ * lossy `normalizedToolName` (lowercased/slugified) fails for camelCase or
+ * otherwise non-slug-safe names, so it is only a fallback for manifest-sourced
+ * tools. Using one helper everywhere keeps discovery and approval in agreement.
+ */
+function findInstallToolByLangChainName(
+  install: WorkspaceMcpInstallRecord,
+  langChainToolName: string,
+) {
+  const rawName = stripLangChainMcpToolPrefix({
+    serverKey: install.marketIdentifier ?? install.id,
+    toolName: langChainToolName,
+  });
+  return (
+    install.tools.find((candidate) => candidate.serverToolName === rawName) ??
+    install.tools.find(
+      (candidate) => candidate.normalizedToolName === langChainToolName,
+    ) ??
+    install.tools.find(
+      (candidate) =>
+        normalizedMcpToolName({
+          serverSlug: install.marketIdentifier ?? install.id,
+          toolName: candidate.serverToolName,
+        }) === langChainToolName,
+    )
+  );
+}
+
+/**
+ * Compare two dotted-numeric version strings. Returns <0 if a<b, >0 if a>b, and
+ * 0 when equal OR when either side isn't cleanly comparable (so non-semver tags
+ * never trigger a false downgrade block).
+ */
+function compareDottedVersions(a: string, b: string): number {
+  const parse = (value: string) => {
+    const core = value.trim().replace(/^v/i, "").split(/[-+]/)[0] ?? "";
+    const parts = core.split(".");
+    if (parts.length === 0 || !parts.every((part) => /^\d+$/.test(part))) {
+      return null;
+    }
+    return parts.map((part) => Number(part));
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) {
+    return 0;
+  }
+  const length = Math.max(pa.length, pb.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (pa[index] ?? 0) - (pb[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
 }
 
 function buildMcpRequestPreview(input: {
@@ -260,6 +320,35 @@ function normalizeMcpOutputForAudit(value: unknown): Record<string, unknown> {
     return { items: value.slice(0, 50) };
   }
   return toObject(value);
+}
+
+// A hostile or buggy MCP server can return multi-MB output. The audit copy is
+// already truncated; this caps the value handed back to the model so a single
+// tool result can't blow up the context window (and cost) mid-turn.
+const MCP_MODEL_OUTPUT_CHAR_LIMIT =
+  Number(process.env.MCP_MAX_TOOL_OUTPUT_CHARS) || 100_000;
+
+function capMcpModelText(value: string) {
+  return value.length > MCP_MODEL_OUTPUT_CHAR_LIMIT
+    ? `${value.slice(0, MCP_MODEL_OUTPUT_CHAR_LIMIT).trimEnd()}\n\n[MCP tool output truncated: ${value.length} characters]`
+    : value;
+}
+
+function capMcpModelOutput(value: unknown): unknown {
+  if (typeof value === "string") {
+    return capMcpModelText(value);
+  }
+  // Preserve the shape of standard content-block arrays, capping only big text.
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item &&
+      typeof item === "object" &&
+      typeof (item as { text?: unknown }).text === "string"
+        ? { ...item, text: capMcpModelText((item as { text: string }).text) }
+        : item,
+    );
+  }
+  return value;
 }
 
 export class McpService {
@@ -399,12 +488,11 @@ export class McpService {
     const response = await marketService.getMcpManifest(input.identifier, {
       version: input.version,
     });
-    const parsed = marketMcpManifestSchema.safeParse({
-      ...response.manifest,
-      ...(input.endpointUrlOverride
-        ? { endpointUrl: input.endpointUrlOverride }
-        : {}),
-    });
+    // Verify the signature over the ORIGINAL, unmodified manifest. Applying an
+    // endpoint override before this would change canonicalJson(manifest) and
+    // break verification, so the override is treated as local install config
+    // that lives outside the signed set and is applied afterwards.
+    const parsed = marketMcpManifestSchema.safeParse(response.manifest);
     if (!parsed.success) {
       throw new McpError(
         422,
@@ -414,19 +502,59 @@ export class McpService {
       );
     }
 
-    assertWebTransport(parsed.data);
-    verifyMarketManifestSignature({
+    const verification = verifyMarketManifestSignature({
       manifest: parsed.data,
       signature: response.signature,
       signingKeyId: response.signingKeyId,
       trustedPublicKeys: config.market.trustedPublicKeys,
+      allowUnsigned: config.market.allowUnsigned,
+      envelope: response.version?.provenanceJson?.marketSignatureEnvelope,
     });
+
+    // Downgrade protection: refuse to replace an installed version with an
+    // older one. Only enforced when both versions are comparable dotted-numeric
+    // strings, to avoid false rejections on non-semver tags.
+    const existingInstall = await findWorkspaceMcpInstallByMarketIdentifier({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      marketIdentifier: parsed.data.identifier,
+    });
+    if (
+      existingInstall?.marketVersion &&
+      compareDottedVersions(parsed.data.version, existingInstall.marketVersion) < 0
+    ) {
+      throw new McpError(
+        409,
+        "MCP_MARKET_VERSION_DOWNGRADE",
+        `Refusing to install ${parsed.data.identifier}@${parsed.data.version}; a newer version (${existingInstall.marketVersion}) is already installed.`,
+      );
+    }
+
+    let manifestForInstall = parsed.data;
+    if (input.endpointUrlOverride) {
+      const overridden = marketMcpManifestSchema.safeParse({
+        ...parsed.data,
+        endpointUrl: input.endpointUrlOverride,
+      });
+      if (!overridden.success) {
+        throw new McpError(
+          422,
+          "MCP_MARKET_MANIFEST_INVALID",
+          "Market MCP manifest is invalid",
+          overridden.error.flatten() as Record<string, unknown>,
+        );
+      }
+      manifestForInstall = overridden.data;
+    }
+
+    await assertWebTransport(manifestForInstall);
 
     const install = await createOrUpdateMarketMcpInstall({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       userId: input.userId,
-      manifest: parsed.data,
+      manifest: manifestForInstall,
+      verified: verification.verified,
       signature: response.signature,
       signingKeyId: response.signingKeyId,
     });
@@ -583,7 +711,9 @@ export class McpService {
     if (!install.endpointUrl) {
       throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
     }
-    assertSafeMcpEndpoint(install.endpointUrl, { allowLocalhost: isDevelopment() });
+    await assertSafeMcpEndpoint(install.endpointUrl, {
+      allowLocalhost: isDevelopment(),
+    });
 
     const credential = await findWorkspaceMcpCredential({
       teamId: workspace.organizationId,
@@ -599,6 +729,7 @@ export class McpService {
         workspaceId: workspace.id,
         installId: install.id,
         serverSlug: install.marketIdentifier ?? install.id,
+        preserveExistingMetadata: true,
         tools: tools.map((tool) => ({
           name: stripLangChainMcpToolPrefix({
             serverKey: install.marketIdentifier ?? install.id,
@@ -681,18 +812,38 @@ export class McpService {
         installId: install.id,
       });
       const headers = credential ? headersFromCredential(credential) : {};
+      // Re-validate the stored endpoint at execution time. The install-time
+      // check is not enough on its own: a hostname can be repointed at an
+      // internal/metadata address after install (DNS rebinding). Skip — rather
+      // than connect to — any install whose endpoint now resolves unsafely.
+      if (install.endpointUrl) {
+        try {
+          await assertSafeMcpEndpoint(install.endpointUrl, {
+            allowLocalhost: isDevelopment(),
+          });
+        } catch {
+          continue;
+        }
+      }
+      // Each install is isolated: one server being unreachable (getTools throws,
+      // since onConnectionError is "throw") must neither leak its transport nor
+      // abort the whole turn. Close the client and move on.
       const client = createLangChainMcpClient({ install, headers });
+      let installTools: DynamicStructuredTool[];
+      try {
+        installTools = await client.getTools();
+      } catch {
+        await client.close().catch(() => undefined);
+        continue;
+      }
       clients.push(client);
-      const installTools = await client.getTools();
       for (const tool of installTools) {
-        const knownTool = install.tools.find(
-          (candidate) =>
-            candidate.normalizedToolName === tool.name ||
-            normalizedMcpToolName({
-              serverSlug: install.marketIdentifier ?? install.id,
-              toolName: candidate.serverToolName,
-            }) === tool.name,
-        );
+        const knownTool = findInstallToolByLangChainName(install, tool.name);
+        // A tool disabled via updateInstall/setWorkspaceMcpToolsEnabled must not
+        // be bound, regardless of whether an explicit toolIds filter is present.
+        if (knownTool && !knownTool.enabled) {
+          continue;
+        }
         if (input.toolIds?.length && (!knownTool || !input.toolIds.includes(knownTool.id))) {
           continue;
         }
@@ -842,7 +993,7 @@ export class McpService {
               executedBy: input.userId,
             }),
           ]);
-          return output;
+          return capMcpModelOutput(output);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const latencyMs = Date.now() - startedAt;
@@ -889,12 +1040,19 @@ export class McpService {
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
-    const install = installs.find((candidate) =>
-      candidate.tools.some((tool) => tool.normalizedToolName === input.toolName),
-    );
-    const tool = install?.tools.find(
-      (candidate) => candidate.normalizedToolName === input.toolName,
-    );
+    // input.toolName is the LangChain tool name from the interrupt; resolve it
+    // with the same matcher discovery uses so camelCase/non-slug-safe tools
+    // aren't left un-approvable (which would hard-fail the turn).
+    let install: (typeof installs)[number] | undefined;
+    let tool: WorkspaceMcpToolRecord | undefined;
+    for (const candidate of installs) {
+      const match = findInstallToolByLangChainName(candidate, input.toolName);
+      if (match) {
+        install = candidate;
+        tool = match;
+        break;
+      }
+    }
     if (!install || !tool) {
       return null;
     }
