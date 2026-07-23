@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../shared/config", () => ({
   config: {
-    market: { trustedPublicKeys: [], allowUnsigned: true },
+    market: { enabled: true },
     modelGatewayEncryptionSecret: "test-encryption-secret",
   },
 }));
@@ -518,8 +518,6 @@ test("installMarketMcp refuses to downgrade an already-installed newer version",
       webExecutable: true,
     },
     version: { provenanceJson: {} },
-    signature: null,
-    signingKeyId: null,
   });
   // A newer version (2.0.0) is already installed.
   mocks.findWorkspaceMcpInstallByMarketIdentifier.mockResolvedValue(

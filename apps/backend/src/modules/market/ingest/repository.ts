@@ -54,6 +54,37 @@ type MarketItemStatus = McpRepositoryIngestOptions["status"];
 type MarketItemVisibility = McpRepositoryIngestOptions["visibility"];
 
 /**
+ * Ownership/state of an existing catalog item, used to guard submissions
+ * against overwriting federated (upstream) entries or hijacking another
+ * submitter's published listing, and to keep a flagged identifier sticky in
+ * review.
+ */
+export async function getMarketItemForSubmission(identifier: string): Promise<{
+  hasUpstream: boolean;
+  status: MarketItemStatus;
+  submittedBy: string | null;
+} | null> {
+  const [item] = await db
+    .select()
+    .from(marketItems)
+    .where(eq(marketItems.identifier, identifier))
+    .limit(1);
+  if (!item) {
+    return null;
+  }
+  const versions = await db
+    .select()
+    .from(marketItemVersions)
+    .where(eq(marketItemVersions.itemId, item.id));
+  const hasUpstream = versions.some((version) => version.origin === "upstream");
+  const submittedBy =
+    versions
+      .map((version) => version.provenanceJson?.submittedBy)
+      .find((value): value is string => typeof value === "string") ?? null;
+  return { hasUpstream, status: item.status, submittedBy };
+}
+
+/**
  * Shared upsert for a market MCP item + version + categories. Both the
  * submission path (a parsed GitHub repo) and the federation path (an upstream
  * registry entry) call this; they differ only in origin/source/owner and the
@@ -69,6 +100,13 @@ export async function upsertMarketMcp(input: {
   provenanceJson?: Record<string, unknown>;
 }) {
   const { manifest } = input;
+  // A submission must never confer official/verified — those come only from a
+  // trusted upstream (federation) or an admin, never from the submitted repo's
+  // own manifest content.
+  const metadataJson =
+    input.origin === "submitted"
+      ? { ...metadataFromManifest(manifest), official: false, verified: false }
+      : metadataFromManifest(manifest);
   const itemId = hashId("mcp", manifest.identifier);
   const versionId = hashId("mcpv", `${manifest.identifier}@${manifest.version}`);
   const now = new Date();
@@ -90,7 +128,7 @@ export async function upsertMarketMcp(input: {
       owner,
       sourceUrl: manifest.sourceUrl,
       repoUrl: manifest.repoUrl,
-      metadataJson: metadataFromManifest(manifest),
+      metadataJson,
       publishedAt,
       updatedAt: now,
     })
@@ -105,7 +143,7 @@ export async function upsertMarketMcp(input: {
         owner,
         sourceUrl: manifest.sourceUrl,
         repoUrl: manifest.repoUrl,
-        metadataJson: metadataFromManifest(manifest),
+        metadataJson,
         updatedAt: now,
         publishedAt,
       },

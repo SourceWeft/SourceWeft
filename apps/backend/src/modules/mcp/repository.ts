@@ -311,12 +311,12 @@ export async function createOrUpdateMarketMcpInstall(input: {
   userId: string;
   manifest: MarketMcpManifest;
   /**
-   * Trust badge derived from signature verification — NOT the manifest's own
-   * self-asserted `verified` flag, which is attacker/catalog-controlled.
+   * Trust badge for the install. Sourced from the catalog row (federated =
+   * upstream-verified; submissions are forced unverified at ingest), never from
+   * the submitted manifest's own self-asserted flag. Per-manifest signing was
+   * removed with sourceweft-api.
    */
   verified: boolean;
-  signature?: string | null;
-  signingKeyId?: string | null;
 }) {
   const id = randomUUID();
   const credentialStatus =
@@ -346,8 +346,8 @@ export async function createOrUpdateMarketMcpInstall(input: {
             webExecutable: input.manifest.webExecutable,
             authType: input.manifest.auth.type,
             manifestJson: input.manifest,
-            signature: input.signature ?? null,
-            signingKeyId: input.signingKeyId ?? null,
+            signature: null,
+            signingKeyId: null,
             updatedAt: new Date(),
           })
           .where(
@@ -382,8 +382,8 @@ export async function createOrUpdateMarketMcpInstall(input: {
             credentialStatus,
             enabled: true,
             manifestJson: input.manifest,
-            signature: input.signature ?? null,
-            signingKeyId: input.signingKeyId ?? null,
+            signature: null,
+            signingKeyId: null,
             createdBy: input.userId,
           })
           .returning()

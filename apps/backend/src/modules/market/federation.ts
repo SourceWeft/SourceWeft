@@ -15,12 +15,16 @@ import { upsertMarketMcp } from "./ingest/repository";
 export type RegistrySource = {
   source: string;
   baseUrl: string;
+  // Whether entries from this source are namespace-verified upstream. Only a
+  // source we trust to verify ownership should mint verified=true rows.
+  verified: boolean;
 };
 
 export const DEFAULT_REGISTRY_SOURCES: RegistrySource[] = [
   {
     source: "registry.modelcontextprotocol.io",
     baseUrl: "https://registry.modelcontextprotocol.io",
+    verified: true,
   },
 ];
 
@@ -88,6 +92,7 @@ function displayName(server: RegistryServer, identifier: string) {
  */
 export function mapRegistryServerToManifest(
   entry: RegistryEntry,
+  options: { verified: boolean } = { verified: false },
 ): MarketMcpManifest | null {
   const server: RegistryServer = entry.server ?? entry;
   const identifier = server.name?.trim();
@@ -118,7 +123,7 @@ export function mapRegistryServerToManifest(
     desktopOnly: !hasRemote,
     webExecutable: hasRemote,
     official: false,
-    verified: true,
+    verified: options.verified,
     auth: { type: "none" as const, required: false, allowedHeaderNames: [] },
     categories: [],
     tools: [],
@@ -156,6 +161,7 @@ async function fetchRegistryPage(
 export async function ingestFromRegistry(input: {
   source: string;
   baseUrl: string;
+  verified: boolean;
   maxServers?: number;
   pageSize?: number;
 }) {
@@ -179,7 +185,7 @@ export async function ingestFromRegistry(input: {
         skipped += 1;
         continue;
       }
-      const manifest = mapRegistryServerToManifest(entry);
+      const manifest = mapRegistryServerToManifest(entry, { verified: input.verified });
       if (!manifest) {
         skipped += 1;
         continue;
@@ -229,6 +235,7 @@ export async function runMarketFederation(
         await ingestFromRegistry({
           source: source.source,
           baseUrl: source.baseUrl,
+          verified: source.verified,
           maxServers: options.maxServers,
         }),
       );

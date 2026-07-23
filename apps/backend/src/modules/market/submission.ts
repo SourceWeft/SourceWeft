@@ -1,5 +1,8 @@
 import { logger } from "../../shared/logger";
-import { upsertMarketMcp } from "./ingest/repository";
+import {
+  getMarketItemForSubmission,
+  upsertMarketMcp,
+} from "./ingest/repository";
 import { parseMcpRepository } from "./parse-repository";
 import { scanMcpSubmission } from "./scan";
 
@@ -40,10 +43,38 @@ export async function submitMcpFromGitHub(input: {
     );
   }
 
+  const identifier = parsed.manifest.identifier;
+  const existing = await getMarketItemForSubmission(identifier);
+
+  // Ownership guard: a submission may not overwrite a federated (upstream)
+  // entry, nor another submitter's already-published listing. This closes the
+  // catalog-takeover / install-endpoint-hijack vector where an attacker submits
+  // a repo whose server.json name collides with a trusted identifier.
+  if (existing?.hasUpstream) {
+    throw new MarketSubmissionError(
+      "MARKET_SUBMISSION_CONFLICT",
+      `${identifier} is already provided by an upstream registry and cannot be overwritten by a submission.`,
+    );
+  }
+  if (
+    existing?.status === "published" &&
+    existing.submittedBy &&
+    existing.submittedBy !== input.userId
+  ) {
+    throw new MarketSubmissionError(
+      "MARKET_SUBMISSION_CONFLICT",
+      `${identifier} is already published by another submitter.`,
+    );
+  }
+
   const scan = scanMcpSubmission(parsed);
-  const status: "published" | "reviewing" = scan.reviewRequired
-    ? "reviewing"
-    : "published";
+  // Sticky review: a flagged submission goes to review, and an identifier that
+  // is currently under review or was rejected can never auto-publish via a
+  // re-submit that merely drops the risky lines — only an admin moves it out.
+  const stickyReview =
+    existing?.status === "reviewing" || existing?.status === "archived";
+  const status: "published" | "reviewing" =
+    scan.reviewRequired || stickyReview ? "reviewing" : "published";
 
   await upsertMarketMcp({
     manifest: parsed.manifest,
