@@ -9,25 +9,15 @@ import {
   type ListMarketMcpResponse,
 } from "@sourceweft/market-sdk";
 
-const DEFAULT_MARKET_API_BASE_URL = "http://localhost:3011";
+import { apiBaseUrl } from "./api-base-url";
+
 const MCP_LIST_LIMIT = 100;
 
-function marketApiBaseUrl() {
-  return (
-    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
-    process.env.MARKET_API_BASE_URL?.trim() ||
-    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
-    process.env.MARKET_API_URL?.trim() ||
-    DEFAULT_MARKET_API_BASE_URL
-  );
-}
-
 function marketClient() {
-  return new MarketClient({
-    baseUrl: marketApiBaseUrl(),
-    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
-    getToken: () => process.env.MARKET_SERVICE_TOKEN?.trim() || undefined,
-  });
+  // The MCP catalog is now served by the backend (sourceweft-api retired), so
+  // the public read API lives at {backend}/v1/mcp — no separate service or
+  // service token.
+  return new MarketClient({ baseUrl: apiBaseUrl });
 }
 
 export function isMarketNotFound(error: unknown) {
