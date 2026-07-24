@@ -1,14 +1,35 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db, workspaceMemberships, workspaces } from "@sourceweft/db";
-import type { Workspace, WorkspaceMembership, WorkspaceRole } from "./types";
+import {
+  isOrganizationAdminRole,
+  resolveContentRole,
+  type Workspace,
+  type WorkspaceAccess,
+  type WorkspaceMember,
+  type WorkspaceRole,
+} from "./types";
+
+const workspaceColumns = {
+  id: workspaces.id,
+  organizationId: workspaces.organizationId,
+  name: workspaces.name,
+  slug: workspaces.slug,
+  isDefault: workspaces.isDefault,
+  createdBy: workspaces.createdBy,
+  createdAt: workspaces.createdAt,
+};
 
 type WorkspaceRow = Pick<
   typeof workspaces.$inferSelect,
-  "id" | "organizationId" | "name" | "slug" | "createdBy" | "createdAt"
+  | "id"
+  | "organizationId"
+  | "name"
+  | "slug"
+  | "isDefault"
+  | "createdBy"
+  | "createdAt"
 >;
-type WorkspaceMembershipRow = typeof workspaceMemberships.$inferSelect;
-
 type OrganizationMembershipRow = {
   organization_id: string;
   user_id: string;
@@ -29,16 +50,8 @@ function mapWorkspaceRow(row: WorkspaceRow): Workspace {
     organizationId: row.organizationId,
     name: row.name,
     slug: row.slug,
+    isDefault: row.isDefault,
     createdBy: row.createdBy,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-function mapMembershipRow(row: WorkspaceMembershipRow): WorkspaceMembership {
-  return {
-    workspaceId: row.workspaceId,
-    userId: row.userId,
-    role: row.role,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -88,7 +101,16 @@ export async function updateWorkspaceNameRecord(input: {
   return mapWorkspaceRow(row);
 }
 
-export async function ensureWorkspaceMembership(input: {
+/**
+ * Writes an explicit content-role override.
+ *
+ * Every row in `workspace_memberships` is now an override — a deliberate
+ * statement that this user's role here differs from, or exists independently
+ * of, what the organization implies. Roles that merely follow from
+ * organization membership are computed on read and never stored, which is why
+ * there is nothing here to keep in sync.
+ */
+export async function upsertWorkspaceMembershipOverride(input: {
   workspaceId: string;
   userId: string;
   role: WorkspaceRole;
@@ -99,49 +121,77 @@ export async function ensureWorkspaceMembership(input: {
       workspaceId: input.workspaceId,
       userId: input.userId,
       role: input.role,
+      source: "direct",
     })
     .onConflictDoUpdate({
       target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
-      set: {
-        role: input.role,
-      },
+      set: { role: input.role, source: "direct" },
     })
     .returning();
 
   if (!row) {
-    throw new Error("Failed to ensure workspace membership");
+    throw new Error("Failed to write workspace membership override");
   }
 
-  return mapMembershipRow(row);
+  return { workspaceId: row.workspaceId, userId: row.userId, role: row.role };
 }
 
+type ListedWorkspaceRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  slug: string;
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string;
+};
+
+/**
+ * Workspaces the user can actually enter: the organization's shared default
+ * one, plus any other workspace holding an explicit row for them.
+ *
+ * The `member` join is the access check, not a filter added on top of one —
+ * losing organization membership removes every workspace from this list on the
+ * next request, with no cleanup pass in between.
+ *
+ * Note this is the *content* plane. An organization admin does not see
+ * teammates' private workspaces here even though they may administer them;
+ * listing them as somewhere to go would misrepresent what they can read.
+ */
 export async function listWorkspacesForMember(input: {
   organizationId: string;
   userId: string;
 }) {
-  const rows = await db
-    .select({
-      id: workspaces.id,
-      organizationId: workspaces.organizationId,
-      name: workspaces.name,
-      slug: workspaces.slug,
-      createdBy: workspaces.createdBy,
-      createdAt: workspaces.createdAt,
-    })
-    .from(workspaces)
-    .innerJoin(
-      workspaceMemberships,
-      eq(workspaceMemberships.workspaceId, workspaces.id),
-    )
-    .where(
-      and(
-        eq(workspaces.organizationId, input.organizationId),
-        eq(workspaceMemberships.userId, input.userId),
-      ),
-    )
-    .orderBy(asc(workspaces.createdAt));
+  const result = await db.execute<ListedWorkspaceRow>(sql`
+    select
+      w.id,
+      w.organization_id,
+      w.name,
+      w.slug,
+      w.is_default,
+      w.created_by,
+      w.created_at::text as created_at
+    from workspaces w
+    join member m
+      on m."organizationId" = w.organization_id
+     and m."userId" = ${input.userId}
+    left join workspace_memberships wm
+      on wm.workspace_id = w.id
+     and wm.user_id = ${input.userId}
+    where w.organization_id = ${input.organizationId}
+      and (w.is_default or wm.user_id is not null)
+    order by w.created_at asc
+  `);
 
-  return rows.map(mapWorkspaceRow);
+  return (result.rows ?? []).map((row) => ({
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    slug: row.slug,
+    isDefault: row.is_default,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  })) satisfies Workspace[];
 }
 
 export async function ensureUserWorkspaceInOrganizationRecord(input: {
@@ -159,14 +209,7 @@ export async function ensureUserWorkspaceInOrganizationRecord(input: {
     `);
 
     const [existing] = await tx
-      .select({
-        id: workspaces.id,
-        organizationId: workspaces.organizationId,
-        name: workspaces.name,
-        slug: workspaces.slug,
-        createdBy: workspaces.createdBy,
-        createdAt: workspaces.createdAt,
-      })
+      .select(workspaceColumns)
       .from(workspaces)
       .innerJoin(
         workspaceMemberships,
@@ -234,36 +277,180 @@ export async function ensureUserWorkspaceInOrganizationRecord(input: {
   });
 }
 
+/**
+ * The one workspace every member of a team organization shares. Unlike
+ * `ensureUserWorkspaceInOrganizationRecord` this is keyed on the organization,
+ * not on the user: the second member through the door joins the first
+ * member's workspace instead of getting an empty one of their own.
+ */
+export async function ensureSharedWorkspaceRecord(input: {
+  organizationId: string;
+  name: string;
+  primarySlug: string;
+  createdBy: string;
+}) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(
+        hashtext('sourceweft:shared-workspace'),
+        hashtext(${input.organizationId})
+      )
+    `);
+
+    const [existing] = await tx
+      .select(workspaceColumns)
+      .from(workspaces)
+      .where(
+        and(
+          eq(workspaces.organizationId, input.organizationId),
+          eq(workspaces.isDefault, true),
+        ),
+      )
+      .orderBy(asc(workspaces.createdAt))
+      .limit(1);
+
+    if (existing) {
+      return mapWorkspaceRow(existing);
+    }
+
+    // Deliberately does NOT adopt a pre-existing workspace. Organizations
+    // created before shared workspaces existed hold their content in whoever's
+    // private workspace it landed in; promoting one of those would hand a
+    // newly invited teammate everything its owner had written in private, as a
+    // side effect of accepting an invitation. New shared space, empty, and an
+    // admin grants access to the older workspaces explicitly if they want to.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const slug =
+        attempt === 0
+          ? input.primarySlug
+          : `${input.primarySlug}-${Math.random().toString(36).slice(2, 8)}`;
+      const [workspace] = await tx
+        .insert(workspaces)
+        .values({
+          id: randomUUID(),
+          organizationId: input.organizationId,
+          name: input.name,
+          slug,
+          isDefault: true,
+          createdBy: input.createdBy,
+        })
+        .onConflictDoNothing({
+          target: [workspaces.organizationId, workspaces.slug],
+        })
+        .returning();
+
+      if (workspace) {
+        return mapWorkspaceRow(workspace);
+      }
+    }
+
+    throw new Error("Failed to create shared workspace");
+  });
+}
+
+type WorkspaceAccessRow = {
+  organization_id: string;
+  is_default: boolean;
+  organization_role: string;
+  override_role: WorkspaceRole | null;
+};
+
+/**
+ * The single place where "what may this user do in this workspace" is decided.
+ *
+ * One query answers both planes, because both derive from the same three
+ * facts: the organization row the workspace belongs to, whether the caller is
+ * a current member of that organization, and whether an explicit override
+ * names them.
+ *
+ * Returns null when the caller is not in the owning organization — that is the
+ * outer boundary, and no `workspace_memberships` row can substitute for it.
+ */
+export async function resolveWorkspaceAccessRecord(input: {
+  workspaceId: string;
+  userId: string;
+}): Promise<WorkspaceAccess | null> {
+  const result = await db.execute<WorkspaceAccessRow>(sql`
+    select
+      w.organization_id,
+      w.is_default,
+      m.role as organization_role,
+      wm.role as override_role
+    from workspaces w
+    join member m
+      on m."organizationId" = w.organization_id
+     and m."userId" = ${input.userId}
+    left join workspace_memberships wm
+      on wm.workspace_id = w.id
+     and wm.user_id = ${input.userId}
+    where w.id = ${input.workspaceId}
+    limit 1
+  `);
+
+  const row = result.rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  const { role, source } = resolveContentRole({
+    organizationRole: row.organization_role,
+    isDefaultWorkspace: row.is_default,
+    overrideRole: row.override_role,
+  });
+
+  return {
+    workspaceId: input.workspaceId,
+    organizationId: row.organization_id,
+    userId: input.userId,
+    organizationRole: row.organization_role,
+    role,
+    source,
+    isContainerAdmin: isOrganizationAdminRole(row.organization_role),
+  };
+}
+
 export async function findWorkspaceByIdForMember(input: {
   workspaceId: string;
   userId: string;
 }) {
-  const [row] = await db
-    .select({
-      id: workspaces.id,
-      organizationId: workspaces.organizationId,
-      name: workspaces.name,
-      slug: workspaces.slug,
-      createdBy: workspaces.createdBy,
-      createdAt: workspaces.createdAt,
-    })
-    .from(workspaces)
-    .innerJoin(
-      workspaceMemberships,
-      eq(workspaceMemberships.workspaceId, workspaces.id),
-    )
-    .where(
-      and(
-        eq(workspaces.id, input.workspaceId),
-        eq(workspaceMemberships.userId, input.userId),
-      ),
-    )
-    .limit(1);
+  const result = await db.execute<ListedWorkspaceRow>(sql`
+    select
+      w.id,
+      w.organization_id,
+      w.name,
+      w.slug,
+      w.is_default,
+      w.created_by,
+      w.created_at::text as created_at
+    from workspaces w
+    join member m
+      on m."organizationId" = w.organization_id
+     and m."userId" = ${input.userId}
+    left join workspace_memberships wm
+      on wm.workspace_id = w.id
+     and wm.user_id = ${input.userId}
+    where w.id = ${input.workspaceId}
+      and (w.is_default or wm.user_id is not null)
+    limit 1
+  `);
 
-  return row ? mapWorkspaceRow(row) : null;
+  const row = result.rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    slug: row.slug,
+    isDefault: row.is_default,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  } satisfies Workspace;
 }
 
-export async function findWorkspaceMembership(input: {
+export async function findWorkspaceMembershipOverride(input: {
   workspaceId: string;
   userId: string;
 }) {
@@ -278,7 +465,115 @@ export async function findWorkspaceMembership(input: {
     )
     .limit(1);
 
-  return row ? mapMembershipRow(row) : null;
+  return row
+    ? { workspaceId: row.workspaceId, userId: row.userId, role: row.role }
+    : null;
+}
+
+type WorkspaceMemberRow = {
+  user_id: string;
+  organization_role: string;
+  override_role: WorkspaceRole | null;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+};
+
+/**
+ * Everyone who can currently enter the workspace, derived members included.
+ *
+ * Driven from `member` rather than from `workspace_memberships`, so a user who
+ * left the organization disappears from the list immediately whether or not a
+ * stale override row was cleaned up.
+ */
+export async function listWorkspaceMemberRecords(input: {
+  workspaceId: string;
+  organizationId: string;
+  isDefaultWorkspace: boolean;
+}): Promise<WorkspaceMember[]> {
+  const result = await db.execute<WorkspaceMemberRow>(sql`
+    select
+      m."userId" as user_id,
+      m.role as organization_role,
+      wm.role as override_role,
+      u.name,
+      u.email,
+      u.image
+    from member m
+    left join workspace_memberships wm
+      on wm.workspace_id = ${input.workspaceId}
+     and wm.user_id = m."userId"
+    left join "user" u on u.id = m."userId"
+    where m."organizationId" = ${input.organizationId}
+      and (${input.isDefaultWorkspace} or wm.user_id is not null)
+    order by m."createdAt" asc
+  `);
+
+  return (result.rows ?? []).flatMap((row) => {
+    const { role, source } = resolveContentRole({
+      organizationRole: row.organization_role,
+      isDefaultWorkspace: input.isDefaultWorkspace,
+      overrideRole: row.override_role,
+    });
+
+    if (!role || !source) {
+      return [];
+    }
+
+    return [
+      {
+        workspaceId: input.workspaceId,
+        userId: row.user_id,
+        role,
+        source,
+        organizationRole: row.organization_role,
+        name: row.name,
+        email: row.email,
+        image: row.image,
+      },
+    ];
+  });
+}
+
+export async function deleteWorkspaceMembershipRecord(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  const rows = await db
+    .delete(workspaceMemberships)
+    .where(
+      and(
+        eq(workspaceMemberships.workspaceId, input.workspaceId),
+        eq(workspaceMemberships.userId, input.userId),
+      ),
+    )
+    .returning();
+
+  return rows.length > 0;
+}
+
+/**
+ * Drops every override a user holds inside one organization, called when they
+ * are removed from it.
+ *
+ * Purely hygiene: derived access already ends the moment the `member` row goes,
+ * and better-auth's `/organization/leave` fires no hook at all, so nothing may
+ * depend on this having run.
+ */
+export async function deleteOrganizationWorkspaceMemberships(input: {
+  organizationId: string;
+  userId: string;
+}) {
+  const result = await db.execute<{ workspace_id: string }>(sql`
+    delete from workspace_memberships wm
+    using workspaces w
+    where w.id = wm.workspace_id
+      and w.organization_id = ${input.organizationId}
+      and wm.user_id = ${input.userId}
+    returning wm.workspace_id
+  `);
+
+  return (result.rows ?? []).map((row) => row.workspace_id);
 }
 
 export async function findWorkspaceByIdInOrganization(input: {
@@ -286,14 +581,7 @@ export async function findWorkspaceByIdInOrganization(input: {
   organizationId: string;
 }) {
   const [row] = await db
-    .select({
-      id: workspaces.id,
-      organizationId: workspaces.organizationId,
-      name: workspaces.name,
-      slug: workspaces.slug,
-      createdBy: workspaces.createdBy,
-      createdAt: workspaces.createdAt,
-    })
+    .select(workspaceColumns)
     .from(workspaces)
     .where(
       and(
@@ -332,6 +620,25 @@ export async function findOrganizationMembership(input: {
     role: row.role,
     createdAt: row.created_at,
   };
+}
+
+export async function listOrganizationMemberships(organizationId: string) {
+  const result = await db.execute<OrganizationMembershipRow>(sql`
+    select
+      "organizationId" as organization_id,
+      "userId" as user_id,
+      role,
+      "createdAt"::text as created_at
+    from member
+    where "organizationId" = ${organizationId}
+  `);
+
+  return (result.rows ?? []).map((row) => ({
+    organizationId: row.organization_id,
+    userId: row.user_id,
+    role: row.role,
+    createdAt: row.created_at,
+  }));
 }
 
 export async function findOrganizationById(organizationId: string) {
@@ -554,13 +861,3 @@ export async function isOrganizationMember(input: {
   const membership = await findOrganizationMembership(input);
   return Boolean(membership);
 }
-
-export async function findMembershipByUser(userId: string) {
-  const [row] = await db
-    .select()
-    .from(workspaceMemberships)
-    .where(eq(workspaceMemberships.userId, userId))
-    .limit(1);
-  return row ? mapMembershipRow(row) : null;
-}
-

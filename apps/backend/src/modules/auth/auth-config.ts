@@ -395,32 +395,76 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                     userId: user.id,
                   });
                 },
+                // `user` in these hooks is the member the change is about, not
+                // whoever triggered it — see better-auth's crud-members route.
                 async afterAddMember({ organization, user }) {
+                  // Only makes sure the shared workspace exists. Membership of
+                  // it is derived, so this user — and every existing teammate —
+                  // is in it already.
+                  const { workspaceService } = await import("../workspace");
+                  await workspaceService.ensureMembershipWorkspace({
+                    organizationId: organization.id,
+                    userId: user.id,
+                  });
+
+                  const { teamAuditService } = await import("../team-audit");
+                  await teamAuditService.record({
+                    teamId: organization.id,
+                    actorUserId: user.id,
+                    action: "organization.member_added",
+                    targetType: "member",
+                    targetId: user.id,
+                  });
+
                   logger.info("Team member added; paid seat count unchanged", {
                     organizationId: organization.id,
-                    actorUserId: user.id,
+                    memberUserId: user.id,
                   });
                 },
                 async afterRemoveMember({ organization, user }) {
+                  // Access is derived from the `member` row that has just been
+                  // deleted, so it is already gone. This only clears leftover
+                  // explicit overrides, and nothing may depend on it running:
+                  // `/organization/leave` deletes the same row and fires no
+                  // hook at all.
+                  const { workspaceService } = await import("../workspace");
+                  await workspaceService.revokeOrganizationWorkspaceAccess({
+                    organizationId: organization.id,
+                    userId: user.id,
+                  });
+
                   logger.info(
                     "Team member removed; paid seat count unchanged",
                     {
                       organizationId: organization.id,
-                      actorUserId: user.id,
+                      memberUserId: user.id,
                     },
                   );
                 },
+                // No `afterUpdateMemberRole`: the workspace role follows from
+                // the organization role on every read, so a promotion takes
+                // effect without anything being rewritten.
                 async afterAcceptInvitation({ organization, user }) {
                   const { workspaceService } = await import("../workspace");
-                  await workspaceService.ensureUserWorkspaceInOrganization({
+                  await workspaceService.ensureMembershipWorkspace({
                     organizationId: organization.id,
                     userId: user.id,
                   });
+
+                  const { teamAuditService } = await import("../team-audit");
+                  await teamAuditService.record({
+                    teamId: organization.id,
+                    actorUserId: user.id,
+                    action: "organization.invitation_accepted",
+                    targetType: "member",
+                    targetId: user.id,
+                  });
+
                   logger.info(
                     "Team invitation accepted; paid seat count unchanged",
                     {
                       organizationId: organization.id,
-                      actorUserId: user.id,
+                      memberUserId: user.id,
                     },
                   );
                 },

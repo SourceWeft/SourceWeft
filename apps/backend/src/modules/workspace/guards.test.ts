@@ -21,6 +21,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     organizationId: "org-test-1",
     name: "Test Workspace",
     slug: "test-workspace",
+    isDefault: false,
     createdBy: "user-test-1",
     createdAt: new Date().toISOString(),
     ...overrides,
