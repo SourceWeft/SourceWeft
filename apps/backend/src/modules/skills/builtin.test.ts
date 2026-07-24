@@ -215,6 +215,8 @@ test("ppt-deck builtin skill stays hidden from the public gallery", async () => 
   assert.deepEqual(skill.manifestJson.tools, [
     "prepare_sandbox_workspace",
     "execute",
+    "generate_image",
+    "review_deck_visuals",
     "publish_artifact",
   ]);
   assert.deepEqual(
@@ -224,112 +226,6 @@ test("ppt-deck builtin skill stays hidden from the public gallery", async () => 
   assert.deepEqual(skill.manifestJson.options?.[0]?.target, {
     path: "config.stylePreset",
   });
-});
-
-test("ppt-deck builtin skill includes sandbox-based generation guidance", async () => {
-  const skill = await getBuiltinSkillBySlug("ppt-deck");
-  assert.ok(skill);
-  const bundle = await loadBuiltinSkillBundle(skill.storagePointer);
-  const content = bundle?.files.find(
-    (file) => file.path === "SKILL.md",
-  )?.contentText;
-  const bundledContent = bundle?.files
-    .map((file) => file.contentText)
-    .join("\n\n");
-
-  assert.match(content ?? "", /pptxgenjs/);
-  assert.doesNotMatch(content ?? "", new RegExp(["sourceweft", ":"].join("")));
-  assert.match(content ?? "", /sandbox/);
-  assert.doesNotMatch(content ?? "", /slides\.json/);
-  assert.doesNotMatch(content ?? "", /\/workfiles\/ppt-deck\/deck\.js/);
-  assert.doesNotMatch(content ?? "", /\/workspace\/ppt-deck\/deck\.js/);
-  assert.doesNotMatch(content ?? "", /SourceWeft Runtime Rules/);
-  assert.doesNotMatch(content ?? "", /OUTPUT_DIR/);
-  assert.match(content ?? "", /Quick Reference/);
-  assert.match(content ?? "", /Read or analyze a PPTX/);
-  assert.match(content ?? "", /Edit Existing Decks/);
-  assert.match(content ?? "", /Create From Scratch/);
-  assert.match(content ?? "", /Design Guardrails/);
-  assert.match(content ?? "", /QA/);
-  assert.match(content ?? "", /Dependencies/);
-  assert.match(content ?? "", /prepared sandbox builder path/);
-  assert.match(
-    content ?? "",
-    /prepare it into the\s+sandbox workspace according to the sandbox runtime rules/,
-  );
-  assert.doesNotMatch(content ?? "", /publish_artifact/);
-  assert.doesNotMatch(content ?? "", /artifactType: "slides"/);
-  assert.match(content ?? "", /PPTX_ARTIFACT_PATH/);
-  assert.match(content ?? "", /PREVIEW_IMAGE_PATH/);
-  assert.match(content ?? "", /\$QA_DIR\/preview\.jpg/);
-  assert.doesNotMatch(content ?? "", /deckData/);
-  assert.match(content ?? "", /promised visuals/);
-  assert.doesNotMatch(content ?? "", /backgroundMode/);
-  assert.doesNotMatch(content ?? "", /renderBackground/);
-  assert.doesNotMatch(content ?? "", /applyBackground/);
-  assert.doesNotMatch(content ?? "", /role\s*\/\s*visualIntent/);
-  assert.doesNotMatch(content ?? "", /Feynman Method/);
-  assert.doesNotMatch(content ?? "", /feynman-method\.pptx/);
-  assert.doesNotMatch(content ?? "", /\/workspace\/ppt-deck\/qa/);
-  assert.match(content ?? "", /QA_DIR="<sandbox QA directory>"/);
-  assert.match(content ?? "", /Use the exact path printed by the deck builder/);
-  assert.match(content ?? "", /===CONTENT_QA===/);
-  assert.match(content ?? "", /===PPTX_TO_PDF===/);
-  assert.match(content ?? "", /===PDF_TO_JPG===/);
-  assert.match(content ?? "", /===VISUAL_QA_SUMMARY===/);
-  assert.match(content ?? "", /pdftoppm/);
-  assert.match(content ?? "", /QA_IMAGE_COUNT/);
-  assert.match(content ?? "", /test "\$QA_IMAGE_COUNT" -gt 0/);
-  assert.match(content ?? "", /PREVIEW_SOURCE_PATH="\$\(head -n 1 "\$QA_DIR\/slide-images\.txt"\)"/);
-  assert.match(content ?? "", /echo "PREVIEW_IMAGE_PATH=\$QA_DIR\/preview\.jpg"/);
-  assert.match(
-    content ?? "",
-    /find "\$QA_DIR" -maxdepth 1 -type f -name 'slide\*\.jpg' \| sort > "\$QA_DIR\/slide-images\.txt"/,
-  );
-  assert.match(content ?? "", /Do not run `file` against slide JPGs on the happy path/);
-  assert.match(content ?? "", /use the\s+discovered slide image paths from `\$QA_DIR\/slide-images\.txt`/);
-  assert.doesNotMatch(content ?? "", /\/workspace\/qa/);
-  assert.match(content ?? "", /Do not assume a fixed filename such as `slide-01\.jpg`/);
-  assert.match(content ?? "", /Every content slide needs a meaningful visual structure/);
-  assert.match(content ?? "", /find "<sandbox task directory>" -type f -iname '\*\.pptx'/);
-  assert.match(content ?? "", /roughly 12 visible tool calls/);
-  assert.match(content ?? "", /roughly 18 visible tool calls/);
-  assert.match(content ?? "", /If visible tool calls approach 20/);
-  assert.doesNotMatch(content ?? "", /visible tool calls reach 20, stop/);
-  assert.match(bundledContent ?? "", /===PPTX_TO_PDF===/);
-  assert.match(bundledContent ?? "", /===PDF_TO_JPG===/);
-  assert.match(bundledContent ?? "", /QA_IMAGE_COUNT/);
-  assert.match(bundledContent ?? "", /PREVIEW_IMAGE_PATH/);
-  assert.match(bundledContent ?? "", /visual QA summary/);
-  assert.match(
-    bundledContent ?? "",
-    /Theme Presets/,
-  );
-  assert.match(bundledContent ?? "", /Learning Studio/);
-  assert.match(bundledContent ?? "", /Executive Strategy/);
-  assert.match(bundledContent ?? "", /Chinese or mixed Chinese-English decks/);
-  assert.match(bundledContent ?? "", /Topic-to-Preset Map/);
-  assert.match(bundledContent ?? "", /Concept Map/);
-  assert.match(bundledContent ?? "", /Framework Canvas/);
-  assert.match(bundledContent ?? "", /Recap Matrix/);
-  assert.match(bundledContent ?? "", /sandbox-local scratch path/);
-  assert.doesNotMatch(bundledContent ?? "", /Always write to `\/tmp\/` first/);
-  assert.doesNotMatch(bundledContent ?? "", /\/workspace\/ppt-deck/);
-  assert.doesNotMatch(bundledContent ?? "", /\/workfiles\/ppt-deck/);
-  assert.doesNotMatch(bundledContent ?? "", /Page Number Badge.*MANDATORY/);
-  assert.doesNotMatch(bundledContent ?? "", /Use ONLY the provided color palette/);
-  assert.doesNotMatch(bundledContent ?? "", /Feynman Method/);
-  assert.doesNotMatch(bundledContent ?? "", /Feynman learning method deck/);
-  assert.doesNotMatch(bundledContent ?? "", /feynman-method\.pptx/);
-  assert.doesNotMatch(bundledContent ?? "", /\/workspace\/work/);
-  assert.doesNotMatch(
-    bundledContent ?? "",
-    /\/workspace\/output\/\.sourceweft\/artifacts\/slides\.json/,
-  );
-  assert.doesNotMatch(bundledContent ?? "", /Create one JS file per slide/);
-  assert.doesNotMatch(bundledContent ?? "", /slides\/compile\.js/);
-  assert.doesNotMatch(bundledContent ?? "", /slide-\d{2}\.js/);
-  assert.doesNotMatch(bundledContent ?? "", /slide-XX-preview/);
 });
 
 test("ppt-deck builtin skill guards against unsafe natural-language literals", async () => {

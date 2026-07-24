@@ -258,6 +258,8 @@ test("resolveThreadCommand resolves manifest skill aliases to enabled skills", a
   assert.deepEqual(command?.workflow?.defaultTools, [
     "prepare_sandbox_workspace",
     "execute",
+    "generate_image",
+    "review_deck_visuals",
     "publish_artifact",
   ]);
   assert.deepEqual(command?.workflow?.successCriteria, {
