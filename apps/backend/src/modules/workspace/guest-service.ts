@@ -15,7 +15,17 @@ import {
 
 export type GuestMutationResult<T = void> =
   | { ok: true; value: T }
-  | { ok: false; reason: "not_found" | "forbidden" | "invalid_invitation" };
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "forbidden"
+        | "invalid_invitation"
+        | "email_mismatch";
+    };
+
+/** Guest invitations expire 14 days after they are issued. */
+const GUEST_INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type WorkspaceGuest = {
   userId: string;
@@ -82,12 +92,12 @@ export class GuestService {
       return { ok: false, reason: "not_found" };
     }
 
-    const invitation = await createGuestInvitationRecord({
+    const { invitation, token } = await createGuestInvitationRecord({
       workspaceId: input.workspaceId,
       email: input.email,
       role: input.role,
       invitedBy: input.actorUserId,
-      expiresAt: null,
+      expiresAt: new Date(Date.now() + GUEST_INVITATION_TTL_MS),
     });
 
     try {
@@ -99,7 +109,7 @@ export class GuestService {
         variables: {
           inviterLabel: "A teammate",
           workspaceName: workspace.name,
-          url: guestAcceptUrl(invitation.token),
+          url: guestAcceptUrl(token),
         },
       });
     } catch (error) {
@@ -165,10 +175,21 @@ export class GuestService {
   async acceptInvitation(input: {
     token: string;
     userId: string;
+    userEmail: string;
   }): Promise<GuestMutationResult<{ workspaceId: string }>> {
     const invitation = await findLiveGuestInvitationByToken(input.token);
     if (!invitation) {
       return { ok: false, reason: "invalid_invitation" };
+    }
+
+    // Possessing the token is not enough: a guest invitation is bound to the
+    // invited email, so the accepting account's email must match (case-folded).
+    // Mirrors better-auth's org-invite behavior.
+    if (
+      input.userEmail.trim().toLowerCase() !==
+      invitation.email.trim().toLowerCase()
+    ) {
+      return { ok: false, reason: "email_mismatch" };
     }
 
     const { workspaceId, organizationId } = await acceptGuestInvitationRecord({
@@ -183,7 +204,13 @@ export class GuestService {
         action: "workspace.guest_accepted",
         targetType: "guest",
         targetId: input.userId,
-        metadata: { workspaceId },
+        // Record both the invited email and the accepting user so any future
+        // email-binding anomaly is forensically visible in the audit trail.
+        metadata: {
+          workspaceId,
+          invitedEmail: invitation.email,
+          acceptedUserId: input.userId,
+        },
       });
     }
 

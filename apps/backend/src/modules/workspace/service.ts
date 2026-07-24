@@ -360,6 +360,13 @@ export class WorkspaceService {
       return { ok: false, reason: "not_found" };
     }
 
+    // A guest is not a member: their access is a source='guest' grant managed
+    // solely through GuestService. Grading one here would write a source='direct'
+    // override that escapes the guest cap and the guest-removal path, so refuse.
+    if (target.source === "guest") {
+      return { ok: false, reason: "forbidden" };
+    }
+
     const previousRole = target.role;
 
     await upsertWorkspaceMembershipOverride({

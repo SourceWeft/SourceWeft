@@ -33,6 +33,13 @@ function throwGuestError(result: GuestMutationResult<unknown>): never {
       "This invitation is not valid or has expired.",
     );
   }
+  if (result.reason === "email_mismatch") {
+    throw new ApiError(
+      403,
+      "GUEST_INVITATION_EMAIL_MISMATCH",
+      "This invitation was sent to a different email address.",
+    );
+  }
   throw new ApiError(404, "GUEST_NOT_FOUND", "Not found");
 }
 
@@ -393,6 +400,7 @@ export function registerWorkspaceRoutes(app: Hono) {
     const result = await guestService.acceptInvitation({
       token: parsed.data.token,
       userId: getSessionUserId(session),
+      userEmail: session.user.email,
     });
     if (!result.ok) {
       throwGuestError(result);
