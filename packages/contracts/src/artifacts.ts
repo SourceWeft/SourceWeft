@@ -150,6 +150,14 @@ export const getArtifactResponseSchema = z.object({
   artifact: artifactSchema,
 });
 
+export const deleteArtifactResponseSchema = z.object({
+  deleted: z.literal(true),
+  artifactId: z.string(),
+});
+
 export type Artifact = z.infer<typeof artifactSchema>;
 export type GetArtifactResponse = z.infer<typeof getArtifactResponseSchema>;
 export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>;
+export type DeleteArtifactResponse = z.infer<
+  typeof deleteArtifactResponseSchema
+>;

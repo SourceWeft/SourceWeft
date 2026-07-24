@@ -87,6 +87,21 @@ export function registerArtifactRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.delete("/artifacts/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentArtifactsService.deleteArtifact({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/artifacts/:id/source.json", async (c) => {
     const session = await requireSession(c);
     if (!session) {

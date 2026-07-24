@@ -518,6 +518,31 @@ export async function findArtifactRecord(input: {
 }
 
 /**
+ * Delete the artifact row. Versions and artifact-source rows go with it via
+ * `ON DELETE CASCADE`; stored object cleanup is the caller's business, since
+ * the repository never touches object storage. Returns false when the row was
+ * already gone (or belongs to another tenant), which callers report as 404.
+ */
+export async function deleteArtifactRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+}) {
+  const rows = await db
+    .delete(artifacts)
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning({ id: artifacts.id });
+
+  return rows.length > 0;
+}
+
+/**
  * Re-label every artifact of a thread to the thread's visibility. Artifacts do
  * not carry an independent toggle; they inherit their thread, so when the thread
  * is re-shared or hidden its artifacts move with it. `private` maps to private,

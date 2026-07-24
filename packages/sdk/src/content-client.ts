@@ -21,6 +21,7 @@ import type {
   CreateCustomSkillRequest,
   CreateCustomSkillVersionRequest,
   CustomSkillResponse,
+  DeleteArtifactResponse,
   DeleteByokCredentialResponse,
   DeleteByokModelResponse,
   DeleteCustomSkillVersionFileResponse,
@@ -215,6 +216,12 @@ export class ContentClient {
 
   getArtifact(workspaceId: string, artifactId: string) {
     return this.http.get<GetArtifactResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,
+    );
+  }
+
+  deleteArtifact(workspaceId: string, artifactId: string) {
+    return this.http.delete<DeleteArtifactResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,
     );
   }

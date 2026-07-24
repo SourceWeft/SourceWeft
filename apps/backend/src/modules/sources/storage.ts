@@ -11,6 +11,7 @@ import {
   ArtifactError,
 } from "@sourceweft/contracts/artifact-errors";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   type GetObjectCommandOutput,
   PutObjectCommand,
@@ -159,11 +160,34 @@ export async function uploadChatImageObject(input: {
   await putObject(input);
 }
 
-export function downloadSourceObject(input: { bucket?: string | null; key: string }) {
+export function downloadSourceObject(input: {
+  bucket?: string | null;
+  key: string;
+}) {
   return getObjectBuffer(input);
 }
 
-export function downloadArtifactObject(input: { bucket?: string | null; key: string }) {
+/**
+ * The one delete. An already-absent key is success — S3 deletes are idempotent
+ * and the caller's goal (the bytes are gone) is met either way. Anything else
+ * propagates exactly as the store raised it, matching the read/write helpers.
+ */
+export async function deleteArtifactObject(input: {
+  bucket?: string | null;
+  key: string;
+}) {
+  await s3Client.send(
+    new DeleteObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+    }),
+  );
+}
+
+export function downloadArtifactObject(input: {
+  bucket?: string | null;
+  key: string;
+}) {
   return getObjectBuffer(input);
 }
 

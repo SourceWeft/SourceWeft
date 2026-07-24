@@ -9,10 +9,21 @@ import type {
   ArtifactViewHandler,
 } from "@sourceweft/contracts";
 import { requireContentWorkspace } from "../workspace/guards";
+import { workspaceService } from "../workspace";
 import { canViewContent } from "../workspace/content-visibility";
 import { ContentError } from "../content/errors";
-import { downloadArtifactObject } from "../sources/storage";
-import { findArtifactRecord, listArtifactRecords } from "./repository";
+import {
+  deleteArtifactObject,
+  downloadArtifactObject,
+} from "../sources/storage";
+import { revokeShareLink } from "../sharing/store";
+import { teamAuditService } from "../team-audit";
+import { logger } from "../../shared/logger";
+import {
+  deleteArtifactRecord,
+  findArtifactRecord,
+  listArtifactRecords,
+} from "./repository";
 import { loadArtifactViewHandlerRegistry } from "./view-handlers";
 
 type ArtifactRecord = Awaited<ReturnType<typeof findArtifactRecord>>;
@@ -379,6 +390,117 @@ export class ContentArtifactsService {
 
   buildArtifactPreviewUrl(input: { workspaceId: string; artifactId: string }) {
     return buildArtifactPreviewPageUrl(input);
+  }
+
+  /**
+   * Permanently delete one artifact.
+   *
+   * Authorization mirrors sharing's `requireShareableArtifact`: only the
+   * artifact's creator or a workspace admin may delete, because deletion (like
+   * publication) is a decision about the item itself, not mere access to it.
+   * `ARTIFACT_NOT_FOUND` hides existence from callers without access.
+   *
+   * Order matters: the share link is revoked first (a public URL must stop
+   * resolving even if a later step dies), then the row goes (versions and
+   * artifact-source rows cascade), and only then the stored bytes — a failed
+   * byte delete leaves an unreferenced object, which beats a row that points
+   * at bytes we already destroyed. Byte deletion is best-effort by design.
+   */
+  async deleteArtifact(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    const access = await workspaceService.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    if (!access || access.role === null) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+
+    const artifact = await findArtifactRecord({
+      teamId: access.organizationId,
+      workspaceId: input.workspaceId,
+      artifactId: input.artifactId,
+    });
+    if (!artifact || !canViewContent(input.userId, artifact)) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+
+    const isCreator = artifact.createdBy === input.userId;
+    if (!isCreator && !workspaceService.canAdministerContainer(access)) {
+      throw new ContentError(
+        403,
+        "ARTIFACT_DELETE_FORBIDDEN",
+        "Only the artifact's creator or a workspace admin can delete it.",
+      );
+    }
+
+    await revokeShareLink({
+      targetType: "artifact",
+      targetId: artifact.id,
+    });
+
+    const deleted = await deleteArtifactRecord({
+      teamId: access.organizationId,
+      workspaceId: input.workspaceId,
+      artifactId: artifact.id,
+    });
+    if (!deleted) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+
+    // Every stored object the row referenced. The payload's source JSON may
+    // live in its own bucket (resolveSourceJsonStorageBucket); the primary file
+    // and the preview share the artifact's bucket.
+    const payload = toObjectRecord(artifact.payloadJson);
+    const sourceJsonStorageKey =
+      payload && typeof payload.sourceJsonStorageKey === "string"
+        ? payload.sourceJsonStorageKey.trim()
+        : "";
+    const storedObjects = [
+      ...(artifact.storageKey
+        ? [{ bucket: artifact.storageBucket, key: artifact.storageKey }]
+        : []),
+      ...(artifact.previewStorageKey
+        ? [{ bucket: artifact.storageBucket, key: artifact.previewStorageKey }]
+        : []),
+      ...(sourceJsonStorageKey
+        ? [
+            {
+              bucket: resolveSourceJsonStorageBucket(artifact),
+              key: sourceJsonStorageKey,
+            },
+          ]
+        : []),
+    ];
+    for (const object of storedObjects) {
+      try {
+        await deleteArtifactObject(object);
+      } catch (error) {
+        logger.warn("artifact_stored_object_delete_failed", {
+          artifactId: artifact.id,
+          key: object.key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    await teamAuditService.record({
+      teamId: access.organizationId,
+      actorUserId: input.userId,
+      action: "artifact.deleted",
+      targetType: "artifact",
+      targetId: artifact.id,
+      metadata: {
+        artifactType: artifact.artifactType,
+        status: artifact.status,
+        title: artifact.title,
+      },
+    });
+
+    return { deleted: true as const, artifactId: artifact.id };
   }
 
   async getArtifactFile(input: {

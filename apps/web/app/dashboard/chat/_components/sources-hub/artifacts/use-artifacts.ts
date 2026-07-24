@@ -8,6 +8,7 @@ import {
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../workspace-hub-cache";
+import { subscribeArtifactDeleted } from "./artifact-delete-events";
 
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
@@ -191,6 +192,34 @@ export function useArtifacts(input: {
       void refreshArtifacts();
     }
   }, [artifactsRefreshKey, refreshArtifacts]);
+
+  // Evict a deleted artifact from the list and both cache layers the moment
+  // the preview panel deletes it, without waiting for the next full refresh.
+  useEffect(() => {
+    return subscribeArtifactDeleted(
+      ({ workspaceId: deletedIn, artifactId }) => {
+        const removeDeleted = (items: ArtifactListItem[]) =>
+          items.filter((artifact) => artifact.id !== artifactId);
+
+        const cachedItems = workspaceArtifactsCache.get(deletedIn);
+        if (cachedItems) {
+          const remaining = removeDeleted(cachedItems);
+          workspaceArtifactsCache.set(deletedIn, remaining);
+          setCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+            WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+            deletedIn,
+            {
+              items: remaining,
+              nextCursor: workspaceArtifactsCursorCache.get(deletedIn) ?? null,
+            },
+          );
+        }
+        if (workspaceId === deletedIn) {
+          setArtifacts(removeDeleted);
+        }
+      },
+    );
+  }, [workspaceId]);
 
   return {
     artifacts,
