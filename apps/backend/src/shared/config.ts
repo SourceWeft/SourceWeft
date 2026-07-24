@@ -150,6 +150,49 @@ function parseCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+/**
+ * Confidential OAuth clients for MCP providers that don't support Dynamic Client
+ * Registration (e.g. Stripe, GitHub). Parsed from a JSON array of
+ * { issuer, clientId, clientSecret } and keyed by the issuer's origin, so a
+ * configured client is only ever matched to — and sent to — its own
+ * authorization server. Malformed entries are skipped.
+ */
+function parseOAuthClients(
+  value: string | undefined,
+): Record<string, { clientId: string; clientSecret?: string }> {
+  if (!value?.trim()) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return {};
+  }
+  if (!Array.isArray(parsed)) {
+    return {};
+  }
+  const out: Record<string, { clientId: string; clientSecret?: string }> = {};
+  for (const entry of parsed) {
+    const issuer = typeof entry?.issuer === "string" ? entry.issuer : null;
+    const clientId = typeof entry?.clientId === "string" ? entry.clientId : null;
+    if (!issuer || !clientId) {
+      continue;
+    }
+    try {
+      const origin = new URL(issuer).origin;
+      out[origin] = {
+        clientId,
+        clientSecret:
+          typeof entry?.clientSecret === "string" ? entry.clientSecret : undefined,
+      };
+    } catch {
+      // Skip an entry whose issuer is not a valid URL.
+    }
+  }
+  return out;
+}
+
 function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   if (!value) {
     return fallback;
@@ -577,6 +620,20 @@ export const config = {
     // allowlist; the gate is abstracted (requireMarketAdmin) so this can later
     // become a DB-backed role without touching the endpoints.
     adminUserIds: parseCsv(process.env.MARKET_ADMIN_USER_IDS),
+  },
+  mcpOAuth: {
+    // Callback our backend exposes for the MCP OAuth authorization-code flow. It
+    // must be registered with any confidential (non-DCR) provider's OAuth app;
+    // DCR/public providers pick it up automatically.
+    redirectUrl:
+      process.env.MCP_OAUTH_REDIRECT_URL?.trim() ||
+      `${resolveApiBaseUrl()}/v1/mcp/oauth/callback`,
+    // Client name advertised during (dynamic) registration / authorization.
+    clientName: process.env.MCP_OAUTH_CLIENT_NAME?.trim() || "SourceWeft",
+    // Confidential clients for providers without DCR, keyed by issuer origin. A
+    // client is only ever used for its matching issuer; DCR/public providers
+    // need no entry. See parseOAuthClients.
+    clients: parseOAuthClients(process.env.MCP_OAUTH_CLIENTS),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
