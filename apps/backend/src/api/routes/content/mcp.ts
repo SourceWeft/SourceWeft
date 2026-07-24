@@ -42,6 +42,8 @@ export function registerMcpRoutes(app: Hono) {
       query: c.req.query("query"),
       category: c.req.query("category"),
       includeDesktopOnly: parseBooleanQuery(c.req.query("includeDesktopOnly")),
+      limit: parseLimitQuery(c.req.query("limit")),
+      cursor: c.req.query("cursor"),
     });
     return ApiResponse.success(c, result);
   });

@@ -624,9 +624,23 @@ export class ContentClient {
     );
   }
 
-  listWorkspaceMarketMcp(workspaceId: string) {
+  listWorkspaceMarketMcp(
+    workspaceId: string,
+    params?: {
+      query?: string;
+      category?: string;
+      limit?: number;
+      cursor?: string;
+    },
+  ) {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category) search.set("category", params.category);
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.cursor) search.set("cursor", params.cursor);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListWorkspaceMarketMcpResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/market/mcp`,
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp${suffix}`,
     );
   }
 

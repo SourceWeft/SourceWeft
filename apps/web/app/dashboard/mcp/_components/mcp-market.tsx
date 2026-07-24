@@ -116,10 +116,12 @@ const trustOptions: Array<{ key: TrustFilter; label: string }> = [
   { key: "unverified", label: "Unverified" },
 ];
 
+// The web catalog only ever lists web-executable servers (the backend excludes
+// desktop-only entries); the desktop-only facet returns when the desktop host
+// ships its own market view.
 const deviceOptions: Array<{ key: DeviceFilter; label: string }> = [
   { key: "all", label: "All devices" },
   { key: "web", label: "Web executable" },
-  { key: "desktop", label: "Desktop only" },
 ];
 
 const sortOptions: Array<{ key: SortKey; label: string }> = [
@@ -129,19 +131,29 @@ const sortOptions: Array<{ key: SortKey; label: string }> = [
   { key: "trusted_first", label: "Trusted first" },
 ];
 
-function fetchMcpCatalog(targetWorkspaceId: string) {
-  const pending = catalogRequestsByWorkspace.get(targetWorkspaceId);
+const CATALOG_PAGE_SIZE = 100;
+
+function fetchMcpCatalog(
+  targetWorkspaceId: string,
+  params?: { query?: string; category?: string; cursor?: string },
+) {
+  // Dedupe concurrent identical requests (workspace + filters + page).
+  const requestKey = `${targetWorkspaceId}|${params?.query ?? ""}|${params?.category ?? ""}|${params?.cursor ?? ""}`;
+  const pending = catalogRequestsByWorkspace.get(requestKey);
   if (pending) {
     return pending;
   }
   const promise = contentClient
-    .listWorkspaceMarketMcp(targetWorkspaceId)
+    .listWorkspaceMarketMcp(targetWorkspaceId, {
+      ...params,
+      limit: CATALOG_PAGE_SIZE,
+    })
     .finally(() => {
-      if (catalogRequestsByWorkspace.get(targetWorkspaceId) === promise) {
-        catalogRequestsByWorkspace.delete(targetWorkspaceId);
+      if (catalogRequestsByWorkspace.get(requestKey) === promise) {
+        catalogRequestsByWorkspace.delete(requestKey);
       }
     });
-  catalogRequestsByWorkspace.set(targetWorkspaceId, promise);
+  catalogRequestsByWorkspace.set(requestKey, promise);
   return promise;
 }
 
@@ -1126,6 +1138,16 @@ export function McpMarket() {
   const [trustFilter, setTrustFilter] = React.useState<TrustFilter>("all");
   const [deviceFilter, setDeviceFilter] = React.useState<DeviceFilter>("all");
   const [sort, setSort] = React.useState<SortKey>("recommended");
+  // Server-side catalog paging: the catalog is far larger than one page, so
+  // query/category are pushed to the backend (debounced) and further pages are
+  // appended via the keyset cursor.
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+  const [serverQuery, setServerQuery] = React.useState("");
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => setServerQuery(query.trim()), 300);
+    return () => window.clearTimeout(timeout);
+  }, [query]);
   const [catalogStatus, setCatalogStatus] =
     React.useState<CatalogStatus>("resolving_workspace");
   const [error, setError] = React.useState<string | null>(null);
@@ -1208,6 +1230,7 @@ export function McpMarket() {
       if (catalogGenerationRef.current !== generation) return;
       loadedCatalogWorkspaceIdRef.current = resolved.id;
       setItems(result.items);
+      setNextCursor(result.nextCursor ?? null);
       setCategories(categoryResult);
       setCatalogStatus("ready");
     } catch (loadError) {
@@ -1222,6 +1245,63 @@ export function McpMarket() {
   React.useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  // Refetch the first page from the server whenever the debounced query or the
+  // category changes; the initial default-filter load per workspace is done by
+  // loadCatalog and skipped here.
+  const filterKeyRef = React.useRef("");
+  React.useEffect(() => {
+    const targetWorkspaceId = workspace?.id;
+    if (!targetWorkspaceId) return;
+    const key = `${targetWorkspaceId}|${serverQuery}|${category}`;
+    if (filterKeyRef.current === key) return;
+    const isFirstForWorkspace = !filterKeyRef.current.startsWith(
+      `${targetWorkspaceId}|`,
+    );
+    filterKeyRef.current = key;
+    if (isFirstForWorkspace && !serverQuery && category === "all") return;
+    let cancelled = false;
+    void fetchMcpCatalog(targetWorkspaceId, {
+      query: serverQuery || undefined,
+      category: category === "all" ? undefined : category,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.items);
+        setNextCursor(result.nextCursor ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to search the MCP catalog.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace?.id, serverQuery, category]);
+
+  const loadMoreMcp = React.useCallback(async () => {
+    const targetWorkspaceId = workspace?.id;
+    if (!targetWorkspaceId || !nextCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const result = await fetchMcpCatalog(targetWorkspaceId, {
+        query: serverQuery || undefined,
+        category: category === "all" ? undefined : category,
+        cursor: nextCursor,
+      });
+      setItems((current) => {
+        const seen = new Set(current.map((item) => item.market.identifier));
+        return [
+          ...current,
+          ...result.items.filter((item) => !seen.has(item.market.identifier)),
+        ];
+      });
+      setNextCursor(result.nextCursor ?? null);
+    } catch {
+      toast.error("Failed to load more MCP servers.");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [workspace?.id, nextCursor, isLoadingMore, serverQuery, category]);
 
   // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
   // once the catalog is loaded, scroll the matching card into view and give it
@@ -1632,6 +1712,21 @@ export function McpMarket() {
                   ))}
                 </div>
               )}
+              {catalogStatus === "ready" && nextCursor ? (
+                <div className="flex justify-center py-4">
+                  <Button
+                    disabled={isLoadingMore}
+                    onClick={() => void loadMoreMcp()}
+                    type="button"
+                    variant="outline"
+                  >
+                    {isLoadingMore ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    Load more
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </ScrollArea>
         </section>

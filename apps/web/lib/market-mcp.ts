@@ -28,8 +28,9 @@ export async function listPublicMcp(
   input: ListMarketMcpRequest = {},
 ): Promise<ListMarketMcpResponse> {
   try {
+    // Web surfaces only web-executable (http/sse) servers; desktop-only entries
+    // return when the desktop host ships.
     return await marketClient().listMcp({
-      includeDesktopOnly: true,
       limit: MCP_LIST_LIMIT,
       ...input,
     });

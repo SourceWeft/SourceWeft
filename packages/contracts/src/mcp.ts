@@ -127,6 +127,8 @@ export const listWorkspaceMarketMcpResponseSchema = z.object({
       install: workspaceMcpInstallSchema.nullable(),
     }),
   ),
+  // Keyset cursor for the next catalog page; null when this page is the last.
+  nextCursor: z.string().nullable().optional(),
 });
 
 export const listWorkspaceMarketMcpCategoriesResponseSchema =
