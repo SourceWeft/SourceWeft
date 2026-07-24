@@ -506,6 +506,49 @@ export function registerThreadRoutes(app: Hono) {
     );
   });
 
+  app.post("/threads/:id/typing", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({}))) as {
+      typing?: unknown;
+    };
+    await contentThreadService.emitTyping({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      typing: body.typing === true,
+    });
+    // Same envelope whether the ping was broadcast or rate-dropped.
+    return ApiResponse.success(c, { ok: true });
+  });
+
+  app.post("/threads/:id/presence/identities", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({}))) as {
+      userIds?: unknown;
+    };
+    const userIds = Array.isArray(body.userIds)
+      ? body.userIds
+          .filter((id): id is string => typeof id === "string")
+          .slice(0, 200)
+      : [];
+
+    const result = await contentThreadService.resolveThreadPresenceIdentities({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      userIds,
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/threads/:id/title-job/:jobId", async (c) => {
     const session = await requireSession(c);
     if (!session) {

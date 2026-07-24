@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -60,6 +60,7 @@ export function ThreadHeader({
   setSelectedModels,
   sourcesVisible,
   threadTitle,
+  presenceSlot,
 }: {
   availableModels: Record<ModelType, ModelItem[]>;
   byokCredentials: ByokCredentialItem[];
@@ -77,6 +78,7 @@ export function ThreadHeader({
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
   sourcesVisible: boolean;
   threadTitle: string;
+  presenceSlot?: ReactNode;
 }) {
   const hubButtonTitle = isPersistentLayout
     ? sourcesVisible
@@ -96,6 +98,7 @@ export function ThreadHeader({
               {threadTitle}
             </h1>
           </div>
+          {presenceSlot ? <div className="shrink-0">{presenceSlot}</div> : null}
         </div>
 
         <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">

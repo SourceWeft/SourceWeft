@@ -11,6 +11,12 @@ import {
 // enqueues; a second copy here had no readers and could only drift.
 export const CHAT_RUN_STREAM_TTL_SECONDS = 24 * 60 * 60;
 
+// Presence piggybacks the room SSE's existing 15s heartbeat as its TTL refresh
+// (no separate client heartbeat). 40s ≈ 2.5 missed beats, so a single blip does
+// not flicker a viewer out.
+export const PRESENCE_TTL_SECONDS = 40;
+export const PRESENCE_TTL_MS = PRESENCE_TTL_SECONDS * 1000;
+
 export function isDurableChatRunKey(value: string | undefined) {
   return Boolean(value?.startsWith(SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX));
 }

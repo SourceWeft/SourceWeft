@@ -410,6 +410,7 @@ export function Composer({
   submitDisabled = false,
   searchEnabled = false,
   onSearchEnabledChange,
+  onType,
   thinkingCapabilities,
   thinkingSettings = { mode: "auto" as const, effort: "medium" as const },
   onThinkingSettingsChange,
@@ -453,6 +454,7 @@ export function Composer({
   onRemoveSource?: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
   submitDisabled?: boolean;
+  onType?: () => void;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
   thinkingCapabilities?: PromptThinkingCapabilities;
@@ -1607,6 +1609,10 @@ export function Composer({
               onValueChange={({ segments, text }) => {
                 setDraftText(text);
                 setDraftSegments(segments);
+                if (text.trim().length > 0) {
+                  // Throttling lives in the presence hook; the composer stays dumb.
+                  onType?.();
+                }
               }}
               onSlashCommandSelect={(option: PromptInputSlashCommand) => {
                 const meta = option.meta as

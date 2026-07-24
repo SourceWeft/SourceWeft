@@ -422,6 +422,32 @@ export class ContentClient {
     );
   }
 
+  sendThreadTyping(workspaceId: string, threadId: string, typing: boolean) {
+    return this.http.post<{ ok: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/typing`,
+      { typing },
+    );
+  }
+
+  resolveThreadPresenceIdentities(
+    workspaceId: string,
+    threadId: string,
+    userIds: string[],
+  ) {
+    return this.http.post<{
+      identities: {
+        userId: string;
+        name: string | null;
+        email: string | null;
+        image: string | null;
+        isGuest: boolean;
+      }[];
+    }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/presence/identities`,
+      { userIds },
+    );
+  }
+
   listWorkingFiles(workspaceId: string, threadId: string) {
     return this.http.get<ListWorkingFilesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files`,

@@ -7,6 +7,8 @@ import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-s
 import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
 import { ThreadHeader } from "./thread-header";
+import { ThreadPresenceAvatars } from "./thread-presence-avatars";
+import { ThreadTypingIndicator } from "./thread-typing-indicator";
 import { ThreadSidePanels } from "./thread-side-panels";
 import type { useThreadPageController } from "./use-thread-page-controller";
 import {
@@ -58,6 +60,9 @@ export function DashboardChatThreadPageView({
   assistantVersionById,
   activeThreadRun,
   otherUserRunActive,
+  presentViewers,
+  typingViewers,
+  onComposerType,
   queuedSends,
   onCancelQueuedSend,
   chatExecutionState,
@@ -246,6 +251,7 @@ export function DashboardChatThreadPageView({
             chatHubContext?.setMobileHubOpen(true);
           }}
           onToggleSources={toggleSourcesVisible}
+          presenceSlot={<ThreadPresenceAvatars viewers={presentViewers} />}
           selectedModels={selectedModels}
           setSelectedModels={setSelectedModels}
           sourcesVisible={sourcesVisible}
@@ -265,6 +271,8 @@ export function DashboardChatThreadPageView({
             assistantVersionById={assistantVersionById}
             activeThreadRun={activeThreadRun}
             otherUserRunActive={otherUserRunActive}
+            typingIndicator={<ThreadTypingIndicator typing={typingViewers} />}
+            onComposerType={onComposerType}
             queuedSends={queuedSends}
             onCancelQueuedSend={onCancelQueuedSend}
             chatExecutionState={chatExecutionState}

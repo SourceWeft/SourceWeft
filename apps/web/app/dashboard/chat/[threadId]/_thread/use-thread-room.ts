@@ -15,7 +15,9 @@ type RoomFrame =
   | { type: "ready" }
   | { type: "resync" }
   | { type: "message"; messageId?: string; role?: string }
-  | { type: "run"; kind?: string; runId?: string; status?: string };
+  | { type: "run"; kind?: string; runId?: string; status?: string }
+  | { type: "presence"; here?: string[] }
+  | { type: "typing"; userId?: string };
 
 type RoomActiveRun = {
   id: string;
@@ -101,6 +103,10 @@ type UseThreadRoomInput = {
   ) => void;
   clearRunIfCurrent: (durableRunKey: string) => void;
   loadThreadMessages: () => Promise<void>;
+  // Presence/typing: the full viewer roster (userIds) on each presence frame,
+  // and one userId per typing frame (already self-filtered server-side).
+  onPresence: (here: string[]) => void;
+  onTyping: (userId: string) => void;
 };
 
 /**
@@ -120,6 +126,8 @@ export function useThreadRoom({
   setActiveThreadRun,
   clearRunIfCurrent,
   loadThreadMessages,
+  onPresence,
+  onTyping,
 }: UseThreadRoomInput) {
   // Latest callbacks/refs read at fire time so the subscription only re-opens on
   // thread/workspace change, never on a render-to-render identity change.
@@ -130,6 +138,8 @@ export function useThreadRoom({
     setActiveThreadRun,
     clearRunIfCurrent,
     loadThreadMessages,
+    onPresence,
+    onTyping,
   });
   latestRef.current = {
     activeThreadRunRef,
@@ -138,6 +148,8 @@ export function useThreadRoom({
     setActiveThreadRun,
     clearRunIfCurrent,
     loadThreadMessages,
+    onPresence,
+    onTyping,
   };
 
   useEffect(() => {
@@ -227,8 +239,20 @@ export function useThreadRoom({
         scheduleMessageRefetch();
         return;
       }
+      if (frame.type === "presence") {
+        latestRef.current.onPresence(frame.here ?? []);
+        return;
+      }
+      if (frame.type === "typing") {
+        if (frame.userId) {
+          latestRef.current.onTyping(frame.userId);
+        }
+        return;
+      }
       if (frame.type === "ready" || frame.type === "resync") {
         // (Re)connect / gap recovery: reconcile run state and pull messages.
+        // The server re-emits the presence snapshot right after ready, so no
+        // presence handling is needed here.
         void reconcileRun();
         scheduleMessageRefetch();
       }

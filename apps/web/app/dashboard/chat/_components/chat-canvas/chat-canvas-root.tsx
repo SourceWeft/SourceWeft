@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 import type { FileUIPart } from "ai";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
@@ -134,6 +141,8 @@ export function ChatCanvas({
   hasOlderMessages = false,
   activeThreadRun = null,
   otherUserRunActive = false,
+  typingIndicator,
+  onComposerType,
   queuedSends = [],
   onCancelQueuedSend,
   chatExecutionState,
@@ -193,6 +202,8 @@ export function ChatCanvas({
   // member. We follow it live but must not lock this member's composer or show
   // them a Stop button for a run they don't own.
   otherUserRunActive?: boolean;
+  typingIndicator?: ReactNode;
+  onComposerType?: () => void;
   // Messages the user submitted while a run was streaming, awaiting auto-send
   // when the thread frees. Rendered as a compact stack above the composer.
   queuedSends?: { id: string; preview: string }[];
@@ -788,6 +799,7 @@ export function ChatCanvas({
               ))}
             </div>
           ) : null}
+          {typingIndicator}
           <Composer
             className="w-full"
             allSources={allSources}
@@ -822,6 +834,7 @@ export function ChatCanvas({
               })
             }
             onStopStreaming={composerStopStreaming}
+            onType={onComposerType}
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}

@@ -48,6 +48,7 @@ import {
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
 import { useThreadRoom } from "./use-thread-room";
+import { useThreadPresence } from "./use-thread-presence";
 import { useThreadModels } from "./use-thread-models";
 import { useThreadPreviews } from "./use-thread-previews";
 import { useThreadSources } from "./use-thread-sources";
@@ -508,9 +509,18 @@ export function useThreadPageController({
     activeThreadRun.userId != null &&
     activeThreadRun.userId !== currentUserId;
 
+  // Presence + typing state, fed by the room SSE below (opens no stream itself).
+  const {
+    presentViewers,
+    typingViewers,
+    onPresence,
+    onTyping,
+    notifyTyping,
+  } = useThreadPresence({ workspaceId, threadId, currentUserId });
+
   // Live collaboration: subscribe to the thread room so another member's run
   // (or a new message) is reflected without a refresh — which also lets the
-  // send-queue engage when the thread was already open.
+  // send-queue engage when the thread was already open — plus presence/typing.
   useThreadRoom({
     workspaceId,
     threadId,
@@ -520,6 +530,8 @@ export function useThreadPageController({
     setActiveThreadRun,
     clearRunIfCurrent,
     loadThreadMessages,
+    onPresence,
+    onTyping,
   });
 
   // Turn-taking is client-orchestrated: sending while any run is active on the
@@ -1116,6 +1128,9 @@ export function useThreadPageController({
     assistantVersionById,
     activeThreadRun,
     otherUserRunActive,
+    presentViewers,
+    typingViewers,
+    onComposerType: notifyTyping,
     queuedSends: queuedSends.map((queued) => ({
       id: queued.id,
       preview: queuedSendPreview(queued.input),

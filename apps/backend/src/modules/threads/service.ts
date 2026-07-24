@@ -44,6 +44,13 @@ import { downloadChatImageObject } from "../sources/storage";
 import { durableChatRunService } from "./durable/service";
 import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
 import { streamThreadRoom } from "./durable/room-service";
+import { readPresence } from "./durable/presence-store";
+import { typingRateLimiter } from "./durable/typing-rate-limit";
+import { publishThreadEvent } from "../../shared/notify-hub";
+import {
+  filterOrganizationMemberIds,
+  findUserIdentitiesByIds,
+} from "../workspace/store";
 import type { ChatThreadRunMode } from "./durable/types";
 import type { StreamThreadEventInput } from "./turn/types";
 import { sanitizeThreadMessageMetadataForClient } from "./agent/turn/output-normalizer";
@@ -672,7 +679,124 @@ class ContentThreadService {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
-    return streamThreadRoom({ threadId: thread.id, signal: input.signal });
+    return streamThreadRoom({
+      threadId: thread.id,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      signal: input.signal,
+      // Re-run the FULL open gate each beat so a viewer who loses access
+      // mid-stream (removed from the workspace, or the thread flipped to
+      // private) is evicted within one beat — not just a thread-visibility
+      // recheck, which would miss a workspace-membership removal.
+      checkAccess: async () => {
+        const currentWorkspace = await workspaceService.resolveWorkspace({
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+        });
+        if (!currentWorkspace) {
+          return false;
+        }
+        const currentThread = await findThreadRecord({
+          threadId: input.threadId,
+          teamId: currentWorkspace.organizationId,
+          workspaceId: currentWorkspace.id,
+        });
+        return Boolean(
+          currentThread && canViewThread(input.userId, currentThread),
+        );
+      },
+    });
+  }
+
+  /**
+   * Broadcast that a viewer is typing. Same `canViewThread` gate as the room,
+   * server-side rate limited, fire-and-forget. `threadId`/`userId` come from the
+   * route + session, never the body, so typing can't be forged as another user.
+   */
+  async emitTyping(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    typing: boolean;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const thread = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!thread || !canViewThread(input.userId, thread)) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    if (!typingRateLimiter.allow(input.userId, thread.id)) {
+      return;
+    }
+
+    void publishThreadEvent({
+      threadId: thread.id,
+      workspaceId: workspace.id,
+      kind: "typing",
+      actorUserId: input.userId,
+      typing: input.typing,
+    }).catch(() => undefined);
+  }
+
+  /**
+   * Resolve display identities for viewers currently present on a thread. Gated
+   * by `canViewThread`, and the requested ids are intersected with the LIVE
+   * presence roster so this can't be used to scrape arbitrary users. Covers
+   * guests (cross-org users not in the member table) — flagged `isGuest`.
+   */
+  async resolveThreadPresenceIdentities(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    userIds: string[];
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const thread = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!thread || !canViewThread(input.userId, thread)) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    const present = new Set(await readPresence(thread.id));
+    const wanted = [...new Set(input.userIds)].filter((id) => present.has(id));
+    if (wanted.length === 0) {
+      return { identities: [] };
+    }
+
+    const [records, memberIds] = await Promise.all([
+      findUserIdentitiesByIds(wanted),
+      filterOrganizationMemberIds({
+        organizationId: workspace.organizationId,
+        userIds: wanted,
+      }),
+    ]);
+
+    return {
+      identities: records.map((record) => ({
+        userId: record.userId,
+        name: record.name,
+        email: record.email,
+        image: record.image,
+        isGuest: !memberIds.has(record.userId),
+      })),
+    };
   }
 
   async getMessageImageFile(input: {

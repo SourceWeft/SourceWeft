@@ -601,6 +601,59 @@ export async function listWorkspaceMemberRecords(input: {
   });
 }
 
+export type UserIdentityRecord = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+};
+
+/**
+ * Resolve display identities for a set of users. Works for guests too: a guest
+ * is a real `"user"` row (just not in this org's `member` table). Callers must
+ * gate access before calling — this is a raw lookup with no authorization.
+ */
+export async function findUserIdentitiesByIds(
+  userIds: string[],
+): Promise<UserIdentityRecord[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const result = await db.execute<{
+    id: string;
+    name: string | null;
+    email: string | null;
+    image: string | null;
+  }>(sql`
+    select id, name, email, image
+    from "user"
+    where id = any(${userIds})
+  `);
+  return (result.rows ?? []).map((row) => ({
+    userId: row.id,
+    name: row.name,
+    email: row.email,
+    image: row.image,
+  }));
+}
+
+/** Of the given users, which are members of `organizationId` (i.e. not guests). */
+export async function filterOrganizationMemberIds(input: {
+  organizationId: string;
+  userIds: string[];
+}): Promise<Set<string>> {
+  if (input.userIds.length === 0) {
+    return new Set();
+  }
+  const result = await db.execute<{ userId: string }>(sql`
+    select m."userId" as "userId"
+    from member m
+    where m."organizationId" = ${input.organizationId}
+      and m."userId" = any(${input.userIds})
+  `);
+  return new Set((result.rows ?? []).map((row) => row.userId));
+}
+
 export async function deleteWorkspaceMembershipRecord(input: {
   workspaceId: string;
   userId: string;

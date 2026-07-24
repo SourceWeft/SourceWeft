@@ -19,7 +19,13 @@ export type ThreadEventKind =
   | "run_waiting_approval"
   | "run_cancel_requested"
   | "run_finished"
-  | "run_status";
+  | "run_status"
+  // Presence: an ID-only wake-up that the viewer roster changed (join/leave).
+  // Carries NO roster — the room generator reads it from Redis inside the
+  // authorized stream and emits it in the SSE frame.
+  | "presence_changed"
+  // Typing: ephemeral; `actorUserId` is (or stopped) typing. Never any content.
+  | "typing";
 
 export type ThreadEventPayload = {
   threadId: string;
@@ -32,6 +38,8 @@ export type ThreadEventPayload = {
   status?: string;
   assistantMessageId?: string;
   userMessageId?: string;
+  // Only on kind:"typing" — whether the actor started (true) or stopped typing.
+  typing?: boolean;
 };
 
 export type ThreadEventSubscriber = {
