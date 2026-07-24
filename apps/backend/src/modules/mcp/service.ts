@@ -8,6 +8,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { InterruptOnConfig } from "langchain";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { decryptSecret, encryptSecret } from "../../shared/secrets";
 import { McpError } from "./errors";
@@ -16,7 +17,11 @@ import {
   langChainMcpServerKey,
 } from "./langchain-client";
 import { McpOAuthClientProvider } from "./oauth-provider";
-import { createDbMcpOAuthStore, getMcpOAuthStatus } from "./oauth-repository";
+import {
+  createDbMcpOAuthStore,
+  getMcpOAuthStatus,
+  listUserConnectedOAuthInstallIds,
+} from "./oauth-repository";
 import { marketService } from "./market-service";
 import { requireMcpWorkspace } from "./permissions";
 import {
@@ -30,6 +35,7 @@ import {
   findWorkspaceMcpInstallByMarketIdentifier,
   listMcpActionRuns,
   listMcpToolRuns,
+  listUserCredentialInstallIds,
   listWorkspaceMcpInstalls,
   setWorkspaceMcpToolsEnabled,
   updateMcpActionRun,
@@ -42,6 +48,7 @@ import {
   assertSafeMcpEndpoint,
   hashJson,
   normalizedMcpToolName,
+  redactErrorMessage,
   redactMcpSecrets,
   resolveCredentialEnvRef,
   sanitizeHeaderName,
@@ -49,6 +56,7 @@ import {
 } from "./security";
 import type {
   McpActionRunRecord,
+  WorkspaceMcpCredentialStatus,
   WorkspaceMcpInstallRecord,
   WorkspaceMcpToolRecord,
 } from "./types";
@@ -89,6 +97,10 @@ async function mcpEndpointRequiresAuth(endpointUrl: string): Promise<boolean> {
     const timer = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(endpointUrl, {
       method: "POST",
+      // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
+      // could bounce the probe to an internal/metadata address (blind SSRF). A
+      // redirect is simply "not a 401".
+      redirect: "manual",
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
@@ -110,10 +122,6 @@ async function mcpEndpointRequiresAuth(endpointUrl: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function credentialStatusFor(authType: McpAuthType) {
-  return authType === "none" ? "not_required" : "configured";
 }
 
 function headersFromCredential(input: {
@@ -156,6 +164,62 @@ function toObject(value: unknown): Record<string, unknown> {
 
 function isHighRisk(risk: McpRiskLevel) {
   return risk === "write" || risk === "destructive" || risk === "unknown";
+}
+
+/**
+ * The risk the HITL gate actually acts on — never the manifest's self-asserted
+ * value alone. An unverified install (federated-but-catalog-unverified, or a
+ * user submission) can declare any tool `read` to slip past approval, so every
+ * tool from an unverified install is forced to `unknown` (which hard-requires
+ * approval). A tool with no stored record is likewise `unknown`. Only a
+ * verified install's catalog risk is trusted. Both mount-time (interruptOn) and
+ * execute-time (backstop) go through this so they can never disagree.
+ */
+function effectiveMcpRisk(input: {
+  install: Pick<WorkspaceMcpInstallRecord, "verified">;
+  tool?: Pick<WorkspaceMcpToolRecord, "risk"> | null;
+}): McpRiskLevel {
+  if (!input.tool) {
+    return "unknown";
+  }
+  if (!input.install.verified) {
+    return "unknown";
+  }
+  return input.tool.risk;
+}
+
+// Aggregate ceiling on tools bound into a single turn. installIds is already
+// capped (10), but a server can expose unlimited tools; without this the tool
+// schema handed to the model can balloon (cost/latency/provider 400s).
+const MCP_MAX_BOUND_TOOLS = Number(process.env.MCP_MAX_BOUND_TOOLS) || 128;
+
+// Per-connection deadlines. A selected install that accepts the socket but
+// stalls on discovery/execution must not hang turn assembly (installs are
+// awaited in sequence). Mirrors the install-time auth probe's 5s abort.
+const MCP_GET_TOOLS_TIMEOUT_MS =
+  Number(process.env.MCP_GET_TOOLS_TIMEOUT_MS) || 15_000;
+const MCP_INVOKE_TIMEOUT_MS =
+  Number(process.env.MCP_INVOKE_TIMEOUT_MS) || 30_000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new McpError(504, "MCP_TIMEOUT", `${label} timed out`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function connectorRiskFromMcpRisk(risk: McpRiskLevel) {
@@ -403,6 +467,55 @@ function capMcpModelOutput(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Overlay per-user credential status onto installs. `credentialStatus` is a
+ * per-user fact now (static credentials and OAuth tokens are both keyed by
+ * user), so the value returned to a caller reflects THAT user's configuration,
+ * not a shared install-level flag: `none` → not_required; otherwise
+ * `configured` iff the user has their own credential/token, else `required`.
+ */
+async function overlayUserCredentialStatus<
+  T extends WorkspaceMcpInstallRecord,
+>(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  installs: T[];
+}): Promise<T[]> {
+  const authRequired = input.installs.filter(
+    (install) => install.authType !== "none",
+  );
+  const oauthIds = authRequired
+    .filter((install) => install.authType === "oauth")
+    .map((install) => install.id);
+  const staticIds = authRequired
+    .filter((install) => install.authType !== "oauth")
+    .map((install) => install.id);
+  const [connected, credentialed] = await Promise.all([
+    listUserConnectedOAuthInstallIds({
+      userId: input.userId,
+      installIds: oauthIds,
+    }),
+    listUserCredentialInstallIds({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      installIds: staticIds,
+    }),
+  ]);
+  return input.installs.map((install) => {
+    let status: WorkspaceMcpCredentialStatus;
+    if (install.authType === "none") {
+      status = "not_required";
+    } else if (install.authType === "oauth") {
+      status = connected.has(install.id) ? "configured" : "required";
+    } else {
+      status = credentialed.has(install.id) ? "configured" : "required";
+    }
+    return { ...install, credentialStatus: status };
+  });
+}
+
 export class McpService {
   async listMarketMcp(input: {
     workspaceId: string;
@@ -431,8 +544,14 @@ export class McpService {
         workspaceId: workspace.id,
       }),
     ]);
+    const installsWithStatus = await overlayUserCredentialStatus({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      installs,
+    });
     const installsByIdentifier = new Map(
-      installs
+      installsWithStatus
         .filter((install) => install.marketIdentifier)
         .map((install) => [install.marketIdentifier, install]),
     );
@@ -475,7 +594,15 @@ export class McpService {
         marketIdentifier: input.identifier,
       }),
     ]);
-    return { market, install };
+    const [installWithStatus] = install
+      ? await overlayUserCredentialStatus({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          installs: [install],
+        })
+      : [null];
+    return { market, install: installWithStatus ?? null };
   }
 
   async listInstalls(input: { workspaceId: string; userId: string }) {
@@ -485,9 +612,14 @@ export class McpService {
       permission: "mcp.read",
     });
     return {
-      items: await listWorkspaceMcpInstalls({
+      items: await overlayUserCredentialStatus({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
+        userId: input.userId,
+        installs: await listWorkspaceMcpInstalls({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+        }),
       }),
     };
   }
@@ -626,7 +758,13 @@ export class McpService {
       throw new McpError(500, "MCP_INSTALL_FAILED", "Failed to install MCP");
     }
 
-    return { install };
+    const [installWithStatus] = await overlayUserCredentialStatus({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      installs: [install],
+    });
+    return { install: installWithStatus ?? install };
   }
 
   async updateInstall(input: {
@@ -658,7 +796,13 @@ export class McpService {
     if (!install) {
       throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
     }
-    return { install };
+    const [installWithStatus] = await overlayUserCredentialStatus({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      installs: [install],
+    });
+    return { install: installWithStatus ?? install };
   }
 
   async deleteInstall(input: {
@@ -725,26 +869,27 @@ export class McpService {
       encryptedHeaders = encryptSecret(JSON.stringify(headers), encryptionSecret());
     }
 
+    // Credentials are per-user: store them keyed to the caller and DON'T touch
+    // the install-level credentialStatus (which would misrepresent every other
+    // member as configured). The status returned below is overlaid per user.
     await upsertWorkspaceMcpCredential({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       installId: input.installId,
+      userId: input.userId,
       authType: input.authType,
       encryptedSecret,
       encryptedHeaders,
       headerName,
       configuredBy: input.userId,
     });
-    const updated = await updateWorkspaceMcpInstall({
+    const [installWithStatus] = await overlayUserCredentialStatus({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      installId: input.installId,
-      credentialStatus: credentialStatusFor(input.authType),
+      userId: input.userId,
+      installs: [install],
     });
-    if (!updated) {
-      throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
-    }
-    return { install: updated };
+    return { install: installWithStatus ?? install };
   }
 
   async testInstall(input: {
@@ -813,12 +958,17 @@ export class McpService {
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
         installId: input.installId,
+        userId: input.userId,
       });
       headers = credential ? headersFromCredential(credential) : {};
     }
     const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
-      const tools = await client.getTools();
+      const tools = await withTimeout(
+        client.getTools(),
+        MCP_GET_TOOLS_TIMEOUT_MS,
+        `MCP ${install.name} tool discovery`,
+      );
       await upsertWorkspaceMcpTools({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
@@ -940,10 +1090,15 @@ export class McpService {
           store: createDbMcpOAuthStore(scope, status.issuer),
         });
       } else {
+        // Static credentials are per-user: use the INVOKING user's own
+        // credential, never a workspace-shared one. A user who hasn't
+        // configured this install has no headers (the connection fails as
+        // unauthenticated) rather than borrowing another member's token.
         const credential = await findWorkspaceMcpCredential({
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
           installId: install.id,
+          userId: input.userId,
         });
         headers = credential ? headersFromCredential(credential) : {};
       }
@@ -953,13 +1108,25 @@ export class McpService {
       const client = createLangChainMcpClient({ install, headers, authProvider });
       let installTools: DynamicStructuredTool[];
       try {
-        installTools = await client.getTools();
+        installTools = await withTimeout(
+          client.getTools(),
+          MCP_GET_TOOLS_TIMEOUT_MS,
+          `MCP ${install.name} tool discovery`,
+        );
       } catch {
         await client.close().catch(() => undefined);
         continue;
       }
       clients.push(client);
       for (const tool of installTools) {
+        if (tools.length >= MCP_MAX_BOUND_TOOLS) {
+          logger.warn("MCP bound-tool cap reached; dropping remaining tools", {
+            cap: MCP_MAX_BOUND_TOOLS,
+            installId: install.id,
+            installName: install.name,
+          });
+          break;
+        }
         const knownTool = findInstallToolByLangChainName(install, tool.name);
         // A tool disabled via updateInstall/setWorkspaceMcpToolsEnabled must not
         // be bound, regardless of whether an explicit toolIds filter is present.
@@ -969,15 +1136,16 @@ export class McpService {
         if (input.toolIds?.length && (!knownTool || !input.toolIds.includes(knownTool.id))) {
           continue;
         }
-        // A tool with no DB record (fresh federated install, or one the server
-        // added since the last test) falls back to risk "unknown" at execution,
-        // which hard-requires approval — so it MUST get an interrupt here too,
-        // or every call dead-ends in MCP_APPROVAL_REQUIRED with no approval
-        // surface ever shown.
-        if (!knownTool || isHighRisk(knownTool.risk)) {
+        // Gate on the EFFECTIVE risk, not the manifest's self-asserted value: an
+        // unverified install's tools are all forced to "unknown" (hard-requires
+        // approval), and a tool with no DB record is "unknown" too — so it MUST
+        // get an interrupt here, or every call dead-ends in
+        // MCP_APPROVAL_REQUIRED with no approval surface ever shown.
+        const risk = effectiveMcpRisk({ install, tool: knownTool });
+        if (isHighRisk(risk)) {
           interruptOn[tool.name] = {
             allowedDecisions: ["approve", "edit", "reject"],
-            description: `${install.name} MCP tool ${knownTool?.serverToolName ?? tool.name} may perform external ${knownTool?.risk ?? "unknown"} actions. Review before execution.`,
+            description: `${install.name} MCP tool ${knownTool?.serverToolName ?? tool.name} may perform external ${risk} actions. Review before execution.`,
             argsSchema: knownTool?.inputSchema,
           };
         }
@@ -1025,7 +1193,7 @@ export class McpService {
         inputSchema: {},
         risk: "unknown",
       } as const);
-    const risk = toolRecord.risk;
+    const risk = effectiveMcpRisk({ install: input.install, tool: input.tool });
     return new DynamicStructuredTool({
       name: input.originalTool.name,
       description: input.originalTool.description,
@@ -1053,24 +1221,38 @@ export class McpService {
           }),
           idempotencyKey:
             toolCallId ??
-            `${input.runId ?? input.threadId ?? input.workspaceId}:${input.originalTool.name}:${hashJson(requestJson)}`,
+            // No tool-call id: key on the ORIGINAL args hash (not the redacted
+            // one) so two calls differing only in a sensitive-named field don't
+            // collide onto one action run. The key is a hash, never stored
+            // plaintext.
+            `${input.runId ?? input.threadId ?? input.workspaceId}:${input.originalTool.name}:${hashJson(toObject(args))}`,
         });
-        if (isHighRisk(risk) && actionRun.status !== "approved") {
-          throw new McpError(
-            409,
-            "MCP_APPROVAL_REQUIRED",
-            "This MCP tool call requires approval before execution.",
-            {
-              sourceRef: {
-                kind: "mcp_tool",
-                serverInstallId: input.install.id,
-                serverToolName: toolRecord.serverToolName,
-                normalizedToolName: toolRecord.normalizedToolName,
-                toolId: input.tool?.id ?? null,
+        if (isHighRisk(risk)) {
+          // Approval is bound to the args that were approved, not merely to the
+          // tool-call id. If a reused tool-call id lands on a previously
+          // approved run whose approved args differ from what's about to
+          // execute, this is NOT the approved call — re-gate it. (Comparison is
+          // over the redacted args, which is what the DB persists.)
+          const approvedForTheseArgs =
+            actionRun.status === "approved" &&
+            hashJson(actionRun.requestJson) === hashJson(requestJson);
+          if (!approvedForTheseArgs) {
+            throw new McpError(
+              409,
+              "MCP_APPROVAL_REQUIRED",
+              "This MCP tool call requires approval before execution.",
+              {
+                sourceRef: {
+                  kind: "mcp_tool",
+                  serverInstallId: input.install.id,
+                  serverToolName: toolRecord.serverToolName,
+                  normalizedToolName: toolRecord.normalizedToolName,
+                  toolId: input.tool?.id ?? null,
+                },
+                recoverable: true,
               },
-              recoverable: true,
-            },
-          );
+            );
+          }
         }
         const toolRun = await createMcpToolRun({
           teamId: input.teamId,
@@ -1097,7 +1279,11 @@ export class McpService {
           executedBy: input.userId,
         });
         try {
-          const output = await input.originalTool.invoke(args, configValue);
+          const output = await withTimeout(
+            input.originalTool.invoke(args, configValue),
+            MCP_INVOKE_TIMEOUT_MS,
+            `MCP ${input.install.name}.${toolRecord.serverToolName}`,
+          );
           const redactedOutput = redactMcpSecrets(
             normalizeMcpOutputForAudit(output),
           ) as Record<string, unknown>;
@@ -1123,6 +1309,10 @@ export class McpService {
           return capMcpModelOutput(output);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          // A hostile/buggy server (or an auth failure echoing the presented
+          // header) can put secrets into the error text; redact before it is
+          // persisted or later streamed to co-participants.
+          const safeMessage = redactErrorMessage(message);
           const latencyMs = Date.now() - startedAt;
           await Promise.all([
             updateMcpToolRun({
@@ -1133,7 +1323,7 @@ export class McpService {
               redactedOutput: {},
               latencyMs,
               errorCode: "MCP_TOOL_CALL_FAILED",
-              errorMessage: message,
+              errorMessage: safeMessage,
             }),
             updateMcpActionRun({
               teamId: input.teamId,
@@ -1141,7 +1331,7 @@ export class McpService {
               actionRunId: actionRun.id,
               status: "failed",
               errorCode: "MCP_TOOL_CALL_FAILED",
-              errorMessage: message,
+              errorMessage: safeMessage,
               executedBy: input.userId,
             }),
           ]);
@@ -1171,7 +1361,11 @@ export class McpService {
     // with the same matcher discovery uses so camelCase/non-slug-safe tools
     // aren't left un-approvable (which would hard-fail the turn).
     let install: (typeof installs)[number] | undefined;
-    let tool: WorkspaceMcpToolRecord | undefined;
+    // id is null for a synthesized (no-DB-record) tool; the fields below are all
+    // that the confirmation/action-run need — never the id.
+    let tool:
+      | (Omit<WorkspaceMcpToolRecord, "id"> & { id: string | null })
+      | undefined;
     for (const candidate of installs) {
       const match = findInstallToolByLangChainName(candidate, input.toolName);
       if (match) {
@@ -1181,7 +1375,39 @@ export class McpService {
       }
     }
     if (!install || !tool) {
-      return null;
+      // No stored tool record (the server added a tool since the last test, or a
+      // fresh federated install). Locate the owning install by its sanitized
+      // server key and synthesize an unknown-risk tool record so the call can
+      // still be approved, instead of hard-failing the turn with a 500.
+      const owner = installs.find((candidate) =>
+        input.toolName.startsWith(`mcp__${langChainMcpServerKey(candidate)}__`),
+      );
+      if (!owner) {
+        return null;
+      }
+      const serverToolName = stripLangChainMcpToolPrefix({
+        serverKey: langChainMcpServerKey(owner),
+        toolName: input.toolName,
+      });
+      install = owner;
+      tool = {
+        id: null,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        installId: owner.id,
+        serverToolName,
+        normalizedToolName: input.toolName,
+        title: serverToolName,
+        description: null,
+        inputSchema: {},
+        outputSchema: null,
+        annotations: {},
+        risk: "unknown",
+        enabled: true,
+        lastDiscoveredHash: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
     }
     const requestJson = redactMcpSecrets(input.args) as Record<string, unknown>;
     const action = await createMcpActionRun({
@@ -1191,13 +1417,24 @@ export class McpService {
       toolId: tool.id,
       serverToolName: tool.serverToolName,
       normalizedToolName: tool.normalizedToolName,
-      risk: tool.risk,
+      // Never the manifest's self-asserted risk: an unverified install or a
+      // synthesized tool is forced to require approval.
+      risk: effectiveMcpRisk({ install, tool }),
       status: "proposed",
       requestJson,
-      requestPreview: buildMcpRequestPreview({ install, tool, args: requestJson }),
+      requestPreview: buildMcpRequestPreview({
+        install,
+        tool: tool as WorkspaceMcpToolRecord,
+        args: requestJson,
+      }),
       idempotencyKey: input.toolCallId,
     });
-    return mcpConfirmationPayload({ action, install, tool, toolCallId: input.toolCallId });
+    return mcpConfirmationPayload({
+      action,
+      install,
+      tool: tool as WorkspaceMcpToolRecord,
+      toolCallId: input.toolCallId,
+    });
   }
 
   async respondToApproval(input: {
@@ -1234,12 +1471,37 @@ export class McpService {
       workspaceId: workspace.id,
       installId: action.installId,
     });
-    const tool = install?.tools.find(
-      (candidate) => candidate.id === action.toolId,
-    );
-    if (!install || !tool) {
+    if (!install) {
       throw new McpError(404, "MCP_TOOL_NOT_FOUND", "MCP tool not found");
     }
+    // Match by toolId when the action run has one; a synthesized (server-added)
+    // tool has none, so fall back to the server tool name and finally
+    // reconstruct a minimal record from the action run itself — an approval for
+    // a tool with no stored row must still resolve rather than 404.
+    const tool: WorkspaceMcpToolRecord =
+      install.tools.find((candidate) =>
+        action.toolId
+          ? candidate.id === action.toolId
+          : candidate.serverToolName === action.serverToolName,
+      ) ??
+      ({
+        id: action.toolId,
+        teamId: action.teamId,
+        workspaceId: action.workspaceId,
+        installId: action.installId,
+        serverToolName: action.serverToolName,
+        normalizedToolName: action.normalizedToolName,
+        title: action.serverToolName,
+        description: null,
+        inputSchema: {},
+        outputSchema: null,
+        annotations: {},
+        risk: action.risk,
+        enabled: true,
+        lastDiscoveredHash: null,
+        createdAt: action.createdAt,
+        updatedAt: action.updatedAt,
+      } as WorkspaceMcpToolRecord);
     if (input.decision === "reject") {
       const rejected =
         (await updateMcpActionRun({
@@ -1280,9 +1542,14 @@ export class McpService {
     // "edit" so the interrupted tool re-executes with the edited args. A plain
     // "approve" would re-run the model's ORIGINAL args while the audit record
     // above claims the edited ones ran. Mirrors the sandbox confirmation path.
-    const editedToolName =
-      input.confirmation?.action.toolName ??
-      `mcp__${langChainMcpServerKey(install)}__${tool.serverToolName}`;
+    //
+    // The resume target is ALWAYS reconstructed server-side from the DB-approved
+    // install+tool — never taken from the client-submitted confirmation. The
+    // payload we emit carries the lossy normalizedToolName (which wouldn't match
+    // the bound `mcp__<serverKey>__<serverToolName>`), and trusting the client
+    // would also let it redirect the edit to a different tool than the one the
+    // action run records as approved.
+    const editedToolName = `mcp__${langChainMcpServerKey(install)}__${tool.serverToolName}`;
     const resumeDecision = input.editedArgs
       ? {
           type: "edit" as const,

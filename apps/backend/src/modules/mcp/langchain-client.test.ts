@@ -14,7 +14,10 @@ vi.mock("@langchain/mcp-adapters", () => ({
   },
 }));
 
-import { createLangChainMcpClient } from "./langchain-client";
+import {
+  createLangChainMcpClient,
+  langChainMcpServerKey,
+} from "./langchain-client";
 
 function install(
   input: Partial<WorkspaceMcpInstallRecord> = {},
@@ -54,8 +57,9 @@ function install(
 test("createLangChainMcpClient configures streamable HTTP MCP servers", () => {
   mocks.constructorSpy.mockClear();
 
+  const record = install({ marketIdentifier: "github" });
   createLangChainMcpClient({
-    install: install({ marketIdentifier: "github" }),
+    install: record,
     headers: { Authorization: "Bearer secret" },
   });
 
@@ -66,7 +70,7 @@ test("createLangChainMcpClient configures streamable HTTP MCP servers", () => {
     useStandardContentBlocks: true,
     onConnectionError: "throw",
     mcpServers: {
-      github: {
+      [langChainMcpServerKey(record)]: {
         transport: "http",
         url: "https://mcp.example.com/mcp",
         headers: { Authorization: "Bearer secret" },
@@ -79,17 +83,16 @@ test("createLangChainMcpClient configures streamable HTTP MCP servers", () => {
 test("createLangChainMcpClient enables SSE fallback for http_sse_compat manifests", () => {
   mocks.constructorSpy.mockClear();
 
-  createLangChainMcpClient({
-    install: install({
-      marketIdentifier: "legacy",
-      transport: "http_sse_compat",
-    }),
+  const record = install({
+    marketIdentifier: "legacy",
+    transport: "http_sse_compat",
   });
+  createLangChainMcpClient({ install: record });
 
   const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
     mcpServers: Record<string, Record<string, unknown>>;
   };
-  const server = config.mcpServers.legacy;
+  const server = config.mcpServers[langChainMcpServerKey(record)];
   assert.ok(server);
   assert.equal(server.transport, "http");
   assert.equal(server.automaticSSEFallback, true);
@@ -98,17 +101,16 @@ test("createLangChainMcpClient enables SSE fallback for http_sse_compat manifest
 test("createLangChainMcpClient does not enable SSE fallback for streamable_http", () => {
   mocks.constructorSpy.mockClear();
 
-  createLangChainMcpClient({
-    install: install({
-      marketIdentifier: "streamable",
-      transport: "streamable_http",
-    }),
+  const record = install({
+    marketIdentifier: "streamable",
+    transport: "streamable_http",
   });
+  createLangChainMcpClient({ install: record });
 
   const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
     mcpServers: Record<string, Record<string, unknown>>;
   };
-  const server = config.mcpServers.streamable;
+  const server = config.mcpServers[langChainMcpServerKey(record)];
   assert.ok(server);
   assert.equal(server.transport, "http");
   assert.equal(server.automaticSSEFallback, false);
@@ -117,22 +119,38 @@ test("createLangChainMcpClient does not enable SSE fallback for streamable_http"
 test("createLangChainMcpClient configures SSE MCP servers and falls back to install id", () => {
   mocks.constructorSpy.mockClear();
 
-  createLangChainMcpClient({
-    install: install({
-      id: "mcp_install_sse",
-      marketIdentifier: null,
-      transport: "sse",
-      endpointUrl: "https://mcp.example.com/sse",
-    }),
+  const record = install({
+    id: "mcp_install_sse",
+    marketIdentifier: null,
+    transport: "sse",
+    endpointUrl: "https://mcp.example.com/sse",
   });
+  createLangChainMcpClient({ install: record });
 
   const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
     mcpServers: Record<string, Record<string, unknown>>;
   };
-  const server = config.mcpServers.mcp_install_sse;
+  const server = config.mcpServers[langChainMcpServerKey(record)];
   assert.ok(server);
   assert.equal(server.transport, "sse");
   assert.equal(server.url, "https://mcp.example.com/sse");
+});
+
+test("langChainMcpServerKey disambiguates identifiers that sanitize alike", () => {
+  // `io.github.a/b` and `io.github.a.b` both collapse to `io_github_a_b`; the
+  // install-id suffix must keep their server keys distinct so their tool names
+  // (and interruptOn entries) never collide.
+  const a = langChainMcpServerKey({
+    marketIdentifier: "io.github.a/b",
+    id: "install_aaaa",
+  });
+  const b = langChainMcpServerKey({
+    marketIdentifier: "io.github.a.b",
+    id: "install_bbbb",
+  });
+  assert.notEqual(a, b);
+  assert.match(a, /^[a-zA-Z0-9_-]+$/);
+  assert.match(b, /^[a-zA-Z0-9_-]+$/);
 });
 
 test("createLangChainMcpClient rejects missing endpointUrl before construction", () => {

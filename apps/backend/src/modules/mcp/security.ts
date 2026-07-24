@@ -61,6 +61,34 @@ export function hashJson(value: unknown) {
     .digest("hex");
 }
 
+/**
+ * Value-level secret patterns for free-text redaction. `redactMcpSecrets` works
+ * key-by-key on structured data, but MCP error strings are opaque text a hostile
+ * or buggy server controls (and an auth failure may echo the presented header),
+ * so before an MCP error is persisted or streamed to co-participants its likely
+ * secret-bearing substrings are masked. Best-effort, deliberately broad.
+ */
+const SENSITIVE_VALUE_PATTERNS: RegExp[] = [
+  /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+  /\b(?:access|refresh|api)[_-]?tokens?["'=:\s]+[A-Za-z0-9._~+/-]{8,}/gi,
+  /\b(?:client[_-]?secret|password|api[_-]?key|secret|credential)["'=:\s]+\S{6,}/gi,
+  /\bsk-[A-Za-z0-9]{16,}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+  /\beyJ[A-Za-z0-9._-]{10,}/g,
+];
+
+/** Mask likely secret substrings in a free-text (error) message. */
+export function redactErrorMessage(message: string): string {
+  if (!message) {
+    return message;
+  }
+  let output = message;
+  for (const pattern of SENSITIVE_VALUE_PATTERNS) {
+    output = output.replace(pattern, "[REDACTED]");
+  }
+  return output;
+}
+
 export function redactMcpSecrets(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => redactMcpSecrets(item));

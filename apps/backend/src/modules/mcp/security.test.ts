@@ -6,6 +6,7 @@ import {
   canonicalJson,
   hashJson,
   normalizedMcpToolName,
+  redactErrorMessage,
   redactMcpSecrets,
   resolveCredentialEnvRef,
   sanitizeHeaders,
@@ -164,6 +165,28 @@ test("redactMcpSecrets redacts nested credential-looking fields", () => {
       },
       list: [{ clientSecret: "[REDACTED]" }],
     },
+  );
+});
+
+test("redactErrorMessage masks secrets embedded in free-text errors", () => {
+  const bearer = redactErrorMessage(
+    "401 Unauthorized: sent Authorization: Bearer sk-abcdef0123456789abcdef",
+  );
+  assert.ok(!bearer.includes("sk-abcdef0123456789abcdef"));
+  assert.ok(bearer.includes("[REDACTED]"));
+
+  const jwt = redactErrorMessage(
+    "token rejected: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig",
+  );
+  assert.ok(!jwt.includes("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"));
+
+  const gh = redactErrorMessage("bad credential ghp_0123456789abcdefghijABCDEFabcdef0123");
+  assert.ok(!gh.includes("ghp_0123456789abcdefghijABCDEFabcdef0123"));
+
+  // Ordinary error text is left intact.
+  assert.equal(
+    redactErrorMessage("connection refused by host"),
+    "connection refused by host",
   );
 });
 

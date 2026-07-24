@@ -118,6 +118,7 @@ function mapCredential(row: CredentialRow): WorkspaceMcpCredentialRecord {
     teamId: row.teamId,
     workspaceId: row.workspaceId,
     installId: row.installId,
+    userId: row.userId,
     authType: row.authType,
     encryptedSecret: row.encryptedSecret,
     encryptedHeaders: row.encryptedHeaders,
@@ -398,14 +399,21 @@ export async function createOrUpdateMarketMcpInstall(input: {
     throw new Error("Failed to create MCP install");
   }
 
-  // Endpoint changed on re-install: every stored OAuth token was consented for
-  // the OLD endpoint's service. Invalidate all sessions so tokens are never
-  // presented to the new URL (confused-deputy); users re-connect explicitly.
+  // Endpoint changed on re-install: every stored OAuth token AND static
+  // credential was consented/configured for the OLD endpoint's service.
+  // Invalidate both so nothing is ever presented to the new URL
+  // (confused-deputy); users re-connect / re-enter explicitly, and the install
+  // drops back to its baseline credential requirement.
   if (existing && existing.endpointUrl !== endpointUrl) {
     await deleteMcpOAuthSessionsForInstall(existing.id);
-  }
-
-  if (existing && existing.credentialStatus !== "configured") {
+    await deleteWorkspaceMcpCredentialsForInstall(existing.id);
+    await updateWorkspaceMcpInstall({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      installId: row.id,
+      credentialStatus,
+    });
+  } else if (existing && existing.credentialStatus !== credentialStatus) {
     await updateWorkspaceMcpInstall({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -587,6 +595,7 @@ export async function upsertWorkspaceMcpCredential(input: {
   teamId: string;
   workspaceId: string;
   installId: string;
+  userId: string;
   authType: McpAuthType;
   encryptedSecret?: string | null;
   encryptedHeaders?: string | null;
@@ -600,6 +609,7 @@ export async function upsertWorkspaceMcpCredential(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       installId: input.installId,
+      userId: input.userId,
       authType: input.authType,
       encryptedSecret: input.encryptedSecret ?? null,
       encryptedHeaders: input.encryptedHeaders ?? null,
@@ -608,7 +618,10 @@ export async function upsertWorkspaceMcpCredential(input: {
       configuredBy: input.configuredBy,
     })
     .onConflictDoUpdate({
-      target: [workspaceMcpCredentials.installId],
+      target: [
+        workspaceMcpCredentials.installId,
+        workspaceMcpCredentials.userId,
+      ],
       set: {
         authType: input.authType,
         encryptedSecret: input.encryptedSecret ?? null,
@@ -630,6 +643,7 @@ export async function findWorkspaceMcpCredential(input: {
   teamId: string;
   workspaceId: string;
   installId: string;
+  userId: string;
 }) {
   const [row] = await db
     .select()
@@ -639,10 +653,52 @@ export async function findWorkspaceMcpCredential(input: {
         eq(workspaceMcpCredentials.teamId, input.teamId),
         eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
         eq(workspaceMcpCredentials.installId, input.installId),
+        eq(workspaceMcpCredentials.userId, input.userId),
       ),
     )
     .limit(1);
   return row ? mapCredential(row) : null;
+}
+
+/**
+ * Install ids for which this user has a stored static credential. Batched so a
+ * per-user credential-status overlay over an install list is one query, not N.
+ */
+export async function listUserCredentialInstallIds(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  installIds: string[];
+}) {
+  if (input.installIds.length === 0) {
+    return new Set<string>();
+  }
+  const rows = await db
+    .select({ installId: workspaceMcpCredentials.installId })
+    .from(workspaceMcpCredentials)
+    .where(
+      and(
+        eq(workspaceMcpCredentials.teamId, input.teamId),
+        eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+        eq(workspaceMcpCredentials.userId, input.userId),
+        inArray(workspaceMcpCredentials.installId, input.installIds),
+      ),
+    );
+  return new Set(rows.map((row) => row.installId));
+}
+
+/**
+ * Remove EVERY user's static credential for an install. Called when the
+ * install's endpoint URL changes (re-install with a different endpoint): a
+ * stored bearer/API key was configured for the OLD endpoint's service, and
+ * continuing to send it to a new URL would leak it to whatever the new URL
+ * points at (confused-deputy). Mirrors deleteMcpOAuthSessionsForInstall; users
+ * re-enter credentials against the new endpoint.
+ */
+export async function deleteWorkspaceMcpCredentialsForInstall(installId: string) {
+  await db
+    .delete(workspaceMcpCredentials)
+    .where(eq(workspaceMcpCredentials.installId, installId));
 }
 
 export async function createMcpActionRun(input: {

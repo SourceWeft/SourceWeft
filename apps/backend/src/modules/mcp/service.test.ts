@@ -445,6 +445,85 @@ test("buildLangChainToolsForTurn does not bind tools disabled per-tool", async (
   await runtime.close();
 });
 
+test("buildLangChainToolsForTurn forces approval for an unverified install's read tool", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_install_1",
+    verified: false,
+    tools: [
+      mcpTool({
+        id: "t_read",
+        serverToolName: "read_repo",
+        normalizedToolName: "mcp__github__read_repo",
+        risk: "read",
+        enabled: true,
+      }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+  ]);
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  // The manifest declares this tool "read" (low risk), but an unverified
+  // install can't be trusted to self-assert — it is gated for approval anyway.
+  assert.ok(runtime.interruptOn["mcp__github__read_repo"]);
+  await runtime.close();
+});
+
+test("buildLangChainToolsForTurn does not gate a verified install's read tool", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_install_1",
+    verified: true,
+    tools: [
+      mcpTool({
+        id: "t_read",
+        serverToolName: "read_repo",
+        normalizedToolName: "mcp__github__read_repo",
+        risk: "read",
+        enabled: true,
+      }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+  ]);
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  assert.deepEqual(runtime.interruptOn, {});
+  await runtime.close();
+});
+
+test("buildLangChainToolsForTurn resolves the invoking user's own static credential", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({ id: "mcp_install_1", authType: "bearer" });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+  ]);
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  // Per-user credentials: the lookup is scoped to the turn's user, never a
+  // workspace-shared credential.
+  assert.equal(
+    mocks.findWorkspaceMcpCredential.mock.calls[0]?.[0]?.userId,
+    "user_1",
+  );
+  await runtime.close();
+});
+
 test("createApprovalForInterruptedTool resolves camelCase LangChain tool names", async () => {
   resetMcpServiceMocks();
   const install = mcpInstall({

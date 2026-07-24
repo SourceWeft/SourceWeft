@@ -62,6 +62,7 @@ export type WorkspaceMcpCredentialRecord = {
   teamId: string;
   workspaceId: string;
   installId: string;
+  userId: string;
   authType: McpAuthType;
   encryptedSecret: string | null;
   encryptedHeaders: string | null;

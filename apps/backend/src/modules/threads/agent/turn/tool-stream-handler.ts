@@ -55,6 +55,7 @@ import {
   sanitizeFilesystemToolInputForClient,
   type SkillInstructionDisplayOptions,
 } from "./output-normalizer";
+import { redactErrorMessage } from "../../../mcp/security";
 
 function getSkillInstructionDisplayOptions(
   prepared: PreparedThreadTurn,
@@ -618,6 +619,12 @@ export async function* handleToolErrorStreamChunk(input: {
       ? Date.now() - startedAt
       : currentToolCall.latencyMs;
   const errorText = normalizeErrorText(toolPayload.error);
+  // MCP servers control their error text (and an auth failure may echo the
+  // presented header), so mask likely secrets before broadcasting it to every
+  // thread participant. Non-MCP tools are unaffected.
+  const clientErrorText = toolName.startsWith("mcp__")
+    ? redactErrorMessage(errorText)
+    : errorText;
   const connectorContentError =
     getConnectorToolErrorTextContentError(errorText);
   const nextToolCall = applyToolsStreamToolError({
@@ -629,7 +636,7 @@ export async function* handleToolErrorStreamChunk(input: {
         skillDisplayOptions,
       ),
     },
-    error: errorText,
+    error: clientErrorText,
     latencyMs,
     toolCallId,
     toolCallsById: runtime.toolCallsById,
@@ -647,7 +654,7 @@ export async function* handleToolErrorStreamChunk(input: {
       nextToolCall.input,
       skillDisplayOptions,
     ),
-    error: errorText,
+    error: clientErrorText,
     latencyMs,
     toolCall: nextToolCall,
   };

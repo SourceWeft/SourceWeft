@@ -39,10 +39,17 @@ export function langChainMcpServerKey(install: {
   marketIdentifier: string | null;
   id: string;
 }) {
-  return (install.marketIdentifier ?? install.id).replace(
-    /[^a-zA-Z0-9_-]/g,
-    "_",
-  );
+  const base = (install.marketIdentifier ?? install.id)
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 32);
+  // Disambiguate installs whose identifiers sanitize to the same key
+  // (`io.github.a/b` and `io.github.a.b` both collapse to `io_github_a_b`):
+  // append a short slice of the globally-unique install id. Without this two
+  // installs share a server key, their tool names collide, and their
+  // interruptOn entries overwrite each other — the approval gate then applies to
+  // the wrong server.
+  const suffix = install.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+  return suffix ? `${base}_${suffix}` : base;
 }
 
 export function createLangChainMcpClient(input: {

@@ -39,13 +39,53 @@ export const updateWorkspaceMcpInstallRequestSchema = z.object({
   toolIds: z.array(z.string()).optional(),
 });
 
-export const upsertWorkspaceMcpCredentialsRequestSchema = z.object({
-  authType: mcpAuthTypeSchema,
-  bearerToken: z.string().optional(),
-  apiKeyHeaderName: z.string().optional(),
-  apiKey: z.string().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-});
+export const upsertWorkspaceMcpCredentialsRequestSchema = z
+  .object({
+    authType: mcpAuthTypeSchema,
+    bearerToken: z.string().optional(),
+    apiKeyHeaderName: z.string().optional(),
+    apiKey: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+  })
+  // Reject empty submissions per auth type so a blank Save can't overwrite (and
+  // wipe) a previously configured credential.
+  .superRefine((value, ctx) => {
+    if (value.authType === "bearer" && !value.bearerToken?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["bearerToken"],
+        message: "Bearer token is required",
+      });
+    }
+    if (value.authType === "api_key_header") {
+      if (!value.apiKeyHeaderName?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["apiKeyHeaderName"],
+          message: "API key header name is required",
+        });
+      }
+      if (!value.apiKey?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["apiKey"],
+          message: "API key value is required",
+        });
+      }
+    }
+    if (value.authType === "custom_headers") {
+      const nonEmpty = Object.entries(value.headers ?? {}).filter(
+        ([key, headerValue]) => key.trim() && headerValue.trim(),
+      );
+      if (nonEmpty.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["headers"],
+          message: "At least one non-empty header is required",
+        });
+      }
+    }
+  });
 
 export const mcpToolSelectionSchema = z.object({
   enabled: z.boolean().optional(),

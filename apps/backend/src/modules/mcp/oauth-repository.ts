@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
@@ -191,6 +191,31 @@ export async function getMcpOAuthStatus(scope: McpOAuthScope): Promise<{
     connected: Boolean(row?.encryptedTokens),
     issuer: row?.issuer ?? null,
   };
+}
+
+/**
+ * Install ids this user has a token-bearing (connected) OAuth session for.
+ * Batched to overlay per-user credential status over an install list in one
+ * query.
+ */
+export async function listUserConnectedOAuthInstallIds(input: {
+  userId: string;
+  installIds: string[];
+}) {
+  if (input.installIds.length === 0) {
+    return new Set<string>();
+  }
+  const rows = await db
+    .select({ installId: workspaceMcpOAuthSessions.installId })
+    .from(workspaceMcpOAuthSessions)
+    .where(
+      and(
+        eq(workspaceMcpOAuthSessions.userId, input.userId),
+        inArray(workspaceMcpOAuthSessions.installId, input.installIds),
+        isNotNull(workspaceMcpOAuthSessions.encryptedTokens),
+      ),
+    );
+  return new Set(rows.map((row) => row.installId));
 }
 
 /** Clear the single-use PKCE verifier + state once a callback completes. */

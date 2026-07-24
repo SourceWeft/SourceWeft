@@ -13,10 +13,7 @@ import {
   type McpOAuthScope,
 } from "./oauth-repository";
 import { requireMcpWorkspace } from "./permissions";
-import {
-  findWorkspaceMcpInstall,
-  updateWorkspaceMcpInstall,
-} from "./repository";
+import { findWorkspaceMcpInstall } from "./repository";
 import { assertSafeMcpEndpoint } from "./security";
 
 function isDevelopment() {
@@ -197,15 +194,10 @@ export async function completeMcpOAuthCallback(input: {
     );
   }
   await clearMcpOAuthTransient(scope);
-  // Terminal state of the credential machine: nothing else writes "configured"
-  // for oauth installs (the credentials dialog has no Save for them), and the
-  // UI disables Run/selection until this flips. Install-level, by design — the
-  // first successful connect unlocks the install; tokens stay per-user.
-  await updateWorkspaceMcpInstall({
-    teamId: scope.teamId,
-    workspaceId: scope.workspaceId,
-    installId: scope.installId,
-    credentialStatus: "configured",
-  });
+  // Credential status is now derived per-user (from this user's token-bearing
+  // OAuth session), NOT written install-level: flipping the shared install flag
+  // to "configured" here would make every other member appear connected. The
+  // token we just stored is what a per-user overlay reads to report "configured"
+  // for this user only.
   return { workspaceId: scope.workspaceId, installId: scope.installId };
 }
