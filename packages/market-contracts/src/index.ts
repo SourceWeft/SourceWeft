@@ -26,6 +26,7 @@ export const mcpAuthTypeSchema = z.enum([
   "bearer",
   "api_key_header",
   "custom_headers",
+  "oauth",
 ]);
 
 export const mcpRiskLevelSchema = z.enum([

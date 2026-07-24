@@ -201,6 +201,7 @@ function authTypeLabel(authType: McpAuthType) {
   if (authType === "bearer") return "Bearer token";
   if (authType === "api_key_header") return "API key header";
   if (authType === "custom_headers") return "Custom headers";
+  if (authType === "oauth") return "OAuth";
   return "No auth";
 }
 
@@ -920,6 +921,31 @@ function CredentialsDialog({
     }
   }
 
+  async function connectOAuth() {
+    if (!workspaceId || !install) return;
+    setSaving(true);
+    try {
+      const result = await contentClient.authorizeWorkspaceMcpOAuth(
+        workspaceId,
+        install.id,
+      );
+      if (result.status === "redirect") {
+        // Hand off to the provider's consent screen; it redirects back to
+        // /dashboard/mcp?mcpOAuth=connected. Keep the spinner during navigation.
+        window.location.href = result.authorizationUrl;
+        return;
+      }
+      toast.success("MCP server already connected");
+      onSaved(install);
+      onClose();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to start authorization.",
+      );
+      setSaving(false);
+    }
+  }
+
   const authType = install?.authType ?? "none";
   const instructions = install?.manifestJson.auth.instructions;
 
@@ -1020,16 +1046,42 @@ function CredentialsDialog({
               This MCP server does not require credentials.
             </div>
           ) : null}
+
+          {authType === "oauth" ? (
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
+              <p>
+                This MCP server uses OAuth. Connect your account with the
+                provider — you&apos;ll be redirected to grant access, then
+                returned here. Your token is stored encrypted and refreshed
+                automatically.
+              </p>
+              <Button
+                disabled={saving || !install}
+                onClick={() => void connectOAuth()}
+                size="sm"
+                type="button"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                Connect
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter>
           <Button disabled={saving} onClick={onClose} type="button" variant="outline">
-            Cancel
+            {authType === "oauth" ? "Close" : "Cancel"}
           </Button>
-          <Button disabled={saving || !install} onClick={() => void saveCredentials()} type="button">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-            Save
-          </Button>
+          {authType === "oauth" ? null : (
+            <Button disabled={saving || !install} onClick={() => void saveCredentials()} type="button">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              Save
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1196,6 +1248,29 @@ export function McpMarket() {
       window.clearTimeout(timeout);
     };
   }, [catalogStatus, deepLinkIdentifier, items]);
+
+  // Surface the result of the OAuth redirect (GET /v1/mcp/oauth/callback bounces
+  // back here with ?mcpOAuth=connected|error), then strip the query so a refresh
+  // doesn't re-toast.
+  const oauthCallbackHandledRef = React.useRef(false);
+  React.useEffect(() => {
+    const status = searchParams.get("mcpOAuth");
+    if (!status || oauthCallbackHandledRef.current) return;
+    oauthCallbackHandledRef.current = true;
+    if (status === "connected") {
+      toast.success("MCP server connected");
+      if (workspace?.id) {
+        invalidateWorkspaceMcpCache(workspace.id);
+      }
+    } else {
+      toast.error("MCP authorization failed. Please try again.");
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("mcpOAuth");
+    router.replace(
+      `/dashboard/mcp${params.toString() ? `?${params.toString()}` : ""}`,
+    );
+  }, [router, searchParams, workspace?.id]);
 
   async function handleWorkspaceChange(nextWorkspaceId: string, nextWorkspaceName: string) {
     if (nextWorkspaceId === workspace?.id) return;

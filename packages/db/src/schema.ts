@@ -86,7 +86,12 @@ type AgentSandboxOperationStatus =
   | "failed"
   | "canceled";
 type McpTransport = "streamable_http" | "http_sse_compat" | "sse" | "stdio";
-type McpAuthType = "none" | "bearer" | "api_key_header" | "custom_headers";
+type McpAuthType =
+  | "none"
+  | "bearer"
+  | "api_key_header"
+  | "custom_headers"
+  | "oauth";
 type McpRiskLevel = "read" | "write" | "destructive" | "unknown";
 type WorkspaceMcpInstallStatus = "active" | "disabled" | "error";
 type WorkspaceMcpCredentialStatus =
@@ -1951,7 +1956,7 @@ export const workspaceMcpInstalls = pgTable(
     ),
     check(
       "workspace_mcp_installs_auth_type_check",
-      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers')`,
+      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers', 'oauth')`,
     ),
     check(
       "workspace_mcp_installs_credential_status_check",
@@ -2078,13 +2083,65 @@ export const workspaceMcpCredentials = pgTable(
     }).onDelete("cascade"),
     check(
       "workspace_mcp_credentials_auth_type_check",
-      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers')`,
+      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers', 'oauth')`,
     ),
     check(
       "workspace_mcp_credentials_status_check",
       sql`${table.status} in ('not_required', 'required', 'configured', 'invalid')`,
     ),
     uniqueIndex("workspace_mcp_credentials_install_uq").on(table.installId),
+  ],
+);
+
+/**
+ * Per-(install, user) OAuth session for MCP servers using authType "oauth".
+ * Holds the authorization-server issuer we bound to, the DCR-registered client
+ * (when the server supports Dynamic Client Registration; encrypted), the user's
+ * encrypted access/refresh tokens, and the short-lived PKCE verifier + state
+ * spanning an authorize→callback round-trip. Tokens are per-user; confidential
+ * app client_id/secret for non-DCR providers live in env, never here.
+ */
+export const workspaceMcpOAuthSessions = pgTable(
+  "workspace_mcp_oauth_sessions",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installId: text("install_id")
+      .notNull()
+      .references(() => workspaceMcpInstalls.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    issuer: text("issuer"),
+    // Encrypted JSON of the DCR-registered client { client_id, client_secret? }.
+    encryptedClientInfo: text("encrypted_client_info"),
+    // Encrypted JSON of the OAuth tokens { access_token, refresh_token?, ... }.
+    encryptedTokens: text("encrypted_tokens"),
+    // Transient, single-use across the authorize→callback window.
+    codeVerifier: text("code_verifier"),
+    state: text("state"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workspace_mcp_oauth_sessions_install_workspace_team_fk",
+      columns: [table.installId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        workspaceMcpInstalls.id,
+        workspaceMcpInstalls.workspaceId,
+        workspaceMcpInstalls.teamId,
+      ],
+    }).onDelete("cascade"),
+    uniqueIndex("workspace_mcp_oauth_sessions_install_user_uq").on(
+      table.installId,
+      table.userId,
+    ),
   ],
 );
 

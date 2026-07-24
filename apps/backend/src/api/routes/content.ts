@@ -6,7 +6,10 @@ import { registerCapabilityRoutes } from "./content/capabilities";
 import { registerConnectorRoutes } from "./content/connectors";
 import { registerWorkspaceLlmObservabilityRoutes } from "./llm-observability";
 import { registerModelGatewayRoutes } from "./content/model-gateway";
-import { registerMcpRoutes } from "./content/mcp";
+import {
+  registerMcpOAuthCallbackRoutes,
+  registerMcpRoutes,
+} from "./content/mcp";
 import { registerSourceRoutes } from "./content/sources";
 import { registerSkillRoutes } from "./content/skills";
 import { registerThreadRoutes } from "./content/threads";
@@ -29,4 +32,7 @@ export function registerContentRoutes(app: Hono) {
   registerWorkspaceLlmObservabilityRoutes(workspaceRoutes);
 
   app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
+
+  // Non-workspace-scoped: the OAuth provider redirects here after consent.
+  registerMcpOAuthCallbackRoutes(app);
 }

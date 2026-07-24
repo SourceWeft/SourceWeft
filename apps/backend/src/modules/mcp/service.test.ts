@@ -38,7 +38,17 @@ vi.mock("../../shared/config", () => ({
   config: {
     market: { enabled: true },
     modelGatewayEncryptionSecret: "test-encryption-secret",
+    mcpOAuth: {
+      redirectUrl: "https://test.local/v1/mcp/oauth/callback",
+      clientName: "SourceWeft",
+      clients: {},
+    },
   },
+}));
+
+vi.mock("./oauth-repository", () => ({
+  getMcpOAuthStatus: vi.fn(async () => ({ connected: false, issuer: null })),
+  createDbMcpOAuthStore: vi.fn(() => ({})),
 }));
 
 vi.mock("../../shared/secrets", () => ({

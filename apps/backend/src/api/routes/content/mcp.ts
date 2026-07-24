@@ -5,6 +5,11 @@ import {
   upsertWorkspaceMcpCredentialsRequestSchema,
 } from "@sourceweft/contracts";
 import { mcpService } from "../../../modules/mcp";
+import {
+  completeMcpOAuthCallback,
+  startMcpOAuthAuthorization,
+} from "../../../modules/mcp/oauth-service";
+import { config } from "../../../shared/config";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
@@ -193,6 +198,19 @@ export function registerMcpRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.post("/mcp-installs/:installId/oauth/authorize", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const result = await startMcpOAuthAuthorization({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      installId: requireRouteParam(c, "installId"),
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.post("/mcp-installs/:installId/test", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -205,5 +223,27 @@ export function registerMcpRoutes(app: Hono) {
       installId: requireRouteParam(c, "installId"),
     });
     return ApiResponse.success(c, result);
+  });
+}
+
+/**
+ * Top-level (non-workspace) OAuth redirect target. The `state` nonce carries the
+ * (install, user) binding, so this route needs no workspace path segment. On
+ * completion it bounces the browser back to the dashboard with a status flag.
+ */
+export function registerMcpOAuthCallbackRoutes(app: Hono) {
+  app.get("/v1/mcp/oauth/callback", async (c) => {
+    const base = `${config.auth.webBaseUrl}/dashboard/mcp`;
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    if (c.req.query("error") || !code || !state) {
+      return c.redirect(`${base}?mcpOAuth=error`);
+    }
+    try {
+      await completeMcpOAuthCallback({ code, state });
+      return c.redirect(`${base}?mcpOAuth=connected`);
+    } catch {
+      return c.redirect(`${base}?mcpOAuth=error`);
+    }
   });
 }
