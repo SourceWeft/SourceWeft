@@ -132,6 +132,7 @@ export const artifactSchema = z.object({
   previewMetadataJson: z.record(z.string(), z.unknown()),
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
+  visibility: z.enum(["private", "workspace"]),
   createdBy: z.string().nullable(),
   completedAt: z.string().nullable(),
   createdAt: z.string(),

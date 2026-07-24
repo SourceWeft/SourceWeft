@@ -5,8 +5,65 @@ export const workspaceSchema = z.object({
   organizationId: z.string(),
   name: z.string(),
   slug: z.string(),
+  isDefault: z.boolean().optional(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
+});
+
+export const workspaceRoleSchema = z.enum([
+  "workspace_admin",
+  "editor",
+  "viewer",
+]);
+
+/**
+ * A member's standing in a workspace, as returned by the members endpoint.
+ * `source` distinguishes a role that follows from organization membership
+ * (`derived`) from one written explicitly for this workspace (`explicit`);
+ * `organizationRole` is the raw better-auth role, so the UI can tell that a
+ * member also administers the container.
+ */
+export const workspaceMemberSchema = z.object({
+  workspaceId: z.string(),
+  userId: z.string(),
+  role: workspaceRoleSchema,
+  source: z.enum(["derived", "explicit"]),
+  organizationRole: z.string(),
+  name: z.string().nullable(),
+  email: z.string().nullable(),
+  image: z.string().nullable(),
+});
+
+export const listWorkspaceMembersResponseSchema = z.object({
+  items: z.array(workspaceMemberSchema),
+});
+
+export const addWorkspaceMemberRequestSchema = z.object({
+  userId: z.string().min(1),
+  role: workspaceRoleSchema,
+});
+
+export const updateWorkspaceMemberRoleRequestSchema = z.object({
+  role: workspaceRoleSchema,
+});
+
+export const workspaceMemberMutationResponseSchema = z.object({
+  ok: z.literal(true),
+});
+
+export const teamAuditLogSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  actorUserId: z.string().nullable(),
+  action: z.string(),
+  targetType: z.string(),
+  targetId: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+});
+
+export const listTeamAuditLogsResponseSchema = z.object({
+  items: z.array(teamAuditLogSchema),
 });
 
 export const createWorkspaceRequestSchema = z.object({
@@ -54,4 +111,22 @@ export type SetWorkspaceContextResponse = z.infer<
 >;
 export type CurrentContextResponse = z.infer<
   typeof currentContextResponseSchema
+>;
+export type WorkspaceRole = z.infer<typeof workspaceRoleSchema>;
+export type WorkspaceMember = z.infer<typeof workspaceMemberSchema>;
+export type ListWorkspaceMembersResponse = z.infer<
+  typeof listWorkspaceMembersResponseSchema
+>;
+export type AddWorkspaceMemberRequest = z.infer<
+  typeof addWorkspaceMemberRequestSchema
+>;
+export type UpdateWorkspaceMemberRoleRequest = z.infer<
+  typeof updateWorkspaceMemberRoleRequestSchema
+>;
+export type WorkspaceMemberMutationResponse = z.infer<
+  typeof workspaceMemberMutationResponseSchema
+>;
+export type TeamAuditLog = z.infer<typeof teamAuditLogSchema>;
+export type ListTeamAuditLogsResponse = z.infer<
+  typeof listTeamAuditLogsResponseSchema
 >;

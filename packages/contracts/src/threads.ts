@@ -14,6 +14,7 @@ export const threadSchema = z.object({
     visionModelAlias: z.string().nullable(),
   }),
   sourceCount: z.number().int().nonnegative(),
+  visibility: z.enum(["private", "workspace", "public_link"]),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -138,6 +139,19 @@ export const updateThreadModelSettingsResponseSchema = z.object({
   thread: threadWithChatPreferencesSchema,
 });
 
+/**
+ * A member may put their own thread into `private` (author-only) or `workspace`
+ * (team-visible). `public_link` is reached through the separate share flow, not
+ * this toggle, so it is not an accepted input here.
+ */
+export const updateThreadVisibilityRequestSchema = z.object({
+  visibility: z.enum(["private", "workspace"]),
+});
+
+export const updateThreadVisibilityResponseSchema = z.object({
+  thread: threadWithChatPreferencesSchema,
+});
+
 export const updateThreadChatPreferencesResponseSchema = z.object({
   thread: threadWithChatPreferencesSchema,
 });
@@ -170,6 +184,12 @@ export type UpdateThreadModelSettingsRequest = z.infer<
 >;
 export type UpdateThreadModelSettingsResponse = z.infer<
   typeof updateThreadModelSettingsResponseSchema
+>;
+export type UpdateThreadVisibilityRequest = z.infer<
+  typeof updateThreadVisibilityRequestSchema
+>;
+export type UpdateThreadVisibilityResponse = z.infer<
+  typeof updateThreadVisibilityResponseSchema
 >;
 export type UpdateThreadChatPreferencesResponse = z.infer<
   typeof updateThreadChatPreferencesResponseSchema

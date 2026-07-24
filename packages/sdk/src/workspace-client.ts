@@ -1,10 +1,15 @@
 import type {
+  AddWorkspaceMemberRequest,
   CreateWorkspaceRequest,
   CurrentContextResponse,
+  ListTeamAuditLogsResponse,
+  ListWorkspaceMembersResponse,
   ListWorkspacesResponse,
   SetWorkspaceContextResponse,
+  UpdateWorkspaceMemberRoleRequest,
   UpdateWorkspaceRequest,
   Workspace,
+  WorkspaceMemberMutationResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
@@ -51,6 +56,43 @@ export class WorkspaceClient {
       {
         workspaceId,
       },
+    );
+  }
+
+  listWorkspaceMembers(workspaceId: string) {
+    return this.http.get<ListWorkspaceMembersResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/members`,
+    );
+  }
+
+  addWorkspaceMember(workspaceId: string, input: AddWorkspaceMemberRequest) {
+    return this.http.post<WorkspaceMemberMutationResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/members`,
+      input,
+    );
+  }
+
+  updateWorkspaceMemberRole(
+    workspaceId: string,
+    userId: string,
+    input: UpdateWorkspaceMemberRoleRequest,
+  ) {
+    return this.http.patch<WorkspaceMemberMutationResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/members/${encode(userId)}`,
+      input,
+    );
+  }
+
+  removeWorkspaceMember(workspaceId: string, userId: string) {
+    return this.http.delete<WorkspaceMemberMutationResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/members/${encode(userId)}`,
+    );
+  }
+
+  listTeamAuditLogs(teamId: string, limit?: number) {
+    const suffix = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+    return this.http.get<ListTeamAuditLogsResponse>(
+      `/v1/teams/${encode(teamId)}/audit-logs${suffix}`,
     );
   }
 }

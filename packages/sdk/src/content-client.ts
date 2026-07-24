@@ -88,6 +88,8 @@ import type {
   UpdateThreadChatPreferencesResponse,
   UpdateThreadModelSettingsRequest,
   UpdateThreadModelSettingsResponse,
+  UpdateThreadVisibilityRequest,
+  UpdateThreadVisibilityResponse,
   UpdateCustomSkillVersionRequest,
   ListThreadMessagesResponse,
   ListThreadMessagesRequest,
@@ -431,6 +433,17 @@ export class ContentClient {
   ) {
     return this.http.patch<UpdateThreadChatPreferencesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/chat-preferences`,
+      input,
+    );
+  }
+
+  updateThreadVisibility(
+    workspaceId: string,
+    threadId: string,
+    input: UpdateThreadVisibilityRequest,
+  ) {
+    return this.http.patch<UpdateThreadVisibilityResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/visibility`,
       input,
     );
   }
