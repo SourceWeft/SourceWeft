@@ -338,6 +338,40 @@ export class WorkspaceService {
     return { ok: true };
   }
 
+  /**
+   * True when the target user is the ONLY content `workspace_admin` of a
+   * NON-default workspace. Demoting or removing them would leave that workspace
+   * with no content administrator, and — unlike the shared default workspace,
+   * where an organization owner/admin is always a derived content admin —
+   * nothing backstops a private workspace's content plane (a container admin
+   * deliberately cannot administer content). There is also no workspace-delete
+   * endpoint, so the workspace would be permanently unmanageable. The default
+   * workspace is exempt (its derived admins always exist).
+   */
+  private async wouldOrphanContentAdmin(input: {
+    workspaceId: string;
+    organizationId: string;
+    targetUserId: string;
+  }): Promise<boolean> {
+    const workspace = await findWorkspaceByIdInOrganization({
+      workspaceId: input.workspaceId,
+      organizationId: input.organizationId,
+    });
+    if (!workspace || workspace.isDefault) {
+      return false;
+    }
+
+    const members = await listWorkspaceMemberRecords({
+      workspaceId: workspace.id,
+      organizationId: workspace.organizationId,
+      isDefaultWorkspace: workspace.isDefault,
+    });
+    const admins = members.filter(
+      (member) => member.role === "workspace_admin",
+    );
+    return admins.length === 1 && admins[0]?.userId === input.targetUserId;
+  }
+
   async updateWorkspaceMemberRole(input: {
     workspaceId: string;
     actorUserId: string;
@@ -368,6 +402,21 @@ export class WorkspaceService {
     }
 
     const previousRole = target.role;
+
+    // Refuse to demote the last content admin of a private workspace, which
+    // would strand it with no one able to administer its content (see
+    // wouldOrphanContentAdmin). Break-glass recovery is appointWorkspaceContentAdmin.
+    if (
+      previousRole === "workspace_admin" &&
+      input.role !== "workspace_admin" &&
+      (await this.wouldOrphanContentAdmin({
+        workspaceId: input.workspaceId,
+        organizationId: actor.organizationId,
+        targetUserId: input.userId,
+      }))
+    ) {
+      return { ok: false, reason: "forbidden" };
+    }
 
     await upsertWorkspaceMembershipOverride({
       workspaceId: input.workspaceId,
@@ -431,6 +480,19 @@ export class WorkspaceService {
       return { ok: false, reason: "forbidden" };
     }
 
+    // Removing the last content admin of a private workspace would strand it
+    // (see wouldOrphanContentAdmin) — refuse; recover via appointment.
+    if (
+      target.role === "workspace_admin" &&
+      (await this.wouldOrphanContentAdmin({
+        workspaceId: input.workspaceId,
+        organizationId: access.organizationId,
+        targetUserId: input.userId,
+      }))
+    ) {
+      return { ok: false, reason: "forbidden" };
+    }
+
     await deleteWorkspaceMembershipRecord({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -443,6 +505,86 @@ export class WorkspaceService {
       targetType: "workspace_member",
       targetId: input.userId,
       metadata: { workspaceId: input.workspaceId, role: target.role },
+    });
+
+    return { ok: true };
+  }
+
+  /**
+   * Break-glass recovery for the wouldOrphanContentAdmin invariant: a container
+   * admin (org owner/admin) may appoint a content `workspace_admin` on a
+   * NON-default workspace that currently has zero content admins. This is the
+   * one place a container admin is allowed to grant content access, and only to
+   * un-strand an orphaned private workspace — never to reach into a workspace
+   * that still has an administrator (that path is normal member management,
+   * which a container admin who isn't a content admin cannot use).
+   */
+  async appointWorkspaceContentAdmin(input: {
+    workspaceId: string;
+    actorUserId: string;
+    userId: string;
+  }): Promise<WorkspaceMemberMutationResult> {
+    const actorAccess = await this.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.actorUserId,
+    });
+    if (!actorAccess) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (!this.canAdministerContainer(actorAccess)) {
+      return { ok: false, reason: "forbidden" };
+    }
+
+    const workspace = await findWorkspaceByIdInOrganization({
+      workspaceId: input.workspaceId,
+      organizationId: actorAccess.organizationId,
+    });
+    if (!workspace) {
+      return { ok: false, reason: "not_found" };
+    }
+
+    const members = await listWorkspaceMemberRecords({
+      workspaceId: workspace.id,
+      organizationId: workspace.organizationId,
+      isDefaultWorkspace: workspace.isDefault,
+    });
+    const hasContentAdmin = members.some(
+      (member) => member.role === "workspace_admin",
+    );
+    // Only usable when the content plane is genuinely orphaned. The default
+    // workspace always has derived admins, so it never qualifies.
+    if (workspace.isDefault || hasContentAdmin) {
+      return { ok: false, reason: "forbidden" };
+    }
+
+    // The appointee must already belong to the organization — appointment grants
+    // a role, it never reaches outside the org (mirrors addWorkspaceMember).
+    const target = await findOrganizationMembership({
+      organizationId: actorAccess.organizationId,
+      userId: input.userId,
+    });
+    if (!target) {
+      return { ok: false, reason: "not_found" };
+    }
+
+    await upsertWorkspaceMembershipOverride({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      role: "workspace_admin",
+    });
+
+    await teamAuditService.record({
+      teamId: actorAccess.organizationId,
+      actorUserId: input.actorUserId,
+      action: "workspace.member_role_changed",
+      targetType: "workspace_member",
+      targetId: input.userId,
+      metadata: {
+        workspaceId: input.workspaceId,
+        to: "workspace_admin",
+        breakGlass: true,
+        reason: "orphaned_content_admin_recovery",
+      },
     });
 
     return { ok: true };

@@ -51,6 +51,12 @@ export const getShareResponseSchema = z.object({
  * The public projection a viewer of `/s/:token` receives. Deliberately narrow:
  * only what is needed to render the artifact read-only, plus card metadata for
  * social unfurls. No workspace, thread, source, or creator-identity leakage.
+ *
+ * The internal `payloadJson` is intentionally absent: it embeds workspace-
+ * scoped URLs, job ids, source JSON, and storage keys that must never reach an
+ * anonymous token holder. The page renders solely from `fileUrl` (the
+ * sandboxed artifact bytes) and the metadata below. Extend this only with
+ * fields the public renderer genuinely consumes, after sanitizing them.
  */
 export const publicSharedArtifactSchema = z.object({
   token: z.string(),
@@ -60,7 +66,6 @@ export const publicSharedArtifactSchema = z.object({
   fileUrl: z.string().nullable(),
   /** Signed URL to a preview image for the social card (or null). */
   previewImageUrl: z.string().nullable(),
-  payloadJson: z.record(z.string(), z.unknown()),
   viewCount: z.number().int().nonnegative(),
   noindex: z.boolean(),
   createdAt: z.string(),

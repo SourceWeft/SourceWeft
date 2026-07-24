@@ -429,7 +429,7 @@ export class ContentArtifactsService {
     }
 
     const isCreator = artifact.createdBy === input.userId;
-    if (!isCreator && !workspaceService.canAdministerContainer(access)) {
+    if (!isCreator && !workspaceService.canAdministerContent(access)) {
       throw new ContentError(
         403,
         "ARTIFACT_DELETE_FORBIDDEN",

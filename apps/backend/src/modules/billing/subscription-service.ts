@@ -1194,6 +1194,33 @@ export class BillingSubscriptionService {
     const result = await this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
+        // Serialize every seat-capacity check for this team. Without this,
+        // N concurrent invite/accept/add requests each read the same
+        // pre-write committed snapshot, all pass, and together overrun the
+        // paid seatCount (a read-then-write TOCTOU). A transaction-scoped
+        // advisory lock keyed on the teamId makes the count-read + decision
+        // below mutually exclusive per team; it releases automatically when
+        // this transaction commits. (Mirrors the two-arg hashtext lock
+        // pattern used by the workspace store.)
+        //
+        // Residual race: Better Auth performs the actual seat-consuming write
+        // (invitation/member INSERT) in a SEPARATE, later transaction that is
+        // outside this lock's hold, so a narrow window remains between this
+        // locked check committing and that INSERT committing. Fully closing it
+        // would require wrapping Better Auth's write in this same locked
+        // transaction, which its 1.6.10 API does not expose. This lock removes
+        // the dominant, easily-triggered check-vs-check overrun.
+        //
+        // Guarded on raw-SQL capability: the in-memory store used in tests has
+        // no real connection (and, being single-process, no advisory-lock
+        // semantics to enforce), so there is nothing to serialize there.
+        if (typeof client.query === "function") {
+          await client.query(
+            "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+            ["sourceweft:team-seat-capacity", account.teamId],
+          );
+        }
+
         const subscription = await this.store.getSubscriptionByTeam(
           account.teamId,
           client,

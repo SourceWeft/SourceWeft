@@ -2,6 +2,7 @@ import type { PublicSharedArtifact, ShareLink } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { workspaceService } from "../workspace";
+import { canViewContent } from "../workspace/content-visibility";
 import { teamAuditService } from "../team-audit";
 import { findArtifactRecord } from "../artifacts/repository";
 import {
@@ -49,9 +50,12 @@ function toShareLink(row: ShareLinkRow): ShareLink {
 export class SharingService {
   /**
    * Resolves the artifact for a share operation and checks that the actor may
-   * publish it. Publishing is deliberately narrow — the creator, or a workspace
-   * admin — mirroring "only the author decides an item's visibility". Returns a
-   * discriminated failure rather than throwing so routes map it to a status.
+   * publish it. Publishing is deliberately narrow — the creator, or a content
+   * workspace admin, and only when that actor can also *view* the artifact —
+   * mirroring "only someone who can view an item may change its exposure".
+   * Container admins (org owners, container-only admins) deliberately gain no
+   * publish right over content they are walled out of. Returns a discriminated
+   * failure rather than throwing so routes map it to a status.
    */
   private async requireShareableArtifact(input: {
     workspaceId: string;
@@ -82,8 +86,15 @@ export class SharingService {
       return { ok: false, reason: "not_found" };
     }
 
+    // Row-level visibility first: a private artifact belonging to another
+    // member is reported absent, so its existence stays private and no
+    // container admin can reach it by id (mirrors the view/delete paths).
+    if (!canViewContent(input.userId, artifact)) {
+      return { ok: false, reason: "not_found" };
+    }
+
     const isCreator = artifact.createdBy === input.userId;
-    if (!isCreator && !workspaceService.canAdministerContainer(access)) {
+    if (!isCreator && !workspaceService.canAdministerContent(access)) {
       return { ok: false, reason: "forbidden" };
     }
 
@@ -227,13 +238,20 @@ export class SharingService {
 
     const hasPreview = Boolean(artifact.previewStorageKey);
 
+    // Curated, allow-list projection. The internal `payloadJson` is never
+    // exposed: for real artifact types it embeds workspace-scoped URLs
+    // (`/v1/workspaces/...`), `jobId`, `sourceJson`, and storage keys/buckets,
+    // all of which an anonymous token holder could otherwise harvest. The
+    // public page renders solely from `fileUrl` (the sandboxed /raw bytes) and
+    // the social-card metadata below, so nothing internal needs to cross the
+    // boundary. Add a field here only when the public renderer truly consumes
+    // it, and only after sanitizing it.
     return {
       token,
       artifactType: artifact.artifactType,
       title: artifact.title,
       fileUrl: artifact.storageKey ? publicRawUrl(token) : null,
       previewImageUrl: hasPreview ? publicPreviewUrl(token) : null,
-      payloadJson: artifact.payloadJson,
       viewCount: share.viewCount,
       noindex: share.noindex,
       createdAt: share.createdAt.toISOString(),

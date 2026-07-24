@@ -269,6 +269,31 @@ export function registerWorkspaceRoutes(app: Hono) {
     return ApiResponse.success(c, { ok: true });
   });
 
+  // Break-glass: a container admin (org owner/admin) appoints a content admin
+  // on a private workspace that has been left with none. Guarded in the service
+  // to only fire when the workspace is genuinely orphaned.
+  app.post(
+    "/v1/workspaces/:workspaceId/content-admins/:userId",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const result = await workspaceService.appointWorkspaceContentAdmin({
+        workspaceId: c.req.param("workspaceId"),
+        actorUserId: getSessionUserId(session),
+        userId: c.req.param("userId"),
+      });
+
+      if (!result.ok) {
+        throwMemberMutationError(result);
+      }
+
+      return ApiResponse.success(c, { ok: true });
+    },
+  );
+
   app.get("/v1/teams/:teamId/audit-logs", async (c) => {
     const session = await requireSession(c);
     if (!session) {

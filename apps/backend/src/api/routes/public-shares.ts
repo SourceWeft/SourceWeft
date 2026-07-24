@@ -61,10 +61,36 @@ function shouldCountView(token: string, clientIp: string, now: number) {
   return true;
 }
 
-function clientIpOf(headerValue: string | undefined) {
-  if (!headerValue) return "unknown";
-  // X-Forwarded-For is a comma list; the left-most is the original client.
-  return headerValue.split(",")[0]?.trim() || "unknown";
+/**
+ * Best-effort client IP for the throttle key. Deliberately NOT the left-most
+ * X-Forwarded-For token: that is fully client-controlled, so keying on it lets
+ * an attacker rotate a fake IP per request and defeat the throttle. Prefer
+ * headers our own edge sets and a client cannot forge — Cloudflare's
+ * `cf-connecting-ip`, then `x-real-ip`, then the RIGHT-most XFF hop (the one our
+ * closest trusted proxy appended; an external caller can only prepend on the
+ * left). Falls back to a single bucket, which just makes the throttle stricter.
+ */
+function clientIpOf(headers: {
+  cfConnectingIp: string | undefined;
+  xRealIp: string | undefined;
+  xForwardedFor: string | undefined;
+}) {
+  const cf = headers.cfConnectingIp?.trim();
+  if (cf) return cf;
+
+  const realIp = headers.xRealIp?.trim();
+  if (realIp) return realIp;
+
+  if (headers.xForwardedFor) {
+    const hops = headers.xForwardedFor
+      .split(",")
+      .map((hop) => hop.trim())
+      .filter(Boolean);
+    const rightMost = hops[hops.length - 1];
+    if (rightMost) return rightMost;
+  }
+
+  return "unknown";
 }
 
 // Revocable, token-gated bytes: a short max-age caps how long a shared/CDN cache
@@ -96,7 +122,11 @@ export function registerPublicShareRoutes(app: Hono) {
     const token = requireRouteParam(c, "token");
     const countView = shouldCountView(
       token,
-      clientIpOf(c.req.header("x-forwarded-for")),
+      clientIpOf({
+        cfConnectingIp: c.req.header("cf-connecting-ip"),
+        xRealIp: c.req.header("x-real-ip"),
+        xForwardedFor: c.req.header("x-forwarded-for"),
+      }),
       Date.now(),
     );
     const resolved = await sharingService.resolvePublicArtifactBytes(token, {

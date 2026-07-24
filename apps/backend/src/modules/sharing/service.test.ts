@@ -3,6 +3,7 @@ import { beforeEach, test, vi } from "vitest";
 
 const mockResolveAccess = vi.fn();
 const mockCanAdministerContainer = vi.fn();
+const mockCanAdministerContent = vi.fn();
 const mockFindArtifact = vi.fn();
 const mockCreateShare = vi.fn();
 const mockFindActive = vi.fn();
@@ -14,8 +15,11 @@ vi.mock("../workspace", () => ({
     resolveAccess: (...a: unknown[]) => mockResolveAccess(...a),
     canAdministerContainer: (...a: unknown[]) =>
       mockCanAdministerContainer(...a),
+    canAdministerContent: (...a: unknown[]) => mockCanAdministerContent(...a),
   },
 }));
+// The real, pure content-visibility predicate: a private artifact is visible
+// only to its creator. Left unmocked so the tests exercise the actual gate.
 vi.mock("../team-audit", () => ({
   teamAuditService: { record: vi.fn() },
 }));
@@ -60,6 +64,7 @@ function artifact(overrides: Record<string, unknown> = {}) {
     storageKey: "k",
     storageBucket: "b",
     previewStorageKey: null,
+    visibility: "workspace",
     createdBy: "author",
     ...overrides,
   };
@@ -69,6 +74,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockResolveAccess.mockResolvedValue(ACCESS);
   mockCanAdministerContainer.mockReturnValue(false);
+  mockCanAdministerContent.mockReturnValue(false);
 });
 
 test("the artifact's creator may share it", async () => {
@@ -109,9 +115,11 @@ test("a non-creator without container admin cannot share", async () => {
   assert.deepEqual(result, { ok: false, reason: "forbidden" });
 });
 
-test("a container admin may share someone else's artifact", async () => {
-  mockFindArtifact.mockResolvedValue(artifact({ createdBy: "someone-else" }));
-  mockCanAdministerContainer.mockReturnValue(true);
+test("a content workspace admin may share another member's workspace artifact", async () => {
+  mockFindArtifact.mockResolvedValue(
+    artifact({ createdBy: "someone-else", visibility: "workspace" }),
+  );
+  mockCanAdministerContent.mockReturnValue(true);
   mockFindActive.mockResolvedValue(null);
   mockCreateShare.mockResolvedValue({
     token: "tok",
@@ -132,6 +140,58 @@ test("a container admin may share someone else's artifact", async () => {
   });
 
   assert.equal(result.ok, true);
+});
+
+test("a workspace admin cannot share another member's PRIVATE artifact — reported not_found", async () => {
+  // Two-plane rule: even a content admin may only change the exposure of
+  // something they can view. A private artifact of another member is invisible
+  // to them, so its very existence stays hidden.
+  mockFindArtifact.mockResolvedValue(
+    artifact({ createdBy: "someone-else", visibility: "private" }),
+  );
+  mockCanAdministerContent.mockReturnValue(true);
+
+  const result = await sharingService.shareArtifact({
+    workspaceId: "ws-1",
+    artifactId: "art-1",
+    userId: "actor",
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "not_found" });
+});
+
+test("an org owner who joined as a viewer cannot share another member's artifact", async () => {
+  // Container-plane standing (org owner / container admin) confers no publish
+  // right over content. As a plain content viewer, canAdministerContent is
+  // false → forbidden, even though canAdministerContainer would be true.
+  mockFindArtifact.mockResolvedValue(
+    artifact({ createdBy: "someone-else", visibility: "workspace" }),
+  );
+  mockCanAdministerContainer.mockReturnValue(true);
+  mockCanAdministerContent.mockReturnValue(false);
+
+  const result = await sharingService.shareArtifact({
+    workspaceId: "ws-1",
+    artifactId: "art-1",
+    userId: "actor",
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "forbidden" });
+});
+
+test("a plain viewer cannot share another member's artifact", async () => {
+  mockFindArtifact.mockResolvedValue(
+    artifact({ createdBy: "someone-else", visibility: "workspace" }),
+  );
+  mockCanAdministerContent.mockReturnValue(false);
+
+  const result = await sharingService.shareArtifact({
+    workspaceId: "ws-1",
+    artifactId: "art-1",
+    userId: "actor",
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "forbidden" });
 });
 
 test("a non-member gets not_found, never revealing the artifact exists", async () => {
@@ -194,6 +254,45 @@ test("public resolve projects a ready artifact without counting a view", async (
   );
   assert.equal(projection?.viewCount, 41);
   assert.equal(mockIncrement.mock.calls.length, 0);
+});
+
+test("public projection leaks no internal payload fields", async () => {
+  // A realistic payload embeds workspace-scoped URLs, a job id, source JSON,
+  // and storage keys/buckets — all internal. None may cross the public boundary.
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(
+    artifact({
+      payloadJson: {
+        jobId: "job-secret",
+        sourceJson: { slides: ["internal"] },
+        sourceJsonStorageKey: "keys/deck.source.json",
+        sourceJsonStorageBucket: "internal-bucket",
+        fileUrl: "https://api.test/v1/workspaces/ws-1/artifacts/art-1/file",
+      },
+    }),
+  );
+
+  const projection = await sharingService.resolvePublicArtifact("tok");
+  assert.ok(projection);
+
+  const serialized = JSON.stringify(projection);
+  for (const needle of [
+    "payloadJson",
+    "workspaceId",
+    "artifactId",
+    "jobId",
+    "job-secret",
+    "sourceJson",
+    "StorageKey",
+    "StorageBucket",
+    "/v1/workspaces/",
+    "ws-1",
+  ]) {
+    assert.ok(
+      !serialized.includes(needle),
+      `public projection must not contain "${needle}": ${serialized}`,
+    );
+  }
 });
 
 test("serving the bytes counts a view only when asked", async () => {

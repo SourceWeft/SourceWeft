@@ -43,6 +43,10 @@ const WRITE_RULES: WriteRule[] = [
   { pattern: /^\/$/, requirement: { plane: "container" } },
   // Membership changes split across both planes — see WorkspaceService.
   { pattern: /^\/members(\/|$)/, requirement: { plane: "none" } },
+  // Break-glass content-admin appointment: a CONTAINER admin (content role may
+  // be null) may call it, so it can't sit on the content plane — the service
+  // enforces container-admin + orphaned-workspace itself.
+  { pattern: /^\/content-admins(\/|$)/, requirement: { plane: "none" } },
   // Guest management does its own content-admin check in GuestService.
   { pattern: /^\/guests(\/|$)/, requirement: { plane: "none" } },
   { pattern: /^\/sources\/status$/, requirement: { plane: "none" } },

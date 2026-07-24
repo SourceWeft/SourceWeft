@@ -76,6 +76,12 @@ type SoleOwnerOrganizationRow = {
 };
 
 async function assertUserHardDeleteAllowed(userId: string) {
+  // Only a NON-personal (team) organization that the user solely owns should
+  // block deletion. Every user has an auto-provisioned personal org where they
+  // are the permanent sole owner (it can never gain or transfer owners), so
+  // counting it here would make account deletion impossible for everyone — a
+  // right-to-erasure defect. The metadata json path mirrors the personal-org
+  // filter used in the workspace store's create/find personal-org queries.
   const result = await database.query<SoleOwnerOrganizationRow>(
     `
       select
@@ -85,6 +91,11 @@ async function assertUserHardDeleteAllowed(userId: string) {
       left join organization o on o.id = m."organizationId"
       where m."userId" = $1
         and m.role = 'owner'
+        and (
+          o.metadata is null
+          or o.metadata = ''
+          or o.metadata::jsonb #>> '{sourceweft,kind}' is distinct from 'personal'
+        )
         and (
           select count(*)
           from member m2
@@ -398,10 +409,23 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                 // `user` in these hooks is the member the change is about, not
                 // whoever triggered it — see better-auth's crud-members route.
                 async afterAddMember({ organization, user }) {
+                  const { workspaceService } = await import("../workspace");
+
+                  // Rejoin must be a clean slate. `/organization/leave`
+                  // (self-leave) deletes the member row but fires NO hook, so
+                  // explicit workspace_memberships overrides from a prior stint
+                  // can survive and silently re-grant access on rejoin. Clear
+                  // them before granting so access is only what we re-grant
+                  // now. (Admin-initiated removal already clears these in
+                  // afterRemoveMember; this covers the self-leave path.)
+                  await workspaceService.revokeOrganizationWorkspaceAccess({
+                    organizationId: organization.id,
+                    userId: user.id,
+                  });
+
                   // Only makes sure the shared workspace exists. Membership of
                   // it is derived, so this user — and every existing teammate —
                   // is in it already.
-                  const { workspaceService } = await import("../workspace");
                   await workspaceService.ensureMembershipWorkspace({
                     organizationId: organization.id,
                     userId: user.id,
@@ -446,6 +470,16 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                 // effect without anything being rewritten.
                 async afterAcceptInvitation({ organization, user }) {
                   const { workspaceService } = await import("../workspace");
+
+                  // Same clean-slate guarantee as afterAddMember: a user who
+                  // previously self-left (no hook fired) may still have stale
+                  // workspace overrides for this org. Clear them before the
+                  // (re)grant so rejoining never inherits pre-existing access.
+                  await workspaceService.revokeOrganizationWorkspaceAccess({
+                    organizationId: organization.id,
+                    userId: user.id,
+                  });
+
                   await workspaceService.ensureMembershipWorkspace({
                     organizationId: organization.id,
                     userId: user.id,
