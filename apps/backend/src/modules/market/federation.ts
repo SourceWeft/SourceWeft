@@ -114,10 +114,12 @@ export function mapRegistryServerToManifest(
   // The official registry has no category field, so classify from the text it
   // does give us (name/title/description/provider). Keeps federated entries
   // browsable by category instead of landing uncategorized.
+  // Classify from human text only. The reverse-DNS identifier/namespace is
+  // deliberately excluded: nearly every registry entry is io.github.*, and the
+  // "github" keyword match was mis-tagging the whole catalog as
+  // developer-tools regardless of function.
   const categories = classifyByText(
-    [identifier, server.title, server.description, providerFromIdentifier(identifier)]
-      .filter(Boolean)
-      .join(" "),
+    [server.title, server.description].filter(Boolean).join(" "),
   );
 
   const candidate = {

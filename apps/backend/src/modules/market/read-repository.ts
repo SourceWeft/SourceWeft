@@ -324,7 +324,10 @@ function decodeListCursor(
     }
     const millis = Number(decoded.slice(0, separator));
     const id = decoded.slice(separator + 1);
-    if (!Number.isFinite(millis) || !id) {
+    // Beyond ±8.64e15 ms, new Date() is an Invalid Date, which the pg driver
+    // serializes into a literal Postgres rejects — a crafted cursor 500. Treat
+    // out-of-range like malformed base64: fall back to page one.
+    if (!Number.isFinite(millis) || Math.abs(millis) > 8.64e15 || !id) {
       return null;
     }
     return { publishedAt: new Date(millis), id };

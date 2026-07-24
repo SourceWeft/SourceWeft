@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
@@ -174,7 +174,12 @@ export async function upsertMarketMcp(input: {
         desktopOnly: facets.desktopOnly,
         runtime: facets.runtime,
         updatedAt: now,
-        publishedAt,
+        // Keep the FIRST publish time on re-upsert. Stamping now() each
+        // federation run turned the catalog's primary sort key into a
+        // sync-touch time and broke every in-flight keyset pagination on every
+        // scheduled sync (rows jumped ahead of open cursors). Only a
+        // null->published transition sets it.
+        publishedAt: sql`coalesce(${marketItems.publishedAt}, excluded.published_at)`,
       },
     });
 
@@ -200,7 +205,8 @@ export async function upsertMarketMcp(input: {
         source: input.source ?? null,
         manifestJson: manifest,
         provenanceJson,
-        publishedAt,
+        // Same first-publish preservation as the item row.
+        publishedAt: sql`coalesce(${marketItemVersions.publishedAt}, excluded.published_at)`,
       },
     });
 

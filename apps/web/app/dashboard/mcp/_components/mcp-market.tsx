@@ -1336,6 +1336,9 @@ export function McpMarket() {
   React.useEffect(() => {
     const status = searchParams.get("mcpOAuth");
     if (!status || oauthCallbackHandledRef.current) return;
+    // Wait for the workspace to resolve before handling — marking handled while
+    // workspace is still null would permanently skip the cache invalidation.
+    if (!workspace?.id) return;
     oauthCallbackHandledRef.current = true;
     if (status === "connected") {
       toast.success("MCP server connected");
@@ -1540,7 +1543,10 @@ export function McpMarket() {
       const market = item.market;
       const trusted = isTrustedMcp(market);
       const desktopOnly = market.desktopOnly || !market.webExecutable;
-      if (category !== "all" && categoryForMcp(market, categories) !== category) return false;
+      // Category is filtered SERVER-side (DB join over all of an item's
+      // categories). Re-checking here with categoryForMcp — which collapses an
+      // item to a single category — hid server-matched items whose first
+      // category differed from the selected one.
       if (statusFilter === "installed" && !item.install) return false;
       if (statusFilter === "not_installed" && item.install) return false;
       if (trustFilter === "trusted" && !trusted) return false;

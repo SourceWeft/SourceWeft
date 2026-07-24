@@ -78,6 +78,40 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
   });
 }
 
+/**
+ * Does this endpoint demand authentication? One cheap unauthenticated MCP
+ * initialize; a 401 is the spec's signal for OAuth. Network failure or any
+ * other status reads as "no" so a flaky probe never blocks an install.
+ */
+async function mcpEndpointRequiresAuth(endpointUrl: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "sourceweft-auth-probe", version: "1" },
+        },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return response.status === 401;
+  } catch {
+    return false;
+  }
+}
+
 function credentialStatusFor(authType: McpAuthType) {
   return authType === "none" ? "not_required" : "configured";
 }
@@ -558,6 +592,23 @@ export class McpService {
     }
 
     await assertWebTransport(manifestForInstall);
+
+    // The official registry carries no auth metadata, so federated manifests
+    // all claim auth "none" — which left OAuth-gated servers (GitHub, Notion…)
+    // installed with no Connect path and silently skipped at turn time. Probe
+    // the (already SSRF-validated) endpoint once at install: a 401 means the
+    // server wants OAuth per the MCP spec. Probe failure keeps the manifest
+    // value.
+    if (
+      manifestForInstall.auth.type === "none" &&
+      manifestForInstall.endpointUrl &&
+      (await mcpEndpointRequiresAuth(manifestForInstall.endpointUrl))
+    ) {
+      manifestForInstall = {
+        ...manifestForInstall,
+        auth: { type: "oauth", required: true, allowedHeaderNames: [] },
+      };
+    }
 
     const install = await createOrUpdateMarketMcpInstall({
       teamId: workspace.organizationId,
