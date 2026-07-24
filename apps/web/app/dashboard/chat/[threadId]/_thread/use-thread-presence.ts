@@ -9,7 +9,6 @@ const TYPING_LOCAL_TTL_MS = 4000;
 export type PresenceViewer = {
   userId: string;
   name: string | null;
-  email: string | null;
   image: string | null;
   isGuest: boolean;
   isSelf: boolean;
@@ -19,7 +18,6 @@ function fallbackViewer(userId: string, currentUserId: string | null): PresenceV
   return {
     userId,
     name: null,
-    email: null,
     image: null,
     isGuest: false,
     isSelf: userId === currentUserId,

@@ -3,7 +3,7 @@
 import type { PresenceViewer } from "./use-thread-presence";
 
 function viewerName(viewer: PresenceViewer): string {
-  return viewer.name || viewer.email || "Someone";
+  return viewer.name || (viewer.isGuest ? "A guest" : "Someone");
 }
 
 /**

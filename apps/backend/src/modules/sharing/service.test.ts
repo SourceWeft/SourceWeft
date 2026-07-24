@@ -9,6 +9,8 @@ const mockCreateShare = vi.fn();
 const mockFindActive = vi.fn();
 const mockFindLive = vi.fn();
 const mockIncrement = vi.fn();
+const mockRevokeForThread = vi.fn();
+const mockAuditRecord = vi.fn();
 
 vi.mock("../workspace", () => ({
   workspaceService: {
@@ -21,7 +23,7 @@ vi.mock("../workspace", () => ({
 // The real, pure content-visibility predicate: a private artifact is visible
 // only to its creator. Left unmocked so the tests exercise the actual gate.
 vi.mock("../team-audit", () => ({
-  teamAuditService: { record: vi.fn() },
+  teamAuditService: { record: (...a: unknown[]) => mockAuditRecord(...a) },
 }));
 vi.mock("../artifacts/repository", () => ({
   findArtifactRecord: (...a: unknown[]) => mockFindArtifact(...a),
@@ -32,6 +34,8 @@ vi.mock("./store", () => ({
   findLiveShareByToken: (...a: unknown[]) => mockFindLive(...a),
   incrementShareViewCount: (...a: unknown[]) => mockIncrement(...a),
   revokeShareLink: vi.fn(),
+  revokeShareLinksForThreadArtifacts: (...a: unknown[]) =>
+    mockRevokeForThread(...a),
   updateShareLink: vi.fn(),
 }));
 vi.mock("../../shared/config", () => ({
@@ -322,4 +326,45 @@ test("serving the bytes counts a view only when asked", async () => {
 
   await sharingService.resolvePublicArtifactBytes("tok", { countView: true });
   assert.equal(mockIncrement.mock.calls.length, 1);
+});
+
+test("privating a thread revokes its artifact shares and audits each", async () => {
+  mockRevokeForThread.mockResolvedValue(["art-1", "art-2"]);
+
+  const count = await sharingService.revokeSharesForPrivatedThread({
+    teamId: "team-1",
+    workspaceId: "ws-1",
+    threadId: "thread-1",
+    actorUserId: "actor",
+  });
+
+  assert.equal(count, 2);
+  assert.deepEqual(mockRevokeForThread.mock.calls[0]?.[0], {
+    teamId: "team-1",
+    workspaceId: "ws-1",
+    threadId: "thread-1",
+  });
+  assert.equal(mockAuditRecord.mock.calls.length, 2);
+  assert.deepEqual(mockAuditRecord.mock.calls[0]?.[0], {
+    teamId: "team-1",
+    actorUserId: "actor",
+    action: "artifact.share_revoked",
+    targetType: "artifact",
+    targetId: "art-1",
+    metadata: { reason: "thread_visibility_private" },
+  });
+});
+
+test("privating a thread with no live shares audits nothing", async () => {
+  mockRevokeForThread.mockResolvedValue([]);
+
+  const count = await sharingService.revokeSharesForPrivatedThread({
+    teamId: "team-1",
+    workspaceId: "ws-1",
+    threadId: "thread-1",
+    actorUserId: "actor",
+  });
+
+  assert.equal(count, 0);
+  assert.equal(mockAuditRecord.mock.calls.length, 0);
 });

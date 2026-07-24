@@ -36,11 +36,12 @@ test("a private thread is visible only to its author", () => {
   assert.equal(canViewThread("user-b", row), false);
 });
 
-test("a creator-less private thread is treated as shared", () => {
-  // Legacy threads predate creator tracking; hiding them from everyone would
-  // erase chat history, and they only ever lived in single-member workspaces.
+test("a creator-less private thread is visible to nobody", () => {
+  // Same fail-closed rule as canViewContent. Legacy pre-creator-tracking
+  // threads were backfilled to workspace visibility (migration 0019), so a
+  // null creator on a private row can only be a bug — hide, don't share.
   assert.equal(
     canViewThread("user-b", { visibility: "private", createdBy: null }),
-    true,
+    false,
   );
 });

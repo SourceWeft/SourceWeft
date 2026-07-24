@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { db, shareLinks } from "@sourceweft/db";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { artifacts, db, shareLinks } from "@sourceweft/db";
 import type { ShareAccessLevel, ShareTargetType } from "@sourceweft/contracts";
 import { generateShareToken } from "./token";
 
@@ -141,6 +141,45 @@ export async function revokeShareLink(input: {
     .returning({ id: shareLinks.id });
 
   return rows.length > 0;
+}
+
+/**
+ * Revokes every live artifact share belonging to one thread, returning the
+ * affected artifact ids. Backs the private-flip revoke: exposure was granted
+ * while the artifacts were workspace-visible, and the flip withdraws it — a
+ * later flip back must not silently re-arm the old tokens.
+ */
+export async function revokeShareLinksForThreadArtifacts(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+}): Promise<string[]> {
+  const rows = await db
+    .update(shareLinks)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(shareLinks.teamId, input.teamId),
+        eq(shareLinks.targetType, "artifact"),
+        isNull(shareLinks.revokedAt),
+        inArray(
+          shareLinks.targetId,
+          db
+            .select({ id: artifacts.id })
+            .from(artifacts)
+            .where(
+              and(
+                eq(artifacts.teamId, input.teamId),
+                eq(artifacts.workspaceId, input.workspaceId),
+                eq(artifacts.threadId, input.threadId),
+              ),
+            ),
+        ),
+      ),
+    )
+    .returning({ targetId: shareLinks.targetId });
+
+  return rows.map((row) => row.targetId);
 }
 
 /**

@@ -604,14 +604,15 @@ export async function listWorkspaceMemberRecords(input: {
 export type UserIdentityRecord = {
   userId: string;
   name: string | null;
-  email: string | null;
   image: string | null;
 };
 
 /**
  * Resolve display identities for a set of users. Works for guests too: a guest
- * is a real `"user"` row (just not in this org's `member` table). Callers must
- * gate access before calling — this is a raw lookup with no authorization.
+ * is a real `"user"` row (just not in this org's `member` table). Deliberately
+ * display-only (name/image, no email) — email stays on member-management
+ * surfaces, never on presence. Callers must gate access before calling — this
+ * is a raw lookup with no authorization.
  */
 export async function findUserIdentitiesByIds(
   userIds: string[],
@@ -622,17 +623,15 @@ export async function findUserIdentitiesByIds(
   const result = await db.execute<{
     id: string;
     name: string | null;
-    email: string | null;
     image: string | null;
   }>(sql`
-    select id, name, email, image
+    select id, name, image
     from "user"
     where id = any(${userIds})
   `);
   return (result.rows ?? []).map((row) => ({
     userId: row.id,
     name: row.name,
-    email: row.email,
     image: row.image,
   }));
 }

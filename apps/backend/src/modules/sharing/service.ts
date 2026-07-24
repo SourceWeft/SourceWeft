@@ -11,6 +11,7 @@ import {
   findLiveShareByToken,
   incrementShareViewCount,
   revokeShareLink,
+  revokeShareLinksForThreadArtifacts,
   updateShareLink,
   type ShareLinkRow,
 } from "./store";
@@ -212,6 +213,41 @@ export class SharingService {
     }
 
     return { ok: true, value: null };
+  }
+
+  /**
+   * Proactive counterpart to the serve-path private gate: flipping a thread to
+   * private revokes every live share of its artifacts, so a later flip back to
+   * workspace never silently re-arms an old public token — re-exposure requires
+   * a fresh, deliberate publish (which mints a new token). No per-share authz
+   * here: the caller has already authorized the visibility change itself, and
+   * withdrawing exposure is strictly narrowing. Audited per revoked artifact
+   * like a manual revoke, with the trigger recorded.
+   */
+  async revokeSharesForPrivatedThread(input: {
+    teamId: string;
+    workspaceId: string;
+    threadId: string;
+    actorUserId: string;
+  }): Promise<number> {
+    const artifactIds = await revokeShareLinksForThreadArtifacts({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      threadId: input.threadId,
+    });
+
+    for (const artifactId of artifactIds) {
+      await teamAuditService.record({
+        teamId: input.teamId,
+        actorUserId: input.actorUserId,
+        action: "artifact.share_revoked",
+        targetType: "artifact",
+        targetId: artifactId,
+        metadata: { reason: "thread_visibility_private" },
+      });
+    }
+
+    return artifactIds.length;
   }
 
   /**

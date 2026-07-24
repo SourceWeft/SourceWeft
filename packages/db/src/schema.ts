@@ -4508,13 +4508,18 @@ export const shareLinks = pgTable(
       columns: [table.workspaceId, table.teamId],
       foreignColumns: [workspaces.id, workspaces.organizationId],
     }),
+    // Mirrors the contract: artifacts share today, `thread` is the reserved
+    // slot for sharing conversations later (as immutable snapshots, not live
+    // access). Anything else is surface no code path can produce.
     check(
       "share_links_target_type_check",
-      sql`${table.targetType} in ('thread', 'artifact', 'chat_view')`,
+      sql`${table.targetType} in ('artifact', 'thread')`,
     ),
+    // Anonymous link viewers are read-only; widen only when an editing share
+    // actually ships end-to-end.
     check(
       "share_links_access_level_check",
-      sql`${table.accessLevel} in ('viewer', 'editor')`,
+      sql`${table.accessLevel} in ('viewer')`,
     ),
     uniqueIndex("share_links_token_uq").on(table.token),
     index("share_links_target_idx").on(table.targetType, table.targetId),

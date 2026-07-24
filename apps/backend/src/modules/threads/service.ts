@@ -1,4 +1,5 @@
 import { findCitationByMessageRank } from "../citations";
+import { sharingService } from "../sharing";
 import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
 import { ContentError } from "../content/errors";
 import type { MessageRecord } from "../content/types";
@@ -405,6 +406,19 @@ class ContentThreadService {
       threadVisibility: input.visibility,
     });
 
+    // Going private also withdraws external exposure: revoke the artifacts'
+    // public share links instead of leaving live tokens that the serve-path
+    // visibility gate merely blanks — flipping back to workspace must require
+    // a fresh publish, not silently resurrect an old URL.
+    if (input.visibility === "private") {
+      await sharingService.revokeSharesForPrivatedThread({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: input.threadId,
+        actorUserId: input.userId,
+      });
+    }
+
     return { thread: updated };
   }
 
@@ -752,6 +766,9 @@ class ContentThreadService {
    * by `canViewThread`, and the requested ids are intersected with the LIVE
    * presence roster so this can't be used to scrape arbitrary users. Covers
    * guests (cross-org users not in the member table) — flagged `isGuest`.
+   * Display-only (name/image): email never crosses the presence surface —
+   * member emails belong to the member-management screens, and a guest viewer
+   * must not learn members' emails (nor members a guest's) just by co-viewing.
    */
   async resolveThreadPresenceIdentities(input: {
     workspaceId: string;
@@ -792,7 +809,6 @@ class ContentThreadService {
       identities: records.map((record) => ({
         userId: record.userId,
         name: record.name,
-        email: record.email,
         image: record.image,
         isGuest: !memberIds.has(record.userId),
       })),

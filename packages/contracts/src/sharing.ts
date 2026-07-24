@@ -10,7 +10,8 @@ import { artifactTypeSchema } from "./artifacts";
  */
 
 export const shareTargetTypeSchema = z.enum(["artifact", "thread"]);
-export const shareAccessLevelSchema = z.enum(["viewer", "editor"]);
+/** Anonymous link viewers are read-only; widen only when editing shares ship. */
+export const shareAccessLevelSchema = z.enum(["viewer"]);
 
 /** The owner-facing view of a share (what the creator manages). */
 export const shareLinkSchema = z.object({

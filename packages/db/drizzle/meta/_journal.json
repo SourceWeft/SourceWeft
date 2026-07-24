@@ -134,6 +134,20 @@
       "when": 1784873976420,
       "tag": "0018_billing_per_member",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784893110308,
+      "tag": "0019_backfill_creatorless_private_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784894205913,
+      "tag": "0021_tighten_share_links_checks",
+      "breakpoints": true
     }
   ]
 }

@@ -43,12 +43,13 @@ const THREAD_RETURNING_SQL = `
 
 /**
  * Raw-SQL predicate hiding other members' private threads. `public_link` is an
- * external flag, not an internal hide, so only `private` restricts; a thread
- * with no recorded creator predates creator tracking and is treated as shared.
- * `$${index}` is the 1-based position of the viewer id in the query params.
+ * external flag, not an internal hide, so only `private` restricts. Fail-closed
+ * like `canViewThread`: a creator-less private row matches nobody (legacy rows
+ * were backfilled to `workspace` in migration 0019). `$${index}` is the 1-based
+ * position of the viewer id in the query params.
  */
 function threadVisibilityClause(paramIndex: number) {
-  return `(visibility <> 'private' or created_by = $${paramIndex} or created_by is null)`;
+  return `(visibility <> 'private' or created_by = $${paramIndex})`;
 }
 
 function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {

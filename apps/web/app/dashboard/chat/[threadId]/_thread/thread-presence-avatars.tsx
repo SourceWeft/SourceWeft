@@ -10,19 +10,22 @@ import type { PresenceViewer } from "./use-thread-presence";
 const MAX_SHOWN = 4;
 
 function viewerLabel(viewer: PresenceViewer): string {
-  const base = viewer.name || viewer.email || "";
-  return viewer.isGuest && base ? `${base} · Guest` : base || "Guest";
+  const name = viewer.name || "";
+  if (viewer.isGuest) {
+    return name ? `${name} · Guest` : "Guest";
+  }
+  return name || "Member";
 }
 
 function viewerInitials(viewer: PresenceViewer): string {
-  const source = (viewer.name || viewer.email || viewer.userId).trim();
+  const source = (viewer.name || viewer.userId).trim();
   return source.slice(0, 2).toUpperCase();
 }
 
 /**
  * Overlapping avatar stack of who is currently viewing the thread. Renders
  * nothing when it's just you (or nobody) — there is no one to be "present" with.
- * Guests (cross-org viewers) resolve to their name/email; the tooltip marks them.
+ * Presence is name/avatar only (no email); the tooltip marks guests.
  */
 export function ThreadPresenceAvatars({
   viewers,

@@ -75,18 +75,16 @@ export function canViewContent(
 
 /**
  * In-memory thread visibility check, for a loaded thread. `public_link` is an
- * external-sharing flag, not an internal hide, so only `private` restricts; a
- * creator-less thread predates creator tracking and is treated as shared. The
- * raw-SQL counterpart lives in the threads repository (`threadVisibilityClause`)
+ * external-sharing flag, not an internal hide, so only `private` restricts.
+ * Same fail-closed rule as `canViewContent`: a creator-less private row is
+ * visible to nobody (legacy pre-creator-tracking threads were backfilled to
+ * `workspace` in migration 0019, so no real rows hit that branch). The raw-SQL
+ * counterpart lives in the threads repository (`threadVisibilityClause`)
  * because threads are queried without drizzle.
  */
 export function canViewThread(
   viewerUserId: string,
   row: { visibility: string; createdBy: string | null },
 ): boolean {
-  return (
-    row.visibility !== "private" ||
-    row.createdBy === viewerUserId ||
-    row.createdBy === null
-  );
+  return row.visibility !== "private" || row.createdBy === viewerUserId;
 }
