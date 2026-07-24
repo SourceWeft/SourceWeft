@@ -177,7 +177,7 @@ export function registerBillingRoutes(app: Hono) {
     const userId = getSessionUserId(session);
     await requireTeamMembership(teamId, userId);
 
-    const summary = await billingService.getSummary(teamId);
+    const summary = await billingService.getSummary(teamId, userId);
     return ApiResponse.success(c, summary);
   });
 
@@ -191,7 +191,7 @@ export function registerBillingRoutes(app: Hono) {
     const userId = getSessionUserId(session);
     await requireTeamMembership(teamId, userId);
 
-    const usage = await billingService.getUsage(teamId);
+    const usage = await billingService.getUsage(teamId, userId);
     return ApiResponse.success(c, usage);
   });
 
@@ -451,5 +451,4 @@ export function registerBillingRoutes(app: Hono) {
     const response = await billingService.cancelSubscription(teamId, userId);
     return ApiResponse.success(c, response);
   });
-
 }

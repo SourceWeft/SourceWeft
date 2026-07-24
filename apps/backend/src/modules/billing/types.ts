@@ -58,6 +58,9 @@ export type BillingRuntimeConfig = {
 
 export type BillingAccountState = {
   teamId: string;
+  // Per-member allocation: each account row is keyed on (teamId, userId).
+  // A member's runs settle against their own row (谁问谁付, deduct own first).
+  userId: string;
   planFamily: PlanFamily;
   cycleAnchorAt: string;
   cycleSource: BillingCycleSource;

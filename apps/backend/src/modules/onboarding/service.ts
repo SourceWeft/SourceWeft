@@ -4,9 +4,15 @@ import { billingService } from "../billing";
 import { workspaceService } from "../workspace";
 
 export class OnboardingService {
-  async provisionOrganization(input: { organizationId: string; userId: string }) {
+  async provisionOrganization(input: {
+    organizationId: string;
+    userId: string;
+  }) {
     await workspaceService.ensureMembershipWorkspace(input);
-    await billingService.ensureBillingAccount(input.organizationId);
+    await billingService.ensureBillingAccount(
+      input.organizationId,
+      input.userId,
+    );
   }
 
   async ensurePersonalTeamForUser(input: { userId: string }) {

@@ -27,7 +27,10 @@ import {
   billingAdmission,
   BillingAdmissionError,
 } from "./billing/admission";
-import type { ModelCallBillingOptions, ModelUsageContext } from "./billing/context";
+import type {
+  ModelCallBillingOptions,
+  ModelUsageContext,
+} from "./billing/context";
 import { openBillingScope, type BillingScope } from "./billing/scope";
 import type { MeterUsageFn } from "./billing/settle";
 import { createBilledAgentChatModel } from "./billing/langchain-proxy";
@@ -55,14 +58,20 @@ export type BilledModelGateway = {
     ): AsyncIterable<ChatStreamEvent>;
   };
   embeddings: {
-    embed(input: EmbedInput, options: BilledRequestOptions): Promise<EmbedResult>;
+    embed(
+      input: EmbedInput,
+      options: BilledRequestOptions,
+    ): Promise<EmbedResult>;
     embedBatch(
       input: EmbedBatchInput,
       options: BilledRequestOptions,
     ): Promise<EmbedBatchResult>;
   };
   rerank: {
-    rank(input: RerankInput, options: BilledRequestOptions): Promise<RerankResult>;
+    rank(
+      input: RerankInput,
+      options: BilledRequestOptions,
+    ): Promise<RerankResult>;
   };
   asr: {
     transcribe(
@@ -184,10 +193,15 @@ async function openBilledGateway(
   // is out of credits would withhold work the team is not being charged for.
   const decision =
     input.context.intent.mode === "covered"
-      ? await admitCoveredScope(input.billing, input.context.teamId)
+      ? await admitCoveredScope(
+          input.billing,
+          input.context.teamId,
+          input.context.actorUserId,
+        )
       : await billingAdmission.admit({
           billing: input.billing,
           teamId: input.context.teamId,
+          userId: input.context.actorUserId,
         });
 
   if (!decision.allowed) {

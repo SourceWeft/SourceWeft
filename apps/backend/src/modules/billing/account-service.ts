@@ -1,7 +1,8 @@
 import type { PoolClient } from "pg";
 import {
   getAnchoredMonthlyCycleWindow,
-  getPlanQuota,
+  getPerSeatQuota,
+  type PlanQuota,
 } from "@sourceweft/credits-core";
 import { BillingError } from "./errors";
 import {
@@ -15,19 +16,23 @@ import {
   getTotalPagesBalance,
   getTotalCreditsBalance,
   normalizeTeamId,
+  normalizeUserId,
+  resolvePlanFromSubscription,
 } from "./service-helpers";
 
-const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set([
-  "active",
-  "past_due",
-]);
+const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 
-function resolvePlanQuota(
+/**
+ * The quota a single member receives. Grants are per-member now (one
+ * `billing_accounts` row per user), so this is one seat's worth regardless of
+ * how many seats the team has — a `team_standard` seat is an `individual_pro`
+ * allocation. `getPlanQuota` (seat-scaled team total) is only for pricing/catalog.
+ */
+function resolvePerSeatQuota(
   runtimeConfig: BillingRuntimeConfig,
   planFamily: BillingAccountState["planFamily"],
-  seatCount = 1,
-) {
-  const quota = getPlanQuota(planFamily, seatCount);
+): PlanQuota {
+  const quota = getPerSeatQuota(planFamily);
   if (planFamily !== "individual_free") {
     return quota;
   }
@@ -43,10 +48,7 @@ function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function formatQuotaRenewalSummary(input: {
-  credits: number;
-  pages: number;
-}) {
+function formatQuotaRenewalSummary(input: { credits: number; pages: number }) {
   return [
     input.credits > 0 ? formatSignedLedgerDelta("credit", input.credits) : null,
     input.pages > 0 ? formatSignedLedgerDelta("page", input.pages) : null,
@@ -68,18 +70,26 @@ export class BillingAccountService {
     private readonly runtimeConfig: BillingRuntimeConfig,
   ) {}
 
+  /**
+   * Locks a single member's allocation row for the duration of `callback`.
+   * This is the per-actor path (谁问谁付): a member's runs, ingestion, and
+   * top-ups move only their own row.
+   */
   async withLockedAccount<T>(
     teamId: string,
+    userId: string,
     callback: (input: {
       account: BillingAccountState;
       client: PoolClient;
     }) => Promise<T>,
   ) {
     const normalizedTeamId = normalizeTeamId(teamId);
+    const normalizedUserId = normalizeUserId(userId);
 
     return this.store.runInTransaction(async (client) => {
       const account = await this.getOrCreateAccountLocked(
         normalizedTeamId,
+        normalizedUserId,
         client,
       );
       const syncedAccount = await this.syncCycleLocked(account, client);
@@ -91,51 +101,145 @@ export class BillingAccountService {
     });
   }
 
-  async ensureAccountLocked(teamId: string, client: PoolClient) {
+  /**
+   * Locks every current member's allocation row for a team-wide operation
+   * (plan change, cycle realignment, seat/quota update, spend limits). Ensures a
+   * row exists for each Better Auth member first so a newly-activated plan
+   * grants everyone their per-seat allocation immediately.
+   */
+  async withLockedTeamAccounts<T>(
+    teamId: string,
+    callback: (input: {
+      accounts: BillingAccountState[];
+      client: PoolClient;
+    }) => Promise<T>,
+  ) {
     const normalizedTeamId = normalizeTeamId(teamId);
+
+    return this.store.runInTransaction(async (client) => {
+      const memberUserIds = await this.store.listTeamMemberUserIds(
+        normalizedTeamId,
+        client,
+      );
+      const accounts: BillingAccountState[] = [];
+      for (const memberUserId of memberUserIds) {
+        const account = await this.getOrCreateAccountLocked(
+          normalizedTeamId,
+          memberUserId,
+          client,
+        );
+        accounts.push(await this.syncCycleLocked(account, client));
+      }
+
+      return callback({ accounts, client });
+    });
+  }
+
+  async ensureAccountLocked(
+    teamId: string,
+    userId: string,
+    client: PoolClient,
+  ) {
+    const normalizedTeamId = normalizeTeamId(teamId);
+    const normalizedUserId = normalizeUserId(userId);
     const account = await this.getOrCreateAccountLocked(
       normalizedTeamId,
+      normalizedUserId,
       client,
     );
     return this.syncCycleLocked(account, client);
+  }
+
+  /**
+   * Locks a single representative member row for a team-level READ that only
+   * needs team attributes (plan, cycle, seat count) — all member rows carry the
+   * same team attributes. Prefers an existing row; otherwise materializes the
+   * first Better Auth member's row. Team-level MUTATIONS must use
+   * {@link withLockedTeamAccounts} so every member's allocation is updated.
+   */
+  async withRepresentativeTeamAccount<T>(
+    teamId: string,
+    callback: (input: {
+      account: BillingAccountState;
+      client: PoolClient;
+    }) => Promise<T>,
+  ) {
+    const normalizedTeamId = normalizeTeamId(teamId);
+
+    return this.store.runInTransaction(async (client) => {
+      const existing = await this.store.getAnyTeamAccount(
+        normalizedTeamId,
+        client,
+      );
+      let representativeUserId = existing?.userId ?? null;
+      if (!representativeUserId) {
+        const memberUserIds = await this.store.listTeamMemberUserIds(
+          normalizedTeamId,
+          client,
+        );
+        representativeUserId = memberUserIds[0] ?? null;
+      }
+
+      if (!representativeUserId) {
+        throw new BillingError(
+          "TEAM_HAS_NO_MEMBERS",
+          409,
+          "Team has no members to resolve a billing account for",
+          { teamId: normalizedTeamId },
+        );
+      }
+
+      const account = await this.getOrCreateAccountLocked(
+        normalizedTeamId,
+        representativeUserId,
+        client,
+      );
+      const syncedAccount = await this.syncCycleLocked(account, client);
+
+      return callback({ account: syncedAccount, client });
+    });
   }
 
   async updateSpendLimits(
     teamId: string,
     input: { softCapUsd?: number | null; hardCapUsd?: number | null },
   ) {
-    return this.withLockedAccount(teamId, async ({ account, client }) => {
-      if (input.softCapUsd !== undefined) {
-        account.spendSoftCapUsd = input.softCapUsd;
-      }
+    // Spend caps are a team-level policy applied uniformly to every member row.
+    return this.withLockedTeamAccounts(teamId, async ({ accounts, client }) => {
+      const nowIso = new Date().toISOString();
+      for (const account of accounts) {
+        if (input.softCapUsd !== undefined) {
+          account.spendSoftCapUsd = input.softCapUsd;
+        }
 
-      if (input.hardCapUsd !== undefined) {
-        account.spendHardCapUsd = input.hardCapUsd;
-      }
+        if (input.hardCapUsd !== undefined) {
+          account.spendHardCapUsd = input.hardCapUsd;
+        }
 
-      if (
-        account.spendSoftCapUsd !== null &&
-        account.spendHardCapUsd !== null &&
-        account.spendHardCapUsd < account.spendSoftCapUsd
-      ) {
-        throw new BillingError(
-          "INVALID_SPEND_LIMITS",
-          400,
-          "hardCapUsd must be greater than or equal to softCapUsd",
-          {
-            softCapUsd: account.spendSoftCapUsd,
-            hardCapUsd: account.spendHardCapUsd,
-          },
-        );
-      }
+        if (
+          account.spendSoftCapUsd !== null &&
+          account.spendHardCapUsd !== null &&
+          account.spendHardCapUsd < account.spendSoftCapUsd
+        ) {
+          throw new BillingError(
+            "INVALID_SPEND_LIMITS",
+            400,
+            "hardCapUsd must be greater than or equal to softCapUsd",
+            {
+              softCapUsd: account.spendSoftCapUsd,
+              hardCapUsd: account.spendHardCapUsd,
+            },
+          );
+        }
 
-      account.updatedAt = new Date().toISOString();
-      await this.store.updateAccount(account, client);
+        account.updatedAt = nowIso;
+        await this.store.updateAccount(account, client);
+      }
 
       return {
-        teamId: account.teamId,
-        softCapUsd: account.spendSoftCapUsd,
-        hardCapUsd: account.spendHardCapUsd,
+        teamId: normalizeTeamId(teamId),
+        softCapUsd: input.softCapUsd ?? accounts[0]?.spendSoftCapUsd ?? null,
+        hardCapUsd: input.hardCapUsd ?? accounts[0]?.spendHardCapUsd ?? null,
       };
     });
   }
@@ -153,11 +257,7 @@ export class BillingAccountService {
     const previousPlanFamily = account.planFamily;
     const previousMonthlyGrant = account.monthlyCreditsGrant;
     const previousMonthlyPagesGrant = account.monthlyPagesGrant;
-    const nextQuota = resolvePlanQuota(
-      this.runtimeConfig,
-      nextPlanFamily,
-      account.seatCount,
-    );
+    const nextQuota = resolvePerSeatQuota(this.runtimeConfig, nextPlanFamily);
 
     account.planFamily = nextPlanFamily;
     account.monthlyCreditsGrant = nextQuota.monthlyCreditsGrant;
@@ -171,8 +271,10 @@ export class BillingAccountService {
       nextPlanFamily,
       Date.now(),
     );
-    const creditGrantDelta = nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
-    const pageGrantDelta = nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
+    const creditGrantDelta =
+      nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
+    const pageGrantDelta =
+      nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
     const isCreditPlanActivityVisible =
       !metadata.suppressImmediateGrant &&
       this.runtimeConfig.creditsEnabled &&
@@ -185,10 +287,7 @@ export class BillingAccountService {
       nextPlanFamily,
     )}`;
 
-    if (
-      !metadata.suppressImmediateGrant &&
-      creditGrantDelta > 0
-    ) {
+    if (!metadata.suppressImmediateGrant && creditGrantDelta > 0) {
       const grantDelta = creditGrantDelta;
       account.monthlyCreditsBalance += grantDelta;
 
@@ -217,10 +316,7 @@ export class BillingAccountService {
       });
     }
 
-    if (
-      !metadata.suppressImmediateGrant &&
-      pageGrantDelta > 0
-    ) {
+    if (!metadata.suppressImmediateGrant && pageGrantDelta > 0) {
       const grantDelta = pageGrantDelta;
       account.monthlyPagesBalance += grantDelta;
 
@@ -265,7 +361,8 @@ export class BillingAccountService {
     const previousMonthlyGrant = account.monthlyCreditsGrant;
     const previousMonthlyPagesGrant = account.monthlyPagesGrant;
     const previousSeatCount = readNumber(metadata.previousSeatCount);
-    const nextSeatCount = readNumber(metadata.nextSeatCount) ?? account.seatCount;
+    const nextSeatCount =
+      readNumber(metadata.nextSeatCount) ?? account.seatCount;
     const isSeatChange =
       previousSeatCount !== null && previousSeatCount !== nextSeatCount;
     const operationId =
@@ -281,10 +378,9 @@ export class BillingAccountService {
               Date.now(),
             )
           : createOperationId("quota-adjustment", account.teamId, Date.now());
-    const nextQuota = resolvePlanQuota(
+    const nextQuota = resolvePerSeatQuota(
       this.runtimeConfig,
       account.planFamily,
-      account.seatCount,
     );
 
     if (isSeatChange) {
@@ -354,7 +450,8 @@ export class BillingAccountService {
     }
 
     if (nextQuota.monthlyPagesLimit > previousMonthlyPagesGrant) {
-      const grantDelta = nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
+      const grantDelta =
+        nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
       account.monthlyPagesBalance += grantDelta;
 
       await appendBillingLedger({
@@ -410,11 +507,7 @@ export class BillingAccountService {
       input.cycleSource,
       input.cycleStartAt,
     );
-    const quota = resolvePlanQuota(
-      this.runtimeConfig,
-      account.planFamily,
-      account.seatCount,
-    );
+    const quota = resolvePerSeatQuota(this.runtimeConfig, account.planFamily);
 
     if (input.expireCurrentMonthly) {
       if (this.runtimeConfig.creditsEnabled && previousMonthlyBalance > 0) {
@@ -488,31 +581,118 @@ export class BillingAccountService {
     await this.store.updateAccount(account, client);
   }
 
-  private async getOrCreateAccountLocked(teamId: string, client: PoolClient) {
-    const existing = await this.store.getAccountForUpdate(teamId, client);
+  private async getOrCreateAccountLocked(
+    teamId: string,
+    userId: string,
+    client: PoolClient,
+  ) {
+    const existing = await this.store.getAccountForUpdate(
+      teamId,
+      userId,
+      client,
+    );
     if (existing) {
       return existing;
     }
 
-    return this.createDefaultAccountLocked(teamId, client);
+    return this.createDefaultAccountLocked(teamId, userId, client);
   }
 
-  private async createDefaultAccountLocked(teamId: string, client: PoolClient) {
-    const quota = resolvePlanQuota(
-      this.runtimeConfig,
-      this.runtimeConfig.defaultPlanFamily,
-    );
+  /**
+   * Resolves the plan and cycle a newly-created member row should inherit. A
+   * member joins the team's current plan and aligns to its cycle: prefer an
+   * existing sibling member row (already cycle-aligned), else the team's active
+   * provider subscription, else the free default.
+   */
+  private async resolveMemberAccountContext(
+    teamId: string,
+    client: PoolClient,
+  ): Promise<{
+    planFamily: BillingAccountState["planFamily"];
+    cycleSource: BillingAccountState["cycleSource"];
+    cycleAnchorAt: string;
+    cycleStartAt: string;
+    cycleEndAt: string;
+    seatCount: number;
+    spendSoftCapUsd: number | null;
+    spendHardCapUsd: number | null;
+  }> {
+    const sibling = await this.store.getAnyTeamAccount(teamId, client);
+    if (sibling) {
+      return {
+        planFamily: sibling.planFamily,
+        cycleSource: sibling.cycleSource,
+        cycleAnchorAt: sibling.cycleAnchorAt,
+        cycleStartAt: sibling.cycleStartAt,
+        cycleEndAt: sibling.cycleEndAt,
+        seatCount: sibling.seatCount,
+        spendSoftCapUsd: sibling.spendSoftCapUsd,
+        spendHardCapUsd: sibling.spendHardCapUsd,
+      };
+    }
+
     const now = new Date();
-    const nowIso = now.toISOString();
+    const subscription = await this.store.getSubscriptionByTeam(teamId, client);
+    const planFamily = subscription
+      ? resolvePlanFromSubscription({
+          status: subscription.status,
+          planFamily: subscription.planFamily,
+          defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
+        })
+      : this.runtimeConfig.defaultPlanFamily;
+
+    const isProviderCycle =
+      subscription != null &&
+      ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES.has(subscription.status) &&
+      subscription.currentPeriodStart != null &&
+      subscription.currentPeriodEnd != null;
+
+    if (isProviderCycle) {
+      return {
+        planFamily,
+        cycleSource: "provider_subscription",
+        cycleAnchorAt: subscription.currentPeriodStart as string,
+        cycleStartAt: subscription.currentPeriodStart as string,
+        cycleEndAt: subscription.currentPeriodEnd as string,
+        // seatCount is a replicated team attribute; the plan-activation fan-out
+        // sets the real purchased-seat count on every member row. A lazily
+        // created row between activations defaults to 1 (grants don't scale by it).
+        seatCount: 1,
+        spendSoftCapUsd: null,
+        spendHardCapUsd: null,
+      };
+    }
+
     const cycle = getAnchoredMonthlyCycleWindow(now, now);
+    return {
+      planFamily,
+      cycleSource: "free_account",
+      cycleAnchorAt: now.toISOString(),
+      cycleStartAt: cycle.startAt.toISOString(),
+      cycleEndAt: cycle.endAt.toISOString(),
+      seatCount: 1,
+      spendSoftCapUsd: null,
+      spendHardCapUsd: null,
+    };
+  }
+
+  private async createDefaultAccountLocked(
+    teamId: string,
+    userId: string,
+    client: PoolClient,
+  ) {
+    const context = await this.resolveMemberAccountContext(teamId, client);
+    const quota = resolvePerSeatQuota(this.runtimeConfig, context.planFamily);
+    const nowIso = new Date().toISOString();
 
     const account: BillingAccountState = {
       teamId,
-      planFamily: this.runtimeConfig.defaultPlanFamily,
-      cycleAnchorAt: nowIso,
-      cycleSource: "free_account",
-      cycleStartAt: cycle.startAt.toISOString(),
-      cycleEndAt: cycle.endAt.toISOString(),
+      userId,
+      planFamily: context.planFamily,
+      cycleAnchorAt: context.cycleAnchorAt,
+      cycleSource: context.cycleSource,
+      cycleStartAt: context.cycleStartAt,
+      cycleEndAt: context.cycleEndAt,
       pagesLimit: quota.monthlyPagesLimit,
       pagesUsed: 0,
       monthlyPagesGrant: quota.monthlyPagesLimit,
@@ -524,9 +704,9 @@ export class BillingAccountService {
       addOnCreditsBalance: 0,
       creditsReserved: 0,
       creditsConsumedThisCycle: 0,
-      seatCount: 1,
-      spendSoftCapUsd: null,
-      spendHardCapUsd: null,
+      seatCount: context.seatCount,
+      spendSoftCapUsd: context.spendSoftCapUsd,
+      spendHardCapUsd: context.spendHardCapUsd,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -639,11 +819,7 @@ export class BillingAccountService {
       return account;
     }
 
-    const quota = resolvePlanQuota(
-      this.runtimeConfig,
-      account.planFamily,
-      account.seatCount,
-    );
+    const quota = resolvePerSeatQuota(this.runtimeConfig, account.planFamily);
     const isProviderMonthlyCycle =
       account.cycleSource === "provider_subscription" &&
       subscription?.billingInterval === "monthly";
@@ -757,7 +933,7 @@ export class BillingAccountService {
   private async expireAndGrantCycleLocked(
     account: BillingAccountState,
     client: PoolClient,
-    quota: ReturnType<typeof getPlanQuota>,
+    quota: PlanQuota,
     metadata: Record<string, unknown>,
     expiredCycle: { source: string; startAt: string },
   ) {
@@ -901,7 +1077,7 @@ export class BillingAccountService {
   private async grantCycleBalancesLocked(
     account: BillingAccountState,
     client: PoolClient,
-    quota: ReturnType<typeof getPlanQuota>,
+    quota: PlanQuota,
     metadata: Record<string, unknown>,
   ) {
     const operationId =

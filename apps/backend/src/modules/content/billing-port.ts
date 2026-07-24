@@ -7,7 +7,8 @@ import type {
 } from "@sourceweft/contracts";
 
 export type ContentBillingPort = {
-  getSummary(teamId: string): Promise<BillingSummaryResponse>;
+  // Per-member: the summary/capacity reflects the acting user's own allocation.
+  getSummary(teamId: string, userId: string): Promise<BillingSummaryResponse>;
   meterConsume(
     teamId: string,
     input: MeterConsumeRequest,

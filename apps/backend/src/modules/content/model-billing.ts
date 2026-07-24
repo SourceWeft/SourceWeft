@@ -34,7 +34,10 @@ export async function meterBillableModelUsage(input: {
   llm?: LlmExecutionConfig;
   metadata?: Record<string, unknown>;
 }): Promise<MeterBillableModelUsageResult> {
-  const summary = await input.billing.getSummary(input.teamId);
+  const summary = await input.billing.getSummary(
+    input.teamId,
+    input.actorUserId,
+  );
   const zeroBilling = {
     teamId: input.teamId,
     consumedCredits: 0,

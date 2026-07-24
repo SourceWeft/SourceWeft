@@ -546,7 +546,10 @@ export const workspaceGuestInvitations = pgTable(
 export const billingAccounts = pgTable(
   "billing_accounts",
   {
-    teamId: text("team_id").primaryKey(),
+    // Credits and pages are granted per-member: one row per (team_id, user_id).
+    // A member's runs deduct from their own row; no shared team pool (谁问谁付).
+    teamId: text("team_id").notNull(),
+    userId: text("user_id").notNull(),
     planFamily: text("plan_family").$type<PlanFamily>().notNull(),
     cycleAnchorAt: timestamp("cycle_anchor_at", {
       withTimezone: true,
@@ -596,6 +599,7 @@ export const billingAccounts = pgTable(
       .defaultNow(),
   },
   (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
     check(
       "billing_accounts_cycle_source_check",
       sql`${table.cycleSource} in ('free_account', 'provider_subscription', 'manual')`,

@@ -13,12 +13,23 @@ export type BillingStore = {
   runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T>;
   getAccount(
     teamId: string,
+    userId: string,
     client?: PoolClient,
   ): Promise<BillingAccountState | null>;
   getAccountForUpdate(
     teamId: string,
+    userId: string,
     client: PoolClient,
   ): Promise<BillingAccountState | null>;
+  getTeamAccountsForUpdate(
+    teamId: string,
+    client: PoolClient,
+  ): Promise<BillingAccountState[]>;
+  getAnyTeamAccount(
+    teamId: string,
+    client?: PoolClient,
+  ): Promise<BillingAccountState | null>;
+  listTeamMemberUserIds(teamId: string, client?: PoolClient): Promise<string[]>;
   insertAccount(
     account: BillingAccountState,
     client: PoolClient,

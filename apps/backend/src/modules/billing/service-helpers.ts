@@ -49,7 +49,10 @@ export function ensureBillingCheckoutEnabled(
   }
 }
 
-export function toWebhookError(error: unknown): { code: string; message: string } {
+export function toWebhookError(error: unknown): {
+  code: string;
+  message: string;
+} {
   if (error instanceof BillingError) {
     return {
       code: error.code,
@@ -247,6 +250,15 @@ export function normalizeTeamId(teamId: string) {
   return value;
 }
 
+export function normalizeUserId(userId: string) {
+  const value = userId.trim();
+  if (!value) {
+    throw new BillingError("INVALID_USER_ID", 400, "userId is required");
+  }
+
+  return value;
+}
+
 export function stableSerialize(value: unknown): string {
   if (value === null || value === undefined) {
     return "null";
@@ -276,7 +288,9 @@ export function stableSerialize(value: unknown): string {
   return JSON.stringify(String(value));
 }
 
-export function createFallbackWebhookEventId(input: BillingWebhookProcessInput) {
+export function createFallbackWebhookEventId(
+  input: BillingWebhookProcessInput,
+) {
   const seed = {
     provider: input.provider,
     eventType: input.eventType,

@@ -84,6 +84,18 @@ class MemoryBillingStore implements BillingStore {
     return this.account;
   }
 
+  async getTeamAccountsForUpdate() {
+    return this.account ? [this.account] : [];
+  }
+
+  async getAnyTeamAccount() {
+    return this.account;
+  }
+
+  async listTeamMemberUserIds() {
+    return this.account ? [this.account.userId] : ["user_1"];
+  }
+
   async insertAccount(account: BillingAccountState) {
     this.account = { ...account };
   }
@@ -344,6 +356,7 @@ function createActiveTeamAccount(
 
   return {
     teamId: "team_1",
+    userId: "user_1",
     planFamily: "team_standard",
     cycleAnchorAt: now,
     cycleSource: "provider_subscription",
@@ -511,7 +524,7 @@ test("default free quota can be configured by runtime env", async () => {
     accountService,
   );
 
-  const summary = await usageService.getSummary("team_1");
+  const summary = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(summary.pages.monthlyGrant, 42);
   assert.equal(summary.pages.available, 42);
@@ -531,7 +544,7 @@ test("billing summary counts pending invitations as occupied seats", async () =>
     accountService,
   );
 
-  const summary = await usageService.getSummary("team_1");
+  const summary = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(summary.seats.used, 3);
   assert.equal(summary.seats.remaining, 0);
@@ -539,7 +552,7 @@ test("billing summary counts pending invitations as occupied seats", async () =>
   assert.equal(summary.seats.pendingInvitations, 1);
 
   store.pendingInvitationCount = 0;
-  const afterRevoke = await usageService.getSummary("team_1");
+  const afterRevoke = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(afterRevoke.seats.used, 2);
   assert.equal(afterRevoke.seats.remaining, 1);
@@ -573,7 +586,7 @@ test("monthly pages expire and regrant while add-on pages carry over", async () 
     addOnPagesBalance: 7,
   };
 
-  const summary = await usageService.getSummary("team_1");
+  const summary = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(summary.pages.monthlyGrant, 300);
   assert.equal(summary.pages.monthlyBalance, 300);
@@ -621,7 +634,7 @@ test("free billing cycle anchors to account creation time", async () => {
     accountService,
   );
 
-  const summary = await usageService.getSummary("team_1");
+  const summary = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(summary.cycleSource, "free_account");
   assert.equal(summary.cycleAnchorAt, summary.cycleStartAt);
@@ -686,7 +699,7 @@ test("expired paid monthly cycle waits for provider renewal webhook", async () =
     updatedAt: expiredStart,
   };
 
-  const summary = await usageService.getSummary("team_1");
+  const summary = await usageService.getSummary("team_1", "user_1");
 
   assert.equal(summary.cycleStartAt, expiredStart);
   assert.equal(summary.cycleEndAt, expiredEnd);
@@ -716,7 +729,7 @@ test("stale provider monthly snapshot is rejected before subscription upsert", a
     noopProvider,
   );
 
-  await billingService.ensureBillingAccount("team_1");
+  await billingService.ensureBillingAccount("team_1", "user_1");
   assert.ok(store.account);
 
   const currentStart = new Date(Date.now() - 62 * 86_400_000).toISOString();
@@ -788,7 +801,7 @@ test("active provider snapshot without usable period is rejected before subscrip
     noopProvider,
   );
 
-  await billingService.ensureBillingAccount("team_1");
+  await billingService.ensureBillingAccount("team_1", "user_1");
   assert.ok(store.account);
   const initialAccount = { ...store.account };
 
@@ -1059,6 +1072,7 @@ test("creem cancellation webhook without team metadata resolves existing subscri
   const now = new Date().toISOString();
   store.account = {
     teamId: "team_1",
+    userId: "user_1",
     planFamily: "team_standard",
     cycleAnchorAt: now,
     cycleSource: "provider_subscription",
@@ -1089,7 +1103,7 @@ test("creem cancellation webhook without team metadata resolves existing subscri
     status: "active",
     billingInterval: "monthly",
     currentPeriodStart: now,
-    currentPeriodEnd: store.account.cycleEndAt,
+    currentPeriodEnd: store.account!.cycleEndAt,
     externalCustomerId: "cus_1",
     externalSubscriptionId: "ext_sub_1",
     externalSubscriptionItemId: "item_1",
@@ -1194,6 +1208,7 @@ test("team subscription seat sync updates provider before local quota", async ()
   const now = new Date().toISOString();
   store.account = {
     teamId: "team_1",
+    userId: "user_1",
     planFamily: "team_standard",
     cycleAnchorAt: now,
     cycleSource: "provider_subscription",
@@ -1282,8 +1297,11 @@ test("team subscription seat sync updates provider before local quota", async ()
   assert.equal(result.seatCount, 5);
   assert.equal(result.seatsUsed, 3);
   assert.equal(store.account?.seatCount, 5);
-  assert.equal(store.account?.monthlyCreditsGrant, 100_000);
-  assert.equal(store.account?.monthlyPagesGrant, 30_000);
+  // Per-member billing: a member's grant is one seat's worth and does NOT scale
+  // with the team's seat count. Changing seats never re-grants existing members;
+  // a new member gets their own per-seat allocation when their row is created.
+  assert.equal(store.account?.monthlyCreditsGrant, 20_000);
+  assert.equal(store.account?.monthlyPagesGrant, 6_000);
 
   const seatLedgers = store.ledgers.filter(
     (entry) => entry.unitType === "seat",
@@ -1299,14 +1317,11 @@ test("team subscription seat sync updates provider before local quota", async ()
 
   const seatOperationId = seatLedgers[0]?.operationId;
   assert.ok(seatOperationId);
+  // No per-member quota grant on a seat change under per-member billing.
   const quotaLedgers = store.ledgers.filter(
     (entry) => entry.feature === "seat_quota_grant",
   );
-  assert.equal(quotaLedgers.length, 2);
-  assert.ok(
-    quotaLedgers.every((entry) => entry.operationId === seatOperationId),
-  );
-  assert.ok(quotaLedgers.every((entry) => entry.activityVisible === false));
+  assert.equal(quotaLedgers.length, 0);
 });
 
 test("team subscription seat changes are visible per update without merging", async () => {
@@ -1316,6 +1331,7 @@ test("team subscription seat changes are visible per update without merging", as
   const periodEnd = new Date(Date.now() + 31 * 86_400_000).toISOString();
   store.account = {
     teamId: "team_1",
+    userId: "user_1",
     planFamily: "team_standard",
     cycleAnchorAt: now,
     cycleSource: "provider_subscription",
@@ -1472,11 +1488,10 @@ test("team subscription seat downgrade fully claws back unused monthly quota", a
   const preview = await billingService.previewTeamSubscriptionSeats("team_1", {
     seatCount: 2,
   });
-  assert.equal(preview.quotaAdjustment?.targetCredits, 10_000);
-  assert.equal(preview.quotaAdjustment?.actualCredits, 10_000);
-  assert.equal(preview.quotaAdjustment?.targetPages, 3_000);
-  assert.equal(preview.quotaAdjustment?.actualPages, 3_000);
-  assert.equal(preview.quotaAdjustment?.refundRatio, 1);
+  // Per-member billing: a seat downgrade reclaims no shared quota (there is no
+  // pool) — a removed seat removes that member's row. Only the seat's money is
+  // refunded, at full proration.
+  assert.equal(preview.quotaAdjustment, null);
   assert.equal(preview.billingAdjustment?.providerAction, "proration_credit");
 
   const result = await billingService.syncTeamSubscriptionSeats("team_1", {
@@ -1492,27 +1507,15 @@ test("team subscription seat downgrade fully claws back unused monthly quota", a
   ]);
   assert.equal(result.seatCount, 2);
   assert.equal(store.account?.seatCount, 2);
-  assert.equal(store.account?.monthlyCreditsGrant, 40_000);
-  assert.equal(store.account?.monthlyCreditsBalance, 50_000);
-  assert.equal(store.account?.monthlyPagesGrant, 12_000);
-  assert.equal(store.account?.monthlyPagesBalance, 15_000);
+  // Per-member grant is one seat's worth and is not scaled or clawed back by the
+  // team seat count; the member's balance is untouched by the seat change.
+  assert.equal(store.account?.monthlyCreditsGrant, 20_000);
+  assert.equal(store.account?.monthlyCreditsBalance, 60_000);
+  assert.equal(store.account?.monthlyPagesGrant, 6_000);
+  assert.equal(store.account?.monthlyPagesBalance, 18_000);
   assert.equal(
-    store.ledgers.some(
-      (entry) =>
-        entry.feature === "seat_quota_clawback" &&
-        entry.unitType === "credit" &&
-        entry.delta === -10_000,
-    ),
-    true,
-  );
-  assert.equal(
-    store.ledgers.some(
-      (entry) =>
-        entry.feature === "seat_quota_clawback" &&
-        entry.unitType === "page" &&
-        entry.delta === -3_000,
-    ),
-    true,
+    store.ledgers.some((entry) => entry.feature === "seat_quota_clawback"),
+    false,
   );
 });
 
@@ -1557,7 +1560,7 @@ test("team subscription seat upgrade preview includes prorated charge", async ()
   assert.ok((preview.billingAdjustment?.estimatedChargeCents ?? 0) <= 4_900);
 });
 
-test("team subscription seat downgrade partially refunds when monthly quota is spent", async () => {
+test("team subscription seat downgrade refunds in full regardless of a member's spend", async () => {
   const store = new MemoryBillingStore();
   store.teamMemberCount = 2;
   const nowMs = Date.now();
@@ -1605,15 +1608,11 @@ test("team subscription seat downgrade partially refunds when monthly quota is s
   const preview = await billingService.previewTeamSubscriptionSeats("team_1", {
     seatCount: 2,
   });
-  assert.equal(preview.quotaAdjustment?.targetCredits, 10_000);
-  assert.equal(preview.quotaAdjustment?.actualCredits, 5_000);
-  assert.equal(preview.quotaAdjustment?.targetPages, 3_000);
-  assert.equal(preview.quotaAdjustment?.actualPages, 3_000);
-  assert.equal(preview.quotaAdjustment?.refundRatio, 0.5);
-  assert.equal(
-    preview.billingAdjustment?.providerAction,
-    "internal_partial_credit",
-  );
+  // Per-member billing: no shared quota to reclaim, so a member's already-spent
+  // balance no longer reduces the seat refund — the removed seat is refunded at
+  // full proration and the member's balances are left untouched.
+  assert.equal(preview.quotaAdjustment, null);
+  assert.equal(preview.billingAdjustment?.providerAction, "proration_credit");
 
   const result = await billingService.syncTeamSubscriptionSeats("team_1", {
     seatCount: 2,
@@ -1623,20 +1622,17 @@ test("team subscription seat downgrade partially refunds when monthly quota is s
   assert.deepEqual(updates, [
     {
       seatCount: 2,
-      updateBehavior: "proration-none",
+      updateBehavior: "proration-charge",
     },
   ]);
-  assert.equal(
-    result.billingAdjustment?.providerAction,
-    "internal_partial_credit",
-  );
-  assert.equal(store.account?.monthlyCreditsBalance, 0);
+  assert.equal(result.billingAdjustment?.providerAction, "proration_credit");
+  assert.equal(store.account?.monthlyCreditsBalance, 5_000);
   assert.equal(store.account?.addOnCreditsBalance, 8_000);
-  assert.equal(store.account?.monthlyPagesBalance, 0);
+  assert.equal(store.account?.monthlyPagesBalance, 3_000);
   assert.equal(store.account?.addOnPagesBalance, 1_000);
   assert.equal(
     result.billingAdjustment?.actualRefundCents,
-    Math.round((result.billingAdjustment?.theoreticalRefundCents ?? 0) * 0.5),
+    result.billingAdjustment?.theoreticalRefundCents,
   );
 });
 
@@ -1721,7 +1717,7 @@ test("team subscription seat sync failure leaves local seat count unchanged", as
       provider: "creem",
     },
     noopProvider,
-  ).ensureBillingAccount("team_1");
+  ).ensureBillingAccount("team_1", "user_1");
   assert.ok(store.account);
   store.account = {
     ...store.account,
@@ -1842,7 +1838,7 @@ test("active team subscription rejects invitations at allocated seat capacity", 
       provider: "creem",
     },
     noopProvider,
-  ).ensureBillingAccount("team_1");
+  ).ensureBillingAccount("team_1", "user_1");
   assert.ok(store.account);
   store.account = {
     ...store.account,
@@ -2081,7 +2077,7 @@ test("billing portal actions fall back to the payer customer", async () => {
     },
   );
 
-  await billingService.ensureBillingAccount("team_1");
+  await billingService.ensureBillingAccount("team_1", "user_1");
   const now = new Date().toISOString();
   store.subscription = {
     id: "sub_1",

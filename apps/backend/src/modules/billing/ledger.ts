@@ -32,11 +32,26 @@ export function formatSignedLedgerDelta(
   return `${prefix}${formatNumber(delta)} ${formatLedgerUnit(unitType, delta)}`;
 }
 
-export function createOperationId(...parts: Array<string | number | null | undefined>) {
+export function createOperationId(
+  ...parts: Array<string | number | null | undefined>
+) {
   return parts
-    .filter((part): part is string | number => part !== null && part !== undefined)
+    .filter(
+      (part): part is string | number => part !== null && part !== undefined,
+    )
     .map((part) => encodeURIComponent(String(part)))
     .join(":");
+}
+
+/**
+ * Namespaces a ledger idempotency key / operation id by the owning member.
+ * `billing_accounts` rows are per (team, user) and the ledger's uniqueness
+ * indexes are per team, so deterministic keys (e.g. `cycle-grant:<cycle>`) would
+ * otherwise collide across a team's members. Every stored key is scoped by
+ * userId; lookups must scope the same way.
+ */
+export function scopeMemberLedgerKey(userId: string, key: string) {
+  return `${userId}:${key}`;
 }
 
 export type LedgerWriteInput = {
@@ -67,18 +82,26 @@ export async function appendBillingLedger(input: {
     id: randomUUID(),
     teamId: input.account.teamId,
     workspaceId: input.entry.workspaceId ?? null,
-    actorUserId: input.entry.actorUserId ?? null,
+    // Attribute every line to the member whose allocation row it moves, so the
+    // team activity feed and per-member balances stay consistent.
+    actorUserId: input.entry.actorUserId ?? input.account.userId,
     feature: input.entry.feature,
     eventType: input.entry.eventType,
     unitType: input.entry.unitType,
     delta: input.entry.delta,
     balanceAfter: input.entry.balanceAfter,
     referenceId: input.entry.referenceId ?? null,
-    idempotencyKey: input.entry.idempotencyKey ?? null,
-    operationId: input.entry.operationId ?? null,
+    // Scope keys by member so per-member deterministic keys never collide on the
+    // team-scoped uniqueness indexes.
+    idempotencyKey: input.entry.idempotencyKey
+      ? scopeMemberLedgerKey(input.account.userId, input.entry.idempotencyKey)
+      : null,
+    operationId: input.entry.operationId
+      ? scopeMemberLedgerKey(input.account.userId, input.entry.operationId)
+      : null,
     operationType: input.entry.operationType ?? null,
     activityVisible:
-      input.entry.activityVisible ?? (input.entry.eventType === "consume"),
+      input.entry.activityVisible ?? input.entry.eventType === "consume",
     activityTitle: input.entry.activityTitle ?? null,
     activitySummary: input.entry.activitySummary ?? null,
     metadata: input.entry.metadata ?? {},

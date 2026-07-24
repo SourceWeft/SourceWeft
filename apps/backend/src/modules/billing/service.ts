@@ -81,16 +81,16 @@ export class BillingService {
     );
   }
 
-  ensureBillingAccount(teamId: string) {
-    return this.usageService.ensureBillingAccount(teamId);
+  ensureBillingAccount(teamId: string, userId: string) {
+    return this.usageService.ensureBillingAccount(teamId, userId);
   }
 
-  getSummary(teamId: string) {
-    return this.usageService.getSummary(teamId);
+  getSummary(teamId: string, userId: string) {
+    return this.usageService.getSummary(teamId, userId);
   }
 
-  getUsage(teamId: string) {
-    return this.usageService.getUsage(teamId);
+  getUsage(teamId: string, userId: string) {
+    return this.usageService.getUsage(teamId, userId);
   }
 
   getLedger(
@@ -116,8 +116,10 @@ export class BillingService {
       provider,
       externalSubscriptionId,
     );
+    // A representative member row carries the team-level attributes the webhook
+    // context needs (plan, cycle); balances are per-member and not read here.
     const account = subscription
-      ? await this.store.getAccount(subscription.teamId)
+      ? await this.store.getAnyTeamAccount(subscription.teamId)
       : null;
 
     return { account, subscription };

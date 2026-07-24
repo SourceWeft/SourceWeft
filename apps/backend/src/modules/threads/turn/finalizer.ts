@@ -1,4 +1,5 @@
 import type { ContentBillingPort } from "../../content/billing-port";
+import { workspaceService } from "../../workspace";
 import { createCitationRecords, replaceCitationRecords } from "../../citations";
 import {
   buildGatewayAuditMetadata,
@@ -120,11 +121,20 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
 
   const totalCreditsConsumed =
     meteredLlmCreditsConsumed + preflightCreditsConsumed;
+  // 谁问谁付: report the balance from the org that was actually billed (a guest's
+  // own personal org, not the host team) so we never materialize a spurious
+  // account for the actor in the workspace's team.
+  const billingTeamId = await workspaceService.resolveBillingOrganizationId({
+    workspaceId: prepared.workspace.id,
+    userId: prepared.userId,
+    workspaceOrganizationId: prepared.workspace.organizationId,
+  });
   const billingSummary = await input.billing.getSummary(
-    prepared.workspace.organizationId,
+    billingTeamId,
+    prepared.userId,
   );
   const billing = {
-    teamId: prepared.workspace.organizationId,
+    teamId: billingTeamId,
     consumedCredits: meteredLlmCreditsConsumed,
     availableCredits: billingSummary.credits.available,
     consumedThisCycle: billingSummary.credits.consumedThisCycle,

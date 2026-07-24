@@ -29,6 +29,7 @@ import {
   appendBillingLedger,
   createOperationId,
   formatSignedLedgerDelta,
+  scopeMemberLedgerKey,
 } from "./ledger";
 import type { BillingStore } from "./store-port";
 import type {
@@ -94,10 +95,7 @@ const RECOVERABLE_CHECKOUT_STATUSES = new Set<BillingOrderState["status"]>([
   "payment_failed",
 ]);
 
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set([
-  "active",
-  "past_due",
-]);
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 const TEAM_SEAT_MIN = 2;
 const TEAM_SEAT_MAX = 99;
 
@@ -126,7 +124,9 @@ function isMonthlyOrYearly(
   return value === "monthly" || value === "yearly";
 }
 
-function toCheckoutResponse(order: BillingOrderState): CreatePricingCheckoutResponse {
+function toCheckoutResponse(
+  order: BillingOrderState,
+): CreatePricingCheckoutResponse {
   if (
     !order.planFamily ||
     (order.planFamily !== INDIVIDUAL_PRO_PLAN &&
@@ -164,7 +164,9 @@ function toCheckoutResponse(order: BillingOrderState): CreatePricingCheckoutResp
   };
 }
 
-function toTopupResponse(order: BillingOrderState): CreateTopupCheckoutResponse {
+function toTopupResponse(
+  order: BillingOrderState,
+): CreateTopupCheckoutResponse {
   const checkoutUrl = String(order.metadata.checkoutUrl ?? "");
   if (!checkoutUrl || !order.unitType || !order.unitAmount) {
     throw new BillingError(
@@ -191,7 +193,10 @@ function toTopupResponse(order: BillingOrderState): CreateTopupCheckoutResponse 
   };
 }
 
-function defaultSuccessUrl(runtimeConfig: BillingRuntimeConfig, orderId: string) {
+function defaultSuccessUrl(
+  runtimeConfig: BillingRuntimeConfig,
+  orderId: string,
+) {
   const configured = runtimeConfig.defaultSuccessUrl;
   const separator = configured.includes("?") ? "&" : "?";
   return `${configured}${separator}orderId=${encodeURIComponent(orderId)}`;
@@ -333,7 +338,9 @@ export class BillingOrderService {
       billingInterval,
     });
     const teamId =
-      planFamily === INDIVIDUAL_PRO_PLAN ? input.personalTeamId ?? null : null;
+      planFamily === INDIVIDUAL_PRO_PLAN
+        ? (input.personalTeamId ?? null)
+        : null;
 
     if (planFamily === INDIVIDUAL_PRO_PLAN && !teamId) {
       throw new BillingError(
@@ -365,14 +372,16 @@ export class BillingOrderService {
         existing.planFamily === planFamily &&
         existing.billingInterval === billingInterval
       ) {
-        const recovered = await this.createProviderCheckoutForSubscriptionOrder({
-          order: existing,
-          actor: input.actor,
-          planFamily,
-          billingInterval,
-          quantity,
-          productId: product.productId,
-        });
+        const recovered = await this.createProviderCheckoutForSubscriptionOrder(
+          {
+            order: existing,
+            actor: input.actor,
+            planFamily,
+            billingInterval,
+            quantity,
+            productId: product.productId,
+          },
+        );
         return toCheckoutResponse(recovered);
       }
     }
@@ -420,7 +429,9 @@ export class BillingOrderService {
           : {}),
       },
     });
-    draft.successUrl = input.request.successUrl ?? defaultSuccessUrl(this.runtimeConfig, draft.id);
+    draft.successUrl =
+      input.request.successUrl ??
+      defaultSuccessUrl(this.runtimeConfig, draft.id);
 
     let order = await this.store.insertOrder(draft);
     order = await this.createProviderCheckoutForSubscriptionOrder({
@@ -499,7 +510,9 @@ export class BillingOrderService {
         unitAmount: catalogEntry.unitAmount,
       },
     });
-    draft.successUrl = input.request.successUrl ?? defaultSuccessUrl(this.runtimeConfig, draft.id);
+    draft.successUrl =
+      input.request.successUrl ??
+      defaultSuccessUrl(this.runtimeConfig, draft.id);
 
     let order = await this.store.insertOrder(draft);
     const providerResult = await this.provider.createCheckout({
@@ -661,29 +674,37 @@ export class BillingOrderService {
           return order;
         }
 
-    const confirmed = await this.store.updateOrder({
-          ...order,
-          status: "payment_confirmed",
-          paymentStatus: "paid",
-          externalPaymentId: input.externalPaymentId ?? order.externalPaymentId,
-          externalCustomerId:
-            input.externalCustomerId ?? order.externalCustomerId,
-          externalSubscriptionId:
-            input.externalSubscriptionId ?? order.externalSubscriptionId,
-          externalProductId: input.externalProductId ?? order.externalProductId,
-          paidAt: order.paidAt ?? new Date().toISOString(),
-          fulfillmentAttemptCount: order.fulfillmentAttemptCount + 1,
-          metadata: {
-            ...order.metadata,
-            ...(input.metadata ?? {}),
-            ...(input.externalSubscriptionItemId
-              ? { externalSubscriptionItemId: input.externalSubscriptionItemId }
-              : {}),
+        const confirmed = await this.store.updateOrder(
+          {
+            ...order,
+            status: "payment_confirmed",
+            paymentStatus: "paid",
+            externalPaymentId:
+              input.externalPaymentId ?? order.externalPaymentId,
+            externalCustomerId:
+              input.externalCustomerId ?? order.externalCustomerId,
+            externalSubscriptionId:
+              input.externalSubscriptionId ?? order.externalSubscriptionId,
+            externalProductId:
+              input.externalProductId ?? order.externalProductId,
+            paidAt: order.paidAt ?? new Date().toISOString(),
+            fulfillmentAttemptCount: order.fulfillmentAttemptCount + 1,
+            metadata: {
+              ...order.metadata,
+              ...(input.metadata ?? {}),
+              ...(input.externalSubscriptionItemId
+                ? {
+                    externalSubscriptionItemId:
+                      input.externalSubscriptionItemId,
+                  }
+                : {}),
+            },
+            errorCode: null,
+            errorMessage: null,
+            updatedAt: new Date().toISOString(),
           },
-          errorCode: null,
-          errorMessage: null,
-          updatedAt: new Date().toISOString(),
-        }, client);
+          client,
+        );
 
         if (confirmed.kind === "subscription") {
           return this.fulfillSubscriptionOrderLocked(confirmed, input, client);
@@ -755,10 +776,6 @@ export class BillingOrderService {
       );
     }
 
-    const account = await this.accountService.ensureAccountLocked(
-      teamId,
-      client,
-    );
     const snapshot: TeamSubscriptionSnapshot = {
       teamId,
       provider: order.provider,
@@ -784,19 +801,45 @@ export class BillingOrderService {
           : 1,
     };
 
-    await this.applySubscriptionSnapshotLocked(account, snapshot, client);
-
-    return this.store.updateOrder({
-      ...order,
+    // Activating (or changing) the team plan is a team-wide change: every
+    // current member's row must receive the new plan's per-seat allocation.
+    // We are already inside fulfillOrder's transaction (holding the order row
+    // locked), and runInTransaction opens a fresh connection rather than
+    // nesting, so we can't use withLockedTeamAccounts here — instead we fan out
+    // over the same client, ensuring+locking each member's row exactly as
+    // withLockedTeamAccounts would. The team-wide subscription upsert is emitted
+    // exactly once (on the first member).
+    const memberUserIds = await this.store.listTeamMemberUserIds(
       teamId,
-      status: "fulfilled",
-      paymentStatus: "paid",
-      externalCustomerId: snapshot.externalCustomerId,
-      externalSubscriptionId: snapshot.externalSubscriptionId,
-      externalProductId: snapshot.externalProductId,
-      fulfilledAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    }, client);
+      client,
+    );
+    let upsertSubscriptionOnce = true;
+    for (const memberUserId of memberUserIds) {
+      const account = await this.accountService.ensureAccountLocked(
+        teamId,
+        memberUserId,
+        client,
+      );
+      await this.applySubscriptionSnapshotLocked(account, snapshot, client, {
+        upsertSubscription: upsertSubscriptionOnce,
+      });
+      upsertSubscriptionOnce = false;
+    }
+
+    return this.store.updateOrder(
+      {
+        ...order,
+        teamId,
+        status: "fulfilled",
+        paymentStatus: "paid",
+        externalCustomerId: snapshot.externalCustomerId,
+        externalSubscriptionId: snapshot.externalSubscriptionId,
+        externalProductId: snapshot.externalProductId,
+        fulfilledAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      },
+      client,
+    );
   }
 
   private async fulfillTopupOrderLocked(
@@ -812,8 +855,11 @@ export class BillingOrderService {
       );
     }
 
+    // Top-up grants land on the PURCHASING member's own row (谁问谁付): the
+    // buyer is the order's actor (`order.userId`).
     const account = await this.accountService.ensureAccountLocked(
       order.teamId,
+      order.userId,
       client,
     );
     const grantAmount =
@@ -829,7 +875,7 @@ export class BillingOrderService {
 
     const existingLedger = await this.store.getLedgerByIdempotency(
       order.teamId,
-      `billing-order:${order.id}:grant`,
+      scopeMemberLedgerKey(account.userId, `billing-order:${order.id}:grant`),
       client,
     );
 
@@ -879,13 +925,16 @@ export class BillingOrderService {
       await this.store.updateAccount(account, client);
     }
 
-    return this.store.updateOrder({
-      ...order,
-      status: "fulfilled",
-      paymentStatus: "paid",
-      fulfilledAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }, client);
+    return this.store.updateOrder(
+      {
+        ...order,
+        status: "fulfilled",
+        paymentStatus: "paid",
+        fulfilledAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      client,
+    );
   }
 
   private async ensurePaidTeamOrganization(order: BillingOrderState) {
@@ -953,8 +1002,13 @@ export class BillingOrderService {
     account: BillingAccountState,
     snapshot: TeamSubscriptionSnapshot,
     client: PoolClient,
+    options: { upsertSubscription: boolean } = { upsertSubscription: true },
   ) {
-    await this.store.upsertSubscription(snapshot, client);
+    // The subscription row is a team-wide record; only upsert it once even when
+    // this runs per-member as part of a team fan-out.
+    if (options.upsertSubscription) {
+      await this.store.upsertSubscription(snapshot, client);
+    }
 
     const previousSeatCount = account.seatCount;
     account.seatCount = snapshot.seatCount;
@@ -987,7 +1041,9 @@ export class BillingOrderService {
       snapshot.billingInterval === "monthly"
         ? {
             startAt: new Date(snapshot.currentPeriodStart ?? new Date()),
-            endAt: new Date(snapshot.currentPeriodEnd ?? addMonths(new Date(), 1)),
+            endAt: new Date(
+              snapshot.currentPeriodEnd ?? addMonths(new Date(), 1),
+            ),
           }
         : getAnchoredMonthlyCycleWindow(
             new Date(),
@@ -1020,9 +1076,7 @@ export class BillingOrderService {
     const message =
       error instanceof Error ? error.message : "Unknown fulfillment error";
     const code =
-      error instanceof BillingError
-        ? error.code
-        : "BILLING_FULFILLMENT_FAILED";
+      error instanceof BillingError ? error.code : "BILLING_FULFILLMENT_FAILED";
     await this.store.updateOrder({
       ...order,
       status: "fulfillment_failed",

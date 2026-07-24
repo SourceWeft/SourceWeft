@@ -4,7 +4,10 @@ import type { BillingSummaryResponse } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import { billingAdmission } from "./admission";
 
-function billingWith(billingMode: string, available: number): ContentBillingPort {
+function billingWith(
+  billingMode: string,
+  available: number,
+): ContentBillingPort {
   return {
     getSummary: vi.fn(
       async (teamId: string) =>
@@ -19,7 +22,7 @@ function billingWith(billingMode: string, available: number): ContentBillingPort
   } as unknown as ContentBillingPort;
 }
 
-const scope = { teamId: "team_1" };
+const scope = { teamId: "team_1", userId: "user_1" };
 
 test("enforced mode denies a team with no credits", async () => {
   const decision = await billingAdmission.admit({

@@ -13,10 +13,7 @@ import type {
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
-import {
-  getAnchoredMonthlyCycleWindow,
-  getPlanQuota,
-} from "@sourceweft/credits-core";
+import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
 import { logger } from "../../shared/logger";
 import { BillingAccountService } from "./account-service";
 import { resolveSubscriptionProduct } from "./catalog";
@@ -141,31 +138,6 @@ function clampRatio(value: number) {
   return Math.min(1, Math.max(0, value));
 }
 
-function resolveRecoverRatio(actual: number, target: number) {
-  if (target <= 0) {
-    return 1;
-  }
-
-  return clampRatio(actual / target);
-}
-
-function resolveSeatUnitQuota() {
-  const teamTwoSeatQuota = getPlanQuota(TEAM_STANDARD_PLAN, 2);
-  const teamThreeSeatQuota = getPlanQuota(TEAM_STANDARD_PLAN, 3);
-
-  return {
-    credits: Math.max(
-      0,
-      teamThreeSeatQuota.monthlyCreditsGrant -
-        teamTwoSeatQuota.monthlyCreditsGrant,
-    ),
-    pages: Math.max(
-      0,
-      teamThreeSeatQuota.monthlyPagesLimit - teamTwoSeatQuota.monthlyPagesLimit,
-    ),
-  };
-}
-
 function resolveSeatUnitPriceCents(input: {
   runtimeConfig: BillingRuntimeConfig;
   subscription: { billingInterval: string | null };
@@ -266,27 +238,10 @@ function calculateSeatPreview(input: {
           now: new Date(),
         })
       : 0;
-  const seatQuota = resolveSeatUnitQuota();
-  const targetCredits = input.runtimeConfig.creditsEnabled
-    ? roundNonNegative(removedSeats * seatQuota.credits * remainingRatio)
-    : 0;
-  const targetPages = input.runtimeConfig.pagesEnabled
-    ? roundNonNegative(removedSeats * seatQuota.pages * remainingRatio)
-    : 0;
-  const actualCredits = Math.min(
-    input.account.monthlyCreditsBalance,
-    targetCredits,
-  );
-  const actualPages = Math.min(input.account.monthlyPagesBalance, targetPages);
-  const creditRecoverRatio = input.runtimeConfig.creditsEnabled
-    ? resolveRecoverRatio(actualCredits, targetCredits)
-    : 1;
-  const pageRecoverRatio = input.runtimeConfig.pagesEnabled
-    ? resolveRecoverRatio(actualPages, targetPages)
-    : 1;
-  const refundRatio = clampRatio(
-    Math.min(creditRecoverRatio, pageRecoverRatio),
-  );
+  // Per-member billing: a removed seat removes that member's own allocation row;
+  // remaining members keep their full per-seat quota, so there is no shared pool
+  // to claw back. The seat's money is refunded at full proration.
+  const refundRatio = 1;
   const unitPriceCents = resolveSeatUnitPriceCents({
     runtimeConfig: input.runtimeConfig,
     subscription: input.subscription,
@@ -313,20 +268,8 @@ function calculateSeatPreview(input: {
     seatCount: input.seatCount,
     seatsUsed: input.seatsUsed,
     pendingInvitations: input.pendingInvitations,
-    quotaAdjustment:
-      removedSeats > 0
-        ? {
-            removedSeats,
-            remainingRatio,
-            targetCredits,
-            actualCredits,
-            targetPages,
-            actualPages,
-            creditRecoverRatio,
-            pageRecoverRatio,
-            refundRatio,
-          }
-        : null,
+    // No monthly-quota clawback under per-member billing (see refundRatio note).
+    quotaAdjustment: null,
     billingAdjustment:
       removedSeats > 0 || input.seatCount !== input.account.seatCount
         ? {
@@ -354,7 +297,7 @@ export class BillingSubscriptionService {
   ) {}
 
   async getSubscription(teamId: string): Promise<BillingSubscriptionResponse> {
-    return this.accountService.withLockedAccount(
+    return this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -390,7 +333,7 @@ export class BillingSubscriptionService {
       );
     }
 
-    return this.accountService.withLockedAccount(
+    return this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const seatCount =
@@ -449,7 +392,7 @@ export class BillingSubscriptionService {
   ): Promise<PreviewTeamSubscriptionSeatsResponse> {
     ensureTeamBillingEnabled(this.runtimeConfig);
 
-    return this.accountService.withLockedAccount(
+    return this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -516,26 +459,37 @@ export class BillingSubscriptionService {
     } | null = null;
 
     try {
-      const response = await this.accountService.withLockedAccount(
+      const response = await this.accountService.withLockedTeamAccounts(
         teamId,
-        async ({ account, client }) => {
+        async ({ accounts, client }) => {
+          // All member rows mirror the team's seat/plan attributes; use the
+          // first row as the representative for team-level reads and validation.
+          const representative = accounts[0];
+          if (!representative) {
+            throw new BillingError(
+              "TEAM_HAS_NO_MEMBERS",
+              409,
+              "Team has no members to resolve a billing account for",
+              { teamId },
+            );
+          }
           const subscription = await this.store.getSubscriptionByTeam(
-            account.teamId,
+            representative.teamId,
             client,
           );
           const seatsUsed = await this.store.countTeamMembers(
-            account.teamId,
+            representative.teamId,
             client,
           );
           const pendingInvitations =
             await this.store.countPendingTeamInvitations(
-              account.teamId,
+              representative.teamId,
               client,
             );
           const seatCount = this.normalizeRequestedSeatCount(input.seatCount);
 
           this.assertSeatUpdateAllowed({
-            currentSeatCount: account.seatCount,
+            currentSeatCount: representative.seatCount,
             seatCount,
             seatsUsed,
             pendingInvitations,
@@ -562,7 +516,7 @@ export class BillingSubscriptionService {
           }
 
           const preview = calculateSeatPreview({
-            account,
+            account: representative,
             subscription,
             runtimeConfig: this.runtimeConfig,
             seatCount,
@@ -571,16 +525,16 @@ export class BillingSubscriptionService {
             provider: this.runtimeConfig.provider,
           });
           alertOperation = {
-            teamId: account.teamId,
-            currentSeatCount: account.seatCount,
+            teamId: representative.teamId,
+            currentSeatCount: representative.seatCount,
             externalSubscriptionId: subscription.externalSubscriptionId,
             seatCount,
             seatsUsed,
           };
 
-          if (account.seatCount === seatCount) {
+          if (representative.seatCount === seatCount) {
             return {
-              teamId: account.teamId,
+              teamId: representative.teamId,
               provider: this.runtimeConfig.provider,
               seatCount,
               seatsUsed,
@@ -590,59 +544,77 @@ export class BillingSubscriptionService {
             };
           }
 
+          // The provider seat change is a single team-level side effect.
           const providerAction =
             preview.billingAdjustment?.providerAction ?? "none";
           const providerResult = await this.provider.updateSubscriptionSeats({
-            teamId: account.teamId,
+            teamId: representative.teamId,
             actorUserId: input.actorUserId,
             externalSubscriptionId: subscription.externalSubscriptionId,
             externalProductId: subscription.externalProductId,
             seatCount,
             updateBehavior: toProviderUpdateBehavior(providerAction),
           });
-          const previousSeatCount = account.seatCount;
-          account.seatCount = seatCount;
+          const previousSeatCount = representative.seatCount;
           const operationId = createOperationId(
             "seat-change",
-            account.teamId,
+            representative.teamId,
             previousSeatCount,
-            account.seatCount,
+            seatCount,
             subscription.externalSubscriptionId,
             Date.now(),
           );
-          await this.accountService.refreshPlanQuotaLocked(account, client, {
-            source: "seat_sync",
-            provider: providerResult.provider,
-            externalSubscriptionId: subscription.externalSubscriptionId,
-            reason: input.reason ?? "seat_count_update",
-            previousSeatCount,
-            nextSeatCount: account.seatCount,
-            operationId,
-          });
-          const quotaAdjustment = preview.quotaAdjustment;
-          const billingAdjustment = preview.billingAdjustment;
 
-          if (quotaAdjustment) {
-            await this.applySeatQuotaClawbackLocked(account, client, {
-              quotaAdjustment,
-              billingAdjustment,
-              actorUserId: input.actorUserId,
+          // Apply the seat change, quota refresh and any clawback to every
+          // member row so each member's allocation is updated identically.
+          // The clawback is recomputed per member because it clamps to that
+          // member's own credit/page balances.
+          for (const account of accounts) {
+            // Compute this member's clawback from its pre-mutation balances,
+            // mirroring the original ordering (preview before quota refresh).
+            const accountPreview = calculateSeatPreview({
+              account,
+              subscription,
+              runtimeConfig: this.runtimeConfig,
+              seatCount,
+              seatsUsed,
+              pendingInvitations,
+              provider: this.runtimeConfig.provider,
+            });
+
+            account.seatCount = seatCount;
+            await this.accountService.refreshPlanQuotaLocked(account, client, {
+              source: "seat_sync",
+              provider: providerResult.provider,
               externalSubscriptionId: subscription.externalSubscriptionId,
+              reason: input.reason ?? "seat_count_update",
               previousSeatCount,
               nextSeatCount: account.seatCount,
-              reason: input.reason ?? "seat_count_update",
               operationId,
             });
+
+            if (accountPreview.quotaAdjustment) {
+              await this.applySeatQuotaClawbackLocked(account, client, {
+                quotaAdjustment: accountPreview.quotaAdjustment,
+                billingAdjustment: accountPreview.billingAdjustment,
+                actorUserId: input.actorUserId,
+                externalSubscriptionId: subscription.externalSubscriptionId,
+                previousSeatCount,
+                nextSeatCount: account.seatCount,
+                reason: input.reason ?? "seat_count_update",
+                operationId,
+              });
+            }
           }
 
           return {
-            teamId: account.teamId,
+            teamId: representative.teamId,
             provider: providerResult.provider,
-            seatCount: account.seatCount,
+            seatCount: representative.seatCount,
             seatsUsed,
             pendingInvitations,
-            quotaAdjustment: quotaAdjustment ?? null,
-            billingAdjustment: billingAdjustment ?? null,
+            quotaAdjustment: preview.quotaAdjustment ?? null,
+            billingAdjustment: preview.billingAdjustment ?? null,
           };
         },
       );
@@ -673,7 +645,7 @@ export class BillingSubscriptionService {
   ): Promise<CreateTeamBillingPortalResponse> {
     ensureTeamBillingEnabled(this.runtimeConfig);
 
-    return this.accountService.withLockedAccount(
+    return this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -725,7 +697,7 @@ export class BillingSubscriptionService {
   ): Promise<CancelTeamSubscriptionResponse> {
     ensureTeamBillingEnabled(this.runtimeConfig);
 
-    return this.accountService.withLockedAccount(
+    return this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -806,14 +778,37 @@ export class BillingSubscriptionService {
       ensureTeamBillingEnabled(this.runtimeConfig);
     }
 
-    return this.accountService.withLockedAccount(
+    return this.accountService.withLockedTeamAccounts(
       snapshot.teamId,
-      async ({ account, client }) => {
-        await this.applySubscriptionSnapshotLocked(account, snapshot, client);
+      async ({ accounts, client }) => {
+        // Validate the snapshot period and upsert the subscription record once
+        // per team; the per-account mutation is then applied to every member.
+        const prepared = await this.prepareSubscriptionSnapshotLocked(
+          snapshot,
+          client,
+        );
+        for (const account of accounts) {
+          await this.applySubscriptionSnapshotToAccountLocked(
+            account,
+            snapshot,
+            prepared,
+            client,
+          );
+        }
+
+        const representative = accounts[0];
+        if (!representative) {
+          throw new BillingError(
+            "TEAM_HAS_NO_MEMBERS",
+            409,
+            "Team has no members to resolve a billing account for",
+            { teamId: snapshot.teamId },
+          );
+        }
         return toSubscriptionSummary({
-          account,
+          account: representative,
           subscription: await this.store.getSubscriptionByTeam(
-            account.teamId,
+            representative.teamId,
             client,
           ),
           provider: this.runtimeConfig.provider,
@@ -822,11 +817,19 @@ export class BillingSubscriptionService {
     );
   }
 
-  private async applySubscriptionSnapshotLocked(
-    account: BillingAccountState,
+  private async prepareSubscriptionSnapshotLocked(
     snapshot: TeamSubscriptionSnapshot,
     client: PoolClient,
-  ) {
+  ): Promise<{
+    targetPlan: BillingAccountState["planFamily"];
+    now: Date;
+    metadata: Record<string, unknown>;
+    providerCycle: {
+      anchorAt: Date;
+      cycleStartAt: Date;
+      cycleEndAt: Date;
+    } | null;
+  }> {
     const targetPlan = resolvePlanFromSubscription({
       status: snapshot.status,
       planFamily: snapshot.planFamily,
@@ -865,6 +868,26 @@ export class BillingSubscriptionService {
     }
 
     await this.store.upsertSubscription(snapshot, client);
+
+    return { targetPlan, now, metadata, providerCycle };
+  }
+
+  private async applySubscriptionSnapshotToAccountLocked(
+    account: BillingAccountState,
+    snapshot: TeamSubscriptionSnapshot,
+    prepared: {
+      targetPlan: BillingAccountState["planFamily"];
+      now: Date;
+      metadata: Record<string, unknown>;
+      providerCycle: {
+        anchorAt: Date;
+        cycleStartAt: Date;
+        cycleEndAt: Date;
+      } | null;
+    },
+    client: PoolClient,
+  ) {
+    const { targetPlan, now, metadata, providerCycle } = prepared;
 
     if (!isActiveSubscriptionStatus(snapshot.status)) {
       const previousSeatCount = account.seatCount;
@@ -1168,7 +1191,7 @@ export class BillingSubscriptionService {
       return;
     }
 
-    const result = await this.accountService.withLockedAccount(
+    const result = await this.accountService.withRepresentativeTeamAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(

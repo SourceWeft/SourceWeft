@@ -53,11 +53,17 @@ export class BillingReconcileService {
         continue;
       }
 
-      await this.accountService.withLockedAccount(
+      await this.accountService.withLockedTeamAccounts(
         state.teamId,
-        async ({ account, client }) => {
+        async ({ accounts, client }) => {
+          // All member rows mirror the team's plan; read/decide once from a
+          // representative row, then realign every member row identically.
+          const representative = accounts[0];
+          if (!representative) {
+            return;
+          }
           const latestSubscription = await this.store.getSubscriptionByTeam(
-            account.teamId,
+            representative.teamId,
             client,
           );
           const expectedPlan = resolvePlanFromSubscription({
@@ -68,14 +74,14 @@ export class BillingReconcileService {
             defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
           });
 
-          if (account.planFamily === expectedPlan) {
+          if (representative.planFamily === expectedPlan) {
             return;
           }
 
           if (expectedPlan !== this.runtimeConfig.defaultPlanFamily) {
             anomalies.push({
-              teamId: account.teamId,
-              previousPlanFamily: account.planFamily,
+              teamId: representative.teamId,
+              previousPlanFamily: representative.planFamily,
               expectedPlanFamily: expectedPlan,
               subscriptionStatus: latestSubscription?.status ?? "inactive",
               externalSubscriptionId:
@@ -84,24 +90,26 @@ export class BillingReconcileService {
             return;
           }
 
-          const previousPlanFamily = account.planFamily;
-          await this.accountService.applyPlanFamilyLocked(
-            account,
-            expectedPlan,
-            client,
-            {
-              source: "reconcile",
-              reason: "plan_mismatch",
-              previousPlanFamily,
-              expectedPlanFamily: expectedPlan,
-              subscriptionStatus: latestSubscription?.status ?? "inactive",
-              suppressImmediateGrant: true,
-            },
-          );
+          const previousPlanFamily = representative.planFamily;
+          for (const account of accounts) {
+            await this.accountService.applyPlanFamilyLocked(
+              account,
+              expectedPlan,
+              client,
+              {
+                source: "reconcile",
+                reason: "plan_mismatch",
+                previousPlanFamily,
+                expectedPlanFamily: expectedPlan,
+                subscriptionStatus: latestSubscription?.status ?? "inactive",
+                suppressImmediateGrant: true,
+              },
+            );
+          }
 
           realigned += 1;
           anomalies.push({
-            teamId: account.teamId,
+            teamId: representative.teamId,
             previousPlanFamily,
             expectedPlanFamily: expectedPlan,
             subscriptionStatus: latestSubscription?.status ?? "inactive",

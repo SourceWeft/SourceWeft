@@ -23,6 +23,7 @@ import {
   appendBillingLedger,
   createOperationId,
   formatSignedLedgerDelta,
+  scopeMemberLedgerKey,
 } from "./ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
@@ -33,6 +34,7 @@ import {
   getAvailablePages,
   getTotalPagesBalance,
   getTotalCreditsBalance,
+  normalizeTeamId,
   spendPages,
   spendCredits,
   toSummary,
@@ -46,23 +48,30 @@ export class BillingUsageService {
     private readonly orderService?: BillingOrderService,
   ) {}
 
-  async ensureBillingAccount(teamId: string) {
+  async ensureBillingAccount(teamId: string, userId: string) {
     return this.accountService.withLockedAccount(
       teamId,
+      userId,
       async ({ account }) => account,
     );
   }
 
-  async getSummary(teamId: string): Promise<BillingSummaryResponse> {
+  async getSummary(
+    teamId: string,
+    userId: string,
+  ): Promise<BillingSummaryResponse> {
     return this.accountService.withLockedAccount(
       teamId,
+      userId,
       async ({ account, client }) => {
         const activeMembers = await this.store.countTeamMembers(
           account.teamId,
           client,
         );
-        const pendingInvitations =
-          await this.store.countPendingTeamInvitations(account.teamId, client);
+        const pendingInvitations = await this.store.countPendingTeamInvitations(
+          account.teamId,
+          client,
+        );
         const seatsUsed = activeMembers + pendingInvitations;
 
         return toSummary({
@@ -76,9 +85,13 @@ export class BillingUsageService {
     );
   }
 
-  async getUsage(teamId: string): Promise<BillingUsageResponse> {
+  async getUsage(
+    teamId: string,
+    userId: string,
+  ): Promise<BillingUsageResponse> {
     return this.accountService.withLockedAccount(
       teamId,
+      userId,
       async ({ account, client }) => {
         const entries = await this.store.listLedger(
           account.teamId,
@@ -168,37 +181,34 @@ export class BillingUsageService {
       cursor?: { createdAt: Date; id: string } | null;
     },
   ): Promise<BillingLedgerResponse> {
-    return this.accountService.withLockedAccount(
-      teamId,
-      async ({ account, client }) => {
-        const safeLimit = Number.isFinite(limit)
-          ? Math.min(200, Math.max(1, Math.floor(limit)))
-          : 50;
+    // The ledger is the team-wide activity feed (all members' lines), so it is a
+    // plain team-scoped read — no per-member account lock required.
+    const normalizedTeamId = normalizeTeamId(teamId);
+    const safeLimit = Number.isFinite(limit)
+      ? Math.min(200, Math.max(1, Math.floor(limit)))
+      : 50;
 
-        const rows = await this.store.listLedger(
-          account.teamId,
-          safeLimit + 1,
-          options,
-          client,
-        );
-        const items = rows.slice(0, safeLimit);
-        const nextRow = rows[safeLimit] ?? null;
-
-        return {
-          teamId: account.teamId,
-          items,
-          nextCursor: nextRow
-            ? Buffer.from(
-                JSON.stringify({
-                  createdAt: nextRow.createdAt,
-                  id: nextRow.id,
-                }),
-                "utf8",
-              ).toString("base64url")
-            : null,
-        };
-      },
+    const rows = await this.store.listLedger(
+      normalizedTeamId,
+      safeLimit + 1,
+      options,
     );
+    const items = rows.slice(0, safeLimit);
+    const nextRow = rows[safeLimit] ?? null;
+
+    return {
+      teamId: normalizedTeamId,
+      items,
+      nextCursor: nextRow
+        ? Buffer.from(
+            JSON.stringify({
+              createdAt: nextRow.createdAt,
+              id: nextRow.id,
+            }),
+            "utf8",
+          ).toString("base64url")
+        : null,
+    };
   }
 
   async createTopupCheckout(
@@ -218,33 +228,30 @@ export class BillingUsageService {
       });
     }
 
-    return this.accountService.withLockedAccount(
-      teamId,
-      async ({ account }) => {
-        const creditsToAdd = Math.floor(input.quantity);
+    // No configured order service: this path only validates and reports that
+    // checkout is unavailable, so it needs no per-member account lock.
+    const creditsToAdd = Math.floor(input.quantity);
 
-        if (creditsToAdd <= 0) {
-          throw new BillingError(
-            "INVALID_TOPUP_CREDITS",
-            400,
-            "Topup credits must be greater than zero",
-          );
-        }
+    if (creditsToAdd <= 0) {
+      throw new BillingError(
+        "INVALID_TOPUP_CREDITS",
+        400,
+        "Topup credits must be greater than zero",
+      );
+    }
 
-        throw new BillingError(
-          "TOPUP_CHECKOUT_NOT_CONFIGURED",
-          501,
-          "Top-up checkout is not available until payment provider support is configured",
-          {
-            teamId: account.teamId,
-            provider: this.runtimeConfig.provider,
-            credits: creditsToAdd,
-            amountUsd: toUsdFromCredits(
-              creditsToAdd,
-              this.runtimeConfig.creditUnitUsd,
-            ),
-          },
-        );
+    throw new BillingError(
+      "TOPUP_CHECKOUT_NOT_CONFIGURED",
+      501,
+      "Top-up checkout is not available until payment provider support is configured",
+      {
+        teamId: normalizeTeamId(teamId),
+        provider: this.runtimeConfig.provider,
+        credits: creditsToAdd,
+        amountUsd: toUsdFromCredits(
+          creditsToAdd,
+          this.runtimeConfig.creditUnitUsd,
+        ),
       },
     );
   }
@@ -254,8 +261,10 @@ export class BillingUsageService {
     input: MeterConsumeRequest,
     actorUserId: string,
   ): Promise<MeterConsumeResponse> {
+    // 谁问谁付: consumption deducts from the acting member's own allocation row.
     return this.accountService.withLockedAccount(
       teamId,
+      actorUserId,
       async ({ account, client }) => {
         if (
           !this.runtimeConfig.creditsEnabled ||
@@ -274,7 +283,7 @@ export class BillingUsageService {
         if (idempotencyKey) {
           const existing = await this.store.getLedgerByIdempotency(
             account.teamId,
-            idempotencyKey,
+            scopeMemberLedgerKey(account.userId, idempotencyKey),
             client,
           );
 
@@ -298,7 +307,8 @@ export class BillingUsageService {
           computeCreditsFromCost({
             providerCostUsd: input.providerCostUsd ?? 0,
             platformCostUsd: input.platformCostUsd ?? 0,
-            markupRate: input.markupRate ?? this.runtimeConfig.defaultMarkupRate,
+            markupRate:
+              input.markupRate ?? this.runtimeConfig.defaultMarkupRate,
             creditUnitUsd: this.runtimeConfig.creditUnitUsd,
           });
 
@@ -345,7 +355,10 @@ export class BillingUsageService {
             operationType: "usage",
             activityVisible: true,
             activityTitle: "Chat credits used",
-            activitySummary: formatSignedLedgerDelta("credit", -creditsToConsume),
+            activitySummary: formatSignedLedgerDelta(
+              "credit",
+              -creditsToConsume,
+            ),
             metadata: {
               creditUnitUsd: this.runtimeConfig.creditUnitUsd,
               ...(input.modelKind ? { modelKind: input.modelKind } : {}),
@@ -380,8 +393,10 @@ export class BillingUsageService {
     input: MeterIngestionRequest,
     actorUserId: string,
   ): Promise<MeterIngestionResponse> {
+    // 谁问谁付: ingestion pages deduct from the acting member's own allocation.
     return this.accountService.withLockedAccount(
       teamId,
+      actorUserId,
       async ({ account, client }) => {
         if (
           !this.runtimeConfig.pagesEnabled ||
@@ -400,7 +415,7 @@ export class BillingUsageService {
         if (idempotencyKey) {
           const existing = await this.store.getLedgerByIdempotency(
             account.teamId,
-            idempotencyKey,
+            scopeMemberLedgerKey(account.userId, idempotencyKey),
             client,
           );
 

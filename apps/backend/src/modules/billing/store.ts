@@ -41,6 +41,7 @@ function toNumberOrNull(value: string | null) {
 function mapAccount(row: BillingAccountRow): BillingAccountState {
   return {
     teamId: row.teamId,
+    userId: row.userId,
     planFamily: row.planFamily,
     cycleAnchorAt: row.cycleAnchorAt.toISOString(),
     cycleSource: row.cycleSource,
@@ -237,7 +238,61 @@ export class PostgresBillingStore implements BillingStore {
     }
   }
 
-  async getAccount(teamId: string, client?: PoolClient) {
+  async getAccount(teamId: string, userId: string, client?: PoolClient) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingAccounts)
+      .where(
+        and(
+          eq(billingAccounts.teamId, teamId),
+          eq(billingAccounts.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return row ? mapAccount(row) : null;
+  }
+
+  async getAccountForUpdate(
+    teamId: string,
+    userId: string,
+    client: PoolClient,
+  ) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingAccounts)
+      .where(
+        and(
+          eq(billingAccounts.teamId, teamId),
+          eq(billingAccounts.userId, userId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+
+    return row ? mapAccount(row) : null;
+  }
+
+  /**
+   * All member rows for a team, locked FOR UPDATE — the basis for team-wide
+   * operations (plan change, cycle renewal, seat updates) that must apply to
+   * every member's allocation.
+   */
+  async getTeamAccountsForUpdate(teamId: string, client: PoolClient) {
+    const rows = await pickDb(client)
+      .select()
+      .from(billingAccounts)
+      .where(eq(billingAccounts.teamId, teamId))
+      .for("update");
+
+    return rows.map(mapAccount);
+  }
+
+  /**
+   * Any one member row for the team — used to read team-level attributes
+   * (plan family, cycle window) without a specific member in hand.
+   */
+  async getAnyTeamAccount(teamId: string, client?: PoolClient) {
     const [row] = await pickDb(client)
       .select()
       .from(billingAccounts)
@@ -247,15 +302,12 @@ export class PostgresBillingStore implements BillingStore {
     return row ? mapAccount(row) : null;
   }
 
-  async getAccountForUpdate(teamId: string, client: PoolClient) {
-    const [row] = await pickDb(client)
-      .select()
-      .from(billingAccounts)
-      .where(eq(billingAccounts.teamId, teamId))
-      .limit(1)
-      .for("update");
-
-    return row ? mapAccount(row) : null;
+  /** Better Auth organization members — the users who each get an allocation row. */
+  async listTeamMemberUserIds(teamId: string, client?: PoolClient) {
+    const result = await pickDb(client).execute<{ userId: string }>(sql`
+      select "userId" from member where "organizationId" = ${teamId}
+    `);
+    return (result.rows ?? []).map((row) => row.userId);
   }
 
   async insertAccount(account: BillingAccountState, client: PoolClient) {
@@ -263,6 +315,7 @@ export class PostgresBillingStore implements BillingStore {
       .insert(billingAccounts)
       .values({
         teamId: account.teamId,
+        userId: account.userId,
         planFamily: account.planFamily,
         cycleAnchorAt: parseDate(account.cycleAnchorAt),
         cycleSource: account.cycleSource,
@@ -312,7 +365,12 @@ export class PostgresBillingStore implements BillingStore {
         spendHardCapUsd: parseNumeric(account.spendHardCapUsd),
         updatedAt: parseDate(account.updatedAt),
       })
-      .where(eq(billingAccounts.teamId, account.teamId));
+      .where(
+        and(
+          eq(billingAccounts.teamId, account.teamId),
+          eq(billingAccounts.userId, account.userId),
+        ),
+      );
   }
 
   async appendLedger(entry: BillingLedgerRow, client: PoolClient) {
@@ -740,7 +798,8 @@ export class PostgresBillingStore implements BillingStore {
           currentPeriodStart: parseDateOrNull(snapshot.currentPeriodStart),
           currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
           externalCustomerId:
-            snapshot.externalCustomerId ?? sql`${subscriptions.externalCustomerId}`,
+            snapshot.externalCustomerId ??
+            sql`${subscriptions.externalCustomerId}`,
           externalSubscriptionId: snapshot.externalSubscriptionId,
           externalSubscriptionItemId:
             snapshot.externalSubscriptionItemId ?? null,
@@ -977,5 +1036,3 @@ export class PostgresBillingStore implements BillingStore {
 }
 
 export const billingStore = new PostgresBillingStore();
-
-

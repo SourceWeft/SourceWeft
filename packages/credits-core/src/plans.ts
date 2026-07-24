@@ -46,3 +46,17 @@ export function getPlanQuota(planFamily: PlanFamily, seatCount = 1): PlanQuota {
   }
   return planQuotaByFamily[planFamily];
 }
+
+/**
+ * The allocation a single member receives, independent of how many seats the
+ * team has. Credits and pages are granted per-member (each `billing_accounts`
+ * row is keyed on `(team_id, user_id)`), so a team member's own quota is one
+ * seat's worth — a `team_standard` seat is an `individual_pro` allocation.
+ * `getPlanQuota` (seat-scaled team total) stays for catalog/pricing display.
+ */
+export function getPerSeatQuota(planFamily: PlanFamily): PlanQuota {
+  if (planFamily === "team_standard") {
+    return planQuotaByFamily["individual_pro"];
+  }
+  return planQuotaByFamily[planFamily];
+}

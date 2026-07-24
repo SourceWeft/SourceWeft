@@ -118,7 +118,10 @@ export async function settleModelCall(
   let billingMode: BillingMode = "enforced";
 
   try {
-    const summary = await input.billing.getSummary(context.teamId);
+    const summary = await input.billing.getSummary(
+      context.teamId,
+      context.actorUserId,
+    );
     billingMode = resolveBillingMode(summary);
 
     const meterUsage = input.meterUsage ?? meterBillableModelUsage;

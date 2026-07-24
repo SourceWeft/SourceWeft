@@ -40,9 +40,10 @@ export class BillingAdmissionError extends Error {
 export async function admitCoveredScope(
   billing: ContentBillingPort,
   teamId: string,
+  userId: string,
 ): Promise<AdmissionDecision> {
   try {
-    const summary = await billing.getSummary(teamId);
+    const summary = await billing.getSummary(teamId, userId);
     return {
       allowed: true,
       availableCredits: summary.credits.available,
@@ -73,11 +74,13 @@ export const billingAdmission = {
   async admit({
     billing,
     teamId,
+    userId,
   }: {
     billing: ContentBillingPort;
     teamId: string;
+    userId: string;
   }): Promise<AdmissionDecision> {
-    const summary = await billing.getSummary(teamId);
+    const summary = await billing.getSummary(teamId, userId);
     const billingMode = summary.billingMode;
     const availableCredits = summary.credits.available;
 
