@@ -256,6 +256,23 @@ test("public resolve projects a ready artifact without counting a view", async (
   assert.equal(mockIncrement.mock.calls.length, 0);
 });
 
+test("public resolve refuses a private artifact even with a live share", async () => {
+  // A thread flipped to private after publishing must not keep serving: the
+  // serve path is the load-bearing gate regardless of the share row.
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(artifact({ visibility: "private" }));
+
+  assert.equal(await sharingService.resolvePublicArtifact("tok"), null);
+
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(artifact({ visibility: "private" }));
+  assert.equal(
+    await sharingService.resolvePublicArtifactBytes("tok", { countView: true }),
+    null,
+  );
+  assert.equal(mockIncrement.mock.calls.length, 0);
+});
+
 test("public projection leaks no internal payload fields", async () => {
   // A realistic payload embeds workspace-scoped URLs, a job id, source JSON,
   // and storage keys/buckets — all internal. None may cross the public boundary.

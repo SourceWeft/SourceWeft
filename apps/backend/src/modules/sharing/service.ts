@@ -232,7 +232,15 @@ export class SharingService {
       workspaceId: share.workspaceId ?? "",
       artifactId: share.targetId,
     });
-    if (!artifact || artifact.status !== "ready") {
+    // A private artifact is never served publicly even if a live share row
+    // exists — e.g. the owning thread was flipped to private after publishing.
+    // Publish revoking on visibility flip is the proactive counterpart; this is
+    // the load-bearing gate.
+    if (
+      !artifact ||
+      artifact.status !== "ready" ||
+      artifact.visibility === "private"
+    ) {
       return null;
     }
 
@@ -278,7 +286,12 @@ export class SharingService {
       workspaceId: share.workspaceId ?? "",
       artifactId: share.targetId,
     });
-    if (!artifact || artifact.status !== "ready") {
+    // Private artifacts never serve publicly — see resolvePublicArtifact.
+    if (
+      !artifact ||
+      artifact.status !== "ready" ||
+      artifact.visibility === "private"
+    ) {
       return null;
     }
 
