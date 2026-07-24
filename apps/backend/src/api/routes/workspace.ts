@@ -1,6 +1,13 @@
 import { Hono } from "hono";
-import { workspaceService } from "../../modules/workspace";
-import type { WorkspaceMemberMutationResult } from "../../modules/workspace";
+import {
+  acceptGuestInvitationRequestSchema,
+  inviteGuestRequestSchema,
+} from "@sourceweft/contracts";
+import { guestService, workspaceService } from "../../modules/workspace";
+import type {
+  GuestMutationResult,
+  WorkspaceMemberMutationResult,
+} from "../../modules/workspace";
 import { isWorkspaceRole } from "../../modules/workspace/types";
 import { teamAuditService } from "../../modules/team-audit";
 import {
@@ -9,6 +16,25 @@ import {
   requireSession,
 } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
+
+function throwGuestError(result: GuestMutationResult<unknown>): never {
+  if (result.ok) {
+    throw new Error("Expected a failed guest mutation");
+  }
+  if (result.reason === "forbidden") {
+    throw ApiError.forbidden(
+      "Only workspace admins can manage guest collaborators.",
+    );
+  }
+  if (result.reason === "invalid_invitation") {
+    throw new ApiError(
+      404,
+      "GUEST_INVITATION_INVALID",
+      "This invitation is not valid or has expired.",
+    );
+  }
+  throw new ApiError(404, "GUEST_NOT_FOUND", "Not found");
+}
 
 function ensureObjectBody(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -261,6 +287,118 @@ export function registerWorkspaceRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, { items });
+  });
+
+  app.get("/v1/workspaces/:workspaceId/guests", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await guestService.listGuests({
+      workspaceId: c.req.param("workspaceId"),
+      userId: getSessionUserId(session),
+    });
+    if (!result) {
+      throw new ApiError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
+    }
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/v1/workspaces/:workspaceId/guests", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = inviteGuestRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => null)),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await guestService.inviteGuest({
+      workspaceId: c.req.param("workspaceId"),
+      actorUserId: getSessionUserId(session),
+      email: parsed.data.email,
+      role: parsed.data.role,
+    });
+    if (!result.ok) {
+      throwGuestError(result);
+    }
+
+    return ApiResponse.success(c, { ok: true }, 201);
+  });
+
+  app.delete(
+    "/v1/workspaces/:workspaceId/guests/invitations/:invitationId",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const result = await guestService.revokeInvitation({
+        workspaceId: c.req.param("workspaceId"),
+        actorUserId: getSessionUserId(session),
+        invitationId: c.req.param("invitationId"),
+      });
+      if (!result.ok) {
+        throwGuestError(result);
+      }
+
+      return ApiResponse.success(c, { ok: true });
+    },
+  );
+
+  app.delete("/v1/workspaces/:workspaceId/guests/:userId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await guestService.removeGuest({
+      workspaceId: c.req.param("workspaceId"),
+      actorUserId: getSessionUserId(session),
+      userId: c.req.param("userId"),
+    });
+    if (!result.ok) {
+      throwGuestError(result);
+    }
+
+    return ApiResponse.success(c, { ok: true });
+  });
+
+  // Not workspace-scoped: any signed-in user accepts by token — that is the
+  // point of a guest (no organization membership required).
+  app.post("/v1/guest-invitations/accept", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = acceptGuestInvitationRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => null)),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await guestService.acceptInvitation({
+      token: parsed.data.token,
+      userId: getSessionUserId(session),
+    });
+    if (!result.ok) {
+      throwGuestError(result);
+    }
+
+    return ApiResponse.success(c, result.value);
   });
 
   app.get("/v1/context/current", async (c) => {

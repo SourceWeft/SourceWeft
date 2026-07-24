@@ -8,6 +8,7 @@ export type MailMessageType =
   | "auth.change-email"
   | "auth.delete-account"
   | "org.invitation"
+  | "workspace.guest-invitation"
   | "ops.alert"
   | "biz.notification";
 

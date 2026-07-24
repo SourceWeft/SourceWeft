@@ -1,8 +1,12 @@
 import type {
+  AcceptGuestInvitationRequest,
+  AcceptGuestInvitationResponse,
   AddWorkspaceMemberRequest,
   CreateWorkspaceRequest,
   CurrentContextResponse,
+  InviteGuestRequest,
   ListTeamAuditLogsResponse,
+  ListWorkspaceGuestsResponse,
   ListWorkspaceMembersResponse,
   ListWorkspacesResponse,
   SetWorkspaceContextResponse,
@@ -93,6 +97,38 @@ export class WorkspaceClient {
     const suffix = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
     return this.http.get<ListTeamAuditLogsResponse>(
       `/v1/teams/${encode(teamId)}/audit-logs${suffix}`,
+    );
+  }
+
+  listWorkspaceGuests(workspaceId: string) {
+    return this.http.get<ListWorkspaceGuestsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/guests`,
+    );
+  }
+
+  inviteWorkspaceGuest(workspaceId: string, input: InviteGuestRequest) {
+    return this.http.post<{ ok: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/guests`,
+      input,
+    );
+  }
+
+  revokeGuestInvitation(workspaceId: string, invitationId: string) {
+    return this.http.delete<{ ok: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/guests/invitations/${encode(invitationId)}`,
+    );
+  }
+
+  removeWorkspaceGuest(workspaceId: string, userId: string) {
+    return this.http.delete<{ ok: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/guests/${encode(userId)}`,
+    );
+  }
+
+  acceptGuestInvitation(input: AcceptGuestInvitationRequest) {
+    return this.http.post<AcceptGuestInvitationResponse>(
+      "/v1/guest-invitations/accept",
+      input,
     );
   }
 }

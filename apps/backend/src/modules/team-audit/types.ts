@@ -13,13 +13,18 @@ export type TeamAuditAction =
   | "organization.member_role_changed"
   | "organization.invitation_accepted"
   | "artifact.shared"
-  | "artifact.share_revoked";
+  | "artifact.share_revoked"
+  | "workspace.guest_invited"
+  | "workspace.guest_accepted"
+  | "workspace.guest_revoked"
+  | "workspace.guest_removed";
 
 export type TeamAuditTargetType =
   | "workspace"
   | "workspace_member"
   | "member"
-  | "artifact";
+  | "artifact"
+  | "guest";
 
 export type TeamAuditEntry = {
   teamId: string;

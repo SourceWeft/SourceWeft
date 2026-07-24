@@ -66,6 +66,46 @@ export const listTeamAuditLogsResponseSchema = z.object({
   items: z.array(teamAuditLogSchema),
 });
 
+/**
+ * Guest collaboration: a guest is invited to one workspace by email, with a
+ * viewer/editor role, and is not an organization member (no seat).
+ */
+export const guestRoleSchema = z.enum(["editor", "viewer"]);
+
+export const inviteGuestRequestSchema = z.object({
+  email: z.string().email(),
+  role: guestRoleSchema,
+});
+
+export const workspaceGuestSchema = z.object({
+  userId: z.string(),
+  role: guestRoleSchema,
+  name: z.string().nullable(),
+  email: z.string().nullable(),
+  image: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+export const pendingGuestInvitationSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: guestRoleSchema,
+  createdAt: z.string(),
+});
+
+export const listWorkspaceGuestsResponseSchema = z.object({
+  guests: z.array(workspaceGuestSchema),
+  invitations: z.array(pendingGuestInvitationSchema),
+});
+
+export const acceptGuestInvitationRequestSchema = z.object({
+  token: z.string().min(1),
+});
+
+export const acceptGuestInvitationResponseSchema = z.object({
+  workspaceId: z.string(),
+});
+
 export const createWorkspaceRequestSchema = z.object({
   name: z.string().min(1),
 });
@@ -129,4 +169,19 @@ export type WorkspaceMemberMutationResponse = z.infer<
 export type TeamAuditLog = z.infer<typeof teamAuditLogSchema>;
 export type ListTeamAuditLogsResponse = z.infer<
   typeof listTeamAuditLogsResponseSchema
+>;
+export type GuestRole = z.infer<typeof guestRoleSchema>;
+export type InviteGuestRequest = z.infer<typeof inviteGuestRequestSchema>;
+export type WorkspaceGuest = z.infer<typeof workspaceGuestSchema>;
+export type PendingGuestInvitation = z.infer<
+  typeof pendingGuestInvitationSchema
+>;
+export type ListWorkspaceGuestsResponse = z.infer<
+  typeof listWorkspaceGuestsResponseSchema
+>;
+export type AcceptGuestInvitationRequest = z.infer<
+  typeof acceptGuestInvitationRequestSchema
+>;
+export type AcceptGuestInvitationResponse = z.infer<
+  typeof acceptGuestInvitationResponseSchema
 >;
