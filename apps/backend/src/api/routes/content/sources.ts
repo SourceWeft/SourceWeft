@@ -11,8 +11,15 @@ import {
   retrySourceRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
-import { contentSourceService, sourceIndexingService, sourceParsingService } from "../../../modules/sources";
-import { getSessionUserId, requireSession } from "../../middleware/auth-session";
+import {
+  contentSourceService,
+  sourceIndexingService,
+  sourceParsingService,
+} from "../../../modules/sources";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
@@ -248,24 +255,21 @@ export function registerSourceRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
-  app.get(
-    "/sources/:id/documents/:documentId",
-    async (c) => {
-      const session = await requireSession(c);
-      if (!session) {
-        throw ApiError.unauthorized();
-      }
+  app.get("/sources/:id/documents/:documentId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
 
-      const result = await contentSourceService.getSourceDocument({
-        workspaceId: requireRouteParam(c, "workspaceId"),
-        sourceId: requireRouteParam(c, "id"),
-        documentId: requireRouteParam(c, "documentId"),
-        userId: getSessionUserId(session),
-      });
+    const result = await contentSourceService.getSourceDocument({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      documentId: requireRouteParam(c, "documentId"),
+      userId: getSessionUserId(session),
+    });
 
-      return ApiResponse.success(c, result);
-    },
-  );
+    return ApiResponse.success(c, result);
+  });
 
   app.get("/sources/:id/status", async (c) => {
     const session = await requireSession(c);
@@ -423,7 +427,8 @@ export function registerSourceRoutes(app: Hono) {
       chunkSize: parsed.data.chunkSize,
       forceRefresh: parsed.data.forceRefresh,
     };
-    const reparsed = await sourceParsingService.tryQueueSourceReparse(retryInput);
+    const reparsed =
+      await sourceParsingService.tryQueueSourceReparse(retryInput);
     const result = reparsed
       ? { ...reparsed, mode: "reparse" as const }
       : {

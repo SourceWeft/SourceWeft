@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { artifacts, artifactVersions, db } from "@sourceweft/db";
+import { visibleContentWhere } from "../workspace/content-visibility";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type ArtifactStatus = ArtifactRow["status"];
@@ -25,6 +26,7 @@ function mapArtifact(row: ArtifactRow) {
     previewMetadataJson: row.previewMetadataJson ?? {},
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
+    visibility: row.visibility,
     createdBy: row.createdBy,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -86,6 +88,10 @@ export async function createReadyArtifactRecord(input: {
       storageKey: input.storageKey ?? null,
       previewStorageKey: input.previewStorageKey ?? null,
       previewMetadataJson: input.previewMetadata ?? {},
+      // Artifacts inherit their thread's visibility: private thread → private
+      // artifact, anything else → workspace-visible. There is no independent
+      // per-artifact toggle; the thread is the source of truth.
+      visibility: sql`coalesce((select case when t.visibility = 'private' then 'private' else 'workspace' end from threads t where t.id = ${input.threadId}), 'workspace')`,
       createdBy: input.userId,
       completedAt: now,
     });
@@ -137,6 +143,10 @@ export async function createPendingArtifactRecord(input: {
     title: input.title,
     promptText: input.prompt,
     payloadJson: input.payload,
+    // Artifacts inherit their thread's visibility: private thread → private
+    // artifact, anything else → workspace-visible. There is no independent
+    // per-artifact toggle; the thread is the source of truth.
+    visibility: sql`coalesce((select case when t.visibility = 'private' then 'private' else 'workspace' end from threads t where t.id = ${input.threadId}), 'workspace')`,
     createdBy: input.userId,
   });
 }
@@ -507,15 +517,50 @@ export async function findArtifactRecord(input: {
   return row ? mapArtifact(row) : null;
 }
 
+/**
+ * Re-label every artifact of a thread to the thread's visibility. Artifacts do
+ * not carry an independent toggle; they inherit their thread, so when the thread
+ * is re-shared or hidden its artifacts move with it. `private` maps to private,
+ * anything else to workspace-visible. Returns the number of rows updated.
+ */
+export async function updateArtifactsVisibilityForThread(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  threadVisibility: "private" | "workspace" | "public_link";
+}) {
+  const mapped = input.threadVisibility === "private" ? "private" : "workspace";
+  const rows = await db
+    .update(artifacts)
+    .set({ visibility: mapped, updatedAt: new Date() })
+    .where(
+      and(
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.threadId, input.threadId),
+      ),
+    )
+    .returning();
+
+  return rows.length;
+}
+
 export async function listArtifactRecords(input: {
   teamId: string;
   workspaceId: string;
   cursor?: { createdAt: Date; id: string } | null;
   limit?: number;
+  viewerUserId?: string;
 }) {
   const conditions = [
     eq(artifacts.teamId, input.teamId),
     eq(artifacts.workspaceId, input.workspaceId),
+    input.viewerUserId
+      ? visibleContentWhere(
+          { userId: input.viewerUserId },
+          { visibility: artifacts.visibility, createdBy: artifacts.createdBy },
+        )
+      : undefined,
     input.cursor
       ? or(
           lt(artifacts.createdAt, input.cursor.createdAt),

@@ -96,6 +96,20 @@ export type SourceRevisionRecord = {
   createdAt: string;
 };
 
+/**
+ * Row-level visibility of content in a shared workspace. `private` is seen only
+ * by its creator; `workspace` by every member. Mirrors the DB column added in
+ * migration 0013.
+ */
+export type ContentVisibility = "private" | "workspace";
+
+/**
+ * Thread visibility. `public_link` is an external-sharing flag layered on top
+ * of workspace visibility, not a fourth internal state — internally a
+ * public-linked thread behaves like `workspace`.
+ */
+export type ThreadVisibility = "private" | "workspace" | "public_link";
+
 export type SourceRecord = {
   id: string;
   teamId: string;
@@ -192,6 +206,7 @@ export type ThreadRecord = {
   };
   chatPreferences: ThreadChatPreferences;
   sourceCount: number;
+  visibility: ThreadVisibility;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -215,7 +230,11 @@ export type MessageRecord = {
   createdAt: string;
 };
 
-export type WorkingFilePurpose = "scratch" | "draft" | "note" | "output_candidate";
+export type WorkingFilePurpose =
+  | "scratch"
+  | "draft"
+  | "note"
+  | "output_candidate";
 
 export type WorkingFileRecord = {
   id: string;

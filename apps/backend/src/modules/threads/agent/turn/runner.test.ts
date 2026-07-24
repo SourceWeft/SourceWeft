@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test, vi } from "vitest";
+import { beforeAll, test, vi } from "vitest";
+import { connectorAdaptersReady } from "../../../connectors";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
 import {
@@ -2113,6 +2114,13 @@ test("HITL stream handler preserves missing checkpoint content error", async () 
   );
 });
 
+// Connector tools register through an async import-time side effect. The
+// observability normalizer keys off that registry, so without awaiting it the
+// connector cases below race the registration and see an unregistered tool.
+beforeAll(async () => {
+  await connectorAdaptersReady();
+});
+
 test("connector success outputs hide raw provider payloads", () => {
   const output = normalizeToolOutputForObservability("create_notion_page", {
     url: "https://www.notion.so/page",
@@ -2844,10 +2852,7 @@ test("video presentation retry progress events include retry error context", () 
   });
 
   assert.deepEqual(retrying?.items, ["Retrying video generation"]);
-  assert.match(
-    retrying?.description ?? "",
-    /Storyboard provider call failed/u,
-  );
+  assert.match(retrying?.description ?? "", /Storyboard provider call failed/u);
 });
 
 test("unknown presentation progress stages do not create CoT steps", () => {
@@ -2855,7 +2860,7 @@ test("unknown presentation progress stages do not create CoT steps", () => {
     testExports.buildPresentationProgressThinkingStep({
       data: {
         type: "publish_artifact_progress",
-      tool: "publish_artifact",
+        tool: "publish_artifact",
         toolCallId: "call-1",
         stage: "internal_layout_pass",
       },
@@ -3326,8 +3331,7 @@ test("raw textual tool calls are suppressed while command success is pending", (
         kind: "artifact",
         toolName: "publish_artifact",
       },
-      delta:
-        '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="publish_artifact">',
+      delta: '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="publish_artifact">',
       suppressing: false,
     }),
     true,
@@ -3457,11 +3461,7 @@ test("presentation artifact trace labels needs_content without claiming artifact
   };
 
   assert.equal(
-    testExports.getFilesystemToolEndTitle(
-      "publish_artifact",
-      {},
-      output,
-    ),
+    testExports.getFilesystemToolEndTitle("publish_artifact", {}, output),
     "Deck content needed",
   );
   assert.equal(
@@ -3984,7 +3984,11 @@ test("runtime prompt appends capability provider lines verbatim", () => {
     ],
   });
 
-  assert.ok(prompt.includes(`Available artifact tools this turn: ${SYNTHETIC_TOOL_NAME}.`));
+  assert.ok(
+    prompt.includes(
+      `Available artifact tools this turn: ${SYNTHETIC_TOOL_NAME}.`,
+    ),
+  );
   assert.ok(prompt.includes(SYNTHETIC_PROMPT_MARKER));
 });
 
@@ -4005,7 +4009,9 @@ test("runtime prompt omits the artifact-tools section when nothing contributes",
     timezone: "UTC",
     availableArtifactTools: [],
     artifactToolRuntimePromptProviders: [
-      createSyntheticRuntimePromptProvider([]) as ArtifactToolRuntimePromptProvider,
+      createSyntheticRuntimePromptProvider(
+        [],
+      ) as ArtifactToolRuntimePromptProvider,
     ],
   });
 

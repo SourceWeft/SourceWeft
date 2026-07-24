@@ -512,6 +512,7 @@ const prepared: PreparedThreadTurn = {
       composerOptions: {},
     },
     sourceCount: 0,
+    visibility: "private",
     createdBy: "user-1",
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),

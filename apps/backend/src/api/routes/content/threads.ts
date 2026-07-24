@@ -10,6 +10,7 @@ import {
   type ThreadRunSummary,
   updateThreadChatPreferencesRequestSchema,
   updateThreadModelSettingsRequestSchema,
+  updateThreadVisibilityRequestSchema,
 } from "@sourceweft/contracts";
 import {
   contentThreadService,
@@ -352,6 +353,30 @@ export function registerThreadRoutes(app: Hono) {
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
       chatPreferences: parsed.data,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.patch("/threads/:id/visibility", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = updateThreadVisibilityRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.updateThreadVisibility({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      visibility: parsed.data.visibility,
     });
 
     return ApiResponse.success(c, result);

@@ -103,11 +103,12 @@ async function assertNoDirectoryNameConflict(input: {
     workspaceId: input.workspaceId,
   });
   const normalizedTitle = normalizeDirectoryTitleForConflict(input.title);
-  const conflict = siblings.items.find((candidate) =>
-    candidate.sourceType === "directory" &&
-    candidate.id !== input.sourceId &&
-    candidate.parentSourceId === input.parentSourceId &&
-    normalizeDirectoryTitleForConflict(candidate.title) === normalizedTitle
+  const conflict = siblings.items.find(
+    (candidate) =>
+      candidate.sourceType === "directory" &&
+      candidate.id !== input.sourceId &&
+      candidate.parentSourceId === input.parentSourceId &&
+      normalizeDirectoryTitleForConflict(candidate.title) === normalizedTitle,
   );
 
   if (conflict) {
@@ -143,7 +144,11 @@ async function validateSourceParent(input: {
     sourceId: input.parentSourceId,
   });
   if (!parent) {
-    throw new ContentError(404, "SOURCE_PARENT_NOT_FOUND", "Parent source not found");
+    throw new ContentError(
+      404,
+      "SOURCE_PARENT_NOT_FOUND",
+      "Parent source not found",
+    );
   }
   if (parent.sourceType !== "directory") {
     throw new ContentError(
@@ -160,7 +165,9 @@ async function validateSourceParent(input: {
       sourceIds: [input.sourceId],
       maxDepth: SOURCE_TREE_MAX_DEPTH,
     });
-    if (descendants.some((descendant) => descendant.id === input.parentSourceId)) {
+    if (
+      descendants.some((descendant) => descendant.id === input.parentSourceId)
+    ) {
       throw new ContentError(
         400,
         "INVALID_SOURCE_PARENT",
@@ -192,7 +199,9 @@ export async function resolveSourceTreeScope(input: {
     workspaceId: input.workspaceId,
     sourceIds: requestedSourceIds,
   });
-  const selectedById = new Map(selectedSources.map((source) => [source.id, source]));
+  const selectedById = new Map(
+    selectedSources.map((source) => [source.id, source]),
+  );
   const selectedDirectoryIds = requestedSourceIds.filter(
     (sourceId) => selectedById.get(sourceId)?.sourceType === "directory",
   );
@@ -248,7 +257,10 @@ export function resolveRecursiveSourceDeleteOrder(input: {
 
   const childrenByParentId = new Map<string, string[]>();
   for (const source of effectiveSources.values()) {
-    if (!source.parentSourceId || !effectiveSources.has(source.parentSourceId)) {
+    if (
+      !source.parentSourceId ||
+      !effectiveSources.has(source.parentSourceId)
+    ) {
       continue;
     }
     const children = childrenByParentId.get(source.parentSourceId) ?? [];
@@ -298,7 +310,9 @@ export class ContentSourceService {
       return source;
     }
 
-    const fileName = String(source.metadata.fileName || source.title || "source");
+    const fileName = String(
+      source.metadata.fileName || source.title || "source",
+    );
     const contentType = source.mimeType || "application/octet-stream";
     const [previewUrl, downloadUrl] = await Promise.all([
       getSourceObjectPreviewUrl({
@@ -470,7 +484,8 @@ export class ContentSourceService {
         },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Source upload failed";
+      const message =
+        error instanceof Error ? error.message : "Source upload failed";
       await updateSourceRecord({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
@@ -527,7 +542,8 @@ export class ContentSourceService {
     }
 
     const contentText = input.contentText ?? "";
-    const emptyDirectory = sourceType === "directory" && contentText.trim().length === 0;
+    const emptyDirectory =
+      sourceType === "directory" && contentText.trim().length === 0;
 
     const source = await createSourceRecord({
       teamId: workspace.organizationId,
@@ -628,7 +644,10 @@ export class ContentSourceService {
       : await createSourceRecord({
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
-          title: resolveUrlSourceTitle({ title: input.title, url: externalUri }),
+          title: resolveUrlSourceTitle({
+            title: input.title,
+            url: externalUri,
+          }),
           contentText: "",
           createdBy: input.userId,
           ingestKind: "web_url",
@@ -725,7 +744,9 @@ export class ContentSourceService {
       parentSourceId: input.view === "tree" ? undefined : input.parentSourceId,
       connectorId: input.connectorId,
       syncRunId: input.syncRunId,
-      updatedAfter: input.updatedAfter ? new Date(input.updatedAfter) : undefined,
+      updatedAfter: input.updatedAfter
+        ? new Date(input.updatedAfter)
+        : undefined,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
@@ -934,14 +955,18 @@ export class ContentSourceService {
         parentSourceId: nextParentSourceId,
       });
     }
-    if (source.sourceType === "directory" && (nextTitle !== undefined || nextParentSourceId !== undefined)) {
+    if (
+      source.sourceType === "directory" &&
+      (nextTitle !== undefined || nextParentSourceId !== undefined)
+    ) {
       await assertNoDirectoryNameConflict({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
         sourceId: source.id,
-        parentSourceId: nextParentSourceId !== undefined
-          ? nextParentSourceId
-          : source.parentSourceId,
+        parentSourceId:
+          nextParentSourceId !== undefined
+            ? nextParentSourceId
+            : source.parentSourceId,
         title: nextTitle ?? source.title,
       });
     }
@@ -949,21 +974,20 @@ export class ContentSourceService {
       source.sourceType === "directory" &&
       input.contentText !== undefined &&
       input.contentText.trim().length === 0;
-    const updated =
-      directoryContentCleared
-        ? await updateSourceRecordAndInvalidateDocuments({
-            teamId: workspace.organizationId,
-            workspaceId: workspace.id,
-            sourceId: source.id,
-            title: nextTitle,
-            parentSourceId: nextParentSourceId,
-            contentText: "",
-            status: "indexed",
-            indexedAt: new Date(),
-            estimatedPages: input.estimatedPages,
-            parsedTokens: input.parsedTokens,
-          })
-        : input.contentText !== undefined
+    const updated = directoryContentCleared
+      ? await updateSourceRecordAndInvalidateDocuments({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          sourceId: source.id,
+          title: nextTitle,
+          parentSourceId: nextParentSourceId,
+          contentText: "",
+          status: "indexed",
+          indexedAt: new Date(),
+          estimatedPages: input.estimatedPages,
+          parsedTokens: input.parsedTokens,
+        })
+      : input.contentText !== undefined
         ? await updateSourceRecordAndInvalidateDocuments({
             teamId: workspace.organizationId,
             workspaceId: workspace.id,

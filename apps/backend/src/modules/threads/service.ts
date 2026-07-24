@@ -1,7 +1,9 @@
 import { findCitationByMessageRank } from "../citations";
+import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
 import { ContentError } from "../content/errors";
 import type { MessageRecord } from "../content/types";
 import { requireContentWorkspace } from "../workspace/guards";
+import { canViewThread } from "../workspace/content-visibility";
 import { normalizeContentTitle } from "../../shared/strings";
 import {
   getMetadataNumber,
@@ -16,6 +18,7 @@ import {
   listThreadRecordsByWorkspace,
   updateThreadChatPreferencesRecord,
   updateThreadModelSettingsRecord,
+  updateThreadVisibilityRecord,
 } from "./thread/repository";
 import {
   listMessageRecordPageByThread,
@@ -169,6 +172,7 @@ class ContentThreadService {
     const items = await listThreadRecordsByWorkspace({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
+      viewerUserId: input.userId,
       limit: limit + 1,
       cursor: decodedCursor,
     });
@@ -203,7 +207,7 @@ class ContentThreadService {
       workspaceId: workspace.id,
     });
 
-    if (!thread) {
+    if (!thread || !canViewThread(input.userId, thread)) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
@@ -224,6 +228,7 @@ class ContentThreadService {
       threadId: input.threadId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
+      viewerUserId: input.userId,
     });
 
     if (!deleted) {
@@ -255,7 +260,7 @@ class ContentThreadService {
       workspaceId: workspace.id,
     });
 
-    if (!thread) {
+    if (!thread || !canViewThread(input.userId, thread)) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
@@ -277,15 +282,11 @@ class ContentThreadService {
     }
 
     const currentSettings = normalizeThreadModelSettings(thread.modelSettings);
-    const sanitizedCurrentSettings = await pruneUnavailableThreadModelAliases(
-      currentSettings,
-    );
+    const sanitizedCurrentSettings =
+      await pruneUnavailableThreadModelAliases(currentSettings);
 
     const nextSettings = await pruneUnavailableThreadModelAliases(
-      mergeThreadModelSettings(
-        sanitizedCurrentSettings,
-        patch,
-      ),
+      mergeThreadModelSettings(sanitizedCurrentSettings, patch),
     );
 
     await validateThreadModelSettings(nextSettings);
@@ -327,7 +328,7 @@ class ContentThreadService {
       workspaceId: workspace.id,
     });
 
-    if (!thread) {
+    if (!thread || !canViewThread(input.userId, thread)) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
@@ -345,6 +346,43 @@ class ContentThreadService {
         "Failed to update thread chat preferences",
       );
     }
+
+    return { thread: updated };
+  }
+
+  async updateThreadVisibility(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    visibility: "private" | "workspace";
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    // Scoped to the author in the repository. A thread the caller can see but
+    // did not create returns null here, and that is intentional: reading a
+    // shared thread does not grant the right to change who else can read it.
+    const updated = await updateThreadVisibilityRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      visibility: input.visibility,
+    });
+
+    if (!updated) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    // Artifacts inherit thread visibility, so re-sharing/hiding a thread re-labels its artifacts.
+    await updateArtifactsVisibilityForThread({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      threadVisibility: input.visibility,
+    });
 
     return { thread: updated };
   }
@@ -430,7 +468,7 @@ class ContentThreadService {
         workspaceId: workspace.id,
         threadId: existingRun.threadId,
       });
-      if (!existingThread) {
+      if (!existingThread || !canViewThread(input.userId, existingThread)) {
         throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
       }
       return { thread: existingThread, run: existingRun };
@@ -552,7 +590,7 @@ class ContentThreadService {
       workspaceId: workspace.id,
     });
 
-    if (!thread) {
+    if (!thread || !canViewThread(input.userId, thread)) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
     const includeFields = new Set(

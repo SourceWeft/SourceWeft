@@ -11,6 +11,7 @@ import { logger } from "../shared/logger";
 import { describeError } from "./response/error-detail";
 import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { performanceLoggingMiddleware } from "./middleware/performance-logging";
+import { workspaceRoleGuard } from "./middleware/workspace-role";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
@@ -91,6 +92,13 @@ export function createApp() {
   });
 
   app.use("/v1/*", performanceLoggingMiddleware);
+
+  // Must be registered before any workspace-scoped handler: Hono composes
+  // middleware and handlers in registration order, so a guard added after a
+  // route would never wrap it. Two patterns because `/*` does not stand in for
+  // the bare workspace path that the rename endpoint uses.
+  app.use("/v1/workspaces/:workspaceId", workspaceRoleGuard);
+  app.use("/v1/workspaces/:workspaceId/*", workspaceRoleGuard);
 
   registerAuthMetaRoutes(app);
   registerDesktopAuthRoutes(app);

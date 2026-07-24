@@ -22,6 +22,7 @@ type RawThreadRow = {
   title: string;
   model_settings_json: ThreadModelSettingsInput | undefined;
   chat_preferences_json: unknown;
+  visibility: ThreadRecord["visibility"];
   created_by: string | null;
   created_at: Date;
   updated_at: Date;
@@ -34,10 +35,21 @@ const THREAD_RETURNING_SQL = `
   title,
   model_settings_json,
   chat_preferences_json,
+  visibility,
   created_by,
   created_at,
   updated_at
 `;
+
+/**
+ * Raw-SQL predicate hiding other members' private threads. `public_link` is an
+ * external flag, not an internal hide, so only `private` restricts; a thread
+ * with no recorded creator predates creator tracking and is treated as shared.
+ * `$${index}` is the 1-based position of the viewer id in the query params.
+ */
+function threadVisibilityClause(paramIndex: number) {
+  return `(visibility <> 'private' or created_by = $${paramIndex} or created_by is null)`;
+}
 
 function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
   return {
@@ -50,6 +62,7 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     ),
     chatPreferences: normalizeThreadChatPreferences(row.chat_preferences_json),
     sourceCount,
+    visibility: row.visibility,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -144,6 +157,7 @@ export async function createThreadRecord(input: {
 export async function listThreadRecordsByWorkspace(input: {
   teamId: string;
   workspaceId: string;
+  viewerUserId: string;
   limit: number;
   cursor?: {
     id: string;
@@ -155,6 +169,25 @@ export async function listThreadRecordsByWorkspace(input: {
     Boolean(input.cursor) &&
     Boolean(cursorDate) &&
     !Number.isNaN(cursorDate?.getTime());
+
+  // Params are built in order; the viewer id always comes third so its
+  // placeholder index is stable whether or not the cursor branch is present.
+  const params: unknown[] = [
+    input.teamId,
+    input.workspaceId,
+    input.viewerUserId,
+  ];
+  const visibility = threadVisibilityClause(3);
+
+  let cursorSql = "";
+  if (hasValidCursor) {
+    params.push(cursorDate?.toISOString(), input.cursor?.id);
+    cursorSql = `and (updated_at < $${params.length - 1}::timestamptz or (updated_at = $${params.length - 1}::timestamptz and id < $${params.length}))`;
+  }
+
+  params.push(input.limit);
+  const limitParam = params.length;
+
   const result = await database.query<RawThreadRow>(
     `
       select ${THREAD_RETURNING_SQL}
@@ -162,23 +195,12 @@ export async function listThreadRecordsByWorkspace(input: {
       where team_id = $1
         and workspace_id = $2
         and archived = false
-        ${
-          hasValidCursor
-            ? "and (updated_at < $3::timestamptz or (updated_at = $3::timestamptz and id < $4))"
-            : ""
-        }
+        and ${visibility}
+        ${cursorSql}
       order by updated_at desc, id desc
-      limit ${hasValidCursor ? "$5" : "$3"}
+      limit $${limitParam}
     `,
-    hasValidCursor
-      ? [
-          input.teamId,
-          input.workspaceId,
-          cursorDate?.toISOString(),
-          input.cursor?.id,
-          input.limit,
-        ]
-      : [input.teamId, input.workspaceId, input.limit],
+    params,
   );
 
   const sourceCounts = await countUsedSourceIdsByThread({
@@ -199,16 +221,7 @@ export async function findRecentThreadRecordByUser(input: {
 }) {
   const result = await database.query<RawThreadRow>(
     `
-      select
-        id,
-        team_id,
-        workspace_id,
-        title,
-        model_settings_json,
-        chat_preferences_json,
-        created_by,
-        created_at,
-        updated_at
+      select ${THREAD_RETURNING_SQL}
       from threads
       where team_id = $1
         and workspace_id = $2
@@ -259,16 +272,21 @@ export async function deleteThreadRecord(input: {
   threadId: string;
   teamId: string;
   workspaceId: string;
+  viewerUserId: string;
 }) {
+  // The visibility clause is what keeps a member from deleting another
+  // member's private thread by guessing its id: an invisible thread simply
+  // matches no row and the delete reports not-found.
   const result = await database.query<{ id: string }>(
     `
       delete from threads
       where id = $1
         and team_id = $2
         and workspace_id = $3
+        and ${threadVisibilityClause(4)}
       returning id
     `,
-    [input.threadId, input.teamId, input.workspaceId],
+    [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
   );
 
   return result.rows.length > 0;
@@ -358,6 +376,50 @@ export async function updateThreadChatPreferencesRecord(input: {
     ],
   );
 
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: [row.id],
+  });
+
+  return mapRawThread(row, sourceCounts.get(row.id) ?? 0);
+}
+
+/**
+ * Changes a thread's visibility. Scoped to `created_by = viewer`: only the
+ * author decides whether their conversation is private or shared with the
+ * workspace. A thread the caller did not create matches no row and returns
+ * null, which the service reports as not-found.
+ */
+export async function updateThreadVisibilityRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  visibility: ThreadRecord["visibility"];
+}) {
+  const result = await database.query<RawThreadRow>(
+    `
+      update threads
+      set visibility = $5,
+          updated_at = now()
+      where id = $1
+        and team_id = $2
+        and workspace_id = $3
+        and created_by = $4
+      returning ${THREAD_RETURNING_SQL}
+    `,
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      input.visibility,
+    ],
+  );
   const row = result.rows[0];
   if (!row) return null;
 

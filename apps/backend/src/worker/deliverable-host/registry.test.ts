@@ -41,7 +41,9 @@ function fakeDefinition(jobName: string) {
     defaultErrorCode: "FAKE_FAILED",
     invalidPayloadErrorCode: "FAKE_INVALID",
     prepareJob: () => ({}),
-    loadState: () => ({ generation: { status: "pending", stage: "one", progress: 0 } }),
+    loadState: () => ({
+      generation: { status: "pending", stage: "one", progress: 0 },
+    }),
     buildStageView: () => ({}),
     runStage: async ({ state }: { state: unknown }) => state,
     finalize: () => ({}),

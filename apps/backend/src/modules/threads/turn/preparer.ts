@@ -166,9 +166,8 @@ function resolveInvocationSkillId(input: {
   if (sourceRef?.kind !== "skill_command") {
     return undefined;
   }
-  return input.enabledSkills.find(
-    (skill) => skill.name === sourceRef.skillSlug,
-  )?.workspaceSkillId;
+  return input.enabledSkills.find((skill) => skill.name === sourceRef.skillSlug)
+    ?.workspaceSkillId;
 }
 
 async function resolveExistingOverrideUserMessage(input: {
@@ -1534,7 +1533,12 @@ export async function prepareThreadTurn(
       ...Object.fromEntries(
         REQUESTABLE_THREAD_MODEL_KINDS.flatMap((kind) =>
           requestedThreadProfiles[kind].provided
-            ? [[`${kind}ProfileAlias`, requestedThreadProfiles[kind].profileAlias]]
+            ? [
+                [
+                  `${kind}ProfileAlias`,
+                  requestedThreadProfiles[kind].profileAlias,
+                ],
+              ]
             : [],
         ),
       ),
@@ -1782,7 +1786,7 @@ export async function prepareThreadTurn(
   const persistedResolvedThreadSettings = applyResolvedThreadModelSettings(
     normalizedThreadSettingsWithSnapshots,
     requestedExecutionMode !== "BYOK" &&
-    (requestedProfileAlias || requestedModelAlias)
+      (requestedProfileAlias || requestedModelAlias)
       ? {
           llm: {
             profileAlias,
@@ -1793,7 +1797,9 @@ export async function prepareThreadTurn(
   );
 
   const threadModelSettingsChanged = (
-    Object.keys(persistedResolvedThreadSettings) as (keyof ThreadModelSettings)[]
+    Object.keys(
+      persistedResolvedThreadSettings,
+    ) as (keyof ThreadModelSettings)[]
   ).some(
     (key) =>
       persistedResolvedThreadSettings[key] !== originalThreadSettings[key],

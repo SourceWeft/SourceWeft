@@ -59,7 +59,9 @@ export function mapSource(row: SourceRow): SourceRecord {
   };
 }
 
-export function mapSourceRevision(row: SourceRevisionRow): SourceRevisionRecord {
+export function mapSourceRevision(
+  row: SourceRevisionRow,
+): SourceRevisionRecord {
   return {
     id: row.id,
     sourceId: row.sourceId,
@@ -105,7 +107,9 @@ export function mapSourceDocument(row: DocumentRow): SourceDocumentRecord {
   };
 }
 
-export function mapSourceEmbedding(row: ChunkEmbeddingRow): SourceEmbeddingRecord {
+export function mapSourceEmbedding(
+  row: ChunkEmbeddingRow,
+): SourceEmbeddingRecord {
   return {
     id: row.id,
     chunkId: row.chunkId,

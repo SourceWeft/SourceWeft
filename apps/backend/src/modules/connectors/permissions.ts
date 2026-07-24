@@ -37,10 +37,13 @@ export async function requireConnectorWorkspace(input: {
     throw new ConnectorError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
   }
 
-  const membership = await workspaceService.getWorkspaceMembership({
+  // `resolveWorkspace` has already established content access, so `role` is
+  // set here; a container-only administrator never gets this far.
+  const access = await workspaceService.resolveAccess({
     workspaceId: input.workspaceId,
     userId: input.userId,
   });
+  const membership = access?.role ? { role: access.role } : null;
   const permissions = membership
     ? WORKSPACE_ROLE_PERMISSIONS[membership.role]
     : undefined;

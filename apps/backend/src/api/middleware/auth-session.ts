@@ -15,14 +15,27 @@ export type AppSession = {
   };
 };
 
-export async function requireSession(c: Context): Promise<AppSession | null> {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+/**
+ * One session lookup per request. Route handlers each call `requireSession`,
+ * and middleware now does too; without this the workspace role guard would
+ * double the session round-trips on every write.
+ *
+ * Keyed on the raw `Request`, which is unique per request and unreachable
+ * afterwards, so entries cannot outlive the request they belong to.
+ */
+const sessionCache = new WeakMap<Request, AppSession | null>();
 
-  if (!session) {
-    return null;
+export async function requireSession(c: Context): Promise<AppSession | null> {
+  const cached = sessionCache.get(c.req.raw);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  return session as AppSession;
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const value = session ? (session as AppSession) : null;
+  sessionCache.set(c.req.raw, value);
+
+  return value;
 }
 
 export function getSessionUserId(session: AppSession) {

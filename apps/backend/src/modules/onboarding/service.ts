@@ -5,7 +5,7 @@ import { workspaceService } from "../workspace";
 
 export class OnboardingService {
   async provisionOrganization(input: { organizationId: string; userId: string }) {
-    await workspaceService.ensureUserWorkspaceInOrganization(input);
+    await workspaceService.ensureMembershipWorkspace(input);
     await billingService.ensureBillingAccount(input.organizationId);
   }
 

@@ -9,12 +9,10 @@ import type {
   ArtifactViewHandler,
 } from "@sourceweft/contracts";
 import { requireContentWorkspace } from "../workspace/guards";
+import { canViewContent } from "../workspace/content-visibility";
 import { ContentError } from "../content/errors";
 import { downloadArtifactObject } from "../sources/storage";
-import {
-  findArtifactRecord,
-  listArtifactRecords,
-} from "./repository";
+import { findArtifactRecord, listArtifactRecords } from "./repository";
 import { loadArtifactViewHandlerRegistry } from "./view-handlers";
 
 type ArtifactRecord = Awaited<ReturnType<typeof findArtifactRecord>>;
@@ -139,10 +137,7 @@ function buildArtifactCapabilities(
   artifact: ArtifactRecord,
   handler?: ArtifactViewHandler | null,
 ): ArtifactCapabilities {
-  const hasFile = Boolean(
-    artifact?.status === "ready" &&
-      artifact.storageKey,
-  );
+  const hasFile = Boolean(artifact?.status === "ready" && artifact.storageKey);
   const canRenderClientSide = Boolean(
     artifact && handler && artifact.status !== "failed",
   );
@@ -232,9 +227,7 @@ function resolveArtifactPreviewImage(
   }
   const metadata = toObjectRecord(artifact.previewMetadataJson);
   const mimeType =
-    typeof metadata?.mimeType === "string"
-      ? metadata.mimeType.trim()
-      : "";
+    typeof metadata?.mimeType === "string" ? metadata.mimeType.trim() : "";
   const fileName =
     typeof metadata?.fileName === "string" &&
     metadata.fileName.trim().length > 0
@@ -270,6 +263,34 @@ function decodeArtifactCursor(cursor: string | undefined) {
 }
 
 export class ContentArtifactsService {
+  /**
+   * Resolves one artifact for a member, enforcing both the workspace boundary
+   * and row-level visibility. A private artifact belonging to another member is
+   * reported absent, so its existence stays private and no single-artifact
+   * operation (view, download, preview, source JSON) can reach it by id.
+   */
+  private async requireViewableArtifact(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const artifact = await findArtifactRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      artifactId: input.artifactId,
+    });
+
+    if (!artifact || !canViewContent(input.userId, artifact)) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+
+    return { workspace, artifact };
+  }
+
   private buildArtifactResponse(input: {
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>;
     workspaceId: string;
@@ -292,6 +313,7 @@ export class ContentArtifactsService {
       previewMetadataJson: artifact.previewMetadataJson,
       errorCode: artifact.errorCode,
       errorMessage: artifact.errorMessage,
+      visibility: artifact.visibility,
       createdBy: artifact.createdBy,
       completedAt: artifact.completedAt,
       createdAt: artifact.createdAt,
@@ -321,6 +343,7 @@ export class ContentArtifactsService {
       workspaceId: workspace.id,
       cursor: decodeArtifactCursor(input.cursor),
       limit: input.limit,
+      viewerUserId: input.userId,
     });
     const registry = await loadArtifactViewHandlerRegistry();
 
@@ -341,19 +364,7 @@ export class ContentArtifactsService {
     artifactId: string;
     userId: string;
   }) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const artifact = await findArtifactRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      artifactId: input.artifactId,
-    });
-
-    if (!artifact) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
+    const { workspace, artifact } = await this.requireViewableArtifact(input);
 
     const registry = await loadArtifactViewHandlerRegistry();
 
@@ -375,19 +386,7 @@ export class ContentArtifactsService {
     artifactId: string;
     userId: string;
   }) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const artifact = await findArtifactRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      artifactId: input.artifactId,
-    });
-
-    if (!artifact) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
+    const { artifact } = await this.requireViewableArtifact(input);
     if (!artifact.storageKey) {
       throw new ContentError(
         400,
@@ -415,19 +414,7 @@ export class ContentArtifactsService {
     artifactId: string;
     userId: string;
   }) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const artifact = await findArtifactRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      artifactId: input.artifactId,
-    });
-
-    if (!artifact) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
+    const { artifact } = await this.requireViewableArtifact(input);
 
     const payload = toObjectRecord(artifact.payloadJson);
     const sourceJsonStorageKey =
@@ -470,19 +457,7 @@ export class ContentArtifactsService {
     artifactId: string;
     userId: string;
   }) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const artifact = await findArtifactRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      artifactId: input.artifactId,
-    });
-
-    if (!artifact) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
+    const { artifact } = await this.requireViewableArtifact(input);
     const previewImage = resolveArtifactPreviewImage(artifact);
     if (!previewImage) {
       throw new ContentError(
@@ -508,19 +483,7 @@ export class ContentArtifactsService {
     userId: string;
     fileName: string;
   }) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const artifact = await findArtifactRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      artifactId: input.artifactId,
-    });
-
-    if (!artifact) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
+    const { artifact } = await this.requireViewableArtifact(input);
     const registry = await loadArtifactViewHandlerRegistry();
     const asset = resolveArtifactAsset(
       artifact,

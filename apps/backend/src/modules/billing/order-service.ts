@@ -911,7 +911,7 @@ export class BillingOrderService {
     });
 
     if (created.created) {
-      await workspaceService.ensureUserWorkspaceInOrganization({
+      await workspaceService.ensureMembershipWorkspace({
         organizationId: created.id,
         userId: order.userId,
       });

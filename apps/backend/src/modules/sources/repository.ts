@@ -161,7 +161,7 @@ export async function listSourceRecords(input: {
   if (!treeView && input.parentSourceId !== undefined) {
     conditions.push(
       input.parentSourceId === null
-        ? sql`${sources.parentSourceId} is null` as never
+        ? (sql`${sources.parentSourceId} is null` as never)
         : eq(sources.parentSourceId, input.parentSourceId),
     );
   }
@@ -212,12 +212,15 @@ export async function listSourceRecords(input: {
             .orderBy(desc(sources.updatedAt), desc(sources.id));
 
   const pageRows = !treeView && input.limit ? rows.slice(0, input.limit) : rows;
-  const nextRow = !treeView && input.limit ? rows[input.limit] ?? null : null;
+  const nextRow = !treeView && input.limit ? (rows[input.limit] ?? null) : null;
 
   return {
     items: pageRows.map(mapSource),
     nextCursor: nextRow
-      ? encodeSourceMentionCursor({ updatedAt: nextRow.updatedAt, id: nextRow.id })
+      ? encodeSourceMentionCursor({
+          updatedAt: nextRow.updatedAt,
+          id: nextRow.id,
+        })
       : null,
   };
 }
@@ -241,10 +244,7 @@ function decodeSourceMentionCursor(cursor: string | undefined) {
     const parsed = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
     ) as { id?: unknown; updatedAt?: unknown };
-    if (
-      typeof parsed.id !== "string" ||
-      typeof parsed.updatedAt !== "string"
-    ) {
+    if (typeof parsed.id !== "string" || typeof parsed.updatedAt !== "string") {
       return null;
     }
     const updatedAt = new Date(parsed.updatedAt);
@@ -333,17 +333,17 @@ export async function listSourceRecordsByIds(input: {
     return [];
   }
 
+  const conditions = [
+    eq(sources.teamId, input.teamId),
+    eq(sources.workspaceId, input.workspaceId),
+    inArray(sources.id, input.sourceIds),
+    ne(sources.status, "archived"),
+  ];
+
   const rows = await db
     .select()
     .from(sources)
-    .where(
-      and(
-        eq(sources.teamId, input.teamId),
-        eq(sources.workspaceId, input.workspaceId),
-        inArray(sources.id, input.sourceIds),
-        ne(sources.status, "archived"),
-      ),
-    );
+    .where(and(...conditions));
 
   return rows.map(mapSource);
 }
@@ -533,26 +533,33 @@ export async function updateSourceRecord(input: {
   };
 
   if (input.title !== undefined) updates.title = input.title;
-  if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
+  if (input.parentSourceId !== undefined)
+    updates.parentSourceId = input.parentSourceId;
   if (input.connectorId !== undefined) updates.connectorId = input.connectorId;
   if (input.syncRunId !== undefined) updates.syncRunId = input.syncRunId;
   if (input.externalId !== undefined) updates.externalId = input.externalId;
   if (input.externalUri !== undefined) updates.externalUri = input.externalUri;
-  if (input.externalUpdatedAt !== undefined) updates.externalUpdatedAt = input.externalUpdatedAt;
+  if (input.externalUpdatedAt !== undefined)
+    updates.externalUpdatedAt = input.externalUpdatedAt;
   if (input.contentText !== undefined) {
     updates.contentText = input.contentText;
     updates.status = "created";
     updates.indexedAt = null;
   }
-  if (input.estimatedPages !== undefined) updates.estimatedPages = input.estimatedPages;
-  if (input.parsedTokens !== undefined) updates.parsedTokens = input.parsedTokens;
+  if (input.estimatedPages !== undefined)
+    updates.estimatedPages = input.estimatedPages;
+  if (input.parsedTokens !== undefined)
+    updates.parsedTokens = input.parsedTokens;
   if (input.mimeType !== undefined) updates.mimeType = input.mimeType;
   if (input.sizeBytes !== undefined) updates.sizeBytes = input.sizeBytes;
   if (input.contentHash !== undefined) updates.contentHash = input.contentHash;
-  if (input.storageBucket !== undefined) updates.storageBucket = input.storageBucket;
+  if (input.storageBucket !== undefined)
+    updates.storageBucket = input.storageBucket;
   if (input.storageKey !== undefined) updates.storageKey = input.storageKey;
-  if (input.parserVersion !== undefined) updates.parserVersion = input.parserVersion;
-  if (input.parsingConfig !== undefined) updates.parsingConfig = input.parsingConfig ?? {};
+  if (input.parserVersion !== undefined)
+    updates.parserVersion = input.parserVersion;
+  if (input.parsingConfig !== undefined)
+    updates.parsingConfig = input.parsingConfig ?? {};
   if (input.metadata !== undefined) updates.metadataJson = input.metadata;
   if (input.error !== undefined) updates.errorJson = input.error;
   if (input.status !== undefined) updates.status = input.status;
@@ -596,18 +603,23 @@ export async function updateSourceRecordForLatestRevision(input: {
   };
 
   if (input.title !== undefined) updates.title = input.title;
-  if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
+  if (input.parentSourceId !== undefined)
+    updates.parentSourceId = input.parentSourceId;
   if (input.contentText !== undefined) {
     updates.contentText = input.contentText;
     updates.status = "created";
     updates.indexedAt = null;
   }
-  if (input.estimatedPages !== undefined) updates.estimatedPages = input.estimatedPages;
-  if (input.parsedTokens !== undefined) updates.parsedTokens = input.parsedTokens;
+  if (input.estimatedPages !== undefined)
+    updates.estimatedPages = input.estimatedPages;
+  if (input.parsedTokens !== undefined)
+    updates.parsedTokens = input.parsedTokens;
   if (input.sizeBytes !== undefined) updates.sizeBytes = input.sizeBytes;
   if (input.contentHash !== undefined) updates.contentHash = input.contentHash;
-  if (input.parserVersion !== undefined) updates.parserVersion = input.parserVersion;
-  if (input.parsingConfig !== undefined) updates.parsingConfig = input.parsingConfig ?? {};
+  if (input.parserVersion !== undefined)
+    updates.parserVersion = input.parserVersion;
+  if (input.parsingConfig !== undefined)
+    updates.parsingConfig = input.parsingConfig ?? {};
   if (input.metadata !== undefined) updates.metadataJson = input.metadata;
   if (input.error !== undefined) updates.errorJson = input.error;
   if (input.status !== undefined) updates.status = input.status;
@@ -706,17 +718,21 @@ export async function updateSourceRecordAndInvalidateDocuments(input: {
   indexedAt?: Date | null;
 }) {
   return db.transaction(async (tx) => {
-    const updates: Partial<typeof sources.$inferInsert> & { updatedAt: Date } = {
-      contentText: input.contentText,
-      status: "created",
-      indexedAt: null,
-      updatedAt: new Date(),
-    };
+    const updates: Partial<typeof sources.$inferInsert> & { updatedAt: Date } =
+      {
+        contentText: input.contentText,
+        status: "created",
+        indexedAt: null,
+        updatedAt: new Date(),
+      };
 
     if (input.title !== undefined) updates.title = input.title;
-    if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
-    if (input.estimatedPages !== undefined) updates.estimatedPages = input.estimatedPages;
-    if (input.parsedTokens !== undefined) updates.parsedTokens = input.parsedTokens;
+    if (input.parentSourceId !== undefined)
+      updates.parentSourceId = input.parentSourceId;
+    if (input.estimatedPages !== undefined)
+      updates.estimatedPages = input.estimatedPages;
+    if (input.parsedTokens !== undefined)
+      updates.parsedTokens = input.parsedTokens;
     if (input.status !== undefined) updates.status = input.status;
     if (input.indexedAt !== undefined) updates.indexedAt = input.indexedAt;
 
@@ -805,7 +821,11 @@ export async function getSourceDetailRecord(input: {
           currentDocumentCondition(),
         ),
       )
-      .orderBy(desc(documents.createdAt), desc(documents.updatedAt), desc(documents.id)),
+      .orderBy(
+        desc(documents.createdAt),
+        desc(documents.updatedAt),
+        desc(documents.id),
+      ),
     db
       .select()
       .from(sourceRevisions)
@@ -816,7 +836,10 @@ export async function getSourceDetailRecord(input: {
           eq(sourceRevisions.workspaceId, input.workspaceId),
         ),
       )
-      .orderBy(desc(sourceRevisions.revisionNo), desc(sourceRevisions.createdAt)),
+      .orderBy(
+        desc(sourceRevisions.revisionNo),
+        desc(sourceRevisions.createdAt),
+      ),
   ]);
 
   const currentDocument = documentRows[0] ?? null;
@@ -925,7 +948,10 @@ export async function getSourceDocumentDetailRecord(input: {
           eq(sourceRevisions.workspaceId, input.workspaceId),
         ),
       )
-      .orderBy(desc(sourceRevisions.revisionNo), desc(sourceRevisions.createdAt)),
+      .orderBy(
+        desc(sourceRevisions.revisionNo),
+        desc(sourceRevisions.createdAt),
+      ),
   ]);
 
   return {

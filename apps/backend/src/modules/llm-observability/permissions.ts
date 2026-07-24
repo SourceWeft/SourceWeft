@@ -55,11 +55,14 @@ export async function resolveWorkspaceObservabilityAccess(input: {
     };
   }
 
-  const workspaceMembership = await workspaceService.getWorkspaceMembership({
+  // Payload access is content access, so it is judged on the content plane
+  // only: an organization admin gets the metrics-only branch above, never the
+  // branch that reads what members actually sent.
+  const workspaceAccess = await workspaceService.resolveAccess({
     workspaceId: workspace.id,
     userId: input.actorUserId,
   });
-  if (workspaceMembership?.role !== "workspace_admin") {
+  if (workspaceAccess?.role !== "workspace_admin") {
     return null;
   }
 
@@ -67,7 +70,7 @@ export async function resolveWorkspaceObservabilityAccess(input: {
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
     actorUserId: input.actorUserId,
-    role: workspaceMembership.role,
+    role: workspaceAccess.role,
     payloadAccess: true,
     metricsOnly: false,
   };

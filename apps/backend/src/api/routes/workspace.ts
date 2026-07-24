@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import { workspaceService } from "../../modules/workspace";
+import type { WorkspaceMemberMutationResult } from "../../modules/workspace";
+import { isWorkspaceRole } from "../../modules/workspace/types";
+import { teamAuditService } from "../../modules/team-audit";
 import {
   getActiveOrganizationId,
   getSessionUserId,
@@ -13,6 +16,39 @@ function ensureObjectBody(value: unknown): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+/**
+ * `not_found` covers both "no such workspace" and "you are not a member of it",
+ * so a non-member cannot use this endpoint to probe for workspace ids.
+ */
+function throwMemberMutationError(
+  result: WorkspaceMemberMutationResult,
+): never {
+  if (result.ok) {
+    throw new Error("Expected a failed workspace member mutation");
+  }
+
+  if (result.reason === "forbidden") {
+    throw ApiError.forbidden(
+      "Only workspace admins can manage workspace members.",
+    );
+  }
+
+  throw new ApiError(404, "WORKSPACE_MEMBER_NOT_FOUND", "Member not found");
+}
+
+function parseRole(body: Record<string, unknown>) {
+  const role = body.role;
+  if (!isWorkspaceRole(role)) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      "role must be one of workspace_admin, editor, viewer",
+    );
+  }
+
+  return role;
 }
 
 export function registerWorkspaceRoutes(app: Hono) {
@@ -33,18 +69,19 @@ export function registerWorkspaceRoutes(app: Hono) {
       throw ApiError.forbidden();
     }
 
-    let workspaces = await workspaceService.listWorkspaces({
+    // Unconditionally, not only when the list comes back empty. This is what
+    // makes the shared workspace appear for organizations that predate it:
+    // creation is idempotent, and because membership of it is derived, the
+    // whole team is in it the moment it exists. No migration, no backfill.
+    await workspaceService.ensureMembershipWorkspace({
       organizationId: teamId,
       userId,
     });
 
-    if (workspaces.length === 0) {
-      const workspace = await workspaceService.ensureUserWorkspaceInOrganization({
-        organizationId: teamId,
-        userId,
-      });
-      workspaces = [workspace];
-    }
+    const workspaces = await workspaceService.listWorkspaces({
+      organizationId: teamId,
+      userId,
+    });
 
     return ApiResponse.success(c, { items: workspaces });
   });
@@ -113,6 +150,119 @@ export function registerWorkspaceRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/v1/workspaces/:workspaceId/members", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const members = await workspaceService.listWorkspaceMembers({
+      workspaceId: c.req.param("workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    if (!members) {
+      throw new ApiError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
+    }
+
+    return ApiResponse.success(c, { items: members });
+  });
+
+  app.post("/v1/workspaces/:workspaceId/members", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const targetUserId = typeof body.userId === "string" ? body.userId : "";
+
+    if (!targetUserId) {
+      throw new ApiError(400, "VALIDATION_ERROR", "userId is required");
+    }
+
+    const result = await workspaceService.addWorkspaceMember({
+      workspaceId: c.req.param("workspaceId"),
+      actorUserId: getSessionUserId(session),
+      userId: targetUserId,
+      role: parseRole(body),
+    });
+
+    if (!result.ok) {
+      throwMemberMutationError(result);
+    }
+
+    return ApiResponse.success(c, { ok: true }, 201);
+  });
+
+  app.patch("/v1/workspaces/:workspaceId/members/:userId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+
+    const result = await workspaceService.updateWorkspaceMemberRole({
+      workspaceId: c.req.param("workspaceId"),
+      actorUserId: getSessionUserId(session),
+      userId: c.req.param("userId"),
+      role: parseRole(body),
+    });
+
+    if (!result.ok) {
+      throwMemberMutationError(result);
+    }
+
+    return ApiResponse.success(c, { ok: true });
+  });
+
+  app.delete("/v1/workspaces/:workspaceId/members/:userId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await workspaceService.removeWorkspaceMember({
+      workspaceId: c.req.param("workspaceId"),
+      actorUserId: getSessionUserId(session),
+      userId: c.req.param("userId"),
+    });
+
+    if (!result.ok) {
+      throwMemberMutationError(result);
+    }
+
+    return ApiResponse.success(c, { ok: true });
+  });
+
+  app.get("/v1/teams/:teamId/audit-logs", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const teamId = c.req.param("teamId");
+    const isAdmin = await workspaceService.isOrganizationAdmin({
+      organizationId: teamId,
+      userId: getSessionUserId(session),
+    });
+
+    if (!isAdmin) {
+      throw ApiError.forbidden();
+    }
+
+    const rawLimit = c.req.query("limit");
+    const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+
+    const items = await teamAuditService.list({
+      teamId,
+      limit: Number.isFinite(limit) ? limit : undefined,
+    });
+
+    return ApiResponse.success(c, { items });
+  });
+
   app.get("/v1/context/current", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -133,7 +283,7 @@ export function registerWorkspaceRoutes(app: Hono) {
       : null;
 
     if (!requestedWorkspaceId && !workspace && organizationId) {
-      workspace = await workspaceService.ensureUserWorkspaceInOrganization({
+      workspace = await workspaceService.ensureMembershipWorkspace({
         organizationId,
         userId,
       });

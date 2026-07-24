@@ -1,6 +1,9 @@
 import type { Hono } from "hono";
 import { contentArtifactsService } from "../../../modules/artifacts";
-import { getSessionUserId, requireSession } from "../../middleware/auth-session";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { requireRouteParam } from "./helpers";
 

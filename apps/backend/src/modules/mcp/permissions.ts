@@ -22,10 +22,14 @@ export async function requireMcpWorkspace(input: {
     throw new McpError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
   }
 
-  const membership = await workspaceService.getWorkspaceMembership({
+  // `resolveWorkspace` has already established content access, so `role` is
+  // set here; a container-only administrator never gets this far, which is
+  // deliberate — MCP runs surface workspace content.
+  const access = await workspaceService.resolveAccess({
     workspaceId: input.workspaceId,
     userId: input.userId,
   });
+  const membership = access?.role ? { role: access.role } : null;
   const permissions = membership
     ? WORKSPACE_ROLE_PERMISSIONS[membership.role]
     : undefined;
