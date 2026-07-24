@@ -154,6 +154,29 @@ async function fetchRegistryPage(
   return (await response.json()) as RegistryPage;
 }
 
+// The full registry is thousands of servers across dozens of pages; a single
+// transient network blip late in the walk shouldn't throw away all the pages we
+// already ingested. Retry a page a few times before giving up on it.
+async function fetchRegistryPageWithRetry(
+  baseUrl: string,
+  cursor: string | undefined,
+  limit: number,
+  attempts = 3,
+): Promise<RegistryPage> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchRegistryPage(baseUrl, cursor, limit);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 /**
  * Pull every server from an upstream registry and upsert it into the catalog as
  * origin=upstream. Returns counts for observability. `maxServers` bounds a run.
@@ -170,9 +193,27 @@ export async function ingestFromRegistry(input: {
   let cursor: string | undefined;
   let ingested = 0;
   let skipped = 0;
+  let partial = false;
+  let error: string | undefined;
 
   while (ingested < maxServers) {
-    const page = await fetchRegistryPage(input.baseUrl, cursor, pageSize);
+    let page: RegistryPage;
+    try {
+      page = await fetchRegistryPageWithRetry(input.baseUrl, cursor, pageSize);
+    } catch (pageError) {
+      // A page fetch failed even after retries. The rows upserted on earlier
+      // pages are already committed, so record what we have and stop rather than
+      // throwing away the whole run — the next scheduled sync resumes the walk.
+      partial = true;
+      error = pageError instanceof Error ? pageError.message : String(pageError);
+      logger.warn("Registry federation page fetch failed; keeping partial run", {
+        source: input.source,
+        ingested,
+        skipped,
+        error,
+      });
+      break;
+    }
     const entries = page.servers ?? [];
     if (entries.length === 0) {
       break;
@@ -220,8 +261,9 @@ export async function ingestFromRegistry(input: {
     source: input.source,
     ingested,
     skipped,
+    partial,
   });
-  return { source: input.source, ingested, skipped };
+  return { source: input.source, ingested, skipped, partial, error };
 }
 
 export async function runMarketFederation(
