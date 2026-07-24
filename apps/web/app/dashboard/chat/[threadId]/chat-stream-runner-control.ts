@@ -93,10 +93,17 @@ export function useChatStreamRunnerControl({
   });
   const activeThreadRunRef = useRef<ActiveThreadRun | null>(null);
   const attachedRunKeyRef = useRef<string | null>(null);
+  // Mirrors isStreaming for reads inside effects/callbacks (e.g. the room hook,
+  // which must know whether THIS tab drives a run's token stream).
+  const isStreamingRef = useRef(isStreaming);
 
   useEffect(() => {
     activeThreadRunRef.current = activeThreadRun;
   }, [activeThreadRun]);
+
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   const markRunStarted = useCallback(
     (run: ActiveThreadRun) => {
@@ -242,6 +249,7 @@ export function useChatStreamRunnerControl({
     activeThreadRun,
     activeThreadRunRef,
     attachedRunKeyRef,
+    isStreamingRef,
     chatExecutionState,
     clearTerminalLocalRunState,
     clearAttachedRunKeyIfCurrent,

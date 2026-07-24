@@ -15,6 +15,10 @@ export class ListenConnection {
   private client: Client | null = null;
   private stopped = false;
   private attempt = 0;
+  // When the current connection was established. Backoff is only reset once a
+  // connection has stayed up this long, so a connection that flaps immediately
+  // keeps escalating the delay instead of hammering the DB every 250ms.
+  private connectedAt: number | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -73,8 +77,14 @@ export class ListenConnection {
       // Channel name is a fixed constant, not user input (LISTEN cannot be
       // parameterized anyway).
       await client.query(`LISTEN ${THREAD_EVENTS_CHANNEL}`);
+      if (this.stopped) {
+        // stop() raced this connect: it saw a null this.client and closed
+        // nothing, so end the freshly established client rather than adopt it.
+        await client.end().catch(() => undefined);
+        return;
+      }
       this.client = client;
-      this.attempt = 0;
+      this.connectedAt = Date.now();
       logger.info("NotifyHub is listening for thread events");
     } catch (error) {
       logger.warn("NotifyHub listen connection failed; will retry", {
@@ -94,6 +104,15 @@ export class ListenConnection {
     if (this.stopped) {
       return;
     }
+    // Reset backoff only if the connection proved stable; a connection that
+    // drops within the window keeps the delay escalating toward the cap.
+    if (
+      this.connectedAt !== null &&
+      Date.now() - this.connectedAt >= BACKOFF_MAX_MS
+    ) {
+      this.attempt = 0;
+    }
+    this.connectedAt = null;
     if (error) {
       logger.warn("NotifyHub listen connection dropped", {
         error: error.message,

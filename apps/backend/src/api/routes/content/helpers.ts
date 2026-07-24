@@ -24,7 +24,7 @@ export function ensureObjectBody(value: unknown) {
 
 export function createSseResponse(
   stream: AsyncGenerator<string>,
-  options: { cancel?: "return" | "detach" } = {},
+  options: { cancel?: "return" | "detach"; onCancel?: () => void } = {},
 ) {
   const bodyStream = new ReadableStream({
     async start(controller) {
@@ -42,6 +42,9 @@ export function createSseResponse(
       }
     },
     async cancel() {
+      // Signal the producer first so a generator parked on an await can unwind
+      // immediately (its finally runs now, not at the next heartbeat).
+      options.onCancel?.();
       if (options.cancel === "detach") {
         return;
       }

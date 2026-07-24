@@ -47,6 +47,7 @@ import {
 } from "../chat-stream-runner-control";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
+import { useThreadRoom } from "./use-thread-room";
 import { useThreadModels } from "./use-thread-models";
 import { useThreadPreviews } from "./use-thread-previews";
 import { useThreadSources } from "./use-thread-sources";
@@ -260,6 +261,8 @@ export function useThreadPageController({
   const {
     attachedRunKeyRef,
     activeThreadRun,
+    activeThreadRunRef,
+    isStreamingRef,
     chatExecutionState,
     clearAttachedRunKeyIfCurrent,
     clearRunIfCurrent,
@@ -504,6 +507,20 @@ export function useThreadPageController({
     activeThreadRun != null &&
     activeThreadRun.userId != null &&
     activeThreadRun.userId !== currentUserId;
+
+  // Live collaboration: subscribe to the thread room so another member's run
+  // (or a new message) is reflected without a refresh — which also lets the
+  // send-queue engage when the thread was already open.
+  useThreadRoom({
+    workspaceId,
+    threadId,
+    activeThreadRunRef,
+    attachedRunKeyRef,
+    isStreamingRef,
+    setActiveThreadRun,
+    clearRunIfCurrent,
+    loadThreadMessages,
+  });
 
   // Turn-taking is client-orchestrated: sending while any run is active on the
   // thread (ours or another member's) parks the message in a FIFO here and

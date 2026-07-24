@@ -485,17 +485,25 @@ export function registerThreadRoutes(app: Hono) {
 
     // Authorization happens inside openThreadRoom (before the generator starts),
     // so a non-viewer gets a clean 404 rather than a half-open event-stream.
+    const abortController = new AbortController();
     const stream = await contentThreadService.openThreadRoom({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
+      signal: abortController.signal,
     });
 
     c.header("Content-Type", "text/event-stream");
     c.header("Cache-Control", "no-cache, no-transform");
     c.header("Connection", "keep-alive");
     c.header("X-Accel-Buffering", "no");
-    return c.body(createSseResponse(stream));
+    // Aborting on cancel lets the room generator unwind and unsubscribe at once
+    // instead of lingering until its next heartbeat.
+    return c.body(
+      createSseResponse(stream, {
+        onCancel: () => abortController.abort(),
+      }),
+    );
   });
 
   app.get("/threads/:id/title-job/:jobId", async (c) => {

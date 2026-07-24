@@ -58,23 +58,44 @@ export function reconcileRoomRun(input: {
   attachedRunKey: string | null;
 }): ActiveThreadRun {
   const { current, incoming, attachedRunKey } = input;
+  // A run we attach/drive is owned by the local streaming flow, whose state is
+  // fresher than a room snapshot (which can momentarily lag). Never let the room
+  // modify it — return our local copy untouched.
+  if (attachedRunKey === incoming.idempotencyKey) {
+    return current ?? incoming;
+  }
   if (current && current.idempotencyKey === incoming.idempotencyKey) {
     return current.status === incoming.status
       ? current
       : { ...current, status: incoming.status };
   }
-  if (attachedRunKey === incoming.idempotencyKey) {
-    return current ?? incoming;
-  }
   return incoming;
 }
 
+/**
+ * When the room reports no active run, should we clear the local run here? Only
+ * if THIS tab does not locally own its token stream. A run we drive or attach is
+ * cleared by that local lifecycle; a run we merely adopted from the room (another
+ * member's, or our own from a second tab) has no such lifecycle, so it must be
+ * cleared here or chatExecutionState stays "executing" and the queue never drains.
+ */
+export function shouldClearAdoptedRun(input: {
+  isLocallyDriven: boolean;
+  isAttached: boolean;
+}): boolean {
+  return !input.isLocallyDriven && !input.isAttached;
+}
+
 type UseThreadRoomInput = {
-  workspaceId: string | null;
+  workspaceId: string | null | undefined;
   threadId: string;
-  currentUserId: string | null;
   activeThreadRunRef: RefObject<ActiveThreadRun | null>;
   attachedRunKeyRef: RefObject<string | null>;
+  // Whether THIS tab drives a run's token stream. Used to decide when a
+  // room-reported "no active run" should clear the local run — a run we don't
+  // locally drive (another member's, or our own from a second tab) must be
+  // cleared here, or the send-queue would never drain.
+  isStreamingRef: RefObject<boolean>;
   setActiveThreadRun: (
     updater: (current: ActiveThreadRun | null) => ActiveThreadRun | null,
   ) => void;
@@ -93,9 +114,9 @@ type UseThreadRoomInput = {
 export function useThreadRoom({
   workspaceId,
   threadId,
-  currentUserId,
   activeThreadRunRef,
   attachedRunKeyRef,
+  isStreamingRef,
   setActiveThreadRun,
   clearRunIfCurrent,
   loadThreadMessages,
@@ -103,17 +124,17 @@ export function useThreadRoom({
   // Latest callbacks/refs read at fire time so the subscription only re-opens on
   // thread/workspace change, never on a render-to-render identity change.
   const latestRef = useRef({
-    currentUserId,
     activeThreadRunRef,
     attachedRunKeyRef,
+    isStreamingRef,
     setActiveThreadRun,
     clearRunIfCurrent,
     loadThreadMessages,
   });
   latestRef.current = {
-    currentUserId,
     activeThreadRunRef,
     attachedRunKeyRef,
+    isStreamingRef,
     setActiveThreadRun,
     clearRunIfCurrent,
     loadThreadMessages,
@@ -129,6 +150,11 @@ export function useThreadRoom({
     let reconnectAttempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    // Latest-wins guard: a run's terminal frame fires the last reconcile, and
+    // its (null) result must win even if an earlier "running" fetch resolves
+    // afterward — otherwise a stale response re-adopts a finished run and the
+    // send-queue never drains.
+    let reconcileSeq = 0;
 
     // Only refetch messages while idle — never reset the list mid-stream, which
     // would drop an in-flight assistant render for the driver or a follower.
@@ -145,6 +171,7 @@ export function useThreadRoom({
     };
 
     const reconcileRun = async () => {
+      const seq = ++reconcileSeq;
       let summary: RoomActiveRun | null;
       try {
         const result = await contentClient.getActiveThreadRun(
@@ -155,23 +182,28 @@ export function useThreadRoom({
       } catch {
         return;
       }
-      if (closed) {
+      // Drop a stale/out-of-order response: only the newest-issued reconcile
+      // applies its result.
+      if (closed || seq !== reconcileSeq) {
         return;
       }
       const deps = latestRef.current;
       if (!summary) {
-        // No active run server-side. Clear an adopted remote run; leave our own
-        // and attached runs to the existing local lifecycle. Then pull the turn
-        // that just finished.
+        // No active run server-side. Clear the local run unless THIS tab drives
+        // its token stream (streaming or attached) — that lifecycle clears it
+        // itself. This drains another member's run AND our own run adopted from
+        // a second tab; leaving it set would wedge chatExecutionState at
+        // "executing" and the send-queue would never fire.
         const current = deps.activeThreadRunRef.current;
-        if (current) {
-          const isOurs =
-            current.userId == null || current.userId === deps.currentUserId;
-          const isAttached =
-            deps.attachedRunKeyRef.current === current.idempotencyKey;
-          if (!isOurs && !isAttached) {
-            deps.clearRunIfCurrent(current.idempotencyKey);
-          }
+        if (
+          current &&
+          shouldClearAdoptedRun({
+            isLocallyDriven: deps.isStreamingRef.current === true,
+            isAttached:
+              deps.attachedRunKeyRef.current === current.idempotencyKey,
+          })
+        ) {
+          deps.clearRunIfCurrent(current.idempotencyKey);
         }
         scheduleMessageRefetch();
         return;
@@ -276,6 +308,5 @@ export function useThreadRoom({
       }
     };
     // Only re-open on thread/workspace change; everything else is read from refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, threadId]);
 }

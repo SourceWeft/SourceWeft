@@ -31,10 +31,17 @@ function toSseFrame(frame: RoomFrame): string {
 
 export async function* streamThreadRoom(input: {
   threadId: string;
+  signal?: AbortSignal;
 }): AsyncGenerator<string> {
   const pending: RoomFrame[] = [];
   let wake: (() => void) | null = null;
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const resumeWait = () => {
+    const resume = wake;
+    wake = null;
+    resume?.();
+  };
 
   const push = (frame: RoomFrame) => {
     if (pending.length >= MAX_PENDING) {
@@ -43,10 +50,21 @@ export async function* streamThreadRoom(input: {
     } else {
       pending.push(frame);
     }
-    const resume = wake;
-    wake = null;
-    resume?.();
+    resumeWait();
   };
+
+  // Registered once (not per iteration) so listeners never accumulate. On abort
+  // (client disconnect, via createSseResponse's onCancel) it wakes the parked
+  // await so the loop exits into `finally` immediately instead of lingering up
+  // to a heartbeat interval.
+  let aborted = input.signal?.aborted ?? false;
+  const onAbort = () => {
+    aborted = true;
+    resumeWait();
+  };
+  if (input.signal && !aborted) {
+    input.signal.addEventListener("abort", onAbort, { once: true });
+  }
 
   const unsubscribe = notifyHub.subscribe(input.threadId, {
     id: randomUUID(),
@@ -70,11 +88,14 @@ export async function* streamThreadRoom(input: {
 
   try {
     yield toSseFrame({ type: "ready" });
-    while (true) {
+    while (!aborted) {
       let frame = pending.shift();
       while (frame) {
         yield toSseFrame(frame);
         frame = pending.shift();
+      }
+      if (aborted) {
+        break;
       }
 
       const outcome = await new Promise<"event" | "beat">((resolve) => {
@@ -86,11 +107,15 @@ export async function* streamThreadRoom(input: {
         heartbeatTimer = null;
       }
       wake = null;
+      if (aborted) {
+        break;
+      }
       if (outcome === "beat") {
         yield ": heartbeat\n\n";
       }
     }
   } finally {
+    input.signal?.removeEventListener("abort", onAbort);
     if (heartbeatTimer) {
       clearTimeout(heartbeatTimer);
     }

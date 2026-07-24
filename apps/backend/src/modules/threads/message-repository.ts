@@ -226,8 +226,15 @@ export async function listMessageRecordPageByThread(input: {
     )
     .limit(input.limit + 1);
 
+  const hasMore = rows.length > input.limit;
   const pageRows = rows.slice(0, input.limit);
-  const nextRow = rows[input.limit] ?? null;
+  // The cursor must be the last row we actually deliver, NOT the has-more probe
+  // row at index `limit`: the strict gt/lt predicate would skip the probe row on
+  // the next page and it would be lost at every boundary. Capture it before the
+  // in-place reverse below mutates pageRows.
+  const boundaryRow = hasMore
+    ? (pageRows[pageRows.length - 1] ?? null)
+    : null;
 
   // Both directions return items in ascending (chronological) order; backward
   // mode fetched descending, so it reverses.
@@ -235,7 +242,7 @@ export async function listMessageRecordPageByThread(input: {
 
   return {
     items: orderedRows.map((row) => mapMessage(row, input.include)),
-    nextCursor: nextRow ? encodeMessageCursor(nextRow) : null,
+    nextCursor: boundaryRow ? encodeMessageCursor(boundaryRow) : null,
   };
 }
 

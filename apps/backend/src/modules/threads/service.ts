@@ -642,6 +642,7 @@ class ContentThreadService {
     workspaceId: string;
     threadId: string;
     userId: string;
+    signal?: AbortSignal;
   }): Promise<AsyncGenerator<string>> {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
@@ -658,7 +659,7 @@ class ContentThreadService {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
-    return streamThreadRoom({ threadId: thread.id });
+    return streamThreadRoom({ threadId: thread.id, signal: input.signal });
   }
 
   async getMessageImageFile(input: {
