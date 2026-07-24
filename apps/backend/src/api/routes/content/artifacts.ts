@@ -1,11 +1,30 @@
 import type { Hono } from "hono";
+import {
+  createArtifactShareRequestSchema,
+  updateArtifactShareRequestSchema,
+} from "@sourceweft/contracts";
 import { contentArtifactsService } from "../../../modules/artifacts";
+import { sharingService } from "../../../modules/sharing";
+import type { ShareMutationResult } from "../../../modules/sharing";
 import {
   getSessionUserId,
   requireSession,
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
-import { requireRouteParam } from "./helpers";
+import { ensureObjectBody, requireRouteParam } from "./helpers";
+
+/** `not_found` hides existence from callers who lack access to the artifact. */
+function unwrapShareResult<T>(result: ShareMutationResult<T>): T {
+  if (result.ok) {
+    return result.value;
+  }
+  if (result.reason === "forbidden") {
+    throw ApiError.forbidden(
+      "Only the artifact's creator or a workspace admin can share it.",
+    );
+  }
+  throw new ApiError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+}
 
 export function registerArtifactRoutes(app: Hono) {
   app.get("/artifacts", async (c) => {
@@ -151,5 +170,88 @@ export function registerArtifactRoutes(app: Hono) {
     );
     c.header("Cache-Control", "private, max-age=60");
     return c.body(result.body);
+  });
+
+  app.get("/artifacts/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await sharingService.getArtifactShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { share: unwrapShareResult(result) });
+  });
+
+  app.post("/artifacts/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = createArtifactShareRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => ({}))),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await sharingService.shareArtifact({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      noindex: parsed.data.noindex,
+      expiresAt: parsed.data.expiresAt,
+    });
+
+    return ApiResponse.success(c, { share: unwrapShareResult(result) }, 201);
+  });
+
+  app.patch("/artifacts/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = updateArtifactShareRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => ({}))),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await sharingService.updateArtifactShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      noindex: parsed.data.noindex,
+      expiresAt: parsed.data.expiresAt,
+    });
+
+    return ApiResponse.success(c, { share: unwrapShareResult(result) });
+  });
+
+  app.delete("/artifacts/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await sharingService.revokeArtifactShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    unwrapShareResult(result);
+    return ApiResponse.success(c, { ok: true });
   });
 }

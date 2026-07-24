@@ -477,6 +477,53 @@ export class ContentArtifactsService {
     };
   }
 
+  /**
+   * File bytes for an artifact that a *share* has already authorized. There is
+   * no per-user check here on purpose: the caller (the public share route) has
+   * validated a live share token, which is the access grant. Never call this
+   * for an artifact the caller has not authorized.
+   */
+  async getSharedArtifactFile(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ) {
+    if (!artifact.storageKey) {
+      throw new ContentError(
+        400,
+        "ARTIFACT_FILE_MISSING",
+        "Artifact has no stored file",
+      );
+    }
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    return {
+      body: await downloadArtifactObject({
+        bucket: artifact.storageBucket,
+        key: artifact.storageKey,
+      }),
+      contentType: resolveArtifactContentType(artifact, handler),
+      fileName: resolveArtifactFileName(artifact, handler),
+      renderer: resolveArtifactRenderer(artifact, handler),
+    };
+  }
+
+  /** Preview-image bytes for a share-authorized artifact, or null if none. */
+  async getSharedArtifactPreview(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ) {
+    const previewImage = resolveArtifactPreviewImage(artifact);
+    if (!previewImage) {
+      return null;
+    }
+    return {
+      body: await downloadArtifactObject({
+        bucket: previewImage.storageBucket,
+        key: previewImage.storageKey,
+      }),
+      contentType: previewImage.contentType,
+      fileName: previewImage.fileName,
+    };
+  }
+
   async getArtifactAsset(input: {
     workspaceId: string;
     artifactId: string;

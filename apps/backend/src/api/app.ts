@@ -21,6 +21,7 @@ import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
+import { registerPublicShareRoutes } from "./routes/public-shares";
 import { registerMarketRoutes } from "./routes/market";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerUserSettingsRoutes } from "./routes/user-settings";
@@ -111,6 +112,7 @@ export function createApp() {
   registerContentRoutes(app);
   registerMarketRoutes(app);
   registerJobRoutes(app);
+  registerPublicShareRoutes(app);
   registerTeamLlmObservabilityRoutes(app);
 
   app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
