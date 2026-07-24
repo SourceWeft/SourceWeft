@@ -1,0 +1,2 @@
+ALTER TABLE "artifacts" ADD COLUMN "visibility" text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
+ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_visibility_check" CHECK ("artifacts"."visibility" in ('private', 'workspace'));

@@ -145,6 +145,20 @@ type ThreadModelSettings = {
 export type ModelGatewayRoutingStrategy = "priority" | "weighted-random";
 type MessageRole = (typeof messageRoleSchema.options)[number];
 type ThreadVisibility = "private" | "workspace" | "public_link";
+
+/**
+ * Row-level visibility for content that lives in a shared workspace.
+ *
+ * `private` — only the creator sees it, even from organization admins.
+ * `workspace` — every member of the workspace sees it.
+ *
+ * A single-member workspace (every personal one, and every team workspace
+ * before a second member joins) cannot observe the difference, which is why
+ * the migration can default existing rows to `workspace` without exposing
+ * anything: exposure needs a second member, and content that predates sharing
+ * has none.
+ */
+type ContentVisibility = "private" | "workspace";
 type NoteType = "manual" | "saved_response" | "generated";
 type ArtifactType = (typeof artifactTypeSchema.options)[number];
 type ArtifactStatus = (typeof artifactStatusSchema.options)[number];
@@ -4218,6 +4232,10 @@ export const artifacts = pgTable(
       .default(emptyJsonObject),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    visibility: text("visibility")
+      .$type<ContentVisibility>()
+      .notNull()
+      .default("workspace"),
     createdBy: text("created_by"),
     completedAt: timestamp("completed_at", {
       withTimezone: true,
@@ -4243,6 +4261,10 @@ export const artifacts = pgTable(
     check(
       "artifacts_status_check",
       sql`${table.status} in (${sqlEnumList(artifactStatusSchema.options)})`,
+    ),
+    check(
+      "artifacts_visibility_check",
+      sql`${table.visibility} in ('private', 'workspace')`,
     ),
     index("artifacts_workspace_status_created_idx").on(
       table.workspaceId,
@@ -4492,7 +4514,10 @@ export const marketItems = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
-    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
   },
   (table) => [
     uniqueIndex("market_items_identifier_uq").on(table.identifier),
@@ -4543,7 +4568,10 @@ export const marketItemVersions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
-    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
   },
   (table) => [
     uniqueIndex("market_item_versions_item_version_uq").on(

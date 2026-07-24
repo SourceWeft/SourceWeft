@@ -92,6 +92,13 @@
       "when": 1784802777897,
       "tag": "0012_smiling_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784844383255,
+      "tag": "0013_add_artifact_visibility",
+      "breakpoints": true
     }
   ]
 }
