@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
-import { ArrowLeft, Download, ExternalLink, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, Download, ExternalLink, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
   artifactTypeLabel,
@@ -57,6 +58,10 @@ export function ArtifactPreviewPanel({
     artifact.capabilities?.canDownloadFile ?? Boolean(downloadUrl);
   const canUseDefaultOpen = !renderer?.blocksDefaultOpen;
   const canUseDefaultDownload = !renderer?.blocksDefaultDownload;
+  const [shareOpen, setShareOpen] = useState(false);
+  // Sharing publishes a finished artifact publicly; only offer it once the
+  // artifact is ready and we know which workspace it lives in.
+  const canShare = artifact.status === "ready" && Boolean(workspaceId);
 
   useEffect(() => {
     if (!onClose) {
@@ -158,6 +163,18 @@ export function ArtifactPreviewPanel({
             </div>
           )}
           <div className="flex shrink-0 items-center gap-1">
+            {canShare ? (
+              <Button
+                onClick={() => setShareOpen(true)}
+                size="icon-xs"
+                title="Share artifact"
+                type="button"
+                variant="ghost"
+              >
+                <Share2 className="size-3.5" />
+                <span className="sr-only">Share artifact</span>
+              </Button>
+            ) : null}
             <Button
               disabled={!pageUrl || !canOpenFile || !canUseDefaultOpen}
               onClick={handleOpenExternal}
@@ -170,7 +187,9 @@ export function ArtifactPreviewPanel({
               <span className="sr-only">Open artifact in new tab</span>
             </Button>
             <Button
-              disabled={!downloadUrl || !canDownloadFile || !canUseDefaultDownload}
+              disabled={
+                !downloadUrl || !canDownloadFile || !canUseDefaultDownload
+              }
               onClick={handleDownload}
               size="icon-xs"
               title="Download artifact"
@@ -219,6 +238,16 @@ export function ArtifactPreviewPanel({
           </div>
         ) : null}
       </div>
+
+      {canShare && workspaceId ? (
+        <ShareArtifactDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          workspaceId={workspaceId}
+          artifactId={artifact.id}
+          title={title}
+        />
+      ) : null}
     </section>
   );
 }
