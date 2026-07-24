@@ -1,6 +1,7 @@
 import type { Client } from "pg";
 import { createDedicatedClient } from "@sourceweft/db";
 import { logger } from "../logger";
+import { metrics } from "../metrics";
 import { THREAD_EVENTS_CHANNEL, type ThreadEventPayload } from "./types";
 
 const BACKOFF_MIN_MS = 250;
@@ -85,6 +86,7 @@ export class ListenConnection {
       }
       this.client = client;
       this.connectedAt = Date.now();
+      metrics.gauge("notify_hub.listener.up", 1);
       logger.info("NotifyHub is listening for thread events");
     } catch (error) {
       logger.warn("NotifyHub listen connection failed; will retry", {
@@ -101,6 +103,8 @@ export class ListenConnection {
       return;
     }
     this.client = null;
+    metrics.gauge("notify_hub.listener.up", 0);
+    metrics.inc("notify_hub.listener.down");
     if (this.stopped) {
       return;
     }
@@ -125,6 +129,7 @@ export class ListenConnection {
     if (this.stopped || this.reconnectTimer) {
       return;
     }
+    metrics.inc("notify_hub.listener.reconnects");
     const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** this.attempt);
     this.attempt += 1;
     this.reconnectTimer = setTimeout(() => {

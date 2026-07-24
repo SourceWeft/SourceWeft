@@ -70,6 +70,42 @@ test("serializeThreadEvent round-trips a normal payload", () => {
   assert.deepEqual(JSON.parse(serializeThreadEvent(input)), input);
 });
 
+test("reserve holds a slot, attach swaps it in, release frees it (idempotent)", () => {
+  const hub = new NotifyHub();
+  const result = hub.reserve("thread-1");
+  assert.ok(result.ok);
+  // The placeholder holds the counted slot before the real subscriber attaches.
+  assert.equal(hub.subscriberCount("thread-1"), 1);
+
+  const delivered: string[] = [];
+  result.reservation.attach({ id: "real", onEvent: () => delivered.push("x") });
+  // Swap keeps the count constant.
+  assert.equal(hub.subscriberCount("thread-1"), 1);
+
+  hub.dispatch(payload({ threadId: "thread-1" }));
+  assert.deepEqual(delivered, ["x"]);
+
+  result.reservation.release();
+  assert.equal(hub.subscriberCount("thread-1"), 0);
+  // Double release must not go negative or throw.
+  result.reservation.release();
+  assert.equal(hub.subscriberCount("thread-1"), 0);
+});
+
+test("reserve rejects a thread once it hits the per-thread cap (default 200)", () => {
+  const hub = new NotifyHub();
+  for (let i = 0; i < 200; i += 1) {
+    assert.ok(hub.reserve("thread-1").ok);
+  }
+  const over = hub.reserve("thread-1");
+  assert.equal(over.ok, false);
+  if (!over.ok) {
+    assert.equal(over.reason, "per_thread");
+  }
+  // A different thread is unaffected by another thread's saturation.
+  assert.ok(hub.reserve("thread-2").ok);
+});
+
 test("serializeThreadEvent rejects an over-limit payload", () => {
   // A payload should never carry content; if one ever does, fail loudly rather
   // than let Postgres truncate/reject it silently.

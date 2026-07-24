@@ -12,6 +12,7 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 import { toast } from "sonner";
 import { authClient } from "../../../../../lib/auth-client";
 import {
+  planQueuedSendRetry,
   queuedSendPreview,
   shouldQueueSend,
   type QueuedSend,
@@ -58,9 +59,16 @@ import {
 } from "./use-thread-stream-action";
 import { useThreadVersioning } from "./use-thread-versioning";
 import {
+  createDurableRunKey,
   getDisplayErrorMessage,
   throwStreamRequestError,
 } from "./message-normalizers";
+
+// Client-orchestrated turn-taking: when two clients' queued sends auto-fire on
+// the same free window, the 409 loser re-queues (front, stable key) with a small
+// backoff so it never becomes a tight loop, and drops after a bounded retry.
+const QUEUED_SEND_RETRY_BACKOFF_MS = 500;
+const QUEUED_SEND_MAX_ATTEMPTS = 8;
 import {
   collectPendingArtifacts,
 } from "../../_components/chat-canvas/artifact-progress-tracker";
@@ -286,6 +294,7 @@ export function useThreadPageController({
     ((input: ThreadStreamActionInput) => Promise<void>) | null
   >(null);
   const {
+    appendNewerThreadMessages,
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,
@@ -295,6 +304,7 @@ export function useThreadPageController({
     setMessages,
     setStreamingAssistantSnapshot,
   } = useThreadMessages({
+    activeThreadRunRef,
     attachedRunKeyRef,
     clearTerminalLocalRunState,
     setActiveThreadRun,
@@ -529,7 +539,7 @@ export function useThreadPageController({
     isStreamingRef,
     setActiveThreadRun,
     clearRunIfCurrent,
-    loadThreadMessages,
+    appendNewerMessages: appendNewerThreadMessages,
     onPresence,
     onTyping,
   });
@@ -543,6 +553,10 @@ export function useThreadPageController({
   const pendingSendsRef = useRef<QueuedSend[]>([]);
   const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([]);
   const queuedSendIdRef = useRef(0);
+  // Until this timestamp the auto-send effect must not fire — the load-bearing
+  // guard that turns a 409 re-queue into a paced retry rather than a hot loop.
+  const retryBackoffUntilRef = useRef(0);
+  const [retryTick, setRetryTick] = useState(0);
 
   const { streamThreadAction } = useThreadStreamAction({
     catalogKindEnabled,
@@ -769,11 +783,49 @@ export function useThreadPageController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingArtifactIds.join("\0"), refreshArtifactStatuses, workspaceId]);
 
+  // A queued send that hit the server's 409 backstop (another client won the
+  // free window). Re-queue it at the FIFO front with the SAME idempotency key,
+  // bump attempts, and back off so the auto-send effect paces the retry.
+  const requeueSendAfterRunActive = useCallback((queued: QueuedSend) => {
+    const plan = planQueuedSendRetry({
+      queued,
+      maxAttempts: QUEUED_SEND_MAX_ATTEMPTS,
+    });
+    if ("dropped" in plan) {
+      toast.error("The chat stayed busy — please try again.");
+      return;
+    }
+    // Front-insert so the loser goes next (FIFO fairness).
+    pendingSendsRef.current = [plan.requeued, ...pendingSendsRef.current];
+    setQueuedSends(pendingSendsRef.current);
+    retryBackoffUntilRef.current = Date.now() + QUEUED_SEND_RETRY_BACKOFF_MS;
+    window.setTimeout(
+      () => setRetryTick((tick) => tick + 1),
+      QUEUED_SEND_RETRY_BACKOFF_MS,
+    );
+  }, []);
+
   const handleSendMessage = useCallback(
     async (
       input: ChatSendInput,
-      options?: { allowWhileStreaming?: boolean },
+      options?: {
+        allowWhileStreaming?: boolean;
+        queuedSendId?: string;
+        durableRunKey?: string;
+        attempts?: number;
+      },
     ) => {
+      // Set only when replaying a queued send: on a 409 re-queue the same item.
+      const onRunAlreadyActive =
+        options?.durableRunKey && options.queuedSendId
+          ? () =>
+              requeueSendAfterRunActive({
+                id: options.queuedSendId as string,
+                input,
+                durableRunKey: options.durableRunKey as string,
+                attempts: options.attempts ?? 0,
+              })
+          : undefined;
       const text = input.content.trim();
       const images = input.images ?? [];
       if (
@@ -795,6 +847,8 @@ export function useThreadPageController({
         const queued: QueuedSend = {
           id: `queued-${queuedSendIdRef.current}`,
           input,
+          durableRunKey: createDurableRunKey(),
+          attempts: 0,
         };
         pendingSendsRef.current = [...pendingSendsRef.current, queued];
         setQueuedSends(pendingSendsRef.current);
@@ -900,6 +954,8 @@ export function useThreadPageController({
           searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
+          durableRunKey: options?.durableRunKey,
+          onRunAlreadyActive,
         });
         return;
       }
@@ -915,6 +971,8 @@ export function useThreadPageController({
         command: input.command,
         invocation: input.invocation,
         searchEnabled,
+        durableRunKey: options?.durableRunKey,
+        onRunAlreadyActive,
       });
     },
     [
@@ -934,6 +992,7 @@ export function useThreadPageController({
       searchEnabled,
       selectedModels.llm,
       pendingLatestVersionSelectionRef,
+      requeueSendAfterRunActive,
       setActiveVersionByGroup,
       streamThreadAction,
     ],
@@ -951,16 +1010,20 @@ export function useThreadPageController({
     if (
       chatExecutionState === "idle" &&
       !hasActivelyRunningToolWorkState &&
-      next
+      next &&
+      Date.now() >= retryBackoffUntilRef.current
     ) {
       const rest = pendingSendsRef.current.slice(1);
       pendingSendsRef.current = rest;
       setQueuedSends(rest);
       void handleSendMessageRef.current(next.input, {
         allowWhileStreaming: true,
+        queuedSendId: next.id,
+        durableRunKey: next.durableRunKey,
+        attempts: next.attempts,
       });
     }
-  }, [chatExecutionState, hasActivelyRunningToolWorkState]);
+  }, [chatExecutionState, hasActivelyRunningToolWorkState, retryTick]);
 
   const cancelQueuedSend = useCallback((id: string) => {
     pendingSendsRef.current = pendingSendsRef.current.filter(

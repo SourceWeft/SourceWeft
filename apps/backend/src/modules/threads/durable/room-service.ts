@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { notifyHub, publishThreadEvent } from "../../../shared/notify-hub";
+import {
+  publishThreadEvent,
+  type RoomReservation,
+} from "../../../shared/notify-hub";
+import { metrics } from "../../../shared/metrics";
 import { dropPresence, readPresence, touchPresence } from "./presence-store";
 
 /**
@@ -39,6 +43,7 @@ export async function* streamThreadRoom(input: {
   threadId: string;
   workspaceId: string;
   viewerUserId: string;
+  reservation: RoomReservation;
   checkAccess: () => Promise<boolean>;
   signal?: AbortSignal;
 }): AsyncGenerator<string> {
@@ -50,6 +55,9 @@ export async function* streamThreadRoom(input: {
   // Set when a presence_changed wake-up arrives; the loop (not the sync onEvent)
   // does the async Redis read, coalescing a burst into one roster snapshot.
   let presenceDirty = false;
+  // Set on an access_changed wake-up; the loop re-runs checkAccess and evicts if
+  // the viewer no longer qualifies (sub-second, vs. the per-beat backstop).
+  let accessDirty = false;
 
   const resumeWait = () => {
     const resume = wake;
@@ -72,6 +80,7 @@ export async function* streamThreadRoom(input: {
   const emitPresenceFrame = async (): Promise<string | null> => {
     try {
       const here = await readPresence(threadId);
+      metrics.observe("presence.roster.size", here.length);
       return toSseFrame({ type: "presence", here });
     } catch {
       return null;
@@ -106,11 +115,18 @@ export async function* streamThreadRoom(input: {
     input.signal.addEventListener("abort", onAbort, { once: true });
   }
 
-  const unsubscribe = notifyHub.subscribe(threadId, {
+  // Attach the real subscriber into the admission slot reserved by
+  // openThreadRoom (the capped path). Released in `finally`.
+  input.reservation.attach({
     id: connId,
     onEvent: (payload) => {
       if (payload.kind === "presence_changed") {
         presenceDirty = true;
+        resumeWait();
+        return;
+      }
+      if (payload.kind === "access_changed") {
+        accessDirty = true;
         resumeWait();
         return;
       }
@@ -139,6 +155,7 @@ export async function* streamThreadRoom(input: {
   });
 
   try {
+    metrics.inc("room.connects");
     yield toSseFrame({ type: "ready" });
 
     // Join, hand the client the current roster, and tell peers to refresh.
@@ -162,6 +179,19 @@ export async function* streamThreadRoom(input: {
       }
       if (aborted) {
         break;
+      }
+
+      if (accessDirty) {
+        accessDirty = false;
+        // A transient error is not a revocation — ride through and let the beat
+        // re-check; a definitive false evicts now.
+        const allowed = await checkAccess().catch(() => true);
+        if (!allowed) {
+          break;
+        }
+        if (aborted) {
+          break;
+        }
       }
 
       if (presenceDirty) {
@@ -200,8 +230,9 @@ export async function* streamThreadRoom(input: {
       await new Promise<void>((resolve) => {
         wake = () => resolve();
         // Observe a flag set during a prior await (when wake was null), so a
-        // roster change isn't deferred up to a full heartbeat.
-        if (aborted || presenceDirty || pending.length > 0) {
+        // roster change OR a pending access revocation isn't deferred up to a
+        // full heartbeat.
+        if (aborted || accessDirty || presenceDirty || pending.length > 0) {
           resolve();
           return;
         }
@@ -221,7 +252,8 @@ export async function* streamThreadRoom(input: {
     if (heartbeatTimer) {
       clearTimeout(heartbeatTimer);
     }
-    unsubscribe();
+    input.reservation.release();
+    metrics.inc("room.disconnects");
     void dropPresence(threadId, viewerUserId, connId).catch(() => undefined);
     broadcastPresenceChanged();
   }

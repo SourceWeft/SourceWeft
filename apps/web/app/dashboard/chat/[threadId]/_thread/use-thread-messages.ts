@@ -15,16 +15,21 @@ import {
   dropStaleActiveThreadRunMessages,
   findActiveThreadRunMessage,
   mapThreadMessagesToChatMessages,
+  newestServerCursor,
   shouldRetryThreadMessagesLoad,
   THREAD_MESSAGES_INITIAL_PAGE_SIZE,
   THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS,
   waitForThreadMessagesRetry,
 } from "./message-normalizers";
+
+// Caps a reconnect/gap catch-up; a larger gap is finished by the next frame.
+const MAX_INCREMENTAL_DRAIN_PAGES = 10;
 import type {
   ThreadStreamActionInput,
 } from "./use-thread-stream-action";
 
 type UseThreadMessagesInput = {
+  activeThreadRunRef: RefObject<ActiveThreadRun | null>;
   attachedRunKeyRef: RefObject<string | null>;
   clearTerminalLocalRunState: () => void;
   setActiveThreadRun: (run: ActiveThreadRun | null) => void;
@@ -44,6 +49,7 @@ function normalizeActiveThreadRun(run: ActiveThreadRun): ActiveThreadRun {
 }
 
 export function useThreadMessages({
+  activeThreadRunRef,
   attachedRunKeyRef,
   clearTerminalLocalRunState,
   setActiveThreadRun,
@@ -62,6 +68,11 @@ export function useThreadMessages({
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const loadedThreadMessagesKeyRef = useRef<string | null>(null);
   const threadMessagesLoadGenerationRef = useRef(0);
+  // Forward-cursor watermark of the newest RAW server message rendered, used to
+  // incrementally append newer messages on a room 'message' frame instead of
+  // replacing the whole list. Sourced only from server responses.
+  const newestMessageCursorRef = useRef<string | null>(null);
+  const isAppendingRef = useRef(false);
 
   const loadThreadMessages = useCallback(async () => {
     const loadGeneration = threadMessagesLoadGenerationRef.current + 1;
@@ -69,6 +80,7 @@ export function useThreadMessages({
 
     if (!workspaceId) {
       loadedThreadMessagesKeyRef.current = null;
+      newestMessageCursorRef.current = null;
       setMessages([]);
       setStreamingAssistantSnapshot(null);
       clearTerminalLocalRunState();
@@ -101,6 +113,11 @@ export function useThreadMessages({
         }
 
         loadedThreadMessagesKeyRef.current = threadMessagesKey;
+        // Watermark from the raw server page (the newest 80), never from
+        // rendered/optimistic messages.
+        newestMessageCursorRef.current = newestServerCursor(
+          messagesResult.items,
+        );
         setOlderMessagesCursor(messagesResult.nextCursor ?? null);
         const runningRun = activeRun ? normalizeActiveThreadRun(activeRun) : null;
         let runningAssistant:
@@ -175,6 +192,85 @@ export function useThreadMessages({
     workspaceId,
   ]);
 
+  // Incremental forward sync: on a room 'message' frame, append messages newer
+  // than the watermark instead of replacing the whole list. Idle-only (the
+  // caller gates on no active run), single-flight, bounded, generation-guarded,
+  // with a full-reload fallback. No watermark yet → fall back to a full load.
+  const appendNewerThreadMessages = useCallback(async () => {
+    if (!workspaceId) {
+      return;
+    }
+    // Idle-only: never merge into the list while a run is active (an optimistic
+    // send in flight), or a committed server copy could duplicate/reorder the
+    // temp rows until stream reconciliation. The next post-run frame re-drains.
+    if (activeThreadRunRef.current != null) {
+      return;
+    }
+    const cursor = newestMessageCursorRef.current;
+    if (!cursor) {
+      await loadThreadMessages();
+      return;
+    }
+    if (isAppendingRef.current) {
+      return;
+    }
+    isAppendingRef.current = true;
+    const loadGeneration = threadMessagesLoadGenerationRef.current;
+    try {
+      let after = cursor;
+      for (let page = 0; page < MAX_INCREMENTAL_DRAIN_PAGES; page += 1) {
+        const result = await contentClient.listThreadMessages(
+          workspaceId,
+          threadId,
+          {
+            after,
+            include: "metadata,contentJson,citations",
+            limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
+          },
+        );
+        // A thread switch (or full reload) superseded us mid-drain.
+        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+        // A run started mid-drain: bail WITHOUT advancing the watermark so the
+        // unmerged page re-drains once idle again (advancing + skipping the
+        // merge would drop those messages until a full reload).
+        if (activeThreadRunRef.current != null) {
+          return;
+        }
+        if (result.items.length === 0) {
+          break;
+        }
+        const nextWatermark = newestServerCursor(result.items);
+        if (nextWatermark) {
+          newestMessageCursorRef.current = nextWatermark;
+          after = nextWatermark;
+        }
+        const newItems = mapThreadMessagesToChatMessages(result.items);
+        setMessages((current) => {
+          // Server copies win on id collision (listed last in the Map).
+          const mergedById = new Map(
+            [...current, ...newItems].map((message) => [message.id, message]),
+          );
+          return dropStaleActiveThreadRunMessages(
+            Array.from(mergedById.values()).sort(
+              (left, right) =>
+                new Date(left.createdAt).getTime() -
+                new Date(right.createdAt).getTime(),
+            ),
+          );
+        });
+        if (!result.nextCursor) {
+          break;
+        }
+      }
+    } catch {
+      await loadThreadMessages();
+    } finally {
+      isAppendingRef.current = false;
+    }
+  }, [activeThreadRunRef, loadThreadMessages, threadId, workspaceId]);
+
   const loadOlderThreadMessages = useCallback(async () => {
     if (!workspaceId || !olderMessagesCursor || isLoadingOlderMessages) {
       return;
@@ -216,6 +312,7 @@ export function useThreadMessages({
   }, [isLoadingOlderMessages, olderMessagesCursor, threadId, workspaceId]);
 
   return {
+    appendNewerThreadMessages,
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,

@@ -47,7 +47,8 @@ import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
 import { streamThreadRoom } from "./durable/room-service";
 import { readPresence } from "./durable/presence-store";
 import { typingRateLimiter } from "./durable/typing-rate-limit";
-import { publishThreadEvent } from "../../shared/notify-hub";
+import { notifyHub, publishThreadEvent } from "../../shared/notify-hub";
+import { metrics } from "../../shared/metrics";
 import {
   filterOrganizationMemberIds,
   findUserIdentitiesByIds,
@@ -398,6 +399,15 @@ class ContentThreadService {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
+    // Sub-second eviction: any live room subscriber re-checks canViewThread and
+    // ends its stream if it no longer qualifies (e.g. flipped to private). The
+    // per-beat re-auth is the backstop if this NOTIFY is missed.
+    void publishThreadEvent({
+      threadId: input.threadId,
+      workspaceId: workspace.id,
+      kind: "access_changed",
+    }).catch(() => undefined);
+
     // Artifacts inherit thread visibility, so re-sharing/hiding a thread re-labels its artifacts.
     await updateArtifactsVisibilityForThread({
       teamId: workspace.organizationId,
@@ -693,10 +703,23 @@ class ContentThreadService {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
+    // Admission AFTER the access gate, so an unauthorized viewer always gets 404
+    // (never a 503 capacity oracle for a thread they can't see). At capacity the
+    // client falls back to low-frequency polling.
+    const reserved = notifyHub.reserve(thread.id);
+    if (!reserved.ok) {
+      throw new ContentError(
+        503,
+        "THREAD_ROOM_AT_CAPACITY",
+        "This thread's live room is at capacity",
+      );
+    }
+
     return streamThreadRoom({
       threadId: thread.id,
       workspaceId: workspace.id,
       viewerUserId: input.userId,
+      reservation: reserved.reservation,
       signal: input.signal,
       // Re-run the FULL open gate each beat so a viewer who loses access
       // mid-stream (removed from the workspace, or the thread flipped to
@@ -749,9 +772,11 @@ class ContentThreadService {
     }
 
     if (!typingRateLimiter.allow(input.userId, thread.id)) {
+      metrics.inc("typing.dropped");
       return;
     }
 
+    metrics.inc("typing.broadcasts");
     void publishThreadEvent({
       threadId: thread.id,
       workspaceId: workspace.id,

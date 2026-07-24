@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  planQueuedSendRetry,
   queuedSendPreview,
   shouldQueueSend,
   type QueuedSend,
@@ -9,6 +10,15 @@ import type { ChatSendInput } from "../../_components/chat-canvas";
 
 function sendInput(overrides: Partial<ChatSendInput> = {}): ChatSendInput {
   return { content: "hello", ...overrides };
+}
+
+function queued(id: string, attempts = 0): QueuedSend {
+  return {
+    id,
+    input: sendInput({ content: id }),
+    durableRunKey: `key-${id}`,
+    attempts,
+  };
 }
 
 test("an idle thread sends immediately (no queue)", () => {
@@ -43,7 +53,7 @@ test("FIFO: sends fire in the order they were queued", () => {
   // here to lock the ordering contract the auto-send effect relies on.
   let queue: QueuedSend[] = [];
   const enqueue = (id: string) => {
-    queue = [...queue, { id, input: sendInput({ content: id }) }];
+    queue = [...queue, queued(id)];
   };
   enqueue("a");
   enqueue("b");
@@ -58,6 +68,19 @@ test("FIFO: sends fire in the order they were queued", () => {
   }
 
   assert.deepEqual(drained, ["a", "b", "c"]);
+});
+
+test("planQueuedSendRetry re-queues under the cap (attempts bumped, id/key stable)", () => {
+  const plan = planQueuedSendRetry({ queued: queued("a", 2), maxAttempts: 8 });
+  assert.ok("requeued" in plan);
+  assert.equal(plan.requeued.id, "a");
+  assert.equal(plan.requeued.durableRunKey, "key-a");
+  assert.equal(plan.requeued.attempts, 3);
+});
+
+test("planQueuedSendRetry drops once the attempt cap is exceeded", () => {
+  const plan = planQueuedSendRetry({ queued: queued("a", 8), maxAttempts: 8 });
+  assert.ok("dropped" in plan);
 });
 
 test("preview prefers text, then image count, then a fallback", () => {

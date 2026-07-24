@@ -10,6 +10,10 @@ const apiBaseUrl =
 const MESSAGE_REFETCH_DEBOUNCE_MS = 250;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+// Degrade-mode polling when the room is at capacity (503). Jittered so N evicted
+// clients don't synchronize their polls; re-probe for a free SSE slot every ~2m.
+const POLL_BASE_MS = 15_000;
+const POLL_REPROBE_TICKS = 8;
 
 type RoomFrame =
   | { type: "ready" }
@@ -102,7 +106,7 @@ type UseThreadRoomInput = {
     updater: (current: ActiveThreadRun | null) => ActiveThreadRun | null,
   ) => void;
   clearRunIfCurrent: (durableRunKey: string) => void;
-  loadThreadMessages: () => Promise<void>;
+  appendNewerMessages: () => Promise<void>;
   // Presence/typing: the full viewer roster (userIds) on each presence frame,
   // and one userId per typing frame (already self-filtered server-side).
   onPresence: (here: string[]) => void;
@@ -125,7 +129,7 @@ export function useThreadRoom({
   isStreamingRef,
   setActiveThreadRun,
   clearRunIfCurrent,
-  loadThreadMessages,
+  appendNewerMessages,
   onPresence,
   onTyping,
 }: UseThreadRoomInput) {
@@ -137,7 +141,7 @@ export function useThreadRoom({
     isStreamingRef,
     setActiveThreadRun,
     clearRunIfCurrent,
-    loadThreadMessages,
+    appendNewerMessages,
     onPresence,
     onTyping,
   });
@@ -147,7 +151,7 @@ export function useThreadRoom({
     isStreamingRef,
     setActiveThreadRun,
     clearRunIfCurrent,
-    loadThreadMessages,
+    appendNewerMessages,
     onPresence,
     onTyping,
   };
@@ -177,7 +181,7 @@ export function useThreadRoom({
       refetchTimer = setTimeout(() => {
         refetchTimer = null;
         if (latestRef.current.activeThreadRunRef.current == null) {
-          void latestRef.current.loadThreadMessages();
+          void latestRef.current.appendNewerMessages();
         }
       }, MESSAGE_REFETCH_DEBOUNCE_MS);
     };
@@ -258,16 +262,60 @@ export function useThreadRoom({
       }
     };
 
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTicks = 0;
+    // Single connect driver: only one connect attempt / live stream at a time,
+    // so a poller re-probe and a reconnect timer can't open two SSE streams
+    // (two hub slots) for one client.
+    let connecting = false;
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    const startPolling = () => {
+      if (pollTimer || closed) {
+        return;
+      }
+      pollTicks = 0;
+      // ±20% jitter so a wave of evicted clients doesn't poll in lockstep.
+      const interval = Math.round(POLL_BASE_MS * (1 + (Math.random() * 0.4 - 0.2)));
+      pollTimer = setInterval(() => {
+        if (closed) {
+          stopPolling();
+          return;
+        }
+        void reconcileRun();
+        scheduleMessageRefetch();
+        pollTicks += 1;
+        if (pollTicks % POLL_REPROBE_TICKS === 0) {
+          // Try to reclaim a live SSE slot; connect() stops the poller on success.
+          void connect();
+        }
+      }, interval);
+    };
+
     const connect = async () => {
+      if (connecting || closed) {
+        return;
+      }
+      connecting = true;
       try {
         const response = await fetch(
           `${apiBaseUrl}/v1/workspaces/${workspaceId}/threads/${threadId}/room`,
           { credentials: "include", signal: controller.signal },
         );
+        if (response.status === 503) {
+          // Room at capacity — degrade to low-frequency polling.
+          startPolling();
+          return;
+        }
         if (!response.ok || !response.body) {
           throw new Error(`Room connect failed (${response.status})`);
         }
         reconnectAttempt = 0;
+        stopPolling();
         // Reconcile immediately on connect so a gap before the first event can't
         // leave stale state.
         void reconcileRun();
@@ -308,6 +356,12 @@ export function useThreadRoom({
           return;
         }
         void error;
+        // While the poller owns reconnection, a failed re-probe is retried by
+        // the next poll tick — don't also start the exponential reconnect chain
+        // (that would run two reconnect drivers in parallel).
+        if (pollTimer) {
+          return;
+        }
         const delay = Math.min(
           RECONNECT_MAX_MS,
           RECONNECT_BASE_MS * 2 ** reconnectAttempt,
@@ -316,6 +370,8 @@ export function useThreadRoom({
         reconnectTimer = setTimeout(() => {
           void connect();
         }, delay);
+      } finally {
+        connecting = false;
       }
     };
 
@@ -330,6 +386,7 @@ export function useThreadRoom({
       if (refetchTimer) {
         clearTimeout(refetchTimer);
       }
+      stopPolling();
     };
     // Only re-open on thread/workspace change; everything else is read from refs.
   }, [workspaceId, threadId]);

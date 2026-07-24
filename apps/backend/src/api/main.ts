@@ -8,6 +8,7 @@ import {
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { notifyHub } from "../shared/notify-hub";
+import { metrics } from "../shared/metrics";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
@@ -23,6 +24,8 @@ await connectorAdaptersReady();
 // first /room subscriber has a working fan-out. API process only — the worker
 // and scheduler publish events but never hold SSE subscribers.
 await notifyHub.start();
+// Flush a metrics snapshot line periodically (API process only).
+metrics.startPeriodicFlush();
 
 const app = createApp();
 
@@ -43,6 +46,7 @@ serve(
 
 async function shutdown() {
   logger.info("API shutting down");
+  metrics.stop();
   // Stop the hub (ends its dedicated LISTEN client) before closing the pool.
   await Promise.allSettled([notifyHub.stop(), closeQueue(), closeDatabase()]);
   process.exit(0);

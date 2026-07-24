@@ -10,6 +10,11 @@ import type { ChatExecutionState } from "../chat-stream-runner-control";
 export type QueuedSend = {
   id: string;
   input: ChatSendInput;
+  // Stable server idempotency key, minted once and reused across retries so a
+  // retry racing its own in-flight 409 is server-deduped rather than double-sent.
+  durableRunKey: string;
+  // 409 retry count; bounded so a permanently-stuck run eventually drops+toasts.
+  attempts: number;
 };
 
 /**
@@ -29,6 +34,22 @@ export function shouldQueueSend(input: {
     return false;
   }
   return input.chatExecutionState !== "idle";
+}
+
+/**
+ * Decide what to do with a queued send that hit the 409 backstop: re-queue it
+ * (attempts bumped, same id/key so the server dedupes the retry) until the cap,
+ * then drop it (the caller toasts). Pure so the retry/cap logic is unit-testable.
+ */
+export function planQueuedSendRetry(input: {
+  queued: QueuedSend;
+  maxAttempts: number;
+}): { requeued: QueuedSend } | { dropped: true } {
+  const attempts = input.queued.attempts + 1;
+  if (attempts > input.maxAttempts) {
+    return { dropped: true };
+  }
+  return { requeued: { ...input.queued, attempts } };
 }
 
 /** A short single-line preview of a queued message for the pending-queue UI. */

@@ -25,7 +25,11 @@ export type ThreadEventKind =
   // authorized stream and emits it in the SSE frame.
   | "presence_changed"
   // Typing: ephemeral; `actorUserId` is (or stopped) typing. Never any content.
-  | "typing";
+  | "typing"
+  // A thread's access changed (e.g. flipped to private). Room subscribers
+  // re-check `canViewThread` and end their stream if they no longer qualify —
+  // sub-second eviction on top of the per-beat backstop.
+  | "access_changed";
 
 export type ThreadEventPayload = {
   threadId: string;

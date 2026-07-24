@@ -35,6 +35,7 @@ import {
   hasRenderBlocksMetadata,
   isCompletedArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
+  isRunAlreadyActiveStreamError,
   mergeThinkingStepRecords,
   normalizeCitationRecords,
   normalizeModelReasoningSegmentRecord,
@@ -82,6 +83,9 @@ export type ThreadStreamActionInput = {
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   durableRunKey?: string;
   attachOnly?: boolean;
+  // Called when the send hit the server's 409 one-run-per-thread backstop, so
+  // the caller can re-queue it (the composer is not restored / no toast).
+  onRunAlreadyActive?: () => void;
   // Initiator of the run being started/attached. Set when attaching to another
   // member's run so the local active-run keeps their id (and does not lock our
   // composer). Omitted for our own sends, which default to the current user.
@@ -850,6 +854,10 @@ export function useThreadStreamAction({
         clearAttachedRunKeyIfCurrent(durableRunKey);
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
+        // The server's one-run-per-thread backstop: this queued send lost the
+        // race for the free window. Don't restore the composer or toast — the
+        // controller re-queues it (see onRunAlreadyActive) so it isn't lost.
+        const isRunAlreadyActive = isRunAlreadyActiveStreamError(error);
         const hadServerPersistedAssistantMessage =
           hasServerPersistedAssistantMessage;
         const existingPersistedAssistantMessageId = persistedAssistantMessageId;
@@ -885,6 +893,10 @@ export function useThreadStreamAction({
             });
             setStreamingAssistantSnapshot(null);
             if (
+              // Only a queued replay (onRunAlreadyActive set) suppresses the
+              // restore — the controller re-queues it. A normal send that raced
+              // into a 409 must restore the composer, or the message is lost.
+              (!isRunAlreadyActive || !input.onRunAlreadyActive) &&
               !input.attachOnly &&
               input.mode === "send" &&
               typeof input.content === "string"
@@ -899,7 +911,9 @@ export function useThreadStreamAction({
           }, 0);
         }
 
-        if (!suppressErrorToast) {
+        if (isRunAlreadyActive && input.onRunAlreadyActive) {
+          input.onRunAlreadyActive();
+        } else if (!suppressErrorToast) {
           toast.error(errorMessage);
         }
       } finally {

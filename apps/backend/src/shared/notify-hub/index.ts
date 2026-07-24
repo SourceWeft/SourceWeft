@@ -1,4 +1,9 @@
-export { notifyHub, NotifyHub } from "./hub";
+export {
+  notifyHub,
+  NotifyHub,
+  type RoomReservation,
+  type ReserveResult,
+} from "./hub";
 export { publishThreadEvent, serializeThreadEvent } from "./publisher";
 export {
   THREAD_EVENTS_CHANNEL,

@@ -65,6 +65,42 @@ function mapThreadMessagesToChatMessages(messages: ThreadMessageItem[]) {
   return dropStaleActiveThreadRunMessages(normalizedMessages);
 }
 
+/**
+ * Encode a forward (`after`) message cursor the server's `decodeMessagesCursor`
+ * accepts: base64url of `{createdAt, id}`. Must be derived from a RAW server
+ * item's fields (not a rendered/optimistic message, whose createdAt/id are
+ * client-minted) so the watermark tracks true server order.
+ */
+function encodeForwardMessageCursor(row: {
+  createdAt: string;
+  id: string;
+}): string {
+  const json = JSON.stringify({ createdAt: row.createdAt, id: row.id });
+  return btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * The forward cursor for the newest raw server item — the incremental-sync
+ * watermark. Returns null for an empty page. `(createdAt, id)` is a stable total
+ * order; createdAt is an ISO string so lexicographic compare is chronological.
+ */
+function newestServerCursor(items: ThreadMessageItem[]): string | null {
+  let newest: { createdAt: string; id: string } | null = null;
+  for (const item of items) {
+    if (
+      !newest ||
+      item.createdAt > newest.createdAt ||
+      (item.createdAt === newest.createdAt && item.id > newest.id)
+    ) {
+      newest = { createdAt: item.createdAt, id: item.id };
+    }
+  }
+  return newest ? encodeForwardMessageCursor(newest) : null;
+}
+
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
@@ -141,6 +177,18 @@ class StreamRequestError extends Error {
     this.status = input.status;
     this.code = input.code ?? null;
   }
+}
+
+/**
+ * Is this the server's one-run-per-thread backstop (409 CHAT_RUN_ALREADY_ACTIVE)?
+ * A queued send that races another client for the same free window hits this;
+ * the caller re-queues instead of dropping it.
+ */
+function isRunAlreadyActiveStreamError(error: unknown): boolean {
+  return (
+    error instanceof StreamRequestError &&
+    (error.code === "CHAT_RUN_ALREADY_ACTIVE" || error.status === 409)
+  );
 }
 
 function getReadableStreamRequestError(input: {
@@ -1656,6 +1704,7 @@ export {
   createActiveThreadRunPlaceholder,
   createDurableRunKey,
   dropStaleActiveThreadRunMessages,
+  encodeForwardMessageCursor,
   excludeResolvedToolConfirmationCalls,
   findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
@@ -1664,8 +1713,10 @@ export {
   hasRenderBlocksMetadata,
   isCompletedArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
+  isRunAlreadyActiveStreamError,
   mapThreadMessagesToChatMessages,
   mergeThinkingStepRecords,
+  newestServerCursor,
   normalizeCitationRecords,
   normalizeModelReasoningSegmentRecord,
   normalizeThinkingStepRecord,
