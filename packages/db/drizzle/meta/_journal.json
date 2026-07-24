@@ -143,6 +143,13 @@
       "breakpoints": true
     },
     {
+      "idx": 20,
+      "version": "7",
+      "when": 1784893662017,
+      "tag": "0020_mcp_per_user_credentials",
+      "breakpoints": true
+    },
+    {
       "idx": 21,
       "version": "7",
       "when": 1784894205913,

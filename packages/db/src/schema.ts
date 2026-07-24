@@ -2055,6 +2055,12 @@ export const workspaceMcpCredentials = pgTable(
     installId: text("install_id")
       .notNull()
       .references(() => workspaceMcpInstalls.id, { onDelete: "cascade" }),
+    // Static (non-OAuth) MCP credentials are per-user, mirroring the OAuth
+    // sessions table: on a shared workspace/thread one member's bearer token or
+    // API key must never be usable by another member's turn. Keyed by
+    // (installId, userId); the connection is skipped when the invoking user has
+    // no credential of their own.
+    userId: text("user_id").notNull(),
     authType: text("auth_type").$type<McpAuthType>().notNull(),
     encryptedSecret: text("encrypted_secret"),
     encryptedHeaders: text("encrypted_headers"),
@@ -2089,7 +2095,10 @@ export const workspaceMcpCredentials = pgTable(
       "workspace_mcp_credentials_status_check",
       sql`${table.status} in ('not_required', 'required', 'configured', 'invalid')`,
     ),
-    uniqueIndex("workspace_mcp_credentials_install_uq").on(table.installId),
+    uniqueIndex("workspace_mcp_credentials_install_user_uq").on(
+      table.installId,
+      table.userId,
+    ),
   ],
 );
 
