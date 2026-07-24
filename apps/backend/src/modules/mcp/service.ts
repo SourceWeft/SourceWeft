@@ -8,9 +8,12 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { InterruptOnConfig } from "langchain";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { decryptSecret, encryptSecret } from "../../shared/secrets";
 import { McpError } from "./errors";
 import { createLangChainMcpClient } from "./langchain-client";
+import { McpOAuthClientProvider } from "./oauth-provider";
+import { createDbMcpOAuthStore, getMcpOAuthStatus } from "./oauth-repository";
 import { marketService } from "./market-service";
 import { requireMcpWorkspace } from "./permissions";
 import {
@@ -807,12 +810,6 @@ export class McpService {
     const tools: DynamicStructuredTool[] = [];
     const interruptOn: Record<string, InterruptOnConfig> = {};
     for (const install of selected) {
-      const credential = await findWorkspaceMcpCredential({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        installId: install.id,
-      });
-      const headers = credential ? headersFromCredential(credential) : {};
       // Re-validate the stored endpoint at execution time. The install-time
       // check is not enough on its own: a hostname can be repointed at an
       // internal/metadata address after install (DNS rebinding). Skip — rather
@@ -826,10 +823,42 @@ export class McpService {
           continue;
         }
       }
+      // Resolve auth per install: OAuth installs use a per-user token provider
+      // (the SDK attaches the bearer and refreshes on 401); the other auth types
+      // use static credential headers. An OAuth install the user hasn't
+      // connected yet is skipped rather than failing the turn.
+      let headers: Record<string, string> = {};
+      let authProvider: OAuthClientProvider | undefined;
+      if (install.authType === "oauth") {
+        const scope = {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          installId: install.id,
+          userId: input.userId,
+        };
+        const status = await getMcpOAuthStatus(scope);
+        if (!status.connected || !status.issuer) {
+          continue;
+        }
+        authProvider = new McpOAuthClientProvider({
+          redirectUrl: config.mcpOAuth.redirectUrl,
+          clientName: config.mcpOAuth.clientName,
+          issuer: status.issuer,
+          configuredClients: config.mcpOAuth.clients,
+          store: createDbMcpOAuthStore(scope, status.issuer),
+        });
+      } else {
+        const credential = await findWorkspaceMcpCredential({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          installId: install.id,
+        });
+        headers = credential ? headersFromCredential(credential) : {};
+      }
       // Each install is isolated: one server being unreachable (getTools throws,
       // since onConnectionError is "throw") must neither leak its transport nor
       // abort the whole turn. Close the client and move on.
-      const client = createLangChainMcpClient({ install, headers });
+      const client = createLangChainMcpClient({ install, headers, authProvider });
       let installTools: DynamicStructuredTool[];
       try {
         installTools = await client.getTools();

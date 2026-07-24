@@ -149,6 +149,38 @@ export function createDbMcpOAuthStore(
   };
 }
 
+/**
+ * Resolve the pending session for an authorization `state` (CSRF check on
+ * callback). The state is a single-use nonce we persisted during authorize, so a
+ * match both authenticates the callback and tells us which (install, user) it is
+ * for.
+ */
+export async function findMcpOAuthSessionByState(state: string): Promise<{
+  scope: McpOAuthScope;
+  issuer: string | null;
+} | null> {
+  if (!state) {
+    return null;
+  }
+  const [row] = await db
+    .select()
+    .from(workspaceMcpOAuthSessions)
+    .where(eq(workspaceMcpOAuthSessions.state, state))
+    .limit(1);
+  if (!row) {
+    return null;
+  }
+  return {
+    scope: {
+      teamId: row.teamId,
+      workspaceId: row.workspaceId,
+      installId: row.installId,
+      userId: row.userId,
+    },
+    issuer: row.issuer ?? null,
+  };
+}
+
 /** Whether a user has a usable (token-bearing) OAuth session for an install. */
 export async function getMcpOAuthStatus(scope: McpOAuthScope): Promise<{
   connected: boolean;

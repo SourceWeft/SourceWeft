@@ -1,4 +1,5 @@
 import { MultiServerMCPClient, type ClientConfig } from "@langchain/mcp-adapters";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { McpError } from "./errors";
 import type { WorkspaceMcpInstallRecord } from "./types";
 
@@ -28,6 +29,12 @@ function automaticSSEFallbackFor(
 export function createLangChainMcpClient(input: {
   install: WorkspaceMcpInstallRecord;
   headers?: Record<string, string>;
+  /**
+   * OAuth provider for authType "oauth". When present the transport attaches the
+   * user's bearer token and refreshes it on 401; static `headers` are used for
+   * the other auth types.
+   */
+  authProvider?: OAuthClientProvider;
 }) {
   const transport = langChainTransportFor(input.install.transport);
   if (!input.install.endpointUrl) {
@@ -44,6 +51,7 @@ export function createLangChainMcpClient(input: {
         transport,
         url: input.install.endpointUrl,
         headers: input.headers,
+        ...(input.authProvider ? { authProvider: input.authProvider } : {}),
         automaticSSEFallback: automaticSSEFallbackFor(input.install.transport),
       },
     },
