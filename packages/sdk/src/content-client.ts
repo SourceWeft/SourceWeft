@@ -3,6 +3,10 @@ import type {
   AddByokModelResponse,
   BulkDeleteSourcesRequest,
   BulkDeleteSourcesResponse,
+  CreateArtifactShareRequest,
+  UpdateArtifactShareRequest,
+  ShareResponse,
+  GetShareResponse,
   CitationDetailResponse,
   CreateByokCredentialRequest,
   CreateByokCredentialResponse,
@@ -172,6 +176,40 @@ export class ContentClient {
 
     return this.http.get<ListArtifactsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts${suffix}`,
+    );
+  }
+
+  getArtifactShare(workspaceId: string, artifactId: string) {
+    return this.http.get<GetShareResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
+    );
+  }
+
+  shareArtifact(
+    workspaceId: string,
+    artifactId: string,
+    input: CreateArtifactShareRequest = {},
+  ) {
+    return this.http.post<ShareResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
+      input,
+    );
+  }
+
+  updateArtifactShare(
+    workspaceId: string,
+    artifactId: string,
+    input: UpdateArtifactShareRequest,
+  ) {
+    return this.http.patch<ShareResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
+      input,
+    );
+  }
+
+  revokeArtifactShare(workspaceId: string, artifactId: string) {
+    return this.http.delete<{ ok: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
     );
   }
 

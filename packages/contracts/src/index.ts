@@ -22,6 +22,7 @@ export * from "./connector-errors";
 export * from "./dashboard";
 export * from "./mcp";
 export * from "./workspace";
+export * from "./sharing";
 export * from "./user-settings";
 export * from "./api-response";
 export * from "./agent-tools";

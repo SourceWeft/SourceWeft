@@ -4380,6 +4380,14 @@ export const shareLinks = pgTable(
       .default("viewer"),
     token: text("token").notNull(),
     isPublic: boolean("is_public").notNull().default(false),
+    /**
+     * Whether the public page opts out of search-engine indexing. A public
+     * link is a deliberate publish, so the default is to allow indexing (SEO /
+     * reach); this turns it off for sensitive one-off shares.
+     */
+    noindex: boolean("noindex").notNull().default(false),
+    /** Unique-visitor-ish page views, incremented on each public read. */
+    viewCount: integer("view_count").notNull().default(0),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     createdBy: text("created_by"),
@@ -4407,6 +4415,12 @@ export const shareLinks = pgTable(
       table.teamId,
       desc(table.createdAt),
     ),
+    // At most one live (non-revoked) share per target — sharing is a toggle,
+    // not an ever-growing list of links. Revoked rows are kept for audit and
+    // do not count against the constraint.
+    uniqueIndex("share_links_active_target_uq")
+      .on(table.targetType, table.targetId)
+      .where(sql`${table.revokedAt} is null`),
   ],
 );
 
