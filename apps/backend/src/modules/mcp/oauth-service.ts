@@ -13,7 +13,10 @@ import {
   type McpOAuthScope,
 } from "./oauth-repository";
 import { requireMcpWorkspace } from "./permissions";
-import { findWorkspaceMcpInstall } from "./repository";
+import {
+  findWorkspaceMcpInstall,
+  updateWorkspaceMcpInstall,
+} from "./repository";
 import { assertSafeMcpEndpoint } from "./security";
 
 function isDevelopment() {
@@ -194,5 +197,15 @@ export async function completeMcpOAuthCallback(input: {
     );
   }
   await clearMcpOAuthTransient(scope);
+  // Terminal state of the credential machine: nothing else writes "configured"
+  // for oauth installs (the credentials dialog has no Save for them), and the
+  // UI disables Run/selection until this flips. Install-level, by design — the
+  // first successful connect unlocks the install; tokens stay per-user.
+  await updateWorkspaceMcpInstall({
+    teamId: scope.teamId,
+    workspaceId: scope.workspaceId,
+    installId: scope.installId,
+    credentialStatus: "configured",
+  });
   return { workspaceId: scope.workspaceId, installId: scope.installId };
 }

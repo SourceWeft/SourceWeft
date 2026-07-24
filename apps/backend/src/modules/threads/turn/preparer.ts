@@ -121,6 +121,7 @@ import type {
   MessageContentJson,
   PreflightBillingTrace,
   ThinkingStepTrace,
+  ThreadToolsSelection,
   TraceContinuationMetadata,
 } from "./types";
 import { normalizeTraceParts } from "./trace-parts";
@@ -1919,10 +1920,36 @@ export async function prepareThreadTurn(
     isFirstAssistantAttempt,
     initialTitle,
     failurePersistence: input.failurePersistence ?? "persist-error-turn",
-    mcpInstallIds: input.mcpInstallIds ?? [],
+    // The web client sends the MCP selection inside tools.mcp (sources-hub
+    // picker); the top-level field remains for API callers. Without this
+    // fallback the picker selection never reached the turn at all.
+    mcpInstallIds:
+      input.mcpInstallIds ?? mcpInstallIdsFromTools(input.tools) ?? [],
     enabledSkills,
     invokedSkillIds,
   };
+}
+
+/**
+ * Narrow the untyped tools map's `mcp` entry to its install selection. The
+ * route schema validates the shape, but ThreadToolsSelection is deliberately
+ * opaque here, so re-narrow defensively.
+ */
+function mcpInstallIdsFromTools(
+  tools: ThreadToolsSelection | undefined,
+): string[] | undefined {
+  const mcp = tools?.mcp;
+  if (!mcp || typeof mcp !== "object") {
+    return undefined;
+  }
+  const installIds = (mcp as { installIds?: unknown }).installIds;
+  if (!Array.isArray(installIds)) {
+    return undefined;
+  }
+  const ids = installIds
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .slice(0, 10);
+  return ids.length > 0 ? ids : undefined;
 }
 
 function resolveLatestSourceIds(

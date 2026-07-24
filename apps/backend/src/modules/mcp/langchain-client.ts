@@ -26,6 +26,25 @@ function automaticSSEFallbackFor(
   return false;
 }
 
+/**
+ * The server key baked into every LangChain tool name
+ * (`mcp__<serverKey>__<tool>`). Market identifiers are reverse-DNS
+ * (`io.github.owner/repo`) whose `.` and `/` violate the LLM providers'
+ * tool-name charset (`[a-zA-Z0-9_-]`) and would 400 the model call the moment a
+ * federated install's tools are bound — so the key is sanitized here, and every
+ * strip/join site derives it from this one helper so discovery, approval, and
+ * binding always agree.
+ */
+export function langChainMcpServerKey(install: {
+  marketIdentifier: string | null;
+  id: string;
+}) {
+  return (install.marketIdentifier ?? install.id).replace(
+    /[^a-zA-Z0-9_-]/g,
+    "_",
+  );
+}
+
 export function createLangChainMcpClient(input: {
   install: WorkspaceMcpInstallRecord;
   headers?: Record<string, string>;
@@ -47,7 +66,7 @@ export function createLangChainMcpClient(input: {
     useStandardContentBlocks: true,
     onConnectionError: "throw",
     mcpServers: {
-      [input.install.marketIdentifier ?? input.install.id]: {
+      [langChainMcpServerKey(input.install)]: {
         transport,
         url: input.install.endpointUrl,
         headers: input.headers,

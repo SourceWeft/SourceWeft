@@ -325,6 +325,19 @@ const threadToolsRequestSchema = z
       connectorToolSelectionSchema.optional(),
     [SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME]:
       connectorToolSelectionSchema.optional(),
+    // MCP selection as the web client sends it (sources-hub picker). The
+    // backend reads installIds from here (see preparer) — the legacy top-level
+    // mcpInstallIds field remains supported for API callers.
+    mcp: z
+      .object({
+        enabled: z.boolean().optional(),
+        installIds: z
+          .array(z.string().trim().min(1).max(128))
+          .max(10)
+          .default([]),
+        toolIds: z.array(z.string().trim().min(1).max(128)).max(200).optional(),
+      })
+      .optional(),
   })
   .catchall(z.unknown());
 

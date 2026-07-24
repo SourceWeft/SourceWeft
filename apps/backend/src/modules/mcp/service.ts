@@ -11,7 +11,10 @@ import { config } from "../../shared/config";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { decryptSecret, encryptSecret } from "../../shared/secrets";
 import { McpError } from "./errors";
-import { createLangChainMcpClient } from "./langchain-client";
+import {
+  createLangChainMcpClient,
+  langChainMcpServerKey,
+} from "./langchain-client";
 import { McpOAuthClientProvider } from "./oauth-provider";
 import { createDbMcpOAuthStore, getMcpOAuthStatus } from "./oauth-repository";
 import { marketService } from "./market-service";
@@ -161,7 +164,7 @@ function findInstallToolByLangChainName(
   langChainToolName: string,
 ) {
   const rawName = stripLangChainMcpToolPrefix({
-    serverKey: install.marketIdentifier ?? install.id,
+    serverKey: langChainMcpServerKey(install),
     toolName: langChainToolName,
   });
   return (
@@ -726,13 +729,43 @@ export class McpService {
       allowPrivateNetwork: isDevelopment(),
     });
 
-    const credential = await findWorkspaceMcpCredential({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      installId: input.installId,
-    });
-    const headers = credential ? headersFromCredential(credential) : {};
-    const client = createLangChainMcpClient({ install, headers });
+    // Same auth split as buildLangChainToolsForTurn: an oauth install tests
+    // with the caller's token provider. Testing an unconnected oauth install
+    // fails fast WITHOUT flipping status to "error" — a status flip here would
+    // silently drop the install from every turn until a later successful test.
+    let headers: Record<string, string> = {};
+    let authProvider: OAuthClientProvider | undefined;
+    if (install.authType === "oauth") {
+      const scope = {
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        installId: install.id,
+        userId: input.userId,
+      };
+      const status = await getMcpOAuthStatus(scope);
+      if (!status.connected || !status.issuer) {
+        throw new McpError(
+          400,
+          "MCP_OAUTH_NOT_CONNECTED",
+          "Connect this MCP server before testing it",
+        );
+      }
+      authProvider = new McpOAuthClientProvider({
+        redirectUrl: config.mcpOAuth.redirectUrl,
+        clientName: config.mcpOAuth.clientName,
+        issuer: status.issuer,
+        configuredClients: config.mcpOAuth.clients,
+        store: createDbMcpOAuthStore(scope, status.issuer),
+      });
+    } else {
+      const credential = await findWorkspaceMcpCredential({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        installId: input.installId,
+      });
+      headers = credential ? headersFromCredential(credential) : {};
+    }
+    const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
       const tools = await client.getTools();
       await upsertWorkspaceMcpTools({
@@ -743,7 +776,7 @@ export class McpService {
         preserveExistingMetadata: true,
         tools: tools.map((tool) => ({
           name: stripLangChainMcpToolPrefix({
-            serverKey: install.marketIdentifier ?? install.id,
+            serverKey: langChainMcpServerKey(install),
             toolName: tool.name,
           }),
           title: tool.name,
@@ -885,11 +918,16 @@ export class McpService {
         if (input.toolIds?.length && (!knownTool || !input.toolIds.includes(knownTool.id))) {
           continue;
         }
-        if (knownTool && isHighRisk(knownTool.risk)) {
+        // A tool with no DB record (fresh federated install, or one the server
+        // added since the last test) falls back to risk "unknown" at execution,
+        // which hard-requires approval — so it MUST get an interrupt here too,
+        // or every call dead-ends in MCP_APPROVAL_REQUIRED with no approval
+        // surface ever shown.
+        if (!knownTool || isHighRisk(knownTool.risk)) {
           interruptOn[tool.name] = {
             allowedDecisions: ["approve", "edit", "reject"],
-            description: `${install.name} MCP tool ${knownTool.serverToolName} may perform external ${knownTool.risk} actions. Review before execution.`,
-            argsSchema: knownTool.inputSchema,
+            description: `${install.name} MCP tool ${knownTool?.serverToolName ?? tool.name} may perform external ${knownTool?.risk ?? "unknown"} actions. Review before execution.`,
+            argsSchema: knownTool?.inputSchema,
           };
         }
         tools.push(
@@ -1193,7 +1231,7 @@ export class McpService {
     // above claims the edited ones ran. Mirrors the sandbox confirmation path.
     const editedToolName =
       input.confirmation?.action.toolName ??
-      `mcp__${install.marketIdentifier ?? install.id}__${tool.serverToolName}`;
+      `mcp__${langChainMcpServerKey(install)}__${tool.serverToolName}`;
     const resumeDecision = input.editedArgs
       ? {
           type: "edit" as const,

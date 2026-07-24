@@ -68,6 +68,8 @@ vi.mock("./security", async (importOriginal) => {
 
 vi.mock("./langchain-client", () => ({
   createLangChainMcpClient: mocks.createLangChainMcpClient,
+  langChainMcpServerKey: (install: { marketIdentifier: string | null; id: string }) =>
+    (install.marketIdentifier ?? install.id).replace(/[^a-zA-Z0-9_-]/g, "_"),
 }));
 
 vi.mock("./market-service", () => ({
