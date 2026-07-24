@@ -29,7 +29,7 @@ import {
   type WorkspaceSwitchStatus,
   type WorkspaceSwitchTransitionState,
 } from "./dashboard-chat-transitions";
-import type { ChatItem } from "./dashboard-chat-types";
+import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
   llmProfileAlias?: string | null;
@@ -105,6 +105,10 @@ type DashboardChatState = {
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => void;
   deleteChat: (id: string) => Promise<void>;
+  setChatVisibility: (
+    id: string,
+    visibility: "private" | "workspace",
+  ) => Promise<void>;
   clearPrivateChats: () => Promise<void>;
   clearArchivedChats: () => Promise<void>;
 };
@@ -126,14 +130,32 @@ function mapThreadToChatItem(item: {
   title: string;
   sourceCount?: number | null;
   updatedAt?: string | null;
+  visibility?: ChatItem["visibility"] | null;
 }): ChatItem {
   return {
     id: item.id,
     title: item.title,
     updatedAt: normalizeUpdatedAt(item.updatedAt),
     sourceCount: item.sourceCount ?? 0,
+    // A thread persisted before visibility existed reads as private, matching
+    // the column's own default and keeping it out of the shared bucket.
+    visibility: item.visibility ?? "private",
     status: "ready",
   };
+}
+
+/**
+ * Splits a page of threads into the sidebar's two buckets. Private threads are
+ * the author's own; the shared bucket is every workspace-visible thread, which
+ * is what a teammate joining the workspace sees of the shared work.
+ */
+function partitionChatsByVisibility(items: ChatItem[]) {
+  const shared: ChatItem[] = [];
+  const privateItems: ChatItem[] = [];
+  for (const item of items) {
+    (isSharedChat(item) ? shared : privateItems).push(item);
+  }
+  return { shared, private: privateItems };
 }
 
 function parseOrganizationMetadata(metadata: unknown) {
@@ -240,15 +262,19 @@ export function DashboardChatStateProvider({
     [bootstrapModelCatalog],
   );
 
-  const fetchPrivateChatsPage = useCallback(
+  // One paginated stream of everything the caller may see, split into the two
+  // sidebar buckets. Both share the cursor: "load more" advances the combined
+  // stream and appends to whichever bucket each thread belongs to.
+  const fetchChatsPage = useCallback(
     async (targetWorkspaceId: string, cursor?: string | null) => {
       const threads = await contentClient.listThreads(targetWorkspaceId, {
         cursor: cursor ?? undefined,
         limit: THREADS_PAGE_SIZE,
       });
 
+      const items = threads.items.map(mapThreadToChatItem);
       return {
-        items: threads.items.map(mapThreadToChatItem),
+        ...partitionChatsByVisibility(items),
         nextCursor: threads.nextCursor,
       };
     },
@@ -290,11 +316,12 @@ export function DashboardChatStateProvider({
       setHasMorePrivateChats(false);
 
       try {
-        const threads = await fetchPrivateChatsPage(active.id);
+        const threads = await fetchChatsPage(active.id);
         if (!isCurrent()) {
           return;
         }
-        setPrivateChats(threads.items);
+        setPrivateChats(threads.private);
+        setSharedChats(threads.shared);
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
       } finally {
@@ -305,7 +332,7 @@ export function DashboardChatStateProvider({
         }
       }
     },
-    [fetchPrivateChatsPage],
+    [fetchChatsPage],
   );
 
   useEffect(() => {
@@ -365,7 +392,11 @@ export function DashboardChatStateProvider({
           result.activeOrganizationId,
           result.activeWorkspace.id,
         );
-        setPrivateChats(result.privateChats.items.map(mapThreadToChatItem));
+        const bootstrapChats = partitionChatsByVisibility(
+          result.privateChats.items.map(mapThreadToChatItem),
+        );
+        setPrivateChats(bootstrapChats.private);
+        setSharedChats(bootstrapChats.shared);
         setPrivateChatsCursor(result.privateChats.nextCursor);
         setHasMorePrivateChats(Boolean(result.privateChats.nextCursor));
         setBootstrapModelCatalog(result.modelCatalog);
@@ -579,7 +610,7 @@ export function DashboardChatStateProvider({
 
       try {
         const [threads, preferences] = await Promise.all([
-          fetchPrivateChatsPage(target.id),
+          fetchChatsPage(target.id),
           contentClient.getInitialChatPreferences(target.id),
         ]);
         if (!isCurrent()) {
@@ -589,7 +620,8 @@ export function DashboardChatStateProvider({
         setWorkspaceId(target.id);
         setWorkspaceName(target.name);
         setStoredDashboardWorkspaceId(organizationId, target.id);
-        setPrivateChats(threads.items);
+        setPrivateChats(threads.private);
+        setSharedChats(threads.shared);
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
         setInitialChatPreferences(preferences.initialChatPreferences);
@@ -622,7 +654,7 @@ export function DashboardChatStateProvider({
     },
     [
       activeChatId,
-      fetchPrivateChatsPage,
+      fetchChatsPage,
       lastChatTransitionError,
       mode,
       organizationId,
@@ -641,28 +673,19 @@ export function DashboardChatStateProvider({
     setIsLoadingPrivateChats(true);
 
     try {
-      const threads = await fetchPrivateChatsPage(
-        workspaceId,
-        privateChatsCursor,
-      );
-      setPrivateChats((value) => {
+      const threads = await fetchChatsPage(workspaceId, privateChatsCursor);
+      const appendUnique = (next: ChatItem[]) => (value: ChatItem[]) => {
         const existing = new Set(value.map((item) => item.id));
-        const nextItems = threads.items.filter(
-          (item) => !existing.has(item.id),
-        );
-        return [...value, ...nextItems];
-      });
+        return [...value, ...next.filter((item) => !existing.has(item.id))];
+      };
+      setPrivateChats(appendUnique(threads.private));
+      setSharedChats(appendUnique(threads.shared));
       setPrivateChatsCursor(threads.nextCursor);
       setHasMorePrivateChats(Boolean(threads.nextCursor));
     } finally {
       setIsLoadingPrivateChats(false);
     }
-  }, [
-    workspaceId,
-    privateChatsCursor,
-    isLoadingPrivateChats,
-    fetchPrivateChatsPage,
-  ]);
+  }, [workspaceId, privateChatsCursor, isLoadingPrivateChats, fetchChatsPage]);
 
   const startNewChat = useCallback(() => {
     setActiveChatId("");
@@ -753,6 +776,8 @@ export function DashboardChatStateProvider({
             title: newTitle,
             updatedAt: new Date().toISOString(),
             sourceCount: 0,
+            // New threads start private; sharing is an explicit action.
+            visibility: "private",
             status: "ready",
           },
           ...value,
@@ -776,17 +801,25 @@ export function DashboardChatStateProvider({
       chatPreferences?: ThreadChatPreferences;
       sourceCount?: number | null;
       updatedAt?: string | null;
+      visibility?: ChatItem["visibility"] | null;
     }) => {
       const item = mapThreadToChatItem(thread);
       if (thread.chatPreferences) {
         rememberChatPreferences(thread.chatPreferences);
       }
-      setPrivateChats((value) => {
-        const withoutExisting = value.filter((chat) => chat.id !== item.id);
-        return [item, ...withoutExisting];
-      });
-      setSharedChats((value) => value.filter((chat) => chat.id !== item.id));
-      setArchivedChats((value) => value.filter((chat) => chat.id !== item.id));
+      // Route by the thread's own visibility so an opened shared thread lands
+      // in the shared bucket rather than being mislabeled private.
+      const dropElsewhere = (value: ChatItem[]) =>
+        value.filter((chat) => chat.id !== item.id);
+      const insert = (value: ChatItem[]) => [item, ...dropElsewhere(value)];
+      if (isSharedChat(item)) {
+        setSharedChats(insert);
+        setPrivateChats(dropElsewhere);
+      } else {
+        setPrivateChats(insert);
+        setSharedChats(dropElsewhere);
+      }
+      setArchivedChats(dropElsewhere);
       setMode("thread");
       setActiveChatId(item.id);
       setThreadTitle(item.title);
@@ -841,6 +874,36 @@ export function DashboardChatStateProvider({
     [workspaceId, removeChatFromState],
   );
 
+  const setChatVisibility = useCallback(
+    async (id: string, visibility: "private" | "workspace") => {
+      if (!workspaceId) return;
+
+      const { thread } = await contentClient.updateThreadVisibility(
+        workspaceId,
+        id,
+        { visibility },
+      );
+      const updated = mapThreadToChatItem(thread);
+
+      // Re-partition from scratch: the toggle both changes the item and moves
+      // it across the private/shared boundary, so a single pass that drops it
+      // from both buckets and re-adds it to the right one keeps them coherent.
+      setPrivateChats((value) => value.filter((item) => item.id !== id));
+      setSharedChats((value) => value.filter((item) => item.id !== id));
+      const insert = (value: ChatItem[]) =>
+        [updated, ...value].sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        );
+      if (isSharedChat(updated)) {
+        setSharedChats(insert);
+      } else {
+        setPrivateChats(insert);
+      }
+    },
+    [workspaceId],
+  );
+
   const clearPrivateChats = useCallback(async () => {
     const privateIds = new Set(privateChats.map((item) => item.id));
 
@@ -872,11 +935,9 @@ export function DashboardChatStateProvider({
     setIsLoadingPrivateChats(true);
 
     try {
-      const threads = await fetchPrivateChatsPage(
-        workspaceId,
-        privateChatsCursor,
-      );
-      setPrivateChats(threads.items);
+      const threads = await fetchChatsPage(workspaceId, privateChatsCursor);
+      setPrivateChats(threads.private);
+      setSharedChats(threads.shared);
       setPrivateChatsCursor(threads.nextCursor);
       setHasMorePrivateChats(Boolean(threads.nextCursor));
     } finally {
@@ -886,7 +947,7 @@ export function DashboardChatStateProvider({
     workspaceId,
     privateChats,
     privateChatsCursor,
-    fetchPrivateChatsPage,
+    fetchChatsPage,
     removeChatFromState,
   ]);
 
@@ -955,6 +1016,7 @@ export function DashboardChatStateProvider({
       openChat,
       archiveChat,
       deleteChat,
+      setChatVisibility,
       clearPrivateChats,
       clearArchivedChats,
     }),
@@ -995,6 +1057,7 @@ export function DashboardChatStateProvider({
       refreshChatThread,
       archiveChat,
       deleteChat,
+      setChatVisibility,
       clearPrivateChats,
       clearArchivedChats,
       startNewChat,

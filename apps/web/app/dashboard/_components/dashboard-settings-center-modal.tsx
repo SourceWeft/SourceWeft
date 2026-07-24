@@ -6,4 +6,5 @@ export { DashboardSettingsCenterModal } from "./dashboard-settings-center/settin
 export { TeamPanel } from "./dashboard-settings-center/team-panel";
 export { TrustRulesPanel } from "./dashboard-settings-center/trust-rules-panel";
 export { UsagePanel } from "./dashboard-settings-center/usage-panel";
+export { WorkspaceMembersPanel } from "./dashboard-settings-center/workspace-members-panel";
 export type { SettingsCenterTab } from "./dashboard-settings-center/types";

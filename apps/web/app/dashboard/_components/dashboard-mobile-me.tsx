@@ -9,6 +9,7 @@ import {
   CreditCard,
   LayoutGrid,
   LogOut,
+  PanelsTopLeft,
   ShieldCheck,
   User,
   Users,
@@ -21,6 +22,7 @@ import {
   TeamPanel,
   TrustRulesPanel,
   UsagePanel,
+  WorkspaceMembersPanel,
   type SettingsCenterTab,
 } from "./dashboard-settings-center-modal";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
@@ -51,6 +53,12 @@ const panelItems: Array<{
     icon: Users,
   },
   {
+    key: "workspace",
+    label: "Workspace",
+    description: "Who can see and work in this workspace",
+    icon: PanelsTopLeft,
+  },
+  {
     key: "usage",
     label: "Usage",
     description: "Plan usage and recent activity",
@@ -73,6 +81,7 @@ const panelItems: Array<{
 const panelTitleByKey: Record<MobileMePanel, string> = {
   account: "Profile",
   team: "Team",
+  workspace: "Workspace",
   usage: "Usage",
   billing: "Billing",
   approvals: "Approvals",
@@ -98,7 +107,9 @@ export function DashboardMobileMe() {
     | undefined;
   const { activeOrg, orgList } = useDashboardTeamSelector();
   const { openObservability } = useDashboardMobileNav();
-  const [activePanel, setActivePanel] = React.useState<MobileMePanel | null>(null);
+  const [activePanel, setActivePanel] = React.useState<MobileMePanel | null>(
+    null,
+  );
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [scope, setScope] = React.useState<"personal" | "team">(
     orgList.length > 0 ? "team" : "personal",
@@ -272,6 +283,7 @@ export function DashboardMobileMe() {
                 teamName={teamName}
               />
             ) : null}
+            {activePanel === "workspace" ? <WorkspaceMembersPanel /> : null}
             {activePanel === "usage" ? <UsagePanel /> : null}
             {activePanel === "billing" ? <BillingPanel /> : null}
             {activePanel === "approvals" ? <TrustRulesPanel /> : null}

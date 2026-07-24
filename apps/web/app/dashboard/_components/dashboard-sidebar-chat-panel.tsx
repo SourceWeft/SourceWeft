@@ -4,11 +4,13 @@ import {
   ChevronDown,
   Clock3,
   Gauge,
+  Lock,
   MoreHorizontal,
   PanelsTopLeft,
   PenSquare,
   Share2,
   Trash2,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -48,16 +50,14 @@ import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
 import { subscribeDashboardBillingSummaryRefresh } from "./dashboard-billing-summary-refresh";
-import {
-  getPersonalOrganization,
-} from "./dashboard-team-selector-shared";
+import { getPersonalOrganization } from "./dashboard-team-selector-shared";
 import {
   DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
   formatDashboardShortcut,
   getDashboardWorkspaceShortcutKeys,
   useDashboardShortcutPlatform,
 } from "./dashboard-shortcuts";
-import type { ChatItem } from "./dashboard-chat-types";
+import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -221,7 +221,11 @@ function SidebarUsageSummary({ onOpenUsage }: { onOpenUsage?: () => void }) {
         <div className="min-w-0">
           <p className="truncate text-muted-foreground">Pages left</p>
           <p className="truncate font-medium text-sidebar-foreground">
-            {summary ? formatUsageNumber(pagesAvailable) : loading ? "..." : "--"}
+            {summary
+              ? formatUsageNumber(pagesAvailable)
+              : loading
+                ? "..."
+                : "--"}
           </p>
         </div>
         <div className="min-w-0 text-right">
@@ -300,7 +304,9 @@ function WorkspaceSwitcher({
             type="button"
           >
             <PanelsTopLeft className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="flex-1 truncate font-medium text-left">{activeWorkspace}</span>
+            <span className="flex-1 truncate font-medium text-left">
+              {activeWorkspace}
+            </span>
             <ChevronDown className="size-3.5 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
@@ -317,9 +323,14 @@ function WorkspaceSwitcher({
             <DropdownMenuItem
               key={workspace.id}
               onClick={() => onWorkspaceChange(workspace.id)}
-              className={cn("gap-2 p-2", workspace.id === workspaceId && "bg-accent/60")}
+              className={cn(
+                "gap-2 p-2",
+                workspace.id === workspaceId && "bg-accent/60",
+              )}
             >
-              <span className="flex-1 truncate text-left">{workspace.name}</span>
+              <span className="flex-1 truncate text-left">
+                {workspace.name}
+              </span>
               {index < DASHBOARD_WORKSPACE_SHORTCUT_LIMIT ? (
                 <span className="text-xs text-muted-foreground">
                   {formatDashboardShortcut(
@@ -334,7 +345,9 @@ function WorkspaceSwitcher({
             className="gap-2 p-2"
             disabled={!activeWorkspaceRecord}
             onSelect={() => {
-              setWorkspaceNameInput(activeWorkspaceRecord?.name ?? activeWorkspace);
+              setWorkspaceNameInput(
+                activeWorkspaceRecord?.name ?? activeWorkspace,
+              );
               setRenameOpen(true);
             }}
           >
@@ -361,7 +374,8 @@ function WorkspaceSwitcher({
           <DialogHeader>
             <DialogTitle>Add workspace</DialogTitle>
             <DialogDescription>
-              Create a workspace to keep sources and chats in a separate context.
+              Create a workspace to keep sources and chats in a separate
+              context.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -376,7 +390,11 @@ function WorkspaceSwitcher({
             value={workspaceNameInput}
           />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreateOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -410,7 +428,11 @@ function WorkspaceSwitcher({
             value={workspaceNameInput}
           />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setRenameOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRenameOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -448,6 +470,7 @@ function ChatListRow({
   item,
   onArchive,
   onDelete,
+  onSetVisibility,
   onOpen,
   onPrefetch,
 }: {
@@ -456,12 +479,29 @@ function ChatListRow({
   item: ChatItem;
   onArchive: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
+  onSetVisibility?: (
+    id: string,
+    visibility: "private" | "workspace",
+  ) => Promise<void>;
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const status = item.status || "ready";
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt);
+  const shared = isSharedChat(item);
+
+  const handleToggleVisibility = async () => {
+    if (!onSetVisibility) return;
+    try {
+      await onSetVisibility(item.id, shared ? "private" : "workspace");
+      toast.success(
+        shared ? "Chat is now private" : "Chat shared with workspace",
+      );
+    } catch {
+      toast.error("Could not change who can see this chat.");
+    }
+  };
 
   return (
     <SidebarMenuItem className="relative px-2">
@@ -488,6 +528,15 @@ function ChatListRow({
                 </span>
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
+                {shared ? (
+                  <>
+                    <Users
+                      className="size-2.5"
+                      aria-label="Shared with workspace"
+                    />
+                    <span aria-hidden="true">|</span>
+                  </>
+                ) : null}
                 <span>{item.sourceCount} sources</span>
                 <span aria-hidden="true">|</span>
                 <span>{status}</span>
@@ -528,7 +577,22 @@ function ChatListRow({
               <span className="sr-only">Open chat actions</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuContent align="end" className="w-44">
+            {onSetVisibility ? (
+              <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
+                {shared ? (
+                  <>
+                    <Lock className="size-4" />
+                    <span>Make private</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="size-4" />
+                    <span>Share with workspace</span>
+                  </>
+                )}
+              </DropdownMenuItem>
+            ) : null}
             {canArchive ? (
               <DropdownMenuItem onSelect={() => onArchive(item.id)}>
                 <Archive className="size-4" />
@@ -559,6 +623,7 @@ function ChatSection({
   onArchive,
   onClear,
   onDelete,
+  onSetVisibility,
   onOpen,
   onPrefetch,
   title,
@@ -572,6 +637,10 @@ function ChatSection({
   onArchive: (id: string) => void;
   onClear?: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onSetVisibility?: (
+    id: string,
+    visibility: "private" | "workspace",
+  ) => Promise<void>;
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
   title: string;
@@ -647,6 +716,7 @@ function ChatSection({
               item={item}
               onArchive={onArchive}
               onDelete={onDelete}
+              onSetVisibility={onSetVisibility}
               onOpen={onOpen}
               onPrefetch={onPrefetch}
             />
@@ -679,6 +749,7 @@ export function DashboardSidebarChatPanel({
   onClearPrivateChats,
   onCreateChat,
   onDeleteChat,
+  onSetChatVisibility,
   onLoadMoreChats,
   onOpenUsage,
   onOpenChat,
@@ -702,6 +773,10 @@ export function DashboardSidebarChatPanel({
   onClearPrivateChats: () => Promise<void>;
   onCreateChat: () => void;
   onDeleteChat: (id: string) => Promise<void>;
+  onSetChatVisibility: (
+    id: string,
+    visibility: "private" | "workspace",
+  ) => Promise<void>;
   onLoadMoreChats: () => void;
   onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
@@ -720,22 +795,23 @@ export function DashboardSidebarChatPanel({
 }) {
   const weekAgo = Date.now() - ONE_WEEK_MS;
   const seenIds = new Set<string>();
-  const threadsThisWeek = [...sharedChats, ...privateChats, ...archivedChats].reduce(
-    (count, item) => {
-      if (seenIds.has(item.id)) {
-        return count;
-      }
+  const threadsThisWeek = [
+    ...sharedChats,
+    ...privateChats,
+    ...archivedChats,
+  ].reduce((count, item) => {
+    if (seenIds.has(item.id)) {
+      return count;
+    }
 
-      seenIds.add(item.id);
-      const updatedAt = new Date(item.updatedAt);
-      if (Number.isNaN(updatedAt.getTime())) {
-        return count;
-      }
+    seenIds.add(item.id);
+    const updatedAt = new Date(item.updatedAt);
+    if (Number.isNaN(updatedAt.getTime())) {
+      return count;
+    }
 
-      return updatedAt.getTime() >= weekAgo ? count + 1 : count;
-    },
-    0,
-  );
+    return updatedAt.getTime() >= weekAgo ? count + 1 : count;
+  }, 0);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -777,6 +853,7 @@ export function DashboardSidebarChatPanel({
           items={sharedChats}
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
+          onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
           title="Shared chats"
@@ -790,6 +867,7 @@ export function DashboardSidebarChatPanel({
           onArchive={onArchiveChat}
           onClear={onClearPrivateChats}
           onDelete={onDeleteChat}
+          onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
           title="Private chats"
@@ -811,7 +889,8 @@ export function DashboardSidebarChatPanel({
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <Clock3 className="size-3.5" />
           <span>
-            {threadsThisWeek} {threadsThisWeek === 1 ? "thread" : "threads"} this week
+            {threadsThisWeek} {threadsThisWeek === 1 ? "thread" : "threads"}{" "}
+            this week
           </span>
         </div>
       </SidebarFooter>

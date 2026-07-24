@@ -2,11 +2,7 @@
 
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  Activity,
-  LayoutDashboard,
-  MessageSquareText,
-} from "lucide-react";
+import { Activity, LayoutDashboard, MessageSquareText } from "lucide-react";
 import { Logo } from "@sourceweft/ui-web/logo";
 import {
   Sheet,
@@ -154,6 +150,7 @@ export function DashboardSidebar() {
     clearPrivateChats,
     createWorkspace,
     deleteChat,
+    setChatVisibility,
     privateChats,
     hasMorePrivateChats,
     isLoadingPrivateChats,
@@ -344,6 +341,7 @@ export function DashboardSidebar() {
           onCreateChat={handleStartNewChat}
           onCreateWorkspace={handleCreateWorkspace}
           onDeleteChat={handleDeleteChat}
+          onSetChatVisibility={setChatVisibility}
           onLoadMoreChats={() => void loadMorePrivateChats()}
           onOpenUsage={() =>
             setSettingsRequest({ id: Date.now(), tab: "usage" })
