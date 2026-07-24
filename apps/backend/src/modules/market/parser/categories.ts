@@ -89,8 +89,17 @@ function toolText(tools: ParsedTool[]) {
     .join(" ");
 }
 
-export function inferMcpCategories(parsed: StaticParseResult, categories: string[]) {
-  const explicit = categories
+/**
+ * Keyword-classify free text into up to three category slugs. Any explicit slugs
+ * are normalized and pinned first; the rest are scored by keyword hits over the
+ * text. Falls back to ["other"] when nothing matches. Shared by the submission
+ * parser (rich repo text) and registry federation (name/title/description).
+ */
+export function classifyByText(
+  text: string,
+  explicitCategories: string[] = [],
+): string[] {
+  const explicit = explicitCategories
     .map(normalizeMcpCategorySlug)
     .filter((category): category is string => Boolean(category));
   const ordered = new Map<string, number>();
@@ -98,6 +107,27 @@ export function inferMcpCategories(parsed: StaticParseResult, categories: string
     ordered.set(category, 100);
   }
 
+  const haystack = text.toLowerCase();
+  for (const category of mcpCategoryDefinitions) {
+    if (category.slug === "other" || ordered.has(category.slug)) {
+      continue;
+    }
+    const score = (categoryKeywords.get(category.slug) ?? []).reduce(
+      (count, pattern) => count + (pattern.test(haystack) ? 1 : 0),
+      0,
+    );
+    if (score > 0) {
+      ordered.set(category.slug, score);
+    }
+  }
+
+  const sorted = [...ordered.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([slug]) => slug);
+  return sorted.length > 0 ? sorted.slice(0, 3) : ["other"];
+}
+
+export function inferMcpCategories(parsed: StaticParseResult, categories: string[]) {
   const text = [
     parsed.serverJson?.content.name,
     parsed.serverJson?.content.title,
@@ -112,24 +142,6 @@ export function inferMcpCategories(parsed: StaticParseResult, categories: string
     toolText(parsed.sourceTools),
   ]
     .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  for (const category of mcpCategoryDefinitions) {
-    if (category.slug === "other" || ordered.has(category.slug)) {
-      continue;
-    }
-    const score = (categoryKeywords.get(category.slug) ?? []).reduce(
-      (count, pattern) => count + (pattern.test(text) ? 1 : 0),
-      0,
-    );
-    if (score > 0) {
-      ordered.set(category.slug, score);
-    }
-  }
-
-  const sorted = [...ordered.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .map(([slug]) => slug);
-  return sorted.length > 0 ? sorted.slice(0, 3) : ["other"];
+    .join(" ");
+  return classifyByText(text, categories);
 }

@@ -8,7 +8,7 @@ vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
-import { ingestFromRegistry } from "./federation";
+import { ingestFromRegistry, mapRegistryServerToManifest } from "./federation";
 
 function serverEntry(id: number) {
   return {
@@ -57,6 +57,24 @@ test("a mid-pagination fetch failure keeps the partial run instead of discarding
   assert.equal(result.partial, true);
   assert.ok(result.error?.includes("fetch failed"));
   assert.equal(mocks.upsert.mock.calls.length, 2);
+});
+
+test("registry entries are categorized from their text, not left empty", async () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "io.github.acme/postgres-mcp",
+        title: "Postgres MCP",
+        version: "1.0.0",
+        description: "Query and manage a PostgreSQL database over SQL.",
+        remotes: [{ type: "streamable-http", url: "https://acme.test/pg" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.ok(manifest);
+  assert.ok(manifest.categories.length > 0);
+  assert.ok(manifest.categories.includes("databases"));
 });
 
 test("a clean walk to the end reports the full count and is not partial", async () => {

@@ -5,6 +5,7 @@ import {
 } from "@sourceweft/market-contracts";
 import { logger } from "../../shared/logger";
 import { upsertMarketMcp } from "./ingest/repository";
+import { classifyByText } from "./parser/categories";
 
 /**
  * Upstream MCP registries we federate from. Both conform to the official MCP
@@ -110,6 +111,15 @@ export function mapRegistryServerToManifest(
     server.description?.trim() ||
     `MCP server ${identifier} from the MCP registry.`;
 
+  // The official registry has no category field, so classify from the text it
+  // does give us (name/title/description/provider). Keeps federated entries
+  // browsable by category instead of landing uncategorized.
+  const categories = classifyByText(
+    [identifier, server.title, server.description, providerFromIdentifier(identifier)]
+      .filter(Boolean)
+      .join(" "),
+  );
+
   const candidate = {
     schemaVersion: 1 as const,
     identifier,
@@ -125,7 +135,7 @@ export function mapRegistryServerToManifest(
     official: false,
     verified: options.verified,
     auth: { type: "none" as const, required: false, allowedHeaderNames: [] },
-    categories: [],
+    categories,
     tools: [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,

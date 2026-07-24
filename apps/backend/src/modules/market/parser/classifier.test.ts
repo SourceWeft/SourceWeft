@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "vitest";
 import { classifyMcpRepository } from "./classifier";
 import {
+  classifyByText,
   inferMcpCategories,
 
   normalizeMcpCategorySlug,
@@ -82,6 +83,22 @@ async function tempCachePath() {
   const dir = await mkdtemp(path.join(tmpdir(), "sourceweft-classifier-test-"));
   return path.join(dir, "cache.json");
 }
+
+test("classifyByText keyword-classifies plain text and pins explicit slugs", () => {
+  // Registry-style text (no repo parse) still classifies from name/description.
+  const dbCats = classifyByText("A Postgres database MCP with SQL queries");
+  assert.ok(dbCats.includes("databases"));
+  assert.equal(dbCats[0], "databases");
+  // Explicit categories are normalized and pinned ahead of keyword matches.
+  const withExplicit = classifyByText(
+    "browser automation with playwright screenshots",
+    ["developer-tools"],
+  );
+  assert.equal(withExplicit[0], "developer-tools");
+  assert.ok(withExplicit.includes("browser-automation"));
+  // Unclassifiable text falls back to "other".
+  assert.deepEqual(classifyByText("zzz qqq"), ["other"]);
+});
 
 test("filters source market slugs out of canonical categories", () => {
   assert.equal(normalizeMcpCategorySlug("mcp-so"), undefined);
