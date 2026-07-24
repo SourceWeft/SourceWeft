@@ -240,6 +240,7 @@ export function useChatStreamRunnerControl({
 
   return {
     activeThreadRun,
+    activeThreadRunRef,
     attachedRunKeyRef,
     chatExecutionState,
     clearTerminalLocalRunState,
