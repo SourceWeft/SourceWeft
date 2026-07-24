@@ -185,17 +185,17 @@ test("normalizedMcpToolName creates stable LangChain-safe names", () => {
 });
 
 test("resolveCredentialEnvRef resolves env: references and passes literals through", () => {
-  const varName = "MCP_TEST_ENV_REF_TOKEN";
+  const varName = "MCP_CRED_TEST_ENV_REF_TOKEN";
   const previous = process.env[varName];
   try {
     process.env[varName] = "sk-from-env";
-    // An exact env:VAR reference resolves from the environment (trims surrounding space).
+    // An exact env:MCP_CRED_* reference resolves from the environment (trims space).
     assert.equal(resolveCredentialEnvRef(`env:${varName}`), "sk-from-env");
     assert.equal(resolveCredentialEnvRef(`  env:${varName}  `), "sk-from-env");
     // A literal secret is returned unchanged.
     assert.equal(resolveCredentialEnvRef("sk-literal-123"), "sk-literal-123");
     // A referenced-but-unset variable resolves to "" (header gets omitted).
-    assert.equal(resolveCredentialEnvRef("env:MCP_DEFINITELY_UNSET_XYZ"), "");
+    assert.equal(resolveCredentialEnvRef("env:MCP_CRED_DEFINITELY_UNSET"), "");
     // Not a valid reference shape → treated as a literal, not resolved.
     assert.equal(resolveCredentialEnvRef("env:9bad name"), "env:9bad name");
   } finally {
@@ -204,6 +204,21 @@ test("resolveCredentialEnvRef resolves env: references and passes literals throu
     } else {
       process.env[varName] = previous;
     }
+  }
+});
+
+test("resolveCredentialEnvRef refuses references outside the MCP_CRED_ namespace", () => {
+  // The attack this closes: a workspace admin pointing an install at their own
+  // endpoint and configuring env:MODEL_GATEWAY_ENCRYPTION_SECRET as the bearer
+  // token — which would ship the encryption root to their server on connect.
+  process.env.MCP_SECURITY_TEST_FORBIDDEN = "infra-secret";
+  try {
+    assert.equal(resolveCredentialEnvRef("env:MCP_SECURITY_TEST_FORBIDDEN"), "");
+    assert.equal(resolveCredentialEnvRef("env:MODEL_GATEWAY_ENCRYPTION_SECRET"), "");
+    assert.equal(resolveCredentialEnvRef("env:DATABASE_URL"), "");
+    assert.equal(resolveCredentialEnvRef("env:PATH"), "");
+  } finally {
+    delete process.env.MCP_SECURITY_TEST_FORBIDDEN;
   }
 });
 

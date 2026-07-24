@@ -14,20 +14,48 @@ import {
 } from "./oauth-repository";
 import { requireMcpWorkspace } from "./permissions";
 import { findWorkspaceMcpInstall } from "./repository";
+import { assertSafeMcpEndpoint } from "./security";
+
+function isDevelopment() {
+  return process.env.NODE_ENV === "development";
+}
+
+/**
+ * The OAuth flow fetches URLs the tool-execution path never touches — the
+ * endpoint's well-known documents, the authorization-server metadata, and the
+ * token endpoint — so it needs the same SSRF discipline as
+ * buildLangChainToolsForTurn: validate the stored endpoint at use time AND
+ * validate the issuer the (untrusted) endpoint's metadata declares, or a
+ * malicious server could steer our discovery/token fetches at internal or
+ * cloud-metadata addresses.
+ */
+async function assertSafeOAuthUrl(value: string) {
+  await assertSafeMcpEndpoint(value, {
+    allowLocalhost: isDevelopment(),
+    allowPrivateNetwork: isDevelopment(),
+  });
+}
 
 /**
  * Resolve the authorization-server issuer for an MCP endpoint: prefer the
  * protected-resource metadata (RFC 9728), else fall back to the endpoint origin
- * for servers that host their own authorization endpoints.
+ * for servers that host their own authorization endpoints. The declared issuer
+ * is attacker-influenced (it comes from the endpoint's own metadata), so it is
+ * SSRF-validated before anything fetches from it.
  */
 async function discoverIssuer(endpointUrl: string): Promise<string> {
   try {
     const metadata = await discoverOAuthProtectedResourceMetadata(endpointUrl);
     const issuer = metadata?.authorization_servers?.[0];
     if (issuer) {
+      await assertSafeOAuthUrl(issuer);
       return issuer;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof McpError) {
+      // The declared issuer failed SSRF validation — refuse, don't fall back.
+      throw error;
+    }
     // No protected-resource metadata document; fall through.
   }
   return new URL(endpointUrl).origin;
@@ -85,6 +113,9 @@ export async function startMcpOAuthAuthorization(input: {
   if (!install.endpointUrl) {
     throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
   }
+  // Execution-time SSRF re-check, mirroring the tool path: the stored endpoint
+  // may have been repointed (DNS or re-install) since install time.
+  await assertSafeOAuthUrl(install.endpointUrl);
 
   const scope: McpOAuthScope = {
     teamId: workspace.organizationId,
@@ -143,8 +174,13 @@ export async function completeMcpOAuthCallback(input: {
   if (!install?.endpointUrl) {
     throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
   }
+  await assertSafeOAuthUrl(install.endpointUrl);
 
   const issuer = session.issuer ?? (await discoverIssuer(install.endpointUrl));
+  if (session.issuer) {
+    // A stored issuer is validated again at use time for the same reason.
+    await assertSafeOAuthUrl(session.issuer);
+  }
   const provider = buildProvider(scope, issuer);
   const result = await auth(provider, {
     serverUrl: install.endpointUrl,

@@ -1187,10 +1187,23 @@ export class McpService {
         }),
         approvedBy: input.userId,
       })) ?? action;
+    // When the user edited the args, the resume decision must carry them as an
+    // "edit" so the interrupted tool re-executes with the edited args. A plain
+    // "approve" would re-run the model's ORIGINAL args while the audit record
+    // above claims the edited ones ran. Mirrors the sandbox confirmation path.
+    const editedToolName =
+      input.confirmation?.action.toolName ??
+      `mcp__${install.marketIdentifier ?? install.id}__${tool.serverToolName}`;
+    const resumeDecision = input.editedArgs
+      ? {
+          type: "edit" as const,
+          editedAction: { name: editedToolName, args: input.editedArgs },
+        }
+      : { type: "approve" as const };
     return {
       confirmation: mcpConfirmationPayload({ action: approved, install, tool }),
       resume: {
-        decisions: [{ type: "approve" as const }],
+        decisions: [resumeDecision],
       },
     };
   }

@@ -182,19 +182,33 @@ export function sanitizeHeaders(headers: Record<string, string>) {
 const ENV_REF_PATTERN = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
 
 /**
+ * Only environment variables under this namespace may be referenced from MCP
+ * credentials. Without the restriction, any workspace admin could point an
+ * install at their own endpoint and reference e.g.
+ * `env:MODEL_GATEWAY_ENCRYPTION_SECRET` — exfiltrating infrastructure secrets
+ * (the encryption root, DB URLs, cloud keys) to an attacker-controlled server.
+ * Operators opt secrets into MCP use by naming them MCP_CRED_*.
+ */
+const ALLOWED_ENV_REF_PREFIX = "MCP_CRED_";
+
+/**
  * Resolve an env-sourced credential value. A stored value of exactly
- * `env:VAR_NAME` is replaced with `process.env.VAR_NAME` at use time, so
- * first-party / self-hosted MCP tokens can live in the environment (or a secret
- * manager) instead of the database — the SurfSense-style pattern. Any other
- * value is returned unchanged; a referenced-but-unset variable resolves to ""
- * so the header is simply omitted (and the connection fails as unauthenticated
- * rather than sending a literal "env:..." token).
+ * `env:MCP_CRED_*` is replaced with the matching `process.env` value at use
+ * time, so first-party / self-hosted MCP tokens can live in the environment (or
+ * a secret manager) instead of the database — the SurfSense-style pattern. A
+ * reference outside the MCP_CRED_ namespace or to an unset variable resolves to
+ * "" so the header is omitted (the connection fails as unauthenticated rather
+ * than leaking either the literal "env:..." string or a forbidden secret). Any
+ * non-reference value is returned unchanged.
  */
 export function resolveCredentialEnvRef(value: string): string {
   const match = ENV_REF_PATTERN.exec(value.trim());
   const varName = match?.[1];
   if (!varName) {
     return value;
+  }
+  if (!varName.startsWith(ALLOWED_ENV_REF_PREFIX)) {
+    return "";
   }
   return process.env[varName] ?? "";
 }

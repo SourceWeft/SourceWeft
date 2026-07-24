@@ -1038,8 +1038,19 @@ test("respondToApproval approves MCP confirmations with edited args", async () =
     requestPreview: "Write MCP call: GitHub.create_issue with title",
     approvedBy: "user_1",
   });
+  // Edited args must resume as an "edit" decision so the tool re-executes with
+  // them; a plain approve would run the model's ORIGINAL args while the audit
+  // record above says the edited ones were approved and executed.
   assert.deepEqual(result.resume, {
-    decisions: [{ type: "approve" }],
+    decisions: [
+      {
+        type: "edit",
+        editedAction: {
+          name: "mcp__github__create_issue",
+          args: { title: "Edited" },
+        },
+      },
+    ],
   });
   assert.equal(result.confirmation.status, "approved");
   assert.deepEqual(result.confirmation.preview.requestJson, {

@@ -206,6 +206,20 @@ export async function clearMcpOAuthTransient(scope: McpOAuthScope) {
     );
 }
 
+/**
+ * Remove EVERY user's OAuth session for an install. Called when the install's
+ * endpoint URL changes (re-install with a different endpoint): tokens were
+ * consented for the old endpoint's service, and continuing to attach them as
+ * Bearer to a new endpoint would hand every connected user's token to whatever
+ * the new URL points at (confused-deputy). Users re-connect against the new
+ * endpoint instead.
+ */
+export async function deleteMcpOAuthSessionsForInstall(installId: string) {
+  await db
+    .delete(workspaceMcpOAuthSessions)
+    .where(eq(workspaceMcpOAuthSessions.installId, installId));
+}
+
 /** Remove a user's OAuth session for an install (disconnect / revoke locally). */
 export async function deleteMcpOAuthSession(scope: McpOAuthScope) {
   await db

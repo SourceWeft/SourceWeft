@@ -25,6 +25,7 @@ import type {
   MarketMcpToolManifest,
   McpAuthType,
 } from "@sourceweft/market-sdk";
+import { deleteMcpOAuthSessionsForInstall } from "./oauth-repository";
 import { hashJson, normalizedMcpToolName } from "./security";
 
 type InstallRow = typeof workspaceMcpInstalls.$inferSelect;
@@ -395,6 +396,13 @@ export async function createOrUpdateMarketMcpInstall(input: {
 
   if (!row) {
     throw new Error("Failed to create MCP install");
+  }
+
+  // Endpoint changed on re-install: every stored OAuth token was consented for
+  // the OLD endpoint's service. Invalidate all sessions so tokens are never
+  // presented to the new URL (confused-deputy); users re-connect explicitly.
+  if (existing && existing.endpointUrl !== endpointUrl) {
+    await deleteMcpOAuthSessionsForInstall(existing.id);
   }
 
   if (existing && existing.credentialStatus !== "configured") {
