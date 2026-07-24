@@ -620,6 +620,13 @@ export async function findUserIdentitiesByIds(
   if (userIds.length === 0) {
     return [];
   }
+  // Build an explicit IN list. Interpolating a JS array into a raw `sql` template
+  // expands to a parenthesized tuple `($1, $2)`, which is valid for `IN` but NOT
+  // for `= any(...)` (that needs a real array param) — so join the ids ourselves.
+  const idList = sql.join(
+    userIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
   const result = await db.execute<{
     id: string;
     name: string | null;
@@ -627,7 +634,7 @@ export async function findUserIdentitiesByIds(
   }>(sql`
     select id, name, image
     from "user"
-    where id = any(${userIds})
+    where id in (${idList})
   `);
   return (result.rows ?? []).map((row) => ({
     userId: row.id,
@@ -644,11 +651,15 @@ export async function filterOrganizationMemberIds(input: {
   if (input.userIds.length === 0) {
     return new Set();
   }
+  const idList = sql.join(
+    input.userIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
   const result = await db.execute<{ userId: string }>(sql`
     select m."userId" as "userId"
     from member m
     where m."organizationId" = ${input.organizationId}
-      and m."userId" = any(${input.userIds})
+      and m."userId" in (${idList})
   `);
   return new Set((result.rows ?? []).map((row) => row.userId));
 }
