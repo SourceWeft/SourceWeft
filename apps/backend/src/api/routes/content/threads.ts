@@ -477,6 +477,27 @@ export function registerThreadRoutes(app: Hono) {
     });
   });
 
+  app.get("/threads/:id/room", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    // Authorization happens inside openThreadRoom (before the generator starts),
+    // so a non-viewer gets a clean 404 rather than a half-open event-stream.
+    const stream = await contentThreadService.openThreadRoom({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    c.header("Content-Type", "text/event-stream");
+    c.header("Cache-Control", "no-cache, no-transform");
+    c.header("Connection", "keep-alive");
+    c.header("X-Accel-Buffering", "no");
+    return c.body(createSseResponse(stream));
+  });
+
   app.get("/threads/:id/title-job/:jobId", async (c) => {
     const session = await requireSession(c);
     if (!session) {

@@ -42,6 +42,7 @@ import { listThreadModelCatalog } from "./thread/model-catalog";
 import { downloadChatImageObject } from "../sources/storage";
 import { durableChatRunService } from "./durable/service";
 import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
+import { streamThreadRoom } from "./durable/room-service";
 import type { ChatThreadRunMode } from "./durable/types";
 import type { StreamThreadEventInput } from "./turn/types";
 import { sanitizeThreadMessageMetadataForClient } from "./agent/turn/output-normalizer";
@@ -628,6 +629,36 @@ class ContentThreadService {
     });
 
     return sanitizeClientMessagePage({ items, nextCursor: null });
+  }
+
+  /**
+   * Authorize and open a live thread room (SSE). Authorization is identical to
+   * `listThreadMessages` — a workspace member who can see the thread — and is
+   * performed up front so a non-viewer gets a clean 404, never a half-open
+   * event-stream. The returned generator subscribes to the NotifyHub and yields
+   * thin wake-up frames; the client reconciles content over REST.
+   */
+  async openThreadRoom(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }): Promise<AsyncGenerator<string>> {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const thread = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!thread || !canViewThread(input.userId, thread)) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    return streamThreadRoom({ threadId: thread.id });
   }
 
   async getMessageImageFile(input: {
