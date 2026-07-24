@@ -724,6 +724,15 @@ export class ContentClient {
     );
   }
 
+  authorizeWorkspaceMcpOAuth(workspaceId: string, installId: string) {
+    return this.http.post<
+      { status: "redirect"; authorizationUrl: string } | { status: "connected" }
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/oauth/authorize`,
+      {},
+    );
+  }
+
   listByokCredentials(workspaceId: string) {
     return this.http.get<ListByokCredentialsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials`,
