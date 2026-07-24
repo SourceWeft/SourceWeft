@@ -74,6 +74,7 @@ import { ArtifactsTab } from "./artifacts/tab";
 import { useArtifacts } from "./artifacts/use-artifacts";
 import { McpTab } from "./mcp/tab";
 import { useMcp } from "./mcp/use-mcp";
+import { McpMarket } from "../../../mcp/_components/mcp-market";
 import {
   sourceMatchesQuery,
 } from "./sources/components";
@@ -246,6 +247,7 @@ export function SourcesHub({
     string | null
   >(null);
   const [isSkillsGalleryOpen, setIsSkillsGalleryOpen] = useState(false);
+  const [isMcpMarketOpen, setIsMcpMarketOpen] = useState(false);
   const {
     workfiles,
     isLoadingWorkfiles,
@@ -906,11 +908,14 @@ export function SourcesHub({
                     </span>
                   ) : null}
                 </div>
-                <Button asChild size="xs" type="button" variant="outline">
-                  <a href="/dashboard/mcp">
-                    <McpIcon className="size-3.5" />
-                    MCP Market
-                  </a>
+                <Button
+                  onClick={() => setIsMcpMarketOpen(true)}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  <McpIcon className="size-3.5" />
+                  MCP Market
                 </Button>
               </div>
 
@@ -1198,6 +1203,34 @@ export function SourcesHub({
             workspaceId={workspaceId}
             workspaceName={workspaceName}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          setIsMcpMarketOpen(open);
+          // Reflect any installs/credentials changed in the market back into the
+          // MCP tab as soon as the dialog is dismissed.
+          if (!open) {
+            void refreshMcpInstalls();
+          }
+        }}
+        open={isMcpMarketOpen}
+      >
+        <DialogContent
+          className="grid h-[min(780px,calc(100svh-2rem))] w-[min(1240px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+          constrainWidth={false}
+        >
+          <DialogHeader className="border-b px-5 py-4 text-left">
+            <DialogTitle>MCP Market</DialogTitle>
+            <DialogDescription>
+              Install and configure MCP servers for{" "}
+              {workspaceName || "the current workspace"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-auto">
+            <McpMarket />
+          </div>
         </DialogContent>
       </Dialog>
     </>
