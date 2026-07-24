@@ -20,6 +20,7 @@ import { ContentError } from "../../content/errors";
 import { contentByokService } from "../../byok";
 import { dedupeSourceIds } from "../../sources/source-ids";
 import { requireContentWorkspace } from "../../workspace/guards";
+import { workspaceService } from "../../workspace";
 import type { SelectableInvocationRegistry } from "../../invocations/registry";
 import {
   findThreadRecord,
@@ -897,12 +898,20 @@ async function buildVisionFallback(input: {
   // scope rather than a raw client. Settlement happens per call inside the
   // wrapper; the resulting traces are carried forward and turned into
   // PreflightBillingTrace values once the turn's trace id is known.
+  // 谁问谁付: a guest's describe pass bills the guest's own personal org, not
+  // the host team. Members bill the workspace's org, unchanged.
+  const billingTeamId = await workspaceService.resolveBillingOrganizationId({
+    workspaceId: input.workspace.id,
+    userId: input.userId,
+    workspaceOrganizationId: input.workspace.organizationId,
+  });
+
   const { gateway, scope } = await openBilledModelGateway({
     billing: input.billing,
     gatewayConfigId: visionProfile.gatewayConfigId,
     meterUsage: input.meterUsage,
     context: {
-      teamId: input.workspace.organizationId,
+      teamId: billingTeamId,
       workspaceId: input.workspace.id,
       actorUserId: input.userId,
       feature: "chat",

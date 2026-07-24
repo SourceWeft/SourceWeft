@@ -38,6 +38,7 @@ import type { WorkspaceMember, WorkspaceRole } from "@sourceweft/contracts";
 import { authClient } from "../../../../lib/auth-client";
 import { workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../dashboard-chat-state";
+import { WorkspaceGuestsSection } from "./workspace-guests-section";
 
 const ASSIGNABLE_ROLES: {
   value: WorkspaceRole;
@@ -399,6 +400,8 @@ export function WorkspaceMembersPanel() {
           })}
         </ul>
       )}
+
+      <WorkspaceGuestsSection canManage={canManage} workspaceId={workspaceId} />
 
       <Dialog
         open={Boolean(removeTarget)}

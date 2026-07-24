@@ -217,6 +217,39 @@ export class WorkspaceService {
     return resolveWorkspaceAccessRecord(input);
   }
 
+  /**
+   * 谁问谁付 — a guest's runs bill the guest's own personal org, not the host
+   * team; members bill the workspace's org.
+   *
+   * Whoever initiates a run pays from their own account. A guest is not an
+   * organization member, so charging the host team for their run would be the
+   * host silently footing an outsider's bill. Members (derived/explicit
+   * standing) keep billing the workspace's owning org, unchanged.
+   *
+   * The fallback to `workspaceOrganizationId` is deliberate: a run must never be
+   * left unbilled or made to error over a missing personal org, so if the guest
+   * somehow has no personal organization we settle against the workspace's org.
+   */
+  async resolveBillingOrganizationId(input: {
+    workspaceId: string;
+    userId: string;
+    workspaceOrganizationId: string;
+  }): Promise<string> {
+    const access = await this.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    if (access?.source === "guest") {
+      const personal = await this.findPersonalOrganizationMembershipByUser(
+        input.userId,
+      );
+      return personal?.organizationId ?? input.workspaceOrganizationId;
+    }
+
+    return input.workspaceOrganizationId;
+  }
+
   /** Administers the container: rename, credentials, membership, audit. */
   canAdministerContainer(access: WorkspaceAccess) {
     return (

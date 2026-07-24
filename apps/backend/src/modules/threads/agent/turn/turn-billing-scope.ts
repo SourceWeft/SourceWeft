@@ -4,6 +4,7 @@ import { openBilledModelGateway } from "../../../../shared/model-gateway/index";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { TraceContext } from "../../../llm-observability";
+import { workspaceService } from "../../../workspace";
 import type { PreparedThreadTurn } from "../..";
 import type { TurnRuntime } from "./turn-runtime";
 
@@ -25,11 +26,19 @@ export async function openTurnBillingScope(input: {
   const { prepared } = input;
   const isByok = input.llm?.executionMode === "BYOK";
 
+  // 谁问谁付: a guest's turn bills the guest's own personal org, not the host
+  // team. Members bill the workspace's org, unchanged.
+  const billingTeamId = await workspaceService.resolveBillingOrganizationId({
+    workspaceId: prepared.workspace.id,
+    userId: prepared.userId,
+    workspaceOrganizationId: prepared.workspace.organizationId,
+  });
+
   const { gateway, scope } = await openBilledModelGateway({
     billing: input.billing,
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,
     context: {
-      teamId: prepared.workspace.organizationId,
+      teamId: billingTeamId,
       workspaceId: prepared.workspace.id,
       actorUserId: prepared.userId,
       feature: "chat",
@@ -70,7 +79,7 @@ export async function openTurnBillingScope(input: {
   input.runtime.billingScope = scope;
 
   logger.debug("Agent turn billing scope opened", {
-    teamId: prepared.workspace.organizationId,
+    teamId: billingTeamId,
     threadId: prepared.thread.id,
     scopeId: input.traceContext?.traceId ?? prepared.runTraceId,
     billingMode: scope.billingMode,
