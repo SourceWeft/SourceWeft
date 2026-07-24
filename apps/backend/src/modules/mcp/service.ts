@@ -37,6 +37,7 @@ import {
   hashJson,
   normalizedMcpToolName,
   redactMcpSecrets,
+  resolveCredentialEnvRef,
   sanitizeHeaderName,
   sanitizeHeaders,
 } from "./security";
@@ -85,9 +86,20 @@ function headersFromCredential(input: {
   }
   if (input.authType === "custom_headers") {
     const decrypted = decryptSecret(input.encryptedHeaders ?? "", encryptionSecret());
-    return decrypted ? (JSON.parse(decrypted) as Record<string, string>) : {};
+    if (!decrypted) {
+      return {};
+    }
+    // Each header value may be an `env:VAR` reference resolved at use time.
+    const parsed = JSON.parse(decrypted) as Record<string, string>;
+    const resolved: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      resolved[key] = resolveCredentialEnvRef(value);
+    }
+    return resolved;
   }
-  const secret = decryptSecret(input.encryptedSecret ?? "", encryptionSecret());
+  const secret = resolveCredentialEnvRef(
+    decryptSecret(input.encryptedSecret ?? "", encryptionSecret()),
+  );
   if (input.authType === "bearer") {
     return secret ? { Authorization: `Bearer ${secret}` } : {};
   }

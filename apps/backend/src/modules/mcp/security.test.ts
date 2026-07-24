@@ -7,6 +7,7 @@ import {
   hashJson,
   normalizedMcpToolName,
   redactMcpSecrets,
+  resolveCredentialEnvRef,
   sanitizeHeaders,
 } from "./security";
 
@@ -181,6 +182,29 @@ test("normalizedMcpToolName creates stable LangChain-safe names", () => {
     }),
     "mcp__server__tool",
   );
+});
+
+test("resolveCredentialEnvRef resolves env: references and passes literals through", () => {
+  const varName = "MCP_TEST_ENV_REF_TOKEN";
+  const previous = process.env[varName];
+  try {
+    process.env[varName] = "sk-from-env";
+    // An exact env:VAR reference resolves from the environment (trims surrounding space).
+    assert.equal(resolveCredentialEnvRef(`env:${varName}`), "sk-from-env");
+    assert.equal(resolveCredentialEnvRef(`  env:${varName}  `), "sk-from-env");
+    // A literal secret is returned unchanged.
+    assert.equal(resolveCredentialEnvRef("sk-literal-123"), "sk-literal-123");
+    // A referenced-but-unset variable resolves to "" (header gets omitted).
+    assert.equal(resolveCredentialEnvRef("env:MCP_DEFINITELY_UNSET_XYZ"), "");
+    // Not a valid reference shape → treated as a literal, not resolved.
+    assert.equal(resolveCredentialEnvRef("env:9bad name"), "env:9bad name");
+  } finally {
+    if (previous === undefined) {
+      delete process.env[varName];
+    } else {
+      process.env[varName] = previous;
+    }
+  }
 });
 
 test("canonicalJson and hashJson are stable across object key order", () => {

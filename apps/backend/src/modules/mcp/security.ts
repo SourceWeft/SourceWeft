@@ -165,3 +165,23 @@ export function sanitizeHeaders(headers: Record<string, string>) {
   }
   return output;
 }
+
+const ENV_REF_PATTERN = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/**
+ * Resolve an env-sourced credential value. A stored value of exactly
+ * `env:VAR_NAME` is replaced with `process.env.VAR_NAME` at use time, so
+ * first-party / self-hosted MCP tokens can live in the environment (or a secret
+ * manager) instead of the database — the SurfSense-style pattern. Any other
+ * value is returned unchanged; a referenced-but-unset variable resolves to ""
+ * so the header is simply omitted (and the connection fails as unauthenticated
+ * rather than sending a literal "env:..." token).
+ */
+export function resolveCredentialEnvRef(value: string): string {
+  const match = ENV_REF_PATTERN.exec(value.trim());
+  const varName = match?.[1];
+  if (!varName) {
+    return value;
+  }
+  return process.env[varName] ?? "";
+}
