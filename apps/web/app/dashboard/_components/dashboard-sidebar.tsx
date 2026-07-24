@@ -15,6 +15,7 @@ import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { McpIcon, SkillIcon } from "./dashboard-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
+import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 
 type NavItem = {
@@ -132,8 +133,11 @@ export function DashboardSidebar() {
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
   const [settingsRequest, setSettingsRequest] = React.useState<{
     id: number;
-    tab: "account" | "team" | "workspace" | "usage" | "billing";
+    tab: "account" | "team" | "usage" | "billing";
   } | null>(null);
+  // Member management is per-workspace, not an account setting — it opens as
+  // its own dialog rather than a settings-center tab.
+  const [membersOpen, setMembersOpen] = React.useState(false);
 
   // Pattern: /dashboard/chat/[threadId]. While a newly created chat is
   // navigating from /dashboard/chat to /dashboard/chat/[threadId], context has
@@ -343,9 +347,7 @@ export function DashboardSidebar() {
           onDeleteChat={handleDeleteChat}
           onSetChatVisibility={setChatVisibility}
           onLoadMoreChats={() => void loadMorePrivateChats()}
-          onOpenMembers={() =>
-            setSettingsRequest({ id: Date.now(), tab: "workspace" })
-          }
+          onOpenMembers={() => setMembersOpen(true)}
           onOpenUsage={() =>
             setSettingsRequest({ id: Date.now(), tab: "usage" })
           }
@@ -417,6 +419,11 @@ export function DashboardSidebar() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <WorkspaceMembersDialog
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+      />
     </>
   );
 }

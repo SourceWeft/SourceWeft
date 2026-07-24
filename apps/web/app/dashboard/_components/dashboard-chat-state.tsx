@@ -295,6 +295,7 @@ export function DashboardChatStateProvider({
         setWorkspaceId(null);
         setWorkspaceName("Workspace");
         setPrivateChats([]);
+        setSharedChats([]);
         setPrivateChatsCursor(null);
         setHasMorePrivateChats(false);
         setIsLoadingPrivateChats(false);
@@ -312,6 +313,7 @@ export function DashboardChatStateProvider({
 
       setIsLoadingPrivateChats(true);
       setPrivateChats([]);
+      setSharedChats([]);
       setPrivateChatsCursor(null);
       setHasMorePrivateChats(false);
 
@@ -507,7 +509,11 @@ export function DashboardChatStateProvider({
       setPendingWorkspaceId(null);
       setWorkspaceSwitchStatus("idle");
       setLastChatTransitionError(null);
+      // A fresh workspace has no threads at all — clear BOTH buckets. Leaving
+      // sharedChats behind kept the previous workspace's shared threads on
+      // screen inside the new workspace.
       setPrivateChats([]);
+      setSharedChats([]);
       setPrivateChatsCursor(null);
       setHasMorePrivateChats(false);
       setMode("new");

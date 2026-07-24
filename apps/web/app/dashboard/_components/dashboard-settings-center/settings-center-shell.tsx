@@ -1,15 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  LayoutGrid,
-  PanelsTopLeft,
-  Receipt,
-  ShieldCheck,
-  User,
-  Users,
-  X,
-} from "lucide-react";
+import { LayoutGrid, Receipt, ShieldCheck, User, Users, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +13,6 @@ import { BillingPanel } from "./billing-panel";
 import { TeamPanel } from "./team-panel";
 import { TrustRulesPanel } from "./trust-rules-panel";
 import { UsagePanel } from "./usage-panel";
-import { WorkspaceMembersPanel } from "./workspace-members-panel";
 import type { BillingScope, SettingsCenterTab } from "./types";
 
 const menuItems: Array<{
@@ -31,7 +22,8 @@ const menuItems: Array<{
 }> = [
   { key: "account", label: "Profile", icon: User },
   { key: "team", label: "Team", icon: Users },
-  { key: "workspace", label: "Workspace", icon: PanelsTopLeft },
+  // Workspace membership is per-workspace, not an account setting — it lives in
+  // the standalone WorkspaceMembersDialog opened from the sidebar.
   { key: "usage", label: "Usage", icon: LayoutGrid },
   { key: "billing", label: "Billing", icon: Receipt },
   { key: "approvals", label: "Approvals", icon: ShieldCheck },
@@ -161,7 +153,6 @@ export function DashboardSettingsCenterModal({
                   teamName={teamName}
                 />
               )}
-              {activeTab === "workspace" && <WorkspaceMembersPanel />}
               {activeTab === "usage" && <UsagePanel />}
               {activeTab === "billing" && <BillingPanel />}
               {activeTab === "approvals" && <TrustRulesPanel />}
