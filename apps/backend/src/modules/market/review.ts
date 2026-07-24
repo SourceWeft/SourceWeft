@@ -99,10 +99,19 @@ export async function setSubmissionStatus(
     .update(marketItems)
     .set({ status, publishedAt, updatedAt: now })
     .where(eq(marketItems.id, item.id));
+  // Only the version(s) actually sitting in review move with the decision. A
+  // blanket item-wide update would republish previously REJECTED (archived)
+  // versions on approve — serving an admin-rejected manifest again — and
+  // archive previously approved clean versions on reject.
   await db
     .update(marketItemVersions)
     .set({ status, publishedAt })
-    .where(eq(marketItemVersions.itemId, item.id));
+    .where(
+      and(
+        eq(marketItemVersions.itemId, item.id),
+        eq(marketItemVersions.status, "reviewing"),
+      ),
+    );
 
   return { identifier, status };
 }
