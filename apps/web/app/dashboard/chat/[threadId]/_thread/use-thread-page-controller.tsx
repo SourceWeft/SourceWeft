@@ -10,6 +10,12 @@ import {
 } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { toast } from "sonner";
+import { authClient } from "../../../../../lib/auth-client";
+import {
+  queuedSendPreview,
+  shouldQueueSend,
+  type QueuedSend,
+} from "./chat-send-queue";
 import type { useDashboardChatState } from "../../../_components/dashboard-chat-state";
 import {
   DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
@@ -488,11 +494,33 @@ export function useThreadPageController({
     };
   }, [workspaceId]);
 
+  // Ownership of the active run drives whether *this* member's composer is
+  // locked. Another member's run on a shared thread is followed live but never
+  // locks our composer; our own run (and an optimistic run whose initiator is
+  // not yet attributed) still locks as before.
+  const { data: chatSessionData } = authClient.useSession();
+  const currentUserId = chatSessionData?.user?.id ?? null;
+  const otherUserRunActive =
+    activeThreadRun != null &&
+    activeThreadRun.userId != null &&
+    activeThreadRun.userId !== currentUserId;
+
+  // Turn-taking is client-orchestrated: sending while any run is active on the
+  // thread (ours or another member's) parks the message in a FIFO here and
+  // auto-sends the front of the queue whenever the thread frees. The server
+  // stays one-run-per-thread; this just turns the 409 backstop into a queue.
+  // `pendingSendsRef` is the source of truth for the auto-send effect (no stale
+  // closures); `queuedSends` mirrors it for rendering the pending list.
+  const pendingSendsRef = useRef<QueuedSend[]>([]);
+  const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([]);
+  const queuedSendIdRef = useRef(0);
+
   const { streamThreadAction } = useThreadStreamAction({
     catalogKindEnabled,
     clearAttachedRunKeyIfCurrent,
     clearEditingState,
     clearRunIfCurrent,
+    currentUserId,
     librarySources,
     loadThreadMessages,
     markRunStarted,
@@ -721,9 +749,27 @@ export function useThreadPageController({
       const images = input.images ?? [];
       if (
         (!text && images.length === 0) ||
-        (chatExecutionState !== "idle" && !options?.allowWhileStreaming) ||
         hasActivelyRunningToolWorkState
       ) {
+        return;
+      }
+      // A run is streaming (ours or another member's) — queue instead of
+      // sending now. The auto-send effect drains the FIFO when chatExecutionState
+      // returns to idle. `allowWhileStreaming` is the internal replay path.
+      if (
+        shouldQueueSend({
+          chatExecutionState,
+          allowWhileStreaming: options?.allowWhileStreaming,
+        })
+      ) {
+        queuedSendIdRef.current += 1;
+        const queued: QueuedSend = {
+          id: `queued-${queuedSendIdRef.current}`,
+          input,
+        };
+        pendingSendsRef.current = [...pendingSendsRef.current, queued];
+        setQueuedSends(pendingSendsRef.current);
+        toast("Queued — will send when the thread is free.");
         return;
       }
       if (modelCatalogStatus !== "ready") {
@@ -863,6 +909,36 @@ export function useThreadPageController({
       streamThreadAction,
     ],
   );
+
+  // Fire the parked message once the thread returns to idle. Kept in a ref so
+  // this effect depends only on the execution state, not on handleSendMessage's
+  // identity. `allowWhileStreaming` guards against a re-queue on replay.
+  const handleSendMessageRef = useRef(handleSendMessage);
+  useEffect(() => {
+    handleSendMessageRef.current = handleSendMessage;
+  }, [handleSendMessage]);
+  useEffect(() => {
+    const next = pendingSendsRef.current[0];
+    if (
+      chatExecutionState === "idle" &&
+      !hasActivelyRunningToolWorkState &&
+      next
+    ) {
+      const rest = pendingSendsRef.current.slice(1);
+      pendingSendsRef.current = rest;
+      setQueuedSends(rest);
+      void handleSendMessageRef.current(next.input, {
+        allowWhileStreaming: true,
+      });
+    }
+  }, [chatExecutionState, hasActivelyRunningToolWorkState]);
+
+  const cancelQueuedSend = useCallback((id: string) => {
+    pendingSendsRef.current = pendingSendsRef.current.filter(
+      (queued) => queued.id !== id,
+    );
+    setQueuedSends(pendingSendsRef.current);
+  }, []);
 
   const handleRefreshLatest = useCallback(
     async (input: {
@@ -1022,6 +1098,12 @@ export function useThreadPageController({
     activeAssistantVersion,
     assistantVersionById,
     activeThreadRun,
+    otherUserRunActive,
+    queuedSends: queuedSends.map((queued) => ({
+      id: queued.id,
+      preview: queuedSendPreview(queued.input),
+    })),
+    onCancelQueuedSend: cancelQueuedSend,
     chatExecutionState,
     chatUiState,
     activeCitationIndex,

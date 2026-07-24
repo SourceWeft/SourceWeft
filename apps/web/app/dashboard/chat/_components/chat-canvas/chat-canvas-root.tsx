@@ -30,7 +30,7 @@ import {
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
   hasActivelyRunningToolWork,
-  shouldLockComposerForRun,
+  shouldLockComposerForApproval,
 } from "./tool-confirmation-state";
 import {
   activateFirstPendingToolConfirmation,
@@ -133,6 +133,9 @@ export function ChatCanvas({
   highlightedMessageId = null,
   hasOlderMessages = false,
   activeThreadRun = null,
+  otherUserRunActive = false,
+  queuedSends = [],
+  onCancelQueuedSend,
   chatExecutionState,
   isEditing = false,
   isLoadingOlderMessages = false,
@@ -186,6 +189,14 @@ export function ChatCanvas({
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activeThreadRun?: ActiveThreadRun | null;
+  // True when the active run on this shared thread was started by another
+  // member. We follow it live but must not lock this member's composer or show
+  // them a Stop button for a run they don't own.
+  otherUserRunActive?: boolean;
+  // Messages the user submitted while a run was streaming, awaiting auto-send
+  // when the thread frees. Rendered as a compact stack above the composer.
+  queuedSends?: { id: string; preview: string }[];
+  onCancelQueuedSend?: (id: string) => void;
   chatExecutionState?: ChatExecutionState;
   composerInitialCommand?: ChatSendInput["command"] | null;
   composerInitialInput?: string;
@@ -367,15 +378,19 @@ export function ChatCanvas({
       }),
     [artifactStatuses, messageGroups],
   );
-  const isSubmitDisabledForRun = shouldLockComposerForRun({
-    chatExecutionState,
-    hasActivelyRunningToolWork: hasActivelyRunningToolWorkState,
-    isStreaming,
-    isWaitingForApproval,
-    pendingConfirmationCount: pendingConfirmationItems.length,
-  });
+  // A streaming run — this member's own or another member's — no longer locks
+  // the composer. Sending while one is active queues the message and auto-sends
+  // when the thread frees (see the controller). Only a pending tool approval or
+  // background tool/artifact work still blocks composing. The Stop control is
+  // still shown for one's own run via `composerStopStreaming` below.
+  const isSubmitDisabledForRun =
+    shouldLockComposerForApproval({
+      isWaitingForApproval,
+      pendingConfirmationCount: pendingConfirmationItems.length,
+    }) || hasActivelyRunningToolWorkState;
   const composerStopStreaming =
-    chatExecutionState === "executing" || chatExecutionState === "stopping"
+    !otherUserRunActive &&
+    (chatExecutionState === "executing" || chatExecutionState === "stopping")
       ? onStopStreaming
       : undefined;
   const isComposerStopping = chatExecutionState === "stopping";
@@ -746,6 +761,33 @@ export function ChatCanvas({
 
       <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+          {queuedSends.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {queuedSends.map((queued) => (
+                <div
+                  key={queued.id}
+                  className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground"
+                >
+                  <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    Queued
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {queued.preview}
+                  </span>
+                  {onCancelQueuedSend ? (
+                    <button
+                      type="button"
+                      onClick={() => onCancelQueuedSend(queued.id)}
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+                      aria-label="Cancel queued message"
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <Composer
             className="w-full"
             allSources={allSources}

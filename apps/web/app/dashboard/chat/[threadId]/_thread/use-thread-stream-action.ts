@@ -82,6 +82,10 @@ export type ThreadStreamActionInput = {
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   durableRunKey?: string;
   attachOnly?: boolean;
+  // Initiator of the run being started/attached. Set when attaching to another
+  // member's run so the local active-run keeps their id (and does not lock our
+  // composer). Omitted for our own sends, which default to the current user.
+  runOwnerUserId?: string | null;
   baseMessages?: ChatMessageItem[];
   resolvedConfirmationIds?: string[];
   toolApprovalResume?: ToolApprovalResume | null;
@@ -94,10 +98,12 @@ type UseThreadStreamActionInput = {
   clearRunIfCurrent: (durableRunKey: string) => void;
   librarySources: SourceItem[];
   loadThreadMessages: () => Promise<void>;
+  currentUserId: string | null;
   markRunStarted: (input: {
     idempotencyKey: string;
     status: "running";
     mode?: "send" | "refresh" | "edit" | "resume";
+    userId?: string | null;
   }) => void;
   markRunTerminal: (input: {
     detachedWithoutFinish: boolean;
@@ -161,6 +167,7 @@ export function useThreadStreamAction({
   clearAttachedRunKeyIfCurrent,
   clearEditingState,
   clearRunIfCurrent,
+  currentUserId,
   librarySources,
   loadThreadMessages,
   markRunStarted,
@@ -195,6 +202,10 @@ export function useThreadStreamAction({
         idempotencyKey: durableRunKey,
         status: "running",
         mode: input.mode,
+        // Attribute the run so the composer's owner-aware lock can tell a
+        // followed (another member's) run from our own. Attach passes the
+        // followed run's initiator; our own sends fall back to the current user.
+        userId: input.runOwnerUserId ?? currentUserId,
       });
       clearEditingState();
 
@@ -904,6 +915,7 @@ export function useThreadStreamAction({
       clearAttachedRunKeyIfCurrent,
       clearEditingState,
       clearRunIfCurrent,
+      currentUserId,
       librarySources,
       loadThreadMessages,
       markRunStarted,

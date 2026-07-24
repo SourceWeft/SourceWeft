@@ -10,6 +10,9 @@ export type ActiveThreadRun = {
   idempotencyKey: string;
   status: "queued" | "running" | "cancel_requested" | "waiting_for_approval";
   mode?: "send" | "refresh" | "edit" | "resume";
+  // Initiator of the run. Absent on optimistic local runs until the server
+  // summary arrives; treated as "mine" when absent (see resolveActiveRunIsMine).
+  userId?: string | null;
   userMessageId?: string | null;
   assistantMessageId?: string | null;
   approvalRequestedAt?: string | null;

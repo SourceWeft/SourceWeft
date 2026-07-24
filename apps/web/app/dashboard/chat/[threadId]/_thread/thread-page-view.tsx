@@ -57,6 +57,9 @@ export function DashboardChatThreadPageView({
   activeAssistantVersion,
   assistantVersionById,
   activeThreadRun,
+  otherUserRunActive,
+  queuedSends,
+  onCancelQueuedSend,
   chatExecutionState,
   chatUiState,
   activeConnectorTools,
@@ -261,6 +264,9 @@ export function DashboardChatThreadPageView({
             activeVersionByGroup={activeVersionByGroup}
             assistantVersionById={assistantVersionById}
             activeThreadRun={activeThreadRun}
+            otherUserRunActive={otherUserRunActive}
+            queuedSends={queuedSends}
+            onCancelQueuedSend={onCancelQueuedSend}
             chatExecutionState={chatExecutionState}
             allSources={librarySources}
             availableSkills={availableSkills}

@@ -477,7 +477,7 @@ export function Composer({
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [, setDraftText] = useState(initialInput);
+  const [draftText, setDraftText] = useState(initialInput);
   const [draftSegments, setDraftSegments] = useState<PromptInputSegment[]>([]);
   const normalizedComposerOptions = useMemo(
     () => normalizeComposerOptionsState(composerOptions),
@@ -2426,7 +2426,11 @@ export function Composer({
                 <ComposerAddImageButton />
 
                 <div>
-                  {submitDisabled && onStopStreaming ? (
+                  {onStopStreaming && (draftText ?? "").trim().length === 0 ? (
+                    // Stop stays in the submit slot (unmoved) but only while the
+                    // composer is empty during our own run. The moment there is
+                    // text to send, this becomes the Send button so a follow-up
+                    // can be queued without touching the running response.
                     <PromptInputSubmit
                       className="size-9 shrink-0 rounded-full px-0 shadow-xs"
                       disabled={isStopping}

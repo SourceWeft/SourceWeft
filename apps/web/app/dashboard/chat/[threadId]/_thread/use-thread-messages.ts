@@ -136,6 +136,9 @@ export function useThreadMessages({
             mode: resolvedRunningRun.mode ?? "send",
             durableRunKey: resolvedRunningRun.idempotencyKey,
             attachOnly: true,
+            // Keep the run attributed to its initiator so following another
+            // member's run does not lock our composer (owner-aware gating).
+            runOwnerUserId: resolvedRunningRun.userId ?? null,
             assistantMessageId: runningAssistant.message.id,
             baseMessages: serverMessages,
           });
