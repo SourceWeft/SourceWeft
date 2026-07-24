@@ -20,7 +20,11 @@ import type {
   WorkspaceMcpInstallRecord,
   WorkspaceMcpToolRecord,
 } from "./types";
-import type { MarketMcpManifest, MarketMcpToolManifest } from "@sourceweft/market-sdk";
+import type {
+  MarketMcpManifest,
+  MarketMcpToolManifest,
+  McpAuthType,
+} from "@sourceweft/market-sdk";
 import { hashJson, normalizedMcpToolName } from "./security";
 
 type InstallRow = typeof workspaceMcpInstalls.$inferSelect;
@@ -575,7 +579,7 @@ export async function upsertWorkspaceMcpCredential(input: {
   teamId: string;
   workspaceId: string;
   installId: string;
-  authType: "none" | "bearer" | "api_key_header" | "custom_headers";
+  authType: McpAuthType;
   encryptedSecret?: string | null;
   encryptedHeaders?: string | null;
   headerName?: string | null;
