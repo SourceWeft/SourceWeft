@@ -1,5 +1,6 @@
 import { ContentError } from "../../content/errors";
 import { requireContentWorkspace } from "../../workspace/guards";
+import { canViewThread } from "../../workspace/content-visibility";
 import { findMessageRecord } from "../message-repository";
 import { findThreadRecord } from "../thread/repository";
 import type { MessageRecord, ThreadRecord } from "../../content/types";
@@ -126,7 +127,41 @@ export async function resolveOwnedRun(input: {
   return run;
 }
 
-export async function findOwnedRun(input: {
+/**
+ * May `userId` follow (read-only) a run that lives on `threadId`? The run's own
+ * initiator always may; any other workspace member may only when the thread is
+ * visible to them — i.e. not another member's private thread. This mirrors the
+ * content visibility model (`canViewThread`) and is the authorization used for
+ * multi-user attach/discovery, as opposed to the owner-only gate that guards
+ * mutating operations (stop) and the synchronous result read.
+ */
+export async function isRunThreadViewable(
+  input: {
+    teamId: string;
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  },
+  run: { userId: string },
+): Promise<boolean> {
+  if (run.userId === input.userId) {
+    return true;
+  }
+  const thread = await findThreadRecord({
+    threadId: input.threadId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+  });
+  return Boolean(thread && canViewThread(input.userId, thread));
+}
+
+/**
+ * Thread-scoped counterpart to `resolveOwnedRun`: resolves a run by idempotency
+ * key and authorizes the caller by thread visibility rather than run ownership,
+ * so a workspace member can attach to (follow) another member's in-flight run
+ * on a thread they can see. Used only for read/follow paths.
+ */
+export async function resolveViewableRun(input: {
   workspaceId: string;
   threadId: string;
   userId: string;
@@ -138,10 +173,54 @@ export async function findOwnedRun(input: {
     workspaceId: workspace.id,
     idempotencyKey: input.idempotencyKey,
   });
-  if (!run || run.threadId !== input.threadId || run.userId !== input.userId) {
-    return null;
+  if (!run || run.threadId !== input.threadId) {
+    throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+  }
+  const viewable = await isRunThreadViewable(
+    {
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      userId: input.userId,
+    },
+    run,
+  );
+  if (!viewable) {
+    throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
   }
   return run;
+}
+
+/**
+ * Non-throwing counterpart to `resolveViewableRun` (returns null instead of a
+ * 404). Lets the stream route detect an existing run to attach to when the
+ * caller is a follower rather than the run's initiator.
+ */
+export async function findViewableRun(input: {
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  idempotencyKey: string;
+}) {
+  const workspace = await requireContentWorkspace(input);
+  const run = await findChatThreadRunByIdempotencyKey({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    idempotencyKey: input.idempotencyKey,
+  });
+  if (!run || run.threadId !== input.threadId) {
+    return null;
+  }
+  const viewable = await isRunThreadViewable(
+    {
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      userId: input.userId,
+    },
+    run,
+  );
+  return viewable ? run : null;
 }
 
 export async function waitForRunResult(input: {

@@ -380,6 +380,9 @@ export class ContentClient {
     if (input.cursor) {
       params.set("cursor", input.cursor);
     }
+    if (input.after) {
+      params.set("after", input.after);
+    }
     if (input.include) {
       params.set("include", input.include);
     }
@@ -401,6 +404,7 @@ export class ContentClient {
           | "cancel_requested"
           | "waiting_for_approval";
         mode: "send" | "refresh" | "edit" | "resume";
+        userId: string;
         userMessageId: string | null;
         assistantMessageId: string | null;
         approvalRequestedAt?: string | null;

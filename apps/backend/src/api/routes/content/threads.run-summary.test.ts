@@ -8,6 +8,7 @@ function runRow(status: string) {
     idempotencyKey: "key-1",
     status,
     mode: "send" as const,
+    userId: "user-1",
     userMessageId: "msg-1",
     assistantMessageId: null,
   };

@@ -112,6 +112,7 @@ export function presentThreadRunSummary(run: {
   idempotencyKey: string;
   status: string;
   mode: "send" | "refresh" | "edit" | "resume";
+  userId: string;
   userMessageId: string | null;
   assistantMessageId: string | null;
   snapshotJson?: Record<string, unknown>;
@@ -128,6 +129,7 @@ export function presentThreadRunSummary(run: {
     idempotencyKey: run.idempotencyKey,
     status,
     mode: run.mode,
+    userId: run.userId,
     userMessageId: run.userMessageId,
     assistantMessageId: run.assistantMessageId,
     ...(status === "waiting_for_approval"
@@ -439,6 +441,7 @@ export function registerThreadRoutes(app: Hono) {
       ...(() => {
         const parsed = listThreadMessagesRequestSchema.safeParse({
           cursor: c.req.query("cursor"),
+          after: c.req.query("after"),
           include: c.req.query("include"),
           limit: c.req.query("limit"),
         });

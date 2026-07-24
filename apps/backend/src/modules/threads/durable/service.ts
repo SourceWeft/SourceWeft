@@ -52,10 +52,12 @@ import {
 } from "./run-state";
 import {
   buildStoppedRunFallback,
-  findOwnedRun,
+  findViewableRun,
   getRunResult,
+  isRunThreadViewable,
   resolveAttachRunState,
   resolveOwnedRun,
+  resolveViewableRun,
   wait,
   waitForRunResult,
 } from "./run-results";
@@ -105,7 +107,7 @@ export class DurableChatRunService {
     userId: string;
     idempotencyKey: string;
   }) {
-    return findOwnedRun(input);
+    return findViewableRun(input);
   }
 
   async findActiveRun(input: {
@@ -119,7 +121,19 @@ export class DurableChatRunService {
       workspaceId: workspace.id,
       threadId: input.threadId,
     });
-    if (!run || run.userId !== input.userId) {
+    if (!run) {
+      return null;
+    }
+    const viewable = await isRunThreadViewable(
+      {
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: input.threadId,
+        userId: input.userId,
+      },
+      run,
+    );
+    if (!viewable) {
       return null;
     }
     const current = await failRunIfStale(run);
@@ -347,7 +361,7 @@ export class DurableChatRunService {
     userId: string;
     idempotencyKey: string;
   }): AsyncGenerator<string> {
-    let run = await resolveOwnedRun(input);
+    let run = await resolveViewableRun(input);
     let offset = 0;
     let lastHeartbeatAt = Date.now();
     let sawErrorEvent = false;

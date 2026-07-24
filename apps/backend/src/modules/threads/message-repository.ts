@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { db, messages, threads } from "@sourceweft/db";
+import { logger } from "../../shared/logger";
+import { publishThreadEvent } from "../../shared/notify-hub";
 import type { MessageRecord, MessageRole } from "../content/types";
 
 type MessageRow = typeof messages.$inferSelect;
@@ -78,7 +80,7 @@ export async function createMessageRecord(input: {
 }) {
   const id = input.id ?? randomUUID();
   const createdAt = new Date();
-  return db.transaction(async (tx) => {
+  const message = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(messages)
       .values({
@@ -118,6 +120,27 @@ export async function createMessageRecord(input: {
 
     return mapMessage(row);
   });
+
+  // Emit AFTER commit (not inside the tx) so a rolled-back insert never signals.
+  // Only user messages: the assistant message starts as an empty placeholder and
+  // is signaled instead by `run_finished` once the turn is durable.
+  if (message.role === "user") {
+    void publishThreadEvent({
+      threadId: message.threadId,
+      workspaceId: message.workspaceId,
+      kind: "message_created",
+      messageId: message.id,
+      role: "user",
+      ...(message.createdBy ? { actorUserId: message.createdBy } : {}),
+    }).catch((error) => {
+      logger.warn("Failed to publish thread message event", {
+        messageId: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  return message;
 }
 
 export async function listMessageRecordsByThread(input: {
@@ -141,26 +164,53 @@ export async function listMessageRecordsByThread(input: {
   return rows.map((row) => mapMessage(row, input.include));
 }
 
+function encodeMessageCursor(row: { createdAt: Date; id: string }): string {
+  return Buffer.from(
+    JSON.stringify({ createdAt: row.createdAt.toISOString(), id: row.id }),
+    "utf8",
+  ).toString("base64url");
+}
+
+/**
+ * Page a thread's messages. `before` pages backward (older, the default UI
+ * pagination); `after` pages forward (strictly newer, ascending) and is what
+ * the live-collaboration reconcile-on-connect uses to drain messages missed
+ * while the room SSE was down. The `(createdAt, id)` tuple is a stable total
+ * order — message `id` is a random UUID and must never be treated as
+ * time-sortable on its own. If both cursors are given, `after` wins.
+ */
 export async function listMessageRecordPageByThread(input: {
   include?: MessageInclude;
   teamId: string;
   workspaceId: string;
   threadId: string;
   before?: { createdAt: Date; id: string } | null;
+  after?: { createdAt: Date; id: string } | null;
   limit: number;
 }) {
+  const forward = Boolean(input.after);
+  const cursor = input.after ?? input.before ?? null;
+
   const conditions = [
     eq(messages.teamId, input.teamId),
     eq(messages.workspaceId, input.workspaceId),
     eq(messages.threadId, input.threadId),
-    input.before
-      ? or(
-          lt(messages.createdAt, input.before.createdAt),
-          and(
-            eq(messages.createdAt, input.before.createdAt),
-            lt(messages.id, input.before.id),
-          ),
-        )
+    cursor
+      ? forward
+        ? or(
+            gt(messages.createdAt, cursor.createdAt),
+            and(
+              eq(messages.createdAt, cursor.createdAt),
+              gt(messages.id, cursor.id),
+            ),
+          )
+        : or(
+            lt(messages.createdAt, cursor.createdAt),
+            and(
+              eq(messages.createdAt, cursor.createdAt),
+              lt(messages.id, cursor.id),
+            ),
+          )
       : undefined,
   ].filter((condition): condition is NonNullable<typeof condition> =>
     Boolean(condition),
@@ -170,23 +220,22 @@ export async function listMessageRecordPageByThread(input: {
     .select()
     .from(messages)
     .where(and(...conditions))
-    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .orderBy(
+      forward ? asc(messages.createdAt) : desc(messages.createdAt),
+      forward ? asc(messages.id) : desc(messages.id),
+    )
     .limit(input.limit + 1);
 
   const pageRows = rows.slice(0, input.limit);
   const nextRow = rows[input.limit] ?? null;
 
+  // Both directions return items in ascending (chronological) order; backward
+  // mode fetched descending, so it reverses.
+  const orderedRows = forward ? pageRows : pageRows.reverse();
+
   return {
-    items: pageRows.reverse().map((row) => mapMessage(row, input.include)),
-    nextCursor: nextRow
-      ? Buffer.from(
-          JSON.stringify({
-            createdAt: nextRow.createdAt.toISOString(),
-            id: nextRow.id,
-          }),
-          "utf8",
-        ).toString("base64url")
-      : null,
+    items: orderedRows.map((row) => mapMessage(row, input.include)),
+    nextCursor: nextRow ? encodeMessageCursor(nextRow) : null,
   };
 }
 

@@ -388,6 +388,10 @@ export const threadRunSummarySchema = z.object({
   idempotencyKey: z.string(),
   status: threadRunStatusSchema,
   mode: streamThreadModeSchema,
+  // The member who initiated the run. Lets clients distinguish "my run" (which
+  // locks my composer) from another member's run on a shared thread (which I
+  // follow live but which must not lock my composer).
+  userId: z.string(),
   userMessageId: z.string().nullable(),
   assistantMessageId: z.string().nullable(),
   approvalRequestedAt: z.string().nullable().optional(),
@@ -428,6 +432,9 @@ export const listThreadMessagesResponseSchema = z.object({
 
 export const listThreadMessagesRequestSchema = z.object({
   cursor: z.string().trim().min(1).max(1024).optional(),
+  // Forward cursor (strictly newer, ascending) for reconcile-on-connect in live
+  // collaboration. Mutually exclusive with `cursor` (backward); `after` wins.
+  after: z.string().trim().min(1).max(1024).optional(),
   include: z.string().trim().max(128).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });

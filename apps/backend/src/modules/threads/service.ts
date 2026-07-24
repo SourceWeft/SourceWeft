@@ -573,6 +573,7 @@ class ContentThreadService {
 
   async listThreadMessages(input: {
     cursor?: string;
+    after?: string;
     include?: string;
     limit?: number;
     workspaceId: string;
@@ -612,6 +613,7 @@ class ContentThreadService {
         workspaceId: workspace.id,
         threadId: thread.id,
         before: decodeMessagesCursor(input.cursor),
+        after: decodeMessagesCursor(input.after),
         limit: input.limit,
       });
 

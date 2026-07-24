@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { chatThreadRuns, db } from "@sourceweft/db";
+import { logger } from "../../../shared/logger";
+import {
+  publishThreadEvent,
+  type ThreadEventKind,
+} from "../../../shared/notify-hub";
 import type {
   ChatRunSnapshot,
   ChatThreadRunMode,
@@ -47,6 +52,40 @@ function mapRun(row: ChatThreadRunRow): ChatThreadRunRecord {
 
 export function isActiveChatRunStatus(status: ChatThreadRunStatus) {
   return ACTIVE_RUN_STATUSES.includes(status);
+}
+
+/**
+ * Broadcast a run transition to thread subscribers (live collaboration). Emitted
+ * only when the write actually happened (`run` truthy) — every status UPDATE is
+ * guarded by a `where status in (...)` clause and returns no row on a lost race,
+ * so a no-op transition never produces a spurious event. Fire-and-forget: a
+ * NOTIFY failure is logged, never allowed to fail the surrounding write.
+ */
+function emitRunEvent(
+  run: ChatThreadRunRecord | null,
+  kind: ThreadEventKind,
+): void {
+  if (!run) {
+    return;
+  }
+  void publishThreadEvent({
+    threadId: run.threadId,
+    workspaceId: run.workspaceId,
+    kind,
+    actorUserId: run.userId,
+    runId: run.id,
+    status: run.status,
+    ...(run.userMessageId ? { userMessageId: run.userMessageId } : {}),
+    ...(run.assistantMessageId
+      ? { assistantMessageId: run.assistantMessageId }
+      : {}),
+  }).catch((error) => {
+    logger.warn("Failed to publish thread run event", {
+      runId: run.id,
+      kind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }
 
 export async function findChatThreadRunById(input: {
@@ -170,7 +209,11 @@ export async function createChatThreadRun(input: {
     })
     .returning();
 
-  return row ? mapRun(row) : null;
+  const run = row ? mapRun(row) : null;
+  // The most important collaboration signal: a member with the thread open
+  // learns another member started a run (so their client engages the queue).
+  emitRunEvent(run, "run_created");
+  return run;
 }
 
 export async function markChatThreadRunQueued(input: {
@@ -221,7 +264,9 @@ export async function markChatThreadRunRunning(input: {
     )
     .returning();
 
-  return row ? mapRun(row) : null;
+  const run = row ? mapRun(row) : null;
+  emitRunEvent(run, "run_started");
+  return run;
 }
 
 export async function updateChatThreadRunProgress(input: {
@@ -290,7 +335,9 @@ export async function requestChatThreadRunCancel(input: {
     )
     .returning();
 
-  return row ? mapRun(row) : null;
+  const run = row ? mapRun(row) : null;
+  emitRunEvent(run, "run_cancel_requested");
+  return run;
 }
 
 export async function updateChatThreadRunStatus(input: {
@@ -359,7 +406,9 @@ export async function markChatThreadRunWaitingForApproval(input: {
     )
     .returning();
 
-  return row ? mapRun(row) : null;
+  const run = row ? mapRun(row) : null;
+  emitRunEvent(run, "run_waiting_approval");
+  return run;
 }
 
 export async function finishChatThreadRun(input: {
@@ -406,7 +455,11 @@ export async function finishChatThreadRun(input: {
     )
     .returning();
 
-  return row ? mapRun(row) : null;
+  const run = row ? mapRun(row) : null;
+  // Doubles as "assistant message finalized": the payload carries the message
+  // ids so the client can reconcile the completed turn.
+  emitRunEvent(run, "run_finished");
+  return run;
 }
 
 export async function touchChatThreadRunHeartbeat(input: {
