@@ -7,6 +7,7 @@ import {
   syncGlobalModelGatewayConfig,
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
+import { notifyHub } from "../shared/notify-hub";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
@@ -18,6 +19,10 @@ await contentSkillsService.syncBuiltinCatalog();
 // Connectors are contributed by capabilities, so registering them reads
 // manifests. Await it before serving so the registry is never consulted empty.
 await connectorAdaptersReady();
+// Live thread collaboration: start the LISTEN connection before serving so the
+// first /room subscriber has a working fan-out. API process only — the worker
+// and scheduler publish events but never hold SSE subscribers.
+await notifyHub.start();
 
 const app = createApp();
 
@@ -38,7 +43,8 @@ serve(
 
 async function shutdown() {
   logger.info("API shutting down");
-  await Promise.allSettled([closeQueue(), closeDatabase()]);
+  // Stop the hub (ends its dedicated LISTEN client) before closing the pool.
+  await Promise.allSettled([notifyHub.stop(), closeQueue(), closeDatabase()]);
   process.exit(0);
 }
 
