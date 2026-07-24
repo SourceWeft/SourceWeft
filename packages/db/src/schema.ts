@@ -4508,6 +4508,14 @@ export const marketItems = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    // Facets promoted out of metadataJson so listing can filter/sort/paginate in
+    // SQL instead of scanning a capped window of rows in memory. Kept in sync by
+    // the upsert; derived from the same manifest metadata mapItemRow reads.
+    transport: text("transport"),
+    official: boolean("official").notNull().default(false),
+    verified: boolean("verified").notNull().default(false),
+    desktopOnly: boolean("desktop_only").notNull().default(false),
+    runtime: text("runtime"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -4525,6 +4533,15 @@ export const marketItems = pgTable(
       table.kind,
       table.status,
       table.visibility,
+    ),
+    // Serves the default catalog browse + keyset pagination: filter by
+    // kind/status/visibility, order by publishedAt desc then id desc.
+    index("market_items_browse_idx").on(
+      table.kind,
+      table.status,
+      table.visibility,
+      desc(table.publishedAt),
+      desc(table.id),
     ),
     check("market_items_kind_check", sql`${table.kind} in ('skill', 'mcp')`),
     check(
