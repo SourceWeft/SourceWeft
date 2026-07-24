@@ -132,7 +132,7 @@ export function DashboardSidebar() {
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
   const [settingsRequest, setSettingsRequest] = React.useState<{
     id: number;
-    tab: "account" | "team" | "usage" | "billing";
+    tab: "account" | "team" | "workspace" | "usage" | "billing";
   } | null>(null);
 
   // Pattern: /dashboard/chat/[threadId]. While a newly created chat is
@@ -343,6 +343,9 @@ export function DashboardSidebar() {
           onDeleteChat={handleDeleteChat}
           onSetChatVisibility={setChatVisibility}
           onLoadMoreChats={() => void loadMorePrivateChats()}
+          onOpenMembers={() =>
+            setSettingsRequest({ id: Date.now(), tab: "workspace" })
+          }
           onOpenUsage={() =>
             setSettingsRequest({ id: Date.now(), tab: "usage" })
           }

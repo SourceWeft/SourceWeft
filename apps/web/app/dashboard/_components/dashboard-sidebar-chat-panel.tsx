@@ -751,6 +751,7 @@ export function DashboardSidebarChatPanel({
   onDeleteChat,
   onSetChatVisibility,
   onLoadMoreChats,
+  onOpenMembers,
   onOpenUsage,
   onOpenChat,
   onPrefetchChat,
@@ -778,6 +779,7 @@ export function DashboardSidebarChatPanel({
     visibility: "private" | "workspace",
   ) => Promise<void>;
   onLoadMoreChats: () => void;
+  onOpenMembers?: () => void;
   onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
   onPrefetchChat?: (id: string) => void;
@@ -840,9 +842,16 @@ export function DashboardSidebarChatPanel({
             <PenSquare className="size-3" />
             New chat
           </Button>
-          <Button size="icon-xs" type="button" variant="outline">
+          {/* "Share the workspace" = bring people in: opens member & guest management. */}
+          <Button
+            onClick={onOpenMembers}
+            size="icon-xs"
+            title="Invite & manage members"
+            type="button"
+            variant="outline"
+          >
             <Share2 className="size-3" />
-            <span className="sr-only">Share</span>
+            <span className="sr-only">Invite & manage members</span>
           </Button>
         </div>
       </SidebarHeader>
