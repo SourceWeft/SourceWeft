@@ -127,10 +127,22 @@ function useOrganizationMembers(): OrganizationMember[] {
 }
 
 export function WorkspaceMembersPanel() {
-  const { workspaceId, organizationId } = useDashboardChatState();
+  const { workspaceId, organizationId, workspaces } = useDashboardChatState();
   const { data: session } = authClient.useSession();
   const currentUserId = session?.user?.id ?? null;
   const organizationMembers = useOrganizationMembers();
+
+  // Membership is per-workspace, so this panel manages exactly one workspace at
+  // a time: the picker below chooses which, defaulting to the one open in the
+  // dashboard.
+  const [managedWorkspaceId, setManagedWorkspaceId] = React.useState<
+    string | null
+  >(workspaceId);
+  React.useEffect(() => {
+    setManagedWorkspaceId(workspaceId);
+  }, [workspaceId]);
+  const managedWorkspaceName =
+    workspaces.find((entry) => entry.id === managedWorkspaceId)?.name ?? null;
 
   const [members, setMembers] = React.useState<WorkspaceMember[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -143,18 +155,19 @@ export function WorkspaceMembersPanel() {
   const [addingUserId, setAddingUserId] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
-    if (!workspaceId) return;
+    if (!managedWorkspaceId) return;
     setIsLoading(true);
     setLoadError(null);
     try {
-      const result = await workspaceClient.listWorkspaceMembers(workspaceId);
+      const result =
+        await workspaceClient.listWorkspaceMembers(managedWorkspaceId);
       setMembers(result.items);
     } catch {
       setLoadError("Could not load workspace members.");
     } finally {
       setIsLoading(false);
     }
-  }, [workspaceId]);
+  }, [managedWorkspaceId]);
 
   React.useEffect(() => {
     void refresh();
@@ -180,11 +193,11 @@ export function WorkspaceMembersPanel() {
     member: WorkspaceMember,
     role: WorkspaceRole,
   ) {
-    if (!workspaceId || role === member.role) return;
+    if (!managedWorkspaceId || role === member.role) return;
     setPendingUserId(member.userId);
     try {
       await workspaceClient.updateWorkspaceMemberRole(
-        workspaceId,
+        managedWorkspaceId,
         member.userId,
         { role },
       );
@@ -204,10 +217,13 @@ export function WorkspaceMembersPanel() {
   }
 
   async function handleRemove(member: WorkspaceMember) {
-    if (!workspaceId) return;
+    if (!managedWorkspaceId) return;
     setPendingUserId(member.userId);
     try {
-      await workspaceClient.removeWorkspaceMember(workspaceId, member.userId);
+      await workspaceClient.removeWorkspaceMember(
+        managedWorkspaceId,
+        member.userId,
+      );
       setMembers((value) =>
         value.filter((entry) => entry.userId !== member.userId),
       );
@@ -221,10 +237,10 @@ export function WorkspaceMembersPanel() {
   }
 
   async function handleAdd(candidate: OrganizationMember) {
-    if (!workspaceId) return;
+    if (!managedWorkspaceId) return;
     setAddingUserId(candidate.userId);
     try {
-      await workspaceClient.addWorkspaceMember(workspaceId, {
+      await workspaceClient.addWorkspaceMember(managedWorkspaceId, {
         userId: candidate.userId,
         role: addRole,
       });
@@ -241,7 +257,7 @@ export function WorkspaceMembersPanel() {
     }
   }
 
-  if (!workspaceId || !organizationId) {
+  if (!managedWorkspaceId || !organizationId) {
     return (
       <p className="px-1 py-6 text-sm text-muted-foreground">
         Select a workspace to manage its members.
@@ -255,8 +271,8 @@ export function WorkspaceMembersPanel() {
         <div className="space-y-1">
           <h3 className="text-sm font-medium">Workspace members</h3>
           <p className="text-xs text-muted-foreground">
-            Who can see and work inside this workspace. Team owners and admins
-            can always administer it.
+            Each workspace has its own members and roles. Team owners and admins
+            can always administer every workspace.
           </p>
         </div>
         {canManage ? (
@@ -270,6 +286,28 @@ export function WorkspaceMembersPanel() {
             Add member
           </Button>
         ) : null}
+      </div>
+
+      {/* Membership is per-workspace: pick which workspace this panel manages. */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Workspace</span>
+        <Select
+          value={managedWorkspaceId}
+          onValueChange={(value) => setManagedWorkspaceId(value)}
+        >
+          <SelectTrigger className="h-8 w-60 text-xs">
+            <SelectValue placeholder="Select a workspace">
+              {managedWorkspaceName ?? "Select a workspace"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {workspaces.map((entry) => (
+              <SelectItem key={entry.id} value={entry.id}>
+                {entry.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -401,7 +439,10 @@ export function WorkspaceMembersPanel() {
         </ul>
       )}
 
-      <WorkspaceGuestsSection canManage={canManage} workspaceId={workspaceId} />
+      <WorkspaceGuestsSection
+        canManage={canManage}
+        workspaceId={managedWorkspaceId}
+      />
 
       <Dialog
         open={Boolean(removeTarget)}
