@@ -71,6 +71,7 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
   }
   await assertSafeMcpEndpoint(manifest.endpointUrl, {
     allowLocalhost: isDevelopment(),
+    allowPrivateNetwork: isDevelopment(),
   });
 }
 
@@ -372,6 +373,8 @@ export class McpService {
     query?: string;
     category?: string;
     includeDesktopOnly?: boolean;
+    limit?: number;
+    cursor?: string;
   }) {
     const { workspace } = await requireMcpWorkspace({
       workspaceId: input.workspaceId,
@@ -383,6 +386,8 @@ export class McpService {
         query: input.query,
         category: input.category,
         includeDesktopOnly: input.includeDesktopOnly,
+        limit: input.limit,
+        cursor: input.cursor,
       }),
       listWorkspaceMcpInstalls({
         teamId: workspace.organizationId,
@@ -399,6 +404,7 @@ export class McpService {
         market: item,
         install: installsByIdentifier.get(item.identifier) ?? null,
       })),
+      nextCursor: market.nextCursor ?? null,
     };
   }
 
@@ -717,6 +723,7 @@ export class McpService {
     }
     await assertSafeMcpEndpoint(install.endpointUrl, {
       allowLocalhost: isDevelopment(),
+      allowPrivateNetwork: isDevelopment(),
     });
 
     const credential = await findWorkspaceMcpCredential({
@@ -818,6 +825,7 @@ export class McpService {
         try {
           await assertSafeMcpEndpoint(install.endpointUrl, {
             allowLocalhost: isDevelopment(),
+            allowPrivateNetwork: isDevelopment(),
           });
         } catch {
           continue;

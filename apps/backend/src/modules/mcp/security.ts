@@ -95,7 +95,17 @@ function isLocalhostName(hostname: string) {
 
 export async function assertSafeMcpEndpoint(
   value: string,
-  input: { allowLocalhost: boolean; lookup?: DnsLookup },
+  input: {
+    allowLocalhost: boolean;
+    /**
+     * Skip the resolved-address (SSRF) check. Development-only: dev machines
+     * commonly sit behind fake-IP VPN/proxy DNS (Clash/Surge resolve every host
+     * into 198.18.0.0/15), which would otherwise block every remote endpoint.
+     * Production always keeps the check.
+     */
+    allowPrivateNetwork?: boolean;
+    lookup?: DnsLookup;
+  },
 ) {
   let url: URL;
   try {
@@ -133,6 +143,9 @@ export async function assertSafeMcpEndpoint(
   // Resolve DNS and reject any endpoint that maps to a private, link-local,
   // loopback, or cloud-metadata address. This closes the DNS-rebinding hole the
   // previous literal-IP-only check left open. Reuses the shared SSRF guard.
+  if (input.allowPrivateNetwork) {
+    return url.toString();
+  }
   try {
     await assertPublicHostname(hostname, input.lookup);
   } catch {
