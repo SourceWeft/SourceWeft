@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db, workspaceMemberships, workspaces } from "@sourceweft/db";
 import {
+  capGuestRole,
   isOrganizationAdminRole,
   resolveContentRole,
   type Workspace,
@@ -351,20 +352,26 @@ export async function ensureSharedWorkspaceRecord(input: {
 type WorkspaceAccessRow = {
   organization_id: string;
   is_default: boolean;
-  organization_role: string;
+  organization_role: string | null;
   override_role: WorkspaceRole | null;
+  membership_source: string | null;
 };
 
 /**
  * The single place where "what may this user do in this workspace" is decided.
  *
- * One query answers both planes, because both derive from the same three
- * facts: the organization row the workspace belongs to, whether the caller is
- * a current member of that organization, and whether an explicit override
- * names them.
+ * Two ways in, resolved in one query:
  *
- * Returns null when the caller is not in the owning organization — that is the
- * outer boundary, and no `workspace_memberships` row can substitute for it.
+ * - **Organization member** (`member` row present): the Model A path —
+ *   role derives from the org role, an explicit `workspace_memberships` row can
+ *   override it, and org owners/admins are container admins.
+ * - **Guest** (a `workspace_memberships` row with `source = 'guest'` and no
+ *   `member` row): an external collaborator invited to this one workspace.
+ *   Content role only (capped at editor), never a container admin, no org
+ *   standing.
+ *
+ * Returns null when neither holds — being able to name a workspace id is not
+ * access.
  */
 export async function resolveWorkspaceAccessRecord(input: {
   workspaceId: string;
@@ -375,9 +382,10 @@ export async function resolveWorkspaceAccessRecord(input: {
       w.organization_id,
       w.is_default,
       m.role as organization_role,
-      wm.role as override_role
+      wm.role as override_role,
+      wm.source as membership_source
     from workspaces w
-    join member m
+    left join member m
       on m."organizationId" = w.organization_id
      and m."userId" = ${input.userId}
     left join workspace_memberships wm
@@ -392,8 +400,28 @@ export async function resolveWorkspaceAccessRecord(input: {
     return null;
   }
 
+  const isOrgMember = row.organization_role !== null;
+  const isGuest = !isOrgMember && row.membership_source === "guest";
+
+  if (!isOrgMember && !isGuest) {
+    return null;
+  }
+
+  if (isGuest) {
+    return {
+      workspaceId: input.workspaceId,
+      organizationId: row.organization_id,
+      userId: input.userId,
+      organizationRole: "",
+      role: row.override_role ? capGuestRole(row.override_role) : null,
+      source: "guest",
+      isContainerAdmin: false,
+    };
+  }
+
+  const organizationRole = row.organization_role as string;
   const { role, source } = resolveContentRole({
-    organizationRole: row.organization_role,
+    organizationRole,
     isDefaultWorkspace: row.is_default,
     overrideRole: row.override_role,
   });
@@ -402,10 +430,10 @@ export async function resolveWorkspaceAccessRecord(input: {
     workspaceId: input.workspaceId,
     organizationId: row.organization_id,
     userId: input.userId,
-    organizationRole: row.organization_role,
+    organizationRole,
     role,
     source,
-    isContainerAdmin: isOrganizationAdminRole(row.organization_role),
+    isContainerAdmin: isOrganizationAdminRole(organizationRole),
   };
 }
 
@@ -423,14 +451,17 @@ export async function findWorkspaceByIdForMember(input: {
       w.created_by,
       w.created_at::text as created_at
     from workspaces w
-    join member m
+    left join member m
       on m."organizationId" = w.organization_id
      and m."userId" = ${input.userId}
     left join workspace_memberships wm
       on wm.workspace_id = w.id
      and wm.user_id = ${input.userId}
     where w.id = ${input.workspaceId}
-      and (w.is_default or wm.user_id is not null)
+      and (
+        (m."userId" is not null and (w.is_default or wm.user_id is not null))
+        or wm.source = 'guest'
+      )
     limit 1
   `);
 
@@ -448,6 +479,41 @@ export async function findWorkspaceByIdForMember(input: {
     createdBy: row.created_by,
     createdAt: row.created_at,
   } satisfies Workspace;
+}
+
+/**
+ * Workspaces the user can enter as a *guest* — those in someone else's
+ * organization they were invited into. Kept separate from
+ * `listWorkspacesForMember`, which is scoped to one organization the user
+ * belongs to; a guest's workspace lives in an organization they are not part of.
+ */
+export async function listGuestWorkspacesForUser(userId: string) {
+  const result = await db.execute<ListedWorkspaceRow>(sql`
+    select
+      w.id,
+      w.organization_id,
+      w.name,
+      w.slug,
+      w.is_default,
+      w.created_by,
+      w.created_at::text as created_at
+    from workspaces w
+    join workspace_memberships wm
+      on wm.workspace_id = w.id
+     and wm.user_id = ${userId}
+     and wm.source = 'guest'
+    order by w.created_at asc
+  `);
+
+  return (result.rows ?? []).map((row) => ({
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    slug: row.slug,
+    isDefault: row.is_default,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  })) satisfies Workspace[];
 }
 
 export async function findWorkspaceMembershipOverride(input: {

@@ -6,12 +6,18 @@ export type WorkspaceRole = "workspace_admin" | "editor" | "viewer";
  * `derived` — no row exists; the role follows from organization membership,
  * which is only the case for the organization's shared default workspace.
  * `explicit` — a `workspace_memberships` row names this user's role.
+ * `guest` — a `workspace_memberships` row for someone who is NOT an
+ * organization member: an external collaborator invited to this one workspace,
+ * with no seat, no organization capabilities, and a role capped at editor.
  *
- * Only `explicit` is stored. Derived access is computed on every read, so
- * organization changes take effect immediately and there is nothing to
- * backfill, sync, or clean up.
+ * `derived` is computed on every read; `explicit`/`guest` are stored rows.
  */
-export type WorkspaceAccessSource = "derived" | "explicit";
+export type WorkspaceAccessSource = "derived" | "explicit" | "guest";
+
+/** A guest never exceeds editor — they never administer the workspace. */
+export function capGuestRole(role: WorkspaceRole): WorkspaceRole {
+  return role === "workspace_admin" ? "editor" : role;
+}
 
 export type Workspace = {
   id: string;

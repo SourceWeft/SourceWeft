@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  capGuestRole,
   defaultContentRoleForOrganizationRole,
   isOrganizationAdminRole,
   isWorkspaceRole,
   resolveContentRole,
   workspaceRoleSatisfies,
 } from "./types";
+
+test("a guest is never more than an editor", () => {
+  assert.equal(capGuestRole("workspace_admin"), "editor");
+  assert.equal(capGuestRole("editor"), "editor");
+  assert.equal(capGuestRole("viewer"), "viewer");
+});
 
 test("workspaceRoleSatisfies ranks admin above editor above viewer", () => {
   assert.equal(workspaceRoleSatisfies("workspace_admin", "viewer"), true);

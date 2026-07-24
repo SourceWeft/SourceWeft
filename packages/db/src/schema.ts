@@ -33,7 +33,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 type WorkspaceRole = "workspace_admin" | "editor" | "viewer";
-type WorkspaceMembershipSource = "direct" | "inherited";
+type WorkspaceMembershipSource = "direct" | "inherited" | "guest";
 type SourceStatus = (typeof sourceStatusSchema.options)[number];
 type SourceIngestKind = (typeof sourceIngestKindSchema.options)[number];
 type SourceType = (typeof sourceTypeSchema.options)[number];
@@ -492,8 +492,54 @@ export const workspaceMemberships = pgTable(
     ),
     check(
       "workspace_memberships_source_check",
-      sql`${table.source} in ('direct', 'inherited')`,
+      sql`${table.source} in ('direct', 'inherited', 'guest')`,
     ),
+  ],
+);
+
+/**
+ * Pending invitations of an external collaborator (a "guest") to one
+ * workspace. On accept, the invitee — who signs in with an ordinary account but
+ * need not belong to the workspace's organization — gets a
+ * `workspace_memberships` row with `source = 'guest'`. Accepted/revoked rows are
+ * kept for the audit trail; a partial unique index keeps at most one live
+ * invite per (workspace, email).
+ */
+export const workspaceGuestInvitations = pgTable(
+  "workspace_guest_invitations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").$type<WorkspaceRole>().notNull().default("viewer"),
+    token: text("token").notNull(),
+    status: text("status")
+      .$type<"pending" | "accepted" | "revoked">()
+      .notNull()
+      .default("pending"),
+    invitedBy: text("invited_by"),
+    acceptedUserId: text("accepted_user_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_guest_invitations_token_uq").on(table.token),
+    index("workspace_guest_invitations_workspace_idx").on(table.workspaceId),
+    check(
+      "workspace_guest_invitations_role_check",
+      sql`${table.role} in ('editor', 'viewer')`,
+    ),
+    check(
+      "workspace_guest_invitations_status_check",
+      sql`${table.status} in ('pending', 'accepted', 'revoked')`,
+    ),
+    uniqueIndex("workspace_guest_invitations_live_uq")
+      .on(table.workspaceId, table.email)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 
