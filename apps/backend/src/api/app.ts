@@ -46,10 +46,10 @@ export function createApp() {
           return origin;
         }
 
-        if (config.auth.trustedOrigins.length === 0) {
-          return origin;
-        }
-
+        // Default-deny: an unlisted origin is never reflected. Reflecting an
+        // arbitrary origin together with `credentials: true` (as an empty-list
+        // fallback used to do) would be a cross-site credential-theft surface,
+        // so a misconfigured/empty allow-list must fail closed, not open.
         return config.auth.trustedOrigins.includes(origin) ? origin : "";
       },
       allowHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],

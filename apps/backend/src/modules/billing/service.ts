@@ -98,6 +98,7 @@ export class BillingService {
     limit = 50,
     options?: {
       activityOnly?: boolean;
+      actorUserId?: string;
       cursor?: { createdAt: Date; id: string } | null;
     },
   ) {

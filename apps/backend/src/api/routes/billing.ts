@@ -203,7 +203,12 @@ export function registerBillingRoutes(app: Hono) {
 
     const teamId = c.req.param("teamId");
     const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId);
+    // The ledger is team-wide (every member's lines, with per-member spend
+    // attribution after per-member billing), so reading it is a billing-manager
+    // action — a plain member must not see peers' spend.
+    await requireTeamMembership(teamId, userId, {
+      requireBillingManager: true,
+    });
 
     const limit = parseLedgerLimit(c.req.query("limit"));
     const activityOnly = c.req.query("activity") === "true";
@@ -222,11 +227,16 @@ export function registerBillingRoutes(app: Hono) {
 
     const teamId = c.req.param("teamId");
     const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId);
+    // The usage panel shows this feed to every member, so it stays readable —
+    // but a plain member is scoped to their OWN lines; only a billing manager
+    // sees the whole team's activity (no peer-spend disclosure).
+    const membership = await requireTeamMembership(teamId, userId);
+    const canSeeTeamWide = canManageBilling(membership.role);
 
     const limit = parseLedgerLimit(c.req.query("limit"));
     const ledger = await billingService.getLedger(teamId, limit, {
       activityOnly: true,
+      actorUserId: canSeeTeamWide ? undefined : userId,
       cursor: parseLedgerCursor(c.req.query("cursor")),
     });
     return ApiResponse.success(c, ledger);

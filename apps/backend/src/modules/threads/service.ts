@@ -3,6 +3,7 @@ import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
 import { ContentError } from "../content/errors";
 import type { MessageRecord } from "../content/types";
 import { requireContentWorkspace } from "../workspace/guards";
+import { workspaceService } from "../workspace";
 import { canViewThread } from "../workspace/content-visibility";
 import { normalizeContentTitle } from "../../shared/strings";
 import {
@@ -225,11 +226,23 @@ class ContentThreadService {
       userId: input.userId,
     });
 
+    // A plain editor may delete only their own threads; a content admin may
+    // delete any thread visible to them. Resolve the caller's content-plane
+    // standing to decide which.
+    const access = await workspaceService.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const isContentAdmin = access
+      ? workspaceService.canAdministerContent(access)
+      : false;
+
     const deleted = await deleteThreadRecord({
       threadId: input.threadId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       viewerUserId: input.userId,
+      isContentAdmin,
     });
 
     if (!deleted) {

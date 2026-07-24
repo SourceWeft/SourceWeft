@@ -273,17 +273,25 @@ export async function deleteThreadRecord(input: {
   teamId: string;
   workspaceId: string;
   viewerUserId: string;
+  isContentAdmin: boolean;
 }) {
-  // The visibility clause is what keeps a member from deleting another
-  // member's private thread by guessing its id: an invisible thread simply
-  // matches no row and the delete reports not-found.
+  // Deleting is a destructive mutation, so it is scoped tighter than reading: a
+  // plain editor may only delete threads they created (or legacy creator-less
+  // ones), NOT another member's shared thread. A content admin manages the
+  // workspace and may delete any thread that is visible to them — which still
+  // excludes other members' private threads via the visibility clause. An
+  // invisible/otherwise-out-of-scope thread simply matches no row and the delete
+  // reports not-found, so ids can't be probed.
+  const deletableClause = input.isContentAdmin
+    ? threadVisibilityClause(4)
+    : `(created_by = $4 or created_by is null)`;
   const result = await database.query<{ id: string }>(
     `
       delete from threads
       where id = $1
         and team_id = $2
         and workspace_id = $3
-        and ${threadVisibilityClause(4)}
+        and ${deletableClause}
       returning id
     `,
     [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],

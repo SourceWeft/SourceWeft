@@ -51,6 +51,9 @@ export async function generateMetadata({
   return {
     title,
     description,
+    // The share token is in this page's URL; keep it out of the Referer header
+    // on any outbound navigation/subresource so it can't leak to third parties.
+    referrer: "no-referrer",
     // A public link is a deliberate publish → indexable for reach, unless the
     // owner opted this share out.
     robots: artifact.noindex ? { index: false, follow: false } : undefined,

@@ -27,6 +27,51 @@ const SANDBOX_CSP = [
 ].join("; ");
 
 /**
+ * Best-effort view-count throttle. The count increment on `/raw` is
+ * unauthenticated and outside better-auth's rate limiter, so a scripted loop
+ * could otherwise inflate the number and drive one DB write per request. We
+ * de-duplicate on (token, client-ip) within a window: a repeat fetch from the
+ * same client neither re-counts nor writes. It is per-process (multi-instance
+ * deployments count at most once per instance per window) — acceptable for a
+ * vanity metric. The map is bounded to cap memory under a flood.
+ */
+const VIEW_DEDUP_WINDOW_MS = 30 * 60 * 1000;
+const VIEW_DEDUP_MAX_ENTRIES = 50_000;
+const recentViews = new Map<string, number>();
+
+function shouldCountView(token: string, clientIp: string, now: number) {
+  const key = `${token}:${clientIp}`;
+  const last = recentViews.get(key);
+  if (last !== undefined && now - last < VIEW_DEDUP_WINDOW_MS) {
+    return false;
+  }
+
+  // Bounded eviction: drop the oldest-inserted entries when over the cap so a
+  // flood of distinct (token, ip) pairs can't grow the map without limit.
+  if (recentViews.size >= VIEW_DEDUP_MAX_ENTRIES) {
+    const overflow = recentViews.size - VIEW_DEDUP_MAX_ENTRIES + 1;
+    let removed = 0;
+    for (const staleKey of recentViews.keys()) {
+      recentViews.delete(staleKey);
+      if (++removed >= overflow) break;
+    }
+  }
+
+  recentViews.set(key, now);
+  return true;
+}
+
+function clientIpOf(headerValue: string | undefined) {
+  if (!headerValue) return "unknown";
+  // X-Forwarded-For is a comma list; the left-most is the original client.
+  return headerValue.split(",")[0]?.trim() || "unknown";
+}
+
+// Revocable, token-gated bytes: a short max-age caps how long a shared/CDN cache
+// keeps serving a link after it is revoked, while still allowing brief caching.
+const SHARE_BYTES_CACHE_CONTROL = "public, max-age=60, must-revalidate";
+
+/**
  * Public, unauthenticated share endpoints. Registered OUTSIDE the workspace
  * mount and with no session middleware: the live share token is the entire
  * access grant. These handlers never read cookies, so a request carrying an app
@@ -48,10 +93,15 @@ export function registerPublicShareRoutes(app: Hono) {
   });
 
   app.get("/v1/public/shares/:token/raw", async (c) => {
-    const resolved = await sharingService.resolvePublicArtifactBytes(
-      requireRouteParam(c, "token"),
-      { countView: true },
+    const token = requireRouteParam(c, "token");
+    const countView = shouldCountView(
+      token,
+      clientIpOf(c.req.header("x-forwarded-for")),
+      Date.now(),
     );
+    const resolved = await sharingService.resolvePublicArtifactBytes(token, {
+      countView,
+    });
     if (!resolved) {
       throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
     }
@@ -66,10 +116,13 @@ export function registerPublicShareRoutes(app: Hono) {
     // A direct top-level visit to /raw is still isolated by the CSP sandbox, but
     // this keeps it from being framed anywhere except our own share page.
     c.header("X-Frame-Options", "SAMEORIGIN");
+    // The token lives in the URL path; never leak it in a Referer to anything
+    // the served (untrusted) markup might reach.
+    c.header("Referrer-Policy", "no-referrer");
     if (resolved.share.noindex) {
       c.header("X-Robots-Tag", "noindex");
     }
-    c.header("Cache-Control", "public, max-age=300");
+    c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
     return c.body(file.body);
   });
 
@@ -90,7 +143,8 @@ export function registerPublicShareRoutes(app: Hono) {
 
     c.header("Content-Type", preview.contentType);
     c.header("X-Content-Type-Options", "nosniff");
-    c.header("Cache-Control", "public, max-age=300");
+    c.header("Referrer-Policy", "no-referrer");
+    c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
     return c.body(preview.body);
   });
 }

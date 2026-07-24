@@ -49,6 +49,7 @@ export type BillingStore = {
     limit?: number,
     options?: {
       activityOnly?: boolean;
+      actorUserId?: string;
       cursor?: { createdAt: Date; id: string } | null;
     },
     client?: PoolClient,

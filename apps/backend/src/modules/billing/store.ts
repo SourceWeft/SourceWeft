@@ -422,6 +422,7 @@ export class PostgresBillingStore implements BillingStore {
     limit?: number,
     options?: {
       activityOnly?: boolean;
+      actorUserId?: string;
       cursor?: { createdAt: Date; id: string } | null;
     },
     client?: PoolClient,
@@ -430,6 +431,10 @@ export class PostgresBillingStore implements BillingStore {
       eq(usageLedgers.teamId, teamId),
       options?.activityOnly
         ? eq(usageLedgers.activityVisible, true)
+        : undefined,
+      // Scope to a single member's lines (non-managers see only their own feed).
+      options?.actorUserId
+        ? eq(usageLedgers.actorUserId, options.actorUserId)
         : undefined,
       options?.cursor
         ? or(

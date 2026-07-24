@@ -178,11 +178,13 @@ export class BillingUsageService {
     limit = 50,
     options?: {
       activityOnly?: boolean;
+      actorUserId?: string;
       cursor?: { createdAt: Date; id: string } | null;
     },
   ): Promise<BillingLedgerResponse> {
-    // The ledger is the team-wide activity feed (all members' lines), so it is a
-    // plain team-scoped read — no per-member account lock required.
+    // The ledger is the team's activity feed. Callers scope it: managers read it
+    // team-wide, a plain member is restricted to their own lines via actorUserId.
+    // It's a plain team-scoped read — no per-member account lock required.
     const normalizedTeamId = normalizeTeamId(teamId);
     const safeLimit = Number.isFinite(limit)
       ? Math.min(200, Math.max(1, Math.floor(limit)))
