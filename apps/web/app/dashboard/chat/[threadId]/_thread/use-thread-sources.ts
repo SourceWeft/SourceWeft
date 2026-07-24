@@ -17,6 +17,10 @@ import {
   writeStoredSourceSelection,
 } from "../../_components/source-selection-storage";
 import {
+  readStoredMcpSelection,
+  writeStoredMcpSelection,
+} from "../../_components/mcp-selection-storage";
+import {
   expandSelectedSources,
   type SourceItem,
 } from "../../_components/source-types";
@@ -145,10 +149,18 @@ export function useThreadSources({
     setSelectionLoaded(false);
     if (!workspaceId) {
       setActiveSourceIds([]);
+      setActiveMcpInstallIds([]);
+      setActiveMcpToolIds([]);
       setSelectionLoaded(true);
       return;
     }
     setActiveSourceIds(readStoredSourceSelection(workspaceId, threadId));
+    // MCP selection is per-thread too: restore THIS thread's selection (empty
+    // for a thread never configured), so switching threads never leaks one
+    // thread's MCP servers onto another's messages.
+    const storedMcp = readStoredMcpSelection(workspaceId, threadId);
+    setActiveMcpInstallIds(storedMcp.installIds);
+    setActiveMcpToolIds(storedMcp.toolIds);
     setSelectionLoaded(true);
   }, [selectionStorageKey, threadId, workspaceId]);
 
@@ -158,6 +170,21 @@ export function useThreadSources({
     writeStoredSourceSelection(workspaceId, "current", activeSourceIds);
   }, [
     activeSourceIds,
+    selectionLoaded,
+    selectionStorageKey,
+    threadId,
+    workspaceId,
+  ]);
+
+  useEffect(() => {
+    if (!selectionLoaded || !workspaceId) return;
+    writeStoredMcpSelection(workspaceId, threadId, {
+      installIds: activeMcpInstallIds,
+      toolIds: activeMcpToolIds,
+    });
+  }, [
+    activeMcpInstallIds,
+    activeMcpToolIds,
     selectionLoaded,
     selectionStorageKey,
     threadId,

@@ -898,6 +898,26 @@ function CredentialsDialog({
     if (!workspaceId || !install) return;
     setSaving(true);
     try {
+      // Fail fast on a blank Save (the server rejects it too now): an empty
+      // submission would otherwise clobber a previously configured credential.
+      if (install.authType === "bearer" && !bearerToken.trim()) {
+        toast.error("Enter a bearer token before saving.");
+        return;
+      }
+      if (
+        install.authType === "api_key_header" &&
+        (!apiKeyHeaderName.trim() || !apiKey.trim())
+      ) {
+        toast.error("Enter the header name and API key before saving.");
+        return;
+      }
+      if (
+        install.authType === "custom_headers" &&
+        Object.keys(parseCustomHeaders(headersText)).length === 0
+      ) {
+        toast.error("Add at least one header before saving.");
+        return;
+      }
       const input =
         install.authType === "bearer"
           ? {
@@ -948,7 +968,10 @@ function CredentialsDialog({
         return;
       }
       toast.success("MCP server already connected");
-      onSaved(install);
+      // Reflect the connected state immediately: the pre-auth `install` still
+      // carries credentialStatus "required", which would keep Run/selection
+      // disabled until a full reload.
+      onSaved({ ...install, credentialStatus: "configured" });
       onClose();
     } catch (error) {
       toast.error(
@@ -1366,10 +1389,16 @@ export function McpMarket() {
     try {
       await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
       if (workspaceIdRef.current !== nextWorkspaceId) return;
-      const result = await fetchMcpCatalog(nextWorkspaceId);
+      const [result, categoryResult] = await Promise.all([
+        fetchMcpCatalog(nextWorkspaceId),
+        // Refresh categories too, or the facet + bucketing keep the previous
+        // workspace's taxonomy after a switch.
+        fetchMcpCategories(nextWorkspaceId),
+      ]);
       if (workspaceIdRef.current !== nextWorkspaceId) return;
       loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;
       setItems(result.items);
+      setCategories(categoryResult);
       setCatalogStatus("ready");
     } catch (changeError) {
       setItems([]);

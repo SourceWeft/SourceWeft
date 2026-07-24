@@ -65,7 +65,17 @@ function McpRow({
       );
       return;
     }
-    emit([...selectedInstallIds, install.id], selectedToolIds);
+    // Selecting the whole install means "all its tools": drop any of this
+    // install's individually-picked tools so the request doesn't carry both
+    // installIds:[X] and toolIds:[X's tools] (which double-counts in the tab
+    // badge and, because a non-empty toolIds filters the mount, would actually
+    // narrow the install back down to just those tools).
+    emit(
+      [...selectedInstallIds, install.id],
+      selectedToolIds.filter(
+        (id) => !enabledTools.some((tool) => tool.id === id),
+      ),
+    );
   }
 
   function toggleTool(toolId: string) {
@@ -230,7 +240,11 @@ export function McpTab({
     [installs, q],
   );
 
-  if (loadingError) {
+  // Only take over the whole panel with an error/spinner when there is nothing
+  // to show yet. With cached installs already rendered, a background refresh
+  // (which toggles isLoading) or a transient error must not blank them out —
+  // otherwise the stale-while-revalidate cache is never actually displayed.
+  if (loadingError && installs.length === 0) {
     return (
       <HubEmptyState
         description={loadingError}
@@ -240,7 +254,7 @@ export function McpTab({
     );
   }
 
-  if (isLoading) {
+  if (isLoading && installs.length === 0) {
     return (
       <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
         <Loader2 className="mr-1.5 size-3.5 animate-spin" />

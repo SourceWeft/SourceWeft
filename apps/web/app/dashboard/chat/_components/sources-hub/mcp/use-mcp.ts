@@ -82,16 +82,35 @@ export function useMcp(input: {
         activeWorkspaceId,
         { installs: result.items },
       );
-      const installIds = new Set(result.items.map((install) => install.id));
-      const toolIds = new Set(
-        result.items.flatMap((install) => install.tools.map((tool) => tool.id)),
+      // Prune not just by existence but by usability: a selected install that
+      // was disabled, errored, or lost its credential (and a tool that was
+      // disabled) can no longer be deselected from the hidden hub, so drop it
+      // from the selection here rather than keep shipping a dead id with every
+      // message.
+      const usableInstallIds = new Set(
+        result.items
+          .filter(
+            (install) =>
+              install.enabled &&
+              install.status === "active" &&
+              (install.credentialStatus === "configured" ||
+                install.credentialStatus === "not_required"),
+          )
+          .map((install) => install.id),
+      );
+      const enabledToolIds = new Set(
+        result.items.flatMap((install) =>
+          install.tools
+            .filter((tool) => tool.enabled)
+            .map((tool) => tool.id),
+        ),
       );
       const currentInstallIds = selectedMcpInstallIdsRef.current;
       const currentToolIds = selectedMcpToolIdsRef.current;
       const nextInstallIds = currentInstallIds.filter((id) =>
-        installIds.has(id),
+        usableInstallIds.has(id),
       );
-      const nextToolIds = currentToolIds.filter((id) => toolIds.has(id));
+      const nextToolIds = currentToolIds.filter((id) => enabledToolIds.has(id));
       if (
         nextInstallIds.length !== currentInstallIds.length ||
         nextToolIds.length !== currentToolIds.length

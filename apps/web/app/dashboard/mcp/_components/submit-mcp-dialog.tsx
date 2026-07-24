@@ -36,10 +36,10 @@ export function SubmitMcpDialog() {
     try {
       const result = await submitMcp(trimmed);
       if (result.status === "published") {
-        toast.success(`已上架:${result.identifier}`);
+        toast.success(`Published: ${result.identifier}`);
       } else {
         toast.success(
-          `已提交 ${result.identifier},进入人工审核队列(${result.flags.length} 项待确认)。`,
+          `Submitted ${result.identifier}, queued for manual review (${result.flags.length} item(s) to confirm).`,
         );
       }
       setRepoUrl("");
@@ -48,7 +48,7 @@ export function SubmitMcpDialog() {
       toast.error(
         error instanceof Error
           ? error.message
-          : "提交失败,请确认这是一个公开的 MCP 仓库。",
+          : "Submission failed. Make sure this is a public MCP repository.",
       );
     } finally {
       setSubmitting(false);
@@ -60,14 +60,16 @@ export function SubmitMcpDialog() {
       <DialogTrigger asChild>
         <Button className="h-7 gap-1.5 px-2.5 text-xs" size="sm" variant="outline">
           <Plus className="h-3.5 w-3.5" />
-          提交 MCP
+          Submit MCP
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>提交 MCP 服务器</DialogTitle>
+          <DialogTitle>Submit an MCP server</DialogTitle>
           <DialogDescription>
-            粘贴一个公开的 GitHub 仓库链接。我们会自动解析并做安全扫描——干净的直接上架,可疑的进入人工审核。
+            Paste a public GitHub repository link. We parse it automatically and
+            run a security scan — clean repos are published directly, suspicious
+            ones go to manual review.
           </DialogDescription>
         </DialogHeader>
         <Input
@@ -87,7 +89,7 @@ export function SubmitMcpDialog() {
             type="button"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            提交
+            Submit
           </Button>
         </DialogFooter>
       </DialogContent>

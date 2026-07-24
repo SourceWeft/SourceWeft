@@ -73,6 +73,7 @@ import type {
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 import type { ArtifactListItem } from "./sources-hub";
 import { writeStoredSourceSelection } from "./source-selection-storage";
+import { writeStoredMcpSelection } from "./mcp-selection-storage";
 import {
   setPendingThreadTurn,
   writePendingThreadTurnFallback,
@@ -955,6 +956,15 @@ export function DashboardChatPageClient() {
         };
         setPendingThreadTurn(result.thread.id, pendingTurn);
         writePendingThreadTurnFallback(result.thread.id, pendingTurn);
+        // Carry the composed MCP selection to the freshly created thread under
+        // its real id, so the thread page restores it instead of resetting to
+        // empty (the selection is otherwise lost on this new-chat → thread hop).
+        if (workspaceId && selectedMcp) {
+          writeStoredMcpSelection(workspaceId, result.thread.id, {
+            installIds: selectedMcp.installIds ?? [],
+            toolIds: selectedMcp.toolIds ?? [],
+          });
+        }
         router.prefetch(`/dashboard/chat/${result.thread.id}`);
         router.push(`/dashboard/chat/${result.thread.id}`);
       } catch (error) {
