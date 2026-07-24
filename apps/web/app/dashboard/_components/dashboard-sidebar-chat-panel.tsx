@@ -496,7 +496,7 @@ function ChatListRow({
     try {
       await onSetVisibility(item.id, shared ? "private" : "workspace");
       toast.success(
-        shared ? "Chat is now private" : "Chat shared with workspace",
+        shared ? "Chat is now private" : "Chat is now visible to the workspace",
       );
     } catch {
       toast.error("Could not change who can see this chat.");
@@ -532,7 +532,7 @@ function ChatListRow({
                   <>
                     <Users
                       className="size-2.5"
-                      aria-label="Shared with workspace"
+                      aria-label="Visible to workspace"
                     />
                     <span aria-hidden="true">|</span>
                   </>
@@ -577,7 +577,7 @@ function ChatListRow({
               <span className="sr-only">Open chat actions</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-52">
             {onSetVisibility ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
@@ -588,7 +588,7 @@ function ChatListRow({
                 ) : (
                   <>
                     <Users className="size-4" />
-                    <span>Share with workspace</span>
+                    <span>Make visible to workspace</span>
                   </>
                 )}
               </DropdownMenuItem>
