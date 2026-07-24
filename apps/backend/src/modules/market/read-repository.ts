@@ -5,7 +5,7 @@ import {
   type McpRuntime,
   type McpTransport,
 } from "@sourceweft/market-contracts";
-import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 import {
   db,
   marketCategories,
@@ -114,13 +114,6 @@ function isDatabaseUnavailable(error: unknown) {
     message.includes("the database system is")
   );
 }
-
-// The metadata-derived facets (transport/official/verified/runtime/desktop) live
-// in JSON, so they are filtered in memory. We therefore scan published rows up
-// to this cap, filter, then paginate — applying the limit last so filtered
-// facets can't silently drop matches. The catalog is small; if it ever exceeds
-// this, the omission is logged rather than hidden.
-const MAX_LIST_SCAN = 1000;
 
 function stringMeta(
   value: Record<string, unknown> | null | undefined,
@@ -309,35 +302,35 @@ async function latestVersionsByItemIds(itemIds: string[]) {
   return map;
 }
 
-function matchesListFilters(
-  item: MarketItemSummary,
-  input: {
-    category?: string;
-    transport?: McpTransport;
-    official?: boolean;
-    verified?: boolean;
-    runtime?: McpRuntime;
-    includeDesktopOnly?: boolean;
-  },
-) {
-  if (!input.includeDesktopOnly && item.desktopOnly) return false;
-  if (input.category && !item.categories.includes(input.category)) return false;
-  if (input.transport && item.transport !== input.transport) return false;
-  if (typeof input.official === "boolean" && item.official !== input.official) {
-    return false;
-  }
-  if (typeof input.verified === "boolean" && item.verified !== input.verified) {
-    return false;
-  }
-  if (input.runtime && item.runtime !== input.runtime) return false;
-  return true;
+// Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to
+// callers; encodes the last row of the previous page so the next page is a plain
+// indexed range scan rather than an offset that grows with the catalog.
+function encodeListCursor(publishedAt: Date | null, id: string): string {
+  const millis = publishedAt ? publishedAt.getTime() : 0;
+  return Buffer.from(`${millis}|${id}`).toString("base64url");
 }
 
-function compareByRecency(a: MarketItemSummary, b: MarketItemSummary) {
-  const pa = a.publishedAt ?? "";
-  const pb = b.publishedAt ?? "";
-  if (pa !== pb) return pa < pb ? 1 : -1; // newest published first, nulls last
-  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0; // stable tiebreak on id
+function decodeListCursor(
+  cursor: string | undefined,
+): { publishedAt: Date; id: string } | null {
+  if (!cursor) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const separator = decoded.indexOf("|");
+    if (separator < 0) {
+      return null;
+    }
+    const millis = Number(decoded.slice(0, separator));
+    const id = decoded.slice(separator + 1);
+    if (!Number.isFinite(millis) || !id) {
+      return null;
+    }
+    return { publishedAt: new Date(millis), id };
+  } catch {
+    return null;
+  }
 }
 
 export async function listMcp(input: {
@@ -354,18 +347,63 @@ export async function listMcp(input: {
   const query = input.query?.trim().toLowerCase();
   const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
 
-  const dbConditions = [
+  // Everything is pushed into SQL — facets are real columns and categories join
+  // — so the whole catalog is filtered/ordered/paginated in the database. No
+  // in-memory scan cap, so results are complete at any catalog size.
+  const conditions = [
     eq(marketItems.kind, "mcp" as const),
     eq(marketItems.status, "published" as const),
     eq(marketItems.visibility, "public" as const),
   ];
   if (query) {
-    dbConditions.push(
+    conditions.push(
       or(
         ilike(marketItems.name, `%${query}%`),
         ilike(marketItems.summary, `%${query}%`),
         ilike(marketItems.identifier, `%${query}%`),
       )!,
+    );
+  }
+  if (!input.includeDesktopOnly) {
+    conditions.push(eq(marketItems.desktopOnly, false));
+  }
+  if (input.transport) {
+    conditions.push(eq(marketItems.transport, input.transport));
+  }
+  if (typeof input.official === "boolean") {
+    conditions.push(eq(marketItems.official, input.official));
+  }
+  if (typeof input.verified === "boolean") {
+    conditions.push(eq(marketItems.verified, input.verified));
+  }
+  if (input.runtime) {
+    conditions.push(eq(marketItems.runtime, input.runtime));
+  }
+  if (input.category) {
+    conditions.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(marketItemCategories)
+          .innerJoin(
+            marketCategories,
+            eq(marketCategories.id, marketItemCategories.categoryId),
+          )
+          .where(
+            and(
+              eq(marketItemCategories.itemId, marketItems.id),
+              eq(marketCategories.slug, input.category),
+            ),
+          ),
+      ),
+    );
+  }
+  const cursor = decodeListCursor(input.cursor);
+  if (cursor) {
+    // Next page in the (publishedAt desc, id desc) ordering: rows strictly after
+    // the cursor row, via a row-value comparison the browse index can serve.
+    conditions.push(
+      sql`(${marketItems.publishedAt}, ${marketItems.id}) < (${cursor.publishedAt}, ${cursor.id})`,
     );
   }
 
@@ -374,8 +412,9 @@ export async function listMcp(input: {
     dbRows = await db
       .select()
       .from(marketItems)
-      .where(and(...dbConditions))
-      .limit(MAX_LIST_SCAN + 1);
+      .where(and(...conditions))
+      .orderBy(desc(marketItems.publishedAt), desc(marketItems.id))
+      .limit(limit + 1);
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
       return fallbackListMcp(input);
@@ -383,44 +422,23 @@ export async function listMcp(input: {
     throw error;
   }
 
-  if (dbRows.length > MAX_LIST_SCAN) {
-    console.warn(
-      `[market] listMcp scan hit cap ${MAX_LIST_SCAN}; some published items were not considered for filtering/pagination`,
-    );
-    dbRows = dbRows.slice(0, MAX_LIST_SCAN);
-  }
-
-  if (dbRows.length === 0) {
-    return fallbackListMcp(input);
-  }
-
-  const itemIds = dbRows.map((row) => row.id);
+  const hasMore = dbRows.length > limit;
+  const pageRows = hasMore ? dbRows.slice(0, limit) : dbRows;
+  const itemIds = pageRows.map((row) => row.id);
   const categoryMap = await categoriesByItemIds(itemIds);
   const latestVersionMap = await latestVersionsByItemIds(itemIds);
-  const filtered = dbRows
-    .map((row) => {
-      const latest = latestVersionMap.get(row.id);
-      return mapItemRow({
-        row,
-        categories: categoryMap.get(row.id) ?? [],
-        latestManifestJson: latest?.manifestJson,
-        latestVersion: latest?.version ?? null,
-      });
-    })
-    .filter((item) => matchesListFilters(item, input))
-    .sort(compareByRecency);
-
-  // Keyset pagination: the cursor is the last id from the previous page.
-  let startIndex = 0;
-  if (input.cursor) {
-    const cursorIndex = filtered.findIndex((item) => item.id === input.cursor);
-    startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-  }
-  const items = filtered.slice(startIndex, startIndex + limit);
+  const items = pageRows.map((row) => {
+    const latest = latestVersionMap.get(row.id);
+    return mapItemRow({
+      row,
+      categories: categoryMap.get(row.id) ?? [],
+      latestManifestJson: latest?.manifestJson,
+      latestVersion: latest?.version ?? null,
+    });
+  });
+  const last = pageRows[pageRows.length - 1];
   const nextCursor =
-    startIndex + limit < filtered.length
-      ? (items[items.length - 1]?.id ?? null)
-      : null;
+    hasMore && last ? encodeListCursor(last.publishedAt, last.id) : null;
   return { items, nextCursor };
 }
 

@@ -49,6 +49,29 @@ type MarketItemStatus = McpRepositoryIngestOptions["status"];
 type MarketItemVisibility = McpRepositoryIngestOptions["visibility"];
 
 /**
+ * Derive the promoted facet columns from the final metadata blob, so listing can
+ * filter/sort in SQL. Mirrors read-repository's runtimeFor/toManifestMeta
+ * defaults (desktopOnly/official/verified default false, webExecutable defaults
+ * true) and is fed the same metadataJson the row stores — including the
+ * submitted-origin official/verified overrides.
+ */
+function facetsFromMetadata(metadataJson: Record<string, unknown>) {
+  const transport =
+    typeof metadataJson.transport === "string" ? metadataJson.transport : null;
+  const official = metadataJson.official === true;
+  const verified = metadataJson.verified === true;
+  const desktopOnly = metadataJson.desktopOnly === true;
+  const webExecutable = metadataJson.webExecutable !== false;
+  const runtime =
+    desktopOnly && webExecutable
+      ? "hybrid"
+      : desktopOnly || !webExecutable
+        ? "desktop"
+        : "web";
+  return { transport, official, verified, desktopOnly, runtime };
+}
+
+/**
  * Ownership/state of an existing catalog item, used to guard submissions
  * against overwriting federated (upstream) entries or hijacking another
  * submitter's published listing, and to keep a flagged identifier sticky in
@@ -108,6 +131,7 @@ export async function upsertMarketMcp(input: {
   const publishedAt = input.status === "published" ? now : null;
   const owner = input.owner ?? null;
   const provenanceJson = input.provenanceJson ?? {};
+  const facets = facetsFromMetadata(metadataJson);
 
   await db
     .insert(marketItems)
@@ -124,6 +148,11 @@ export async function upsertMarketMcp(input: {
       sourceUrl: manifest.sourceUrl,
       repoUrl: manifest.repoUrl,
       metadataJson,
+      transport: facets.transport,
+      official: facets.official,
+      verified: facets.verified,
+      desktopOnly: facets.desktopOnly,
+      runtime: facets.runtime,
       publishedAt,
       updatedAt: now,
     })
@@ -139,6 +168,11 @@ export async function upsertMarketMcp(input: {
         sourceUrl: manifest.sourceUrl,
         repoUrl: manifest.repoUrl,
         metadataJson,
+        transport: facets.transport,
+        official: facets.official,
+        verified: facets.verified,
+        desktopOnly: facets.desktopOnly,
+        runtime: facets.runtime,
         updatedAt: now,
         publishedAt,
       },
