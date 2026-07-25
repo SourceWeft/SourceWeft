@@ -9,6 +9,7 @@ Open MCP and Skill details in a modal dialog from their catalog lists without na
 - Change card and explicit detail actions in `/dashboard/mcp` and `/dashboard/skills` to open dialogs.
 - Keep the existing `/dashboard/mcp/[identifier]` and `/dashboard/skills/[slug]` routes working for direct links and bookmarks.
 - Preserve detail actions such as install, uninstall, enable, configure credentials, test, and run where those actions are currently available.
+- Compact MCP card actions without allowing install state to change the card height.
 - Do not change backend contracts or catalog APIs.
 
 ## Approach
@@ -37,6 +38,15 @@ This is preferred over Next.js intercepted routes because intercepted routes upd
 - The dialog retains the current detail information and MCP actions, including credentials configuration.
 - Successful mutations update the catalog item so the card reflects the latest install state after the dialog closes.
 
+### MCP Card Layout
+
+- MCP cards use a stable height and a fixed-height footer in both installed and uninstalled states. Installing or uninstalling a server must not resize the card or its grid row.
+- The installed footer is one compact horizontal action row. It contains a truncated connection/tool status, icon buttons for test, settings, and uninstall, and the enabled switch. Each icon-only action has an accessible label and tooltip.
+- The uninstalled footer occupies the same fixed-height region and contains the install action.
+- Source links are removed from the card body and rendered as an icon button in the card's top-right header area. A GitHub URL uses the Lucide GitHub icon; another source host uses the external-link icon.
+- Source icon clicks open the source in a new tab and do not open the detail dialog.
+- The header preserves space for the source icon and installed badge so long titles truncate without overlapping either control.
+
 ### Standalone Detail Routes
 
 The existing detail routes remain available. Shared detail content accepts an explicit workspace and identifier/catalog item, allowing route pages to retain their current direct-entry behavior without coupling the catalog dialog to routing.
@@ -45,6 +55,7 @@ The existing detail routes remain available. Shared detail content accepts an ex
 
 - Clicking the card's detail surface or explicit Details control opens the dialog.
 - Install, run, toggle, test, configure, and uninstall controls do not accidentally open or close the detail dialog.
+- MCP source icon buttons do not open the detail dialog.
 - The dialog closes through its close button, Escape, or overlay click when no nested confirmation or credentials dialog is active.
 - Focus moves into the dialog on open and returns to the triggering control on close through the existing Radix-based Dialog primitive.
 - The dialog is constrained to the viewport and scrolls its body independently on desktop and mobile.
@@ -62,5 +73,7 @@ The existing detail routes remain available. Shared detail content accepts an ex
 - Component-level tests verify card clicks open the correct dialog and do not invoke router navigation.
 - Tests verify closing restores the catalog, action buttons do not trigger the detail opener, and stale detail responses are ignored.
 - Tests verify Skill install state and MCP install/configuration state are reflected in both dialog and card after mutations.
+- Tests verify MCP cards retain the same dimensions when their install state changes and installed controls remain on one row at supported widths.
+- Tests verify GitHub sources use the GitHub icon in the card header and source clicks do not open the detail dialog.
 - Run the web package typecheck/lint and focused tests.
 - Use a real browser at desktop and mobile viewport sizes to verify dialog sizing, scrolling, focus/keyboard closure, nested credential dialogs, and unchanged URL behavior.
