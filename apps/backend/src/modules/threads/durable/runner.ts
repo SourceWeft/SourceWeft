@@ -36,6 +36,7 @@ import { findThreadRecord } from "../thread/repository";
 import { billingService } from "../../../modules/billing";
 import { logger } from "../../../shared/logger";
 import { durableChatRunService } from "./service";
+import { chatRunStreamManager } from "./stream-manager";
 import {
   findChatThreadRunById,
   updateChatThreadRunProgress,
@@ -59,6 +60,9 @@ type DurableChatRunServiceFinishRun = typeof durableChatRunService.finishRun;
 const STREAM_APPEND_TEXT_DELTA_FLUSH_MS = 80;
 const ASSISTANT_SNAPSHOT_FLUSH_MS = 500;
 const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
+// Fallback cadence for detecting a cancel the pub/sub delivery may have missed
+// (a Stop that landed before the worker subscribed, or a dropped message).
+const CHAT_RUN_CANCEL_POLL_MS = 2000;
 function stableDurableUserMessageId(runId: string) {
   return `run-user-${runId}`;
 }
@@ -1580,12 +1584,51 @@ export async function processThreadChatRunJob(
     await heartbeat();
   };
 
+  // Interrupt the in-flight turn the moment a cancel arrives, rather than only
+  // refusing its output afterward. Two triggers feed one controller: the pub/sub
+  // channel (prompt, cross-process) and a low-frequency status poll (covers a
+  // Stop that raced our subscribe, or a dropped message). The poll runs on its
+  // own timer so it still fires while a long tool blocks the event loop.
+  const abortController = new AbortController();
+  const abortTurn = (reason: string) => {
+    if (abortController.signal.aborted) {
+      return;
+    }
+    logger.info("Aborting chat run turn on cancel", { runId: run.id, reason });
+    abortController.abort();
+  };
+  // The subscription is an optimization over the poll below; a Redis hiccup at
+  // subscribe time must not fail the run, so degrade to poll-only.
+  let unsubscribeCancel: () => Promise<void> = async () => {};
+  try {
+    unsubscribeCancel = await chatRunStreamManager.subscribeCancel(run.id, () =>
+      abortTurn("stop-signal"),
+    );
+  } catch (error) {
+    logger.warn("Chat run cancel subscription failed; relying on status poll", {
+      runId: run.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const cancelPoll = setInterval(() => {
+    void durableChatRunService
+      .shouldCancel(run)
+      .then((cancelled) => {
+        if (cancelled) {
+          abortTurn("status-poll");
+        }
+      })
+      .catch(() => {});
+  }, CHAT_RUN_CANCEL_POLL_MS);
+  cancelPoll.unref?.();
+
   try {
     const stream = createThreadRunStream({
       streamService,
       request,
       options: {
         shouldCancel: () => durableChatRunService.shouldCancel(run),
+        abortSignal: abortController.signal,
         onPrepared: async (prepared) => {
           run =
             (await updateChatThreadRunProgress({
@@ -1892,6 +1935,9 @@ export async function processThreadChatRunJob(
       errorCode: contentError.code,
       errorMessage: contentError.message,
     };
+  } finally {
+    clearInterval(cancelPoll);
+    await unsubscribeCancel().catch(() => {});
   }
 }
 

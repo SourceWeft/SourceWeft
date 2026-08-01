@@ -2,6 +2,7 @@ import { createThreadAgent } from "..";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "../..";
+import type { RunCancellationGate } from "../../run-cancellation";
 import { SelectedSkillsBackend } from "../../../skills/backend";
 import {
   buildConnectorActionToolset,
@@ -368,6 +369,7 @@ export interface ToolCollectionInput {
   traceContext?: TraceContext;
   runtime: TurnRuntime;
   sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+  runCancellation?: RunCancellationGate;
 }
 
 export interface ToolCollection {
@@ -400,6 +402,8 @@ export interface ThreadAgentAssemblyInput {
   runtimePrompt: string;
   /** Billed chat model for this turn; see CreateThreadAgentParams.model. */
   model: BaseLanguageModel;
+  /** Aborts `agent.stream` (LLM + signal-aware tools) when the run is cancelled. */
+  abortSignal?: AbortSignal;
 }
 
 export interface ThreadAgentAssembly {
@@ -494,6 +498,7 @@ export async function buildThreadAgentAssembly(
     sandboxRuntime,
     runtimePrompt,
     model,
+    abortSignal,
   } = input;
   const {
     capabilityTools,
@@ -646,6 +651,9 @@ export async function buildThreadAgentAssembly(
       selected_skill_count: prepared.enabledSkills.length,
     },
     streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
+    // Cancels the LLM stream and stops scheduling further steps when the run is
+    // aborted; LangGraph propagates it to tools via config.signal.
+    ...(abortSignal ? { signal: abortSignal } : {}),
   } satisfies AgentRunnableConfig;
 
   const runAgentStream = (
@@ -676,6 +684,7 @@ export async function buildToolCollection(
     traceContext,
     runtime,
     sandboxRuntime,
+    runCancellation,
   } = input;
 
   const capabilityAgentTools = await createCapabilityAgentToolsForTurn({
@@ -686,6 +695,7 @@ export async function buildToolCollection(
     traceContext,
     runtime,
     sandboxRuntime,
+    runCancellation,
   });
 
   const actionApprovalCursor: ConnectorActionApprovalCursor = { value: 0 };

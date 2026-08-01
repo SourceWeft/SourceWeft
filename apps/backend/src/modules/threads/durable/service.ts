@@ -272,6 +272,10 @@ export class DurableChatRunService {
     const run = await resolveOwnedRun(input);
     if (!isTerminalRunStatus(run.status)) {
       await chatRunStreamManager.appendStop(run.streamKey);
+      // Wake the worker running the turn now, rather than at its next status
+      // poll: this is what lets an in-flight turn abort promptly instead of
+      // running to completion after Stop.
+      await chatRunStreamManager.publishCancel(run.id);
       if (run.status === "waiting_for_approval") {
         await cancelProposedConfirmationActions(run, {
           code: CLIENT_CANCELLED_CODE,

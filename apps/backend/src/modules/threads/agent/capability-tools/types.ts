@@ -9,6 +9,7 @@ import type { AgentToolBilledGatewaySurface } from "../../../../shared/model-gat
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "../..";
+import type { RunCancellationGate } from "../../run-cancellation";
 import type { TraceContext } from "../../../llm-observability";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import type { TurnRuntime } from "../turn/turn-runtime";
@@ -74,6 +75,11 @@ export type CapabilityAgentToolsForTurnInput = {
   readonly runtime: TurnRuntime;
   readonly sandboxRuntime: AgentSandboxRuntimeForTurn | null;
   readonly traceContext?: TraceContext;
+  /**
+   * Refuses capability writes once the turn is cancelled. Absent on the
+   * non-durable paths that have no run to cancel; the durable worker wires it.
+   */
+  readonly runCancellation?: RunCancellationGate;
 };
 
 export type CapabilityAgentToolsForTurn = {

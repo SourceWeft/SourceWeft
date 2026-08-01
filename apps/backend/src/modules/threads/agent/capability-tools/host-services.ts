@@ -18,6 +18,7 @@ import {
   type DeliverableJobPayload,
 } from "../../../content/queue";
 import { artifactStorage } from "../../../sources/storage";
+import { guardCancellableWrite } from "../../run-cancellation";
 import { logger } from "../../../../shared/logger";
 import { createAgentToolModelGatewayService } from "../../../../shared/model-gateway";
 import { runToolRetrieval } from "../turn/retrieval-runner";
@@ -65,6 +66,7 @@ export function createCapabilityAgentToolHostServices(
     runtime,
     sandboxRuntime,
     traceContext,
+    runCancellation,
   } = input;
 
   return {
@@ -72,25 +74,38 @@ export function createCapabilityAgentToolHostServices(
       /**
        * The one way an artifact is published, handed to every capability. It
        * names no artifact type: what is written is whatever the spec says.
+       *
+       * Every write below is wrapped by {@link guardCancellableWrite} so a tool
+       * that finished its work after the user pressed Stop cannot still commit
+       * an artifact. The wrapper is a pass-through when no gate is wired.
        */
-      publishArtifact,
+      publishArtifact: guardCancellableWrite(
+        runCancellation,
+        "publishing the artifact",
+        publishArtifact,
+      ),
       /**
        * The two-phase half of the same door, for a capability whose artifact
        * outlives the call that asked for it.
        */
-      openArtifact,
+      openArtifact: guardCancellableWrite(
+        runCancellation,
+        "opening the artifact",
+        openArtifact,
+      ),
       /**
        * Publish over an existing ready artifact as its next version — an edit
        * republishing over itself. `expectedStatuses: ["ready"]` is what keeps
        * this from closing someone else's pending row.
        */
-      republishArtifact: (republishInput: {
+      republishArtifact: async (republishInput: {
         context: Parameters<typeof completeArtifact>[0]["context"];
         artifactId: string;
         spec: Parameters<typeof completeArtifact>[0]["spec"];
         expectedVersionNo?: number;
-      }) =>
-        completeArtifact({
+      }) => {
+        await runCancellation?.throwIfCancelled("republishing the artifact");
+        return completeArtifact({
           artifactId: republishInput.artifactId,
           context: republishInput.context,
           spec: republishInput.spec,
@@ -98,7 +113,8 @@ export function createCapabilityAgentToolHostServices(
           ...(republishInput.expectedVersionNo !== undefined
             ? { expectedVersionNo: republishInput.expectedVersionNo }
             : {}),
-        }),
+        });
+      },
       /**
        * The generic artifact-row primitives. Each takes the artifact type as a
        * parameter rather than carrying it in its name: a capability knows its
@@ -111,24 +127,28 @@ export function createCapabilityAgentToolHostServices(
        * text, and a type no reader understands renders as an unknown artifact
        * rather than corrupting anything.
        */
-      createPendingArtifact: (
+      createPendingArtifact: async (
         artifactType: string,
         pendingInput: Omit<PendingArtifactRecordInput, "artifactType">,
-      ) =>
-        createPendingArtifactRecord({
+      ) => {
+        await runCancellation?.throwIfCancelled("creating the artifact");
+        return createPendingArtifactRecord({
           ...pendingInput,
           artifactType:
             artifactType as PendingArtifactRecordInput["artifactType"],
-        }),
-      createReadyArtifact: (
+        });
+      },
+      createReadyArtifact: async (
         artifactType: string,
         recordInput: Omit<ReadyArtifactRecordInput, "artifactType">,
-      ) =>
-        createReadyArtifactRecord({
+      ) => {
+        await runCancellation?.throwIfCancelled("creating the artifact");
+        return createReadyArtifactRecord({
           ...recordInput,
           artifactType:
             artifactType as ReadyArtifactRecordInput["artifactType"],
-        }),
+        });
+      },
       findArtifact: findArtifactRecord,
       /**
        * Reuse lookup. Which type, which statuses and what makes a row a match
@@ -170,16 +190,20 @@ export function createCapabilityAgentToolHostServices(
        * the contract types it as a plain record and the shape is only asserted
        * here, where the queue's envelope type lives.
        */
-      enqueueDeliverableJob: (job: {
+      enqueueDeliverableJob: async (job: {
         readonly jobName: string;
         readonly jobId: string;
         readonly payload: Record<string, unknown>;
-      }) =>
-        enqueueDeliverableJob({
+      }) => {
+        // A late cancel must not still detach a background render job onto the
+        // deliverables queue, which would outlive the cancelled turn.
+        await runCancellation?.throwIfCancelled("enqueueing the deliverable");
+        return enqueueDeliverableJob({
           jobName: job.jobName,
           jobId: job.jobId,
           payload: job.payload as DeliverableJobPayload,
-        }),
+        });
+      },
     },
     retrieval: {
       searchSources: async (

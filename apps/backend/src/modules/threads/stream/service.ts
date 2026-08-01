@@ -10,6 +10,7 @@ import {
   invokeDeepAgentTurn,
   type DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
+import { createRunCancellationGate } from "../run-cancellation";
 import { agentSandboxService } from "../agent/sandbox-service/service";
 import { DEEPAGENTS_WRITE_TODOS_TOOL_NAME } from "../agent/turn/tool-tracker";
 import type { AgentCitation } from "../agent/citation-registry";
@@ -135,6 +136,12 @@ export type ThreadStreamRunOptions = {
     assistantMetadata?: Record<string, unknown>;
   } | void>;
   shouldCancel?: () => Promise<boolean>;
+  /**
+   * Aborts the in-flight agent turn (LLM stream and signal-aware tools) the
+   * instant a cancel arrives, so a turn does not run to completion after Stop.
+   * `shouldCancel` remains the between-events poll; this is the interrupt.
+   */
+  abortSignal?: AbortSignal;
   createErrorMessage?: typeof createThreadStreamErrorMessage;
   onFinalized?: (result: {
     assistantMessage: MessageRecord;
@@ -253,8 +260,9 @@ function isClientCancelledError(error: ContentError) {
 
 async function throwIfClientCancelled(
   shouldCancel: ThreadStreamRunOptions["shouldCancel"],
+  abortSignal?: AbortSignal,
 ) {
-  if (await shouldCancel?.()) {
+  if (abortSignal?.aborted || (await shouldCancel?.())) {
     throw new ContentError(499, "CLIENT_CANCELLED", "Chat run was cancelled");
   }
 }
@@ -1261,6 +1269,11 @@ class ContentThreadStreamService {
             parentSpanId: "agent_run",
           },
           operation: "chat.stream",
+          abortSignal: options.abortSignal,
+          runCancellation: createRunCancellationGate({
+            shouldCancel: options.shouldCancel,
+            signal: options.abortSignal,
+          }),
         });
         await threadStreamObservability.startSpan({
           ...prepared.traceContext,
@@ -1299,20 +1312,40 @@ class ContentThreadStreamService {
           titleCompletion;
 
         while (true) {
-          const result = await Promise.race([
-            nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
-            ...(nextTitleEvent
-              ? [
-                  nextTitleEvent.then((value) => ({
-                    type: "title" as const,
-                    value,
-                  })),
-                ]
-              : []),
-          ]);
+          const raceNext = () =>
+            Promise.race([
+              nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
+              ...(nextTitleEvent
+                ? [
+                    nextTitleEvent.then((value) => ({
+                      type: "title" as const,
+                      value,
+                    })),
+                  ]
+                : []),
+            ]);
+          let result: Awaited<ReturnType<typeof raceNext>>;
+          try {
+            result = await raceNext();
+          } catch (error) {
+            // Aborting the agent stream surfaces as an AbortError here, which
+            // `toDurableRunContentError` would otherwise record as a failure.
+            // When the abort was a cancel, report it as one.
+            if (
+              options.abortSignal?.aborted ||
+              (await options.shouldCancel?.())
+            ) {
+              throw new ContentError(
+                499,
+                "CLIENT_CANCELLED",
+                "Chat run was cancelled",
+              );
+            }
+            throw error;
+          }
 
           if (result.type === "title") {
-            await throwIfClientCancelled(options.shouldCancel);
+            await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
             nextTitleEvent = null;
             const update = titleCompletionToUpdate(result.value);
             if (update) {
@@ -1329,7 +1362,7 @@ class ContentThreadStreamService {
           }
 
           nextAgentEvent = agentEvents.next();
-          await throwIfClientCancelled(options.shouldCancel);
+          await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
           if (event.type === "done") {
             outcome = {
               ...event.outcome,
@@ -1382,7 +1415,7 @@ class ContentThreadStreamService {
           yield* emitTitleUpdates();
         }
 
-        await throwIfClientCancelled(options.shouldCancel);
+        await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
         if (!outcome) {
           throw new ContentError(
             502,
@@ -1408,7 +1441,7 @@ class ContentThreadStreamService {
         });
         agentSpanCompleted = true;
 
-        await throwIfClientCancelled(options.shouldCancel);
+        await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
         const finalized = await withObservedSpan({
           trace: prepared.traceContext,
           spanId: "finalize_thread_turn",

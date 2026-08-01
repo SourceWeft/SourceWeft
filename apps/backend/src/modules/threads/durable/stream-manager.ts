@@ -30,6 +30,10 @@ async function getRedisClient() {
   return jobsQueue.client;
 }
 
+function cancelChannel(runId: string) {
+  return `chatrun:cancel:${runId}`;
+}
+
 export class ChatRunStreamManager {
   async appendEvent(streamKey: string, payload: string) {
     const client = await getRedisClient();
@@ -69,6 +73,50 @@ export class ChatRunStreamManager {
   async hasStop(streamKey: string) {
     const { events } = await this.getEvents(streamKey, 0);
     return events.some((event) => event.kind === "stop");
+  }
+
+  /**
+   * Timely, cross-process cancel delivery. `appendStop` above only pushes a
+   * marker onto the stream list that the client-facing SSE reader drains; it
+   * never wakes the worker running the turn. Publishing here does: the worker
+   * subscribes to this channel and aborts within milliseconds, instead of only
+   * discovering the cancel at the next between-events status poll — the gap that
+   * let a Stop sit unheard while a long tool ran to completion.
+   */
+  async publishCancel(runId: string) {
+    const client = await getRedisClient();
+    await client.publish(cancelChannel(runId), "1");
+  }
+
+  /**
+   * Subscribes the worker to a run's cancel channel. It uses a dedicated
+   * connection because an ioredis client in subscriber mode can no longer issue
+   * the ordinary commands the shared queue client is busy with. Returns an
+   * unsubscribe that also tears the connection down.
+   */
+  async subscribeCancel(
+    runId: string,
+    onCancel: () => void,
+  ): Promise<() => Promise<void>> {
+    const base = await getRedisClient();
+    const subscriber = base.duplicate();
+    const channel = cancelChannel(runId);
+    const handleMessage = (messageChannel: string) => {
+      if (messageChannel === channel) {
+        onCancel();
+      }
+    };
+    subscriber.on("message", handleMessage);
+    await subscriber.subscribe(channel);
+    return async () => {
+      subscriber.off("message", handleMessage);
+      try {
+        await subscriber.unsubscribe(channel);
+      } catch {
+        // Best-effort: we tear the connection down next regardless.
+      }
+      subscriber.disconnect();
+    };
   }
 }
 

@@ -12,6 +12,7 @@ import type { ContentBillingPort } from "../../../content/billing-port";
 import type { BillingScope } from "../../../../shared/model-gateway/index";
 import type { TraceContext } from "../../../llm-observability";
 import type { AgentCheckpointRef, PreparedThreadTurn } from "../..";
+import type { RunCancellationGate } from "../../run-cancellation";
 import {
   createMessageRenderBlockBuilder,
   finalizeMessageRenderBlocks,
@@ -159,6 +160,17 @@ export async function* invokeDeepAgentTurn(input: {
    * holding what was already metered.
    */
   onBillingScope?: (scope: BillingScope) => void;
+  /**
+   * Refuses capability writes once the run is cancelled. The durable worker
+   * builds it from the run's cancel poll; absent on paths with no run.
+   */
+  runCancellation?: RunCancellationGate;
+  /**
+   * Aborts the LLM stream (and signal-aware tools) mid-turn on cancel. Threaded
+   * into `agent.stream`'s runConfig so a Stop interrupts work rather than only
+   * blocking its output.
+   */
+  abortSignal?: AbortSignal;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const runtime = createTurnRuntime({ prepared: input.prepared });
   const {
@@ -199,6 +211,7 @@ export async function* invokeDeepAgentTurn(input: {
       traceContext: input.traceContext,
       runtime,
       sandboxRuntime,
+      runCancellation: input.runCancellation,
     });
     const { connectorToolContext, mcpToolRuntime: mcpRuntime } = toolCollection;
     mcpToolRuntime = mcpRuntime;
@@ -230,6 +243,7 @@ export async function* invokeDeepAgentTurn(input: {
       sandboxRuntime,
       runtimePrompt: runtimePromptContext.runtimePrompt,
       model: billedModel,
+      abortSignal: input.abortSignal,
     });
     const { visibleSources, selectedSourcesOmitted } = runtimePromptContext;
 
