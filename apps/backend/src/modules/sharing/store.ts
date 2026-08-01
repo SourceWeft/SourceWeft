@@ -27,6 +27,35 @@ export async function findActiveShareByTarget(input: {
 }
 
 /**
+ * The subset of the given artifact ids that currently have a live, public share
+ * link (non-revoked, unexpired, `is_public`). Backs the "Public" badge in the
+ * artifacts hub, resolved in one batched query rather than a per-artifact
+ * lookup. Empty input short-circuits to avoid an `IN ()` no-op query.
+ */
+export async function findPubliclySharedArtifactIds(
+  artifactIds: string[],
+): Promise<Set<string>> {
+  if (artifactIds.length === 0) {
+    return new Set();
+  }
+
+  const rows = await db
+    .selectDistinct({ targetId: shareLinks.targetId })
+    .from(shareLinks)
+    .where(
+      and(
+        eq(shareLinks.targetType, "artifact"),
+        inArray(shareLinks.targetId, artifactIds),
+        eq(shareLinks.isPublic, true),
+        isNull(shareLinks.revokedAt),
+        sql`(${shareLinks.expiresAt} is null or ${shareLinks.expiresAt} > now())`,
+      ),
+    );
+
+  return new Set(rows.map((row) => row.targetId));
+}
+
+/**
  * A live share resolved by its public token — the read path for `/s/:token`.
  * Returns null when the token is unknown, revoked, or expired, so callers never
  * have to special-case those separately from "not found".

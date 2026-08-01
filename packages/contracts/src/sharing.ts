@@ -65,8 +65,22 @@ export const publicSharedArtifactSchema = z.object({
   title: z.string().nullable(),
   /** Signed, time-limited URL to the artifact's primary bytes (or null). */
   fileUrl: z.string().nullable(),
-  /** Signed URL to a preview image for the social card (or null). */
+  /**
+   * Whether `fileUrl` renders inside the share page's sandboxed iframe (images,
+   * text, PDF, JSON, media). False for office docs (e.g. `.pptx`) and other
+   * binaries, which a browser downloads rather than displays — the page falls
+   * back to `previewImageUrl` for those instead of showing a blank frame.
+   */
+  inlinePreviewable: z.boolean(),
+  /** Signed URL to a preview image (social card + non-embeddable fallback). */
   previewImageUrl: z.string().nullable(),
+  /**
+   * A short, content-derived summary for SEO/social descriptions, or null. Kept
+   * to non-sensitive, already-shown text (the preview image's alt caption) —
+   * never `promptText` or any internal payload. The renderer falls back to a
+   * title + type sentence when this is null.
+   */
+  description: z.string().nullable(),
   viewCount: z.number().int().nonnegative(),
   noindex: z.boolean(),
   createdAt: z.string(),

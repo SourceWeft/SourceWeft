@@ -1,9 +1,11 @@
 import type { PublicSharedArtifact, ShareLink } from "@sourceweft/contracts";
+import { compactArtifactText } from "@sourceweft/contracts/artifact-files";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { workspaceService } from "../workspace";
 import { canViewContent } from "../workspace/content-visibility";
 import { teamAuditService } from "../team-audit";
+import { contentArtifactsService } from "../artifacts";
 import { findArtifactRecord } from "../artifacts/repository";
 import {
   createShareLink,
@@ -20,9 +22,13 @@ export type ShareMutationResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: "not_found" | "forbidden" };
 
-/** Absolute, copy-pasteable link a viewer opens. */
+/**
+ * Absolute, copy-pasteable link a viewer opens. The token is the entire access
+ * grant, so — like Claude/NotebookLM public links — the path is just the opaque
+ * id with no title slug: nothing about the content leaks into the URL.
+ */
 function shareUrl(token: string) {
-  return `${config.auth.webBaseUrl}/s/${token}`;
+  return `${config.auth.webBaseUrl}/artifact/${token}`;
 }
 
 /** Public backend endpoints the share page and its iframe fetch. */
@@ -268,19 +274,35 @@ export class SharingService {
       workspaceId: share.workspaceId ?? "",
       artifactId: share.targetId,
     });
-    // A private artifact is never served publicly even if a live share row
-    // exists — e.g. the owning thread was flipped to private after publishing.
-    // Publish revoking on visibility flip is the proactive counterpart; this is
-    // the load-bearing gate.
-    if (
-      !artifact ||
-      artifact.status !== "ready" ||
-      artifact.visibility === "private"
-    ) {
+    // A live public share IS the deliberate public grant — an axis orthogonal to
+    // the artifact's workspace `visibility`. Exposure is withdrawn by REVOKING
+    // the share, never by the visibility flag: turning a thread private revokes
+    // its artifacts' shares *before* they inherit the private label (see
+    // `updateThreadVisibility`), so "private ⟹ no live share" holds. We
+    // therefore serve on the live share and only require the bytes to exist
+    // (`ready`); a private-but-still-live share means it was deliberately
+    // published from a private thread, which is exactly what we honor here.
+    if (!artifact || artifact.status !== "ready") {
       return null;
     }
 
     const hasPreview = Boolean(artifact.previewStorageKey);
+    const inlinePreviewable =
+      await contentArtifactsService.isSharedArtifactInlineRenderable(artifact);
+
+    // Content-derived SEO/social description, from the preview image's alt
+    // caption only — already-shown, non-sensitive text. Never `promptText` or
+    // any payload field. Null when there's no usable caption; the page then
+    // falls back to a title + type sentence.
+    const previewMeta = artifact.previewMetadataJson as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const altText =
+      previewMeta && typeof previewMeta.altText === "string"
+        ? previewMeta.altText.trim()
+        : "";
+    const description = altText ? compactArtifactText(altText, 160) : null;
 
     // Curated, allow-list projection. The internal `payloadJson` is never
     // exposed: for real artifact types it embeds workspace-scoped URLs
@@ -295,7 +317,9 @@ export class SharingService {
       artifactType: artifact.artifactType,
       title: artifact.title,
       fileUrl: artifact.storageKey ? publicRawUrl(token) : null,
+      inlinePreviewable,
       previewImageUrl: hasPreview ? publicPreviewUrl(token) : null,
+      description,
       viewCount: share.viewCount,
       noindex: share.noindex,
       createdAt: share.createdAt.toISOString(),
@@ -322,12 +346,9 @@ export class SharingService {
       workspaceId: share.workspaceId ?? "",
       artifactId: share.targetId,
     });
-    // Private artifacts never serve publicly — see resolvePublicArtifact.
-    if (
-      !artifact ||
-      artifact.status !== "ready" ||
-      artifact.visibility === "private"
-    ) {
+    // Serve on the live public share, not the visibility flag — see
+    // resolvePublicArtifact.
+    if (!artifact || artifact.status !== "ready") {
       return null;
     }
 

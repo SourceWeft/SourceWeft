@@ -133,6 +133,11 @@ export const artifactSchema = z.object({
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
   visibility: z.enum(["private", "workspace"]),
+  // True when a live (non-revoked, unexpired) public share link exists for this
+  // artifact — i.e. it is published to an anonymous `/s/:token` page. Distinct
+  // from `visibility`, which is workspace-scoped. Defaults false so response
+  // builders that don't resolve share state stay valid.
+  isPublic: z.boolean().default(false),
   createdBy: z.string().nullable(),
   completedAt: z.string().nullable(),
   createdAt: z.string(),

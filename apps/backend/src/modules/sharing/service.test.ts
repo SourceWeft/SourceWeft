@@ -11,6 +11,7 @@ const mockFindLive = vi.fn();
 const mockIncrement = vi.fn();
 const mockRevokeForThread = vi.fn();
 const mockAuditRecord = vi.fn();
+const mockInlineRenderable = vi.fn();
 
 vi.mock("../workspace", () => ({
   workspaceService: {
@@ -27,6 +28,12 @@ vi.mock("../team-audit", () => ({
 }));
 vi.mock("../artifacts/repository", () => ({
   findArtifactRecord: (...a: unknown[]) => mockFindArtifact(...a),
+}));
+vi.mock("../artifacts", () => ({
+  contentArtifactsService: {
+    isSharedArtifactInlineRenderable: (...a: unknown[]) =>
+      mockInlineRenderable(...a),
+  },
 }));
 vi.mock("./store", () => ({
   createShareLink: (...a: unknown[]) => mockCreateShare(...a),
@@ -79,6 +86,7 @@ beforeEach(() => {
   mockResolveAccess.mockResolvedValue(ACCESS);
   mockCanAdministerContainer.mockReturnValue(false);
   mockCanAdministerContent.mockReturnValue(false);
+  mockInlineRenderable.mockResolvedValue(true);
 });
 
 test("the artifact's creator may share it", async () => {
@@ -103,7 +111,7 @@ test("the artifact's creator may share it", async () => {
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.ok && result.value.url, "https://app.test/s/tok");
+  assert.equal(result.ok && result.value.url, "https://app.test/artifact/tok");
 });
 
 test("a non-creator without container admin cannot share", async () => {
@@ -260,16 +268,51 @@ test("public resolve projects a ready artifact without counting a view", async (
   assert.equal(mockIncrement.mock.calls.length, 0);
 });
 
-test("public resolve refuses a private artifact even with a live share", async () => {
-  // A thread flipped to private after publishing must not keep serving: the
-  // serve path is the load-bearing gate regardless of the share row.
+test("public projection carries the inline-previewable flag for the renderer", async () => {
+  // A non-embeddable file (e.g. a .pptx deck) must report false so the page
+  // falls back to the poster image instead of a blank iframe.
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(artifact());
+  mockInlineRenderable.mockResolvedValue(false);
+
+  const projection = await sharingService.resolvePublicArtifact("tok");
+  assert.equal(projection?.inlinePreviewable, false);
+  assert.equal(mockInlineRenderable.mock.calls.length, 1);
+});
+
+test("public resolve serves an explicitly-shared artifact even from a private thread", async () => {
+  // A live public share IS the deliberate public grant; the artifact's
+  // workspace `visibility` is an orthogonal axis. Exposure is withdrawn by
+  // revoking the share (privating a thread revokes first — covered below), so a
+  // still-live share on a `private` artifact means it was deliberately published
+  // from a private thread, which we honor rather than blank.
   mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
   mockFindArtifact.mockResolvedValue(artifact({ visibility: "private" }));
+
+  const projection = await sharingService.resolvePublicArtifact("tok");
+  assert.equal(projection?.artifactType, "report");
+
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(artifact({ visibility: "private" }));
+  mockIncrement.mockResolvedValue(undefined);
+  const bytes = await sharingService.resolvePublicArtifactBytes("tok", {
+    countView: true,
+  });
+  assert.ok(bytes);
+  assert.equal(bytes?.artifact.visibility, "private");
+  assert.equal(mockIncrement.mock.calls.length, 1);
+});
+
+test("public resolve still refuses a not-ready artifact with a live share", async () => {
+  // Visibility no longer gates, but a share pointing at bytes that don't exist
+  // yet (or failed) must not serve.
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(artifact({ status: "pending" }));
 
   assert.equal(await sharingService.resolvePublicArtifact("tok"), null);
 
   mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
-  mockFindArtifact.mockResolvedValue(artifact({ visibility: "private" }));
+  mockFindArtifact.mockResolvedValue(artifact({ status: "pending" }));
   assert.equal(
     await sharingService.resolvePublicArtifactBytes("tok", { countView: true }),
     null,

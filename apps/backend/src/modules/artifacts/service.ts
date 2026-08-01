@@ -16,7 +16,10 @@ import {
   deleteArtifactObject,
   downloadArtifactObject,
 } from "../sources/storage";
-import { revokeShareLink } from "../sharing/store";
+import {
+  findPubliclySharedArtifactIds,
+  revokeShareLink,
+} from "../sharing/store";
 import { teamAuditService } from "../team-audit";
 import { logger } from "../../shared/logger";
 import {
@@ -101,6 +104,21 @@ function resolveArtifactContentType(
 
 function isInlinePreviewableContentType(contentType: string) {
   return isInlinePreviewableMimeType(contentType);
+}
+
+/**
+ * Whether a browser renders these bytes inside an iframe rather than downloading
+ * them (a blank frame). Images/text/PDF/JSON render and media plays; office
+ * documents and arbitrary binaries download. The public share page uses this to
+ * decide between embedding the file and falling back to the poster image.
+ */
+function isBrowserRenderableContentType(contentType: string) {
+  const normalized = contentType.toLowerCase();
+  return (
+    isInlinePreviewableContentType(contentType) ||
+    normalized.startsWith("video/") ||
+    normalized.startsWith("audio/")
+  );
 }
 
 function resolveArtifactRenderer(
@@ -306,6 +324,7 @@ export class ContentArtifactsService {
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>;
     workspaceId: string;
     handler?: ArtifactViewHandler | null;
+    isPublic?: boolean;
   }) {
     const { artifact, workspaceId } = input;
     return {
@@ -325,6 +344,7 @@ export class ContentArtifactsService {
       errorCode: artifact.errorCode,
       errorMessage: artifact.errorMessage,
       visibility: artifact.visibility,
+      isPublic: input.isPublic ?? false,
       createdBy: artifact.createdBy,
       completedAt: artifact.completedAt,
       createdAt: artifact.createdAt,
@@ -357,6 +377,9 @@ export class ContentArtifactsService {
       viewerUserId: input.userId,
     });
     const registry = await loadArtifactViewHandlerRegistry();
+    const publicArtifactIds = await findPubliclySharedArtifactIds(
+      artifacts.items.map((artifact) => artifact.id),
+    );
 
     return {
       items: artifacts.items.map((artifact) =>
@@ -364,6 +387,7 @@ export class ContentArtifactsService {
           artifact,
           workspaceId: workspace.id,
           handler: registry.handlerFor(artifact.artifactType),
+          isPublic: publicArtifactIds.has(artifact.id),
         }),
       ),
       nextCursor: artifacts.nextCursor,
@@ -378,12 +402,16 @@ export class ContentArtifactsService {
     const { workspace, artifact } = await this.requireViewableArtifact(input);
 
     const registry = await loadArtifactViewHandlerRegistry();
+    const publicArtifactIds = await findPubliclySharedArtifactIds([
+      artifact.id,
+    ]);
 
     return {
       artifact: this.buildArtifactResponse({
         artifact,
         workspaceId: workspace.id,
         handler: registry.handlerFor(artifact.artifactType),
+        isPublic: publicArtifactIds.has(artifact.id),
       }),
     };
   }
@@ -626,6 +654,25 @@ export class ContentArtifactsService {
       fileName: resolveArtifactFileName(artifact, handler),
       renderer: resolveArtifactRenderer(artifact, handler),
     };
+  }
+
+  /**
+   * Whether the public share page can embed this artifact's bytes inline (vs.
+   * falling back to its poster image). Handler-aware via the same content-type
+   * resolution the `/raw` serve uses, so office decks (`.pptx`) etc. correctly
+   * report false instead of rendering as a blank iframe.
+   */
+  async isSharedArtifactInlineRenderable(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ): Promise<boolean> {
+    if (!artifact.storageKey) {
+      return false;
+    }
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    return isBrowserRenderableContentType(
+      resolveArtifactContentType(artifact, handler),
+    );
   }
 
   /** Preview-image bytes for a share-authorized artifact, or null if none. */

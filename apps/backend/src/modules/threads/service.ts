@@ -408,18 +408,13 @@ class ContentThreadService {
       kind: "access_changed",
     }).catch(() => undefined);
 
-    // Artifacts inherit thread visibility, so re-sharing/hiding a thread re-labels its artifacts.
-    await updateArtifactsVisibilityForThread({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      threadId: input.threadId,
-      threadVisibility: input.visibility,
-    });
-
-    // Going private also withdraws external exposure: revoke the artifacts'
-    // public share links instead of leaving live tokens that the serve-path
-    // visibility gate merely blanks — flipping back to workspace must require
-    // a fresh publish, not silently resurrect an old URL.
+    // Going private withdraws external exposure, and the serve path now keys off
+    // the live share rather than the artifact's `visibility` flag. So revoke the
+    // artifacts' public shares BEFORE they inherit the `private` label below:
+    // revoking first means there is never an intermediate state of a `private`
+    // artifact still holding a live public token, even if the relabel step
+    // fails. Flipping back to workspace still requires a fresh publish — a
+    // revoked token stays dead and is never silently resurrected.
     if (input.visibility === "private") {
       await sharingService.revokeSharesForPrivatedThread({
         teamId: workspace.organizationId,
@@ -428,6 +423,14 @@ class ContentThreadService {
         actorUserId: input.userId,
       });
     }
+
+    // Artifacts inherit thread visibility, so re-sharing/hiding a thread re-labels its artifacts.
+    await updateArtifactsVisibilityForThread({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      threadVisibility: input.visibility,
+    });
 
     return { thread: updated };
   }
