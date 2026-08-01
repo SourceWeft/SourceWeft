@@ -48,6 +48,14 @@ const nextConfig: NextConfig = {
   allowedDevOrigins:
     process.env.NODE_ENV === "development" ? getAllowedDevOrigins() : undefined,
   output: "standalone",
+  async redirects() {
+    return [
+      // Public shares moved from `/s/:token` to the canonical `/artifact/:token`
+      // (opaque id, no slug). A routing-layer 308 keeps old links and any
+      // already-indexed pages working without a client-side meta refresh.
+      { source: "/s/:token", destination: "/artifact/:token", permanent: true },
+    ];
+  },
   turbopack: {
     // Avoid inferring workspace root from a lockfile outside this repo (e.g. ~/package-lock.json).
     root: monorepoRoot,

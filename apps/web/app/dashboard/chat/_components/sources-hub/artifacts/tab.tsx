@@ -175,6 +175,9 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
                 <TypeBadge label={artifact.status} />
+                {artifact.isPublic ? (
+                  <TypeBadge label="Public" tone="public" />
+                ) : null}
               </div>
               {artifact.promptText ? (
                 <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">

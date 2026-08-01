@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
+import { SharedArtifactViewer } from "./shared-artifact-viewer";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,38 @@ async function fetchShare(
   }
 }
 
+/** Human noun per artifact type, for the fallback description sentence. */
+const ARTIFACT_TYPE_NOUNS: Record<string, string> = {
+  file: "file",
+  report: "report",
+  slides: "presentation",
+  mindmap: "mind map",
+  podcast: "podcast",
+  audio_overview: "audio overview",
+  video_overview: "video overview",
+  video_presentation: "video presentation",
+  flashcards: "set of flashcards",
+  quiz: "quiz",
+  table: "table",
+  infographic: "infographic",
+  image: "image",
+};
+
+/**
+ * SEO/social description: prefer the backend's content-derived summary, and
+ * fall back to a title + type sentence so the tag is never empty or generic.
+ */
+function artifactDescription(
+  artifact: NonNullable<PublicSharedArtifactResponse["artifact"]>,
+): string {
+  if (artifact.description) {
+    return artifact.description;
+  }
+  const noun = ARTIFACT_TYPE_NOUNS[artifact.artifactType] ?? "artifact";
+  const name = artifact.title || "A shared artifact";
+  return `${name} — a ${noun} shared on SourceWeft.`;
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -43,7 +76,7 @@ export async function generateMetadata({
   }
 
   const title = artifact.title || "Shared artifact";
-  const description = "Made with SourceWeft";
+  const description = artifactDescription(artifact);
   const images = artifact.previewImageUrl
     ? [{ url: artifact.previewImageUrl }]
     : undefined;
@@ -51,6 +84,9 @@ export async function generateMetadata({
   return {
     title,
     description,
+    // Canonical for this content (the old `/s/:token` permanently redirects
+    // here), so the two paths never split SEO signals.
+    alternates: { canonical: `/artifact/${token}` },
     // The share token is in this page's URL; keep it out of the Referer header
     // on any outbound navigation/subresource so it can't leak to third parties.
     referrer: "no-referrer",
@@ -92,44 +128,5 @@ export default async function SharedArtifactPage({
     );
   }
 
-  const title = artifact.title || "Shared artifact";
-
-  return (
-    <main className="flex min-h-dvh flex-col bg-background">
-      <header className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
-        <span className="truncate text-sm font-medium">{title}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {artifact.viewCount} {artifact.viewCount === 1 ? "view" : "views"}
-        </span>
-      </header>
-
-      <div className="min-h-0 flex-1">
-        {artifact.fileUrl ? (
-          // Sandboxed + cross-checked by the /raw endpoint's `CSP: sandbox`
-          // header: the artifact runs in an opaque origin and cannot reach this
-          // page, its cookies, or any other artifact.
-          <iframe
-            title={title}
-            src={artifact.fileUrl}
-            className="h-full w-full border-0"
-            sandbox="allow-scripts allow-popups allow-forms allow-modals"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
-            Nothing to preview.
-          </div>
-        )}
-      </div>
-
-      <footer className="border-t px-4 py-2 text-center">
-        <a
-          className="text-xs text-muted-foreground hover:text-foreground"
-          href="/"
-          rel="noopener"
-        >
-          Made with <span className="font-medium">SourceWeft</span>
-        </a>
-      </footer>
-    </main>
-  );
+  return <SharedArtifactViewer artifact={artifact} />;
 }
