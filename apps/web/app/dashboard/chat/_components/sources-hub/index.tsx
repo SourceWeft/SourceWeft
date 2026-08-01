@@ -9,6 +9,8 @@ import {
   useState,
 } from "react";
 import {
+  ChevronLeft,
+  ChevronRight,
   FolderPlus,
   Loader2,
   RotateCcw,
@@ -243,6 +245,11 @@ export function SourcesHub({
   const deferredSearchQuery = deferredSearchQueries[activeTab];
   const skillsForHub = hubSkills ?? installedSkills;
   const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
+  const [tabScrollState, setTabScrollState] = useState({
+    canScrollLeft: false,
+    canScrollRight: false,
+  });
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<
     string | null
   >(null);
@@ -501,12 +508,74 @@ export function SourcesHub({
     persistHubTab(tab);
   }
 
+  const updateTabScrollState = useCallback(() => {
+    const strip = tabStripRef.current;
+    if (!strip) {
+      return;
+    }
+
+    const maxScrollLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+    const nextState = {
+      canScrollLeft: strip.scrollLeft > 1,
+      canScrollRight: strip.scrollLeft < maxScrollLeft - 1,
+    };
+
+    setTabScrollState((current) =>
+      current.canScrollLeft === nextState.canScrollLeft &&
+      current.canScrollRight === nextState.canScrollRight
+        ? current
+        : nextState,
+    );
+  }, []);
+
+  const scrollTabStrip = useCallback((direction: "left" | "right") => {
+    const strip = tabStripRef.current;
+    if (!strip) {
+      return;
+    }
+    const amount = Math.max(strip.clientWidth * 0.7, 120);
+    strip.scrollBy({
+      left: direction === "left" ? -amount : amount,
+      behavior: "smooth",
+    });
+  }, []);
+
   useEffect(() => {
     const storedTab = readStoredHubTab();
     if (storedTab) {
       setActiveTab(storedTab);
     }
   }, []);
+
+  useEffect(() => {
+    updateTabScrollState();
+  });
+
+  useEffect(() => {
+    const strip = tabStripRef.current;
+    if (!strip) {
+      return;
+    }
+
+    updateTabScrollState();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateTabScrollState);
+
+    resizeObserver?.observe(strip);
+    for (const child of Array.from(strip.children)) {
+      resizeObserver?.observe(child);
+    }
+
+    window.addEventListener("resize", updateTabScrollState);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateTabScrollState);
+    };
+  }, [updateTabScrollState]);
 
 
   useEffect(() => {
@@ -594,27 +663,75 @@ export function SourcesHub({
             )}
           </div>
 
-          <div className="mt-2 flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain border-t pt-2">
-            {tabs.map((tab) => (
-              <button
-                className={cn(
-                  "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
-                  activeTab === tab
-                    ? "border-border bg-secondary text-foreground shadow-xs"
-                    : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                key={tab}
-                onClick={() => handleActiveTabChange(tab)}
-                type="button"
-              >
-                <span>{tab}</span>
-                {tabCounts[tab] !== undefined ? (
-                  <span className="ml-1.5 text-[10px] text-current/70">
-                    {tabCounts[tab]}
-                  </span>
-                ) : null}
-              </button>
-            ))}
+          <div className="relative mt-2 border-t pt-2">
+            <div
+              className="subtle-scrollbar flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain"
+              onScroll={updateTabScrollState}
+              ref={tabStripRef}
+            >
+              {tabs.map((tab) => (
+                <button
+                  className={cn(
+                    "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
+                    activeTab === tab
+                      ? "border-border bg-secondary text-foreground shadow-xs"
+                      : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  key={tab}
+                  onClick={() => handleActiveTabChange(tab)}
+                  type="button"
+                >
+                  <span>{tab}</span>
+                  {tabCounts[tab] !== undefined ? (
+                    <span className="ml-1.5 text-[10px] text-current/70">
+                      {tabCounts[tab]}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute top-2 bottom-0 left-0 w-8 bg-gradient-to-r from-background via-background/85 to-transparent opacity-0 transition-opacity",
+                tabScrollState.canScrollLeft && "opacity-100",
+              )}
+            />
+            <button
+              aria-label="Scroll tabs left"
+              className={cn(
+                "absolute top-2 bottom-0 left-0 flex items-center pr-2 text-muted-foreground transition-opacity hover:text-foreground",
+                tabScrollState.canScrollLeft
+                  ? "opacity-100"
+                  : "pointer-events-none opacity-0",
+              )}
+              onClick={() => scrollTabStrip("left")}
+              tabIndex={-1}
+              type="button"
+            >
+              <ChevronLeft className="size-4 animate-scroll-hint-left" />
+            </button>
+            <div
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute top-2 right-0 bottom-0 w-8 bg-gradient-to-l from-background via-background/90 to-transparent opacity-0 transition-opacity",
+                tabScrollState.canScrollRight && "opacity-100",
+              )}
+            />
+            <button
+              aria-label="Scroll tabs right"
+              className={cn(
+                "absolute top-2 right-0 bottom-0 flex items-center pl-2 text-muted-foreground transition-opacity hover:text-foreground",
+                tabScrollState.canScrollRight
+                  ? "opacity-100"
+                  : "pointer-events-none opacity-0",
+              )}
+              onClick={() => scrollTabStrip("right")}
+              tabIndex={-1}
+              type="button"
+            >
+              <ChevronRight className="size-4 animate-scroll-hint-right" />
+            </button>
           </div>
         </div>
 
