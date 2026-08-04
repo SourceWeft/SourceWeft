@@ -32,11 +32,23 @@ export function slidesPreview(
 
   const isReady = artifact.status === "ready";
 
-  // 1. `slides-pptx`: ready with a proxied file to draw.
+  // 1. `slides-pptx`: ready with a proxied file to draw. On the full-page
+  // surface ("page" layout, e.g. the public share page) the deck IS the page,
+  // so render edge-to-edge with floating overlay controls + arrow-key paging;
+  // in the side panel it stays a self-sized card.
   if (isReady && proxyFileUrl) {
+    const immersive = context.layout === "page";
     return {
       id: "slides-pptx",
-      content: <PptxViewJsPreview fileUrl={proxyFileUrl} title={title} />,
+      content: (
+        <PptxViewJsPreview
+          className={immersive ? "h-full w-full" : undefined}
+          controls={immersive ? "overlay" : "bar"}
+          fileUrl={proxyFileUrl}
+          fill={immersive}
+          title={title}
+        />
+      ),
     };
   }
 

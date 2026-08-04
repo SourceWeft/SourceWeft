@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Maximize2, X } from "lucide-react";
+import {
+  resolveArtifactPreview,
+  type ArtifactPreviewContext,
+} from "@sourceweft/agent-tool-registry/ui";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
-import { PptxViewJsPreview } from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { RawImage } from "../../_components/raw-image";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
@@ -17,10 +20,12 @@ type SharedArtifact = PublicSharedArtifactResponse["artifact"];
  * browser can't do element fullscreen (e.g. iOS Safari). The stage stays mounted
  * across the toggle, so entering fullscreen never re-fetches or re-parses.
  *
- * Per-format interaction lives in the format's own preview: slides render with
- * `controls="overlay"` (floating chevrons, no chrome) and get arrow-key paging
- * while immersive. New formats slot into the same branch without touching this
- * shell.
+ * Per-type UI comes from the capability registry (`resolveArtifactPreview`) —
+ * the same pluggable path the in-app panel uses — so a type's custom viewer
+ * (e.g. the pptx deck, the image viewer) lives in its package, not here. This
+ * shell stays generic: chrome, fullscreen, and a MIME-based fallback for types
+ * with no capability UI. A new type is supported by adding its package UI, with
+ * no change to this file.
  */
 export function SharedArtifactViewer({
   artifact,
@@ -33,12 +38,47 @@ export function SharedArtifactViewer({
   const immersive = nativeFullscreen || overlayFullscreen;
   const title = artifact.title || "Shared artifact";
 
-  const isSlides =
-    artifact.artifactType === "slides" && Boolean(artifact.fileUrl);
+  // Resolve the artifact's own preview UI from the capability registry — the
+  // same pluggable path the in-app panel uses, so each type's custom UI lives in
+  // its package rather than being hardcoded here. The context is PUBLIC: the
+  // only inputs are the token-gated `/raw` bytes (`proxyFileUrl`) and the
+  // preview image — there is no payload or workspace. Payload-only previews
+  // (which need the render host) are gated out by `fileUrl` and, defensively, by
+  // try/catch; they degrade to the poster/download fallback below.
+  // `layout: "page"` tells the capability to render full-bleed.
+  const capabilityContent = useMemo(() => {
+    if (!artifact.fileUrl) {
+      return null;
+    }
+    const context: ArtifactPreviewContext = {
+      artifact: {
+        id: artifact.token,
+        workspaceId: "",
+        artifactType: artifact.artifactType,
+        status: "ready",
+        errorMessage: null,
+      },
+      downloadUrl: artifact.fileUrl,
+      layout: "page",
+      pageUrl: null,
+      payload: {},
+      proxyFileUrl: artifact.fileUrl,
+      title,
+      workspaceId: null,
+    };
+    try {
+      return resolveArtifactPreview(context)?.content ?? null;
+    } catch {
+      return null;
+    }
+  }, [artifact, title]);
+
   const canInlineEmbed =
     Boolean(artifact.fileUrl) && artifact.inlinePreviewable;
   const hasVisual =
-    isSlides || canInlineEmbed || Boolean(artifact.previewImageUrl);
+    Boolean(capabilityContent) ||
+    canInlineEmbed ||
+    Boolean(artifact.previewImageUrl);
 
   // Track the browser's own fullscreen state so Esc / F11 / the OS control keep
   // our UI in sync.
@@ -84,17 +124,12 @@ export function SharedArtifactViewer({
     setOverlayFullscreen(false);
   }, []);
 
+  // Capability UI wins; otherwise a generic, type-agnostic fallback keyed off
+  // the served bytes: embeddable files (image/pdf/text/media) in a sandboxed
+  // iframe, else the poster image, else a download prompt.
   const preview =
-    isSlides && artifact.fileUrl ? (
-      <PptxViewJsPreview
-        className="h-full w-full"
-        controls="overlay"
-        fileUrl={artifact.fileUrl}
-        fill
-        keyboardNav={immersive}
-        title={title}
-      />
-    ) : canInlineEmbed && artifact.fileUrl ? (
+    capabilityContent ??
+    (canInlineEmbed && artifact.fileUrl ? (
       // Sandboxed + cross-checked by the /raw endpoint's `CSP: sandbox` header:
       // the artifact runs in an opaque origin and cannot reach this page.
       <iframe
@@ -119,7 +154,7 @@ export function SharedArtifactViewer({
       <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
         Nothing to preview.
       </div>
-    );
+    ));
 
   return (
     <main className="flex min-h-dvh flex-col bg-background">

@@ -19,6 +19,7 @@ import {
 } from "@sourceweft/contracts/artifact-ui";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { GeneratedImagePreview } from "./generated-image-preview";
+import { SharedImageView } from "./shared-image-view";
 import {
   getGeneratedImageStatus,
   getGeneratedImageTitle,
@@ -236,6 +237,16 @@ function generatedImagePreview(
   const { artifact, downloadUrl, proxyFileUrl, title } = context;
   if (artifact.status !== "ready" || !proxyFileUrl) {
     return null;
+  }
+
+  // Full-page surface (e.g. the public share page): fit-to-screen by default
+  // (whole image, one screen) with click-to-zoom for detail. The interactive
+  // zoom/flip viewer stays the panel experience.
+  if (context.layout === "page") {
+    return {
+      id: "image",
+      content: <SharedImageView alt={title} src={proxyFileUrl} />,
+    };
   }
 
   return {

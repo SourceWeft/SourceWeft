@@ -182,11 +182,12 @@ export function PptxViewJsPreview({
     setCurrentSlide(viewer.getCurrentSlideIndex());
   };
 
-  // Arrow-key paging, opt-in via `keyboardNav` (the host turns it on when this
-  // preview is the sole focus — e.g. fullscreen — so it never hijacks page keys
-  // while embedded in a panel).
+  // Arrow-key paging. On for the `overlay` (full-page/immersive) surface where
+  // the deck IS the page, and via the explicit `keyboardNav` opt-in; off in the
+  // embedded `bar` panel so it never hijacks the page's keys.
+  const keysEnabled = keyboardNav || controls === "overlay";
   useEffect(() => {
-    if (!keyboardNav) {
+    if (!keysEnabled) {
       return;
     }
     const onKey = (event: KeyboardEvent) => {
@@ -202,7 +203,7 @@ export function PptxViewJsPreview({
     return () => window.removeEventListener("keydown", onKey);
     // `goToSlide` closes over the latest slide state each render, so re-binding
     // per render keeps the handler current.
-  }, [keyboardNav, goToSlide]);
+  }, [keysEnabled, goToSlide]);
 
   if (error) {
     return (
