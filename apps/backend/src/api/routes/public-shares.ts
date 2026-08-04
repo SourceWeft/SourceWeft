@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { contentArtifactsService } from "../../modules/artifacts";
 import { sharingService } from "../../modules/sharing";
+import { config } from "../../shared/config";
 import { ApiError, ApiResponse } from "../response/api-response";
 import { requireRouteParam } from "./content/helpers";
 
@@ -24,6 +25,12 @@ const SANDBOX_CSP = [
   "media-src data: blob:",
   "font-src data:",
   "connect-src 'none'",
+  // Only our own share page may frame these bytes. The share page lives on the
+  // WEB origin, which is cross-origin to this API — so `X-Frame-Options:
+  // SAMEORIGIN` (API-origin only) wrongly blocked our own `<iframe>`. Express
+  // the real allow-list with `frame-ancestors` (self = direct visits, plus the
+  // web origin) and drop the legacy header.
+  `frame-ancestors 'self' ${config.auth.webBaseUrl}`,
 ].join("; ");
 
 /**
@@ -143,9 +150,9 @@ export function registerPublicShareRoutes(app: Hono) {
     c.header("Content-Type", file.contentType);
     c.header("Content-Security-Policy", SANDBOX_CSP);
     c.header("X-Content-Type-Options", "nosniff");
-    // A direct top-level visit to /raw is still isolated by the CSP sandbox, but
-    // this keeps it from being framed anywhere except our own share page.
-    c.header("X-Frame-Options", "SAMEORIGIN");
+    // Framing is controlled by the CSP `frame-ancestors` above (our web origin
+    // only). No `X-Frame-Options`: SAMEORIGIN would block our own cross-origin
+    // share page, and XFO can't express a specific external origin.
     // The token lives in the URL path; never leak it in a Referer to anything
     // the served (untrusted) markup might reach.
     c.header("Referrer-Policy", "no-referrer");
