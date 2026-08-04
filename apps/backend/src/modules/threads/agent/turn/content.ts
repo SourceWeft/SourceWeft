@@ -214,10 +214,9 @@ function extractReasoningFromOpenRouterDetails(value: unknown): string | undefin
   const reasoning = value
     .map(extractReasoningFromOpenRouterDetail)
     .filter((item): item is string => item !== null)
-    .join("\n\n")
-    .trim();
+    .join("\n\n");
 
-  return reasoning.length > 0 ? reasoning : undefined;
+  return reasoning.trim().length > 0 ? reasoning : undefined;
 }
 
 function extractReasoningFromContentBlock(block: unknown): string | null {
@@ -252,10 +251,9 @@ function extractReasoningFromContentBlocks(value: unknown): string | undefined {
   const reasoning = value
     .map(extractReasoningFromContentBlock)
     .filter((item): item is string => item !== null)
-    .join("\n\n")
-    .trim();
+    .join("\n\n");
 
-  return reasoning.length > 0 ? reasoning : undefined;
+  return reasoning.trim().length > 0 ? reasoning : undefined;
 }
 
 function extractReasoningDeep(value: unknown, depth = 0): string | undefined {

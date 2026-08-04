@@ -739,6 +739,51 @@ test("messages stream handler yields reasoning before text deltas and records to
   });
 });
 
+test("messages stream handler preserves whitespace across streamed reasoning chunks", async () => {
+  const runtime = createTurnRuntime({
+    prepared: { runTraceId: "trace-reasoning-whitespace" } as never,
+  });
+
+  const firstEvents = await collectMessageStreamEvents({
+    payload: [
+      {
+        role: "assistant",
+        contentBlocks: [{ type: "reasoning", text: "The user is " }],
+      },
+    ],
+    commandSuccessCriteria: { kind: "none" },
+    runtime,
+    suppressModelReasoning: false,
+  });
+
+  const secondEvents = await collectMessageStreamEvents({
+    payload: [
+      {
+        role: "assistant",
+        contentBlocks: [
+          { type: "reasoning", text: "asking about black holes." },
+        ],
+      },
+    ],
+    commandSuccessCriteria: { kind: "none" },
+    runtime,
+    suppressModelReasoning: false,
+  });
+
+  assert.equal(
+    firstEvents[0]?.type === "reasoning" ? firstEvents[0].reasoning : null,
+    "The user is ",
+  );
+  assert.equal(
+    secondEvents[0]?.type === "reasoning" ? secondEvents[0].reasoning : null,
+    "asking about black holes.",
+  );
+  assert.equal(
+    runtime.modelReasoning,
+    "The user is asking about black holes.",
+  );
+});
+
 test("messages stream handler promotes pending run id tool stream when LangChain tool call id arrives", async () => {
   const runtime = createTurnRuntime({
     prepared: { runTraceId: "trace-message-promote" } as never,
