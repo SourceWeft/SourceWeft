@@ -133,8 +133,10 @@ export function renderVideoSlideNumbers(
 }
 
 /**
- * One scene, one command — the whole point of the split. `--` keeps pnpm from
- * eating the slide number as one of its own flags.
+ * One scene, one command — the whole point of the split. The `--` protects
+ * the slide number on pnpm <7 (which would otherwise eat it as a flag); pnpm
+ * ≥7 forwards the `--` itself verbatim, so the generated script filters a
+ * literal "--" out of its argv. Both behaviors parse correctly.
  */
 export function sceneChunkCommand(slideNumber: number) {
   return `pnpm run render-scene -- ${slideNumber}`;

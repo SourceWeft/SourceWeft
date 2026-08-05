@@ -11,6 +11,7 @@ import {
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
 import { videoPresentationSandboxError } from "./errors";
+import { CHROME_HEADLESS_SHELL_ASSET } from "./renderer-version";
 import {
   runProjectInSession,
   type RenderedVideoResult,
@@ -160,11 +161,50 @@ export function createVideoPipelineDeps(
                   "The configured sandbox runtime is disabled or unavailable.",
                 );
               }
+              // Stage the render browser through the host's runtime-asset
+              // ladder. Best-effort by contract: any failure (no resolver, no
+              // cache, ladder exhausted) leaves the path unset and the render
+              // scripts fall back to Remotion's own download — the ladder's
+              // native rung.
+              let browserExecutablePath: string | undefined;
+              if (ctx.sandbox!.ensureRuntimeAssets) {
+                try {
+                  const resolutions = await ctx.sandbox!.ensureRuntimeAssets({
+                    session,
+                    assets: [CHROME_HEADLESS_SHELL_ASSET.name],
+                  });
+                  const browser = resolutions.find(
+                    (resolution) =>
+                      resolution.name === CHROME_HEADLESS_SHELL_ASSET.name,
+                  );
+                  if (browser?.ok && browser.entrypointPath) {
+                    browserExecutablePath = browser.entrypointPath;
+                  }
+                  for (const resolution of resolutions) {
+                    ctx.logger[resolution.ok ? "info" : "warn"](
+                      "video_presentation_runtime_asset",
+                      {
+                        artifactId: runInput.job.artifactId,
+                        jobId: runInput.job.jobId,
+                        ...resolution,
+                      },
+                    );
+                  }
+                } catch (error) {
+                  ctx.logger.warn("video_presentation_runtime_asset_failed", {
+                    artifactId: runInput.job.artifactId,
+                    jobId: runInput.job.jobId,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+                }
+              }
               return runProjectInSession({
                 session,
                 logger: ctx.logger,
                 job: runInput.job,
                 payload: runInput.payload,
+                ...(browserExecutablePath ? { browserExecutablePath } : {}),
                 ...(runInput.renderVideo
                   ? { renderVideo: runInput.renderVideo }
                   : {}),

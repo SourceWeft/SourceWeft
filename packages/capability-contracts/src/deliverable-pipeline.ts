@@ -228,7 +228,34 @@ export type DeliverableHostContext = {
     createSession(input: {
       sessionKey: string;
     }): Promise<DeliverableSandboxSession | null>;
+    /**
+     * Resolve platform runtime assets inside a session
+     * (docs/architecture/sandbox-runtime-assets.md): the host stages each
+     * requested asset through its resolution ladder and reports how. Optional
+     * and best-effort by contract — a pipeline must degrade exactly as it
+     * would without the asset (the ladder's native rung), never fail on a
+     * missing resolver.
+     */
+    ensureRuntimeAssets?(input: {
+      session: DeliverableSandboxSession;
+      /** Asset names from the host's catalog (e.g. "chrome-headless-shell"). */
+      assets: readonly string[];
+    }): Promise<DeliverableRuntimeAssetResolution[]>;
   };
+};
+
+/** Outcome of one runtime asset's resolution ladder inside a session. */
+export type DeliverableRuntimeAssetResolution = {
+  name: string;
+  version: string;
+  ok: boolean;
+  /** Which ladder rung resolved it (absent when ok is false). */
+  rung?: "stamp" | "image" | "mount" | "fetch" | "upload";
+  /** Absolute path of the asset's entrypoint inside the sandbox. */
+  entrypointPath?: string;
+  ms: number;
+  bytes?: number;
+  error?: string;
 };
 
 export type DeliverableRunMode = "create" | "edit";

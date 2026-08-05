@@ -175,3 +175,9 @@ export {
   PREPARE_SANDBOX_TOOL_NAME,
   COLLECT_SANDBOX_OUTPUTS_TOOL_NAME,
 } from "./agent-tool-defs";
+export { ensureRuntimeAssets } from "./runtime/runtime-assets";
+export type {
+  RuntimeAssetPlan,
+  RuntimeAssetResolution,
+  RuntimeAssetSessionLike,
+} from "./runtime/runtime-assets";

@@ -1,7 +1,17 @@
 import type {
   DeliverableJobEnvelope,
+  DeliverableRuntimeAssetResolution,
   DeliverableSandboxSession,
 } from "@sourceweft/capability-contracts";
+import {
+  ensureRuntimeAssets,
+  type RuntimeAssetPlan,
+} from "@sourceweft/builtin-tool-sandbox";
+import { findSandboxAssetSpec } from "../../shared/sandbox-assets/catalog";
+import {
+  loadSandboxAssetContent,
+  presignSandboxAssetUrl,
+} from "../../shared/sandbox-assets/cache";
 import { logger } from "../../shared/logger";
 
 /**
@@ -112,6 +122,53 @@ export function createDeliverableSandboxAdapter(input: {
           }),
         downloadFiles: (paths) => runtime.backend.downloadFiles(paths),
       };
+    },
+
+    /**
+     * Runtime-asset resolution for deliverable pipelines
+     * (docs/architecture/sandbox-runtime-assets.md): catalog names in, ladder
+     * outcomes out. Unknown names resolve to a failed entry rather than a
+     * throw — the pipeline's contract is best-effort degradation.
+     */
+    ensureRuntimeAssets: async (input: {
+      session: DeliverableSandboxSession;
+      assets: readonly string[];
+      job?: DeliverableJobEnvelope;
+    }): Promise<DeliverableRuntimeAssetResolution[]> => {
+      const plans: RuntimeAssetPlan[] = [];
+      const unknown: DeliverableRuntimeAssetResolution[] = [];
+      for (const name of input.assets) {
+        const spec = findSandboxAssetSpec(name);
+        if (!spec) {
+          unknown.push({
+            name,
+            version: "unknown",
+            ok: false,
+            ms: 0,
+            error: "asset not in the platform catalog",
+          });
+          continue;
+        }
+        plans.push({
+          name: spec.name,
+          version: spec.version,
+          platform: spec.platform,
+          sha256: spec.sha256,
+          archive: spec.archive,
+          entrypoint: spec.entrypoint,
+          fetchUrl: () => presignSandboxAssetUrl(spec),
+          loadContent: () => loadSandboxAssetContent(spec),
+        });
+      }
+      const resolutions = await ensureRuntimeAssets({
+        session: input.session,
+        assets: plans,
+        logger,
+        ...(input.job
+          ? { toolCallKey: input.job.toolCallId ?? input.job.jobId }
+          : {}),
+      });
+      return [...unknown, ...resolutions];
     },
   };
 }

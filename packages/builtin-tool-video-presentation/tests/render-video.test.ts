@@ -191,8 +191,17 @@ test("the generated project renders per scene, never the whole deck at once", ()
 
   const script = fileContent(project.files, "scripts/render-scene.mjs");
   // One slide per invocation, rendered as a frameRange of the single
-  // composition so every chunk shares encoder settings.
-  assert.match(script, /const slideNumber = Number\(process\.argv\[2\]\);/);
+  // composition so every chunk shares encoder settings. The argv parse must
+  // skip a literal "--": pnpm ≥7 forwards it verbatim from
+  // `pnpm run render-scene -- 1`, which used to break every chunk render.
+  assert.match(script, /filter\(\(arg\) => arg !== "--"\)/u);
+  assert.match(script, /const slideNumber = Number\(positional\[0\]\);/u);
+  // The staged browser reaches every renderer call when the platform
+  // resolved one (runtime-asset ladder); otherwise Remotion's own download
+  // runs behind a retry loop.
+  assert.match(script, /SOURCEWEFT_REMOTION_BROWSER/u);
+  assert.match(script, /ensureBrowserWithRetry\(\)/u);
+  assert.match(script, /\.\.\.browserOptions/u);
   assert.match(script, /frameRange: \[from, to\]/);
   assert.match(script, /const to = from \+ scene\.durationInFrames - 1;/);
   assert.match(script, /codec: "h264-ts"/);

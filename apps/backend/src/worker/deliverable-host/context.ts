@@ -744,6 +744,12 @@ export function createDefaultDeliverableRuntimeResolver(input: {
         const adapter = createDeliverableSandboxAdapter({ sandboxService });
         return {
           createSession: async () => adapter.createSession({ job }),
+          ensureRuntimeAssets: (input: {
+            session: Parameters<
+              typeof adapter.ensureRuntimeAssets
+            >[0]["session"];
+            assets: readonly string[];
+          }) => adapter.ensureRuntimeAssets({ ...input, job }),
         };
       })(),
     };

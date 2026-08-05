@@ -314,6 +314,54 @@ export function downloadChatImageObject(input: {
 /** How long every presigned source URL this module hands out stays valid. */
 const PRESIGNED_URL_TTL_SECONDS = 15 * 60;
 
+/**
+ * Sandbox runtime-asset cache objects
+ * (docs/architecture/sandbox-runtime-assets.md): immutable archives mirrored
+ * from their upstream, keyed by the same (name, version, platform) triple as
+ * the `sandbox_asset_cache` index rows. Deliberately outside any workspace
+ * prefix — these are platform-global, not tenant content.
+ */
+export function buildSandboxAssetStorageKey(input: {
+  name: string;
+  version: string;
+  platform: string;
+}) {
+  return `sandbox-assets/${input.name}/${input.version}/${input.platform}.zip`;
+}
+
+export async function uploadSandboxAssetObject(input: {
+  key: string;
+  body: Uint8Array;
+}) {
+  await putObject({ key: input.key, body: input.body, contentType: "application/zip" });
+}
+
+export function getSandboxAssetDownloadUrl(input: {
+  bucket?: string | null;
+  key: string;
+}) {
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+    }),
+    { expiresIn: PRESIGNED_URL_TTL_SECONDS },
+  );
+}
+
+/**
+ * Whole-archive read for the runtime-asset *upload* rung — the universal
+ * fallback transport for zero-egress sandboxes. Uncapped on purpose (assets
+ * run to ~200MB); callers hold exactly one asset in memory at a time.
+ */
+export function downloadSandboxAssetObject(input: {
+  bucket?: string | null;
+  key: string;
+}) {
+  return getObjectBuffer(input);
+}
+
 export function getSourceObjectDownloadUrl(input: {
   bucket?: string | null;
   key: string;

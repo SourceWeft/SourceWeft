@@ -89,6 +89,11 @@ export {
   createVideoPresentationPipelineDefinition,
 } from "./pipeline/definition";
 export { createVideoPipelineDeps, type VideoPipelineDeps } from "./pipeline/deps";
+export {
+  CHROME_HEADLESS_SHELL_ASSET,
+  REMOTION_BROWSER_ENV_VAR,
+  REMOTION_RENDERER_VERSION,
+} from "./pipeline/renderer-version";
 
 /** Mirrors the backend worker's testExports for the moved pipeline core. */
 export const videoPipelineTestExports = {

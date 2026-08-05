@@ -11,6 +11,10 @@ import {
 } from "@sourceweft/contracts/video-presentation";
 import type { ProjectExecutionResult, VideoPipelineDeps } from "./deps";
 import {
+  REMOTION_BROWSER_ENV_VAR,
+  REMOTION_RENDERER_VERSION,
+} from "./renderer-version";
+import {
   isVideoPresentationSandboxError,
   videoPresentationSandboxError,
 } from "./errors";
@@ -140,6 +144,14 @@ export async function runProjectInSession(input: {
   payload: VideoPresentationProjectPayload;
   /** Opt-in: also render the composition to mp4 (see RenderVideoRequest). */
   renderVideo?: RenderVideoRequest;
+  /**
+   * Absolute path of a platform-staged Chrome Headless Shell inside the
+   * sandbox (runtime-asset ladder). When set, every render command carries it
+   * via SOURCEWEFT_REMOTION_BROWSER and Remotion never downloads a browser;
+   * when absent the generated scripts fall back to Remotion's own download
+   * with retries.
+   */
+  browserExecutablePath?: string;
 }): Promise<{
   install: ProjectExecutionResult;
   typecheck: ProjectExecutionResult;
@@ -204,6 +216,13 @@ export async function runProjectInSession(input: {
         }),
       );
     };
+    // Render commands carry the staged browser path as an env prefix — the
+    // narrowest possible contract between the ladder and the scripts.
+    const withBrowserEnv = (command: string) =>
+      input.browserExecutablePath
+        ? `${REMOTION_BROWSER_ENV_VAR}=${shellQuote(input.browserExecutablePath)} ${command}`
+        : command;
+    const runRender = (command: string) => run(withBrowserEnv(command));
     const install = await run("pnpm install");
     const typecheck = install.ok
       ? await run("pnpm run build")
@@ -220,11 +239,14 @@ export async function runProjectInSession(input: {
     let stills: Array<{ slideNumber: number; data: Uint8Array }> = [];
     let video: RenderedVideoResult | undefined;
     if (install.ok && typecheck.ok && smoke.ok) {
+      // Exact pins, never ranges: the browser asset is verified against this
+      // renderer version (renderer-version.ts, design decision A3) — a float
+      // here silently decouples them.
       const rendererInstall = await run(
-        "pnpm add @remotion/bundler@^4.0.0 @remotion/renderer@^4.0.0",
+        `pnpm add @remotion/bundler@${REMOTION_RENDERER_VERSION} @remotion/renderer@${REMOTION_RENDERER_VERSION}`,
       );
       const stillsRun = rendererInstall.ok
-        ? await run("pnpm run render-stills")
+        ? await runRender("pnpm run render-stills")
         : rendererInstall;
       if (stillsRun.ok) {
         const paths = input.payload.sceneModules.map(
@@ -305,7 +327,7 @@ export async function runProjectInSession(input: {
             break;
           }
           const command = sceneChunkCommand(slideNumber);
-          const sceneRun = await run(command);
+          const sceneRun = await runRender(command);
           const chunk = sceneRun.ok
             ? parseSceneChunkReport(sceneRun.stdout, slideNumber)
             : null;
@@ -329,7 +351,7 @@ export async function runProjectInSession(input: {
         // PROJECT_NARRATION_AUDIO_PATH); the command is a cheap no-op for a
         // silent deck, so it is not conditioned on the narration option here.
         if (renderable) {
-          const audioRun = await run(NARRATION_AUDIO_COMMAND);
+          const audioRun = await runRender(NARRATION_AUDIO_COMMAND);
           if (!audioRun.ok) {
             warnUnavailable({
               reason: classifyRenderVideoFailure(audioRun),

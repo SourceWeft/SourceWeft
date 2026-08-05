@@ -4772,3 +4772,41 @@ export const marketItemCategories = pgTable(
     }),
   ],
 );
+
+/**
+ * Platform cache index for sandbox runtime assets
+ * (docs/architecture/sandbox-runtime-assets.md): one row per immutable
+ * (name, version, platform) archive mirrored from its upstream into our
+ * object storage. Sandboxes fetch the platform's verified copy via presigned
+ * URL; upstream CDNs are touched exactly once, by the backend.
+ */
+export const sandboxAssetCache = pgTable(
+  "sandbox_asset_cache",
+  {
+    name: text("name").notNull(),
+    version: text("version").notNull(),
+    platform: text("platform").notNull(),
+    status: text("status").notNull().default("pending"),
+    sha256: text("sha256").notNull(),
+    storageBucket: text("storage_bucket"),
+    storageKey: text("storage_key"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.name, table.version, table.platform],
+      name: "sandbox_asset_cache_pk",
+    }),
+    check(
+      "sandbox_asset_cache_status_check",
+      sql`${table.status} IN ('pending', 'ready', 'failed')`,
+    ),
+  ],
+);

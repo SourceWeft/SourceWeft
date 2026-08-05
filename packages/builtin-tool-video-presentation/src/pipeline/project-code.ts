@@ -1,7 +1,41 @@
 import { VIDEO_LAYOUT_PRIMITIVES_TSX } from "@sourceweft/video-presentation-runtime/layout-source";
 import type { VideoPresentationProjectPayload } from "@sourceweft/contracts/video-presentation";
 import { VIDEO_SCENE_COMPONENT_NAME } from "./config";
+import { REMOTION_BROWSER_ENV_VAR } from "./renderer-version";
 import { normalizeSceneProjectCode } from "./scene-gen";
+
+/**
+ * Browser resolution prelude shared by every render script.
+ *
+ * A platform-staged Chrome Headless Shell arrives as an absolute path in
+ * `SOURCEWEFT_REMOTION_BROWSER` (set per command by `runProjectInSession`);
+ * Remotion then never touches the network. Without it the scripts fall back
+ * to Remotion's own download — the runtime-asset ladder's native rung — with
+ * retries, because a single ECONNRESET from the CDN used to sink stills,
+ * visual QA and the artifact cover in one silent chain
+ * (docs/architecture/sandbox-runtime-assets.md).
+ */
+const PROJECT_BROWSER_PRELUDE_LINES = [
+  `const browserExecutable = process.env.${REMOTION_BROWSER_ENV_VAR} || null;`,
+  "const browserOptions = browserExecutable ? { browserExecutable } : {};",
+  "async function ensureBrowserWithRetry() {",
+  "  if (browserExecutable) {",
+  "    await ensureBrowser({ browserExecutable });",
+  "    return;",
+  "  }",
+  "  let lastError;",
+  "  for (let attempt = 1; attempt <= 4; attempt += 1) {",
+  "    try {",
+  "      await ensureBrowser();",
+  "      return;",
+  "    } catch (error) {",
+  "      lastError = error;",
+  "      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));",
+  "    }",
+  "  }",
+  "  throw lastError;",
+  "}",
+];
 
 /**
  * Narration file the sandbox has (or will have) staged under the generated
@@ -368,21 +402,23 @@ export function buildProjectCodePayload(
           'import { bundle } from "@remotion/bundler";',
           'import { ensureBrowser, renderStill, selectComposition } from "@remotion/renderer";',
           "",
+          ...PROJECT_BROWSER_PRELUDE_LINES,
+          "",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
-          "await ensureBrowser();",
+          "await ensureBrowserWithRetry();",
           'const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname });',
-          'const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          'const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
           'mkdirSync(new URL("../out", import.meta.url), { recursive: true });',
           "let frameCursor = 0;",
           "const rendered = [];",
           "for (const scene of manifest.scenes) {",
           "  const frame = Math.min(composition.durationInFrames - 1, frameCursor + Math.floor(scene.durationInFrames / 2));",
           "  const output = new URL(`../out/slide-${scene.slideNumber}.jpeg`, import.meta.url).pathname;",
-          '  await renderStill({ composition, serveUrl, frame, output, imageFormat: "jpeg", jpegQuality: 80 });',
+          '  await renderStill({ composition, serveUrl, frame, output, imageFormat: "jpeg", jpegQuality: 80, ...browserOptions });',
           "  rendered.push({ slideNumber: scene.slideNumber, frame, file: `out/slide-${scene.slideNumber}.jpeg` });",
           "  frameCursor += scene.durationInFrames;",
           "}",
-          'console.log(JSON.stringify({ ok: true, stage: "render-stills", rendered }));',
+          'console.log(JSON.stringify({ ok: true, stage: "render-stills", rendered, browserSource: browserExecutable ? "staged" : "downloaded" }));',
         ].join("\n"),
       },
       {
@@ -412,9 +448,13 @@ export function buildProjectCodePayload(
           'import { bundle } from "@remotion/bundler";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
-          "const slideNumber = Number(process.argv[2]);",
+          ...PROJECT_BROWSER_PRELUDE_LINES,
+          "",
+          '// pnpm 10 forwards a literal "--" from `pnpm run x -- 1`; skip it.',
+          'const positional = process.argv.slice(2).filter((arg) => arg !== "--");',
+          "const slideNumber = Number(positional[0]);",
           "if (!Number.isInteger(slideNumber)) {",
-          "  throw new Error(`render-scene expects a slide number, got ${JSON.stringify(process.argv[2])}`);",
+          "  throw new Error(`render-scene expects a slide number, got ${JSON.stringify(positional[0])}`);",
           "}",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
           "// The scene's frame range inside the single composition: scenes are laid",
@@ -457,9 +497,9 @@ export function buildProjectCodePayload(
           "  // there is no narration so the bundler never trips over a missing path.",
           '  const publicDir = new URL("../public", import.meta.url).pathname;',
           "  mkdirSync(publicDir, { recursive: true });",
-          "  await ensureBrowser();",
+          "  await ensureBrowserWithRetry();",
           `  const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
-          '  const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          '  const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
           "  // Concurrency is left at the renderer's default (derived from the",
           "  // sandbox's own CPU count) rather than pinned here: the sandbox owns its",
           "  // resource budget and this script must not widen it.",
@@ -470,6 +510,7 @@ export function buildProjectCodePayload(
           "    muted: true,",
           "    outputLocation: chunkFile,",
           "    serveUrl,",
+          "    ...browserOptions,",
           "  });",
           "  writeFileSync(sidecarFile, sidecar);",
           "}",
@@ -489,6 +530,8 @@ export function buildProjectCodePayload(
           'import { bundle } from "@remotion/bundler";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
+          ...PROJECT_BROWSER_PRELUDE_LINES,
+          "",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
           "const hasNarration = manifest.scenes.some((scene) => Boolean(scene.narrationFile));",
           `const output = new URL("../${PROJECT_NARRATION_AUDIO_PATH}", import.meta.url).pathname;`,
@@ -502,14 +545,15 @@ export function buildProjectCodePayload(
           '    const publicDir = new URL("../public", import.meta.url).pathname;',
           "    mkdirSync(publicDir, { recursive: true });",
           '    mkdirSync(new URL("../out", import.meta.url).pathname, { recursive: true });',
-          "    await ensureBrowser();",
+          "    await ensureBrowserWithRetry();",
           `    const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
-          '    const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          '    const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
           "    await renderMedia({",
           '      codec: "aac",',
           "      composition,",
           "      outputLocation: output,",
           "      serveUrl,",
+          "      ...browserOptions,",
           "    });",
           "  }",
           `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: ${JSON.stringify(PROJECT_NARRATION_AUDIO_PATH)}, byteLength: statSync(output).size, reused }));`,
