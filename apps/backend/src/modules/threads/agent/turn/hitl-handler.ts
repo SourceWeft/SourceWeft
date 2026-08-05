@@ -63,45 +63,12 @@ type SandboxActionExecutionRef = NonNullable<
 
 export type SandboxActionExecutionCursor = {
   consumedActionKeys?: Set<string>;
-  consumedToolCallIds?: Set<string>;
   refs: SandboxActionExecutionRef[];
   value: number;
 };
 
 function sandboxActionExecutionRefKey(ref: SandboxActionExecutionRef) {
   return `${ref.toolName}:${ref.toolCallId}`;
-}
-
-function preferObservedToolCall(
-  existing: ObservedAgentToolCall,
-  candidate: ObservedAgentToolCall,
-) {
-  const existingArgCount = Object.keys(existing.args).length;
-  const candidateArgCount = Object.keys(candidate.args).length;
-  if (candidateArgCount !== existingArgCount) {
-    return candidateArgCount > existingArgCount ? candidate : existing;
-  }
-  const existingArgsLength = JSON.stringify(existing.args).length;
-  const candidateArgsLength = JSON.stringify(candidate.args).length;
-  if (candidateArgsLength !== existingArgsLength) {
-    return candidateArgsLength > existingArgsLength ? candidate : existing;
-  }
-  if (existing.index === undefined && candidate.index !== undefined) {
-    return candidate;
-  }
-  return existing;
-}
-
-function dedupeObservedToolCalls(candidates: ObservedAgentToolCall[]) {
-  const byId = new Map<string, ObservedAgentToolCall>();
-  for (const candidate of candidates) {
-    const existing = byId.get(candidate.id);
-    byId.set(
-      candidate.id,
-      existing ? preferObservedToolCall(existing, candidate) : candidate,
-    );
-  }
-  return [...byId.values()];
 }
 
 export function extractHitlInterrupts(payload: unknown) {
@@ -168,34 +135,21 @@ export function extractHitlInterrupts(payload: unknown) {
     );
 }
 
-export function matchInterruptedToolCall(input: {
-  action: HitlActionRequest;
+/**
+ * Stable, payload-derived id for an interrupted action, used as the confirmation
+ * / trace / render-block key in place of a checkpoint tool-call id. Deterministic
+ * across the approve→resume round trip (the same interrupt re-fires at the same
+ * checkpoint in the same order), and it never reads graph state, so an interrupt
+ * raised inside a sub-agent subgraph (whose tool-call id never surfaces in the
+ * top-level graph) binds correctly.
+ */
+export function hitlActionRef(input: {
+  checkpointId: string;
   index: number;
-  toolCalls: ObservedAgentToolCall[];
-  usedToolCallIds: Set<string>;
+  interruptId?: string;
+  toolName: string;
 }) {
-  const notFoundMessage = `DeepAgents HITL interrupted ${input.action.name}, but the current checkpoint did not include one exact matching tool call.`;
-  const ambiguousMessage = `DeepAgents HITL interrupted ${input.action.name}, but the current checkpoint included multiple identical tool calls.`;
-  const matches = dedupeObservedToolCalls(input.toolCalls).filter(
-    (call) =>
-      call.name === input.action.name && !input.usedToolCallIds.has(call.id),
-  );
-  const indexedMatches = matches.filter((call) => call.index === input.index);
-  const exactMatches = (
-    indexedMatches.length > 0 ? indexedMatches : matches
-  ).filter((call) => sameToolArgs(call.args, input.action.args));
-  if (exactMatches.length !== 1) {
-    throw new ContentError(
-      500,
-      exactMatches.length > 1
-        ? "AGENT_HITL_TOOL_CALL_AMBIGUOUS"
-        : "AGENT_HITL_TOOL_CALL_NOT_FOUND",
-      exactMatches.length > 1 ? ambiguousMessage : notFoundMessage,
-    );
-  }
-  const match = exactMatches[0]!;
-  input.usedToolCallIds.add(match.id);
-  return match;
+  return `hitl:${input.interruptId ?? input.checkpointId}:${input.index}:${input.toolName}`;
 }
 
 function withHitlEditableArgs(
@@ -255,9 +209,6 @@ function sourceweftMetadataFromHitlBinding(binding: HitlActionBinding) {
     hitlActionToolName: binding.toolName,
     hitlActionRequestJson: binding.requestJson,
     toolCallId: binding.toolCallId,
-    ...(binding.toolName === "execute"
-      ? { sandboxExecuteToolCallId: binding.toolCallId }
-      : {}),
   };
 }
 
@@ -356,8 +307,6 @@ function consumeSandboxActionExecutionRef(
   }
   cursor.consumedActionKeys ??= new Set<string>();
   cursor.consumedActionKeys.add(sandboxActionExecutionRefKey(ref));
-  cursor.consumedToolCallIds ??= new Set<string>();
-  cursor.consumedToolCallIds.add(ref.toolCallId);
   cursor.value = Math.max(
     cursor.value,
     cursor.refs.findIndex(
@@ -370,7 +319,6 @@ function consumeSandboxActionExecutionRef(
 
 function findMatchingSandboxActionExecutionRef(input: {
   action: HitlActionRequest;
-  approvedSandboxToolCallId?: string;
   hitlInterruptId?: string;
   sourceUserMessageId?: string;
   sourceAssistantMessageId?: string;
@@ -383,12 +331,6 @@ function findMatchingSandboxActionExecutionRef(input: {
         input.sandboxActionExecutionCursor?.consumedActionKeys?.has(
           sandboxActionExecutionRefKey(candidate),
         )
-      ) {
-        return false;
-      }
-      if (
-        input.approvedSandboxToolCallId &&
-        candidate.toolCallId !== input.approvedSandboxToolCallId
       ) {
         return false;
       }
@@ -421,48 +363,12 @@ function findMatchingSandboxActionExecutionRef(input: {
   );
 }
 
-function matchesApprovedSandboxToolCallId(input: {
-  action: HitlActionRequest;
-  approvedSandboxToolCallId?: string;
-  hitlInterruptId?: string;
-  sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
-  toolCalls?: ObservedAgentToolCall[];
-  usedToolCallIds: Set<string>;
-}) {
-  if (
-    !input.approvedSandboxToolCallId ||
-    !input.toolCalls ||
-    input.sandboxActionExecutionCursor?.refs.length
-  ) {
-    return false;
-  }
-  if (input.usedToolCallIds.has(input.approvedSandboxToolCallId)) {
-    return false;
-  }
-  if (
-    input.sandboxActionExecutionCursor?.consumedToolCallIds?.has(
-      input.approvedSandboxToolCallId,
-    )
-  ) {
-    return false;
-  }
-  return dedupeObservedToolCalls(input.toolCalls).some(
-    (call) =>
-      call.id === input.approvedSandboxToolCallId &&
-      call.name === input.action.name &&
-      sameToolArgs(call.args, input.action.args),
-  );
-}
-
 function isSandboxHitlActionAlreadyApproved(input: {
   action: HitlActionRequest;
-  approvedSandboxToolCallId?: string;
   hitlInterruptId?: string;
   sourceUserMessageId?: string;
   sourceAssistantMessageId?: string;
-  toolCalls?: ObservedAgentToolCall[];
   sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
-  usedToolCallIds: Set<string>;
 }) {
   if (!isAgentToolDomain(input.action.name, "sandbox")) {
     return false;
@@ -470,32 +376,13 @@ function isSandboxHitlActionAlreadyApproved(input: {
 
   const ref = findMatchingSandboxActionExecutionRef({
     action: input.action,
-    approvedSandboxToolCallId: input.approvedSandboxToolCallId,
     hitlInterruptId: input.hitlInterruptId,
     sourceUserMessageId: input.sourceUserMessageId,
     sourceAssistantMessageId: input.sourceAssistantMessageId,
     sandboxActionExecutionCursor: input.sandboxActionExecutionCursor,
   });
   if (!ref) {
-    const matchedLegacyApprovedToolCall = matchesApprovedSandboxToolCallId({
-      action: input.action,
-      approvedSandboxToolCallId: input.approvedSandboxToolCallId,
-      hitlInterruptId: input.hitlInterruptId,
-      sandboxActionExecutionCursor: input.sandboxActionExecutionCursor,
-      toolCalls: input.toolCalls,
-      usedToolCallIds: input.usedToolCallIds,
-    });
-    if (matchedLegacyApprovedToolCall && input.approvedSandboxToolCallId) {
-      input.usedToolCallIds.add(input.approvedSandboxToolCallId);
-      if (input.sandboxActionExecutionCursor) {
-        input.sandboxActionExecutionCursor.consumedToolCallIds ??=
-          new Set<string>();
-        input.sandboxActionExecutionCursor.consumedToolCallIds.add(
-          input.approvedSandboxToolCallId,
-        );
-      }
-    }
-    return matchedLegacyApprovedToolCall;
+    return false;
   }
   consumeSandboxActionExecutionRef(input.sandboxActionExecutionCursor, ref);
   return true;
@@ -504,18 +391,15 @@ function isSandboxHitlActionAlreadyApproved(input: {
 export function buildAutoApprovedHitlResume(input: {
   connectorContext: {
     actionExecutionCursor?: ConnectorActionExecutionCursor;
-    approvedSandboxToolCallId?: string;
     sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
     sourceUserMessageId?: string;
     sourceAssistantMessageId?: string;
   };
   hitlInterrupts: HitlInterruptRequest[];
-  toolCalls?: ObservedAgentToolCall[];
 }): {
   decisions: ToolApprovalResumeDecision[];
 } | null {
   const decisions: ToolApprovalResumeDecision[] = [];
-  const usedToolCallIds = new Set<string>();
 
   for (const interruptRequest of input.hitlInterrupts) {
     for (const action of interruptRequest.actionRequests) {
@@ -532,16 +416,12 @@ export function buildAutoApprovedHitlResume(input: {
       if (
         isSandboxHitlActionAlreadyApproved({
           action,
-          approvedSandboxToolCallId:
-            input.connectorContext.approvedSandboxToolCallId,
           hitlInterruptId: interruptRequest.id,
           sourceUserMessageId: input.connectorContext.sourceUserMessageId,
           sourceAssistantMessageId:
             input.connectorContext.sourceAssistantMessageId,
-          toolCalls: input.toolCalls,
           sandboxActionExecutionCursor:
             input.connectorContext.sandboxActionExecutionCursor,
-          usedToolCallIds,
         })
       ) {
         decisions.push({ type: "approve" });
@@ -558,13 +438,11 @@ export function buildAutoApprovedHitlResume(input: {
 export function buildAutoApprovedHitlResumeDecisions(input: {
   connectorContext: {
     actionExecutionCursor?: ConnectorActionExecutionCursor;
-    approvedSandboxToolCallId?: string;
     sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
     sourceUserMessageId?: string;
     sourceAssistantMessageId?: string;
   };
   hitlInterrupts: HitlInterruptRequest[];
-  toolCalls?: ObservedAgentToolCall[];
 }): ToolApprovalResumeDecision[] | null {
   return buildAutoApprovedHitlResume(input)?.decisions ?? null;
 }

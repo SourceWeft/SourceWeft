@@ -24,14 +24,13 @@ import {
   commandResumeFromHitlDecisions,
   createHitlConfirmation,
   extractHitlInterrupts,
-  matchInterruptedToolCall,
+  hitlActionRef,
   resolveTrustedHitlApproval,
   type HitlActionBinding,
   type SandboxActionExecutionCursor,
 } from "./hitl-handler";
 import { listThinkingSteps } from "./thinking";
 import {
-  extractLatestToolCallsFromAgentState,
   extractToolCallsFromAgentState,
   extractToolCallsFromUpdates,
   rememberObservedToolCalls,
@@ -44,7 +43,6 @@ type HitlConnectorContext = {
   actionApprovalCursor?: ConnectorActionApprovalCursor;
   actionExecutionCursor?: ConnectorActionExecutionCursor;
   actionApprovalScope?: string;
-  approvedSandboxToolCallId?: string;
   sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
   enabledToolNames?: ReadonlySet<string>;
   sourceUserMessageId?: string;
@@ -115,14 +113,10 @@ export async function* handleHitlStreamChunk(input: {
     runtime.hasTextSinceLastToolBoundary = false;
   }
 
-  const usedToolCallIds = new Set<string>();
   const interruptCheckpoint = await resolvePendingInterruptCheckpoint({
     agent: input.agent,
     config: input.runConfig,
   });
-  const checkpointLatestToolCalls = extractLatestToolCallsFromAgentState(
-    interruptCheckpoint.state,
-  );
   rememberObservedToolCalls(
     runtime.observedToolCallsById,
     extractToolCallsFromAgentState(interruptCheckpoint.state),
@@ -147,7 +141,6 @@ export async function* handleHitlStreamChunk(input: {
   const autoApprovedHitlResume = buildAutoApprovedHitlResume({
     connectorContext: input.connectorToolContext,
     hitlInterrupts,
-    toolCalls: checkpointLatestToolCalls,
   });
   if (
     autoApprovedHitlResume &&
@@ -247,11 +240,16 @@ export async function* handleHitlStreamChunk(input: {
 
   for (const interruptRequest of hitlInterrupts) {
     for (const [index, action] of interruptRequest.actionRequests.entries()) {
-      const observedToolCall = matchInterruptedToolCall({
-        action,
+      // Every domain binds to a stable, payload-derived id and resolves approval
+      // by args-ref (connector/sandbox) or by args-matched action run (MCP) at
+      // execution — never by a checkpoint tool-call id. That is what lets an
+      // interrupt raised inside a sub-agent subgraph, whose tool-call id never
+      // surfaces in the top-level graph, bind and resume correctly.
+      const toolCallId = hitlActionRef({
+        checkpointId: hitlCheckpoint.checkpointId,
         index,
-        toolCalls: checkpointLatestToolCalls,
-        usedToolCallIds,
+        ...(interruptRequest.id ? { interruptId: interruptRequest.id } : {}),
+        toolName: action.name,
       });
       const binding: HitlActionBinding = {
         actionIndex: index,
@@ -271,7 +269,7 @@ export async function* handleHitlStreamChunk(input: {
                 input.connectorToolContext.sourceAssistantMessageId,
             }
           : {}),
-        toolCallId: observedToolCall.id,
+        toolCallId: toolCallId,
         toolName: action.name,
       };
       const reviewConfig =
@@ -286,7 +284,7 @@ export async function* handleHitlStreamChunk(input: {
       });
       const latencyMs = 0;
       const nextToolCall: ToolCallTrace = {
-        id: observedToolCall.id,
+        id: toolCallId,
         tool: action.name,
         input: action.args,
         output: confirmation,
@@ -294,14 +292,14 @@ export async function* handleHitlStreamChunk(input: {
         latencyMs,
         error: null,
         sequence:
-          runtime.toolCallsById.get(observedToolCall.id)?.sequence ??
-          runtime.resolveToolCallSequence(observedToolCall.id),
+          runtime.toolCallsById.get(toolCallId)?.sequence ??
+          runtime.resolveToolCallSequence(toolCallId),
       };
-      if (!runtime.toolCallsById.has(observedToolCall.id)) {
-        runtime.toolCallOrder.push(observedToolCall.id);
+      if (!runtime.toolCallsById.has(toolCallId)) {
+        runtime.toolCallOrder.push(toolCallId);
       }
-      runtime.toolCallsById.set(observedToolCall.id, nextToolCall);
-      runtime.renderBlocks.appendTool(observedToolCall.id);
+      runtime.toolCallsById.set(toolCallId, nextToolCall);
+      runtime.renderBlocks.appendTool(toolCallId);
       const runningToolCall: ToolCallTrace = {
         ...nextToolCall,
         output: null,
@@ -309,14 +307,14 @@ export async function* handleHitlStreamChunk(input: {
       };
       yield {
         type: "tool-call-start",
-        id: observedToolCall.id,
+        id: toolCallId,
         tool: action.name,
         input: action.args,
         toolCall: runningToolCall,
       };
       yield {
         type: "tool-call-result",
-        id: observedToolCall.id,
+        id: toolCallId,
         tool: action.name,
         input: action.args,
         output: confirmation,
@@ -325,7 +323,7 @@ export async function* handleHitlStreamChunk(input: {
       };
       yield {
         type: "tool-call-end",
-        id: observedToolCall.id,
+        id: toolCallId,
         tool: action.name,
         latencyMs,
         status: "approval_requested",
@@ -336,7 +334,7 @@ export async function* handleHitlStreamChunk(input: {
         threadId: input.threadId,
         userId: input.userId,
         toolName: action.name,
-        toolCallId: observedToolCall.id,
+        toolCallId: toolCallId,
         confirmationId: confirmation.id,
       });
     }
