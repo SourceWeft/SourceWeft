@@ -319,6 +319,31 @@ export function createVideoPresentationPipelineDefinition(options?: {
             }),
           );
           scratch.projectRun = run;
+          // Degradations become stage-visible instead of log-only: the exact
+          // silent chain of the cover-image incident (asset ladder → stills →
+          // QA → cover), surfaced where the user already watches progress.
+          {
+            const logTail: string[] = [];
+            if (!narration.ok) {
+              logTail.push(
+                `⚠ narration incomplete (${narration.reason ?? "unknown"}) — server mp4 skipped, browser preview unaffected`,
+              );
+            }
+            for (const resolution of run.assetResolutions ?? []) {
+              if (resolution.ok && resolution.rung !== "image") {
+                logTail.push(
+                  `render browser staged via ${resolution.rung} (${resolution.ms}ms) — image bake missing in this sandbox`,
+                );
+              } else if (!resolution.ok) {
+                logTail.push(
+                  `⚠ ${resolution.name} unavailable (${truncateText(resolution.error ?? "no rung succeeded", 160)}) — renderer falls back to runtime download`,
+                );
+              }
+            }
+            if (logTail.length > 0) {
+              await api.updateStageProgress({ logTail });
+            }
+          }
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             projectCode: {
@@ -422,6 +447,13 @@ export function createVideoPresentationPipelineDefinition(options?: {
                 jobId: job.jobId,
                 stillCount: projectRun.stills?.length ?? 0,
               });
+              await api.updateStageProgress({
+                logTail: [
+                  (projectRun.stills?.length ?? 0) === 0
+                    ? `⚠ visual QA skipped — no slide stills (${truncateText(projectRun.stillsUnavailableReason ?? "renderer produced none", 160)})`
+                    : "⚠ visual QA skipped — no vision profile configured",
+                ],
+              });
               return state;
             }
             const withRepairedScenes = {
@@ -464,6 +496,20 @@ export function createVideoPresentationPipelineDefinition(options?: {
           const projectRun = scratch.projectRun as
             | ProjectRunResults
             | undefined;
+          if (!projectRun?.stills?.length) {
+            await api.updateStageProgress({
+              logTail: [
+                `⚠ cover image skipped — no slide stills (${truncateText(projectRun?.stillsUnavailableReason ?? "not rendered in this run", 160)})`,
+              ],
+            });
+          }
+          if (projectRun?.videoUnavailableReason) {
+            await api.updateStageProgress({
+              logTail: [
+                `⚠ server mp4 skipped (${truncateText(projectRun.videoUnavailableReason, 120)}) — browser preview remains available`,
+              ],
+            });
+          }
           if (projectRun?.stills?.length) {
             try {
               const coverImage = await uploadCoverImage({

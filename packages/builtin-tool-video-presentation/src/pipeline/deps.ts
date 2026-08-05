@@ -118,6 +118,18 @@ export type VideoPipelineDeps = {
       smoke: ProjectExecutionResult;
       stills?: Array<{ slideNumber: number; data: Uint8Array }>;
       video?: RenderedVideoResult;
+      /** Why stills/mp4 degraded, for stage-view surfacing (log tail). */
+      stillsUnavailableReason?: string;
+      videoUnavailableReason?: string;
+      /** Runtime-asset ladder outcomes for this session (host-provided). */
+      assetResolutions?: ReadonlyArray<{
+        name: string;
+        version: string;
+        ok: boolean;
+        rung?: string;
+        ms: number;
+        error?: string;
+      }>;
     }>;
   };
 };
@@ -167,12 +179,24 @@ export function createVideoPipelineDeps(
               // scripts fall back to Remotion's own download — the ladder's
               // native rung.
               let browserExecutablePath: string | undefined;
+              let assetResolutions:
+                | Awaited<
+                    ReturnType<
+                      NonNullable<
+                        NonNullable<
+                          DeliverableHostContext["sandbox"]
+                        >["ensureRuntimeAssets"]
+                      >
+                    >
+                  >
+                | undefined;
               if (ctx.sandbox!.ensureRuntimeAssets) {
                 try {
                   const resolutions = await ctx.sandbox!.ensureRuntimeAssets({
                     session,
                     assets: [CHROME_HEADLESS_SHELL_ASSET.name],
                   });
+                  assetResolutions = resolutions;
                   const browser = resolutions.find(
                     (resolution) =>
                       resolution.name === CHROME_HEADLESS_SHELL_ASSET.name,
@@ -199,7 +223,7 @@ export function createVideoPipelineDeps(
                   });
                 }
               }
-              return runProjectInSession({
+              const projectRun = await runProjectInSession({
                 session,
                 logger: ctx.logger,
                 job: runInput.job,
@@ -209,6 +233,10 @@ export function createVideoPipelineDeps(
                   ? { renderVideo: runInput.renderVideo }
                   : {}),
               });
+              return {
+                ...projectRun,
+                ...(assetResolutions ? { assetResolutions } : {}),
+              };
             },
           }
         : undefined,

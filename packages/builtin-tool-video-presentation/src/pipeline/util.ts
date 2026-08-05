@@ -39,6 +39,17 @@ export function normalizeProjectExecutionResults<
   smoke: ProjectExecutionResult;
   stills?: Array<{ slideNumber: number; data: Uint8Array }>;
   video?: TVideo;
+  /** Degradation diagnostics, passed through for stage-view surfacing. */
+  stillsUnavailableReason?: string;
+  videoUnavailableReason?: string;
+  assetResolutions?: ReadonlyArray<{
+    name: string;
+    version: string;
+    ok: boolean;
+    rung?: string;
+    ms: number;
+    error?: string;
+  }>;
 }) {
   return {
     install: truncateProjectExecutionResult(input.install),
@@ -48,6 +59,15 @@ export function normalizeProjectExecutionResults<
     // Binary render output passes through untouched — truncation applies to
     // diagnostics, never to bytes. Absent unless the opt-in mp4 render ran.
     ...(input.video ? { video: input.video } : {}),
+    ...(input.stillsUnavailableReason
+      ? { stillsUnavailableReason: input.stillsUnavailableReason }
+      : {}),
+    ...(input.videoUnavailableReason
+      ? { videoUnavailableReason: input.videoUnavailableReason }
+      : {}),
+    ...(input.assetResolutions
+      ? { assetResolutions: input.assetResolutions }
+      : {}),
   };
 }
 

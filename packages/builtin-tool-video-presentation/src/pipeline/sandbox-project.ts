@@ -158,6 +158,8 @@ export async function runProjectInSession(input: {
   smoke: ProjectExecutionResult;
   stills?: Array<{ slideNumber: number; data: Uint8Array }>;
   video?: RenderedVideoResult;
+  stillsUnavailableReason?: string;
+  videoUnavailableReason?: string;
 }> {
   try {
     const narrationFiles: ProjectNarrationFile[] = (
@@ -238,6 +240,8 @@ export async function runProjectInSession(input: {
     // are installed separately to keep the critical-path install light.
     let stills: Array<{ slideNumber: number; data: Uint8Array }> = [];
     let video: RenderedVideoResult | undefined;
+    let stillsUnavailableReason: string | undefined;
+    let videoUnavailableReason: string | undefined;
     if (install.ok && typecheck.ok && smoke.ok) {
       // Exact pins, never ranges: the browser asset is verified against this
       // renderer version (renderer-version.ts, design decision A3) — a float
@@ -260,6 +264,10 @@ export async function runProjectInSession(input: {
             : [];
         });
       } else {
+        stillsUnavailableReason =
+          stillsRun.diagnostics.slice(0, 2).join("; ") ||
+          stillsRun.stderr?.slice(-200) ||
+          "still renderer failed";
         input.logger.warn("video_presentation_render_stills_unavailable", {
           artifactId: input.job.artifactId,
           jobId: input.job.jobId,
@@ -279,6 +287,11 @@ export async function runProjectInSession(input: {
       // inside the sandbox's 120s per-command timeout (deliberately unraised).
       if (input.renderVideo && rendererInstall.ok) {
         const warnUnavailable = (meta: Record<string, unknown>) => {
+          videoUnavailableReason =
+            videoUnavailableReason ??
+            [meta.reason, meta.stage ?? meta.slideNumber]
+              .filter((part) => part !== undefined)
+              .join(" @ ");
           input.logger.warn("video_presentation_render_video_unavailable", {
             artifactId: input.job.artifactId,
             jobId: input.job.jobId,
@@ -417,7 +430,15 @@ export async function runProjectInSession(input: {
         }
       }
     }
-    return { install, typecheck, smoke, stills, ...(video ? { video } : {}) };
+    return {
+      install,
+      typecheck,
+      smoke,
+      stills,
+      ...(video ? { video } : {}),
+      ...(stillsUnavailableReason ? { stillsUnavailableReason } : {}),
+      ...(videoUnavailableReason ? { videoUnavailableReason } : {}),
+    };
   } catch (error) {
     input.logger.warn("Video presentation sandbox execution failed", {
       error: error instanceof Error ? error.message : String(error),
