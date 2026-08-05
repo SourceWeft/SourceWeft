@@ -14,6 +14,7 @@ import type {
   SandboxRuntimeLimits,
   SandboxStore,
 } from "../../src/runtime/types";
+import type { RuntimeAssetPlan } from "../../src/runtime/runtime-assets";
 
 const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   workspaceRoot: "/workspace",
@@ -936,4 +937,128 @@ test("SourceWeftSandboxBackend returns recoverable error for absolute glob patte
   const result = await backend.glob("/workfiles/**/*.md", "/workspace/ppt-deck");
 
   assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
+});
+
+// ── Skill-bundle staging (docs/architecture/sandbox-skill-staging.md) ────
+
+function createSkillStagingBackend(input: {
+  loadContent?: () => Promise<Uint8Array | null>;
+  plans?: () => Promise<RuntimeAssetPlan[]>;
+}) {
+  const { files, provider } = createProvider();
+  const plansCalls = { count: 0 };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    skillStaging: {
+      plans:
+        input.plans ??
+        (async () => {
+          plansCalls.count += 1;
+          return [
+            {
+              name: "ppt-deck",
+              version: "sv-1",
+              platform: "any",
+              sha256: "a".repeat(64),
+              archive: "zip" as const,
+              entrypoint: "SKILL.md",
+              installDir: "/skills/ppt-deck",
+              loadContent:
+                input.loadContent ?? (async () => new Uint8Array([1, 2, 3])),
+            },
+          ];
+        }),
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+    toolApprovalEnabled: true,
+  });
+  return { backend, files, manager, plansCalls, provider };
+}
+
+test("skill staging stages bundles into /skills and admits /skills execute commands", async () => {
+  const { backend, files, manager, provider } = createSkillStagingBackend({});
+
+  const result = await backend.execute(
+    'python3 "/skills/ppt-deck/scripts/validate_pptx.py" /workspace/deck.pptx',
+    { toolCallId: "tool-call-skill-1" },
+  );
+
+  // The model command reached the provider unchanged.
+  assert.equal(result.output, "user execute");
+  assert.equal(
+    provider.executed.at(-1),
+    'python3 "/skills/ppt-deck/scripts/validate_pptx.py" /workspace/deck.pptx',
+  );
+  assert.equal(manager.skillScriptsStaged(), true);
+  // Upload rung staged the archive to the contract path and stamped it.
+  assert.ok(files.get("/skills/ppt-deck.staging/asset.zip"));
+  assert.ok(files.get("/skills/ppt-deck/.sourceweft-asset.json"));
+  // Staging commands are host-issued (executeSystem), not model commands.
+  assert.ok(
+    provider.systemExecuted.some((command) =>
+      command.includes("/skills/ppt-deck.staging"),
+    ),
+  );
+});
+
+test("skill staging runs once per sandbox across repeated acquisitions", async () => {
+  const { backend, plansCalls } = createSkillStagingBackend({});
+
+  await backend.execute("echo one", { toolCallId: "tool-call-skill-2" });
+  await backend.execute("echo two", { toolCallId: "tool-call-skill-3" });
+
+  assert.equal(plansCalls.count, 1);
+});
+
+test("failed skill staging degrades /skills execute commands to a recoverable failure", async () => {
+  const { backend, manager, provider } = createSkillStagingBackend({
+    // No content and no fetch URL → every staging rung is unavailable.
+    loadContent: async () => null,
+  });
+
+  const result = await backend.execute(
+    "python3 /skills/ppt-deck/scripts/validate_pptx.py",
+    { toolCallId: "tool-call-skill-4" },
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /SANDBOX_SKILL_STAGING_UNAVAILABLE/u);
+  assert.match(result.output, /file tools/u);
+  assert.equal(manager.skillScriptsStaged(), false);
+  // The model command never reached the provider.
+  assert.ok(
+    !provider.executed.some((command) => command.includes("/skills")),
+  );
+});
+
+test("skill staging leaves non-/skills commands and unconfigured runtimes untouched", async () => {
+  // Unconfigured runtime (no skillStaging): /skills stays denied fast.
+  const { backend: plainBackend, provider: plainProvider } = createBackend();
+  const denied = await plainBackend.execute(
+    "python3 /skills/ppt-deck/scripts/validate_pptx.py",
+    { toolCallId: "tool-call-skill-5" },
+  );
+  assert.equal(denied.exitCode, 1);
+  assert.match(denied.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.deepEqual(plainProvider.executed, []);
+
+  // Configured runtime, command without /skills: no deferral in play, and
+  // /workfiles stays denied fast even with staging configured.
+  const { backend } = createSkillStagingBackend({});
+  const workfiles = await backend.execute("cat /workfiles/notes.md", {
+    toolCallId: "tool-call-skill-6",
+  });
+  assert.equal(workfiles.exitCode, 1);
+  assert.match(workfiles.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
 });

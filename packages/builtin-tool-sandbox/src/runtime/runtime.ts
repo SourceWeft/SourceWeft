@@ -13,6 +13,7 @@ import {
   resolveSandboxCommandTimeoutMs,
 } from "./command-budgets";
 import { SandboxManager } from "./sandbox-manager";
+import type { SandboxSkillStaging } from "./sandbox-manager";
 import { SourceWeftSandboxBackend } from "./sourceweft-sandbox-backend";
 import { createSandboxTools } from "./sandbox-tools";
 import { createSandboxInterruptConfigs } from "./sandbox-interrupts";
@@ -52,6 +53,13 @@ export function createSandboxRuntimeForTurn(input: {
   commandBudget?: SandboxCommandBudget;
   /** Host-provided artifact byte reader for artifact staging in prepare. */
   artifacts?: import("./sandbox-tools").SandboxArtifactReader;
+  /**
+   * Skill-bundle staging plans (docs/architecture/sandbox-skill-staging.md).
+   * When present, the manager stages the bundles into /skills at sandbox
+   * acquisition and the execute path admits /skills-referencing commands
+   * once staging resolved. Absent → exactly today's behavior.
+   */
+  skillAssets?: Pick<SandboxSkillStaging, "plans" | "logger">;
 }): SandboxRuntimeForTurn {
   const commandTimeoutMs = resolveSandboxCommandTimeoutMs({
     limits: input.limits,
@@ -66,6 +74,15 @@ export function createSandboxRuntimeForTurn(input: {
     // maxSandboxCommandTimeoutMs.
     maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(input.limits),
     environment: input.environment,
+    ...(input.skillAssets
+      ? {
+          skillStaging: {
+            ...input.skillAssets,
+            commandTimeoutMs,
+            maxOutputChars: input.limits.maxOutputChars,
+          },
+        }
+      : {}),
   });
   const backend = new SourceWeftSandboxBackend({
     manager,

@@ -70,6 +70,20 @@ export type RuntimeAssetPlan = {
   fetchUrl?: () => Promise<string | null>;
   /** Rung "upload": archive bytes from the platform cache. */
   loadContent?: () => Promise<Uint8Array | null>;
+  /**
+   * Absolute install directory override. Default placement is
+   * `<rootDir>/.sourceweft-assets/<name>/<version>/` — version-nested, so a
+   * new version lands beside the old. Contract-rooted assets (skill bundles
+   * at `/skills/<name>/`, docs/architecture/sandbox-skill-staging.md) need a
+   * FIXED path independent of version: consumers reference it verbatim. With
+   * installDir set, the plan stages to exactly this directory; the stamp's
+   * version+sha comparison makes a version bump restage over the same path
+   * (rm -rf in the promote step replaces the old content atomically).
+   * The parent directory must already exist (image contract or a writable
+   * root) — a failed staging mkdir is an ordinary rung failure, which IS the
+   * probe for that contract.
+   */
+  installDir?: string;
 };
 
 export type RuntimeAssetResolution = {
@@ -115,6 +129,20 @@ function validatePlan(plan: RuntimeAssetPlan): string | null {
   }
   if (plan.imagePathEnvVar && !SAFE_ENV_VAR.test(plan.imagePathEnvVar)) {
     return `unsafe image env var: ${plan.imagePathEnvVar}`;
+  }
+  if (plan.installDir !== undefined) {
+    const dir = plan.installDir;
+    if (
+      !dir.startsWith("/") ||
+      dir === "/" ||
+      dir.endsWith("/") ||
+      dir.includes("..") ||
+      dir.includes("~") ||
+      dir.includes("'") ||
+      /[\x00-\x1f\x7f\s]/u.test(dir)
+    ) {
+      return `unsafe install dir: ${dir}`;
+    }
   }
   return null;
 }
@@ -210,7 +238,8 @@ async function ensureRuntimeAsset(input: {
   }
 
   const rootDir = session.rootDir.replace(/\/$/u, "");
-  const assetDir = `${rootDir}/${ASSETS_DIR}/${plan.name}/${plan.version}`;
+  const assetDir =
+    plan.installDir ?? `${rootDir}/${ASSETS_DIR}/${plan.name}/${plan.version}`;
   const stagingDir = `${assetDir}.staging`;
   const entrypointPath = `${assetDir}/${plan.entrypoint}`;
   const execute = (command: string, label: string) =>

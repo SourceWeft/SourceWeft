@@ -333,6 +333,42 @@ test("sandbox package owns agent-facing runtime prompt", () => {
   assert.doesNotMatch(prompt, /collect_sandbox_outputs/u);
 });
 
+test("sandbox runtime prompt admits staged /skills scripts only when skill staging is on", () => {
+  const capabilities = {
+    prepareToolAvailable: true,
+    executeAvailable: true,
+    collectToolAvailable: false,
+  } as const;
+
+  const staged = buildSandboxRuntimePrompt({
+    ...capabilities,
+    skillScriptsStaged: true,
+  });
+  assert.match(staged, /materialized read-only at the same \/skills\/<name>\/ paths/u);
+  assert.match(staged, /run bundled skill scripts directly/u);
+  assert.match(staged, /Never include \/workfiles or \/kb in an execute command/u);
+  assert.match(staged, /Never write to \/skills from execute commands/u);
+  assert.match(staged, /Skill bundles are already staged under \/skills/u);
+  // The staged prompt must not carry the unstaged prohibitions.
+  assert.doesNotMatch(
+    staged,
+    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+  );
+  assert.doesNotMatch(staged, /\/kb and \/skills are not prepared directly/u);
+
+  // Unstaged (default): byte-identical to the pre-staging prompt.
+  const unstaged = buildSandboxRuntimePrompt(capabilities);
+  assert.equal(
+    unstaged,
+    buildSandboxRuntimePrompt({ ...capabilities, skillScriptsStaged: false }),
+  );
+  assert.match(
+    unstaged,
+    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+  );
+  assert.doesNotMatch(unstaged, /run bundled skill scripts directly/u);
+});
+
 test("sandbox runtime prompt includes default environment only when enabled", () => {
   const unknownPrompt = buildSandboxRuntimePrompt({
     prepareToolAvailable: true,

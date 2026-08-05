@@ -15,6 +15,31 @@ import {
   redactSandboxSecrets,
   sandboxRequestFingerprint,
 } from "./redaction";
+import {
+  ensureRuntimeAssets,
+  type RuntimeAssetPlan,
+  type RuntimeAssetResolution,
+  type RuntimeAssetSessionLike,
+} from "./runtime-assets";
+
+/**
+ * Skill-bundle staging wiring (docs/architecture/sandbox-skill-staging.md).
+ *
+ * Plans arrive as a callback so bundle bytes are only loaded when a sandbox
+ * actually stages (a reused sandbox with valid stamps never re-reads them).
+ * Staging is best-effort by contract: a failure leaves the sandbox fully
+ * usable and merely keeps /skills denied in execute (the two-phase check in
+ * SourceWeftSandboxBackend), which is exactly today's behavior.
+ */
+export type SandboxSkillStaging = {
+  plans: () => Promise<RuntimeAssetPlan[]>;
+  commandTimeoutMs: number;
+  maxOutputChars: number;
+  logger?: {
+    info?(message: string, meta?: Record<string, unknown>): void;
+    warn?(message: string, meta?: Record<string, unknown>): void;
+  };
+};
 
 const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
 const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 15_000;
@@ -136,8 +161,20 @@ export class SandboxManager {
        */
       maxCommandTimeoutMs: number;
       environment?: string;
+      skillStaging?: SandboxSkillStaging;
     },
   ) {}
+
+  /**
+   * Per-provider-sandbox staging memo. The manager lives for one turn, so
+   * this holds at most one entry in practice; the map keeps correctness if a
+   * sandbox is replaced mid-turn (expiry → recreate gets a fresh staging run).
+   */
+  private readonly skillStagingRuns = new Map<
+    string,
+    Promise<RuntimeAssetResolution[]>
+  >();
+  private latestSkillResolutions: RuntimeAssetResolution[] | null = null;
 
   private sandboxExpiresAt() {
     return new Date(Date.now() + this.input.ttlSeconds * 1000);
@@ -152,6 +189,15 @@ export class SandboxManager {
   }
 
   async getOrCreateThreadSandbox(
+    context: SandboxRuntimeContext,
+    options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
+  ): Promise<SandboxRef> {
+    const sandbox = await this.acquireThreadSandbox(context, options);
+    await this.ensureSkillAssetsOnce(sandbox);
+    return sandbox;
+  }
+
+  private async acquireThreadSandbox(
     context: SandboxRuntimeContext,
     options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
   ): Promise<SandboxRef> {
@@ -222,7 +268,7 @@ export class SandboxManager {
       });
 
       if (!inserted) {
-        return this.getOrCreateThreadSandbox(context, options);
+        return this.acquireThreadSandbox(context, options);
       }
 
       const startedAt = Date.now();
@@ -275,6 +321,168 @@ export class SandboxManager {
         throw error;
       }
     }
+  }
+
+  /** True when this runtime was constructed with skill-bundle plans to stage. */
+  skillStagingConfigured() {
+    return Boolean(this.input.skillStaging);
+  }
+
+  /**
+   * True when at least one skill bundle resolved into /skills for the current
+   * sandbox — the signal the execute path's two-phase /skills check consumes.
+   * False both before any sandbox exists and after a fully failed staging, so
+   * a caller that never acquired a sandbox conservatively keeps /skills
+   * denied.
+   */
+  skillScriptsStaged() {
+    return Boolean(
+      this.latestSkillResolutions?.some((resolution) => resolution.ok),
+    );
+  }
+
+  /** Per-bundle staging outcomes for observability; null before staging ran. */
+  skillAssetResolutions() {
+    return this.latestSkillResolutions;
+  }
+
+  /**
+   * Stage skill bundles into the sandbox, once per provider sandbox per
+   * manager lifetime. Never throws: staging failure leaves the sandbox usable
+   * with /skills denied (today's behavior), which the resolutions record.
+   */
+  private async ensureSkillAssetsOnce(sandbox: SandboxRef) {
+    const staging = this.input.skillStaging;
+    if (!staging) {
+      return;
+    }
+    let run = this.skillStagingRuns.get(sandbox.providerSandboxId);
+    if (!run) {
+      run = this.runSkillStaging(sandbox, staging);
+      this.skillStagingRuns.set(sandbox.providerSandboxId, run);
+    }
+    this.latestSkillResolutions = await run;
+  }
+
+  private async runSkillStaging(
+    sandbox: SandboxRef,
+    staging: SandboxSkillStaging,
+  ): Promise<RuntimeAssetResolution[]> {
+    try {
+      const plans = await staging.plans();
+      if (plans.length === 0) {
+        return [];
+      }
+      const resolutions = await ensureRuntimeAssets({
+        session: this.skillStagingSession(sandbox.providerSandboxId, staging),
+        assets: plans,
+        ...(staging.logger ? { logger: staging.logger } : {}),
+      });
+      for (const resolution of resolutions) {
+        if (!resolution.ok) {
+          staging.logger?.warn?.("sandbox_skill_staging_failed", {
+            skill: resolution.name,
+            version: resolution.version,
+            error: resolution.error,
+          });
+        } else {
+          // Rung reporting per the runtime-assets no-silent-rungs rule (A4):
+          // rollout verification reads these to see stamp-hit ratios and
+          // staging latency without a metrics pipeline.
+          staging.logger?.info?.("sandbox_skill_staged", {
+            skill: resolution.name,
+            version: resolution.version,
+            rung: resolution.rung,
+            ms: resolution.ms,
+            ...(resolution.bytes !== undefined
+              ? { bytes: resolution.bytes }
+              : {}),
+          });
+        }
+      }
+      return resolutions;
+    } catch (error) {
+      staging.logger?.warn?.("sandbox_skill_staging_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Adapts the provider's per-file transfer surface to the runtime-asset
+   * engine's session shape. Commands run through executeSystem when the
+   * provider distinguishes it — staging is host-issued work, not model
+   * command text.
+   */
+  private skillStagingSession(
+    providerSandboxId: string,
+    staging: SandboxSkillStaging,
+  ): RuntimeAssetSessionLike {
+    const provider = this.input.provider;
+    const execute = provider.executeSystem
+      ? provider.executeSystem.bind(provider)
+      : provider.execute.bind(provider);
+    return {
+      rootDir: provider.pathPolicy.workspaceRoot,
+      execute: async (command) => {
+        const result = await execute({
+          providerSandboxId,
+          command,
+          timeoutMs: staging.commandTimeoutMs,
+          maxOutputChars: staging.maxOutputChars,
+        });
+        return {
+          exitCode: result.exitCode,
+          output: result.output,
+          ...(result.truncated !== undefined
+            ? { truncated: result.truncated }
+            : {}),
+        };
+      },
+      uploadFiles: async (files) => {
+        const results: Array<{ path: string; error?: string | null }> = [];
+        for (const [path, content] of files) {
+          try {
+            await provider.uploadFile({
+              providerSandboxId,
+              sandboxPath: path,
+              content,
+            });
+            results.push({ path });
+          } catch (error) {
+            results.push({
+              path,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        return results;
+      },
+      downloadFiles: async (paths) => {
+        const results: Array<{
+          path: string;
+          content: Uint8Array | null;
+          error?: string | null;
+        }> = [];
+        for (const path of paths) {
+          try {
+            const content = await provider.downloadFile({
+              providerSandboxId,
+              sandboxPath: path,
+            });
+            results.push({ path, content });
+          } catch (error) {
+            results.push({
+              path,
+              content: null,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        return results;
+      },
+    };
   }
 
   async beginToolOperation(input: {

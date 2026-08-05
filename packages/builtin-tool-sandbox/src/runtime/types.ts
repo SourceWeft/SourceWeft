@@ -3,6 +3,17 @@ import type { SandboxCommandBudget } from "./command-budgets";
 
 export const SOURCEWEFT_WORK_ROOT = "/workfiles";
 export const SOURCEWEFT_KB_ROOT = "/kb";
+/**
+ * Platform skill-staging contract root (docs/architecture/sandbox-skill-staging.md).
+ *
+ * Unlike the two roots above — which are DB-backed VFS namespaces that never
+ * exist inside the provider sandbox — /skills is BOTH the VFS view of skill
+ * bundles (file tools) and, when staging succeeds, a real sandbox directory
+ * holding byte-identical staged copies. Execute commands may reference it only
+ * after staging resolved; path-level asserts (cwd/prepare/collect) always
+ * treat it as platform-owned and deny writes.
+ */
+export const SOURCEWEFT_SKILLS_ROOT = "/skills";
 
 export type SandboxBridgeOperationType = "prepare" | "execute" | "collect";
 export type SandboxOperationType =

@@ -261,6 +261,119 @@ test("unsafe plans are rejected before touching the session", async () => {
   assert.equal(executed.length, 0);
 });
 
+test("installDir overrides the version-nested default placement", async () => {
+  const { session, executed, files } = fakeSession({
+    executeResults: [{ exitCode: 0 }],
+  });
+
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        name: "ppt-deck",
+        version: "sv_01",
+        entrypoint: "SKILL.md",
+        installDir: "/skills/ppt-deck",
+        fetchUrl: async () => "https://cache.example/skill.zip",
+      }),
+    ],
+  });
+
+  assert.equal(resolution?.ok, true);
+  assert.equal(resolution?.rung, "fetch");
+  assert.equal(resolution?.entrypointPath, "/skills/ppt-deck/SKILL.md");
+  // Staging + promote target the fixed contract path, not the assets dir.
+  assert.match(executed[0]!, /\/skills\/ppt-deck\.staging/u);
+  assert.match(executed[0]!, /mv '\/skills\/ppt-deck\.staging' '\/skills\/ppt-deck'/u);
+  assert.ok(files.get("/skills/ppt-deck/.sourceweft-asset.json"));
+});
+
+test("a version bump restages over the same installDir (stamp mismatch)", async () => {
+  const files = new Map<string, Uint8Array>([
+    [
+      "/skills/ppt-deck/.sourceweft-asset.json",
+      new TextEncoder().encode(
+        JSON.stringify({ version: "sv_old", sha256: "b".repeat(64) }),
+      ),
+    ],
+  ]);
+  const { session, executed } = fakeSession({
+    files,
+    executeResults: [{ exitCode: 0 }],
+  });
+
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        name: "ppt-deck",
+        version: "sv_new",
+        entrypoint: "SKILL.md",
+        installDir: "/skills/ppt-deck",
+        fetchUrl: async () => "https://cache.example/skill.zip",
+      }),
+    ],
+  });
+
+  assert.equal(resolution?.ok, true);
+  assert.equal(resolution?.rung, "fetch");
+  assert.equal(executed.length, 1);
+  // A matching stamp resolves without staging; the mismatch restaged instead.
+  const stamp = JSON.parse(
+    new TextDecoder().decode(files.get("/skills/ppt-deck/.sourceweft-asset.json")!),
+  ) as { version: string };
+  assert.equal(stamp.version, "sv_new");
+});
+
+test("a matching stamp at installDir resolves without commands", async () => {
+  const files = new Map<string, Uint8Array>([
+    [
+      "/skills/ppt-deck/.sourceweft-asset.json",
+      new TextEncoder().encode(JSON.stringify({ version: "sv_01", sha256: SHA })),
+    ],
+  ]);
+  const { session, executed } = fakeSession({ files });
+
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        name: "ppt-deck",
+        version: "sv_01",
+        entrypoint: "SKILL.md",
+        installDir: "/skills/ppt-deck",
+      }),
+    ],
+  });
+
+  assert.equal(resolution?.ok, true);
+  assert.equal(resolution?.rung, "stamp");
+  assert.equal(resolution?.entrypointPath, "/skills/ppt-deck/SKILL.md");
+  assert.equal(executed.length, 0);
+});
+
+test("unsafe install dirs are rejected before touching the session", async () => {
+  const { session, executed } = fakeSession({});
+  const resolutions = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({ installDir: "relative/path" }),
+      plan({ installDir: "/" }),
+      plan({ installDir: "/skills/x/" }),
+      plan({ installDir: "/skills/../etc" }),
+      plan({ installDir: "/skills/x'y" }),
+      plan({ installDir: "/skills/x y" }),
+    ],
+  });
+  assert.ok(resolutions.every((resolution) => !resolution.ok));
+  assert.ok(
+    resolutions.every((resolution) =>
+      /unsafe install dir/u.test(resolution.error ?? ""),
+    ),
+  );
+  assert.equal(executed.length, 0);
+});
+
 test("a presigned URL containing a single quote is refused", async () => {
   const { session, executed } = fakeSession({});
   const [resolution] = await ensureRuntimeAssets({

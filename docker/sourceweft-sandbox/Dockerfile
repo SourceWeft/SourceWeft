@@ -227,9 +227,14 @@ RUN groupadd -r sourceweft -g 1000 \
 
 # Working directory matches SourceWeft sandbox runtime expectation
 # (builtin-tool-sandbox SANDBOX_WORKSPACE_ROOT).
+# /skills is the platform skill-staging contract root (SOURCEWEFT_SKILLS_ROOT,
+# docs/architecture/sandbox-skill-staging.md): the runtime stages activated
+# skill bundles under /skills/<name>/ at provision time. It must exist and be
+# writable by the sandbox user — the non-root user cannot create root-level
+# directories at runtime, so a missing /skills degrades skill-script execution.
 WORKDIR /workspace
-RUN mkdir -p /workspace/input /workspace/work /workspace/output /tmp "${PNPM_HOME}" \
-    && chown -R sourceweft:sourceweft /workspace /tmp "${PNPM_HOME}"
+RUN mkdir -p /workspace/input /workspace/work /workspace/output /skills /tmp "${PNPM_HOME}" \
+    && chown -R sourceweft:sourceweft /workspace /skills /tmp "${PNPM_HOME}"
 
 USER sourceweft
 

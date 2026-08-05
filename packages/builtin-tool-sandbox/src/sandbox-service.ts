@@ -37,6 +37,16 @@ export type SandboxRuntimeRequest = {
   commandBudget?: SandboxCommandBudget;
   /** Host-provided artifact byte reader for artifact staging in prepare. */
   artifacts?: import("./runtime/sandbox-tools").SandboxArtifactReader;
+  /**
+   * Skill-bundle staging plans (docs/architecture/sandbox-skill-staging.md).
+   * Presence turns on the /skills execute contract for this turn: the runtime
+   * prompt announces staged skill scripts and the manager stages the bundles
+   * at sandbox acquisition. Absent → exactly the pre-staging behavior.
+   */
+  skillAssets?: Pick<
+    import("./runtime/sandbox-manager").SandboxSkillStaging,
+    "plans" | "logger"
+  >;
 };
 
 export type AgentSandboxRuntimeForTurn = SandboxRuntimeForTurn & {
@@ -102,6 +112,7 @@ export class AgentSandboxService {
       environment: process.env.NODE_ENV || "development",
       commandBudget: input.commandBudget,
       ...(input.artifacts ? { artifacts: input.artifacts } : {}),
+      ...(input.skillAssets ? { skillAssets: input.skillAssets } : {}),
     });
 
     const agentRuntime: AgentSandboxRuntimeForTurn = {
@@ -119,6 +130,7 @@ export class AgentSandboxService {
             providerStatus.metadata?.defaultSandboxEnvironmentAvailable ===
             true,
           pathPolicy: provider.pathPolicy,
+          skillScriptsStaged: Boolean(input.skillAssets),
         });
       },
     };

@@ -455,6 +455,16 @@ export const config = {
       process.env.SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED,
       false,
     ),
+    // Skill-bundle staging into sandbox /skills
+    // (docs/architecture/sandbox-skill-staging.md). Off by default until the
+    // sandbox image that pre-creates /skills has rolled out — with an older
+    // image the runtime degrades safely, but the flag avoids paying the
+    // probe/degrade round-trip on every turn. Kill switch: turning this off
+    // restores the pre-staging behavior exactly.
+    skillStagingEnabled: parseBoolean(
+      process.env.SOURCEWEFT_SANDBOX_SKILL_STAGING_ENABLED,
+      false,
+    ),
     provider: process.env.SOURCEWEFT_SANDBOX_PROVIDER || "daytona",
     ttlSeconds: parsePositiveInteger(
       process.env.SOURCEWEFT_SANDBOX_TTL_SECONDS,

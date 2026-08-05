@@ -560,7 +560,15 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include /workfiles.",
     }),
-    "Execute commands cannot use SourceWeft /workfiles, /kb, or /skills paths. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+    "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+  );
+  assert.equal(
+    getSandboxToolSafeErrorMessage({
+      toolName: "execute",
+      error:
+        "SANDBOX_SKILL_STAGING_UNAVAILABLE: skill bundles could not be staged into this sandbox, so /skills paths are not executable here.",
+    }),
+    "Skill files could not be staged into this sandbox, so /skills paths cannot be executed here. Read the skill file with file tools, save the needed content as a Workfile, prepare it into /workspace, then run that copy.",
   );
 });
 

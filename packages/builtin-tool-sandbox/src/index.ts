@@ -43,6 +43,7 @@ import {
   assertSandboxReadPath,
   assertSandboxWritePath,
   assertSourceWorkPath,
+  commandReferencesSkillsRoot,
   dirname,
   shellQuote,
 } from "./runtime/paths";
@@ -52,7 +53,6 @@ import {
   redactSandboxText,
   sandboxRequestFingerprint,
 } from "./runtime/redaction";
-import { SOURCEWEFT_KB_ROOT, SOURCEWEFT_WORK_ROOT } from "./runtime/types";
 import type {
   CollectSandboxOutputsInput,
   PrepareSandboxWorkspaceInput,
@@ -117,6 +117,7 @@ export {
   assertSandboxReadPath,
   assertSandboxWritePath,
   assertSourceWorkPath,
+  commandReferencesSkillsRoot,
   dirname,
   shellQuote,
   redactSandboxOperationRequest,
@@ -149,7 +150,11 @@ export type {
   SandboxStatus,
   SandboxStore,
 };
-export { SOURCEWEFT_KB_ROOT, SOURCEWEFT_WORK_ROOT };
+export {
+  SOURCEWEFT_KB_ROOT,
+  SOURCEWEFT_SKILLS_ROOT,
+  SOURCEWEFT_WORK_ROOT,
+} from "./runtime/types";
 export {
   AgentSandboxService,
   SandboxRuntimeConfigurationError,

@@ -45,6 +45,8 @@ import { agentSandboxService } from "../sandbox-service/service";
 import { findArtifactRecord } from "../../../artifacts/repository";
 import { artifactStorage } from "../../../sources/storage";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
+import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
+import { config } from "../../../../shared/config";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -439,11 +441,40 @@ export interface ThreadAgentAssembly {
   ) => Promise<AsyncGenerator<unknown>>;
 }
 
+/**
+ * Skill-bundle staging request for the turn
+ * (docs/architecture/sandbox-skill-staging.md). Null when the flag is off or
+ * no enabled skill has a stageable bundle — the runtime then behaves exactly
+ * as before staging existed. Plans are prebuilt (KB-scale, content-cached) so
+ * the callback the manager invokes at sandbox acquisition is trivially cheap.
+ */
+function skillAssetsForPreparedTurn(prepared: PreparedThreadTurn) {
+  if (!config.sandbox.skillStagingEnabled) {
+    return null;
+  }
+  const plans = buildSkillSandboxAssetPlans(prepared.enabledSkills, {
+    warn: (message, meta) => logger.warn(message, meta),
+  });
+  if (plans.length === 0) {
+    return null;
+  }
+  return {
+    plans: async () => plans,
+    logger: {
+      info: (message: string, meta?: Record<string, unknown>) =>
+        logger.info(message, meta),
+      warn: (message: string, meta?: Record<string, unknown>) =>
+        logger.warn(message, meta),
+    },
+  };
+}
+
 export async function buildSandboxRuntimeForPreparedTurn(input: {
   prepared: PreparedThreadTurn;
   filesystemBackend: FilesystemBackend;
 }): Promise<AgentSandboxRuntimeForTurn | null> {
   const { prepared, filesystemBackend } = input;
+  const skillAssets = skillAssetsForPreparedTurn(prepared);
   const sandboxRuntime = isToolDenied(prepared, AGENT_TOOL_NAMES.execute)
     ? null
     : await agentSandboxService.createRuntimeForTurn({
@@ -478,6 +509,7 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
             return download ? { bytes: download.body } : null;
           },
         },
+        ...(skillAssets ? { skillAssets } : {}),
       });
 
   if (sandboxRuntime) {

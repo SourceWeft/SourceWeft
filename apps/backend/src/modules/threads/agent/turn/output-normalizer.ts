@@ -1107,7 +1107,8 @@ export function getFilesystemToolOutputError(
   if (
     structuredFailureCode === "SANDBOX_EXECUTE_COMMAND_DENIED" ||
     structuredFailureCode === "SANDBOX_EXECUTE_CWD_DENIED" ||
-    structuredFailureCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED"
+    structuredFailureCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED" ||
+    structuredFailureCode === "SANDBOX_SKILL_STAGING_UNAVAILABLE"
   ) {
     return structuredFailureCode;
   }
@@ -1123,7 +1124,7 @@ export function getFilesystemToolOutputError(
   }
 
   const deniedMatch = combinedOutputText.match(
-    /(SANDBOX_EXECUTE_(?:COMMAND|CWD|VFS_PATH)_DENIED:[^\n]*)/u,
+    /(SANDBOX_(?:EXECUTE_(?:COMMAND|CWD|VFS_PATH)_DENIED|SKILL_STAGING_UNAVAILABLE):[^\n]*)/u,
   );
   if (deniedMatch?.[1]) {
     return deniedMatch[1].trim();
@@ -1198,7 +1199,8 @@ function safeExecuteFailureMessage(outputText: string) {
   if (
     firstLine?.startsWith("SANDBOX_EXECUTE_COMMAND_DENIED:") ||
     firstLine?.startsWith("SANDBOX_EXECUTE_CWD_DENIED:") ||
-    firstLine?.startsWith("SANDBOX_EXECUTE_VFS_PATH_DENIED:")
+    firstLine?.startsWith("SANDBOX_EXECUTE_VFS_PATH_DENIED:") ||
+    firstLine?.startsWith("SANDBOX_SKILL_STAGING_UNAVAILABLE:")
   ) {
     return firstLine;
   }

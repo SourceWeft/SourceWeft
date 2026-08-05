@@ -17,6 +17,7 @@ import {
   assertExecuteCwd,
   assertSandboxReadPath,
   assertSandboxWritePath,
+  commandReferencesSkillsRoot,
 } from "./paths";
 import type {
   SandboxProvider,
@@ -35,6 +36,7 @@ const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   "SANDBOX_EXECUTE_COMMAND_DENIED",
   "SANDBOX_EXECUTE_CWD_DENIED",
   "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+  "SANDBOX_SKILL_STAGING_UNAVAILABLE",
 ]);
 
 function hasControlChars(value: string) {
@@ -249,6 +251,9 @@ function recoverableExecuteFailureHint(errorCode: string) {
   }
   if (errorCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED") {
     return "Create or edit /workfiles/... with SourceWeft file tools, then use prepare_sandbox_workspace to materialize it under /workspace/...; rerun execute only against /workspace/... paths.";
+  }
+  if (errorCode === "SANDBOX_SKILL_STAGING_UNAVAILABLE") {
+    return "Skill bundle staging is unavailable in this sandbox, so /skills paths cannot be executed. Read the needed skill file with SourceWeft file tools, save the required content as a /workfiles/... Workfile, prepare it into /workspace/..., then rerun execute against the /workspace/... copy.";
   }
   return "Revise the execute request before trying again.";
 }
@@ -749,8 +754,17 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     }
     let sandboxId: string | null = null;
     try {
+      // Two-phase path policy (docs/architecture/sandbox-skill-staging.md D2):
+      // /workfiles and /kb fail fast here; a /skills-referencing command is
+      // admitted optimistically when staging is configured, then re-judged
+      // after sandbox acquisition ran the staging attempt.
+      const skillsDeferred =
+        commandReferencesSkillsRoot(command) &&
+        this.input.manager.skillStagingConfigured();
       try {
-        assertExecuteCommandPathPolicy(command);
+        assertExecuteCommandPathPolicy(command, {
+          skillScriptsStaged: skillsDeferred,
+        });
         assertExecuteCwd(
           undefined,
           this.input.manager.providerForSandbox().pathPolicy,
@@ -770,6 +784,16 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         this.input.context,
       );
       sandboxId = sandbox.id;
+      if (skillsDeferred && !this.input.manager.skillScriptsStaged()) {
+        return await this.completeRecoverableExecuteFailure({
+          command,
+          error: new Error(
+            "SANDBOX_SKILL_STAGING_UNAVAILABLE: skill bundles could not be staged into this sandbox, so /skills paths are not executable here.",
+          ),
+          operationId: claim.operationId,
+          startedAt,
+        });
+      }
       const result = await this.input.manager.providerForSandbox().execute({
         providerSandboxId: sandbox.providerSandboxId,
         command,

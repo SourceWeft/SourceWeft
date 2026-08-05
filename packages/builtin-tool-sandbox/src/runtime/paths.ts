@@ -1,5 +1,6 @@
 import {
   SOURCEWEFT_KB_ROOT,
+  SOURCEWEFT_SKILLS_ROOT,
   SOURCEWEFT_WORK_ROOT,
   type SandboxProviderPathPolicy,
 } from "./types";
@@ -13,10 +14,24 @@ export const SOURCEWEFT_VFS_ROOT_POLICY: SandboxRootPolicy = Object.freeze({
   disallowedVirtualRoots: Object.freeze([
     SOURCEWEFT_WORK_ROOT,
     SOURCEWEFT_KB_ROOT,
-    "/skills",
+    SOURCEWEFT_SKILLS_ROOT,
   ]),
   allowedSandboxRoots: Object.freeze([]),
 });
+
+/**
+ * Roots that execute commands may never reference, independent of skill
+ * staging: these are DB-backed VFS namespaces with no sandbox counterpart.
+ * /skills is deliberately absent — when staging resolved, it is a real
+ * sandbox directory holding byte-identical copies of the bundle content
+ * (docs/architecture/sandbox-skill-staging.md, D2). Path-level asserts
+ * below keep using SOURCEWEFT_VFS_ROOT_POLICY, so cwd/prepare/collect
+ * still treat /skills as platform-owned and read-only.
+ */
+const EXECUTE_ALWAYS_DENIED_ROOTS = Object.freeze([
+  SOURCEWEFT_WORK_ROOT,
+  SOURCEWEFT_KB_ROOT,
+]);
 
 function normalizePath(value: string) {
   if (hasControlChars(value)) {
@@ -36,10 +51,14 @@ function hasDisallowedCommandControlChars(value: string) {
   return /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value);
 }
 
-function disallowedExecuteVfsRoot(command: string) {
-  return SOURCEWEFT_VFS_ROOT_POLICY.disallowedVirtualRoots.find((root) =>
-    command.includes(root),
-  );
+function disallowedExecuteVfsRoot(
+  command: string,
+  options: { skillScriptsStaged?: boolean } = {},
+) {
+  const roots = options.skillScriptsStaged
+    ? EXECUTE_ALWAYS_DENIED_ROOTS
+    : SOURCEWEFT_VFS_ROOT_POLICY.disallowedVirtualRoots;
+  return roots.find((root) => command.includes(root));
 }
 
 function isRootOrChild(path: string, root: string) {
@@ -228,7 +247,10 @@ export function assertSandboxWritePath(
   return assertSandboxReadPath(value, policy);
 }
 
-export function assertExecuteCommandPathPolicy(command: string) {
+export function assertExecuteCommandPathPolicy(
+  command: string,
+  options: { skillScriptsStaged?: boolean } = {},
+) {
   if (!command.trim()) {
     throw new Error("SANDBOX_EXECUTE_COMMAND_DENIED: command is empty.");
   }
@@ -237,13 +259,26 @@ export function assertExecuteCommandPathPolicy(command: string) {
       "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
     );
   }
-  const vfsRoot = disallowedExecuteVfsRoot(command);
+  const vfsRoot = disallowedExecuteVfsRoot(command, options);
   if (vfsRoot) {
+    const accessibleRoots = options.skillScriptsStaged
+      ? `${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}`
+      : `${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, ${SOURCEWEFT_SKILLS_ROOT}`;
     throw new Error(
-      `SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include SourceWeft VFS logical path ${vfsRoot}. SourceWeft VFS roots (${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, /skills) must be accessed with SourceWeft file or source tools. Use prepare_sandbox_workspace to materialize selected files under /workspace. Use only /workspace/... paths inside execute.`,
+      `SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include SourceWeft VFS logical path ${vfsRoot}. SourceWeft VFS roots (${accessibleRoots}) must be accessed with SourceWeft file or source tools. Use prepare_sandbox_workspace to materialize selected files under /workspace. Use only /workspace/... paths inside execute.`,
     );
   }
   return command;
+}
+
+/**
+ * True when the command references the /skills contract root — the signal the
+ * execute path uses to defer the final policy check until skill staging has
+ * resolved for the sandbox (two-phase check: /workfiles and /kb fail fast,
+ * /skills-referencing commands are re-asserted with the staging outcome).
+ */
+export function commandReferencesSkillsRoot(command: string) {
+  return command.includes(SOURCEWEFT_SKILLS_ROOT);
 }
 
 export function shellQuote(value: string) {

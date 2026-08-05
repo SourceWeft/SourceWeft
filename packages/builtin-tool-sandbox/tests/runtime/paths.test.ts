@@ -8,6 +8,7 @@ import {
   assertSandboxReadPath,
   assertSandboxWritePath,
   assertSourceWorkPath,
+  commandReferencesSkillsRoot,
 } from "../../src/runtime/paths";
 import type { SandboxProviderPathPolicy } from "../../src/runtime/types";
 
@@ -163,6 +164,74 @@ describe("assertExecuteCommandPathPolicy", () => {
       () => assertExecuteCommandPathPolicy("printf '/workfiles literal only'"),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
+  });
+
+  test("allows /skills in execute commands only when skill scripts are staged", () => {
+    // Staged: /skills references the platform-staged bundle copies
+    // (docs/architecture/sandbox-skill-staging.md D2).
+    assert.equal(
+      assertExecuteCommandPathPolicy(
+        'python3 "/skills/ppt-deck/scripts/validate_pptx.py" deck.pptx',
+        { skillScriptsStaged: true },
+      ),
+      'python3 "/skills/ppt-deck/scripts/validate_pptx.py" deck.pptx',
+    );
+    // The always-denied roots stay denied regardless of staging.
+    assert.throws(
+      () =>
+        assertExecuteCommandPathPolicy("cat /workfiles/notes.md", {
+          skillScriptsStaged: true,
+        }),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+    assert.throws(
+      () =>
+        assertExecuteCommandPathPolicy("ls /kb", { skillScriptsStaged: true }),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+    // Not staged (default): today's behavior, byte-identical.
+    assert.throws(
+      () =>
+        assertExecuteCommandPathPolicy(
+          'python3 "/skills/ppt-deck/scripts/validate_pptx.py" deck.pptx',
+          { skillScriptsStaged: false },
+        ),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+  });
+
+  test("accepts the ppt-deck SKILL.md QA phase verbatim once staged", () => {
+    // Acceptance baseline (docs/architecture/sandbox-skill-staging.md): the
+    // exact command shape that produced SANDBOX_EXECUTE_VFS_PATH_DENIED in
+    // the incident passes unchanged when skill scripts are staged.
+    const qaPhase = [
+      "set -e",
+      'PPTX_ARTIFACT_PATH="/workspace/Claude_Introduction.pptx"',
+      'QA_DIR="/workspace/qa"',
+      'VALIDATE_PPTX="/skills/ppt-deck/scripts/validate_pptx.py"',
+      'mkdir -p "$QA_DIR"',
+      'echo "===CONTENT_QA==="',
+      'python3 -m markitdown "$PPTX_ARTIFACT_PATH" > "$QA_DIR/content.txt"',
+      'echo "===FILE_QA==="',
+      'python3 "$VALIDATE_PPTX" "$PPTX_ARTIFACT_PATH"',
+    ].join("\n");
+    assert.equal(
+      assertExecuteCommandPathPolicy(qaPhase, { skillScriptsStaged: true }),
+      qaPhase,
+    );
+    assert.throws(
+      () => assertExecuteCommandPathPolicy(qaPhase),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+  });
+
+  test("commandReferencesSkillsRoot flags the two-phase deferral signal", () => {
+    assert.equal(
+      commandReferencesSkillsRoot("python3 /skills/x/scripts/run.py"),
+      true,
+    );
+    assert.equal(commandReferencesSkillsRoot('echo "/skills"'), true);
+    assert.equal(commandReferencesSkillsRoot("ls /workspace"), false);
   });
 
   test("does not reject host-looking absolute paths before provider execution", () => {

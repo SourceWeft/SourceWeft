@@ -519,9 +519,11 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
   SANDBOX_EXECUTE_CWD_DENIED:
     "The command working directory must stay inside the provider sandbox workspace root.",
   SANDBOX_EXECUTE_VFS_PATH_DENIED:
-    "Execute commands cannot use SourceWeft /workfiles, /kb, or /skills paths. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+    "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
   SANDBOX_FILE_NOT_FOUND:
     "The requested sandbox file was not found. Re-run the command or check the output path before collecting.",
+  SANDBOX_SKILL_STAGING_UNAVAILABLE:
+    "Skill files could not be staged into this sandbox, so /skills paths cannot be executed here. Read the skill file with file tools, save the needed content as a Workfile, prepare it into /workspace, then run that copy.",
   SANDBOX_FILE_TOO_LARGE:
     "The selected file exceeds the sandbox transfer limit. Reduce the file size or collect a smaller output.",
   SANDBOX_NOT_CONFIGURED:
