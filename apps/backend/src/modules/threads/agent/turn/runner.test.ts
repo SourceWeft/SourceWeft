@@ -1246,7 +1246,7 @@ test("HITL stream handler emits confirmation event sequence and interrupted fina
         hitlActionIndex: 0,
         hitlActionToolName: "mcp__github__create_issue",
         hitlActionRequestJson: { title: "Ship task 5" },
-        toolCallId: "call-approval",
+        toolCallId: "hitl:interrupt-1:0:mcp__github__create_issue",
       },
     );
     assert.equal(events[5]?.type, "done");
@@ -1274,13 +1274,16 @@ test("HITL stream handler emits confirmation event sequence and interrupted fina
         checkpointNs: "",
       },
     });
-    assert.equal(approvalMock.mock.calls[0]?.[0].toolCallId, "call-approval");
+    assert.equal(
+      approvalMock.mock.calls[0]?.[0].toolCallId,
+      "hitl:interrupt-1:0:mcp__github__create_issue",
+    );
   } finally {
     approvalMock.mockRestore();
   }
 });
 
-test("HITL stream handler matches tool calls from pending checkpoint state", async () => {
+test("HITL stream handler binds MCP interrupts to a payload-derived ref without checkpoint correlation", async () => {
   const runtime = createTurnRuntime({
     prepared: { runTraceId: "trace-hitl-state-tool-call" } as never,
   });
@@ -1387,11 +1390,14 @@ test("HITL stream handler matches tool calls from pending checkpoint state", asy
       ["tool-call-start", "tool-call-result", "tool-call-end", "done"],
     );
     assert.deepEqual(result, { kind: "done" });
-    assert.equal(approvalMock.mock.calls[0]?.[0].toolCallId, "call-from-state");
+    assert.equal(
+      approvalMock.mock.calls[0]?.[0].toolCallId,
+      "hitl:interrupt-from-state:0:mcp__github__create_issue",
+    );
     assert.equal(events[0]?.type, "tool-call-start");
     assert.equal(
       events[0]?.type === "tool-call-start" ? events[0].id : null,
-      "call-from-state",
+      "hitl:interrupt-from-state:0:mcp__github__create_issue",
     );
   } finally {
     approvalMock.mockRestore();
@@ -1524,8 +1530,7 @@ test("HITL stream handler creates sandbox confirmation without connector or Dayt
         command: "npm test",
         workingDir: "/workspace/ppt-deck",
       },
-      toolCallId: "call-sandbox-execute",
-      sandboxExecuteToolCallId: "call-sandbox-execute",
+      toolCallId: "hitl:sandbox-interrupt-1:0:execute",
     },
   );
   assert.deepEqual(
@@ -1684,7 +1689,16 @@ test("HITL stream handler returns replace-stream for auto-approved sandbox resum
     beforeAssistantCheckpoint: null,
     beforeInputCheckpoint: null,
     connectorToolContext: {
-      approvedSandboxToolCallId: "call-sandbox-execute",
+      sandboxActionExecutionCursor: {
+        refs: [
+          {
+            requestJson: { command: "npm test" },
+            toolCallId: "call-sandbox-execute",
+            toolName: AGENT_TOOL_NAMES.execute,
+          },
+        ],
+        value: 0,
+      },
       teamId: "team-1",
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -1848,7 +1862,7 @@ test("HITL stream handler binds new confirmation from pending checkpoint, not pa
     events[1]?.type === "tool-call-result"
       ? (events[1].output as Record<string, unknown>)
       : null;
-  assert.equal(output?.id, "call-next-execute");
+  assert.equal(output?.id, "hitl:sandbox-interrupt-1:0:execute");
   assert.deepEqual(
     (output?.execution as { sourceweft?: unknown } | undefined)?.sourceweft,
     {
@@ -1859,8 +1873,7 @@ test("HITL stream handler binds new confirmation from pending checkpoint, not pa
       hitlActionIndex: 0,
       hitlActionToolName: AGENT_TOOL_NAMES.execute,
       hitlActionRequestJson: { command: "npm test" },
-      toolCallId: "call-next-execute",
-      sandboxExecuteToolCallId: "call-next-execute",
+      toolCallId: "hitl:sandbox-interrupt-1:0:execute",
     },
   );
 });
@@ -1936,14 +1949,12 @@ test("HITL stream handler auto-approves repeated sandbox action from persisted b
     replacementStream,
   );
   assert.equal(streamMock.mock.calls.length, 1);
-  assert.equal(runtime.sandboxToolCallAliasesById.size, 0);
 });
 
 test("HITL sandbox active merge does not approve different command args", () => {
   assert.equal(
     testExports.buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
-        approvedSandboxToolCallId: "call-approved-execute",
         sandboxActionExecutionCursor: {
           refs: [
             {
@@ -1969,13 +1980,6 @@ test("HITL sandbox active merge does not approve different command args", () => 
               allowedDecisions: ["approve", "edit", "reject"],
             },
           ],
-        },
-      ],
-      toolCalls: [
-        {
-          args: { command: "npm run build" },
-          id: "call-approved-execute",
-          name: AGENT_TOOL_NAMES.execute,
         },
       ],
     }),
@@ -2012,79 +2016,6 @@ test("HITL sandbox active merge auto-approves matching persisted binding without
               allowedDecisions: ["approve", "edit", "reject"],
             },
           ],
-        },
-      ],
-    }),
-    {
-      decisions: [{ type: "approve" }],
-    },
-  );
-});
-
-test("HITL sandbox active merge rejects matching persisted binding when approved id differs", () => {
-  assert.equal(
-    testExports.buildAutoApprovedHitlResume({
-      connectorContext: {
-        approvedSandboxToolCallId: "call-other-execute",
-        sandboxActionExecutionCursor: {
-          refs: [
-            {
-              requestJson: { command: "npm test" },
-              toolCallId: "call-approved-execute",
-              toolName: AGENT_TOOL_NAMES.execute,
-            },
-          ],
-          value: 0,
-        },
-      },
-      hitlInterrupts: [
-        {
-          actionRequests: [
-            {
-              args: { command: "npm test" },
-              name: AGENT_TOOL_NAMES.execute,
-            },
-          ],
-          reviewConfigs: [
-            {
-              actionName: AGENT_TOOL_NAMES.execute,
-              allowedDecisions: ["approve", "edit", "reject"],
-            },
-          ],
-        },
-      ],
-    }),
-    null,
-  );
-});
-
-test("HITL sandbox active merge uses legacy approved id only when sandboxActions are absent", () => {
-  assert.deepEqual(
-    testExports.buildAutoApprovedHitlResume({
-      connectorContext: {
-        approvedSandboxToolCallId: "call-approved-execute",
-      },
-      hitlInterrupts: [
-        {
-          actionRequests: [
-            {
-              args: { command: "npm test" },
-              name: AGENT_TOOL_NAMES.execute,
-            },
-          ],
-          reviewConfigs: [
-            {
-              actionName: AGENT_TOOL_NAMES.execute,
-              allowedDecisions: ["approve", "edit", "reject"],
-            },
-          ],
-        },
-      ],
-      toolCalls: [
-        {
-          args: { command: "npm test" },
-          id: "call-approved-execute",
-          name: AGENT_TOOL_NAMES.execute,
         },
       ],
     }),
@@ -2394,15 +2325,33 @@ test("DeepAgents HITL duplicate connector interrupts auto-resume from approved e
   assert.equal(context.actionExecutionCursor.consumedActionRunIds, undefined);
 });
 
-test("DeepAgents HITL duplicate sandbox interrupt auto-resumes from approved tool call id", () => {
+test("DeepAgents HITL duplicate sandbox interrupt auto-resumes each approved args ref once", () => {
   assert.deepEqual(
     testExports.buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
-        approvedSandboxToolCallId: "call-sandbox-execute",
+        sandboxActionExecutionCursor: {
+          refs: [
+            {
+              requestJson: { command: "npm test" },
+              toolCallId: "call-sandbox-execute-a",
+              toolName: AGENT_TOOL_NAMES.execute,
+            },
+            {
+              requestJson: { command: "npm test" },
+              toolCallId: "call-sandbox-execute-b",
+              toolName: AGENT_TOOL_NAMES.execute,
+            },
+          ],
+          value: 0,
+        },
       },
       hitlInterrupts: [
         {
           actionRequests: [
+            {
+              args: { command: "npm test" },
+              name: AGENT_TOOL_NAMES.execute,
+            },
             {
               args: { command: "npm test" },
               name: AGENT_TOOL_NAMES.execute,
@@ -2416,49 +2365,8 @@ test("DeepAgents HITL duplicate sandbox interrupt auto-resumes from approved too
           ],
         },
       ],
-      toolCalls: [
-        {
-          args: { command: "npm test" },
-          id: "call-sandbox-execute",
-          name: AGENT_TOOL_NAMES.execute,
-        },
-      ],
     }),
-    [{ type: "approve" }],
-  );
-});
-
-test("DeepAgents HITL duplicate sandbox interrupt does not auto-resume a different tool call id", () => {
-  assert.equal(
-    testExports.buildAutoApprovedHitlResumeDecisions({
-      connectorContext: {
-        approvedSandboxToolCallId: "call-approved-execute",
-      },
-      hitlInterrupts: [
-        {
-          actionRequests: [
-            {
-              args: { command: "npm test" },
-              name: AGENT_TOOL_NAMES.execute,
-            },
-          ],
-          reviewConfigs: [
-            {
-              actionName: AGENT_TOOL_NAMES.execute,
-              allowedDecisions: ["approve", "edit", "reject"],
-            },
-          ],
-        },
-      ],
-      toolCalls: [
-        {
-          args: { command: "npm test" },
-          id: "call-other-execute",
-          name: AGENT_TOOL_NAMES.execute,
-        },
-      ],
-    }),
-    null,
+    [{ type: "approve" }, { type: "approve" }],
   );
 });
 

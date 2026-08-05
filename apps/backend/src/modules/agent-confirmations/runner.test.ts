@@ -138,7 +138,6 @@ function sandboxConfirmation(
         hitlActionToolName: "execute",
         hitlActionRequestJson: { command: "npm test" },
         toolCallId: "sandbox_call_1",
-        sandboxExecuteToolCallId: "sandbox_call_1",
         sourceUserMessageId: "user-message-1",
         sourceAssistantMessageId: "assistant-message-1",
       },
@@ -219,7 +218,6 @@ test("ToolConfirmationRunner resumes approved sandbox HITL edits locally", async
     sourceweft: {
       confirmationId: "sandbox_call_1",
       hitlInterruptId: "sandbox-interrupt-1",
-      sandboxExecuteToolCallId: "sandbox_call_1",
       sourceUserMessageId: "user-message-1",
       sourceAssistantMessageId: "assistant-message-1",
       sandboxActions: [
@@ -256,7 +254,6 @@ test("ToolConfirmationRunner resumes approved sandbox HITL without edits locally
     sourceweft: {
       confirmationId: "sandbox_call_1",
       hitlInterruptId: "sandbox-interrupt-1",
-      sandboxExecuteToolCallId: "sandbox_call_1",
       sourceUserMessageId: "user-message-1",
       sourceAssistantMessageId: "assistant-message-1",
       sandboxActions: [

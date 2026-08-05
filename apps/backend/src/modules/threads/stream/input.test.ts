@@ -239,7 +239,6 @@ test("sandbox resume merge keeps explicit current action and ignores stale prior
       sourceweft: {
         confirmationId: "confirmation-current",
         hitlInterruptId: "interrupt-current",
-        sandboxExecuteToolCallId: "call-current",
         sourceUserMessageId: "user-current",
         sourceAssistantMessageId: "assistant-current",
         sandboxActions: [
@@ -295,7 +294,6 @@ test("sandbox resume merge only uses legacy prior action when it matches current
       decisions: [{ type: "approve" }],
       sourceweft: {
         hitlInterruptId: "interrupt-1",
-        sandboxExecuteToolCallId: "call-approved",
         sourceUserMessageId: "user-1",
         sourceAssistantMessageId: "assistant-1",
       },
@@ -320,7 +318,6 @@ test("sandbox resume merge only uses legacy prior action when it matches current
       decisions: [{ type: "approve" }],
       sourceweft: {
         hitlInterruptId: "interrupt-2",
-        sandboxExecuteToolCallId: "call-approved",
         sourceUserMessageId: "user-2",
         sourceAssistantMessageId: "assistant-2",
       },
@@ -350,7 +347,7 @@ test("approved sandbox actions extracted from assistant metadata include source 
             execution: {
               sourceweft: {
                 hitlInterruptId: "interrupt-1",
-                sandboxExecuteToolCallId: "call-execute",
+                toolCallId: "call-execute",
               },
             },
           },
@@ -368,6 +365,73 @@ test("approved sandbox actions extracted from assistant metadata include source 
       hitlInterruptId: "interrupt-1",
       sourceUserMessageId: "user-1",
       sourceAssistantMessageId: "assistant-1",
+    },
+  ]);
+});
+
+test("extractApprovedMcpActionsFromMessage reconstructs approved MCP refs by action run id and args", () => {
+  const actions = testExports.extractApprovedMcpActionsFromMessage({
+    metadata: {
+      toolCalls: [
+        // A non-approved MCP confirmation is ignored.
+        {
+          id: "trace-pending",
+          tool: "mcp__github__create_issue",
+          output: {
+            type: "tool_confirmation_request",
+            status: "proposed",
+            execution: { executor: { kind: "mcp_action_run", actionRunId: "x" } },
+          },
+        },
+        // The approved one is reconstructed. The LangChain tool name comes off
+        // the HITL sourceweft metadata, not the lossy action.toolName.
+        {
+          id: "trace-approved",
+          tool: "mcp__github__create_issue",
+          output: {
+            type: "tool_confirmation_request",
+            id: "approval-1",
+            status: "approved",
+            action: { toolName: "create_issue" },
+            preview: { requestJson: { title: "Ship MCP" } },
+            execution: {
+              executor: { kind: "mcp_action_run", actionRunId: "mcp_action_1" },
+              sourceweft: { toolName: "mcp__github__create_issue" },
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(actions, [
+    {
+      actionRunId: "mcp_action_1",
+      toolName: "mcp__github__create_issue",
+      requestJson: { title: "Ship MCP" },
+    },
+  ]);
+});
+
+test("mergeToolApprovalResumeActions surfaces reconstructed MCP refs on the resume", () => {
+  const resume = testExports.mergeToolApprovalResumeActions({
+    priorConnectorActions: [],
+    priorMcpActions: [
+      {
+        actionRunId: "mcp_action_1",
+        toolName: "mcp__github__create_issue",
+        requestJson: { title: "Ship MCP" },
+      },
+    ],
+    priorSandboxActions: [],
+    resume: { decisions: [{ type: "approve" }] },
+  });
+
+  assert.deepEqual(resume.sourceweft?.mcpActions, [
+    {
+      actionRunId: "mcp_action_1",
+      toolName: "mcp__github__create_issue",
+      requestJson: { title: "Ship MCP" },
     },
   ]);
 });

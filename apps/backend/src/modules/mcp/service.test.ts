@@ -274,6 +274,11 @@ function originalTool(input: {
 function serviceInput(input: {
   installIds: string[];
   toolIds?: string[];
+  mcpActions?: Array<{
+    actionRunId: string;
+    toolName: string;
+    requestJson: Record<string, unknown>;
+  }>;
 }) {
   return {
     workspaceId: "workspace_1",
@@ -282,6 +287,7 @@ function serviceInput(input: {
     runId: "run_1",
     installIds: input.installIds,
     toolIds: input.toolIds,
+    ...(input.mcpActions ? { mcpActions: input.mcpActions } : {}),
   };
 }
 
@@ -802,7 +808,7 @@ test("high-risk MCP tools are exposed with interrupt config and blocked before a
   assert.equal(mocks.createMcpActionRun.mock.calls[0]?.[0].status, "proposed");
 });
 
-test("approved high-risk MCP action resumes execution by idempotency key", async () => {
+test("approved high-risk MCP action resumes by args-matched ref under a different execution-time tool-call id", async () => {
   resetMcpServiceMocks();
   const writeTool = mcpTool({
     id: "tool_write",
@@ -813,37 +819,101 @@ test("approved high-risk MCP action resumes execution by idempotency key", async
   const install = mcpInstall({ tools: [writeTool] });
   const invoke = vi.fn(async () => ({ url: "https://example.com/issue/1" }));
   mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
-  mocks.createMcpActionRun.mockImplementation(async (input) =>
-    actionRun({
-      id: "mcp_action_approved",
-      installId: input.installId,
-      toolId: input.toolId,
-      serverToolName: input.serverToolName,
-      normalizedToolName: input.normalizedToolName,
-      risk: input.risk,
-      status: "approved",
-      requestJson: input.requestJson,
-      requestPreview: input.requestPreview,
-      idempotencyKey: input.idempotencyKey,
-    }),
+  // The approval lives on a run keyed by the payload-derived hitl ref, resolved
+  // by args — NOT by the tool-call id the tool sees at execution time.
+  mocks.findMcpActionRun.mockImplementation(async ({ actionRunId }) =>
+    actionRunId === "mcp_action_approved"
+      ? actionRun({
+          id: "mcp_action_approved",
+          installId: install.id,
+          toolId: "tool_write",
+          serverToolName: "create_issue",
+          normalizedToolName: "mcp__github__create_issue",
+          risk: "write",
+          status: "approved",
+          requestJson: { title: "Ship MCP" },
+          requestPreview: "create_issue",
+          idempotencyKey: "hitl:thread_1:cp_1:0:mcp__github__create_issue",
+        })
+      : null,
   );
   toolsByInstallId.set(install.id, [
     originalTool({ name: "mcp__github__create_issue", invoke }),
   ]);
 
   const runtime = await new McpService().buildLangChainToolsForTurn(
-    serviceInput({ installIds: [install.id] }),
+    serviceInput({
+      installIds: [install.id],
+      mcpActions: [
+        {
+          actionRunId: "mcp_action_approved",
+          toolName: "mcp__github__create_issue",
+          requestJson: { title: "Ship MCP" },
+        },
+      ],
+    }),
   );
+  // A sub-agent re-executes with a fresh tool-call id that never appeared in the
+  // top-level graph; approval must still resolve.
   const output = await runtime.tools[0]?.invoke(
     { title: "Ship MCP" },
-    { configurable: { tool_call_id: "call_write" } },
+    { configurable: { tool_call_id: "call_subagent_fresh" } },
   );
 
   assert.deepEqual(output, { url: "https://example.com/issue/1" });
   assert.equal(invoke.mock.calls.length, 1);
-  assert.equal(mocks.createMcpToolRun.mock.calls[0]?.[0].actionRunId, "mcp_action_approved");
+  assert.equal(
+    mocks.findMcpActionRun.mock.calls[0]?.[0].actionRunId,
+    "mcp_action_approved",
+  );
   assert.equal(mocks.updateMcpActionRun.mock.calls[0]?.[0].status, "running");
-  assert.equal(mocks.updateMcpActionRun.mock.calls.at(-1)?.[0].status, "succeeded");
+  assert.equal(
+    mocks.updateMcpActionRun.mock.calls.at(-1)?.[0].status,
+    "succeeded",
+  );
+});
+
+test("MCP action ref for different args does not approve the call", async () => {
+  resetMcpServiceMocks();
+  const writeTool = mcpTool({
+    id: "tool_write",
+    serverToolName: "create_issue",
+    normalizedToolName: "mcp__github__create_issue",
+    risk: "write",
+  });
+  const install = mcpInstall({ tools: [writeTool] });
+  const invoke = vi.fn(async () => ({ url: "https://example.com/issue/1" }));
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__create_issue", invoke }),
+  ]);
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({
+      installIds: [install.id],
+      // Approved for a DIFFERENT title — must not satisfy this call.
+      mcpActions: [
+        {
+          actionRunId: "mcp_action_approved",
+          toolName: "mcp__github__create_issue",
+          requestJson: { title: "Something else" },
+        },
+      ],
+    }),
+  );
+  const wrappedTool = runtime.tools[0];
+  assert.ok(wrappedTool);
+  await assert.rejects(
+    () =>
+      wrappedTool.invoke(
+        { title: "Ship MCP" },
+        { configurable: { tool_call_id: "call_write" } },
+      ),
+    (error: unknown) =>
+      error instanceof McpError && error.code === "MCP_APPROVAL_REQUIRED",
+  );
+  assert.equal(invoke.mock.calls.length, 0);
+  assert.equal(mocks.findMcpActionRun.mock.calls.length, 0);
 });
 
 test("createApprovalForInterruptedTool returns redacted MCP confirmation payload", async () => {
