@@ -398,6 +398,10 @@ export function createDefaultDeliverableRuntimeResolver(input: {
           // key provenance) ride on the request metadata instead.
           ...auditMetadata,
           ...llmInput.metadata,
+          // Pipeline provenance for the observe sink: an artifact's detail
+          // view finds its own generations by these keys.
+          artifactId: job.artifactId,
+          jobId: job.jobId,
           teamId: job.teamId,
           workspaceId: job.workspaceId,
           userId: job.userId,
@@ -567,6 +571,9 @@ export function createDefaultDeliverableRuntimeResolver(input: {
                 ...visionInput.metadata,
                 feature,
                 operation: `${feature}.visual_qa`,
+                stage: "visual_qa",
+                artifactId: job.artifactId,
+                jobId: job.jobId,
               },
             },
             {
@@ -591,7 +598,12 @@ export function createDefaultDeliverableRuntimeResolver(input: {
             model: ttsProfile.modelAlias,
             input: ttsInput.text,
             responseFormat: "mp3",
-            metadata: ttsInput.metadata,
+            metadata: {
+              ...ttsInput.metadata,
+              stage: "tts",
+              artifactId: job.artifactId,
+              jobId: job.jobId,
+            },
           };
           const result = await ttsGateway.tts.speech(request, {
             operation: `${feature}.tts`,
@@ -690,6 +702,9 @@ export function createDefaultDeliverableRuntimeResolver(input: {
                   ...metadata,
                   feature,
                   operation: `${feature}.asset_image`,
+                  stage: "asset_image",
+                  artifactId: job.artifactId,
+                  jobId: job.jobId,
                 },
               },
               {

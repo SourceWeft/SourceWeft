@@ -93,6 +93,17 @@ function buildObserveAttributes(metadata: Record<string, unknown>) {
       gatewayConfigId: readMetadataValue(metadata, "gatewayConfigId"),
       profileAlias: readMetadataValue(metadata, "profileAlias"),
       routeStrategy: readMetadataValue(metadata, "routeStrategy"),
+      // Pipeline provenance: what stage of which artifact this call served.
+      // These are the correlation keys that let an artifact's detail view
+      // find its own generations — without them a deliverable's calls are
+      // only attributable to the whole run.
+      stage: readMetadataValue(metadata, "stage"),
+      artifactId: readMetadataValue(metadata, "artifactId"),
+      jobId: readMetadataValue(metadata, "jobId"),
+      slideNumber:
+        typeof metadata.slideNumber === "number"
+          ? metadata.slideNumber
+          : readMetadataValue(metadata, "slideNumber"),
     }) ?? {}
   );
 }
