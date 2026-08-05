@@ -97,6 +97,21 @@ export const toolApprovalResumeSchema = z.object({
           }),
         )
         .optional(),
+      // Approved MCP calls resumed as args-matched execution refs, mirroring
+      // connectorActions. The wrapped MCP tool resolves an approved ref by args
+      // (never by tool-call id), so an interrupt raised inside a sub-agent
+      // subgraph — whose tool-call id never surfaces in the top-level graph —
+      // resumes correctly. Retry-idempotency of the external call stays keyed on
+      // the execution-time tool-call id, independently of this approval channel.
+      mcpActions: z
+        .array(
+          z.object({
+            toolName: z.string().min(1),
+            actionRunId: z.string().min(1),
+            requestJson: jsonObjectSchema,
+          }),
+        )
+        .optional(),
       sandboxActions: z
         .array(
           z.object({
@@ -111,7 +126,6 @@ export const toolApprovalResumeSchema = z.object({
         )
         .optional(),
       hitlInterruptId: z.string().min(1).optional(),
-      sandboxExecuteToolCallId: z.string().min(1).optional(),
       confirmationId: z.string().min(1).optional(),
       sourceUserMessageId: z.string().min(1).optional(),
       sourceAssistantMessageId: z.string().min(1).optional(),
@@ -218,7 +232,6 @@ export const toolConfirmationRequestSchema = z.object({
         hitlActionIndex: z.number().int().nonnegative().optional(),
         hitlActionToolName: z.string().min(1).optional(),
         hitlActionRequestJson: jsonObjectSchema.optional(),
-        sandboxExecuteToolCallId: z.string().min(1).optional(),
         confirmationId: z.string().min(1).optional(),
         sourceUserMessageId: z.string().min(1).optional(),
         sourceAssistantMessageId: z.string().min(1).optional(),

@@ -38,7 +38,6 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const toolStartedAtById = new Map<string, number>();
   const pendingToolStreamsByRunId = new Map<string, PendingToolStream>();
   const observedToolCallsById = new Map<string, ObservedAgentToolCall>();
-  const sandboxToolCallAliasesById = new Map<string, string>();
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
@@ -63,7 +62,6 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     toolStartedAtById,
     pendingToolStreamsByRunId,
     observedToolCallsById,
-    sandboxToolCallAliasesById,
     thinkingStepsById,
     thinkingStepOrder,
     reasoningSegments,

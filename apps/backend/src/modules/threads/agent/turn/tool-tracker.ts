@@ -392,7 +392,6 @@ export type PromotedPendingToolStream = {
 
 export function resolveToolsStreamToolCall(input: {
   pendingToolStreamsByRunId?: Map<string, PendingToolStream>;
-  toolCallAliasesById?: Map<string, string>;
   payload: unknown;
   resolveToolCallSequence: (toolCallId: string) => number;
   toolCallOrder: string[];
@@ -423,8 +422,7 @@ export function resolveToolsStreamToolCall(input: {
     return null;
   }
 
-  const toolCallId =
-    input.toolCallAliasesById?.get(langchainToolCallId) ?? langchainToolCallId;
+  const toolCallId = langchainToolCallId;
   const pending = streamRunId
     ? input.pendingToolStreamsByRunId?.get(streamRunId)
     : undefined;

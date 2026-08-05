@@ -56,15 +56,16 @@ import { filterAllowedTools, isToolDenied } from "./tool-utils";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
 
+// The sandbox backend's operation-claim key when approval is enabled (NOT an
+// approval-correlation id): the resumed `execute` claims its run under the
+// approved args-ref's stable id. One key per turn build, mirroring the prior
+// single-scalar behavior.
 function sandboxExecuteToolCallIdFromResume(
   resume: PreparedThreadTurn["toolApprovalResume"],
 ) {
-  return (
-    resume?.sourceweft?.sandboxExecuteToolCallId ??
-    resume?.sourceweft?.sandboxActions?.find(
-      (action) => action.toolName === AGENT_TOOL_NAMES.execute,
-    )?.toolCallId
-  );
+  return resume?.sourceweft?.sandboxActions?.find(
+    (action) => action.toolName === AGENT_TOOL_NAMES.execute,
+  )?.toolCallId;
 }
 
 export interface FilesystemBackendInput {
@@ -726,9 +727,6 @@ export async function buildToolCollection(
     actionApprovalCursor,
     actionExecutionCursor,
     actionApprovalScope,
-    approvedSandboxToolCallId: sandboxExecuteToolCallIdFromResume(
-      prepared.toolApprovalResume,
-    ),
     sandboxActionExecutionCursor,
     sourceUserMessageId: prepared.userMessage.id,
     ...(prepared.assistantMessageId
@@ -753,6 +751,9 @@ export async function buildToolCollection(
           threadId: prepared.thread.id,
           runId: prepared.runTraceId,
           installIds: prepared.mcpInstallIds,
+          ...(prepared.toolApprovalResume?.sourceweft?.mcpActions?.length
+            ? { mcpActions: prepared.toolApprovalResume.sourceweft.mcpActions }
+            : {}),
         })
       : null;
   const mcpTools = mcpToolRuntime?.tools ?? [];

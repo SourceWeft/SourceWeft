@@ -169,6 +169,10 @@ type SandboxActionResumeRef = NonNullable<
   NonNullable<ToolApprovalResume["sourceweft"]>["sandboxActions"]
 >[number];
 
+type McpActionResumeRef = NonNullable<
+  NonNullable<ToolApprovalResume["sourceweft"]>["mcpActions"]
+>[number];
+
 function extractApprovedConnectorActionsFromMessage(message: {
   metadata?: unknown;
 }): ConnectorActionResumeRef[] {
@@ -217,6 +221,57 @@ function extractApprovedConnectorActionsFromMessage(message: {
   return actions;
 }
 
+function extractApprovedMcpActionsFromMessage(message: {
+  metadata?: unknown;
+}): McpActionResumeRef[] {
+  const metadata = getMessageMetadataRecord(message);
+  const toolCalls = Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [];
+  const actions: McpActionResumeRef[] = [];
+
+  for (const toolCall of toolCalls) {
+    const toolCallRecord = getObjectRecord(toolCall);
+    const output = getObjectRecord(toolCallRecord?.output);
+    if (
+      output?.type !== "tool_confirmation_request" ||
+      output.status !== "approved"
+    ) {
+      continue;
+    }
+
+    const execution = getObjectRecord(output.execution);
+    const executor = getObjectRecord(execution?.executor);
+    if (executor?.kind !== "mcp_action_run") {
+      continue;
+    }
+
+    const actionRunId = getStringField(executor, "actionRunId");
+    // The LangChain tool name (`mcp__<serverKey>__<tool>`) — what the wrapped
+    // tool resolves against — lives on the HITL sourceweft metadata and the
+    // trace's `tool` field, NOT on `action.toolName` (which carries the lossy
+    // normalizedToolName that would never match the bound tool).
+    const sourceweft = getObjectRecord(execution?.sourceweft);
+    const toolName =
+      getStringField(sourceweft, "toolName") ??
+      getStringField(toolCallRecord, "tool");
+    if (!actionRunId || !toolName) {
+      continue;
+    }
+
+    // Match the redacted args the action run persists, mirroring the wrapped
+    // tool's own redacted-vs-redacted comparison.
+    const preview = getObjectRecord(output.preview);
+    const requestJson =
+      getObjectRecord(preview?.requestJson) ??
+      getObjectRecord(toolCallRecord?.input);
+    if (!requestJson) {
+      continue;
+    }
+    actions.push({ actionRunId, toolName, requestJson });
+  }
+
+  return actions;
+}
+
 function extractApprovedSandboxActionsFromMessage(message: {
   id?: string;
   metadata?: unknown;
@@ -252,7 +307,6 @@ function extractApprovedSandboxActionsFromMessage(message: {
     }
 
     const toolCallId =
-      getStringField(sourceweft, "sandboxExecuteToolCallId") ??
       getStringField(sourceweft, "toolCallId") ??
       getStringField(toolCallRecord, "approvalConfirmationId") ??
       getStringField(toolCallRecord, "id");
@@ -288,7 +342,6 @@ function resumeIdentityFromSandboxAction(action: SandboxActionResumeRef) {
     hitlInterruptId: action.hitlInterruptId,
     sourceUserMessageId: action.sourceUserMessageId,
     sourceAssistantMessageId: action.sourceAssistantMessageId,
-    sandboxExecuteToolCallId: action.toolCallId,
   };
 }
 
@@ -333,9 +386,7 @@ function sandboxActionMatchesResumeIdentity(input: {
     (sourceweft.confirmationId &&
       identity.confirmationId === sourceweft.confirmationId) ||
       (sourceweft.hitlInterruptId &&
-        identity.hitlInterruptId === sourceweft.hitlInterruptId) ||
-      (sourceweft.sandboxExecuteToolCallId &&
-        identity.sandboxExecuteToolCallId === sourceweft.sandboxExecuteToolCallId),
+        identity.hitlInterruptId === sourceweft.hitlInterruptId),
   );
 }
 
@@ -344,7 +395,6 @@ function resumeHasSandboxIdentity(resume: ToolApprovalResume) {
   return Boolean(
     sourceweft?.confirmationId ||
       sourceweft?.hitlInterruptId ||
-      sourceweft?.sandboxExecuteToolCallId ||
       sourceweft?.sourceUserMessageId ||
       sourceweft?.sourceAssistantMessageId,
   );
@@ -376,17 +426,22 @@ function selectLegacySandboxActionsForResume(input: {
 
 function mergeToolApprovalResumeActions(input: {
   priorConnectorActions: ConnectorActionResumeRef[];
+  priorMcpActions?: McpActionResumeRef[];
   priorSandboxActions: SandboxActionResumeRef[];
   resume: ToolApprovalResume;
 }): ToolApprovalResume {
+  const priorMcpActions = input.priorMcpActions ?? [];
   const existingActions = input.resume.sourceweft?.connectorActions ?? [];
+  const existingMcpActions = input.resume.sourceweft?.mcpActions ?? [];
   const selectedSandboxActions = selectLegacySandboxActionsForResume({
     priorSandboxActions: input.priorSandboxActions,
     resume: input.resume,
   });
   const mergedActions: ConnectorActionResumeRef[] = [];
+  const mergedMcpActions: McpActionResumeRef[] = [];
   const mergedSandboxActions: SandboxActionResumeRef[] = [];
   const seen = new Set<string>();
+  const seenMcp = new Set<string>();
   const seenSandbox = new Set<string>();
 
   for (const action of [
@@ -412,11 +467,20 @@ function mergeToolApprovalResumeActions(input: {
     mergedSandboxActions.push(action);
   }
 
+  for (const action of [...priorMcpActions, ...existingMcpActions]) {
+    const key = `${action.toolName}:${action.actionRunId}`;
+    if (seenMcp.has(key)) {
+      continue;
+    }
+    seenMcp.add(key);
+    mergedMcpActions.push(action);
+  }
+
   if (
     mergedActions.length === 0 &&
+    mergedMcpActions.length === 0 &&
     mergedSandboxActions.length === 0 &&
-    !input.resume.sourceweft?.hitlInterruptId &&
-    !input.resume.sourceweft?.sandboxExecuteToolCallId
+    !input.resume.sourceweft?.hitlInterruptId
   ) {
     return input.resume;
   }
@@ -426,6 +490,7 @@ function mergeToolApprovalResumeActions(input: {
     sourceweft: {
       ...(input.resume.sourceweft ?? {}),
       ...(mergedActions.length > 0 ? { connectorActions: mergedActions } : {}),
+      ...(mergedMcpActions.length > 0 ? { mcpActions: mergedMcpActions } : {}),
       ...(mergedSandboxActions.length > 0
         ? { sandboxActions: mergedSandboxActions }
         : {}),
@@ -584,6 +649,8 @@ export async function resolveResumeThreadStreamInput(
   const toolApprovalResume = mergeToolApprovalResumeActions({
     priorConnectorActions:
       extractApprovedConnectorActionsFromMessage(latestAssistantMessage),
+    priorMcpActions:
+      extractApprovedMcpActionsFromMessage(latestAssistantMessage),
     priorSandboxActions:
       extractApprovedSandboxActionsFromMessage(latestAssistantMessage),
     resume: input.toolApprovalResume,
@@ -697,6 +764,7 @@ export async function resolveEditThreadStreamInput(
 
 export const testExports = {
   extractApprovedConnectorActionsFromMessage,
+  extractApprovedMcpActionsFromMessage,
   extractApprovedSandboxActionsFromMessage,
   getMessageMetadataRecord,
   mergeToolApprovalResumeActions,

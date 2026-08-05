@@ -115,12 +115,6 @@ function hitlInterruptIdFromConfirmation(
   return confirmation?.execution.sourceweft?.hitlInterruptId;
 }
 
-function sandboxExecuteToolCallIdFromConfirmation(
-  confirmation?: ToolConfirmationRequest,
-) {
-  return confirmation?.execution.sourceweft?.sandboxExecuteToolCallId;
-}
-
 function sandboxActionRequestJsonFromConfirmation(
   confirmation?: ToolConfirmationRequest,
 ) {
@@ -146,9 +140,7 @@ function sandboxActionRefFromConfirmation(input: {
     confirmation?.execution.sourceweft?.hitlActionToolName ??
     confirmation?.action.toolName;
   const toolCallId =
-    confirmation?.execution.sourceweft?.sandboxExecuteToolCallId ??
-    confirmation?.execution.sourceweft?.toolCallId ??
-    confirmation?.id;
+    confirmation?.execution.sourceweft?.toolCallId ?? confirmation?.id;
   const requestJson =
     input.requestJson ?? sandboxActionRequestJsonFromConfirmation(confirmation);
   if (!toolName || !toolCallId || !requestJson) {
@@ -312,10 +304,6 @@ export class ToolConfirmationRunner {
     const decision = input.decision === "reject" ? "reject" : "approve";
 
     if (input.confirmation?.domain === "sandbox") {
-      const sandboxExecuteToolCallId =
-        decision === "approve"
-          ? sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
-          : undefined;
       const sandboxAction =
         decision === "approve"
           ? sandboxActionRefFromConfirmation({
@@ -334,7 +322,6 @@ export class ToolConfirmationRunner {
           }),
         ],
         ...(hitlInterruptIdFromConfirmation(input.confirmation) ||
-        sandboxExecuteToolCallId ||
         sandboxAction
           ? {
               sourceweft: {
@@ -359,11 +346,6 @@ export class ToolConfirmationRunner {
                       hitlInterruptId: hitlInterruptIdFromConfirmation(
                         input.confirmation,
                       ),
-                    }
-                  : {}),
-                ...(sandboxExecuteToolCallId
-                  ? {
-                      sandboxExecuteToolCallId,
                     }
                   : {}),
                 ...(sandboxAction ? { sandboxActions: [sandboxAction] } : {}),

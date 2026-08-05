@@ -406,6 +406,44 @@ function mcpConfirmationPayload(input: {
   };
 }
 
+export type McpActionExecutionRef = {
+  actionRunId: string;
+  toolName: string;
+  requestJson: Record<string, unknown>;
+};
+
+/**
+ * Approved MCP calls threaded into a resumed turn, matched by args (never by
+ * tool-call id) so an interrupt raised inside a sub-agent subgraph — whose
+ * tool-call id never appears in the top-level graph — still resolves. Each ref
+ * is consumed once, so two identically-argumented approved calls execute twice.
+ */
+export type McpActionExecutionCursor = {
+  refs: McpActionExecutionRef[];
+  consumedActionRunIds?: Set<string>;
+};
+
+function resolveApprovedMcpActionRef(
+  cursor: McpActionExecutionCursor | undefined,
+  input: { toolName: string; requestJson: Record<string, unknown> },
+): McpActionExecutionRef | null {
+  if (!cursor) {
+    return null;
+  }
+  const ref = cursor.refs.find(
+    (candidate) =>
+      !cursor.consumedActionRunIds?.has(candidate.actionRunId) &&
+      candidate.toolName === input.toolName &&
+      hashJson(candidate.requestJson) === hashJson(input.requestJson),
+  );
+  if (!ref) {
+    return null;
+  }
+  cursor.consumedActionRunIds ??= new Set<string>();
+  cursor.consumedActionRunIds.add(ref.actionRunId);
+  return ref;
+}
+
 function getToolCallIdFromConfig(configValue: unknown) {
   const config = toObject(configValue);
   const toolCall = toObject(config.toolCall);
@@ -1028,12 +1066,20 @@ export class McpService {
     runId?: string | null;
     installIds: string[];
     toolIds?: string[];
+    mcpActions?: McpActionExecutionRef[];
   }) {
     const { workspace } = await requireMcpWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
       permission: "mcp.execute",
     });
+    // One cursor shared across every wrapped tool this turn: an approved ref is
+    // consumed once, so a resumed turn that approved the same call twice runs it
+    // twice rather than collapsing to one execution.
+    const mcpActionCursor: McpActionExecutionCursor | undefined = input.mcpActions
+      ?.length
+      ? { refs: input.mcpActions }
+      : undefined;
     const installs = await listWorkspaceMcpInstalls({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -1159,6 +1205,7 @@ export class McpService {
             userId: input.userId,
             threadId: input.threadId ?? null,
             runId: input.runId ?? null,
+            mcpActionCursor,
           }),
         );
       }
@@ -1181,6 +1228,7 @@ export class McpService {
     userId: string;
     threadId: string | null;
     runId: string | null;
+    mcpActionCursor?: McpActionExecutionCursor;
   }) {
     const toolRecord =
       input.tool ??
@@ -1228,14 +1276,28 @@ export class McpService {
             `${input.runId ?? input.threadId ?? input.workspaceId}:${input.originalTool.name}:${hashJson(toObject(args))}`,
         });
         if (isHighRisk(risk)) {
-          // Approval is bound to the args that were approved, not merely to the
-          // tool-call id. If a reused tool-call id lands on a previously
-          // approved run whose approved args differ from what's about to
-          // execute, this is NOT the approved call — re-gate it. (Comparison is
-          // over the redacted args, which is what the DB persists.)
+          // Approval is resolved by args from the refs threaded into this
+          // resumed turn, never by tool-call id: an interrupt raised inside a
+          // sub-agent subgraph has a tool-call id that never surfaces in the
+          // top-level graph, so a tool-call-id gate dead-ends there. Each
+          // approved ref is consumed once (two identical approved calls both
+          // run), and the authoritative DB run is re-checked so a ref
+          // reconstructed from persisted confirmation metadata cannot approve
+          // un-approved args.
+          const approvedRef = resolveApprovedMcpActionRef(
+            input.mcpActionCursor,
+            { toolName: input.originalTool.name, requestJson },
+          );
+          const approvedRun = approvedRef
+            ? await findMcpActionRun({
+                teamId: input.teamId,
+                workspaceId: input.workspaceId,
+                actionRunId: approvedRef.actionRunId,
+              })
+            : null;
           const approvedForTheseArgs =
-            actionRun.status === "approved" &&
-            hashJson(actionRun.requestJson) === hashJson(requestJson);
+            approvedRun?.status === "approved" &&
+            hashJson(approvedRun.requestJson) === hashJson(requestJson);
           if (!approvedForTheseArgs) {
             throw new McpError(
               409,

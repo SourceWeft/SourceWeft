@@ -298,8 +298,7 @@ export async function* invokeDeepAgentTurn(input: {
       1,
       input.prepared.toolApprovalResume?.sourceweft?.connectorActions?.length ??
         0,
-      input.prepared.toolApprovalResume?.sourceweft?.sandboxExecuteToolCallId ||
-        input.prepared.toolApprovalResume?.sourceweft?.sandboxActions?.length
+      input.prepared.toolApprovalResume?.sourceweft?.sandboxActions?.length
         ? MAX_AUTO_APPROVED_SANDBOX_HITL_RESUMES
         : 0,
     );
@@ -387,7 +386,6 @@ export async function* invokeDeepAgentTurn(input: {
           pendingToolStreamsByRunId: runtime.pendingToolStreamsByRunId,
           payload,
           resolveToolCallSequence,
-          toolCallAliasesById: runtime.sandboxToolCallAliasesById,
           toolCallOrder,
           toolCallsById,
         });
