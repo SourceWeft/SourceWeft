@@ -2,39 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { beforeEach, test, vi } from "vitest";
 
-const dbState = vi.hoisted(() => ({
-  rows: [] as Array<Record<string, unknown>>,
-  upserts: [] as Array<Record<string, unknown>>,
-}));
-
-vi.mock("@sourceweft/db", () => ({
-  db: {
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: async () => dbState.rows,
-        }),
-      }),
-    }),
-    insert: () => ({
-      values: (values: Record<string, unknown>) => ({
-        onConflictDoUpdate: async (input: { set: Record<string, unknown> }) => {
-          dbState.upserts.push({ ...values, ...input.set });
-        },
-      }),
-    }),
-  },
-  sandboxAssetCache: {
-    name: "name",
-    version: "version",
-    platform: "platform",
-    status: "status",
-    storageBucket: "storage_bucket",
-    storageKey: "storage_key",
-  },
-}));
-
 const storageMocks = vi.hoisted(() => ({
+  existingKeys: new Set<string>(),
   uploads: [] as Array<{ key: string; bytes: number }>,
 }));
 
@@ -43,10 +12,14 @@ vi.mock("../../modules/sources/storage", () => ({
     name: string;
     version: string;
     platform: string;
-  }) => `sandbox-assets/${input.name}/${input.version}/${input.platform}.zip`,
-  getContentStorageBucketName: () => "test-bucket",
+    sha256: string;
+  }) =>
+    `sandbox-assets/${input.name}/${input.version}/${input.platform}-${input.sha256.slice(0, 16)}.zip`,
+  sandboxAssetObjectExists: async (input: { key: string }) =>
+    storageMocks.existingKeys.has(input.key),
   uploadSandboxAssetObject: async (input: { key: string; body: Uint8Array }) => {
     storageMocks.uploads.push({ key: input.key, bytes: input.body.byteLength });
+    storageMocks.existingKeys.add(input.key);
   },
   getSandboxAssetDownloadUrl: async (input: { key: string }) =>
     `https://cache.example/${input.key}?sig=test`,
@@ -57,14 +30,12 @@ vi.mock("../logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
-import {
-  ensureSandboxAssetCached,
-  presignSandboxAssetUrl,
-} from "./cache";
+import { ensureSandboxAssetCached, presignSandboxAssetUrl } from "./cache";
 import type { SandboxAssetSpec } from "./catalog";
 
 const ARCHIVE = new Uint8Array([7, 7, 7, 7]);
 const ARCHIVE_SHA = createHash("sha256").update(ARCHIVE).digest("hex");
+const EXPECTED_KEY = `sandbox-assets/chrome-headless-shell/149.0.7790.0/linux-x64-${ARCHIVE_SHA.slice(0, 16)}.zip`;
 
 function spec(overrides: Partial<SandboxAssetSpec> = {}): SandboxAssetSpec {
   return {
@@ -80,49 +51,44 @@ function spec(overrides: Partial<SandboxAssetSpec> = {}): SandboxAssetSpec {
 }
 
 beforeEach(() => {
-  dbState.rows = [];
-  dbState.upserts = [];
+  storageMocks.existingKeys = new Set();
   storageMocks.uploads = [];
   vi.unstubAllGlobals();
 });
 
-test("a ready row short-circuits without touching upstream", async () => {
-  dbState.rows = [
-    {
-      status: "ready",
-      storageBucket: "test-bucket",
-      storageKey: "sandbox-assets/x.zip",
-    },
-  ];
+test("an existing digest-addressed object short-circuits without touching upstream", async () => {
+  storageMocks.existingKeys.add(EXPECTED_KEY);
   const fetchSpy = vi.fn();
   vi.stubGlobal("fetch", fetchSpy);
 
-  const location = await ensureSandboxAssetCached(spec());
+  const { key } = await ensureSandboxAssetCached(spec());
 
-  assert.equal(location.key, "sandbox-assets/x.zip");
+  assert.equal(key, EXPECTED_KEY);
   assert.equal(fetchSpy.mock.calls.length, 0);
-  assert.equal(dbState.upserts.length, 0);
+  assert.equal(storageMocks.uploads.length, 0);
 });
 
-test("first miss mirrors from upstream, verifies sha256, and marks ready", async () => {
+test("first miss mirrors from upstream, verifies sha256, and uploads once", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response(ARCHIVE.slice().buffer, { status: 200 })),
   );
 
-  const location = await ensureSandboxAssetCached(spec());
+  const { key } = await ensureSandboxAssetCached(spec());
 
-  assert.equal(
-    location.key,
-    "sandbox-assets/chrome-headless-shell/149.0.7790.0/linux-x64.zip",
-  );
+  assert.equal(key, EXPECTED_KEY);
+  assert.deepEqual(storageMocks.uploads, [
+    { key: EXPECTED_KEY, bytes: ARCHIVE.byteLength },
+  ]);
+
+  // Second call now hits the HEAD probe — no new fetch, no new upload.
+  const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  await ensureSandboxAssetCached(spec());
+  assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(storageMocks.uploads.length, 1);
-  assert.equal(storageMocks.uploads[0]?.bytes, ARCHIVE.byteLength);
-  const statuses = dbState.upserts.map((upsert) => upsert.status);
-  assert.deepEqual(statuses, ["pending", "ready"]);
 });
 
-test("a digest mismatch fails the row and never stores a byte", async () => {
+test("a digest mismatch never stores a byte and does not retry that URL", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -130,39 +96,33 @@ test("a digest mismatch fails the row and never stores a byte", async () => {
     ),
   );
 
-  await assert.rejects(
-    ensureSandboxAssetCached(spec()),
-    /sha256 mismatch/u,
-  );
+  await assert.rejects(ensureSandboxAssetCached(spec()), /sha256 mismatch/u);
   assert.equal(storageMocks.uploads.length, 0);
-  assert.equal(dbState.upserts.at(-1)?.status, "failed");
-  // Mismatch is not transient: exactly one request, no retries on that URL.
   const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
   assert.equal(fetchMock.mock.calls.length, 1);
 });
 
-test("a previously failed row is retried, not sticky", async () => {
-  dbState.rows = [{ status: "failed", storageBucket: null, storageKey: null }];
+test("transient upstream failures are retried per URL", async () => {
+  let calls = 0;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(ARCHIVE.slice().buffer, { status: 200 })),
+    vi.fn(async () => {
+      calls += 1;
+      if (calls < 3) {
+        throw new Error("read ECONNRESET");
+      }
+      return new Response(ARCHIVE.slice().buffer, { status: 200 });
+    }),
   );
 
-  const location = await ensureSandboxAssetCached(spec());
-
-  assert.match(location.key, /linux-x64\.zip$/u);
-  assert.equal(dbState.upserts.at(-1)?.status, "ready");
+  const { key } = await ensureSandboxAssetCached(spec());
+  assert.equal(key, EXPECTED_KEY);
+  assert.equal(calls, 3);
 });
 
 test("presign resolves through the cache and returns a URL", async () => {
-  dbState.rows = [
-    {
-      status: "ready",
-      storageBucket: "test-bucket",
-      storageKey: "sandbox-assets/k.zip",
-    },
-  ];
+  storageMocks.existingKeys.add(EXPECTED_KEY);
 
   const url = await presignSandboxAssetUrl(spec());
-  assert.equal(url, "https://cache.example/sandbox-assets/k.zip?sig=test");
+  assert.equal(url, `https://cache.example/${EXPECTED_KEY}?sig=test`);
 });

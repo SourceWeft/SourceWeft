@@ -8,6 +8,9 @@
  * (image manifests, creation-time volume mounts) slot in ahead of these
  * without changing this file's contract — P1 ships the universal rungs:
  *
+ *   image   — the sandbox image pre-baked the asset and declares it via env
+ *             (the primary path under the image-first policy; everything
+ *             below is insurance for when the image assumption falls through)
  *   stamp   — the asset is already staged in this sandbox (idempotency)
  *   fetch   — in-sandbox curl from a presigned platform-cache URL
  *   upload  — session uploadFiles streamed from the platform cache
@@ -26,6 +29,7 @@ const ASSETS_DIR = ".sourceweft-assets";
 
 const SAFE_SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u;
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
+const SAFE_ENV_VAR = /^[A-Z_][A-Z0-9_]*$/u;
 
 export type RuntimeAssetSessionLike = {
   readonly rootDir: string;
@@ -56,6 +60,12 @@ export type RuntimeAssetPlan = {
   entrypoint: string;
   /** Relative paths to chmod +x after unpack (entrypoint is always included). */
   makeExecutable?: readonly string[];
+  /**
+   * Rung "image": env var the sandbox image sets to the baked asset's
+   * entrypoint (e.g. SOURCEWEFT_REMOTION_BROWSER). Probed with `test -x`
+   * before any staging — a hit costs one command and no bytes.
+   */
+  imagePathEnvVar?: string;
   /** Rung "fetch": short-lived URL to the platform cache. */
   fetchUrl?: () => Promise<string | null>;
   /** Rung "upload": archive bytes from the platform cache. */
@@ -66,7 +76,7 @@ export type RuntimeAssetResolution = {
   name: string;
   version: string;
   ok: boolean;
-  rung?: "stamp" | "fetch" | "upload";
+  rung?: "image" | "stamp" | "fetch" | "upload";
   entrypointPath?: string;
   ms: number;
   bytes?: number;
@@ -102,6 +112,9 @@ function validatePlan(plan: RuntimeAssetPlan): string | null {
   if (!SHA256_HEX.test(plan.sha256)) return "asset sha256 must be 64-char hex";
   if (plan.entrypoint.includes("..") || plan.entrypoint.startsWith("/")) {
     return `unsafe entrypoint: ${plan.entrypoint}`;
+  }
+  if (plan.imagePathEnvVar && !SAFE_ENV_VAR.test(plan.imagePathEnvVar)) {
+    return `unsafe image env var: ${plan.imagePathEnvVar}`;
   }
   return null;
 }
@@ -206,6 +219,26 @@ async function ensureRuntimeAsset(input: {
         ? { toolCallId: `${input.toolCallKey}:asset-${plan.name}-${label}` }
         : {}),
     });
+
+  // Rung: image — the sandbox image baked the asset and points at it via env.
+  // Probed inside the sandbox (not trusted from config): the env must exist
+  // AND be an executable path, or the ladder proceeds as if unset.
+  if (plan.imagePathEnvVar) {
+    const probe = await execute(
+      `test -x "$${plan.imagePathEnvVar}" && printf '%s' "$${plan.imagePathEnvVar}"`,
+      "image-probe",
+    );
+    const probedPath = probe.output.trim();
+    if (probe.exitCode === 0 && probedPath.startsWith("/")) {
+      return {
+        ...base,
+        ok: true,
+        rung: "image",
+        entrypointPath: probedPath,
+        ms: Date.now() - startedAt,
+      };
+    }
+  }
 
   // Rung: stamp — already staged in this sandbox.
   if (await hasValidStamp({ session, plan, assetDir })) {

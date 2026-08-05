@@ -13,6 +13,7 @@ import {
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   type GetObjectCommandOutput,
   PutObjectCommand,
   S3Client,
@@ -317,16 +318,44 @@ const PRESIGNED_URL_TTL_SECONDS = 15 * 60;
 /**
  * Sandbox runtime-asset cache objects
  * (docs/architecture/sandbox-runtime-assets.md): immutable archives mirrored
- * from their upstream, keyed by the same (name, version, platform) triple as
- * the `sandbox_asset_cache` index rows. Deliberately outside any workspace
- * prefix — these are platform-global, not tenant content.
+ * from their upstream. Deliberately outside any workspace prefix — these are
+ * platform-global, not tenant content.
+ *
+ * The sha256 prefix in the key is what makes object storage itself the cache
+ * index: uploads happen only after full-digest verification, so *existence of
+ * the key implies content identity* — no database row needed. A spec whose
+ * digest changes (which immutability forbids, but defensively) derives a
+ * different key and simply misses.
  */
 export function buildSandboxAssetStorageKey(input: {
   name: string;
   version: string;
   platform: string;
+  sha256: string;
 }) {
-  return `sandbox-assets/${input.name}/${input.version}/${input.platform}.zip`;
+  return `sandbox-assets/${input.name}/${input.version}/${input.platform}-${input.sha256.slice(0, 16)}.zip`;
+}
+
+/** HEAD probe — the cache's entire "is it mirrored yet?" check. */
+export async function sandboxAssetObjectExists(input: {
+  key: string;
+}): Promise<boolean> {
+  try {
+    await s3Client.send(
+      new HeadObjectCommand({
+        Bucket: getConfiguredBucket(),
+        Key: input.key,
+      }),
+    );
+    return true;
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } })
+      .$metadata?.httpStatusCode;
+    if (status === 404 || (error as { name?: string }).name === "NotFound") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function uploadSandboxAssetObject(input: {

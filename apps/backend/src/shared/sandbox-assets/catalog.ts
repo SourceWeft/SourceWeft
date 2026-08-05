@@ -16,6 +16,8 @@ export type SandboxAssetSpec = {
   readonly archive: "zip";
   readonly entrypoint: string;
   readonly sizeBytes?: number;
+  /** Env var a baked image sets to the asset's entrypoint (image rung). */
+  readonly imagePathEnvVar?: string;
   readonly upstreamUrls: readonly string[];
 };
 

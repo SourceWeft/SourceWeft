@@ -161,6 +161,11 @@ RUN set -eux; \
 # pptxgenjs + react-icons + sharp form the primary "create from scratch"
 # path.  playwright gives us Chromium for HTML→PPT/PDF/screenshots.
 # @marp-team/marp-cli offers a fast Markdown→PPT fallback.
+#
+# PLAYWRIGHT_BROWSERS_PATH: installed browsers must live at a world-readable
+# fixed path.  Without it they land in /root/.cache/ms-playwright — invisible
+# to the non-root sandbox user every command actually runs as.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN set -eux; \
     npm install -g \
         pptxgenjs \
@@ -172,7 +177,38 @@ RUN set -eux; \
         playwright \
     ; \
     npx playwright install --with-deps chromium; \
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}"; \
     npm cache clean --force
+
+# ── Chrome Headless Shell (Remotion render browser) ────────────────────
+# Runtime-asset image rung (docs/architecture/sandbox-runtime-assets.md):
+# the video pipeline's render scripts read SOURCEWEFT_REMOTION_BROWSER and
+# pass it to @remotion/renderer as browserExecutable — Remotion never probes
+# system browsers (the Playwright Chromium above is invisible to it) and
+# would otherwise download this exact build from remotion.media at render
+# time, per job, per sandbox.  Version and sha256 are pinned in lockstep
+# with @remotion/renderer (see packages/builtin-tool-video-presentation/
+# src/pipeline/renderer-version.ts — update both together).
+# linux64-only upstream; skipped on other arches (the ladder's platform
+# cache then serves x64 sandboxes and other arches degrade explicitly).
+ENV SOURCEWEFT_REMOTION_BROWSER=/opt/chrome-headless-shell/chrome-headless-shell-linux64/chrome-headless-shell
+RUN set -eux; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    if [ "${dpkgArch##*-}" = "amd64" ]; then \
+        CHROME_HEADLESS_SHELL_VERSION=149.0.7790.0; \
+        CHROME_HEADLESS_SHELL_SHA256=a3b011ab4c726e215cdeb623907a09cfb48f07054a7271fdda555ee2ae4f804d; \
+        curl -fsSL --retry 4 \
+            "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_HEADLESS_SHELL_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+            -o /tmp/chrome-headless-shell.zip; \
+        echo "${CHROME_HEADLESS_SHELL_SHA256}  /tmp/chrome-headless-shell.zip" | sha256sum -c -; \
+        mkdir -p /opt/chrome-headless-shell; \
+        unzip -q /tmp/chrome-headless-shell.zip -d /opt/chrome-headless-shell; \
+        rm /tmp/chrome-headless-shell.zip; \
+        chmod -R a+rX /opt/chrome-headless-shell; \
+        chmod a+rx "${SOURCEWEFT_REMOTION_BROWSER}"; \
+    else \
+        echo "chrome-headless-shell: no linux64 build for ${dpkgArch}, skipping bake"; \
+    fi
 
 # Corepack keeps package manager downloads in a per-user cache. Install pnpm
 # as a real global executable so the sandbox user gets the pinned version.
@@ -213,6 +249,10 @@ RUN set -eux; \
     pdftoppm -v; \
     node -e "require('pptxgenjs'); console.log('pptxgenjs ok')"; \
     npx playwright --version; \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        "${SOURCEWEFT_REMOTION_BROWSER}" --version; \
+        test -r "${PLAYWRIGHT_BROWSERS_PATH}"; \
+    fi; \
     echo "All smoke tests passed."
 
 # ── Labels ──────────────────────────────────────────────────────────────

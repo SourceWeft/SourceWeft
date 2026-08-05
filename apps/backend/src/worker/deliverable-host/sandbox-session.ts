@@ -156,6 +156,9 @@ export function createDeliverableSandboxAdapter(input: {
           sha256: spec.sha256,
           archive: spec.archive,
           entrypoint: spec.entrypoint,
+          ...(spec.imagePathEnvVar
+            ? { imagePathEnvVar: spec.imagePathEnvVar }
+            : {}),
           fetchUrl: () => presignSandboxAssetUrl(spec),
           loadContent: () => loadSandboxAssetContent(spec),
         });

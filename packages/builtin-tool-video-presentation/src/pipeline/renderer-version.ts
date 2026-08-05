@@ -33,6 +33,9 @@ export const CHROME_HEADLESS_SHELL_ASSET = {
   archive: "zip",
   entrypoint: "chrome-headless-shell-linux64/chrome-headless-shell",
   sizeBytes: 191_850_000,
+  // Image rung (primary path): the sandbox image bakes the browser and sets
+  // this env to its absolute path; the ladder's other rungs are insurance.
+  imagePathEnvVar: REMOTION_BROWSER_ENV_VAR,
   upstreamUrls: [
     "https://storage.googleapis.com/chrome-for-testing-public/149.0.7790.0/linux64/chrome-headless-shell-linux64.zip",
   ],

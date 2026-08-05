@@ -59,6 +59,67 @@ function fakeSession(input: {
 const STAMP_PATH =
   "/workspace/.sourceweft-assets/chrome-headless-shell/149.0.7790.0/.sourceweft-asset.json";
 
+test("image rung: a baked asset declared via env wins with one probe command", async () => {
+  const { session, executed } = fakeSession({
+    executeResults: [
+      {
+        exitCode: 0,
+        output: "/opt/chrome-headless-shell/chrome-headless-shell",
+      },
+    ],
+  });
+
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        imagePathEnvVar: "SOURCEWEFT_REMOTION_BROWSER",
+        fetchUrl: async () => "https://cache.example/x.zip",
+      }),
+    ],
+  });
+
+  assert.equal(resolution?.ok, true);
+  assert.equal(resolution?.rung, "image");
+  assert.equal(
+    resolution?.entrypointPath,
+    "/opt/chrome-headless-shell/chrome-headless-shell",
+  );
+  assert.equal(executed.length, 1);
+  assert.match(executed[0]!, /test -x "\$SOURCEWEFT_REMOTION_BROWSER"/u);
+});
+
+test("image rung misses cleanly when the env is unset or not executable", async () => {
+  const { session } = fakeSession({
+    // probe fails, then fetch succeeds.
+    executeResults: [{ exitCode: 1, output: "" }, { exitCode: 0 }],
+  });
+
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        imagePathEnvVar: "SOURCEWEFT_REMOTION_BROWSER",
+        fetchUrl: async () => "https://cache.example/x.zip",
+      }),
+    ],
+  });
+
+  assert.equal(resolution?.ok, true);
+  assert.equal(resolution?.rung, "fetch");
+});
+
+test("an unsafe image env var name is rejected before touching the session", async () => {
+  const { session, executed } = fakeSession({});
+  const [resolution] = await ensureRuntimeAssets({
+    session,
+    assets: [plan({ imagePathEnvVar: 'X"; rm -rf /; "' })],
+  });
+  assert.equal(resolution?.ok, false);
+  assert.match(resolution?.error ?? "", /unsafe image env var/u);
+  assert.equal(executed.length, 0);
+});
+
 test("valid stamp resolves immediately without executing anything", async () => {
   const files = new Map<string, Uint8Array>([
     [
