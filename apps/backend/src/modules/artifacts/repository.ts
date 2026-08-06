@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { artifacts, artifactVersions, db } from "@sourceweft/db";
 import { visibleContentWhere } from "../workspace/content-visibility";
 
@@ -580,6 +580,12 @@ export async function listArtifactRecords(input: {
   const conditions = [
     eq(artifacts.teamId, input.teamId),
     eq(artifacts.workspaceId, input.workspaceId),
+    // A generation that failed leaves a `failed` row so the originating thread
+    // can still surface the error inline (that path queries by threadId, not
+    // this list). The workspace-wide Artifacts gallery, however, should not
+    // carry dead entries — exclude them here so a failed run is not browsable
+    // as an artifact.
+    ne(artifacts.status, "failed"),
     input.viewerUserId
       ? visibleContentWhere(
           { userId: input.viewerUserId },
