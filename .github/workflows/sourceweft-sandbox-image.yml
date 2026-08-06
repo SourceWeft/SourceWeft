@@ -11,7 +11,12 @@ on:
     - cron: '0 3 1 * *'
   workflow_dispatch:
 
+# An explicit permissions block zeroes every scope it does not name, so
+# contents: read must be spelled out or actions/checkout gets "Repository
+# not found" on this private repo (the failure mode of every run before
+# 2026-08-06).
 permissions:
+  contents: read
   packages: write
 
 concurrency:
