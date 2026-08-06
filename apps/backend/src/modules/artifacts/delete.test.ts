@@ -15,7 +15,7 @@ vi.mock("../workspace/guards", () => ({
 vi.mock("../workspace", () => ({
   workspaceService: {
     resolveAccess: vi.fn(),
-    canAdministerContainer: vi.fn(),
+    canAdministerContent: vi.fn(),
   },
 }));
 
@@ -39,8 +39,8 @@ vi.mock("./repository", () => ({
 }));
 
 const resolveAccess = vi.mocked(workspaceService.resolveAccess);
-const canAdministerContainer = vi.mocked(
-  workspaceService.canAdministerContainer,
+const canAdministerContent = vi.mocked(
+  workspaceService.canAdministerContent,
 );
 const mockedFindArtifact = vi.mocked(findArtifactRecord);
 const mockedDeleteRecord = vi.mocked(deleteArtifactRecord);
@@ -124,7 +124,7 @@ test("creator delete revokes the share, deletes the row, then the stored bytes",
 
 test("a non-creator member without admin standing is refused", async () => {
   resolveAccess.mockResolvedValue(memberAccess());
-  canAdministerContainer.mockReturnValue(false);
+  canAdministerContent.mockReturnValue(false);
   mockedFindArtifact.mockResolvedValue(artifactRow());
 
   await assert.rejects(
@@ -143,7 +143,7 @@ test("a non-creator member without admin standing is refused", async () => {
 
 test("a workspace admin may delete another member's artifact", async () => {
   resolveAccess.mockResolvedValue(memberAccess());
-  canAdministerContainer.mockReturnValue(true);
+  canAdministerContent.mockReturnValue(true);
   mockedFindArtifact.mockResolvedValue(artifactRow());
 
   const result = await contentArtifactsService.deleteArtifact({

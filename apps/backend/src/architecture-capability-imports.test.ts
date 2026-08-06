@@ -176,6 +176,11 @@ const FILE_EXEMPTIONS: readonly {
     reason:
       "Genuine integration test, same seam as above: the host's generic stage runner bound to a real pipeline's stage list and progress function. What is being checked is that the host's runner behaves correctly against a pipeline it did not author.",
   },
+  {
+    file: "shared/sandbox-assets/catalog.ts",
+    reason:
+      "The runtime-asset catalog (docs/architecture/sandbox-runtime-assets.md, A3): a feature declares its asset spec beside the dependency pin that makes the version correct — chrome-headless-shell's version and sha live next to the @remotion/renderer pin in the video package — and this file only assembles the lookup table. Importing the spec value is the price of keeping spec and pin adjacent; moving it into contracts would separate them, and the catalog stays a plain data table either way.",
+  },
 ];
 
 /**
