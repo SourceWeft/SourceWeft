@@ -17,6 +17,12 @@
     "test": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "BETTER_AUTH_SECRET",
+        "MODEL_GATEWAY_ENCRYPTION_SECRET"
+      ],
       "outputs": []
     },
     "dev": {
