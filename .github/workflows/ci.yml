@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   lint-and-type:
     name: Lint & Type Check
@@ -25,7 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ghcr.io/${{ github.repository }}-postgres:17
+        # Hardcoded lowercase: github.repository is SourceWeft/SourceWeft and
+        # Docker rejects uppercase repository names; expressions have no lower().
+        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
         env:
           POSTGRES_USER: sourceweft
           POSTGRES_PASSWORD: sourceweft
