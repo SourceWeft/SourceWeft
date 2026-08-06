@@ -23,6 +23,9 @@
   },
   "packageManager": "pnpm@10.19.0",
   "pnpm": {
+    "overrides": {
+      "fast-uri": "^3.1.5"
+    },
     "peerDependencyRules": {
       "allowedVersions": {
         "@better-auth/core>better-call": "2",
