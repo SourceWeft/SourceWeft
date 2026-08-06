@@ -260,9 +260,6 @@ test("DELETE /mcp-installs/:installId forwards workspace, user, and install", as
 
 test("POST /mcp-installs/:installId/credentials validates auth-specific payloads", async () => {
   resetRouteMocks();
-  mocks.upsertCredentials.mockRejectedValue(
-    new McpError(400, "MCP_CREDENTIAL_REQUIRED", "Bearer token is required"),
-  );
 
   const response = await createTestApp().request(
     "/v1/workspaces/workspace_1/mcp-installs/mcp_install_1/credentials",
@@ -273,17 +270,18 @@ test("POST /mcp-installs/:installId/credentials validates auth-specific payloads
     },
   );
 
+  // The request schema rejects per-auth-type empty submissions before the
+  // service runs, so a blank Save can never overwrite a stored credential.
   assert.equal(response.status, 400);
   assert.deepEqual(await readJson(response), {
-    code: "MCP_CREDENTIAL_REQUIRED",
-    message: "Bearer token is required",
+    code: "VALIDATION_ERROR",
+    details: {
+      fieldErrors: { bearerToken: ["Bearer token is required"] },
+      formErrors: [],
+    },
+    message: "Invalid request body",
   });
-  assert.deepEqual(mocks.upsertCredentials.mock.calls[0]?.[0], {
-    workspaceId: "workspace_1",
-    userId: "user_1",
-    installId: "mcp_install_1",
-    authType: "bearer",
-  });
+  assert.equal(mocks.upsertCredentials.mock.calls.length, 0);
 });
 
 test("POST /mcp-installs/:installId/test maps MCP errors to API errors", async () => {

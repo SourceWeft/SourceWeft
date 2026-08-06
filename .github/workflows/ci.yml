@@ -61,6 +61,15 @@ jobs:
         with:
           version: 10.19.0
       - run: pnpm install --frozen-lockfile
+      # DB-backed suites query real tables; the service container starts from
+      # a bare image, so the schema has to be applied first.
+      - name: Run database migrations
+        run: pnpm --filter @sourceweft/backend db:migrate
+        env:
+          DATABASE_URL: postgresql://sourceweft:sourceweft@localhost:5432/sourceweft
+          REDIS_URL: redis://localhost:6379/0
+          BETTER_AUTH_SECRET: ci-test-secret-at-least-32-chars
+          MODEL_GATEWAY_ENCRYPTION_SECRET: ci-test-model-secret-at-least-32
       # Runs every workspace package that defines a `test` script, not just
       # backend and web. Package-level suites (contracts, model-gateway,
       # builtin-*) were previously never executed in CI, so breakage there
@@ -72,6 +81,10 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           BETTER_AUTH_SECRET: ci-test-secret-at-least-32-chars
           MODEL_GATEWAY_ENCRYPTION_SECRET: ci-test-model-secret-at-least-32
+          # parsers.test.ts drives the OCR fallback through the real provider
+          # module, whose config demands a key at load; locally .env supplies
+          # it. Any non-empty value works — requests are mocked.
+          PDF2MARKDOWN_API_KEY: ci-test-pdf2markdown-key
 
   docker-build:
     name: Docker Build
