@@ -338,11 +338,9 @@ export function combineToolApprovalResumes(
     if (!resume.sourceweft) {
       return metadata;
     }
-    const {
-      connectorActions: _connectorActions,
-      sandboxActions: _sandboxActions,
-      ...rest
-    } = resume.sourceweft;
+    const rest = { ...resume.sourceweft };
+    delete rest.connectorActions;
+    delete rest.sandboxActions;
     return { ...metadata, ...rest };
   }, {});
   const sourceweft =

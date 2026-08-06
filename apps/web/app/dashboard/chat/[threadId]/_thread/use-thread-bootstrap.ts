@@ -9,7 +9,6 @@ import {
 import {
   clearPendingThreadTurn,
   readPendingThreadTurn,
-  type PendingThreadTurn,
 } from "../../_components/pending-thread-turn";
 import type {
   ModelItem,

@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type KeyboardEvent,
 } from "react";
 import type { FileUIPart } from "ai";
@@ -415,8 +414,6 @@ export function Composer({
   thinkingSettings = { mode: "auto" as const, effort: "medium" as const },
   onThinkingSettingsChange,
   modelCapabilities,
-  imageModelAvailable = false,
-  imageModelAlias,
   notionConnectorId = null,
   activeConnectorIds,
   connectorToolsEnabled = {},
@@ -523,12 +520,19 @@ export function Composer({
     () => new Set(disabledToolNames),
     [disabledToolNames],
   );
-  const resolvedConnectorIds: Record<string, string | null> = {
-    ...activeConnectorIds,
-    ...(notionConnectorId ? { notion: notionConnectorId } : {}),
-  };
-  const connectorTypes = Object.keys(resolvedConnectorIds).filter(
-    (type) => resolvedConnectorIds[type] !== null,
+  const resolvedConnectorIds: Record<string, string | null> = useMemo(
+    () => ({
+      ...activeConnectorIds,
+      ...(notionConnectorId ? { notion: notionConnectorId } : {}),
+    }),
+    [activeConnectorIds, notionConnectorId],
+  );
+  const connectorTypes = useMemo(
+    () =>
+      Object.keys(resolvedConnectorIds).filter(
+        (type) => resolvedConnectorIds[type] !== null,
+      ),
+    [resolvedConnectorIds],
   );
   const mentionSources = useMemo(
     () =>
@@ -559,20 +563,13 @@ export function Composer({
       availableSkills,
       connectorToolsEnabled,
       connectorTypes,
-      disabledToolNames,
+      disabledToolNameSet,
       selectedSkillIds,
     ],
   );
   const effectiveSelectedSkillIdSet = useMemo(
     () => new Set(effectiveSelectedSkillIds),
     [effectiveSelectedSkillIds],
-  );
-  const effectiveSelectedSkills = useMemo(
-    () =>
-      availableSkills.filter((skill) =>
-        effectiveSelectedSkillIdSet.has(skill.id),
-      ),
-    [availableSkills, effectiveSelectedSkillIdSet],
   );
   const activeSlashSkills = useMemo(
     () =>
@@ -624,14 +621,6 @@ export function Composer({
     }
     return map;
   }, [capabilityCommands, searchEnabled]);
-  const availableSkillByName = useMemo(() => {
-    const map = new Map<string, ChatSkillItem>();
-    for (const skill of availableSkills) {
-      map.set(skill.name.toLowerCase(), skill);
-      map.set(skill.slug.toLowerCase(), skill);
-    }
-    return map;
-  }, [availableSkills]);
   const activeSlashSkillByName = useMemo(() => {
     const map = new Map<string, ChatSkillItem>();
     for (const skill of activeSlashSkills) {
@@ -873,7 +862,7 @@ export function Composer({
     activeSlashSkills,
     capabilityCommands,
     capabilityToolByName,
-    connectorTypes.join(","),
+    connectorTypes,
     searchEnabled,
   ]);
   function supportsSkillSlash(
@@ -1311,6 +1300,9 @@ export function Composer({
     setCapabilityOptionOverrides(next.capabilityOptionOverrides);
     setCapabilityToolEnabledOverrides(next.capabilityToolEnabledOverrides);
     setSkillOptionOverrides(next.skillOptionOverrides);
+    // Deliberately keyed on the serialized options: the ref-based skip above
+    // must fire once per incoming options change, not on identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalizedComposerOptionsKey]);
 
   useEffect(() => {

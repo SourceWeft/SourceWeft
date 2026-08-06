@@ -802,6 +802,7 @@ export function DashboardChatPageClient() {
       handleLibrarySourcesLoad,
       handleLibrarySourcesMerge,
       handleMcpSelectionChange,
+      handleSkillSelectionChange,
       initialSourcesForWorkspace,
       loadAvailableSkills,
       persistActiveSourceIds,

@@ -39,7 +39,6 @@ export function ConnectorsTab({
   onManageConnectors,
   onSyncConnector,
   onToggleConnectorStatus,
-  webhookConfigsById,
 }: {
   connectors: ConnectorItem[];
   connectorBusyById: Record<string, boolean>;
@@ -55,21 +54,6 @@ export function ConnectorsTab({
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
-  const errorConnectors = activeConnectors.filter(
-    (connector) => connector.status === "error" || connector.raw.lastError,
-  );
-  const needsWebhookSetup = activeConnectors.some((connector) => {
-    const catalogItem = connectorCatalog.find(
-      (item) => item.id === connector.raw.connectorType,
-    );
-    const webhookConfig = webhookConfigsById[connector.id] ?? null;
-    return Boolean(
-      catalogItem?.supportsWebhook &&
-        webhookConfig &&
-        !webhookConfig.isConfigured,
-    );
-  });
-
   return (
     <section className="space-y-2">
       <div className="mb-2 flex items-center justify-between gap-2">

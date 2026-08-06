@@ -217,6 +217,7 @@ export function DashboardChatThreadPageView({
       handleLibrarySourcesMerge,
       handleMcpSelectionChange,
       handleSourceHubCitationOpen,
+      hasCachedWorkspaceSources,
       initialSourcesForWorkspace,
       loadAvailableSkills,
       persistActiveSourceIds,

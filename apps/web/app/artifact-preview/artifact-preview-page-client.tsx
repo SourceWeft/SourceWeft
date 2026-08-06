@@ -33,7 +33,7 @@ export function ArtifactPreviewPageClient({
   workspaceId: string | null;
 }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [pollFailureCount, setPollFailureCount] = useState(0);
+  const [, setPollFailureCount] = useState(0);
   const canLoad = Boolean(artifactId && workspaceId);
 
   useEffect(() => {

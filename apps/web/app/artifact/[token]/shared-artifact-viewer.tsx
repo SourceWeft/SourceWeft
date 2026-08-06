@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Download, Maximize2, X } from "lucide-react";
 import {
   resolveArtifactPreview,
@@ -227,13 +228,13 @@ export function SharedArtifactViewer({
       <footer
         className={`border-t px-4 py-2 text-center ${immersive ? "hidden" : ""}`}
       >
-        <a
+        <Link
           className="text-xs text-muted-foreground hover:text-foreground"
           href="/"
           rel="noopener"
         >
           Made with <span className="font-medium">SourceWeft</span>
-        </a>
+        </Link>
       </footer>
     </main>
   );

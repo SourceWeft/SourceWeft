@@ -33,7 +33,6 @@ import type {
 import { removeDisabledToolSkills } from "./thread-utils";
 import {
   coerceSkillIdsSelection,
-  normalizeSkillIdsForRequest,
   resolveDefaultActiveSkillIds,
   SKILL_SELECTION_LIMIT_MESSAGE,
 } from "../../_components/chat-canvas/tool-selection";

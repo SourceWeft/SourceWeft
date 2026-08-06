@@ -45,7 +45,6 @@ export function AssistantActivityPlaceholder({
 function AssistantToolGroup({
   availableCitations,
   header,
-  isStreaming = false,
   items,
   onCitationClick,
   onWorkfileClick,

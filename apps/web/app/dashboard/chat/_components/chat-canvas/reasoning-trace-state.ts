@@ -120,6 +120,7 @@ function formatApprovalState(state: ToolCallRecord["approvalState"]) {
 }
 
 function escapeExecuteCommandForDisplay(command: string) {
+  // eslint-disable-next-line no-control-regex -- escaping control chars is the point
   return command.replace(/[\x00-\x1f\x7f]/g, (character) => {
     if (character === "\n") return "\\n";
     if (character === "\r") return "\\r";

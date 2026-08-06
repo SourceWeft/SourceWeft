@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
 import { SharedArtifactViewer } from "./shared-artifact-viewer";
 
@@ -118,12 +119,12 @@ export default async function SharedArtifactPage({
         <p className="max-w-sm text-sm text-muted-foreground">
           The link may have been revoked or has expired.
         </p>
-        <a
+        <Link
           className="text-sm font-medium text-primary underline-offset-4 hover:underline"
           href="/"
         >
           Go to SourceWeft
-        </a>
+        </Link>
       </main>
     );
   }
