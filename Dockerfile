@@ -51,7 +51,9 @@ COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
 RUN pnpm --filter web build
-RUN pnpm --filter @sourceweft/backend build
+# The backend build runs tsc over the whole workspace graph; the default heap
+# ceiling OOMs on CI runners (exit 134).
+RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm --filter @sourceweft/backend build
 RUN find . -name ".turbo" -type d -prune -exec rm -rf '{}' + \
   && rm -rf apps/web/.next/cache
 
