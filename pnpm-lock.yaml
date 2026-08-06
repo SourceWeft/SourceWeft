@@ -280,6 +280,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.9.1
         version: 2.10.1
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -351,6 +354,9 @@ importers:
       '@types/chrome':
         specifier: ^0.1.10
         version: 0.1.38
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -367,6 +373,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.9.1
         version: 2.10.1
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -1285,6 +1294,9 @@ importers:
         specifier: workspace:*
         version: link:../market-contracts
     devDependencies:
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
       typescript:
         specifier: 5.9.2
         version: 5.9.2

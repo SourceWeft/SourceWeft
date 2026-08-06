@@ -3,7 +3,7 @@ import { test, describe, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@sourceweft/db";
 import { messages, threads, workspaces } from "@sourceweft/db";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 
 describe("renderBlocks persistence", () => {
   let workspaceId: string;
@@ -13,9 +13,9 @@ describe("renderBlocks persistence", () => {
   let teamId: string;
 
   beforeEach(async () => {
-    teamId = uuidv4();
+    teamId = randomUUID();
 
-    workspaceId = uuidv4();
+    workspaceId = randomUUID();
     await db.insert(workspaces).values({
       id: workspaceId,
       organizationId: teamId,
@@ -23,7 +23,7 @@ describe("renderBlocks persistence", () => {
       slug: `test-workspace-${workspaceId}`,
     });
 
-    threadId = uuidv4();
+    threadId = randomUUID();
     await db.insert(threads).values({
       id: threadId,
       teamId,
@@ -31,7 +31,7 @@ describe("renderBlocks persistence", () => {
       title: "Test Thread",
     });
 
-    userMessageId = uuidv4();
+    userMessageId = randomUUID();
     await db.insert(messages).values({
       id: userMessageId,
       teamId,
@@ -42,7 +42,7 @@ describe("renderBlocks persistence", () => {
       metadata: {},
     });
 
-    assistantMessageId = uuidv4();
+    assistantMessageId = randomUUID();
     await db.insert(messages).values({
       id: assistantMessageId,
       teamId,
