@@ -9,8 +9,10 @@ import {
 import { getChatAdapter, getEmbeddingsAdapter } from "../adapters/registry";
 import {
   downgradeForcedToolChoiceInKwargs,
+  effectiveForcedToolChoiceSupport,
   resolveModelCapabilities,
 } from "../model-capabilities";
+import { resolveThinkingMode } from "../thinking";
 import type {
   ChatCompleteInput,
   EmbedBatchInput,
@@ -19,6 +21,7 @@ import type {
   LangChainChatModelLike,
   LangChainEmbeddingsLike,
   ModelGatewayConfig,
+  ProviderKind,
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
@@ -27,9 +30,14 @@ import type {
 } from "../types";
 import { resolveModelGatewayConfig, resolveRequestCandidates } from "../config";
 import {
+  canonicalProviderModel,
+  isAdministrativeGatewayCode,
   isFailoverableError,
   ModelGatewayError,
   normalizeGatewayError,
+  selectSurfacedFailoverError,
+  summarizeTargetErrors,
+  type TargetAttemptError,
 } from "../errors";
 import {
   buildGenerationErrorEvent,
@@ -83,6 +91,36 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     .trim();
 }
 
+/** Adapter guarantee lookup that tolerates injected/test provider kinds. */
+function adapterGuaranteesThinkingDisable(kind: ProviderKind): boolean {
+  try {
+    return getChatAdapter(kind).guaranteesThinkingDisable === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Effective forced-tool_choice support for this request: the model capability
+ * refined by the request's thinking mode and the adapter's disable guarantee.
+ */
+export function requestForcedToolChoiceSupport(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+  payload: ChatCompleteInput;
+}): boolean {
+  return effectiveForcedToolChoiceSupport({
+    capabilities: resolveModelCapabilities(
+      input.target.providerModel,
+      input.config.modelCapabilities,
+    ),
+    thinkingMode: resolveThinkingMode(input.payload.thinking),
+    adapterGuaranteesThinkingDisable: adapterGuaranteesThinkingDisable(
+      input.target.providerKind,
+    ),
+  });
+}
+
 export function createChatModel(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -107,17 +145,15 @@ export function createChatModel(input: {
     ? model
     : model.bindTools(
         input.payload.tools,
-        // Downgrade a forced tool_choice the model can't take (DeepSeek V4) —
-        // the request-wide counterpart of the structured-output strategy.
+        // Downgrade a forced tool_choice the model can't take (DeepSeek V4
+        // while thinking) — the request-wide counterpart of the
+        // structured-output strategy.
         downgradeForcedToolChoiceInKwargs(
           resolveBindToolsKwargs({
             toolBindingOptions: input.payload.toolBindingOptions,
             toolChoice: input.payload.toolChoice,
           }),
-          resolveModelCapabilities(
-            input.target.providerModel,
-            input.config.modelCapabilities,
-          ),
+          requestForcedToolChoiceSupport(input),
         ),
       ) as LangChainChatModelLike;
 
@@ -238,10 +274,7 @@ function createObservedLangChainChatModel(input: {
         toolBindingOptions: input.payload.toolBindingOptions,
         toolChoice: input.payload.toolChoice,
       }),
-      resolveModelCapabilities(
-        input.target.providerModel,
-        input.config.modelCapabilities,
-      ),
+      requestForcedToolChoiceSupport(input),
     );
     return createObservedLangChainChatModel({
       ...input,
@@ -705,7 +738,12 @@ function createFailoverLangChainChatModel(input: {
       (options as { signal?: AbortSignal } | undefined)?.signal?.aborted,
     );
 
-  const logFailover = (operation: string, index: number, error: unknown) => {
+  const logFailover = (
+    operation: string,
+    index: number,
+    error: unknown,
+    nextIndex: number,
+  ) => {
     const target = input.candidates[index]!;
     input.config.logger.warn?.("model-gateway.failover", {
       operation,
@@ -713,9 +751,12 @@ function createFailoverLangChainChatModel(input: {
       failedProvider: target.provider,
       failedProviderModel: target.providerModel,
       errorCode: normalizeGatewayError(error).code,
-      nextProvider: input.candidates[index + 1]?.provider,
+      nextProvider: input.candidates[nextIndex]?.provider,
       attempt: index + 1,
       candidates: input.candidates.length,
+      ...(nextIndex > index + 1
+        ? { skippedSameModelCandidates: nextIndex - index - 1 }
+        : {}),
     });
   };
 
@@ -724,33 +765,81 @@ function createFailoverLangChainChatModel(input: {
     options: Record<string, unknown> | undefined,
     run: (model: LangChainChatModelLike) => Promise<T>,
   ): Promise<T> {
-    let lastError: unknown;
-    for (let index = 0; index < input.candidates.length; index++) {
+    const attempts: TargetAttemptError[] = [];
+    let index = 0;
+    while (index < input.candidates.length) {
       const target = input.candidates[index]!;
       try {
         const result = await run(getModel(index));
         input.config.targetHealth.markSuccess(target);
         return result;
       } catch (error) {
-        lastError = error;
+        attempts.push({
+          provider: target.provider,
+          providerModel: target.providerModel,
+          error,
+        });
         const aborted = callerAborted(options);
+        const errorCode = normalizeGatewayError(error).code;
+        // STRUCTURED_OUTPUT deliberately does not cool the target down: the
+        // channel is healthy, the model/request combination is what failed.
         if (!aborted && isFailoverableError(error)) {
           input.config.targetHealth.markFailure(target);
         }
-        const isLast = index === input.candidates.length - 1;
-        if (isLast || aborted || !isFailoverableError(error)) {
+        if (!aborted && isAdministrativeGatewayCode(errorCode)) {
+          input.config.logger.warn?.("model-gateway.target-quota", {
+            operation,
+            alias: target.routeDecision.alias,
+            provider: target.provider,
+            providerModel: target.providerModel,
+            errorCode,
+          });
+        }
+        if (aborted) {
           throw error;
         }
-        logFailover(operation, index, error);
+
+        // Same-model channels cannot rescue a model-level structured-output
+        // failure — skip straight to the next genuinely different model.
+        let nextIndex = -1;
+        if (isFailoverableError(error)) {
+          nextIndex = index + 1;
+        } else if (errorCode === "STRUCTURED_OUTPUT") {
+          nextIndex = index + 1;
+          while (
+            nextIndex < input.candidates.length &&
+            canonicalProviderModel(
+              input.candidates[nextIndex]!.providerModel,
+            ) === canonicalProviderModel(target.providerModel)
+          ) {
+            nextIndex += 1;
+          }
+        }
+
+        if (nextIndex < 0 || nextIndex >= input.candidates.length) {
+          const surfaced = selectSurfacedFailoverError(attempts);
+          if (attempts.length > 1) {
+            input.config.logger.warn?.("model-gateway.failover-exhausted", {
+              operation,
+              alias: target.routeDecision.alias,
+              surfacedErrorCode: normalizeGatewayError(surfaced).code,
+              targetErrors: summarizeTargetErrors(attempts),
+            });
+          }
+          throw surfaced;
+        }
+        logFailover(operation, index, error, nextIndex);
+        index = nextIndex;
       }
     }
-    throw lastError;
+    throw selectSurfacedFailoverError(attempts);
   }
 
   async function* streamWithFailover(
     messages: unknown,
     options?: Record<string, unknown>,
   ): AsyncGenerator<unknown> {
+    const attempts: TargetAttemptError[] = [];
     for (let index = 0; index < input.candidates.length; index++) {
       const target = input.candidates[index]!;
       const isLast = index === input.candidates.length - 1;
@@ -765,14 +854,41 @@ function createFailoverLangChainChatModel(input: {
         // ends the stream rather than replaying half an answer elsewhere.
         first = await iterator.next();
       } catch (error) {
+        attempts.push({
+          provider: target.provider,
+          providerModel: target.providerModel,
+          error,
+        });
         const aborted = callerAborted(options);
+        const errorCode = normalizeGatewayError(error).code;
         if (!aborted && isFailoverableError(error)) {
           input.config.targetHealth.markFailure(target);
         }
-        if (isLast || aborted || !isFailoverableError(error)) {
-          throw error;
+        if (!aborted && isAdministrativeGatewayCode(errorCode)) {
+          input.config.logger.warn?.("model-gateway.target-quota", {
+            operation: "chat.stream",
+            alias: target.routeDecision.alias,
+            provider: target.provider,
+            providerModel: target.providerModel,
+            errorCode,
+          });
         }
-        logFailover("chat.stream", index, error);
+        if (aborted || !isFailoverableError(error)) {
+          throw aborted ? error : selectSurfacedFailoverError(attempts);
+        }
+        if (isLast) {
+          const surfaced = selectSurfacedFailoverError(attempts);
+          if (attempts.length > 1) {
+            input.config.logger.warn?.("model-gateway.failover-exhausted", {
+              operation: "chat.stream",
+              alias: target.routeDecision.alias,
+              surfacedErrorCode: normalizeGatewayError(surfaced).code,
+              targetErrors: summarizeTargetErrors(attempts),
+            });
+          }
+          throw surfaced;
+        }
+        logFailover("chat.stream", index, error, index + 1);
         continue;
       }
       input.config.targetHealth.markSuccess(target);
@@ -843,4 +959,3 @@ function createFailoverLangChainChatModel(input: {
     },
   }) as LangChainChatModelLike;
 }
-

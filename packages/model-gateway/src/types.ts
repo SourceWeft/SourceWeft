@@ -19,6 +19,14 @@ export type GatewayErrorCode =
   | "UPSTREAM"
   | "POLICY"
   | "QUOTA"
+  /**
+   * The model answered but produced no usable structured result (empty
+   * content, no schema tool call, unparseable JSON). A model-level failure:
+   * replaying the identical request on another channel of the *same* model is
+   * deterministic waste, so failover applies only across different models;
+   * the productive recovery is the caller's repair loop.
+   */
+  | "STRUCTURED_OUTPUT"
   | "UNKNOWN";
 
 export interface GatewayErrorData {
@@ -318,6 +326,25 @@ export interface ProviderRoutingConfig {
  */
 export interface ModelCapabilities {
   supportsForcedToolChoice: boolean;
+  /**
+   * The model accepts a forced `tool_choice` only while thinking is off
+   * (DeepSeek V4: thinking is the provider default and a forced choice under
+   * it is a hard 400). Conditional refinement of `supportsForcedToolChoice`:
+   * that flag stays `true` for such models, and the effective support is
+   * resolved against the request's thinking mode. Models whose thinking
+   * cannot be disabled at all (deepseek-reasoner) keep the unconditional
+   * `supportsForcedToolChoice: false` instead.
+   */
+  forcedToolChoiceBlockedByThinking: boolean;
+  /**
+   * The model is known to emit tool-call arguments that are not valid JSON
+   * (DeepSeek: unescaped ASCII quotes inside Chinese string content), so a
+   * structured call whose arguments fail strict parsing may be repaired with
+   * `jsonrepair` before being given up on. Quirk handling is declared here —
+   * the model DB, LiteLLM-style — never ambient: a well-behaved model's
+   * malformed output should fail loudly, not be silently patched.
+   */
+  toolCallArgumentJsonRepair: boolean;
 }
 
 /** A capability rule matched by a case-insensitive substring of the model name. */

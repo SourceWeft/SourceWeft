@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { jsonrepair } from "jsonrepair";
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import {
   ModelGatewayError,
@@ -6,11 +7,16 @@ import {
   toGatewayErrorData,
 } from "../errors";
 import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
-import { createChatModel, toLangChainMessages } from "./utils";
+import {
+  createChatModel,
+  requestForcedToolChoiceSupport,
+  toLangChainMessages,
+} from "./utils";
 import {
   planStructuredOutput,
   resolveModelCapabilities,
 } from "../model-capabilities";
+import { resolveThinkingMode } from "../thinking";
 import type {
   ChatCompleteInput,
   ChatCompleteResult,
@@ -110,16 +116,168 @@ function responseTextForDiagnostics(rawMessage: unknown) {
     .join("");
 }
 
+/**
+ * Diagnostics that turn "empty structured output" from a mystery into a
+ * diagnosis: a `finishReason` of "length" plus a non-zero `reasoningLength`
+ * on zero content is the thinking-ate-the-budget signature, and
+ * `invalidToolCalls` entries mean the model DID call the schema tool but its
+ * arguments failed strict JSON parsing (DeepSeek's unescaped inner quotes).
+ */
+function structuredOutputResponseDiagnostics(rawMessage: unknown) {
+  const record = extractObjectRecord(rawMessage);
+  if (!record) {
+    return {};
+  }
+  const responseMetadata = extractResponseMetadata(
+    record as { response_metadata?: unknown },
+  );
+  const finishReason = extractFinishReason(responseMetadata);
+  const reasoning = extractReasoning(record as unknown as AIMessage);
+  const invalidToolCalls = (
+    Array.isArray(record.invalid_tool_calls) ? record.invalid_tool_calls : []
+  ).flatMap((call) => {
+    const callRecord = extractObjectRecord(call);
+    if (!callRecord) {
+      return [];
+    }
+    return [
+      {
+        name: typeof callRecord.name === "string" ? callRecord.name : undefined,
+        argsLength:
+          typeof callRecord.args === "string"
+            ? callRecord.args.length
+            : undefined,
+        error:
+          typeof callRecord.error === "string"
+            ? callRecord.error.slice(0, 200)
+            : undefined,
+      },
+    ];
+  });
+  return {
+    ...(finishReason ? { finishReason } : {}),
+    ...(typeof reasoning === "string"
+      ? { reasoningLength: reasoning.length }
+      : {}),
+    ...(invalidToolCalls.length > 0 ? { invalidToolCalls } : {}),
+  };
+}
+
+type SalvagedStructuredOutput = {
+  args: Record<string, unknown>;
+  source: "invalid_tool_calls" | "additional_kwargs";
+  repaired: boolean;
+};
+
+function parsePossiblyBrokenJson(
+  text: string,
+  allowRepair: boolean,
+): { value: unknown; repaired: boolean } | undefined {
+  try {
+    return { value: JSON.parse(text), repaired: false };
+  } catch {
+    if (!allowRepair) {
+      return undefined;
+    }
+    try {
+      return { value: JSON.parse(jsonrepair(text)), repaired: true };
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Last-resort recovery of a structured tool call the strict parser rejected.
+ *
+ * DeepSeek V4 routinely emits tool arguments whose *content* embeds unescaped
+ * ASCII double quotes (Chinese copy quoting terms: `没有"表面"`), which is
+ * invalid JSON. LangChain's `parseToolCall` does a strict `JSON.parse`, files
+ * the whole call under `invalid_tool_calls`, and leaves `tool_calls` empty —
+ * the model did its job and the answer was thrown away. This salvages those
+ * arguments from `invalid_tool_calls` or the raw wire kwargs.
+ *
+ * Two distinct rungs, LiteLLM-style:
+ * - a plain re-parse (arguments were valid JSON all along, just never lifted
+ *   into `tool_calls`) is lossless and runs for every model;
+ * - the `jsonrepair` rung actually rewrites model output, so it runs only for
+ *   models whose capability declares the quirk (`toolCallArgumentJsonRepair`
+ *   in the model DB / deployment config) — a well-behaved model's malformed
+ *   output should fail loudly, not be silently patched.
+ *
+ * Safe by construction either way: every structured caller schema-validates
+ * the parsed object downstream (the gateway's own zod parse or the caller's
+ * validate/repair loop), so a mis-repair is rejected there rather than
+ * propagated.
+ */
+function salvageStructuredToolCall(input: {
+  rawMessage: unknown;
+  toolName: string;
+  allowJsonRepair: boolean;
+}): SalvagedStructuredOutput | undefined {
+  const record = extractObjectRecord(input.rawMessage);
+  if (!record) {
+    return undefined;
+  }
+  const candidates: Array<{
+    argsText: string;
+    source: SalvagedStructuredOutput["source"];
+  }> = [];
+  for (const call of Array.isArray(record.invalid_tool_calls)
+    ? record.invalid_tool_calls
+    : []) {
+    const callRecord = extractObjectRecord(call);
+    if (
+      callRecord?.name === input.toolName &&
+      typeof callRecord.args === "string"
+    ) {
+      candidates.push({
+        argsText: callRecord.args,
+        source: "invalid_tool_calls",
+      });
+    }
+  }
+  const kwargs = extractObjectRecord(record.additional_kwargs);
+  for (const call of Array.isArray(kwargs?.tool_calls)
+    ? kwargs.tool_calls
+    : []) {
+    const fn = extractObjectRecord(extractObjectRecord(call)?.function);
+    if (fn?.name === input.toolName && typeof fn.arguments === "string") {
+      candidates.push({ argsText: fn.arguments, source: "additional_kwargs" });
+    }
+  }
+  for (const candidate of candidates) {
+    const parsed = parsePossiblyBrokenJson(
+      candidate.argsText,
+      input.allowJsonRepair,
+    );
+    if (
+      parsed &&
+      parsed.value &&
+      typeof parsed.value === "object" &&
+      !Array.isArray(parsed.value)
+    ) {
+      return {
+        args: parsed.value as Record<string, unknown>,
+        source: candidate.source,
+        repaired: parsed.repaired,
+      };
+    }
+  }
+  return undefined;
+}
+
 function invalidStructuredOutputError(rawMessage: unknown) {
   const content = responseTextForDiagnostics(rawMessage);
   if (content === undefined) {
     return new ModelGatewayError({
-      code: "UPSTREAM",
+      code: "STRUCTURED_OUTPUT",
       message: "Provider returned invalid structured output",
       retryable: true,
       metadata: {
         structuredOutputDiagnostics: {
           contentAvailable: false,
+          ...structuredOutputResponseDiagnostics(rawMessage),
         },
       },
     });
@@ -131,7 +289,7 @@ function invalidStructuredOutputError(rawMessage: unknown) {
     .trim()
     .slice(0, STRUCTURED_OUTPUT_PREVIEW_LENGTH);
   return new ModelGatewayError({
-    code: "UPSTREAM",
+    code: "STRUCTURED_OUTPUT",
     message: `Provider returned invalid structured output (length=${content.length}, sha256=${contentSha256})`,
     retryable: true,
     metadata: {
@@ -139,6 +297,7 @@ function invalidStructuredOutputError(rawMessage: unknown) {
         contentLength: content.length,
         contentSha256,
         ...(contentPreview ? { contentPreview } : {}),
+        ...structuredOutputResponseDiagnostics(rawMessage),
       },
     },
   });
@@ -338,6 +497,8 @@ async function invokeStructuredViaAvailableTool(input: {
   target: ResolvedRequestTarget;
   options?: RequestOptions;
   strict?: boolean;
+  allowJsonRepair: boolean;
+  logger?: ResolvedModelGatewayConfig["logger"];
 }): Promise<{ rawMessage: AIMessage; structuredOutput: Record<string, unknown> }> {
   if (typeof input.model.bindTools !== "function") {
     throw new ModelGatewayError({
@@ -377,9 +538,61 @@ async function invokeStructuredViaAvailableTool(input: {
     typeof call.args !== "object" ||
     Array.isArray(call.args)
   ) {
+    const salvaged = salvageStructuredToolCall({
+      rawMessage,
+      toolName: input.config.name,
+      allowJsonRepair: input.allowJsonRepair,
+    });
+    if (salvaged) {
+      input.logger?.warn?.("model-gateway.structured-output-repaired", {
+        toolName: input.config.name,
+        provider: input.target.provider,
+        providerModel: input.target.providerModel,
+        source: salvaged.source,
+        repaired: salvaged.repaired,
+      });
+      return { rawMessage, structuredOutput: salvaged.args };
+    }
     throw invalidStructuredOutputError(rawMessage);
   }
   return { rawMessage, structuredOutput: call.args as Record<string, unknown> };
+}
+
+/**
+ * Structured output on a thinking-by-default model: an unstated thinking mode
+ * ("auto") resolves to the provider default, which for such models means the
+ * response budget is spent on hidden reasoning before the structured answer —
+ * the classic empty-content death of a schema call. A caller that asked for a
+ * schema and expressed no thinking preference gets reliability: "auto" is
+ * translated to "off". An explicit "effort" request is respected untouched —
+ * that caller owns the token-budget consequence.
+ */
+function adjustPayloadForStructuredOutput(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+  payload: ChatCompleteInput;
+}): ChatCompleteInput {
+  if (!input.payload.structuredOutput) {
+    return input.payload;
+  }
+  const capabilities = resolveModelCapabilities(
+    input.target.providerModel,
+    input.config.modelCapabilities,
+  );
+  if (!capabilities.forcedToolChoiceBlockedByThinking) {
+    return input.payload;
+  }
+  if (resolveThinkingMode(input.payload.thinking) !== "auto") {
+    return input.payload;
+  }
+  return {
+    ...input.payload,
+    thinking: {
+      ...input.payload.thinking,
+      mode: "off",
+      enabled: false,
+    },
+  };
 }
 
 export async function runBridgeChatComplete(input: {
@@ -389,27 +602,32 @@ export async function runBridgeChatComplete(input: {
   options?: RequestOptions;
 }): Promise<ChatCompleteResult> {
   try {
-    const model = createChatModel(input);
-    const messages = toLangChainMessages(input.payload.messages);
+    const payload = adjustPayloadForStructuredOutput(input);
+    const request = { ...input, payload };
+    const model = createChatModel(request);
+    const messages = toLangChainMessages(payload.messages);
     let rawMessage: AIMessage;
     let structuredOutput: Record<string, unknown> | undefined;
 
-    if (input.payload.structuredOutput) {
-      const config = input.payload.structuredOutput;
+    if (payload.structuredOutput) {
+      const config = payload.structuredOutput;
       const schema =
         config.description && typeof config.schema.description !== "string"
           ? { ...config.schema, description: config.description }
           : config.schema;
-      // Resolve the structured-output strategy from model capabilities ahead of
-      // execution, so the branch below follows a plan instead of judging inline.
       const capabilities = resolveModelCapabilities(
         input.target.providerModel,
         input.config.modelCapabilities,
       );
+      // Resolve the structured-output strategy ahead of execution, so the
+      // branch below follows a plan instead of judging inline. Support is the
+      // *effective* one: with thinking now off on a hard-disable adapter,
+      // DeepSeek V4 regains forced function_calling and the schema tool call
+      // is guaranteed rather than merely available.
       const plan = planStructuredOutput({
         method: config.method,
         strict: config.strict,
-        supportsForcedToolChoice: capabilities.supportsForcedToolChoice,
+        supportsForcedToolChoice: requestForcedToolChoiceSupport(request),
       });
       if (plan.strategy === "availableTool") {
         const structured = await invokeStructuredViaAvailableTool({
@@ -419,6 +637,8 @@ export async function runBridgeChatComplete(input: {
           messages,
           target: input.target,
           options: input.options,
+          allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+          logger: input.config.logger,
           ...(plan.strict !== undefined ? { strict: plan.strict } : {}),
         });
         rawMessage = structured.rawMessage;
@@ -464,9 +684,32 @@ export async function runBridgeChatComplete(input: {
           typeof parsed !== "object" ||
           Array.isArray(parsed)
         ) {
-          throw invalidStructuredOutputError(result?.raw);
+          // The strict parser may have discarded a real tool call over
+          // invalid JSON in its arguments — salvage before failing.
+          const salvaged = rawMessage
+            ? salvageStructuredToolCall({
+                rawMessage,
+                toolName: config.name,
+                allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+              })
+            : undefined;
+          if (!salvaged || !rawMessage) {
+            throw invalidStructuredOutputError(result?.raw);
+          }
+          input.config.logger.warn?.(
+            "model-gateway.structured-output-repaired",
+            {
+              toolName: config.name,
+              provider: input.target.provider,
+              providerModel: input.target.providerModel,
+              source: salvaged.source,
+              repaired: salvaged.repaired,
+            },
+          );
+          structuredOutput = salvaged.args;
+        } else {
+          structuredOutput = parsed as Record<string, unknown>;
         }
-        structuredOutput = parsed as Record<string, unknown>;
       }
     } else {
       rawMessage = (await model.invoke(

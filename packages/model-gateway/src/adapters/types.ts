@@ -20,6 +20,16 @@ import type {
 export interface ChatAdapter {
   readonly kind: ProviderKind;
 
+  /**
+   * The adapter's thinking-mode "off" is a hard provider-level disable (e.g.
+   * DeepSeek's `thinking: {type: "disabled"}`), not a best-effort hint. Only
+   * behind such a guarantee may a `forcedToolChoiceBlockedByThinking` model be
+   * given a forced `tool_choice`: through a best-effort channel (OpenRouter's
+   * `reasoning.effort: "none"` across heterogeneous upstreams) the upstream may
+   * still be thinking, and the forced choice would 400.
+   */
+  readonly guaranteesThinkingDisable?: boolean;
+
   createModel(
     target: ResolvedRequestTarget,
     input: ChatCompleteInput,

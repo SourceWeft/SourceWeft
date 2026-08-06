@@ -2,12 +2,15 @@ import type {
   ModelCapabilities,
   ModelCapabilityRule,
   StructuredOutputConfig,
+  ThinkingMode,
 } from "./types";
 
 type StructuredOutputMethod = NonNullable<StructuredOutputConfig["method"]>;
 
 const DEFAULTS: ModelCapabilities = {
   supportsForcedToolChoice: true,
+  forcedToolChoiceBlockedByThinking: false,
+  toolCallArgumentJsonRepair: false,
 };
 
 /**
@@ -82,6 +85,36 @@ export function planStructuredOutput(input: {
 }
 
 /**
+ * Whether a forced `tool_choice` may actually be sent on *this* request —
+ * `supportsForcedToolChoice` refined by the thinking-conditional restriction.
+ *
+ * A `forcedToolChoiceBlockedByThinking` model regains forced tool_choice only
+ * when both hold: the request's thinking mode is `"off"`, and the adapter's
+ * "off" is a hard provider-level disable (`guaranteesThinkingDisable`). "auto"
+ * counts as thinking ON for such models — thinking-by-default is precisely why
+ * the flag exists — and a best-effort disable (OpenRouter fan-out) must not be
+ * trusted with a forced choice the upstream may still 400 on.
+ */
+export function effectiveForcedToolChoiceSupport(input: {
+  capabilities: Pick<
+    ModelCapabilities,
+    "supportsForcedToolChoice" | "forcedToolChoiceBlockedByThinking"
+  >;
+  thinkingMode: ThinkingMode;
+  adapterGuaranteesThinkingDisable: boolean;
+}): boolean {
+  if (!input.capabilities.supportsForcedToolChoice) {
+    return false;
+  }
+  if (!input.capabilities.forcedToolChoiceBlockedByThinking) {
+    return true;
+  }
+  return (
+    input.thinkingMode === "off" && input.adapterGuaranteesThinkingDisable
+  );
+}
+
+/**
  * A `tool_choice` that forces the model to call a tool: `"required"`/`"any"`, a
  * bare tool name, or a `{type:"function"|"tool", ...}` object. `"auto"`/`"none"`
  * (and unset) leave the model free and are never forced.
@@ -117,17 +150,19 @@ export function normalizeToolChoiceForModel(input: {
 /**
  * Apply {@link normalizeToolChoiceForModel} to a bindTools kwargs object,
  * returning it unchanged (same reference) when nothing needs downgrading.
+ * `supportsForcedToolChoice` is the *effective* support for this request —
+ * callers resolve it via {@link effectiveForcedToolChoiceSupport}.
  */
 export function downgradeForcedToolChoiceInKwargs(
   kwargs: Record<string, unknown> | undefined,
-  capabilities: Pick<ModelCapabilities, "supportsForcedToolChoice">,
+  supportsForcedToolChoice: boolean,
 ): Record<string, unknown> | undefined {
   if (!kwargs || !("tool_choice" in kwargs)) {
     return kwargs;
   }
   const normalized = normalizeToolChoiceForModel({
     toolChoice: kwargs.tool_choice,
-    supportsForcedToolChoice: capabilities.supportsForcedToolChoice,
+    supportsForcedToolChoice,
   });
   return normalized === kwargs.tool_choice
     ? kwargs

@@ -1,5 +1,10 @@
 import { resolveRequestCandidates } from "../config";
-import { isFailoverableCode, normalizeGatewayError } from "../errors";
+import {
+  isAdministrativeGatewayCode,
+  isFailoverableCode,
+  normalizeGatewayError,
+  surfacedErrorRankForCode,
+} from "../errors";
 import { runBridgeChatComplete, runBridgeChatStream } from "../bridge/chat";
 import { runWithTargetFailover } from "./failover";
 import {
@@ -15,10 +20,41 @@ import type {
   ChatCompleteResult,
   ChatStreamEvent,
   ChatStreamInput,
+  GatewayErrorData,
   RequestOptions,
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
 } from "../types";
+
+/** A stream attempt whose error event was swallowed in favor of failover. */
+type FailedStreamAttempt = {
+  provider: string;
+  providerModel: string;
+  error: GatewayErrorData;
+};
+
+/**
+ * Data-level twin of `selectSurfacedFailoverError`: the most informative
+ * error of the chain wins, earliest attempt on ties.
+ */
+function selectSurfacedStreamError(
+  previousAttempts: readonly FailedStreamAttempt[],
+  terminalError: GatewayErrorData,
+): GatewayErrorData {
+  let best = previousAttempts[0]?.error ?? terminalError;
+  for (const attempt of previousAttempts.slice(1)) {
+    if (
+      surfacedErrorRankForCode(attempt.error.code) >
+      surfacedErrorRankForCode(best.code)
+    ) {
+      best = attempt.error;
+    }
+  }
+  return surfacedErrorRankForCode(terminalError.code) >
+    surfacedErrorRankForCode(best.code)
+    ? terminalError
+    : best;
+}
 
 export class ModelGatewayChatEndpoint {
   constructor(private readonly config: ResolvedModelGatewayConfig) {}
@@ -116,19 +152,34 @@ export class ModelGatewayChatEndpoint {
     options?: RequestOptions,
   ): AsyncGenerator<ChatStreamEvent> {
     const candidates = await resolveRequestCandidates(this.config, input);
+    const failedAttempts: FailedStreamAttempt[] = [];
 
     for (const [index, target] of candidates.entries()) {
       const hasNext = index < candidates.length - 1;
-      const outcome = yield* this.streamAttempt(input, options, target, hasNext);
+      const outcome = yield* this.streamAttempt(
+        input,
+        options,
+        target,
+        hasNext,
+        failedAttempts,
+      );
       if (outcome === "done") {
         return;
       }
-      // "failover": nothing reached the consumer — try the next target.
+      // Failover: nothing reached the consumer — record the swallowed error
+      // (so a later terminal error can be out-ranked by it) and try the next
+      // target.
+      failedAttempts.push({
+        provider: target.provider,
+        providerModel: target.providerModel,
+        error: outcome.failedWith,
+      });
       this.config.logger.warn?.("model-gateway.failover", {
         operation: "chat.stream",
         alias: target.routeDecision.alias,
         failedProvider: target.provider,
         failedProviderModel: target.providerModel,
+        errorCode: outcome.failedWith.code,
         nextProvider: candidates[index + 1]?.provider,
         attempt: index + 1,
         candidates: candidates.length,
@@ -137,18 +188,25 @@ export class ModelGatewayChatEndpoint {
   }
 
   /**
-   * One target's streaming attempt. Returns "failover" only while nothing has
-   * been yielded to the consumer: once any event is out, the attempt is
-   * committed and a later failure ends the stream just as it does today. The
-   * bridge surfaces failures as terminal `{type: "error"}` events rather than
+   * One target's streaming attempt. Fails over only while nothing has been
+   * yielded to the consumer: once any event is out, the attempt is committed
+   * and a later failure ends the stream just as it does today. The bridge
+   * surfaces failures as terminal `{type: "error"}` events rather than
    * throws, so the failover check lives on the event, not in a catch block.
+   *
+   * A terminal error event is surfaced by informativeness, not recency: when
+   * earlier targets failed with a substantive error and this last one is
+   * merely administrative (an unfunded tail target's 402), the earlier error
+   * is what the consumer sees — same policy as `selectSurfacedFailoverError`
+   * on the complete path.
    */
   private async *streamAttempt(
     input: ChatStreamInput,
     options: RequestOptions | undefined,
     target: ResolvedRequestTarget,
     hasNext: boolean,
-  ): AsyncGenerator<ChatStreamEvent, "done" | "failover"> {
+    previousAttempts: readonly FailedStreamAttempt[],
+  ): AsyncGenerator<ChatStreamEvent, "done" | { failedWith: GatewayErrorData }> {
     const requestOptions = this.resolveRequestOptions(options);
     const generation = createGenerationObservation({
       operation: "chat.stream",
@@ -193,17 +251,48 @@ export class ModelGatewayChatEndpoint {
           });
         }
 
+        let eventToYield = event;
         if (event.type === "error") {
           completed = true;
+          let surfaced = event.error;
+          if (previousAttempts.length > 0) {
+            const candidate = selectSurfacedStreamError(
+              previousAttempts,
+              event.error,
+            );
+            if (candidate !== event.error) {
+              this.config.logger.warn?.("model-gateway.failover-exhausted", {
+                operation: "chat.stream",
+                alias: target.routeDecision.alias,
+                surfacedErrorCode: candidate.code,
+                targetErrors: [
+                  ...previousAttempts.map((attempt) => ({
+                    provider: attempt.provider,
+                    providerModel: attempt.providerModel,
+                    code: attempt.error.code,
+                    message: attempt.error.message.slice(0, 200),
+                  })),
+                  {
+                    provider: target.provider,
+                    providerModel: target.providerModel,
+                    code: event.error.code,
+                    message: event.error.message.slice(0, 200),
+                  },
+                ],
+              });
+              eventToYield = { type: "error", error: candidate };
+              surfaced = candidate;
+            }
+          }
           await emitGenerationError(this.config, {
             traceId: generation.start.traceId,
             spanId: generation.spanId,
             endedAt: new Date().toISOString(),
             latencyMs: Date.now() - generation.startedAtMs,
-            errorCode: event.error.code,
-            errorMessage: event.error.message,
-            providerStatusCode: event.error.statusCode,
-            providerRequestId: event.error.requestId,
+            errorCode: surfaced.code,
+            errorMessage: surfaced.message,
+            providerStatusCode: surfaced.statusCode,
+            providerRequestId: surfaced.requestId,
             attributes: generation.start.attributes,
           });
           if (
@@ -213,6 +302,18 @@ export class ModelGatewayChatEndpoint {
             this.config.targetHealth.markFailure(target);
           }
           if (
+            !options?.signal?.aborted &&
+            isAdministrativeGatewayCode(event.error.code)
+          ) {
+            this.config.logger.warn?.("model-gateway.target-quota", {
+              operation: "chat.stream",
+              alias: target.routeDecision.alias,
+              provider: target.provider,
+              providerModel: target.providerModel,
+              errorCode: event.error.code,
+            });
+          }
+          if (
             !yielded &&
             hasNext &&
             !options?.signal?.aborted &&
@@ -220,12 +321,12 @@ export class ModelGatewayChatEndpoint {
           ) {
             // Swallow the error event: the consumer never saw this attempt,
             // so the next target starts a clean stream.
-            return "failover";
+            return { failedWith: event.error };
           }
         }
 
         yielded = true;
-        yield event;
+        yield eventToYield;
       }
     } finally {
       if (!completed) {

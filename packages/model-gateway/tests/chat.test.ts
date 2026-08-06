@@ -357,7 +357,7 @@ test("chat.complete surfaces bounded diagnostics when structured parsing fails",
       }),
     (error: unknown) => {
       assert.ok(error instanceof ModelGatewayError);
-      assert.equal(error.code, "UPSTREAM");
+      assert.equal(error.code, "STRUCTURED_OUTPUT");
       const diagnostics = error.metadata?.structuredOutputDiagnostics as Record<
         string,
         unknown
@@ -462,7 +462,7 @@ test("chat.complete sanitizes invalid JSON errors from the real OpenAI-compatibl
         }),
       (error: unknown) => {
         assert.ok(error instanceof ModelGatewayError);
-        assert.equal(error.code, "UPSTREAM");
+        assert.equal(error.code, "STRUCTURED_OUTPUT");
         assert.equal(error.retryable, true);
         assert.equal(
           error.message,

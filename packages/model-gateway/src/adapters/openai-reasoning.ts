@@ -21,8 +21,14 @@ export function buildOpenAIReasoningModelKwargs(input: ChatCompleteInput) {
 
   if (mode === "off") {
     if (supportedParameters.has("reasoning")) {
+      // effort "none" is OpenRouter's documented way to actually stop
+      // reasoning; `exclude: true` alone only hides it — the tokens are still
+      // generated and billed, and they still eat max_tokens (which is how a
+      // structured call with a tight budget dies with empty content). exclude
+      // stays as defence for endpoints that ignore "none".
       return {
         reasoning: {
+          effort: "none",
           exclude: true,
         },
       };

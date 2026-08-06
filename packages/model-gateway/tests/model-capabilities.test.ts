@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   downgradeForcedToolChoiceInKwargs,
+  effectiveForcedToolChoiceSupport,
   normalizeToolChoiceForModel,
   planStructuredOutput,
   resolveModelCapabilities,
@@ -97,13 +98,71 @@ test("kwargs downgrade rewrites tool_choice and leaves the rest intact", () => {
   assert.deepEqual(
     downgradeForcedToolChoiceInKwargs(
       { tool_choice: "required", parallel_tool_calls: false },
-      { supportsForcedToolChoice: false },
+      false,
     ),
     { tool_choice: "auto", parallel_tool_calls: false },
   );
   const kwargs = { tool_choice: "required" };
+  assert.equal(downgradeForcedToolChoiceInKwargs(kwargs, true), kwargs);
+});
+
+test("effectiveForcedToolChoiceSupport: blocked-by-thinking model regains forced choice only off + guaranteed disable", () => {
+  const blocked = {
+    supportsForcedToolChoice: true,
+    forcedToolChoiceBlockedByThinking: true,
+  };
+  // "auto" counts as thinking ON for a thinking-by-default model.
+  for (const thinkingMode of ["auto", "effort"] as const) {
+    assert.equal(
+      effectiveForcedToolChoiceSupport({
+        capabilities: blocked,
+        thinkingMode,
+        adapterGuaranteesThinkingDisable: true,
+      }),
+      false,
+      thinkingMode,
+    );
+  }
+  // Off through a best-effort channel (OpenRouter) must not be trusted.
   assert.equal(
-    downgradeForcedToolChoiceInKwargs(kwargs, { supportsForcedToolChoice: true }),
-    kwargs,
+    effectiveForcedToolChoiceSupport({
+      capabilities: blocked,
+      thinkingMode: "off",
+      adapterGuaranteesThinkingDisable: false,
+    }),
+    false,
+  );
+  // Off behind a hard provider disable restores the forced choice.
+  assert.equal(
+    effectiveForcedToolChoiceSupport({
+      capabilities: blocked,
+      thinkingMode: "off",
+      adapterGuaranteesThinkingDisable: true,
+    }),
+    true,
+  );
+  // The unconditional flag stays authoritative (deepseek-reasoner).
+  assert.equal(
+    effectiveForcedToolChoiceSupport({
+      capabilities: {
+        supportsForcedToolChoice: false,
+        forcedToolChoiceBlockedByThinking: false,
+      },
+      thinkingMode: "off",
+      adapterGuaranteesThinkingDisable: true,
+    }),
+    false,
+  );
+  // An unblocked model is unaffected by thinking state.
+  assert.equal(
+    effectiveForcedToolChoiceSupport({
+      capabilities: {
+        supportsForcedToolChoice: true,
+        forcedToolChoiceBlockedByThinking: false,
+      },
+      thinkingMode: "effort",
+      adapterGuaranteesThinkingDisable: false,
+    }),
+    true,
   );
 });

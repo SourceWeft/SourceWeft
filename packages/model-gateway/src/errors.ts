@@ -5,6 +5,10 @@ const RETRYABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
   "TIMEOUT",
   "RATE_LIMIT",
   "UPSTREAM",
+  // DeepSeek's own JSON-mode docs admit the occasional empty response; one
+  // more attempt against the same target is legitimate. What is NOT legitimate
+  // is walking the failover chain with it — see FAILOVERABLE_CODES.
+  "STRUCTURED_OUTPUT",
 ]);
 
 /**
@@ -23,6 +27,23 @@ const FAILOVERABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
   "QUOTA",
   "AUTH",
 ]);
+
+/**
+ * Failures that describe the *account behind a target*, not the request:
+ * a drained balance (QUOTA) or a dead key (AUTH). They may consume a failover
+ * hop, but they must never *represent* the request's failure while any target
+ * produced a substantive error — a tail target that happens to be unfunded
+ * would otherwise mask the real cause (a 402 hiding an empty structured
+ * output was a production incident). See {@link selectSurfacedFailoverError}.
+ */
+const ADMINISTRATIVE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
+  "QUOTA",
+  "AUTH",
+]);
+
+export function isAdministrativeGatewayCode(code: GatewayErrorCode): boolean {
+  return ADMINISTRATIVE_CODES.has(code);
+}
 
 export class ModelGatewayError extends Error {
   readonly code: GatewayErrorCode;
@@ -239,4 +260,120 @@ export function toGatewayErrorData(error: unknown): GatewayErrorData {
     provider: normalized.provider,
     requestId: normalized.requestId,
   };
+}
+
+/** One failed target attempt, as the failover loops collect them. */
+export type TargetAttemptError = {
+  provider: string;
+  providerModel: string;
+  error: unknown;
+};
+
+/**
+ * Canonical model identity across gateways. Aggregators prefix the same model
+ * with an org path ("deepseek-v4-pro" direct vs "deepseek/deepseek-v4-pro" on
+ * OpenRouter/Cloudflare), so "same model?" must compare the final path
+ * segment, case-insensitively — a raw string comparison let a model-level
+ * failure walk every channel of the very model that just failed.
+ */
+export function canonicalProviderModel(providerModel: string): string {
+  const segments = providerModel.split("/");
+  return (segments[segments.length - 1] ?? providerModel).trim().toLowerCase();
+}
+
+/**
+ * How much a failure explains about *this request*, for choosing which of a
+ * chain's errors to surface. Substantive failures outrank administrative ones
+ * (see ADMINISTRATIVE_CODES); among substantive ones, the more the code says
+ * about the request itself, the higher it ranks. Ties keep the earliest
+ * attempt — the primary target's account of the failure.
+ */
+const SURFACED_ERROR_RANK: Record<GatewayErrorCode, number> = {
+  STRUCTURED_OUTPUT: 7,
+  BAD_REQUEST: 6,
+  POLICY: 6,
+  UPSTREAM: 5,
+  TIMEOUT: 4,
+  RATE_LIMIT: 3,
+  UNKNOWN: 2,
+  QUOTA: 1,
+  AUTH: 1,
+};
+
+/**
+ * Code-level variant of the surfacing rank, for failures that arrive as
+ * already-classified data rather than thrown errors (a chat stream's terminal
+ * error events). Higher = more informative about the request.
+ */
+export function surfacedErrorRankForCode(code: GatewayErrorCode): number {
+  return SURFACED_ERROR_RANK[code];
+}
+
+/** Compact, log/metadata-safe summary of every attempt in a failed chain. */
+export function summarizeTargetErrors(attempts: readonly TargetAttemptError[]) {
+  return attempts.map((attempt) => {
+    const normalized = normalizeGatewayError(attempt.error);
+    return {
+      provider: attempt.provider,
+      providerModel: attempt.providerModel,
+      code: normalized.code,
+      ...(normalized.statusCode !== undefined
+        ? { statusCode: normalized.statusCode }
+        : {}),
+      message: normalized.message.slice(0, 200),
+    };
+  });
+}
+
+/**
+ * The error a failover-exhausted chain should surface: the most informative
+ * one, not the last one. With a single attempt the original error passes
+ * through untouched (identity preserved for callers that inspect it). With
+ * several, the highest-ranked error wins; when it is a ModelGatewayError it is
+ * re-issued with a `targetErrors` summary of the whole chain merged into its
+ * metadata (original as `cause`), so no attempt's failure is lost — while a
+ * raw provider error is surfaced as-is and the summary is left to the
+ * caller's failover log.
+ */
+export function selectSurfacedFailoverError(
+  attempts: readonly TargetAttemptError[],
+): unknown {
+  if (attempts.length === 0) {
+    return new ModelGatewayError({
+      code: "UNKNOWN",
+      message: "Model gateway failover exhausted with no recorded attempts",
+      retryable: false,
+    });
+  }
+  if (attempts.length === 1) {
+    return attempts[0]!.error;
+  }
+
+  let best = attempts[0]!;
+  let bestRank = SURFACED_ERROR_RANK[normalizeGatewayError(best.error).code];
+  for (const attempt of attempts.slice(1)) {
+    const rank = SURFACED_ERROR_RANK[normalizeGatewayError(attempt.error).code];
+    if (rank > bestRank) {
+      best = attempt;
+      bestRank = rank;
+    }
+  }
+
+  const surfaced = best.error;
+  if (!ModelGatewayError.isInstance(surfaced)) {
+    return surfaced;
+  }
+  return new ModelGatewayError({
+    code: surfaced.code,
+    message: surfaced.message,
+    retryable: surfaced.retryable,
+    statusCode: surfaced.statusCode,
+    provider: surfaced.provider,
+    requestId: surfaced.requestId,
+    metadata: {
+      ...surfaced.metadata,
+      targetErrors: summarizeTargetErrors(attempts),
+    },
+    cause: surfaced,
+  });
 }

@@ -149,8 +149,11 @@ test("OpenAI-compatible chat adapter forwards timeout and disables supported rea
 
   assert.equal(modelRetryCount(model), 0);
   assert.equal((model as { timeout?: unknown }).timeout, 12_345);
+  // "off" must actually stop reasoning (effort "none"), not merely hide it —
+  // hidden reasoning still burns the max_tokens budget.
   assert.deepEqual(modelKwargs(model), {
     reasoning: {
+      effort: "none",
       exclude: true,
     },
   });
