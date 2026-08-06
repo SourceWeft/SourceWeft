@@ -185,7 +185,7 @@ function isMissingStructuredOutputError(error: unknown): boolean {
   return Boolean(metadata && "structuredOutputDiagnostics" in metadata);
 }
 
-function resolveWorkerThinking(input: {
+export function resolveWorkerThinking(input: {
   llm?: LlmExecutionConfig;
   profileConfig?: Record<string, unknown>;
 }): ThinkingConfig {
@@ -209,11 +209,18 @@ function resolveWorkerThinking(input: {
       )
     : input.llm?.thinking?.supportedEfforts;
 
+  // Deliverable pipeline calls are extraction/generation utility work: the
+  // chat turn's thinking preference must not leak into them. "auto" in
+  // particular is not neutral here — for models that think by default
+  // (DeepSeek V4) it means thinking ON, and a structured stage's token budget
+  // gets consumed by hidden reasoning before any output is emitted. Thinking
+  // is pinned off; supported-parameter hints still pass through so adapters
+  // know how to express the disable.
   return {
     ...input.llm?.thinking,
-    mode: input.llm?.thinking?.mode ?? "off",
-    enabled: input.llm?.thinking?.enabled ?? false,
-    includeReasoning: input.llm?.thinking?.includeReasoning ?? false,
+    mode: "off",
+    enabled: false,
+    includeReasoning: false,
     ...(supportedParameters ? { supportedParameters } : {}),
     ...(supportedEfforts ? { supportedEfforts } : {}),
   };

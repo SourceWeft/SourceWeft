@@ -287,7 +287,10 @@ export async function planStoryboard(input: {
   try {
     response = await input.deps.llm.completeStructured({
       temperature: 0.55,
-      maxTokens: 3200,
+      // The full-deck storyboard JSON alone runs 2.5-4k tokens for a dense
+      // 8-slide Chinese deck; anything tighter risks mid-JSON truncation
+      // (DeepSeek's own JSON-mode guidance: budget max_tokens generously).
+      maxTokens: 6000,
       schema: z.toJSONSchema(outputSchema),
       schemaName: "video_presentation_storyboard",
       validate: (parsed) => {
@@ -339,6 +342,10 @@ export async function planStoryboard(input: {
             "Every slide must use its one-based slideNumber exactly once.",
             "Use null for optional text fields when they are not needed.",
             "Keep narration natural for spoken audio. Do not include code.",
+            // DeepSeek reliably emits raw ASCII quotes inside Chinese copy
+            // (`没有"表面"`), producing invalid tool-call JSON. The gateway can
+            // repair it, but not emitting it is strictly better.
+            "Inside string values never use unescaped double-quote characters; when quoting a term, use 「」 (Chinese) or single quotes (English).",
             "Density budget (hard limits): one core idea per slide; title <= 60 chars; subtitle <= 90 chars; contentMarkdown is a distillation of at most ~5 short lines (<= 400 chars total), never a paragraph dump.",
             `Narration pacing: each slide's spoken narration must take ${narrationBudgetSecondsPerSlide(renderProfile.durationTarget).min}-${narrationBudgetSecondsPerSlide(renderProfile.durationTarget).max} seconds when read aloud (~2.45 words/sec in English, ~5.2 chars/sec in Chinese). Split oversized ideas across slides instead of cramming.`,
             renderProfile.visualDensity === "light"
@@ -673,7 +680,9 @@ export async function regenerateStoryboardSlides(input: {
   try {
     response = await input.deps.llm.completeStructured({
       temperature: 0.55,
-      maxTokens: 2400,
+      // Edits regenerate a subset of slides, but each slide entry is as dense
+      // as in the initial plan — sized for headroom, not for the average.
+      maxTokens: 4000,
       schema: z.toJSONSchema(outputSchema),
       schemaName: "video_presentation_storyboard_edit",
       validate: (parsed) => {
@@ -733,6 +742,10 @@ export async function regenerateStoryboardSlides(input: {
             "Stay coherent with the surrounding slides (tone, terminology, narrative flow); do not contradict or repeat them.",
             "Use null for optional text fields when they are not needed.",
             "Keep narration natural for spoken audio. Do not include code.",
+            // DeepSeek reliably emits raw ASCII quotes inside Chinese copy
+            // (`没有"表面"`), producing invalid tool-call JSON. The gateway can
+            // repair it, but not emitting it is strictly better.
+            "Inside string values never use unescaped double-quote characters; when quoting a term, use 「」 (Chinese) or single quotes (English).",
             "Density budget (hard limits): one core idea per slide; title <= 60 chars; subtitle <= 90 chars; contentMarkdown is a distillation of at most ~5 short lines (<= 400 chars total).",
             `Narration pacing: each slide's spoken narration must take ${budget.min}-${budget.max} seconds when read aloud (~2.45 words/sec in English, ~5.2 chars/sec in Chinese).`,
           ].join("\n"),
