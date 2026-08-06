@@ -22,6 +22,7 @@
     "remotion": "^4.0.468"
   },
   "devDependencies": {
+    "@types/node": "^22.15.30",
     "@types/react": "^19.1.0",
     "jsdom": "^26.1.0",
     "typescript": "5.9.2",
