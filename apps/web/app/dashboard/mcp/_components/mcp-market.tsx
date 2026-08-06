@@ -7,12 +7,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  KeyRound,
+  ExternalLink,
+  Github,
   Laptop,
   ListFilter,
   Loader2,
   PanelsTopLeft,
-  Play,
   PlugZap,
   Search,
   Settings2,
@@ -22,20 +22,11 @@ import {
 import { toast } from "sonner";
 import type {
   ListWorkspaceMarketMcpResponse,
-  McpAuthType,
   WorkspaceMcpInstall,
   WorkspaceMcpInstallStatus,
 } from "@sourceweft/sdk";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@sourceweft/ui-web/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,7 +41,11 @@ import {
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
-import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@sourceweft/ui-web/components/ui/tooltip";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
@@ -58,6 +53,8 @@ import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { McpIcon } from "../../_components/dashboard-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
+import { CredentialsDialog } from "./mcp-credentials-dialog";
+import { McpDetailDialog } from "./mcp-detail-dialog";
 import { SubmitMcpDialog } from "./submit-mcp-dialog";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
@@ -67,7 +64,11 @@ type StatusFilter = "all" | "installed" | "not_installed";
 type TrustFilter = "all" | "trusted" | "unverified";
 type DeviceFilter = "all" | "web" | "desktop";
 type SortKey = "recommended" | "name_asc" | "installed_first" | "trusted_first";
-type CatalogStatus = "resolving_workspace" | "loading_catalog" | "ready" | "error";
+type CatalogStatus =
+  | "resolving_workspace"
+  | "loading_catalog"
+  | "ready"
+  | "error";
 
 type ResolvedWorkspace = {
   id: string;
@@ -93,7 +94,10 @@ const fallbackCategories: Array<{ key: CategoryKey; label: string }> = [
   { key: "files-storage", label: "Files & Storage" },
   { key: "knowledge-memory", label: "Knowledge & Memory" },
   { key: "productivity-workflow", label: "Productivity & Workflow" },
-  { key: "communication-collaboration", label: "Communication & Collaboration" },
+  {
+    key: "communication-collaboration",
+    label: "Communication & Collaboration",
+  },
   { key: "business-commerce", label: "Business & Commerce" },
   { key: "cloud-infrastructure", label: "Cloud & Infrastructure" },
   { key: "security-monitoring", label: "Security & Monitoring" },
@@ -195,13 +199,36 @@ function categoryForMcp(
   if (direct) {
     return direct.key;
   }
-  const text = `${item.name} ${item.summary} ${item.identifier} ${normalizedCategories.join(" ")}`.toLowerCase();
-  if (text.includes("search") || text.includes("crawl")) return "web-search-scraping";
-  if (text.includes("notion") || text.includes("calendar") || text.includes("task")) return "productivity-workflow";
-  if (text.includes("slack") || text.includes("email") || text.includes("discord")) return "communication-collaboration";
-  if (text.includes("sql") || text.includes("database") || text.includes("warehouse")) return "databases";
-  if (text.includes("github") || text.includes("code") || text.includes("dev")) return "developer-tools";
-  if (text.includes("research") || text.includes("paper") || text.includes("docs")) return "knowledge-memory";
+  const text =
+    `${item.name} ${item.summary} ${item.identifier} ${normalizedCategories.join(" ")}`.toLowerCase();
+  if (text.includes("search") || text.includes("crawl"))
+    return "web-search-scraping";
+  if (
+    text.includes("notion") ||
+    text.includes("calendar") ||
+    text.includes("task")
+  )
+    return "productivity-workflow";
+  if (
+    text.includes("slack") ||
+    text.includes("email") ||
+    text.includes("discord")
+  )
+    return "communication-collaboration";
+  if (
+    text.includes("sql") ||
+    text.includes("database") ||
+    text.includes("warehouse")
+  )
+    return "databases";
+  if (text.includes("github") || text.includes("code") || text.includes("dev"))
+    return "developer-tools";
+  if (
+    text.includes("research") ||
+    text.includes("paper") ||
+    text.includes("docs")
+  )
+    return "knowledge-memory";
   return "other";
 }
 
@@ -209,12 +236,25 @@ function isTrustedMcp(item: MarketMcpSummary) {
   return item.official || item.verified;
 }
 
-function authTypeLabel(authType: McpAuthType) {
-  if (authType === "bearer") return "Bearer token";
-  if (authType === "api_key_header") return "API key header";
-  if (authType === "custom_headers") return "Custom headers";
-  if (authType === "oauth") return "OAuth";
-  return "No auth";
+function identifierForSearch(identifier: string) {
+  return identifier.toLowerCase().replace(/^(?:io|com)\.github\./, "");
+}
+
+function queryIncludesTechnicalIdentifierSyntax(query: string) {
+  return query.includes(".") || query.includes("/");
+}
+
+function sourceLinkForMcp(item: MarketMcpSummary) {
+  return item.repoUrl ?? item.sourceUrl;
+}
+
+function isGithubSourceUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "github.com" || hostname.endsWith(".github.com");
+  } catch {
+    return false;
+  }
 }
 
 function installStatusMeta(status: WorkspaceMcpInstallStatus): {
@@ -252,25 +292,6 @@ function McpStatusIndicator({ install }: { install: WorkspaceMcpInstall }) {
   );
 }
 
-function parseCustomHeaders(value: string) {
-  const headers: Record<string, string> = {};
-  for (const rawLine of value.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const separatorIndex = line.indexOf(":");
-    if (separatorIndex <= 0) {
-      throw new Error("Use one header per line, for example: X-API-Key: value");
-    }
-    const name = line.slice(0, separatorIndex).trim();
-    const headerValue = line.slice(separatorIndex + 1).trim();
-    if (!name || !headerValue) {
-      throw new Error("Header name and value are required.");
-    }
-    headers[name] = headerValue;
-  }
-  return headers;
-}
-
 function FilterFacet({
   children,
   defaultOpen = false,
@@ -286,14 +307,20 @@ function FilterFacet({
     <details className="group border-b border-border" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 hover:bg-accent/40">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">{label}</div>
+          <div className="truncate text-xs font-medium text-foreground">
+            {label}
+          </div>
           {summary ? (
-            <div className="truncate text-[11px] text-muted-foreground">{summary}</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {summary}
+            </div>
           ) : null}
         </div>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
       </summary>
-      {children ? <div className="space-y-1.5 px-3 pb-2">{children}</div> : null}
+      {children ? (
+        <div className="space-y-1.5 px-3 pb-2">{children}</div>
+      ) : null}
     </details>
   );
 }
@@ -549,7 +576,9 @@ function McpFilterPanel({
 
         <FilterFacet
           label="Device"
-          summary={deviceOptions.find((item) => item.key === deviceFilter)?.label}
+          summary={
+            deviceOptions.find((item) => item.key === deviceFilter)?.label
+          }
         >
           <div className="space-y-1">
             {deviceOptions.map((item) => (
@@ -572,7 +601,9 @@ function McpFilterPanel({
 
         <FilterFacet
           label="Status"
-          summary={statusOptions.find((item) => item.key === statusFilter)?.label}
+          summary={
+            statusOptions.find((item) => item.key === statusFilter)?.label
+          }
         >
           <div className="space-y-1">
             {statusOptions.map((item) => (
@@ -602,7 +633,7 @@ function McpSkeletonGrid() {
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {Array.from({ length: 8 }).map((_, index) => (
         <article
-          className="flex min-h-[220px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"
+          className="flex h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"
           key={index}
         >
           <div className="flex items-center gap-3">
@@ -617,9 +648,10 @@ function McpSkeletonGrid() {
             <div className="h-3 w-11/12 animate-pulse rounded bg-muted" />
             <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
           </div>
-          <div className="mt-auto grid grid-cols-2 gap-2 border-t border-border pt-3">
-            <div className="h-7 animate-pulse rounded-full bg-muted" />
-            <div className="h-7 animate-pulse rounded-full bg-muted" />
+          <div className="mt-auto flex h-11 items-end gap-2 border-t border-border pt-3">
+            <div className="h-7 flex-1 animate-pulse rounded-full bg-muted" />
+            <div className="size-7 animate-pulse rounded-lg bg-muted" />
+            <div className="size-7 animate-pulse rounded-lg bg-muted" />
           </div>
         </article>
       ))}
@@ -634,7 +666,7 @@ function McpCard({
   item,
   onConfigure,
   onInstall,
-  onRun,
+  onOpenDetails,
   onTest,
   onToggleEnabled,
   onUninstall,
@@ -646,7 +678,7 @@ function McpCard({
   item: MarketMcpItem;
   onConfigure: (install: WorkspaceMcpInstall) => void;
   onInstall: (item: MarketMcpItem) => void;
-  onRun: (item: MarketMcpItem) => void;
+  onOpenDetails: (item: MarketMcpItem) => void;
   onTest: (install: WorkspaceMcpInstall) => void;
   onToggleEnabled: (install: WorkspaceMcpInstall, enabled: boolean) => void;
   onUninstall: (item: MarketMcpItem) => void;
@@ -661,55 +693,118 @@ function McpCard({
     pendingActions.has(market.identifier) ||
     (install ? pendingActions.has(install.id) : false);
   const canExecuteHere = !desktopOnly || isDesktopHost;
+  const sourceUrl = sourceLinkForMcp(market);
+  const sourceIsGithub = sourceUrl ? isGithubSourceUrl(sourceUrl) : false;
   const itemCategory = categoryForMcp(market, categories);
   const itemCategoryLabel =
-    categories.find((category) => category.key === itemCategory)?.label ?? itemCategory;
+    categories.find((category) => category.key === itemCategory)?.label ??
+    itemCategory;
   const needsCredentials =
     install &&
     install.authType !== "none" &&
     install.credentialStatus !== "configured";
+  const [iconFailed, setIconFailed] = React.useState(false);
+  const showRegistryIcon = Boolean(market.iconUrl) && !iconFailed;
+
+  React.useEffect(() => {
+    setIconFailed(false);
+  }, [market.iconUrl]);
 
   return (
     <article
       className={cn(
-        "group flex min-h-[230px] flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
-        highlight &&
-          "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        "group flex h-[286px] flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
+        highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
       id={`mcp-card-${market.identifier}`}
     >
-      <div className="flex items-start gap-3">
-        <span
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm",
-            trusted
-              ? "bg-linear-to-br from-emerald-500 via-sky-500 to-blue-500"
-              : "bg-linear-to-br from-amber-500 via-orange-500 to-rose-500",
-          )}
+      <div className="flex items-start gap-2">
+        <button
+          aria-label={`View ${market.name} details`}
+          className="-m-1 flex min-w-0 flex-1 items-start gap-3 rounded-lg p-1 text-left outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onOpenDetails(item)}
+          type="button"
         >
-          <McpIcon className="h-4.5 w-4.5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-semibold leading-6 text-foreground">
-              {market.name}
-            </h3>
-            {installed ? (
-              <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
-                <Check className="h-3 w-3" />
-                Installed
-              </span>
-            ) : null}
+          <span
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm",
+              showRegistryIcon
+                ? "border border-border bg-white"
+                : trusted
+                  ? "bg-linear-to-br from-emerald-500 via-sky-500 to-blue-500 text-white"
+                  : "bg-linear-to-br from-amber-500 via-orange-500 to-rose-500 text-white",
+            )}
+          >
+            {showRegistryIcon ? (
+              // Registry icons can come from arbitrary verified publisher domains,
+              // so Next Image's static remote-host allowlist is not applicable.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                alt=""
+                className="size-full object-contain"
+                loading="lazy"
+                onError={() => setIconFailed(true)}
+                referrerPolicy="no-referrer"
+                src={market.iconUrl ?? undefined}
+              />
+            ) : (
+              <McpIcon className="h-4.5 w-4.5" />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="truncate text-sm font-semibold leading-6 text-foreground">
+                {market.name}
+              </h3>
+              {installed ? (
+                <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
+                  <Check className="h-3 w-3" />
+                  Installed
+                </span>
+              ) : null}
+            </div>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {market.identifier}
+            </p>
           </div>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {market.identifier}
-          </p>
-        </div>
+        </button>
+        {sourceUrl ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                className="-mr-1 -mt-1 text-muted-foreground hover:text-foreground"
+                size="icon-xs"
+                variant="ghost"
+              >
+                <a
+                  aria-label={`Open ${market.name} source`}
+                  href={sourceUrl}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                >
+                  {sourceIsGithub ? (
+                    <Github className="size-4" />
+                  ) : (
+                    <ExternalLink className="size-4" />
+                  )}
+                </a>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {sourceIsGithub ? "Open GitHub repository" : "Open source"}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
 
-      <p className="mt-3 line-clamp-3 min-h-[60px] text-xs leading-5 text-muted-foreground">
+      <button
+        className="mt-3 line-clamp-3 min-h-[60px] text-left text-xs leading-5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => onOpenDetails(item)}
+        type="button"
+      >
         {market.summary}
-      </p>
+      </button>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {market.official ? (
@@ -735,391 +830,120 @@ function McpCard({
       </div>
 
       {!trusted ? (
-        <div className="mt-3 flex gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-2 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
+        <div className="mt-3 flex max-h-11 gap-2 overflow-hidden rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            Unverified MCP can receive this turn&apos;s tool arguments and may perform
-            external actions. Review the server before enabling.
+          <span className="line-clamp-2">
+            Unverified MCP can receive this turn&apos;s tool arguments and may
+            perform external actions. Review the server before enabling.
           </span>
         </div>
       ) : null}
 
-      <div className="mt-auto border-t border-border pt-3">
+      <div className="mt-auto flex h-11 items-center gap-1.5 border-t border-border pt-3">
         {install ? (
-          <div className="mb-3 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
-            <div className="min-w-0">
-              <div className="truncate">
-                {install.tools.length} tool{install.tools.length === 1 ? "" : "s"} synced
-              </div>
-              <div className="mt-1">
-                <McpStatusIndicator install={install} />
-              </div>
-              {needsCredentials ? (
-                <button
-                  className="mt-1 inline-flex items-center gap-1 text-primary hover:underline"
-                  onClick={() => onConfigure(install)}
+          <>
+            <div
+              className={cn(
+                "min-w-0 flex-1 text-[11px] text-muted-foreground",
+                needsCredentials && "text-amber-700 dark:text-amber-300",
+              )}
+              title={
+                needsCredentials
+                  ? "Credentials required"
+                  : `${install.tools.length} tools synced`
+              }
+            >
+              <McpStatusIndicator install={install} />
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={`Test ${market.name}`}
+                  disabled={pending || !canExecuteHere}
+                  onClick={() => onTest(install)}
+                  size="icon-xs"
                   type="button"
                 >
-                  <KeyRound className="h-3 w-3" />
-                  Configure credentials
-                </button>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <span>{install.enabled ? "Enabled" : "Disabled"}</span>
-              <Switch
-                checked={install.enabled}
-                disabled={pending}
-                onCheckedChange={(checked) => onToggleEnabled(install, checked)}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-2 gap-2">
-          {install ? (
-            <>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={
-                  pending ||
-                  !install.enabled ||
-                  !canExecuteHere ||
-                  Boolean(needsCredentials)
-                }
-                onClick={() => onRun(item)}
-                size="xs"
-                type="button"
-              >
-                <Play className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Run</span>
-              </Button>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={pending}
-                onClick={() => onUninstall(item)}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {pending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="truncate">Uninstall</span>
-              </Button>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={pending || !canExecuteHere}
-                onClick={() => onTest(install)}
-                size="xs"
-                type="button"
-                variant="ghost"
-              >
-                <PlugZap className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Test</span>
-              </Button>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={pending}
-                onClick={() => onConfigure(install)}
-                size="xs"
-                type="button"
-                variant="ghost"
-              >
-                <Settings2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Settings</span>
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={pending}
-                onClick={() => onInstall(item)}
-                size="xs"
-                type="button"
-              >
-                {pending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <McpIcon className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="truncate">Install</span>
-              </Button>
-              <Button
-                className="min-w-0 rounded-full px-2"
-                disabled={pending || !canExecuteHere}
-                onClick={() => onRun(item)}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                <Play className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Run</span>
-              </Button>
-            </>
-          )}
-        </div>
+                  {pending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <PlugZap className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Test connection</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={`Configure ${market.name}`}
+                  className={cn(needsCredentials && "text-amber-600")}
+                  disabled={pending}
+                  onClick={() => onConfigure(install)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Settings2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {needsCredentials
+                  ? "Configure required credentials"
+                  : "Settings"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={`Uninstall ${market.name}`}
+                  disabled={pending}
+                  onClick={() => onUninstall(item)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Uninstall</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex h-7 items-center border-l border-border pl-1.5">
+                  <Switch
+                    aria-label={`${install.enabled ? "Disable" : "Enable"} ${market.name}`}
+                    checked={install.enabled}
+                    disabled={pending}
+                    onCheckedChange={(checked) =>
+                      onToggleEnabled(install, checked)
+                    }
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                {install.enabled ? "Disable" : "Enable"}
+              </TooltipContent>
+            </Tooltip>
+          </>
+        ) : (
+          <Button
+            className="w-full rounded-full"
+            disabled={pending}
+            onClick={() => onInstall(item)}
+            size="xs"
+            type="button"
+          >
+            {pending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <McpIcon className="size-3.5" />
+            )}
+            Install
+          </Button>
+        )}
       </div>
     </article>
-  );
-}
-
-function CredentialsDialog({
-  install,
-  onClose,
-  onSaved,
-  open,
-  workspaceId,
-}: {
-  install: WorkspaceMcpInstall | null;
-  onClose: () => void;
-  onSaved: (install: WorkspaceMcpInstall) => void;
-  open: boolean;
-  workspaceId: string | null;
-}) {
-  const [bearerToken, setBearerToken] = React.useState("");
-  const [apiKeyHeaderName, setApiKeyHeaderName] = React.useState("");
-  const [apiKey, setApiKey] = React.useState("");
-  const [headersText, setHeadersText] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!install) return;
-    setBearerToken("");
-    setApiKey("");
-    setApiKeyHeaderName(install.manifestJson.auth.headerName ?? "");
-    setHeadersText("");
-  }, [install]);
-
-  async function saveCredentials() {
-    if (!workspaceId || !install) return;
-    setSaving(true);
-    try {
-      // Fail fast on a blank Save (the server rejects it too now): an empty
-      // submission would otherwise clobber a previously configured credential.
-      if (install.authType === "bearer" && !bearerToken.trim()) {
-        toast.error("Enter a bearer token before saving.");
-        return;
-      }
-      if (
-        install.authType === "api_key_header" &&
-        (!apiKeyHeaderName.trim() || !apiKey.trim())
-      ) {
-        toast.error("Enter the header name and API key before saving.");
-        return;
-      }
-      if (
-        install.authType === "custom_headers" &&
-        Object.keys(parseCustomHeaders(headersText)).length === 0
-      ) {
-        toast.error("Add at least one header before saving.");
-        return;
-      }
-      const input =
-        install.authType === "bearer"
-          ? {
-              authType: "bearer" as const,
-              bearerToken,
-            }
-          : install.authType === "api_key_header"
-            ? {
-                authType: "api_key_header" as const,
-                apiKeyHeaderName,
-                apiKey,
-              }
-            : install.authType === "custom_headers"
-              ? {
-                  authType: "custom_headers" as const,
-                  headers: parseCustomHeaders(headersText),
-                }
-              : { authType: "none" as const };
-      const result = await contentClient.upsertWorkspaceMcpCredentials(
-        workspaceId,
-        install.id,
-        input,
-      );
-      toast.success("MCP credentials saved");
-      onSaved(result.install);
-      onClose();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to save credentials.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function connectOAuth() {
-    if (!workspaceId || !install) return;
-    setSaving(true);
-    try {
-      const result = await contentClient.authorizeWorkspaceMcpOAuth(
-        workspaceId,
-        install.id,
-      );
-      if (result.status === "redirect") {
-        // Hand off to the provider's consent screen; it redirects back to
-        // /dashboard/mcp?mcpOAuth=connected. Keep the spinner during navigation.
-        window.location.href = result.authorizationUrl;
-        return;
-      }
-      toast.success("MCP server already connected");
-      // Reflect the connected state immediately: the pre-auth `install` still
-      // carries credentialStatus "required", which would keep Run/selection
-      // disabled until a full reload.
-      onSaved({ ...install, credentialStatus: "configured" });
-      onClose();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to start authorization.",
-      );
-      setSaving(false);
-    }
-  }
-
-  const authType = install?.authType ?? "none";
-  const instructions = install?.manifestJson.auth.instructions;
-
-  return (
-    <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open={open}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Configure MCP credentials</DialogTitle>
-          <DialogDescription>
-            Credentials are encrypted in SourceWeft and sent only to this MCP
-            server during tool calls.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
-            <div className="font-medium text-foreground">
-              {install?.name ?? "MCP server"}
-            </div>
-            <div className="mt-0.5 text-muted-foreground">
-              {authTypeLabel(authType)}
-            </div>
-          </div>
-
-          {instructions ? (
-            <p className="rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-muted-foreground">
-              {instructions}
-            </p>
-          ) : null}
-
-          {authType === "bearer" ? (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground" htmlFor="mcp-bearer">
-                Bearer token
-              </label>
-              <Input
-                autoComplete="off"
-                id="mcp-bearer"
-                onChange={(event) => setBearerToken(event.target.value)}
-                placeholder="Paste token"
-                type="password"
-                value={bearerToken}
-              />
-            </div>
-          ) : null}
-
-          {authType === "api_key_header" ? (
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_1fr]">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground" htmlFor="mcp-api-header">
-                  Header name
-                </label>
-                <Input
-                  autoComplete="off"
-                  id="mcp-api-header"
-                  onChange={(event) => setApiKeyHeaderName(event.target.value)}
-                  placeholder="X-API-Key"
-                  value={apiKeyHeaderName}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground" htmlFor="mcp-api-key">
-                  API key
-                </label>
-                <Input
-                  autoComplete="off"
-                  id="mcp-api-key"
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="Paste key"
-                  type="password"
-                  value={apiKey}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          {authType === "custom_headers" ? (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground" htmlFor="mcp-custom-headers">
-                Headers
-              </label>
-              <Textarea
-                className="min-h-28 font-mono text-xs"
-                id="mcp-custom-headers"
-                onChange={(event) => setHeadersText(event.target.value)}
-                placeholder={"X-API-Key: value\nX-Workspace: sourceweft"}
-                value={headersText}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Use one header per line. Secret values are not shown again after
-                saving.
-              </p>
-            </div>
-          ) : null}
-
-          {authType === "none" ? (
-            <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-              This MCP server does not require credentials.
-            </div>
-          ) : null}
-
-          {authType === "oauth" ? (
-            <div className="space-y-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-              <p>
-                This MCP server uses OAuth. Connect your account with the
-                provider — you&apos;ll be redirected to grant access, then
-                returned here. Your token is stored encrypted and refreshed
-                automatically.
-              </p>
-              <Button
-                disabled={saving || !install}
-                onClick={() => void connectOAuth()}
-                size="sm"
-                type="button"
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <KeyRound className="h-4 w-4" />
-                )}
-                Connect
-              </Button>
-            </div>
-          ) : null}
-        </div>
-
-        <DialogFooter>
-          <Button disabled={saving} onClick={onClose} type="button" variant="outline">
-            {authType === "oauth" ? "Close" : "Cancel"}
-          </Button>
-          {authType === "oauth" ? null : (
-            <Button disabled={saving || !install} onClick={() => void saveCredentials()} type="button">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-              Save
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1128,12 +952,14 @@ export function McpMarket() {
   const searchParams = useSearchParams();
   const deepLinkIdentifier = searchParams.get("mcp");
   const dashboardState = useDashboardChatState();
-  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(null);
+  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
+    null,
+  );
   const [items, setItems] = React.useState<MarketMcpItem[]>([]);
   const [categories, setCategories] = React.useState(fallbackCategories);
-  const [pendingActions, setPendingActions] = React.useState<ReadonlySet<string>>(
-    () => new Set<string>(),
-  );
+  const [pendingActions, setPendingActions] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set<string>());
   const [highlightIdentifier, setHighlightIdentifier] = React.useState<
     string | null
   >(null);
@@ -1171,12 +997,23 @@ export function McpMarket() {
     const timeout = window.setTimeout(() => setServerQuery(query.trim()), 300);
     return () => window.clearTimeout(timeout);
   }, [query]);
-  const [catalogStatus, setCatalogStatus] =
-    React.useState<CatalogStatus>("resolving_workspace");
+  const [catalogStatus, setCatalogStatus] = React.useState<CatalogStatus>(
+    "resolving_workspace",
+  );
   const [error, setError] = React.useState<string | null>(null);
+  const [serverCategoryCounts, setServerCategoryCounts] = React.useState<Record<
+    string,
+    number
+  > | null>(null);
+  const [serverTotalCount, setServerTotalCount] = React.useState<number | null>(
+    null,
+  );
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const [credentialsInstall, setCredentialsInstall] =
     React.useState<WorkspaceMcpInstall | null>(null);
+  const [selectedIdentifier, setSelectedIdentifier] = React.useState<
+    string | null
+  >(null);
   const [isDesktopHost, setIsDesktopHost] = React.useState(false);
   const workspaceIdRef = React.useRef<string | null>(null);
   const loadedCatalogWorkspaceIdRef = React.useRef<string | null>(null);
@@ -1261,7 +1098,11 @@ export function McpMarket() {
       setItems([]);
       loadedCatalogWorkspaceIdRef.current = null;
       setCatalogStatus("error");
-      setError(loadError instanceof Error ? loadError.message : "Failed to load MCP market.");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load MCP market.",
+      );
     }
   }, [resolveWorkspace]);
 
@@ -1300,6 +1141,29 @@ export function McpMarket() {
       cancelled = true;
     };
   }, [workspace?.id, serverQuery, category]);
+
+  React.useEffect(() => {
+    const targetWorkspaceId = workspace?.id;
+    if (!targetWorkspaceId) return;
+    let cancelled = false;
+    void contentClient
+      .getWorkspaceMarketMcpCategoryCounts(targetWorkspaceId, {
+        query: serverQuery || undefined,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setServerCategoryCounts(result.counts);
+        setServerTotalCount(result.total);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setServerCategoryCounts(null);
+        setServerTotalCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace?.id, serverQuery]);
 
   const loadMoreMcp = React.useCallback(async () => {
     const targetWorkspaceId = workspace?.id;
@@ -1342,10 +1206,7 @@ export function McpMarket() {
       const card = document.getElementById(`mcp-card-${deepLinkIdentifier}`);
       card?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
-    const timeout = window.setTimeout(
-      () => setHighlightIdentifier(null),
-      2600,
-    );
+    const timeout = window.setTimeout(() => setHighlightIdentifier(null), 2600);
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeout);
@@ -1378,10 +1239,14 @@ export function McpMarket() {
     );
   }, [router, searchParams, workspace?.id]);
 
-  async function handleWorkspaceChange(nextWorkspaceId: string, nextWorkspaceName: string) {
+  async function handleWorkspaceChange(
+    nextWorkspaceId: string,
+    nextWorkspaceName: string,
+  ) {
     if (nextWorkspaceId === workspace?.id) return;
     workspaceIdRef.current = nextWorkspaceId;
     loadedCatalogWorkspaceIdRef.current = null;
+    setSelectedIdentifier(null);
     setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
     setItems([]);
     setError(null);
@@ -1424,7 +1289,7 @@ export function McpMarket() {
     );
   }
 
-  async function installMcp(item: MarketMcpItem, options: { runAfterInstall?: boolean } = {}) {
+  async function installMcp(item: MarketMcpItem) {
     if (!workspace || item.install) return;
     const workspaceId = workspace.id;
     const pendingKey = item.market.identifier;
@@ -1438,14 +1303,16 @@ export function McpMarket() {
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
       toast.success("MCP installed");
+      // Installing an auth server immediately prompts for credentials; the user
+      // then Tests to verify the connection. Install and Test stay separate.
       if (result.install.authType !== "none") {
         setCredentialsInstall(result.install);
-      } else if (options.runAfterInstall) {
-        runInstallInChat(result.install);
       }
     } catch (installError) {
       toast.error(
-        installError instanceof Error ? installError.message : "Failed to install MCP.",
+        installError instanceof Error
+          ? installError.message
+          : "Failed to install MCP.",
       );
     } finally {
       endPendingAction(pendingKey);
@@ -1480,22 +1347,6 @@ export function McpMarket() {
     }
   }
 
-  function runInstallInChat(install: WorkspaceMcpInstall) {
-    const params = new URLSearchParams({
-      mcp_install_id: install.id,
-    });
-    router.push(`/dashboard/chat?${params.toString()}`);
-  }
-
-  async function runMcp(item: MarketMcpItem) {
-    if (!workspace) return;
-    if (item.install) {
-      runInstallInChat(item.install);
-      return;
-    }
-    await installMcp(item, { runAfterInstall: true });
-  }
-
   async function toggleInstall(install: WorkspaceMcpInstall, enabled: boolean) {
     if (!workspace) return;
     const workspaceId = workspace.id;
@@ -1511,7 +1362,9 @@ export function McpMarket() {
       toast.success(enabled ? "MCP enabled" : "MCP disabled");
     } catch (toggleError) {
       toast.error(
-        toggleError instanceof Error ? toggleError.message : "Failed to update MCP.",
+        toggleError instanceof Error
+          ? toggleError.message
+          : "Failed to update MCP.",
       );
     } finally {
       endPendingAction(install.id);
@@ -1523,7 +1376,10 @@ export function McpMarket() {
     const workspaceId = workspace.id;
     startPendingAction(install.id);
     try {
-      const result = await contentClient.testWorkspaceMcpInstall(workspaceId, install.id);
+      const result = await contentClient.testWorkspaceMcpInstall(
+        workspaceId,
+        install.id,
+      );
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
       toast.success(`MCP connection tested: ${result.toolCount} tools`);
@@ -1545,11 +1401,17 @@ export function McpMarket() {
     [items],
   );
   const webCount = React.useMemo(
-    () => items.filter((item) => item.market.webExecutable && !item.market.desktopOnly).length,
+    () =>
+      items.filter(
+        (item) => item.market.webExecutable && !item.market.desktopOnly,
+      ).length,
     [items],
   );
   const desktopCount = React.useMemo(
-    () => items.filter((item) => item.market.desktopOnly || !item.market.webExecutable).length,
+    () =>
+      items.filter(
+        (item) => item.market.desktopOnly || !item.market.webExecutable,
+      ).length,
     [items],
   );
 
@@ -1558,13 +1420,25 @@ export function McpMarket() {
       (record, item) => ({ ...record, [item.key]: 0 }),
       {} as Record<CategoryKey, number>,
     );
+    // Prefer whole-catalog counts from the server; these mirror the server-side
+    // category filter (a DB join over every category an item carries) and cover
+    // all matching content, not just the loaded page.
+    if (serverCategoryCounts) {
+      for (const item of categories) {
+        if (item.key === "all") continue;
+        counts[item.key] = serverCategoryCounts[item.key] ?? 0;
+      }
+      counts.all = serverTotalCount ?? items.length;
+      return counts;
+    }
+    // Fallback before the counts response lands: approximate from loaded items.
     counts.all = items.length;
     for (const item of items) {
       const itemCategory = categoryForMcp(item.market, categories);
       counts[itemCategory] = (counts[itemCategory] ?? 0) + 1;
     }
     return counts;
-  }, [categories, items]);
+  }, [categories, items, serverCategoryCounts, serverTotalCount]);
 
   const filteredItems = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1583,17 +1457,23 @@ export function McpMarket() {
       if (deviceFilter === "web" && desktopOnly) return false;
       if (deviceFilter === "desktop" && !desktopOnly) return false;
       if (!q) return true;
+      const searchableIdentifier = identifierForSearch(market.identifier);
       return (
         market.name.toLowerCase().includes(q) ||
         market.summary.toLowerCase().includes(q) ||
-        market.identifier.toLowerCase().includes(q) ||
+        searchableIdentifier.includes(q) ||
+        (queryIncludesTechnicalIdentifierSyntax(q) &&
+          market.identifier.toLowerCase().includes(q)) ||
         market.categories.some((entry) => entry.toLowerCase().includes(q))
       );
     });
     return filtered.sort((a, b) => {
-      if (sort === "name_asc") return a.market.name.localeCompare(b.market.name);
-      if (sort === "installed_first") return Number(Boolean(b.install)) - Number(Boolean(a.install));
-      if (sort === "trusted_first") return Number(isTrustedMcp(b.market)) - Number(isTrustedMcp(a.market));
+      if (sort === "name_asc")
+        return a.market.name.localeCompare(b.market.name);
+      if (sort === "installed_first")
+        return Number(Boolean(b.install)) - Number(Boolean(a.install));
+      if (sort === "trusted_first")
+        return Number(isTrustedMcp(b.market)) - Number(isTrustedMcp(a.market));
       return 0;
     });
   }, [deviceFilter, items, query, sort, statusFilter, trustFilter]);
@@ -1654,8 +1534,19 @@ export function McpMarket() {
   const pageLoading =
     catalogStatus === "resolving_workspace" ||
     catalogStatus === "loading_catalog";
-  const catalogReadyForWorkspace =
-    workspace ? loadedCatalogWorkspaceIdRef.current === workspace.id : false;
+  const catalogReadyForWorkspace = workspace
+    ? loadedCatalogWorkspaceIdRef.current === workspace.id
+    : false;
+  const selectedItem = selectedIdentifier
+    ? (items.find((item) => item.market.identifier === selectedIdentifier) ??
+      null)
+    : null;
+  const selectedItemPending = selectedItem
+    ? pendingActions.has(selectedItem.market.identifier) ||
+      Boolean(
+        selectedItem.install && pendingActions.has(selectedItem.install.id),
+      )
+    : false;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -1680,21 +1571,32 @@ export function McpMarket() {
                   <WorkspaceMenu
                     disabled={catalogStatus === "resolving_workspace"}
                     onChange={(nextWorkspaceId, nextWorkspaceName) =>
-                      void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
+                      void handleWorkspaceChange(
+                        nextWorkspaceId,
+                        nextWorkspaceName,
+                      )
                     }
                     workspaceId={workspace?.id ?? dashboardState.workspaceId}
-                    workspaceName={workspace?.name ?? dashboardState.workspaceName}
+                    workspaceName={
+                      workspace?.name ?? dashboardState.workspaceName
+                    }
                     workspaces={dashboardState.workspaces}
                   />
                 </div>
                 <div className="flex items-center gap-2">
                   {isDesktopHost ? (
-                    <Badge className="h-7 gap-1.5 px-2 text-[11px]" variant="outline">
+                    <Badge
+                      className="h-7 gap-1.5 px-2 text-[11px]"
+                      variant="outline"
+                    >
                       <Laptop className="h-3.5 w-3.5" />
                       Desktop host
                     </Badge>
                   ) : (
-                    <Badge className="h-7 gap-1.5 px-2 text-[11px]" variant="outline">
+                    <Badge
+                      className="h-7 gap-1.5 px-2 text-[11px]"
+                      variant="outline"
+                    >
                       <ShieldCheck className="h-3.5 w-3.5" />
                       Web runtime
                     </Badge>
@@ -1736,7 +1638,9 @@ export function McpMarket() {
                       key={item.market.identifier}
                       onConfigure={setCredentialsInstall}
                       onInstall={(next) => void installMcp(next)}
-                      onRun={runMcp}
+                      onOpenDetails={(next) =>
+                        setSelectedIdentifier(next.market.identifier)
+                      }
                       onTest={(install) => void testInstall(install)}
                       onToggleEnabled={(install, enabled) =>
                         void toggleInstall(install, enabled)
@@ -1776,6 +1680,22 @@ export function McpMarket() {
           {drawerFiltersPanel}
         </SheetContent>
       </Sheet>
+
+      <McpDetailDialog
+        item={selectedItem}
+        onConfigure={setCredentialsInstall}
+        onInstall={(next) => void installMcp(next)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedIdentifier(null);
+        }}
+        onTest={(install) => void testInstall(install)}
+        onToggleEnabled={(install, enabled) =>
+          void toggleInstall(install, enabled)
+        }
+        onUninstall={(next) => void uninstallMcp(next)}
+        pending={selectedItemPending}
+        workspaceId={workspace?.id ?? null}
+      />
 
       <CredentialsDialog
         install={credentialsInstall}

@@ -278,40 +278,62 @@ export async function prepareGitHubRepository(
   const archivePath = path.join(tempRoot, "repo.tar.gz");
   const extractDir = path.join(tempRoot, "extract");
 
-  await rm(tempRoot, { force: true, recursive: true });
-  await mkdir(extractDir, { recursive: true });
-  await downloadTarball({
-    archivePath,
-    owner: source.owner,
-    ref: resolvedRef,
-    repo: source.repo,
-  });
-  await runTarExtract(archivePath, extractDir);
-
-  const entries = await readdir(extractDir);
-  const rootName = entries[0];
-  if (!rootName) {
-    throw new Error("Downloaded GitHub archive was empty");
-  }
-  const rootDir = path.join(extractDir, rootName);
-  const workDir = source.subpath ? path.join(rootDir, source.subpath) : rootDir;
-  const workDirStat = await stat(workDir).catch(() => null);
-  if (!workDirStat?.isDirectory()) {
-    throw new Error(`Repository subpath not found: ${source.subpath}`);
-  }
-
-  return {
-    ...source,
-    commitSha,
-    requestedRef,
-    resolvedRef,
-    rootDir,
-    sourceUrl: sourceUrlFor({
+  try {
+    await rm(tempRoot, { force: true, recursive: true });
+    await mkdir(extractDir, { recursive: true });
+    await downloadTarball({
+      archivePath,
       owner: source.owner,
       ref: resolvedRef,
       repo: source.repo,
-      subpath: source.subpath,
-    }),
-    workDir,
-  };
+    });
+    await runTarExtract(archivePath, extractDir);
+
+    const entries = await readdir(extractDir);
+    const rootName = entries[0];
+    if (!rootName) {
+      throw new Error("Downloaded GitHub archive was empty");
+    }
+    const rootDir = path.join(extractDir, rootName);
+    const workDir = source.subpath
+      ? path.join(rootDir, source.subpath)
+      : rootDir;
+    const workDirStat = await stat(workDir).catch(() => null);
+    if (!workDirStat?.isDirectory()) {
+      throw new Error(`Repository subpath not found: ${source.subpath}`);
+    }
+
+    return {
+      ...source,
+      commitSha,
+      requestedRef,
+      resolvedRef,
+      rootDir,
+      sourceUrl: sourceUrlFor({
+        owner: source.owner,
+        ref: resolvedRef,
+        repo: source.repo,
+        subpath: source.subpath,
+      }),
+      tempRoot,
+      workDir,
+    };
+  } catch (error) {
+    // The extracted repo is a transient analysis copy: a failed download or
+    // extraction must not leave third-party source lingering in os.tmpdir().
+    await rm(tempRoot, { force: true, recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Remove the temp directory created by prepareGitHubRepository. Safe to call
+ * more than once; never throws (best-effort cleanup).
+ */
+export async function cleanupGitHubRepository(
+  repository: Pick<PreparedGitHubRepository, "tempRoot">,
+): Promise<void> {
+  await rm(repository.tempRoot, { force: true, recursive: true }).catch(
+    () => {},
+  );
 }

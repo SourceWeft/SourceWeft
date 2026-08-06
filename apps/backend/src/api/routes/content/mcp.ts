@@ -61,6 +61,20 @@ export function registerMcpRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/market/mcp/category-counts", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.countMarketMcpCategories({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      query: c.req.query("query"),
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/market/mcp/:identifier", async (c) => {
     const session = await requireSession(c);
     if (!session) {

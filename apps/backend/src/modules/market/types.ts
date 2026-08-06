@@ -45,6 +45,12 @@ export type PreparedGitHubRepository = NormalizedGitHubSource & {
   resolvedRef: string;
   rootDir: string;
   workDir: string;
+  /**
+   * Root temp directory holding the downloaded tarball and extracted repo.
+   * Callers MUST delete this once parsing finishes — the extracted third-party
+   * source is a transient analysis copy and must not linger in os.tmpdir().
+   */
+  tempRoot: string;
 };
 
 export type RegistryInput = {

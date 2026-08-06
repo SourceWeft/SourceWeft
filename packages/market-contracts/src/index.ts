@@ -70,6 +70,7 @@ export const marketMcpManifestSchema = z.object({
   description: z.string().optional(),
   providerName: z.string().optional(),
   homepageUrl: z.string().url().optional(),
+  iconUrl: z.string().url().optional(),
   license: z.string().optional(),
   language: z.string().optional(),
   transport: mcpTransportSchema,
@@ -99,6 +100,7 @@ export const marketItemSummarySchema = z.object({
   summary: z.string(),
   providerName: z.string().nullable().default(null),
   homepageUrl: z.string().url().nullable().default(null),
+  iconUrl: z.string().url().nullable().default(null),
   sourceUrl: z.string().url().nullable().default(null),
   repoUrl: z.string().url().nullable().default(null),
   license: z.string().nullable().default(null),
@@ -174,11 +176,18 @@ export const listMarketCategoriesResponseSchema = z.object({
   items: z.array(marketCategorySchema),
 });
 
+// Per-category item counts for the current query, keyed by category slug, plus
+// the distinct total. Computed server-side over the whole catalog so the
+// sidebar facet reflects all matching content rather than one loaded page.
+export const marketCategoryCountsResponseSchema = z.object({
+  counts: z.record(z.string(), z.number().int().min(0)),
+  total: z.number().int().min(0),
+});
+
 export const marketSigningKeySchema = z.object({
   keyId: z.string(),
   alg: z.literal("ed25519"),
-  // Base64 SPKI-encoded Ed25519 public key, matching the `keyId:publicKey`
-  // format consumers configure in MARKET_TRUSTED_PUBLIC_KEYS.
+  // Base64 SPKI-encoded Ed25519 public key in `keyId:publicKey` form.
   publicKey: z.string(),
 });
 
@@ -193,22 +202,16 @@ export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export type McpAuthType = z.infer<typeof mcpAuthTypeSchema>;
 export type McpRiskLevel = z.infer<typeof mcpRiskLevelSchema>;
 export type McpRuntime = z.infer<typeof mcpRuntimeSchema>;
-export type McpVerificationStatus = z.infer<
-  typeof mcpVerificationStatusSchema
->;
+export type McpVerificationStatus = z.infer<typeof mcpVerificationStatusSchema>;
 export type MarketMcpAuthRequirement = z.infer<
   typeof marketMcpAuthRequirementSchema
 >;
-export type MarketMcpToolManifest = z.infer<
-  typeof marketMcpToolManifestSchema
->;
+export type MarketMcpToolManifest = z.infer<typeof marketMcpToolManifestSchema>;
 export type MarketMcpManifest = z.infer<typeof marketMcpManifestSchema>;
 export type MarketItemSummary = z.infer<typeof marketItemSummarySchema>;
 export type MarketItemVersion = z.infer<typeof marketItemVersionSchema>;
 export type ListMarketMcpRequest = z.infer<typeof listMarketMcpRequestSchema>;
-export type ListMarketMcpResponse = z.infer<
-  typeof listMarketMcpResponseSchema
->;
+export type ListMarketMcpResponse = z.infer<typeof listMarketMcpResponseSchema>;
 export type GetMarketMcpResponse = z.infer<typeof getMarketMcpResponseSchema>;
 export type GetMarketMcpManifestResponse = z.infer<
   typeof getMarketMcpManifestResponseSchema
@@ -216,6 +219,9 @@ export type GetMarketMcpManifestResponse = z.infer<
 export type MarketCategory = z.infer<typeof marketCategorySchema>;
 export type ListMarketCategoriesResponse = z.infer<
   typeof listMarketCategoriesResponseSchema
+>;
+export type MarketCategoryCountsResponse = z.infer<
+  typeof marketCategoryCountsResponseSchema
 >;
 export type MarketSigningKey = z.infer<typeof marketSigningKeySchema>;
 export type ListMarketKeysResponse = z.infer<

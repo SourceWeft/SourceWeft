@@ -3,6 +3,7 @@ import { test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   listMcp: vi.fn(),
+  countMcpByCategory: vi.fn(),
   findMcp: vi.fn(),
   findMcpVersion: vi.fn(),
   listCategories: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 // so it delegates to the market read module rather than an HTTP MarketClient.
 vi.mock("../market/read-repository", () => ({
   listMcp: mocks.listMcp,
+  countMcpByCategory: mocks.countMcpByCategory,
   findMcp: mocks.findMcp,
   findMcpVersion: mocks.findMcpVersion,
 }));
@@ -51,6 +53,31 @@ test("listMcp degrades to an empty catalog when the read throws", async () => {
   const result = await new MarketService().listMcp({});
 
   assert.deepEqual(result, { items: [], nextCursor: null });
+});
+
+test("countMcpByCategory delegates to the read repository", async () => {
+  mocks.countMcpByCategory.mockResolvedValue({
+    counts: { "developer-tools": 12 },
+    total: 20,
+  });
+
+  const result = await new MarketService().countMcpByCategory({ query: "git" });
+
+  assert.deepEqual(result, { counts: { "developer-tools": 12 }, total: 20 });
+  assert.deepEqual(mocks.countMcpByCategory.mock.calls[0]?.[0], {
+    query: "git",
+  });
+});
+
+test("countMcpByCategory surfaces non-DB read failures", async () => {
+  // The repository itself degrades DB-unavailable to empty counts; anything it
+  // rethrows is a real failure and must not masquerade as "no matching items".
+  mocks.countMcpByCategory.mockRejectedValue(new Error("boom"));
+
+  await assert.rejects(
+    () => new MarketService().countMcpByCategory({}),
+    /boom/,
+  );
 });
 
 test("getMcpManifest maps the found version, 404s when missing", async () => {

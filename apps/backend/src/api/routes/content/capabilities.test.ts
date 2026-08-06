@@ -6,6 +6,7 @@ import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
 const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
   listCapabilityCatalog: vi.fn(),
+  listHiddenManagedBuiltinSlugs: vi.fn(),
   requireContentWorkspace: vi.fn(),
   requireSession: vi.fn(),
 }));
@@ -21,6 +22,12 @@ vi.mock("../../../modules/workspace", () => ({
 
 vi.mock("../../../modules/threads/turn/capability-command-workflows", () => ({
   listCapabilityCatalog: mocks.listCapabilityCatalog,
+}));
+
+vi.mock("../../../modules/skills", () => ({
+  contentSkillsService: {
+    listHiddenManagedBuiltinSlugs: mocks.listHiddenManagedBuiltinSlugs,
+  },
 }));
 
 import { registerCapabilityRoutes } from "./capabilities";
@@ -53,6 +60,7 @@ function resetRouteMocks() {
     id: "workspace_1",
     organizationId: "team_1",
   });
+  mocks.listHiddenManagedBuiltinSlugs.mockResolvedValue([]);
 }
 
 async function readJson(response: Response) {
@@ -113,4 +121,62 @@ test("GET /capabilities/catalog includes command icon metadata", async () => {
     ],
     tools: [],
   });
+});
+
+test("GET /capabilities/catalog hides uninstalled managed builtin skill commands", async () => {
+  resetRouteMocks();
+  // feynman is a managed builtin not installed in this workspace; ppt-deck is
+  // an always-on builtin and must remain.
+  mocks.listHiddenManagedBuiltinSlugs.mockResolvedValue(["feynman"]);
+  mocks.listCapabilityCatalog.mockResolvedValue({
+    commands: [
+      {
+        action: { kind: "skill", targetId: "feynman" },
+        aliases: ["feynman"],
+        capabilityId: "sourceweft/feynman",
+        category: "Skills",
+        contributionId: "feynman",
+        displayTitle: "Feynman",
+        id: "cap:sourceweft/feynman:feynman",
+        order: 0,
+        parentKind: "skill",
+        parentTitle: "Feynman",
+        sourcePackageName: "@sourceweft/builtin-skill-feynman",
+        title: "Feynman",
+        visible: true,
+        workflow: null,
+      },
+      {
+        action: { kind: "skill", targetId: "ppt-deck" },
+        aliases: ["ppt"],
+        capabilityId: "sourceweft/ppt-deck",
+        category: "Artifacts",
+        contributionId: "ppt-deck",
+        displayTitle: "PPT Deck",
+        id: "cap:sourceweft/ppt-deck:ppt-deck",
+        order: 1,
+        parentKind: "skill",
+        parentTitle: "PPT Deck",
+        sourcePackageName: "@sourceweft/builtin-skill-ppt-deck",
+        title: "PPT Deck",
+        visible: true,
+        workflow: null,
+      },
+    ],
+    tools: [],
+  });
+
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace_1/capabilities/catalog",
+  );
+
+  assert.equal(response.status, 200);
+  const body = await readJson(response);
+  const commands = body.commands as Array<{
+    action: { targetId: string };
+  }>;
+  assert.deepEqual(
+    commands.map((command) => command.action.targetId),
+    ["ppt-deck"],
+  );
 });

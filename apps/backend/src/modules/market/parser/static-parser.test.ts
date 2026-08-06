@@ -25,6 +25,7 @@ async function createRepositoryFixture(input: {
     resolvedRef: "main",
     rootDir: root,
     workDir: root,
+    tempRoot: root,
     subpath: "",
     repoUrl: `https://github.com/${input.owner ?? "example"}/${input.repo}`,
     sourceUrl: `https://github.com/${input.owner ?? "example"}/${input.repo}`,

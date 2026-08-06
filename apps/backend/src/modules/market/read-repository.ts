@@ -25,6 +25,27 @@ function iso(value: Date | null) {
   return value ? value.toISOString() : null;
 }
 
+export function identifierForSearch(identifier: string) {
+  return identifier.toLowerCase().replace(/^(?:io|com)\.github\./, "");
+}
+
+function queryIncludesTechnicalIdentifierSyntax(query: string) {
+  return query.includes(".") || query.includes("/");
+}
+
+function marketSearchCondition(query: string) {
+  const normalizedIdentifier = sql<string>`regexp_replace(${marketItems.identifier}, '^(io|com)\\.github\\.', '', 'i')`;
+  const conditions = [
+    ilike(marketItems.name, `%${query}%`),
+    ilike(marketItems.summary, `%${query}%`),
+    ilike(normalizedIdentifier, `%${query}%`),
+  ];
+  if (queryIncludesTechnicalIdentifierSyntax(query)) {
+    conditions.push(ilike(marketItems.identifier, `%${query}%`));
+  }
+  return or(...conditions)!;
+}
+
 function fallbackListMcp(input: {
   query?: string;
   category?: string;
@@ -62,10 +83,13 @@ function fallbackListMcp(input: {
       if (!query) {
         return true;
       }
+      const searchableIdentifier = identifierForSearch(item.identifier);
       return (
         item.name.toLowerCase().includes(query) ||
         item.summary.toLowerCase().includes(query) ||
-        item.identifier.toLowerCase().includes(query)
+        searchableIdentifier.includes(query) ||
+        (queryIncludesTechnicalIdentifierSyntax(query) &&
+          item.identifier.toLowerCase().includes(query))
       );
     })
     .slice(0, limit);
@@ -74,7 +98,9 @@ function fallbackListMcp(input: {
 }
 
 function fallbackFindMcp(identifier: string) {
-  return records.find((record) => record.item.identifier === identifier) ?? null;
+  return (
+    records.find((record) => record.item.identifier === identifier) ?? null
+  );
 }
 
 // Only genuine connectivity failures should fall back to the (empty) static
@@ -175,11 +201,48 @@ function runtimeFor(input: { desktopOnly: boolean; webExecutable: boolean }) {
   return input.desktopOnly || !input.webExecutable ? "desktop" : "web";
 }
 
-function verificationStatusFor(input: { official: boolean; verified: boolean }) {
+function verificationStatusFor(input: {
+  official: boolean;
+  verified: boolean;
+}) {
   if (input.official) {
     return "official" as const;
   }
   return input.verified ? "verified" : "unverified";
+}
+
+// The upstream registry ships an icon for only a small fraction of entries, so
+// most cards fall back to the generic glyph. Nearly every entry is GitHub-hosted
+// (io.github.<owner>/<repo>), so derive the owner's avatar as a real logo when no
+// upstream icon exists. The <img> follows github.com's redirect to the avatar CDN
+// and the client falls back to the glyph on load error, so a wrong guess is safe.
+function githubOwner(repoUrl: string | null, identifier: string): string | null {
+  if (repoUrl) {
+    try {
+      const url = new URL(repoUrl);
+      if (url.hostname === "github.com" || url.hostname.endsWith(".github.com")) {
+        const owner = url.pathname.split("/").filter(Boolean)[0];
+        if (owner) {
+          return owner;
+        }
+      }
+    } catch {
+      // Fall through to the identifier-based derivation below.
+    }
+  }
+  const namespace = identifier.split("/")[0] ?? "";
+  const match = namespace.match(/^io\.github\.(.+)$/i);
+  return match?.[1] ?? null;
+}
+
+function deriveIconUrl(input: {
+  repoUrl: string | null;
+  identifier: string;
+}): string | null {
+  const owner = githubOwner(input.repoUrl, input.identifier);
+  return owner
+    ? `https://github.com/${encodeURIComponent(owner)}.png?size=80`
+    : null;
 }
 
 function mapItemRow(input: {
@@ -199,9 +262,14 @@ function mapItemRow(input: {
     identifier: input.row.identifier,
     name: input.row.name,
     summary: input.row.summary,
-    providerName:
-      stringMeta(mergedMeta, "providerName") ?? input.row.owner,
+    providerName: stringMeta(mergedMeta, "providerName") ?? input.row.owner,
     homepageUrl: stringMeta(mergedMeta, "homepageUrl"),
+    iconUrl:
+      stringMeta(mergedMeta, "iconUrl") ??
+      deriveIconUrl({
+        repoUrl: input.row.repoUrl,
+        identifier: input.row.identifier,
+      }),
     sourceUrl: input.row.sourceUrl,
     repoUrl: input.row.repoUrl,
     license: stringMeta(mergedMeta, "license"),
@@ -226,7 +294,9 @@ function mapItemRow(input: {
   };
 }
 
-function mapVersionRow(row: typeof marketItemVersions.$inferSelect): MarketItemVersion {
+function mapVersionRow(
+  row: typeof marketItemVersions.$inferSelect,
+): MarketItemVersion {
   return {
     version: row.version,
     status: row.status,
@@ -285,7 +355,10 @@ async function latestVersionsByItemIds(itemIds: string[]) {
     )
     // Deterministic "latest": newest published first, so the first row we keep
     // per item is stable rather than whatever order Postgres returns.
-    .orderBy(desc(marketItemVersions.publishedAt), desc(marketItemVersions.createdAt));
+    .orderBy(
+      desc(marketItemVersions.publishedAt),
+      desc(marketItemVersions.createdAt),
+    );
 
   const map = new Map<
     string,
@@ -359,13 +432,7 @@ export async function listMcp(input: {
     eq(marketItems.visibility, "public" as const),
   ];
   if (query) {
-    conditions.push(
-      or(
-        ilike(marketItems.name, `%${query}%`),
-        ilike(marketItems.summary, `%${query}%`),
-        ilike(marketItems.identifier, `%${query}%`),
-      )!,
-    );
+    conditions.push(marketSearchCondition(query));
   }
   if (!input.includeDesktopOnly) {
     conditions.push(eq(marketItems.desktopOnly, false));
@@ -445,6 +512,65 @@ export async function listMcp(input: {
   return { items, nextCursor };
 }
 
+// Facet counts for the category sidebar: how many published/public MCP items
+// fall in each category for the CURRENT query, computed over the whole catalog
+// (not just a loaded page) and independent of any selected category so the
+// numbers stay stable while the user narrows down. `total` is the distinct item
+// count for the query; per-category counts can sum past it because one item may
+// belong to several categories.
+export async function countMcpByCategory(input: {
+  query?: string;
+  includeDesktopOnly?: boolean;
+}): Promise<{ counts: Record<string, number>; total: number }> {
+  const query = input.query?.trim().toLowerCase();
+  const conditions = [
+    eq(marketItems.kind, "mcp" as const),
+    eq(marketItems.status, "published" as const),
+    eq(marketItems.visibility, "public" as const),
+  ];
+  if (query) {
+    conditions.push(marketSearchCondition(query));
+  }
+  if (!input.includeDesktopOnly) {
+    conditions.push(eq(marketItems.desktopOnly, false));
+  }
+
+  try {
+    const [categoryRows, totalRows] = await Promise.all([
+      db
+        .select({
+          slug: marketCategories.slug,
+          count: sql<number>`count(distinct ${marketItems.id})::int`,
+        })
+        .from(marketItems)
+        .innerJoin(
+          marketItemCategories,
+          eq(marketItemCategories.itemId, marketItems.id),
+        )
+        .innerJoin(
+          marketCategories,
+          eq(marketCategories.id, marketItemCategories.categoryId),
+        )
+        .where(and(...conditions))
+        .groupBy(marketCategories.slug),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marketItems)
+        .where(and(...conditions)),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const row of categoryRows) {
+      counts[row.slug] = Number(row.count);
+    }
+    return { counts, total: Number(totalRows[0]?.count ?? 0) };
+  } catch (error) {
+    if (isDatabaseUnavailable(error)) {
+      return { counts: {}, total: 0 };
+    }
+    throw error;
+  }
+}
+
 export async function findMcp(identifier: string) {
   let row: typeof marketItems.$inferSelect | undefined;
   try {
@@ -509,7 +635,8 @@ export async function findMcpVersion(identifier: string, version?: string) {
     record.versions.find((candidate) => candidate.status === "published")
       ?.version;
   const itemVersion =
-    record.versions.find((candidate) => candidate.version === selectedVersion) ??
-    null;
+    record.versions.find(
+      (candidate) => candidate.version === selectedVersion,
+    ) ?? null;
   return itemVersion ? { record, itemVersion } : null;
 }

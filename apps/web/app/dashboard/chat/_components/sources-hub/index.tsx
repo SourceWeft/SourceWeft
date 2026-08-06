@@ -1025,22 +1025,35 @@ export function SourcesHub({
                     </span>
                   ) : null}
                 </div>
-                <Button
-                  onClick={() => setIsMcpMarketOpen(true)}
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
-                  <McpIcon className="size-3.5" />
-                  MCP Market
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    onClick={() => void refreshMcpInstalls()}
+                    size="icon-xs"
+                    title="Refresh MCP tools"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <RotateCcw
+                      className={cn("size-3.5", isLoadingMcp && "animate-spin")}
+                    />
+                    <span className="sr-only">Refresh MCP tools</span>
+                  </Button>
+                  <Button
+                    onClick={() => setIsMcpMarketOpen(true)}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    <McpIcon className="size-3.5" />
+                    MCP Market
+                  </Button>
+                </div>
               </div>
 
               <McpTab
                 installs={mcpInstalls}
                 isLoading={isLoadingMcp}
                 loadingError={mcpLoadingError}
-                onRefresh={() => void refreshMcpInstalls()}
                 onSelectionChange={onMcpSelectionChange}
                 searchQuery={deferredSearchQuery}
                 selectedInstallIds={selectedMcpInstallIds}
@@ -1345,7 +1358,11 @@ export function SourcesHub({
               {workspaceName || "the current workspace"}.
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 overflow-auto">
+          {/* Flex + clip so McpMarket's flex-1 gets a bounded height and its own
+              ScrollAreas handle scrolling — the filter sidebar stays fixed while
+              only the card grid scrolls. overflow-auto here let the whole panel
+              scroll as one, dragging the sidebar out of view. */}
+          <div className="flex min-h-0 overflow-hidden">
             <McpMarket />
           </div>
         </DialogContent>

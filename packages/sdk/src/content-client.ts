@@ -54,6 +54,7 @@ import type {
   ListByokModelCandidatesResponse,
   ListByokCredentialsResponse,
   ListWorkspaceMarketMcpCategoriesResponse,
+  ListWorkspaceMarketMcpCategoryCountsResponse,
   ListWorkspaceMarketMcpResponse,
   ListWorkspaceMcpActionRunsResponse,
   ListWorkspaceMcpInstallsResponse,
@@ -679,6 +680,18 @@ export class ContentClient {
   listWorkspaceMarketMcpCategories(workspaceId: string) {
     return this.http.get<ListWorkspaceMarketMcpCategoriesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/market/mcp/categories`,
+    );
+  }
+
+  getWorkspaceMarketMcpCategoryCounts(
+    workspaceId: string,
+    params?: { query?: string },
+  ) {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    return this.http.get<ListWorkspaceMarketMcpCategoryCountsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/category-counts${suffix}`,
     );
   }
 

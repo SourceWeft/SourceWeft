@@ -5,6 +5,7 @@ import {
   mcpTransportSchema,
   getMarketMcpResponseSchema,
   listMarketCategoriesResponseSchema,
+  marketCategoryCountsResponseSchema,
   marketItemSummarySchema,
   marketMcpManifestSchema,
   marketMcpToolManifestSchema,
@@ -174,6 +175,9 @@ export const listWorkspaceMarketMcpResponseSchema = z.object({
 export const listWorkspaceMarketMcpCategoriesResponseSchema =
   listMarketCategoriesResponseSchema;
 
+export const listWorkspaceMarketMcpCategoryCountsResponseSchema =
+  marketCategoryCountsResponseSchema;
+
 export const getWorkspaceMarketMcpResponseSchema = z.object({
   market: getMarketMcpResponseSchema,
   install: workspaceMcpInstallSchema.nullable(),
@@ -305,6 +309,9 @@ export type ListWorkspaceMarketMcpResponse = z.infer<
 >;
 export type ListWorkspaceMarketMcpCategoriesResponse = z.infer<
   typeof listWorkspaceMarketMcpCategoriesResponseSchema
+>;
+export type ListWorkspaceMarketMcpCategoryCountsResponse = z.infer<
+  typeof listWorkspaceMarketMcpCategoryCountsResponseSchema
 >;
 export type GetWorkspaceMarketMcpResponse = z.infer<
   typeof getWorkspaceMarketMcpResponseSchema

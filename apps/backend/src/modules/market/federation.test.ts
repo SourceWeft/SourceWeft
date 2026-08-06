@@ -77,6 +77,24 @@ test("registry entries are categorized from their text, not left empty", async (
   assert.ok(manifest.categories.includes("databases"));
 });
 
+test("registry entries preserve the first valid HTTPS icon", () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "io.github.acme/icon-mcp",
+        version: "1.0.0",
+        icons: [
+          { src: "http://insecure.test/icon.png" },
+          { src: "https://cdn.acme.test/icon.png" },
+        ],
+        remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.equal(manifest?.iconUrl, "https://cdn.acme.test/icon.png");
+});
+
 test("a clean walk to the end reports the full count and is not partial", async () => {
   mocks.upsert.mockResolvedValue("item-id");
   vi.stubGlobal(
@@ -86,7 +104,10 @@ test("a clean walk to the end reports the full count and is not partial", async 
       const cursor = url.searchParams.get("cursor");
       const body = cursor
         ? { servers: [serverEntry(3)], metadata: { nextCursor: null } }
-        : { servers: [serverEntry(1), serverEntry(2)], metadata: { nextCursor: "page-2" } };
+        : {
+            servers: [serverEntry(1), serverEntry(2)],
+            metadata: { nextCursor: "page-2" },
+          };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },

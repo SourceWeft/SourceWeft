@@ -29,7 +29,10 @@ function fallbackIdentifier(parsed: StaticParseResult) {
   return `io.github.${parsed.source.owner}${suffix}`;
 }
 
-function usableVersion(value: string | undefined, commitSha: string | undefined) {
+function usableVersion(
+  value: string | undefined,
+  commitSha: string | undefined,
+) {
   if (value && !value.includes("${") && value !== "latest") {
     return value;
   }
@@ -38,7 +41,9 @@ function usableVersion(value: string | undefined, commitSha: string | undefined)
 
 function chooseConnection(connections: ConnectionCandidate[]) {
   return (
-    connections.find((connection) => connection.transport === "streamable_http") ??
+    connections.find(
+      (connection) => connection.transport === "streamable_http",
+    ) ??
     connections.find((connection) => connection.transport === "sse") ??
     connections.find((connection) => connection.transport === "stdio") ??
     connections[0]
@@ -50,7 +55,12 @@ function authFromConnection(
 ): MarketMcpAuthRequirement {
   const headers = connection?.headerNames ?? [];
   const requiredSecrets = connection?.requiredSecrets ?? [];
-  if (!connection || (!connection.authRequired && headers.length === 0 && requiredSecrets.length === 0)) {
+  if (
+    !connection ||
+    (!connection.authRequired &&
+      headers.length === 0 &&
+      requiredSecrets.length === 0)
+  ) {
     return { type: "none", required: false, allowedHeaderNames: [] };
   }
 
@@ -130,7 +140,9 @@ function summarizeRisk(input: {
   runtime: RuntimeIntrospectionResult;
   tools: Array<{ risk?: string }>;
 }) {
-  const destructive = input.tools.filter((tool) => tool.risk === "destructive").length;
+  const destructive = input.tools.filter(
+    (tool) => tool.risk === "destructive",
+  ).length;
   const write = input.tools.filter((tool) => tool.risk === "write").length;
   const parts = [`Parsed ${input.tools.length} tools`];
   if (write > 0) {
@@ -161,6 +173,23 @@ function summarizeServerJson(value: unknown) {
     hasRemotes: Array.isArray(serverJson.remotes),
     repository: serverJson.repository,
   };
+}
+
+function iconUrlFromServerJson(icons: unknown[] | undefined) {
+  for (const icon of icons ?? []) {
+    if (!icon || typeof icon !== "object") continue;
+    const src = (icon as { src?: unknown }).src;
+    if (typeof src !== "string") continue;
+    try {
+      const url = new URL(src);
+      if (url.protocol === "https:") {
+        return url.toString();
+      }
+    } catch {
+      // Ignore malformed server.json icon entries.
+    }
+  }
+  return undefined;
 }
 
 export function mapParsedRepositoryToManifest(input: {
@@ -204,11 +233,10 @@ export function mapParsedRepositoryToManifest(input: {
     version: usableVersion(serverJson?.version, parsed.source.commitSha),
     name,
     summary,
-    description:
-      parsed.readme?.summary ??
-      serverJson?.description,
+    description: parsed.readme?.summary ?? serverJson?.description,
     providerName: parsed.source.owner,
     homepageUrl: serverJson?.websiteUrl,
+    iconUrl: iconUrlFromServerJson(serverJson?.icons),
     license:
       parsed.packageHints
         .map((hint) => hint.license)
@@ -221,7 +249,8 @@ export function mapParsedRepositoryToManifest(input: {
       undefined,
     transport: connection?.transport ?? "stdio",
     endpointUrl:
-      connection?.transport === "streamable_http" || connection?.transport === "sse"
+      connection?.transport === "streamable_http" ||
+      connection?.transport === "sse"
         ? connection.endpointUrl
         : undefined,
     desktopOnly: !connection || connection.transport === "stdio",

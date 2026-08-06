@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { listCapabilityCatalog } from "../../../modules/threads/turn/capability-command-workflows";
+import { contentSkillsService } from "../../../modules/skills";
 import { requireContentWorkspace } from "../../../modules/workspace";
 import {
   getSessionUserId,
@@ -22,10 +23,24 @@ async function requireCapabilityCatalogContext(c: import("hono").Context) {
 
 export function registerCapabilityRoutes(app: Hono) {
   app.get("/capabilities/catalog", async (c) => {
-    await requireCapabilityCatalogContext(c);
-    const catalog = await listCapabilityCatalog();
+    const context = await requireCapabilityCatalogContext(c);
+    const [catalog, hiddenManagedBuiltinSlugs] = await Promise.all([
+      listCapabilityCatalog(),
+      contentSkillsService.listHiddenManagedBuiltinSlugs(context),
+    ]);
+    // Drop skill slash commands for `managed` builtins that this workspace has
+    // not installed (e.g. /feynman before install). Always-on builtins and tool
+    // commands are unaffected; managed builtins are workflow-only (no tools).
+    const hiddenSlugs = new Set(hiddenManagedBuiltinSlugs);
+    const visibleCommands = catalog.commands.filter(
+      (command) =>
+        !(
+          command.action.kind === "skill" &&
+          hiddenSlugs.has(command.action.targetId)
+        ),
+    );
     return ApiResponse.success(c, {
-      commands: catalog.commands.map((command) => ({
+      commands: visibleCommands.map((command) => ({
         id: command.id,
         capabilityId: command.capabilityId,
         contributionId: command.contributionId,

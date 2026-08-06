@@ -3,6 +3,7 @@ import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { listMcpCategories as readMcpCategories } from "../market/read-categories";
 import {
+  countMcpByCategory as readCountMcpByCategory,
   findMcp,
   findMcpVersion,
   listMcp as readListMcp,
@@ -49,6 +50,18 @@ export class MarketService {
       });
       return { items: [] };
     }
+  }
+
+  async countMcpByCategory(
+    input: { query?: string; includeDesktopOnly?: boolean } = {},
+  ) {
+    if (!this.isEnabled()) {
+      return { counts: {}, total: 0 };
+    }
+    // The repository already degrades to empty counts for DB-unavailable;
+    // anything else is a real failure and must surface rather than masquerade
+    // as "no matching items".
+    return readCountMcpByCategory(input);
   }
 
   async getMcp(identifier: string) {

@@ -36,8 +36,10 @@ type RegistryServer = {
   description?: string;
   version?: string;
   remotes?: RegistryRemote[];
+  icons?: unknown[];
   packages?: unknown[];
   repository?: { url?: string; source?: string } | null;
+  websiteUrl?: string;
   _meta?: Record<string, unknown>;
 };
 type RegistryEntry = {
@@ -85,6 +87,23 @@ function displayName(server: RegistryServer, identifier: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function registryIconUrl(server: RegistryServer) {
+  for (const icon of server.icons ?? []) {
+    if (!icon || typeof icon !== "object") continue;
+    const src = (icon as { src?: unknown }).src;
+    if (typeof src !== "string") continue;
+    try {
+      const url = new URL(src);
+      if (url.protocol === "https:") {
+        return url.toString();
+      }
+    } catch {
+      // Ignore malformed upstream icon entries and try the next candidate.
+    }
+  }
+  return undefined;
+}
+
 /**
  * Map an upstream registry entry to our market manifest. Returns null for
  * entries we can't represent (missing name/version). Registry entries are
@@ -130,6 +149,8 @@ export function mapRegistryServerToManifest(
     summary: summary.slice(0, 500),
     description: server.description?.trim() || undefined,
     providerName: providerFromIdentifier(identifier),
+    homepageUrl: server.websiteUrl,
+    iconUrl: registryIconUrl(server),
     transport,
     endpointUrl: hasRemote ? remote?.url : undefined,
     desktopOnly: !hasRemote,
@@ -217,13 +238,17 @@ export async function ingestFromRegistry(input: {
       // pages are already committed, so record what we have and stop rather than
       // throwing away the whole run — the next scheduled sync resumes the walk.
       partial = true;
-      error = pageError instanceof Error ? pageError.message : String(pageError);
-      logger.warn("Registry federation page fetch failed; keeping partial run", {
-        source: input.source,
-        ingested,
-        skipped,
-        error,
-      });
+      error =
+        pageError instanceof Error ? pageError.message : String(pageError);
+      logger.warn(
+        "Registry federation page fetch failed; keeping partial run",
+        {
+          source: input.source,
+          ingested,
+          skipped,
+          error,
+        },
+      );
       break;
     }
     const entries = page.servers ?? [];
@@ -238,7 +263,9 @@ export async function ingestFromRegistry(input: {
         skipped += 1;
         continue;
       }
-      const manifest = mapRegistryServerToManifest(entry, { verified: input.verified });
+      const manifest = mapRegistryServerToManifest(entry, {
+        verified: input.verified,
+      });
       if (!manifest) {
         skipped += 1;
         continue;

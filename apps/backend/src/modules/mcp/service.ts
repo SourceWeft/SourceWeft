@@ -614,6 +614,19 @@ export class McpService {
     return marketService.listMcpCategories();
   }
 
+  async countMarketMcpCategories(input: {
+    workspaceId: string;
+    userId: string;
+    query?: string;
+  }) {
+    await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.read",
+    });
+    return marketService.countMcpByCategory({ query: input.query });
+  }
+
   async getMarketMcp(input: {
     workspaceId: string;
     userId: string;

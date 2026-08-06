@@ -1,8 +1,7 @@
-import { CircleAlert, Loader2, RotateCcw } from "lucide-react";
+import { CircleAlert, Loader2 } from "lucide-react";
 import { useMemo } from "react";
 
 import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
-import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../../../../lib/relative-time";
@@ -206,7 +205,6 @@ export function McpTab({
   installs,
   isLoading,
   loadingError,
-  onRefresh,
   onSelectionChange,
   searchQuery,
   selectedInstallIds,
@@ -215,7 +213,6 @@ export function McpTab({
   installs: WorkspaceMcpInstall[];
   isLoading: boolean;
   loadingError: string | null;
-  onRefresh: () => void;
   onSelectionChange: (selection: McpToolSelection) => void;
   searchQuery: string;
   selectedInstallIds: string[];
@@ -283,18 +280,6 @@ export function McpTab({
 
   return (
     <div className="space-y-1">
-      <div className="mb-2 flex justify-end">
-        <Button
-          onClick={onRefresh}
-          size="icon-xs"
-          title="Refresh MCP tools"
-          type="button"
-          variant="ghost"
-        >
-          <RotateCcw className="size-3.5" />
-          <span className="sr-only">Refresh MCP tools</span>
-        </Button>
-      </div>
       {filtered.map((install) => (
         <McpRow
           install={install}

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { test, vi } from "vitest";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { McpError } from "./errors";
@@ -106,6 +108,7 @@ vi.mock("./repository", () => ({
 }));
 
 import { McpService, stripLangChainMcpToolPrefix } from "./service";
+import { assertSafeMcpEndpoint } from "./security";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
@@ -593,6 +596,54 @@ test("testInstall preserves existing tool metadata instead of clobbering it", as
     mocks.upsertWorkspaceMcpTools.mock.calls[0]?.[0]?.preserveExistingMetadata,
     true,
   );
+});
+
+test("development MCP checks allow fake-IP DNS while production stays fail-closed", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const endpointCheck = vi.mocked(assertSafeMcpEndpoint);
+  try {
+    for (const [nodeEnv, allowed] of [
+      ["development", true],
+      ["production", false],
+    ] as const) {
+      process.env.NODE_ENV = nodeEnv;
+      resetMcpServiceMocks();
+      const install = mcpInstall({ id: `mcp_${nodeEnv}` });
+      mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+      mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
+      mocks.updateWorkspaceMcpInstall.mockResolvedValue(install);
+
+      await new McpService().testInstall({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        installId: install.id,
+      });
+
+      assert.deepEqual(endpointCheck.mock.calls[0]?.[1], {
+        allowLocalhost: allowed,
+        allowPrivateNetwork: allowed,
+      });
+    }
+  } finally {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  }
+});
+
+test("all backend dev entrypoints explicitly select development endpoint policy", () => {
+  const packageJson = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL("../../../package.json", import.meta.url)),
+      "utf8",
+    ),
+  ) as { scripts?: Record<string, string> };
+
+  for (const script of ["dev:api", "dev:worker", "dev:scheduler"]) {
+    assert.match(packageJson.scripts?.[script] ?? "", /^NODE_ENV=development\s/);
+  }
 });
 
 test("installMarketMcp refuses to downgrade an already-installed newer version", async () => {

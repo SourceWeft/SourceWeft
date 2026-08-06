@@ -72,6 +72,7 @@ function staticParseFixture(input?: {
       rootDir: "/tmp/source",
       sourceUrl: `https://github.com/microsoft/${repo}`,
       subpath: "",
+      tempRoot: "/tmp/source",
       workDir: "/tmp/source",
     },
     sourceTools: [],

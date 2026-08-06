@@ -38,6 +38,7 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
     transport: manifest.transport,
     providerName: manifest.providerName,
     homepageUrl: manifest.homepageUrl,
+    iconUrl: manifest.iconUrl,
     license: manifest.license,
     language: manifest.language,
     toolsCount: manifest.tools.length,
@@ -126,7 +127,10 @@ export async function upsertMarketMcp(input: {
       ? { ...metadataFromManifest(manifest), official: false, verified: false }
       : metadataFromManifest(manifest);
   const itemId = hashId("mcp", manifest.identifier);
-  const versionId = hashId("mcpv", `${manifest.identifier}@${manifest.version}`);
+  const versionId = hashId(
+    "mcpv",
+    `${manifest.identifier}@${manifest.version}`,
+  );
   const now = new Date();
   const publishedAt = input.status === "published" ? now : null;
   const owner = input.owner ?? null;
@@ -241,4 +245,3 @@ export async function upsertMarketMcp(input: {
 
   return itemId;
 }
-
