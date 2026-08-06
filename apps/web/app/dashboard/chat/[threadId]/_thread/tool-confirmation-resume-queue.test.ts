@@ -152,7 +152,7 @@ test("tool confirmation resume idempotency key is deterministic for equivalent p
       decisions: [{ type: "approve" }],
       sourceweft: {
         hitlInterruptId: "interrupt-1",
-        sandboxExecuteToolCallId: "call-1",
+        confirmationId: "confirmation-1",
       },
     },
   };
@@ -162,7 +162,7 @@ test("tool confirmation resume idempotency key is deterministic for equivalent p
     resolvedConfirmationIds: ["confirmation-stable"],
     toolApprovalResume: {
       sourceweft: {
-        sandboxExecuteToolCallId: "call-1",
+        confirmationId: "confirmation-1",
         hitlInterruptId: "interrupt-1",
       },
       decisions: [{ type: "approve" }],

@@ -888,7 +888,6 @@ test("tool approval resumes merge sandbox action refs from every decision", () =
                 toolName: "execute",
               },
             ],
-            sandboxExecuteToolCallId: "call-sandbox-1",
           },
         },
       },
@@ -924,7 +923,6 @@ test("tool approval resumes merge sandbox action refs from every decision", () =
             toolName: "execute",
           },
         ],
-        sandboxExecuteToolCallId: "call-sandbox-1",
       },
     },
   );
@@ -1004,7 +1002,7 @@ test("tool approval resume preserves sourceweft metadata without interpreting it
           decisions: [{ type: "approve" }],
           sourceweft: {
             hitlInterruptId: "0123456789abcdef0123456789abcdef",
-            sandboxExecuteToolCallId: "call-sandbox-execute",
+            sourceAssistantMessageId: "assistant-sandbox-execute",
           },
         },
       },
@@ -1013,7 +1011,7 @@ test("tool approval resume preserves sourceweft metadata without interpreting it
       decisions: [{ type: "approve" }],
       sourceweft: {
         hitlInterruptId: "0123456789abcdef0123456789abcdef",
-        sandboxExecuteToolCallId: "call-sandbox-execute",
+        sourceAssistantMessageId: "assistant-sandbox-execute",
       },
     },
   );
