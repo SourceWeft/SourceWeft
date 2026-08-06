@@ -188,7 +188,8 @@ export async function listWorkspaceInstalledSkills(input: {
       and(
         eq(workspaceSkills.teamId, input.teamId),
         eq(workspaceSkills.workspaceId, input.workspaceId),
-        sql`${skillDefinitions.sourceType} <> 'builtin'`,
+        // A workspace_skills row can only exist for an installable skill (custom,
+        // or a `managed` builtin like feynman), so no explicit builtin guard here.
         eq(skillDefinitions.status, "active"),
         visibleSkillCondition(input),
       ),
@@ -230,7 +231,8 @@ export async function listEnabledWorkspaceSkillRecords(input: {
         eq(workspaceSkills.teamId, input.teamId),
         eq(workspaceSkills.workspaceId, input.workspaceId),
         eq(workspaceSkills.enabled, true),
-        sql`${skillDefinitions.sourceType} <> 'builtin'`,
+        // An install row implies the skill is installable (custom or `managed`
+        // builtin); always-on builtins never get a workspace_skills row.
         eq(skillDefinitions.status, "active"),
         visibleSkillCondition(input),
       ),
@@ -318,7 +320,9 @@ export async function findCatalogSkillVersionForWorkspace(input: {
         eq(skillDefinitions.id, input.skillId),
         eq(skillVersions.id, input.skillVersionId),
         eq(skillVersions.skillId, input.skillId),
-        sql`${skillDefinitions.sourceType} <> 'builtin'`,
+        // Builtins are installable only when explicitly `managed` (e.g. feynman);
+        // always-on builtins (generators) stay non-installable.
+        sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
         eq(skillDefinitions.status, "active"),
         eq(skillVersions.status, "published"),
         visibleSkillCondition(input),

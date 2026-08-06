@@ -32,7 +32,9 @@ function workspaceSkill(
   };
 }
 
-test("resolveSkillIdsWithSlashCommand adds builtin id from builtin slash activation", async () => {
+test("resolveSkillIdsWithSlashCommand resolves a managed builtin via the workspace install path", async () => {
+  // feynman is a `managed` builtin (opt-in): a slash activation must resolve
+  // through the install-checked workspace path, not the always-on builtin id.
   const skillIds = await resolveSkillIdsWithSlashCommand({
     teamId: "team-1",
     workspaceId: "workspace-1",
@@ -53,7 +55,23 @@ test("resolveSkillIdsWithSlashCommand adds builtin id from builtin slash activat
     }),
   });
 
-  assert.deepEqual(skillIds, ["builtin:feynman"]);
+  assert.deepEqual(skillIds, ["enabled-feynman"]);
+});
+
+test("resolveSkillIdsWithSlashCommand adds builtin id for an always-on builtin", async () => {
+  // ppt-deck is a non-managed (always-on) builtin, so its slash activation
+  // resolves directly to the builtin selection id without an install lookup.
+  const skillIds = await resolveSkillIdsWithSlashCommand({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    skillIds: [],
+    commandName: "/ppt-deck",
+    findSkillBySlug: async () => {
+      throw new Error("always-on builtin must not hit the workspace path");
+    },
+  });
+
+  assert.deepEqual(skillIds, ["builtin:ppt-deck"]);
 });
 
 test("resolveSkillIdsWithSlashCommand ignores slash subcommands", async () => {

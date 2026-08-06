@@ -10,6 +10,7 @@
     {
       "id": "image-generate",
       "visibility": "restricted",
+      "listing": "listed",
       "categories": ["create", "visual"],
       "slashConfig": {
         "enabled": true

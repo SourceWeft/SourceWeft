@@ -45,6 +45,9 @@ test("builtin skills load from standalone capability packages", async () => {
   assert.ok(feynmanBundle);
   assert.equal(bySlug.get("feynman")?.manifestJson.commands, undefined);
   assert.equal(bySlug.get("feynman")?.manifestJson.slash, true);
+  // feynman is the market's `managed` (opt-in installable) builtin.
+  assert.equal(bySlug.get("feynman")?.manifestJson.listing, "listed");
+  assert.equal(bySlug.get("feynman")?.manifestJson.managed, true);
   assert.equal(existsSync(legacyBuiltinSkillsDir), false);
 });
 
@@ -55,6 +58,9 @@ test("image-generate builtin skill exposes agent image artifact workflow without
   assert.equal(skill.visibility, "restricted");
   assert.equal(skill.manifestJson.visibility, "restricted");
   assert.equal(skill.manifestJson.slash, false);
+  // Generators are listed in the market but always-on (not user-installable).
+  assert.equal(skill.manifestJson.listing, "listed");
+  assert.notEqual(skill.manifestJson.managed, true);
   assert.deepEqual(skill.manifestJson.tools, ["generate_image"]);
   assert.deepEqual(
     skill.manifestJson.options?.map((option) => ({

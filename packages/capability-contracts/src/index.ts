@@ -248,6 +248,11 @@ export const skillContributionSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   visibility: z.enum(["public", "restricted"]).optional(),
+  // Market surfacing (orthogonal to `visibility`, which stays a scope/gate concept):
+  // `listing` decides whether the skill appears in the market at all; `managed`
+  // decides whether it is installable/uninstallable per workspace (false = always-on).
+  listing: z.enum(["listed", "hidden"]).default("listed"),
+  managed: z.boolean().default(false),
   categories: z.array(z.string().min(1)).default([]),
   models: z
     .object({

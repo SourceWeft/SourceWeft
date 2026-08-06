@@ -70,14 +70,19 @@ export class ContentSkillsService {
   }
 
   async listCatalog(input: { teamId: string; workspaceId: string }) {
-    // No lazy syncBuiltinCatalog() fallback here: it only ever writes rows with
-    // sourceType 'builtin', which the filter below discards, so it could not
-    // affect this result. Builtin entries are read from the filesystem further
-    // down. The catalog is synced once at API startup (api/main.ts).
+    // The catalog is synced once at API startup (api/main.ts), which writes a
+    // definition/version row for every builtin. `managed` builtins (e.g. feynman)
+    // flow through the DB-row path below so they get a real skillId/versionId and
+    // an opt-in install state from workspace_skills — identical to custom skills.
+    // `always-on` builtins (generators like ppt/video/image, `managed: false`)
+    // are read from the filesystem further down and rendered as non-installable.
     const rows = await listCatalogSkillVersionsForWorkspace(input);
 
     const installableRows = rows.filter(
-      (row) => row.definition.sourceType !== "builtin",
+      (row) =>
+        (row.definition.sourceType !== "builtin" ||
+          row.version.manifestJson.managed === true) &&
+        row.version.manifestJson.listing !== "hidden",
     );
 
     const items: SkillCatalogItem[] = installableRows.map((row) => {
@@ -109,7 +114,20 @@ export class ContentSkillsService {
         defaultConfig: manifest.defaultConfig,
       };
     });
+    // Builtins already surfaced via the DB-row path above (managed ones) must not
+    // be emitted a second time from disk.
+    const managedBuiltinSlugs = new Set(
+      installableRows
+        .filter((row) => row.definition.sourceType === "builtin")
+        .map((row) => row.definition.slug),
+    );
     for (const skill of await listBuiltinSkills()) {
+      if (skill.manifestJson.listing === "hidden") {
+        continue;
+      }
+      if (managedBuiltinSlugs.has(skill.slug)) {
+        continue;
+      }
       items.push({
         catalogId: `builtin:${skill.slug}`,
         selectionId: builtinSkillSelectionId(skill.slug),
@@ -149,6 +167,34 @@ export class ContentSkillsService {
 
   async listWorkspaceSkills(input: { teamId: string; workspaceId: string }) {
     return { items: await listWorkspaceInstalledSkills(input) };
+  }
+
+  /**
+   * Slugs of `managed` builtins that are NOT installed+enabled in this workspace.
+   * The capability catalog hides these so the composer never offers a slash
+   * command (e.g. /feynman) for an uninstalled opt-in builtin. Always-on builtins
+   * (managed !== true) are never hidden.
+   */
+  async listHiddenManagedBuiltinSlugs(input: {
+    teamId: string;
+    workspaceId: string;
+  }) {
+    const [builtins, installed] = await Promise.all([
+      listBuiltinSkills(),
+      listWorkspaceInstalledSkills(input),
+    ]);
+    const enabledBuiltinSlugs = new Set(
+      installed
+        .filter((item) => item.sourceType === "builtin" && item.enabled)
+        .map((item) => item.slug),
+    );
+    return builtins
+      .filter(
+        (skill) =>
+          skill.manifestJson.managed === true &&
+          !enabledBuiltinSlugs.has(skill.slug),
+      )
+      .map((skill) => skill.slug);
   }
 
   async getCatalogSkillDetail(input: {

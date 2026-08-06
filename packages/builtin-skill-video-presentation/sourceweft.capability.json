@@ -10,6 +10,7 @@
     {
       "id": "video-presentation",
       "visibility": "restricted",
+      "listing": "listed",
       "categories": ["create", "present", "visual"],
       "resources": [
         "SKILL.md",

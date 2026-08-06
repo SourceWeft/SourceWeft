@@ -273,6 +273,11 @@ export type SkillManifestJson = {
   version: string;
   description: string;
   visibility: SkillManifestVisibility;
+  // Market surfacing, orthogonal to `visibility`. `listing: "hidden"` keeps the
+  // skill out of the market entirely; `managed: true` makes it installable/
+  // uninstallable per workspace (default false = always-on built-in capability).
+  listing?: "listed" | "hidden";
+  managed?: boolean;
   categories: string[];
   capabilities?: {
     required?: string[];

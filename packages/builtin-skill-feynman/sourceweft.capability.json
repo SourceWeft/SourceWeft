@@ -10,6 +10,8 @@
     {
       "id": "feynman",
       "visibility": "public",
+      "listing": "listed",
+      "managed": true,
       "categories": ["learn"],
       "slash": true,
       "command": {

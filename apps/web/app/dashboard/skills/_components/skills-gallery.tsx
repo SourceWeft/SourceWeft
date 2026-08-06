@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import {
   Check,
   ChevronDown,
@@ -33,6 +32,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillDetailDialog } from "./skill-detail-dialog";
 
 type SkillsCatalogResponse = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -67,11 +67,25 @@ function fetchSkillsCatalog(targetWorkspaceId: string) {
   return promise;
 }
 
-type CategoryKey = "all" | "learn" | "research" | "write" | "review" | "operate";
+type CategoryKey =
+  | "all"
+  | "learn"
+  | "research"
+  | "write"
+  | "review"
+  | "operate";
 type StatusFilter = "all" | "installed" | "not_installed";
 type PublisherFilter = "all" | "official" | "not_official";
-type SortKey = "recommended" | "name_asc" | "installed_first" | "official_first";
-type CatalogStatus = "resolving_workspace" | "loading_catalog" | "ready" | "error";
+type SortKey =
+  | "recommended"
+  | "name_asc"
+  | "installed_first"
+  | "official_first";
+type CatalogStatus =
+  | "resolving_workspace"
+  | "loading_catalog"
+  | "ready"
+  | "error";
 
 const categories: Array<{ key: CategoryKey; label: string }> = [
   { key: "all", label: "All" },
@@ -113,20 +127,28 @@ function categoryForSkill(item: SkillCatalogItem): CategoryKey {
   );
   if (category) return category;
 
-  const text = `${item.name} ${item.displayName} ${item.description}`.toLowerCase();
-  if (text.includes("review") || text.includes("legal") || text.includes("proposal")) return "review";
-  if (text.includes("summary") || text.includes("meeting") || text.includes("action")) return "operate";
-  if (text.includes("research") || text.includes("source") || text.includes("evidence")) return "research";
+  const text =
+    `${item.name} ${item.displayName} ${item.description}`.toLowerCase();
+  if (
+    text.includes("review") ||
+    text.includes("legal") ||
+    text.includes("proposal")
+  )
+    return "review";
+  if (
+    text.includes("summary") ||
+    text.includes("meeting") ||
+    text.includes("action")
+  )
+    return "operate";
+  if (
+    text.includes("research") ||
+    text.includes("source") ||
+    text.includes("evidence")
+  )
+    return "research";
   if (text.includes("write") || text.includes("draft")) return "write";
   return "learn";
-}
-
-function skillSlug(item: SkillCatalogItem) {
-  return item.slug;
-}
-
-function skillHref(item: SkillCatalogItem) {
-  return `/dashboard/skills/${encodeURIComponent(skillSlug(item))}`;
 }
 
 function SortMenu<T extends string>({
@@ -138,7 +160,8 @@ function SortMenu<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
-  const activeLabel = options.find((option) => option.key === value)?.label ?? "Recommended";
+  const activeLabel =
+    options.find((option) => option.key === value)?.label ?? "Recommended";
 
   return (
     <DropdownMenu>
@@ -222,11 +245,7 @@ function WorkspaceMenu({
               >
                 <span className="min-w-0 flex-1 truncate">{item.name}</span>
                 <span className="text-xs text-muted-foreground">
-                  {active ? (
-                    <Check className="h-3.5 w-3.5" />
-                  ) : (
-                    `⌘${index + 1}`
-                  )}
+                  {active ? <Check className="h-3.5 w-3.5" /> : `⌘${index + 1}`}
                 </span>
               </DropdownMenuItem>
             );
@@ -345,12 +364,20 @@ function FilterFacet({
     <details className="group border-b border-border" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 hover:bg-accent/40">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">{label}</div>
-          {summary ? <div className="truncate text-[11px] text-muted-foreground">{summary}</div> : null}
+          <div className="truncate text-xs font-medium text-foreground">
+            {label}
+          </div>
+          {summary ? (
+            <div className="truncate text-[11px] text-muted-foreground">
+              {summary}
+            </div>
+          ) : null}
         </div>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
       </summary>
-      {children ? <div className="space-y-1.5 px-3 pb-2">{children}</div> : null}
+      {children ? (
+        <div className="space-y-1.5 px-3 pb-2">{children}</div>
+      ) : null}
     </details>
   );
 }
@@ -423,9 +450,13 @@ function SkillsFilterPanel({
   placement?: "desktop" | "drawer";
 }) {
   const notInstalledCount = Math.max(totalCount - installedCount, 0);
-  const categorySummary = categories.find((item) => item.key === category)?.label ?? "All";
-  const publisherSummary = publisherOptions.find((item) => item.key === publisherFilter)?.label ?? "All publishers";
-  const statusSummary = statusOptions.find((item) => item.key === statusFilter)?.label ?? "All";
+  const categorySummary =
+    categories.find((item) => item.key === category)?.label ?? "All";
+  const publisherSummary =
+    publisherOptions.find((item) => item.key === publisherFilter)?.label ??
+    "All publishers";
+  const statusSummary =
+    statusOptions.find((item) => item.key === statusFilter)?.label ?? "All";
 
   return (
     <aside
@@ -439,13 +470,21 @@ function SkillsFilterPanel({
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Filters</h2>
-          <button className="text-[11px] text-muted-foreground hover:text-foreground" onClick={onClear} type="button">
+          <button
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={onClear}
+            type="button"
+          >
             Clear all
           </button>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <FilterFacet defaultOpen label="Search" summary={query.trim() ? query.trim() : "all"}>
+        <FilterFacet
+          defaultOpen
+          label="Search"
+          summary={query.trim() ? query.trim() : "all"}
+        >
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -510,18 +549,19 @@ function SkillsFilterPanel({
 
 function SkillCard({
   item,
+  onOpenDetails,
   pending,
   onInstall,
   onUninstall,
   variant = "page",
 }: {
   item: SkillCatalogItem;
+  onOpenDetails: (item: SkillCatalogItem) => void;
   pending: boolean;
   onInstall: (item: SkillCatalogItem) => void;
   onUninstall: (item: SkillCatalogItem) => void;
   variant?: "page" | "modal";
 }) {
-  const href = skillHref(item);
   const compact = variant === "modal";
   const canManageInstall = item.installable !== false;
 
@@ -532,18 +572,28 @@ function SkillCard({
         compact ? "min-h-[190px]" : "min-h-[202px]",
       )}
     >
-      <Link className="flex min-h-0 flex-1 flex-col" href={href}>
+      <button
+        className="flex min-h-0 flex-1 flex-col text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => onOpenDetails(item)}
+        type="button"
+      >
         <div className="flex min-w-0 items-center gap-3">
           <SkillAvatar item={item} />
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-6 text-foreground">
             {item.displayName}
           </h3>
-          {item.enabled && canManageInstall ? (
-            <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
-              <Check className="h-3 w-3" />
-              Installed
+          {canManageInstall ? (
+            item.enabled ? (
+              <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
+                <Check className="h-3 w-3" />
+                Installed
+              </span>
+            ) : null
+          ) : (
+            <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+              Built-in
             </span>
-          ) : null}
+          )}
         </div>
 
         <p className="mt-3 line-clamp-3 min-h-[60px] text-xs leading-5 text-muted-foreground">
@@ -554,24 +604,25 @@ function SkillCard({
           <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
             {publisherLabel(item.sourceType)}
           </Badge>
-          <Badge className="h-5 px-1.5 text-[10px] capitalize" variant="outline">
+          <Badge
+            className="h-5 px-1.5 text-[10px] capitalize"
+            variant="outline"
+          >
             {categoryForSkill(item)}
           </Badge>
         </div>
-      </Link>
+      </button>
 
       <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
         <Button
-          asChild
           className="min-w-0 rounded-full px-2"
+          onClick={() => onOpenDetails(item)}
           size="xs"
           type="button"
           variant="outline"
         >
-          <Link href={href}>
-            <FileText className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 truncate">Details</span>
-          </Link>
+          <FileText className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 truncate">Details</span>
         </Button>
         {canManageInstall ? (
           <Button
@@ -602,7 +653,7 @@ function SkillCard({
             variant="secondary"
           >
             <Check className="h-3.5 w-3.5" />
-            <span className="min-w-0 truncate">Options</span>
+            <span className="min-w-0 truncate">Built-in</span>
           </Button>
         )}
       </div>
@@ -626,18 +677,27 @@ export function SkillsGallery({
   workspaceName?: string | null;
 }) {
   const dashboardState = useDashboardChatState();
-  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(null);
+  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
+    null,
+  );
   const [items, setItems] = React.useState<SkillCatalogItem[]>([]);
-  const [pendingCatalogId, setPendingCatalogId] = React.useState<string | null>(null);
+  const [pendingCatalogId, setPendingCatalogId] = React.useState<string | null>(
+    null,
+  );
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState<CategoryKey>("all");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
-  const [publisherFilter, setPublisherFilter] = React.useState<PublisherFilter>("all");
+  const [publisherFilter, setPublisherFilter] =
+    React.useState<PublisherFilter>("all");
   const [sort, setSort] = React.useState<SortKey>("recommended");
-  const [catalogStatus, setCatalogStatus] =
-    React.useState<CatalogStatus>("resolving_workspace");
+  const [catalogStatus, setCatalogStatus] = React.useState<CatalogStatus>(
+    "resolving_workspace",
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
+  const [selectedCatalogId, setSelectedCatalogId] = React.useState<
+    string | null
+  >(null);
   const workspaceIdRef = React.useRef<string | null>(null);
   const loadedCatalogWorkspaceIdRef = React.useRef<string | null>(null);
   const catalogGenerationRef = React.useRef(0);
@@ -647,7 +707,11 @@ export function SkillsGallery({
   }, [workspace?.id]);
 
   const resolveWorkspace = React.useCallback(async () => {
-    if (!workspaceId && !dashboardState.workspaceId && !dashboardState.hasWorkspaceHydrated) {
+    if (
+      !workspaceId &&
+      !dashboardState.workspaceId &&
+      !dashboardState.hasWorkspaceHydrated
+    ) {
       return undefined;
     }
 
@@ -748,7 +812,11 @@ export function SkillsGallery({
       setItems([]);
       loadedCatalogWorkspaceIdRef.current = null;
       setCatalogStatus("error");
-      setError(loadError instanceof Error ? loadError.message : "Failed to load skills.");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load skills.",
+      );
     }
   }, [resolveWorkspace]);
 
@@ -756,10 +824,10 @@ export function SkillsGallery({
     void loadCatalog();
   }, [loadCatalog]);
 
-  const galleryItems = React.useMemo(
-    () => items.filter((item) => item.installable !== false),
-    [items],
-  );
+  // Show every catalog item, including always-on built-ins (installable === false).
+  // The server already omits hidden built-ins, so no client-side listing filter is
+  // needed; non-installable items render as "Built-in" cards below.
+  const galleryItems = items;
 
   const installedCount = React.useMemo(
     () => galleryItems.filter((item) => item.enabled).length,
@@ -781,11 +849,14 @@ export function SkillsGallery({
   const filteredItems = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = galleryItems.filter((item) => {
-      if (category !== "all" && categoryForSkill(item) !== category) return false;
+      if (category !== "all" && categoryForSkill(item) !== category)
+        return false;
       if (statusFilter === "installed" && !item.enabled) return false;
       if (statusFilter === "not_installed" && item.enabled) return false;
-      if (publisherFilter === "official" && item.sourceType !== "builtin") return false;
-      if (publisherFilter === "not_official" && item.sourceType === "builtin") return false;
+      if (publisherFilter === "official" && item.sourceType !== "builtin")
+        return false;
+      if (publisherFilter === "not_official" && item.sourceType === "builtin")
+        return false;
       if (!q) return true;
       return (
         item.displayName.toLowerCase().includes(q) ||
@@ -795,9 +866,15 @@ export function SkillsGallery({
     });
 
     return filtered.sort((a, b) => {
-      if (sort === "name_asc") return a.displayName.localeCompare(b.displayName);
-      if (sort === "installed_first") return Number(b.enabled) - Number(a.enabled);
-      if (sort === "official_first") return Number(b.sourceType === "builtin") - Number(a.sourceType === "builtin");
+      if (sort === "name_asc")
+        return a.displayName.localeCompare(b.displayName);
+      if (sort === "installed_first")
+        return Number(b.enabled) - Number(a.enabled);
+      if (sort === "official_first")
+        return (
+          Number(b.sourceType === "builtin") -
+          Number(a.sourceType === "builtin")
+        );
       return 0;
     });
   }, [category, galleryItems, publisherFilter, query, sort, statusFilter]);
@@ -817,12 +894,16 @@ export function SkillsGallery({
 
       workspaceIdRef.current = nextWorkspaceId;
       loadedCatalogWorkspaceIdRef.current = null;
+      setSelectedCatalogId(null);
       setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
       setItems([]);
       setError(null);
       setCatalogStatus("loading_catalog");
       try {
-        await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
+        await dashboardState.switchWorkspace(
+          nextWorkspaceId,
+          nextWorkspaceName,
+        );
         if (workspaceIdRef.current !== nextWorkspaceId) {
           return;
         }
@@ -859,10 +940,13 @@ export function SkillsGallery({
     const activeWorkspaceId = workspace.id;
     setPendingCatalogId(item.catalogId);
     try {
-      const result = await contentClient.enableWorkspaceSkill(activeWorkspaceId, {
-        skillId: item.skillId,
-        skillVersionId: item.skillVersionId,
-      });
+      const result = await contentClient.enableWorkspaceSkill(
+        activeWorkspaceId,
+        {
+          skillId: item.skillId,
+          skillVersionId: item.skillVersionId,
+        },
+      );
       if (workspaceIdRef.current === activeWorkspaceId) {
         setItems((currentItems) =>
           currentItems.map((candidate) =>
@@ -879,7 +963,11 @@ export function SkillsGallery({
       toast.success("Skill installed");
       await onCatalogChange?.();
     } catch (installError) {
-      toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
+      toast.error(
+        installError instanceof Error
+          ? installError.message
+          : "Failed to install skill.",
+      );
     } finally {
       setPendingCatalogId(null);
     }
@@ -896,7 +984,10 @@ export function SkillsGallery({
     const workspaceSkillId = item.enabledWorkspaceSkillId;
     setPendingCatalogId(item.catalogId);
     try {
-      await contentClient.deleteWorkspaceSkill(activeWorkspaceId, workspaceSkillId);
+      await contentClient.deleteWorkspaceSkill(
+        activeWorkspaceId,
+        workspaceSkillId,
+      );
       if (workspaceIdRef.current === activeWorkspaceId) {
         setItems((currentItems) =>
           currentItems.map((candidate) =>
@@ -912,7 +1003,11 @@ export function SkillsGallery({
       toast.success("Skill uninstalled");
       await onCatalogChange?.();
     } catch (uninstallError) {
-      toast.error(uninstallError instanceof Error ? uninstallError.message : "Failed to uninstall skill.");
+      toast.error(
+        uninstallError instanceof Error
+          ? uninstallError.message
+          : "Failed to uninstall skill.",
+      );
     } finally {
       setPendingCatalogId(null);
     }
@@ -923,8 +1018,12 @@ export function SkillsGallery({
     catalogStatus === "loading_catalog";
   const currentWorkspaceName =
     workspace?.name ?? workspaceName ?? dashboardState.workspaceName;
-  const catalogReadyForWorkspace =
-    workspace ? loadedCatalogWorkspaceIdRef.current === workspace.id : false;
+  const catalogReadyForWorkspace = workspace
+    ? loadedCatalogWorkspaceIdRef.current === workspace.id
+    : false;
+  const selectedItem = selectedCatalogId
+    ? (items.find((item) => item.catalogId === selectedCatalogId) ?? null)
+    : null;
   const filtersPanel = (
     <SkillsFilterPanel
       category={category}
@@ -960,7 +1059,12 @@ export function SkillsGallery({
   );
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden bg-background", className)}>
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overflow-hidden bg-background",
+        className,
+      )}
+    >
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {filtersPanel}
 
@@ -985,10 +1089,15 @@ export function SkillsGallery({
                     <WorkspaceMenu
                       disabled={catalogStatus === "resolving_workspace"}
                       onChange={(nextWorkspaceId, nextWorkspaceName) =>
-                        void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
+                        void handleWorkspaceChange(
+                          nextWorkspaceId,
+                          nextWorkspaceName,
+                        )
                       }
                       workspaceId={workspace?.id ?? dashboardState.workspaceId}
-                      workspaceName={workspace?.name ?? dashboardState.workspaceName}
+                      workspaceName={
+                        workspace?.name ?? dashboardState.workspaceName
+                      }
                       workspaces={dashboardState.workspaces}
                     />
                   )}
@@ -1000,7 +1109,9 @@ export function SkillsGallery({
                 />
               </div>
               {error ? (
-                <p className="mb-4 text-xs text-red-600 dark:text-red-300">{error}</p>
+                <p className="mb-4 text-xs text-red-600 dark:text-red-300">
+                  {error}
+                </p>
               ) : null}
 
               {pageLoading ? (
@@ -1032,6 +1143,9 @@ export function SkillsGallery({
                       item={item}
                       key={item.catalogId}
                       onInstall={(next) => void installSkill(next)}
+                      onOpenDetails={(next) =>
+                        setSelectedCatalogId(next.catalogId)
+                      }
                       onUninstall={(next) => void uninstallSkill(next)}
                       pending={pendingCatalogId === item.catalogId}
                       variant={variant}
@@ -1052,6 +1166,16 @@ export function SkillsGallery({
           {drawerFiltersPanel}
         </SheetContent>
       </Sheet>
+      <SkillDetailDialog
+        item={selectedItem}
+        onInstall={(next) => void installSkill(next)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedCatalogId(null);
+        }}
+        onUninstall={(next) => void uninstallSkill(next)}
+        pending={pendingCatalogId === selectedCatalogId}
+        workspaceId={workspace?.id ?? null}
+      />
     </div>
   );
 }

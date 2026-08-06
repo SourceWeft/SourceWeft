@@ -77,15 +77,23 @@ only when the request or a concrete failure requires them:
 ## Create From Scratch
 
 1. Read [pptxgenjs.md](references/pptxgenjs.md).
-2. Draft the storyboard mentally or in the response; do not create planning
-   files, QA ledgers, or manifests unless the user asks.
-3. If the asset plan calls for generated raster imagery (cover hero,
-   editorial illustration, topic texture), call `generate_image` for at most
-   3 images, then stage each result into the sandbox with
-   `prepare_sandbox_workspace` using `{ artifactId, sandboxPath }` entries.
-   Reference the staged files in `deck.js` with `addImage` and real pixel
-   dimensions. If generation fails, fall back to procedural SVG/PNG; never
-   leave a promised image missing.
+2. Draft the storyboard in the response as a compact per-slide asset plan: for
+   each slide, name its role and a `visual:` decision — `generated` (needs a
+   real generated image: cover hero, editorial illustration, topic texture),
+   `procedural` (native shapes, diagram, icon system, or shaped layout), or
+   `chart` (native data chart). Keep it to a few lines. Do not create separate
+   planning files, QA ledgers, or manifest files unless the user asks.
+3. Produce the generated imagery the plan committed to. Every from-scratch deck
+   MUST include at least one real generated image — normally a cover hero —
+   unless the user asked for a minimal or outline deck, or the topic is purely
+   data/diagrammatic. For each slide the plan marked `visual: generated`, you
+   MUST call `generate_image` (at most 3 images total per deck), then stage each
+   result into the sandbox with `prepare_sandbox_workspace` using
+   `{ artifactId, sandboxPath }` entries, and reference the staged files in
+   `deck.js` with `addImage` and real pixel dimensions. Procedural shapes and
+   icon glyphs are NOT a substitute for a `generated` visual. Fall back to
+   procedural SVG/PNG only after a `generate_image` call actually fails, and
+   when you do, remove that slide's image promise instead of leaving it missing.
 4. Create one deck builder script as a Workfile, then prepare it into the
    sandbox workspace according to the sandbox runtime rules.
 5. Run one generation `execute`: confirm the prepared builder exists, run
@@ -232,9 +240,10 @@ Do not assume a fixed filename such as `slide-01.jpg`; use the files returned by
 `===FILE_QA===`, `===PPTX_TO_PDF===`, `===PDF_TO_JPG===`, `QA_IMAGE_COUNT=<n>`,
 and `PREVIEW_IMAGE_PATH=<path>`. Do not publish when File QA fails,
 `QA_IMAGE_COUNT` is zero, `PREVIEW_IMAGE_PATH` is missing, or
-`review_deck_visuals` reported severe issues that have not been repaired. A
-`skipped` visual QA does not block publishing, but its reason must appear in
-the publish `qa` summary.
+`review_deck_visuals` reported severe issues that have not been repaired, or a
+slide the storyboard marked `visual: generated` is missing its staged generated
+image in the final deck. A `skipped` visual QA does not block publishing, but
+its reason must appear in the publish `qa` summary.
 
 Do not run `file` against slide JPGs on the happy path. If a concrete debugging
 failure needs MIME diagnostics, make that optional and non-blocking, and use the

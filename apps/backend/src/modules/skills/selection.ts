@@ -166,7 +166,17 @@ function slugFromBuiltinSkillSelectionId(value: string) {
 
 async function runtimeBuiltinSkillSelectionId(slug: string) {
   const skill = await getBuiltinSkillBySlug(slug);
-  return skill ? builtinSkillSelectionId(skill.slug) : null;
+  if (!skill) {
+    return null;
+  }
+  // `managed` builtins (e.g. feynman) are opt-in: they behave like installed
+  // workspace skills, so a slash command must resolve through the install-checked
+  // workspace path rather than the always-on builtin selection id. Non-managed
+  // builtins (always-on generators) keep resolving directly here.
+  if (skill.manifestJson.managed === true) {
+    return null;
+  }
+  return builtinSkillSelectionId(skill.slug);
 }
 
 async function resolveBuiltinRuntimeSkill(

@@ -10,6 +10,8 @@
     {
       "id": "meeting-summary",
       "visibility": "public",
+      "listing": "listed",
+      "managed": true,
       "categories": ["operate"],
       "command": {
         "title": "Summarize Meeting",

@@ -213,12 +213,17 @@ function buildBuiltinManifestFromCapability(input: {
       : undefined;
   const slash = defaultSkillSlash(input.skill);
 
+  const listing = input.skill.listing ?? "listed";
+  const managed = input.skill.managed ?? false;
+
   const manifestJson: SkillManifestJson = {
     slug: input.parsedFrontmatter.slug,
     displayName,
     version: input.capability.version,
     description: description.trim(),
     visibility,
+    listing,
+    managed,
     categories,
     slash,
   };

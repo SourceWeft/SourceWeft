@@ -10,6 +10,7 @@
     {
       "id": "ppt-deck",
       "visibility": "restricted",
+      "listing": "listed",
       "categories": ["create", "present"],
       "options": [
         {
