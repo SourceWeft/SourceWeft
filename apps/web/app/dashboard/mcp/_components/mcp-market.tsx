@@ -1596,7 +1596,7 @@ export function McpMarket() {
       if (sort === "trusted_first") return Number(isTrustedMcp(b.market)) - Number(isTrustedMcp(a.market));
       return 0;
     });
-  }, [categories, category, deviceFilter, items, query, sort, statusFilter, trustFilter]);
+  }, [deviceFilter, items, query, sort, statusFilter, trustFilter]);
 
   const clearFilters = React.useCallback(() => {
     setQuery("");
