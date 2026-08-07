@@ -258,10 +258,22 @@ type RawCaptureMode =
   | "sdk_metadata"
   | "reconstructed"
   | "provider_wire";
-type SkillDefinitionSourceType = "builtin" | "workspace_custom" | "team_custom";
+type SkillDefinitionSourceType =
+  | "builtin"
+  | "workspace_custom"
+  | "team_custom"
+  // Submission-based GitHub registry index (docs/architecture/
+  // skill-registry-index.md): pointer + metadata only, never file bodies.
+  | "registry_github";
 type SkillDefinitionStatus = "active" | "archived";
 type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
-type SkillVersionStorageType = "repo_builtin" | "db_text";
+type SkillVersionStorageType =
+  | "repo_builtin"
+  | "db_text"
+  // Content fetched-on-use from the pinned upstream commit; a `pointer`
+  // version has ZERO skill_version_files rows (redistribution tripwire,
+  // invariant 2 of skill-registry-index.md).
+  | "pointer";
 export type SkillManifestVisibility =
   | "public"
   | "restricted"
@@ -332,6 +344,30 @@ export type SkillManifestJson = {
     enabled?: boolean;
   };
   defaultConfig?: Record<string, unknown>;
+  /**
+   * Registry-sourced skill fields (sourceType='registry_github' only;
+   * docs/architecture/skill-registry-index.md §2). All metadata — never
+   * content bodies. `fileManifest` is what lets the runtime fetch individual
+   * files by path at the pinned commit instead of extracting an archive.
+   */
+  registry?: {
+    /** Real upstream identifier, e.g. "gh:owner/repo". */
+    identifier: string;
+    sourceUrl: string;
+    repoUrl: string;
+    submittedBy: string;
+    /** Decides sandbox material sync, not permission (§6b). */
+    capability: "prompt-only" | "executable";
+    scan: { reviewRequired: boolean; flags: string[] };
+    licenseTier: "permissive" | "copyleft" | "unknown";
+    license?: string;
+    fileManifest: {
+      path: string;
+      sha256: string;
+      sizeBytes: number;
+      role: "model-readable" | "script";
+    }[];
+  };
 };
 
 const emptyJsonObject = sql`'{}'::jsonb`;
@@ -3433,7 +3469,7 @@ export const skillDefinitions = pgTable(
     }).onDelete("cascade"),
     check(
       "skill_definitions_source_type_check",
-      sql`${table.sourceType} in ('builtin', 'workspace_custom', 'team_custom')`,
+      sql`${table.sourceType} in ('builtin', 'workspace_custom', 'team_custom', 'registry_github')`,
     ),
     check(
       "skill_definitions_visibility_check",
@@ -3445,7 +3481,7 @@ export const skillDefinitions = pgTable(
     ),
     check(
       "skill_definitions_scope_check",
-      sql`(${table.sourceType} = 'builtin' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted')) or (${table.sourceType} = 'workspace_custom' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.visibility} = 'workspace') or (${table.sourceType} = 'team_custom' and ${table.teamId} is not null and ${table.workspaceId} is null and ${table.visibility} = 'team')`,
+      sql`(${table.sourceType} = 'builtin' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted')) or (${table.sourceType} = 'workspace_custom' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.visibility} = 'workspace') or (${table.sourceType} = 'team_custom' and ${table.teamId} is not null and ${table.workspaceId} is null and ${table.visibility} = 'team') or (${table.sourceType} = 'registry_github' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted'))`,
     ),
     uniqueIndex("skill_definitions_slug_uq").on(table.slug),
     index("skill_definitions_team_workspace_status_idx").on(
@@ -3494,7 +3530,7 @@ export const skillVersions = pgTable(
     ),
     check(
       "skill_versions_storage_type_check",
-      sql`${table.storageType} in ('repo_builtin', 'db_text')`,
+      sql`${table.storageType} in ('repo_builtin', 'db_text', 'pointer')`,
     ),
     uniqueIndex("skill_versions_skill_version_uq").on(
       table.skillId,

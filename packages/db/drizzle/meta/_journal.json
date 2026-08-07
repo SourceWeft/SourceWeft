@@ -155,6 +155,13 @@
       "when": 1784894205913,
       "tag": "0021_tighten_share_links_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786435200000,
+      "tag": "0022_skill_registry_pointer",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,13 @@
 import type { SkillManifestJson } from "@sourceweft/db";
 import type { SkillBundleFile } from "./builtin";
 
-export type SkillSourceType = "builtin" | "workspace_custom" | "team_custom";
+export type SkillSourceType =
+  | "builtin"
+  | "workspace_custom"
+  | "team_custom"
+  // GitHub registry index entries: pointer + metadata only, content
+  // fetched-on-use (docs/architecture/skill-registry-index.md).
+  | "registry_github";
 
 export type SkillOptionDescriptor = {
   id: string;
@@ -144,4 +150,15 @@ export type SkillCatalogItem = {
     enabled?: boolean;
   };
   defaultConfig?: Record<string, unknown>;
+  // Registry (`sourceType='registry_github'`) attribution + trust surface for the
+  // gallery, populated only for registry entries (undefined otherwise).
+  // `publisher` is "Community"; `verified` is always false (trust firewall — never
+  // self-asserted); `flagged` reflects the ingest scan's reviewRequired;
+  // `sourceUrl`/`license` satisfy index-level attribution.
+  // skill-registry-index.md §0/§5.5.
+  publisher?: string | null;
+  verified?: boolean;
+  sourceUrl?: string | null;
+  license?: string | null;
+  flagged?: boolean;
 };
