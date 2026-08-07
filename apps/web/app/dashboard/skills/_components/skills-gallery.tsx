@@ -2,13 +2,16 @@
 
 import * as React from "react";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   FileText,
   ListFilter,
   Loader2,
   PanelsTopLeft,
+  Scale,
   Search,
   Trash2,
 } from "lucide-react";
@@ -33,6 +36,7 @@ import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../_components/dashboard-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
+import { SubmitSkillDialog } from "./submit-skill-dialog";
 
 type SkillsCatalogResponse = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -75,7 +79,7 @@ type CategoryKey =
   | "review"
   | "operate";
 type StatusFilter = "all" | "installed" | "not_installed";
-type PublisherFilter = "all" | "official" | "not_official";
+type PublisherFilter = "all" | "official" | "community" | "not_official";
 type SortKey =
   | "recommended"
   | "name_asc"
@@ -99,6 +103,7 @@ const categories: Array<{ key: CategoryKey; label: string }> = [
 const publisherOptions: Array<{ key: PublisherFilter; label: string }> = [
   { key: "all", label: "All publishers" },
   { key: "official", label: "Official" },
+  { key: "community", label: "Community" },
   { key: "not_official", label: "Not official" },
 ];
 
@@ -118,7 +123,12 @@ const sortOptions: Array<{ key: SortKey; label: string }> = [
 function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
   if (sourceType === "builtin") return "Official";
   if (sourceType === "team_custom") return "Team";
+  if (sourceType === "registry_github") return "Community";
   return "Workspace";
+}
+
+function isUnverifiedRegistrySkill(item: SkillCatalogItem) {
+  return item.sourceType === "registry_github" && !item.verified;
 }
 
 function categoryForSkill(item: SkillCatalogItem): CategoryKey {
@@ -334,7 +344,9 @@ function SkillAvatar({ item }: { item: SkillCatalogItem }) {
   const palette =
     item.sourceType === "builtin"
       ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
+      : item.sourceType === "registry_github"
+        ? "from-amber-500/90 via-orange-500/80 to-rose-500/80"
+        : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
 
   return (
     <span
@@ -564,6 +576,8 @@ function SkillCard({
 }) {
   const compact = variant === "modal";
   const canManageInstall = item.installable !== false;
+  const isRegistry = item.sourceType === "registry_github";
+  const unverified = isUnverifiedRegistrySkill(item);
 
   return (
     <article
@@ -610,8 +624,47 @@ function SkillCard({
           >
             {categoryForSkill(item)}
           </Badge>
+          {item.flagged ? (
+            <Badge
+              className="h-5 gap-1 border-amber-500/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+              variant="outline"
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+              Under review
+            </Badge>
+          ) : unverified ? (
+            <Badge
+              className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
+              variant="outline"
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+              Unverified
+            </Badge>
+          ) : null}
+          {item.license ? (
+            <Badge
+              className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
+              variant="outline"
+            >
+              <Scale className="h-2.5 w-2.5" />
+              {item.license}
+            </Badge>
+          ) : null}
         </div>
       </button>
+
+      {isRegistry && item.sourceUrl ? (
+        <a
+          className="mt-2 inline-flex w-fit max-w-full items-center gap-1 truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+          href={item.sourceUrl}
+          onClick={(event) => event.stopPropagation()}
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          <ExternalLink className="h-3 w-3 shrink-0" />
+          <span className="truncate">Source</span>
+        </a>
+      ) : null}
 
       <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
         <Button
@@ -681,6 +734,9 @@ export function SkillsGallery({
     null,
   );
   const [items, setItems] = React.useState<SkillCatalogItem[]>([]);
+  const [registryResults, setRegistryResults] = React.useState<
+    SkillCatalogItem[]
+  >([]);
   const [pendingCatalogId, setPendingCatalogId] = React.useState<string | null>(
     null,
   );
@@ -824,10 +880,50 @@ export function SkillsGallery({
     void loadCatalog();
   }, [loadCatalog]);
 
+  // Registry relevance search (skill-registry-index.md §4). The base catalog
+  // already lists registry entries the caller can see, so this is purely
+  // additive: a query surfaces the backend's relevance-ranked matches (and any
+  // it ranks in that a plain substring filter would miss). Debounced; failures
+  // are non-fatal and fall back to local filtering. `q` < 2 chars is a no-op.
+  const activeWorkspaceId = workspace?.id ?? null;
+  React.useEffect(() => {
+    const q = query.trim();
+    if (!activeWorkspaceId || q.length < 2) {
+      setRegistryResults([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      void contentClient
+        .searchSkillRegistry(activeWorkspaceId, q)
+        .then((result) => {
+          if (!cancelled) setRegistryResults(result.items);
+        })
+        .catch(() => {
+          if (!cancelled) setRegistryResults([]);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [activeWorkspaceId, query]);
+
   // Show every catalog item, including always-on built-ins (installable === false).
   // The server already omits hidden built-ins, so no client-side listing filter is
-  // needed; non-installable items render as "Built-in" cards below.
-  const galleryItems = items;
+  // needed; non-installable items render as "Built-in" cards below. Registry
+  // search hits not already in the catalog are merged in (deduped by catalogId).
+  const galleryItems = React.useMemo(() => {
+    if (registryResults.length === 0) return items;
+    const seen = new Set(items.map((item) => item.catalogId));
+    const extras = registryResults.filter((item) => !seen.has(item.catalogId));
+    return extras.length === 0 ? items : [...items, ...extras];
+  }, [items, registryResults]);
+
+  const registryHitIds = React.useMemo(
+    () => new Set(registryResults.map((item) => item.catalogId)),
+    [registryResults],
+  );
 
   const installedCount = React.useMemo(
     () => galleryItems.filter((item) => item.enabled).length,
@@ -855,9 +951,18 @@ export function SkillsGallery({
       if (statusFilter === "not_installed" && item.enabled) return false;
       if (publisherFilter === "official" && item.sourceType !== "builtin")
         return false;
+      if (
+        publisherFilter === "community" &&
+        item.sourceType !== "registry_github"
+      )
+        return false;
       if (publisherFilter === "not_official" && item.sourceType === "builtin")
         return false;
       if (!q) return true;
+      // Registry search hits are already relevance-matched server-side (BM25 over
+      // name/description/tags), so honor them even if the query isn't a literal
+      // substring of the displayed text.
+      if (registryHitIds.has(item.catalogId)) return true;
       return (
         item.displayName.toLowerCase().includes(q) ||
         item.name.toLowerCase().includes(q) ||
@@ -877,7 +982,15 @@ export function SkillsGallery({
         );
       return 0;
     });
-  }, [category, galleryItems, publisherFilter, query, sort, statusFilter]);
+  }, [
+    category,
+    galleryItems,
+    publisherFilter,
+    query,
+    registryHitIds,
+    sort,
+    statusFilter,
+  ]);
 
   const clearFilters = React.useCallback(() => {
     setQuery("");
@@ -1013,6 +1126,21 @@ export function SkillsGallery({
     }
   }
 
+  const refreshCatalog = React.useCallback(async () => {
+    const currentWorkspaceId = workspaceIdRef.current;
+    if (!currentWorkspaceId) return;
+    try {
+      const result = await fetchSkillsCatalog(currentWorkspaceId);
+      if (workspaceIdRef.current === currentWorkspaceId) {
+        loadedCatalogWorkspaceIdRef.current = currentWorkspaceId;
+        setItems(result.items);
+      }
+      await onCatalogChange?.();
+    } catch {
+      // Best-effort refresh after a submission — leave existing items in place.
+    }
+  }, [onCatalogChange]);
+
   const pageLoading =
     catalogStatus === "resolving_workspace" ||
     catalogStatus === "loading_catalog";
@@ -1102,11 +1230,17 @@ export function SkillsGallery({
                     />
                   )}
                 </div>
-                <SortMenu
-                  onChange={setSort}
-                  options={sortOptions}
-                  value={sort}
-                />
+                <div className="flex items-center gap-2">
+                  <SubmitSkillDialog
+                    onSubmitted={refreshCatalog}
+                    workspaceId={workspace?.id ?? dashboardState.workspaceId}
+                  />
+                  <SortMenu
+                    onChange={setSort}
+                    options={sortOptions}
+                    value={sort}
+                  />
+                </div>
               </div>
               {error ? (
                 <p className="mb-4 text-xs text-red-600 dark:text-red-300">

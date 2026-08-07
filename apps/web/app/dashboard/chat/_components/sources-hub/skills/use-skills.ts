@@ -11,7 +11,7 @@ export type HubSkillItem = {
   name: string;
   displayName: string;
   description: string;
-  sourceType: "builtin" | "workspace_custom" | "team_custom";
+  sourceType: "builtin" | "workspace_custom" | "team_custom" | "registry_github";
   version: string;
   enabled?: boolean;
   hasReadme: boolean;
@@ -26,6 +26,7 @@ export type SkillIconSpec = Pick<
 export function skillSourceLabel(sourceType: HubSkillItem["sourceType"]) {
   if (sourceType === "builtin") return "Official";
   if (sourceType === "team_custom") return "Team";
+  if (sourceType === "registry_github") return "Community";
   return "Workspace";
 }
 

@@ -1,7 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { FileText, Loader2, RotateCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  FileText,
+  Loader2,
+  RotateCw,
+  Scale,
+  Trash2,
+} from "lucide-react";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -33,6 +41,7 @@ type SkillCatalogDetail = Awaited<
 function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
   if (sourceType === "builtin") return "Official";
   if (sourceType === "team_custom") return "Team";
+  if (sourceType === "registry_github") return "Community";
   return "Workspace";
 }
 
@@ -48,7 +57,9 @@ function SkillAvatar({ item }: { item: SkillCatalogItem }) {
   const palette =
     item.sourceType === "builtin"
       ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
+      : item.sourceType === "registry_github"
+        ? "from-amber-500/90 via-orange-500/80 to-rose-500/80"
+        : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
 
   return (
     <span
@@ -187,7 +198,24 @@ export function SkillDetailDialog({
             </div>
           ) : activeItem ? (
             <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_260px]">
-              <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
+              <div className="flex min-w-0 flex-col gap-4">
+                {activeItem.flagged ? (
+                  <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    This skill was flagged during automated review and is held for
+                    a maintainer to approve before it is surfaced more widely.
+                  </section>
+                ) : null}
+                {activeItem.sourceType === "registry_github" &&
+                !activeItem.verified ? (
+                  <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    This is an unverified community skill indexed from GitHub.
+                    Review the source before installing — its instructions run in
+                    your conversations.
+                  </section>
+                ) : null}
+                <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
                 <Tabs className="gap-0" defaultValue="readme">
                   <div className="border-b border-border px-5 py-3">
                     <TabsList className="h-8" variant="line">
@@ -216,7 +244,8 @@ export function SkillDetailDialog({
                     )}
                   </TabsContent>
                 </Tabs>
-              </article>
+                </article>
+              </div>
 
               <aside className="h-fit rounded-lg border border-border bg-background p-4">
                 <div className="flex items-center gap-2">
@@ -243,11 +272,51 @@ export function SkillDetailDialog({
                       </dd>
                     </div>
                   ))}
+                  {activeItem.license ? (
+                    <div>
+                      <dt className="text-muted-foreground">License</dt>
+                      <dd className="mt-1 inline-flex items-center gap-1 break-words font-medium text-foreground">
+                        <Scale className="size-3 shrink-0" />
+                        {activeItem.license}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
+                {activeItem.sourceUrl ? (
+                  <div className="mt-4 border-t border-border pt-3 text-xs">
+                    <a
+                      className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
+                      href={activeItem.sourceUrl}
+                      rel="noreferrer noopener"
+                      target="_blank"
+                    >
+                      <ExternalLink className="size-3" />
+                      Source
+                    </a>
+                  </div>
+                ) : null}
                 <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border pt-3">
                   <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
                     {publisherLabel(activeItem.sourceType)}
                   </Badge>
+                  {activeItem.sourceType === "registry_github" &&
+                  !activeItem.verified ? (
+                    <Badge
+                      className="h-5 gap-1 px-1.5 text-[10px]"
+                      variant="outline"
+                    >
+                      <AlertTriangle className="size-2.5" />
+                      Unverified
+                    </Badge>
+                  ) : null}
+                  {activeItem.flagged ? (
+                    <Badge
+                      className="h-5 gap-1 border-amber-500/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+                      variant="outline"
+                    >
+                      Under review
+                    </Badge>
+                  ) : null}
                   {activeItem.enabled && canManageInstall ? (
                     <Badge
                       className="h-5 px-1.5 text-[10px]"

@@ -19,6 +19,9 @@ const skillSourceTypeSchema = z.enum([
   "builtin",
   "workspace_custom",
   "team_custom",
+  // GitHub registry index entries: pointer + metadata only, content fetched
+  // on-use (docs/architecture/skill-registry-index.md §0).
+  "registry_github",
 ]);
 
 export const skillCommandSchema = z.object({
@@ -152,6 +155,17 @@ export const skillCatalogItemSchema = z.object({
   slash: z.boolean().optional(),
   slashConfig: skillSlashConfigSchema.optional(),
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
+  // Registry (`sourceType='registry_github'`) attribution + trust surface,
+  // populated only for registry entries (undefined otherwise). `publisher` is
+  // "Community"; `verified` is always false (trust firewall — never
+  // self-asserted); `flagged` reflects the ingest scan's reviewRequired;
+  // `sourceUrl`/`license` satisfy index-level attribution.
+  // docs/architecture/skill-registry-index.md §0/§5.5.
+  publisher: z.string().nullable().optional(),
+  verified: z.boolean().optional(),
+  sourceUrl: z.string().nullable().optional(),
+  license: z.string().nullable().optional(),
+  flagged: z.boolean().optional(),
 });
 
 export const skillManifestJsonSchema = z.object({
@@ -184,6 +198,30 @@ export const skillManifestJsonSchema = z.object({
 
 export const listSkillsCatalogResponseSchema = z.object({
   items: z.array(skillCatalogItemSchema),
+});
+
+// GET /skills/registry/search?q= — relevance-ranked registry entries sharing the
+// SkillCatalogItem shape (so the gallery reuses the same card). `q` < 2 chars
+// returns an empty list server-side. docs/architecture/skill-registry-index.md §4.
+export const searchRegistrySkillsResponseSchema = z.object({
+  items: z.array(skillCatalogItemSchema),
+  query: z.string(),
+});
+
+// POST /skills/registry/submit — one GitHub-URL intake. The authoritative URL
+// parse (github.com allowlist + traversal stripping) is server-side, so the wire
+// shape is deliberately just a non-empty string (skill-registry-index.md §3).
+export const submitRegistrySkillRequestSchema = z
+  .object({
+    repoUrl: z.string().trim().min(1),
+  })
+  .strict();
+
+// `indexed` = clean scan → auto-published catalog entry; `queued` = flagged or
+// sticky (§4 triage) → held for review. `slug` is the derived collision-safe key.
+export const submitRegistrySkillResponseSchema = z.object({
+  status: z.enum(["indexed", "queued"]),
+  slug: z.string().optional(),
 });
 
 export const listWorkspaceSkillsResponseSchema = z.object({
@@ -330,6 +368,15 @@ export type WorkspaceInstalledSkill = z.infer<
 export type SkillCatalogItem = z.infer<typeof skillCatalogItemSchema>;
 export type ListSkillsCatalogResponse = z.infer<
   typeof listSkillsCatalogResponseSchema
+>;
+export type SearchRegistrySkillsResponse = z.infer<
+  typeof searchRegistrySkillsResponseSchema
+>;
+export type SubmitRegistrySkillRequest = z.infer<
+  typeof submitRegistrySkillRequestSchema
+>;
+export type SubmitRegistrySkillResponse = z.infer<
+  typeof submitRegistrySkillResponseSchema
 >;
 export type ListWorkspaceSkillsResponse = z.infer<
   typeof listWorkspaceSkillsResponseSchema

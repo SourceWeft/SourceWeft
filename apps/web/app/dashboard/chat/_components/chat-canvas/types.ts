@@ -182,7 +182,7 @@ export type ChatSkillItem = {
   name: string;
   displayName: string;
   description: string;
-  sourceType: "builtin" | "workspace_custom" | "team_custom";
+  sourceType: "builtin" | "workspace_custom" | "team_custom" | "registry_github";
   version: string;
   enabled?: boolean;
   hasReadme: boolean;
