@@ -25,6 +25,47 @@ function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/**
+ * Hard invariant 1 (docs/architecture/skill-registry-index.md §0): `pointer`
+ * storage and the `registry_github` source are strictly co-extensive — each is
+ * used by the other and by nothing else. The DB CHECK constraints can only see
+ * one column at a time, so this cross-column biconditional lives in code: it is
+ * what keeps registry (index-only, no bodies) and custom/builtin (bodies on
+ * disk or in `skill_version_files`) from ever bleeding into each other's
+ * storage. Called at every skill_versions write entry.
+ */
+export function assertRegistryStorageInvariant(
+  sourceType: SkillDefinitionRow["sourceType"],
+  storageType: SkillVersionRow["storageType"],
+): void {
+  const isPointer = storageType === "pointer";
+  const isRegistry = sourceType === "registry_github";
+  if (isPointer !== isRegistry) {
+    throw new Error(
+      `Skill storage invariant violated: storageType='${storageType}' with sourceType='${sourceType}' (pointer ⇔ registry_github)`,
+    );
+  }
+}
+
+/**
+ * Hard invariant 2 (docs/architecture/skill-registry-index.md §0/§1): a
+ * `pointer`/`registry_github` version persists ZERO `skill_version_files` rows.
+ * This is the redistribution tripwire — registry content is fetched-on-use from
+ * the pinned upstream commit and never stored, so an attempt to write a file
+ * body for a pointer version is a bug that would flip us from indexer to
+ * redistributor. Asserted at the file-write entry so it fires regardless of how
+ * a pointer version reaches the custom-skill file path.
+ */
+export function assertNoRegistryFileWrite(
+  storageType: SkillVersionRow["storageType"],
+): void {
+  if (storageType === "pointer") {
+    throw new Error(
+      "Skill storage invariant violated: pointer/registry_github versions must not persist skill_version_files rows",
+    );
+  }
+}
+
 function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
   return {
     id: row.id,
@@ -508,6 +549,7 @@ export async function syncBuiltinSkillMetadata(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
+  assertRegistryStorageInvariant("builtin", "repo_builtin");
   const now = new Date();
   return db.transaction(async (tx) => {
     const [conflict] = await tx
@@ -622,6 +664,7 @@ export async function createWorkspaceCustomSkillDraft(input: {
   description: string;
   version?: string;
 }) {
+  assertRegistryStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const skillId = randomUUID();
@@ -706,6 +749,10 @@ export async function createNextCustomSkillVersionDraft(input: {
   if (!definition) {
     return null;
   }
+  // `definition.sourceType` is read from the DB (not a constant), so this is a
+  // real biconditional check: a registry_github definition must never mint a
+  // db_text version.
+  assertRegistryStorageInvariant(definition.sourceType, "db_text");
 
   const versionId = randomUUID();
   const [version] = await db
@@ -853,6 +900,9 @@ export async function upsertCustomSkillVersionFile(input: {
   if (!draft) {
     return null;
   }
+  // Redistribution tripwire: no file body may ever be persisted for a pointer
+  // (registry_github) version — its content lives only behind the pointer.
+  assertNoRegistryFileWrite(draft.version.storageType);
 
   const [row] = await db
     .insert(skillVersionFiles)
@@ -903,6 +953,7 @@ export async function publishWorkspaceCustomSkillVersion(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
+  assertRegistryStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const [draftVersion] = await tx
