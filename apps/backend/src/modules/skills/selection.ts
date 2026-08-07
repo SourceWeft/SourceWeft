@@ -1,7 +1,9 @@
 import { ContentError } from "../content/errors";
+import { logger } from "../../shared/logger";
 import {
   getBuiltinSkillBySlug,
   loadBuiltinSkillBundle,
+  type SkillBundleFile,
 } from "./builtin";
 import {
   findEnabledWorkspaceSkillRecordBySlug,
@@ -9,6 +11,7 @@ import {
   listWorkspaceSkillRecordsByIds,
   loadSkillVersionBundle,
 } from "./repository";
+import { loadPointerSkillBundle } from "./registry/pointer-bundle";
 import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
 import type { EnabledSkillDescriptor, WorkspaceSkillRecord } from "./types";
 
@@ -139,14 +142,17 @@ export async function resolveSelectedSkills(input: {
   }
 
   for (const record of activeWorkspaceRecords.values()) {
-    result.push(
-      await resolveWorkspaceRuntimeSkill({
-        record,
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        loadWorkspaceSkillVersion,
-      }),
-    );
+    const resolved = await resolveWorkspaceRuntimeSkill({
+      record,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      loadWorkspaceSkillVersion,
+    });
+    // A `pointer` (registry) skill whose fetch-on-use failed resolves to null:
+    // skip it so the rest of the turn's skills still resolve (§6a).
+    if (resolved) {
+      result.push(resolved);
+    }
   }
 
   return result;
@@ -223,7 +229,7 @@ async function resolveWorkspaceRuntimeSkill(input: {
   teamId: string;
   workspaceId: string;
   loadWorkspaceSkillVersion: typeof loadSkillVersionBundle;
-}): Promise<EnabledSkillDescriptor> {
+}): Promise<EnabledSkillDescriptor | null> {
   const bundle = await input.loadWorkspaceSkillVersion({
     teamId: input.teamId,
     workspaceId: input.workspaceId,
@@ -237,6 +243,11 @@ async function resolveWorkspaceRuntimeSkill(input: {
       "Selected skill is no longer available to this workspace",
     );
   }
+  // Revocation gate — reused unchanged for pointer/registry skills: flipping a
+  // registry version to `deprecated` (or archiving the definition, filtered out
+  // by loadSkillVersionBundle) already revokes it here, so the pointer branch
+  // needs no separate revocation mechanism (docs/architecture/
+  // skill-registry-index.md §6a).
   if (bundle.version.status !== "published") {
     throw new ContentError(
       403,
@@ -245,10 +256,33 @@ async function resolveWorkspaceRuntimeSkill(input: {
     );
   }
 
-  const files =
-    bundle.version.storageType === "repo_builtin"
-      ? (await loadBuiltinSkillBundle(bundle.version.storagePointer))?.files
-      : bundle.files;
+  let files: SkillBundleFile[] | undefined;
+  if (bundle.version.storageType === "repo_builtin") {
+    files = (await loadBuiltinSkillBundle(bundle.version.storagePointer))?.files;
+  } else if (bundle.version.storageType === "pointer") {
+    // R5 fetch-on-use: a registry (`registry_github`) version stores no file
+    // bodies (invariant 2). Fetch each model-readable file by path from the
+    // pinned commit, verifying per-file sha256. A transient failure / integrity
+    // reject returns null → skip the skill, never fail the turn (§6a).
+    const pointerFiles = await loadPointerSkillBundle(
+      bundle.version.storagePointer,
+      bundle.version.contentHash,
+      bundle.version.manifestJson.registry,
+    );
+    if (!pointerFiles) {
+      logger.warn("SKILL_FILES_NOT_FOUND", {
+        reason: "pointer_fetch_failed",
+        workspaceSkillId: input.record.id,
+        skillId: input.record.skillId,
+        skillVersionId: input.record.skillVersionId,
+        storageType: "pointer",
+      });
+      return null;
+    }
+    files = pointerFiles;
+  } else {
+    files = bundle.files;
+  }
   if (!files) {
     throw new ContentError(
       404,

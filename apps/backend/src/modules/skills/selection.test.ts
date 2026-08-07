@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { createHash } from "node:crypto";
+import { afterEach, test, vi } from "vitest";
 import { ContentError } from "../content/errors";
 import {
   builtinSkillSelectionId,
   resolveSelectedSkills,
   resolveSkillIdsWithSlashCommand,
 } from "./selection";
+import { __clearPointerBundleCache } from "./registry/pointer-bundle";
 import type { WorkspaceSkillRecord } from "./types";
 
 const emptyWorkspaceSkillDependencies = {
@@ -211,6 +213,123 @@ test("resolveSelectedSkills ignores disabled workspace skills unless explicitly 
     listWorkspaceSkillsByIds: async () => [],
   });
 
+  assert.deepEqual(skills, []);
+});
+
+function pointerBundle(input: {
+  record: WorkspaceSkillRecord;
+  contentHash: string;
+  skillMdSha: string;
+}) {
+  return {
+    definition: {
+      id: input.record.skillId,
+      teamId: null,
+      workspaceId: null,
+      sourceType: "registry_github" as const,
+      slug: "gh-acme-skill",
+      displayName: "Community Skill",
+      description: "A community-submitted skill.",
+      visibility: "restricted" as const,
+      status: "active" as const,
+      ownerUserId: "user-1",
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+    version: {
+      id: input.record.skillVersionId,
+      skillId: input.record.skillId,
+      version: "1.0.0",
+      status: "published" as const,
+      storageType: "pointer" as const,
+      storagePointer: `github:acme/skill@${"a".repeat(40)}`,
+      isCurrent: true,
+      contentHash: input.contentHash,
+      manifestJson: {
+        slug: "gh-acme-skill",
+        displayName: "Community Skill",
+        version: "1.0.0",
+        description: "A community-submitted skill.",
+        visibility: "restricted" as const,
+        categories: [],
+        registry: {
+          identifier: "gh:acme/skill",
+          sourceUrl: "https://github.com/acme/skill",
+          repoUrl: "https://github.com/acme/skill",
+          submittedBy: "user-1",
+          capability: "prompt-only" as const,
+          scan: { reviewRequired: false, flags: [] },
+          licenseTier: "permissive" as const,
+          fileManifest: [
+            {
+              path: "SKILL.md",
+              sha256: input.skillMdSha,
+              sizeBytes: 32,
+              role: "model-readable" as const,
+            },
+          ],
+        },
+      },
+      createdBy: "user-1",
+      publishedAt: new Date(0),
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+    files: [],
+  };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  __clearPointerBundleCache();
+});
+
+test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use", async () => {
+  const skillMd = "# Community Skill\ninstructions";
+  const skillMdSha = createHash("sha256")
+    .update(Buffer.from(skillMd, "utf8"))
+    .digest("hex");
+  vi.stubGlobal(
+    "fetch",
+    async () => new Response(skillMd, { status: 200 }),
+  );
+
+  const record = workspaceSkill();
+  const skills = await resolveSelectedSkills({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    skillIds: [record.id],
+    listEnabledWorkspaceSkills: async () => [],
+    listWorkspaceSkillsByIds: async () => [record],
+    loadWorkspaceSkillVersion: async () =>
+      pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
+  });
+
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0]?.sourceType, "registry_github");
+  assert.equal(skills[0]?.files[0]?.path, "SKILL.md");
+  assert.equal(skills[0]?.files[0]?.contentText, skillMd);
+});
+
+test("resolveSelectedSkills skips a pointer skill whose fetch fails without failing the turn", async () => {
+  const skillMdSha = createHash("sha256").update("x").digest("hex");
+  vi.stubGlobal(
+    "fetch",
+    async () => new Response("nope", { status: 404 }),
+  );
+
+  const record = workspaceSkill();
+  const skills = await resolveSelectedSkills({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    skillIds: [record.id],
+    listEnabledWorkspaceSkills: async () => [],
+    listWorkspaceSkillsByIds: async () => [record],
+    loadWorkspaceSkillVersion: async () =>
+      pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
+  });
+
+  // Fetch-on-use failed → the skill is skipped, the turn is not failed.
   assert.deepEqual(skills, []);
 });
 
