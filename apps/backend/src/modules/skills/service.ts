@@ -27,8 +27,33 @@ import {
   validateCustomSkillBundle,
   validateCustomSkillFileInput,
 } from "./custom-validation";
-import type { SkillCatalogItem } from "./types";
+import { and, eq, ilike, or } from "drizzle-orm";
+import {
+  db,
+  skillDefinitions,
+  type SkillManifestJson,
+  skillVersions,
+  workspaceSkills,
+} from "@sourceweft/db";
+import type { SkillCatalogItem, SkillSourceType } from "./types";
 import { builtinSkillSelectionId } from "./selection";
+
+// Lexical registry search tuning. Kept small — the registry catalog is a
+// curated index, not a document corpus (skill-registry-index.md §4).
+const REGISTRY_SEARCH_MIN_QUERY_LENGTH = 2;
+const REGISTRY_SEARCH_RESULT_LIMIT = 25;
+// Fetch cap before in-process relevance ranking. Bounded so a broad ILIKE
+// match set can't balloon memory; ranking happens over this window.
+const REGISTRY_CATALOG_QUERY_LIMIT = 100;
+
+// A catalog row as produced by `listCatalogSkillVersionsForWorkspace` and by
+// the inline registry query below (identical select shape) so both feed the
+// same `mapCatalogRow`.
+type CatalogRow = {
+  definition: typeof skillDefinitions.$inferSelect;
+  version: typeof skillVersions.$inferSelect;
+  enabled: typeof workspaceSkills.$inferSelect | null;
+};
 
 function displayNameFromName(name: string) {
   return name
@@ -44,6 +69,126 @@ function isBuiltinSkillDefaultEnabled(skill: {
   // `restricted` builtin skills are internal capabilities (e.g. ppt-deck) that
   // stay enabled by default without appearing in the public gallery.
   return skill.visibility === "restricted";
+}
+
+// Registry catalog visibility (skill-registry-index.md §5.5): a `registry_github`
+// entry is teamId/workspaceId-NULL, so `public` is universal while `restricted`
+// (unknown/AGPL/no-license, or still under review) is visible ONLY to the user
+// who submitted it. A restricted entry must never leak to a non-submitter.
+function isRegistryRowVisibleToViewer(input: {
+  visibility: string;
+  ownerUserId: string | null;
+  viewerUserId: string;
+}) {
+  if (input.visibility === "public") {
+    return true;
+  }
+  if (input.visibility === "restricted") {
+    return (
+      input.ownerUserId !== null && input.ownerUserId === input.viewerUserId
+    );
+  }
+  return false;
+}
+
+// UI-facing attribution + trust surface for a registry entry, derived purely
+// from its manifest. `publisher` is always "Community" and `verified` always
+// false — trust is admin-granted, never self-asserted (the trust firewall,
+// skill-registry-index.md §0/§3). `flagged` mirrors the ingest scan verdict.
+function registryCatalogFields(manifest: SkillManifestJson) {
+  const registry = manifest.registry;
+  return {
+    publisher: "Community",
+    verified: false,
+    sourceUrl: registry?.sourceUrl ?? null,
+    license: registry?.license ?? null,
+    flagged: registry?.scan?.reviewRequired ?? false,
+  };
+}
+
+// Lexical relevance for registry search. Lower = more relevant: exact name (0)
+// < name prefix (1) < name substring (2) < description substring (3) < no match
+// (4). The DB does the ILIKE filter; this re-ranks the matched window.
+function skillSearchRelevanceRank(input: {
+  displayName: string;
+  description: string;
+  query: string;
+}) {
+  const query = input.query.trim().toLowerCase();
+  if (!query) {
+    return 4;
+  }
+  const name = input.displayName.toLowerCase();
+  const description = input.description.toLowerCase();
+  if (name === query) {
+    return 0;
+  }
+  if (name.startsWith(query)) {
+    return 1;
+  }
+  if (name.includes(query)) {
+    return 2;
+  }
+  if (description.includes(query)) {
+    return 3;
+  }
+  return 4;
+}
+
+function compareSkillSearchRelevance(query: string) {
+  return (a: SkillCatalogItem, b: SkillCatalogItem) => {
+    const rankA = skillSearchRelevanceRank({
+      displayName: a.displayName,
+      description: a.description,
+      query,
+    });
+    const rankB = skillSearchRelevanceRank({
+      displayName: b.displayName,
+      description: b.description,
+      query,
+    });
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    return a.displayName.localeCompare(b.displayName);
+  };
+}
+
+// Maps a DB catalog row (custom / managed builtin / registry) to a catalog item.
+// Registry rows additionally carry the Community publisher + attribution/trust
+// fields. Non-registry rows are unchanged from the prior inline mapping.
+function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
+  const manifest = row.version.manifestJson;
+  const base: SkillCatalogItem = {
+    catalogId: `${row.definition.id}:${row.version.id}`,
+    selectionId: row.enabled?.id ?? null,
+    sourceType: row.definition.sourceType as SkillSourceType,
+    skillId: row.definition.id,
+    skillVersionId: row.version.id,
+    slug: row.definition.slug,
+    name: row.definition.displayName,
+    version: row.version.version,
+    displayName: row.definition.displayName,
+    description: row.definition.description,
+    visibility: row.definition.visibility,
+    categories: Array.isArray(manifest.categories) ? manifest.categories : [],
+    enabledWorkspaceSkillId: row.enabled?.id ?? null,
+    enabled: row.enabled?.enabled ?? false,
+    installable: true,
+    hasReadme: false,
+    capabilities: manifest.capabilities,
+    models: manifest.models,
+    commands: manifest.commands,
+    tools: manifest.tools,
+    options: manifest.options,
+    slash: manifest.slash,
+    slashConfig: manifest.slashConfig,
+    defaultConfig: manifest.defaultConfig,
+  };
+  if (row.definition.sourceType === "registry_github") {
+    return { ...base, ...registryCatalogFields(manifest) };
+  }
+  return base;
 }
 
 export class ContentSkillsService {
@@ -69,7 +214,11 @@ export class ContentSkillsService {
     await validateBuiltinSkills();
   }
 
-  async listCatalog(input: { teamId: string; workspaceId: string }) {
+  async listCatalog(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+  }) {
     // The catalog is synced once at API startup (api/main.ts), which writes a
     // definition/version row for every builtin. `managed` builtins (e.g. feynman)
     // flow through the DB-row path below so they get a real skillId/versionId and
@@ -78,42 +227,29 @@ export class ContentSkillsService {
     // are read from the filesystem further down and rendered as non-installable.
     const rows = await listCatalogSkillVersionsForWorkspace(input);
 
+    // Registry (`registry_github`) skills are surfaced by a dedicated query
+    // below (own visibility rule + attribution), so they are excluded from the
+    // shared DB-row path here to avoid double-emitting.
     const installableRows = rows.filter(
       (row) =>
+        row.definition.sourceType !== "registry_github" &&
         (row.definition.sourceType !== "builtin" ||
           row.version.manifestJson.managed === true) &&
         row.version.manifestJson.listing !== "hidden",
     );
 
-    const items: SkillCatalogItem[] = installableRows.map((row) => {
-      const manifest = row.version.manifestJson;
-      return {
-        catalogId: `${row.definition.id}:${row.version.id}`,
-        selectionId: row.enabled?.id ?? null,
-        sourceType: row.definition.sourceType,
-        skillId: row.definition.id,
-        skillVersionId: row.version.id,
-        slug: row.definition.slug,
-        name: row.definition.displayName,
-        version: row.version.version,
-        displayName: row.definition.displayName,
-        description: row.definition.description,
-        visibility: row.definition.visibility,
-        categories: Array.isArray(manifest.categories) ? manifest.categories : [],
-        enabledWorkspaceSkillId: row.enabled?.id ?? null,
-        enabled: row.enabled?.enabled ?? false,
-        installable: true,
-        hasReadme: false,
-        capabilities: manifest.capabilities,
-        models: manifest.models,
-        commands: manifest.commands,
-        tools: manifest.tools,
-        options: manifest.options,
-        slash: manifest.slash,
-        slashConfig: manifest.slashConfig,
-        defaultConfig: manifest.defaultConfig,
-      };
-    });
+    const items: SkillCatalogItem[] = installableRows.map(mapCatalogRow);
+
+    // Registry catalog entries: Community publisher, unverified, with
+    // public / submitter-owned-restricted visibility (skill-registry-index.md
+    // §0/§5.5). Same DB-row → `SkillCatalogItem` convergence as above.
+    const registryRows = await this.listRegistryCatalogRows(input);
+    for (const row of registryRows) {
+      if (row.version.manifestJson.listing === "hidden") {
+        continue;
+      }
+      items.push(mapCatalogRow(row));
+    }
     // Builtins already surfaced via the DB-row path above (managed ones) must not
     // be emitted a second time from disk.
     const managedBuiltinSlugs = new Set(
@@ -165,6 +301,104 @@ export class ContentSkillsService {
     return { items };
   }
 
+  /**
+   * Registry catalog rows (`sourceType='registry_github'`) for a viewer.
+   *
+   * Kept inline here (rather than in repository.ts) deliberately: R3 scopes the
+   * registry catalog/search surface to this service, so the query lives beside
+   * its consumers; it can migrate to repository.ts when the registry gains its
+   * own repository module. Visibility is enforced in SQL AND re-checked in
+   * process (defense-in-depth) so a restricted entry never reaches a
+   * non-submitter. Pass `query` to additionally ILIKE-filter name/description.
+   */
+  private async listRegistryCatalogRows(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    query?: string;
+  }): Promise<CatalogRow[]> {
+    const conditions = [
+      eq(skillDefinitions.sourceType, "registry_github"),
+      eq(skillDefinitions.status, "active"),
+      eq(skillVersions.status, "published"),
+      eq(skillVersions.isCurrent, true),
+      or(
+        eq(skillDefinitions.visibility, "public"),
+        and(
+          eq(skillDefinitions.visibility, "restricted"),
+          eq(skillDefinitions.ownerUserId, input.userId),
+        ),
+      ),
+    ];
+    if (input.query) {
+      const like = `%${input.query}%`;
+      conditions.push(
+        or(
+          ilike(skillDefinitions.displayName, like),
+          ilike(skillDefinitions.description, like),
+        ),
+      );
+    }
+
+    const rows = await db
+      .select({
+        definition: skillDefinitions,
+        version: skillVersions,
+        enabled: workspaceSkills,
+      })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(
+        workspaceSkills,
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, skillDefinitions.id),
+        ),
+      )
+      .where(and(...conditions))
+      .limit(REGISTRY_CATALOG_QUERY_LIMIT);
+
+    // Defense-in-depth: re-apply the visibility predicate in process so a
+    // restricted entry can never leak even if the SQL guard ever regresses.
+    return rows.filter((row) =>
+      isRegistryRowVisibleToViewer({
+        visibility: row.definition.visibility,
+        ownerUserId: row.definition.ownerUserId,
+        viewerUserId: input.userId,
+      }),
+    );
+  }
+
+  /**
+   * Lexical search over the registry index (skill-registry-index.md §4).
+   * ILIKE over displayName + description (the same drizzle-`ilike` posture the
+   * MCP market read-repository uses), re-ranked by relevance. No vector search.
+   */
+  async searchRegistry(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    query: string;
+  }) {
+    const query = input.query.trim();
+    if (query.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
+      return { items: [] as SkillCatalogItem[], query };
+    }
+    const rows = await this.listRegistryCatalogRows({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      query,
+    });
+    const items = rows
+      .filter((row) => row.version.manifestJson.listing !== "hidden")
+      .map(mapCatalogRow)
+      .sort(compareSkillSearchRelevance(query))
+      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
+    return { items, query };
+  }
+
   async listWorkspaceSkills(input: { teamId: string; workspaceId: string }) {
     return { items: await listWorkspaceInstalledSkills(input) };
   }
@@ -200,6 +434,7 @@ export class ContentSkillsService {
   async getCatalogSkillDetail(input: {
     teamId: string;
     workspaceId: string;
+    userId: string;
     catalogId: string;
   }) {
     const catalog = await this.listCatalog(input);
@@ -445,4 +680,9 @@ export const contentSkillsService = new ContentSkillsService();
 
 export const testExports = {
   isBuiltinSkillDefaultEnabled,
+  isRegistryRowVisibleToViewer,
+  registryCatalogFields,
+  skillSearchRelevanceRank,
+  compareSkillSearchRelevance,
+  mapCatalogRow,
 };

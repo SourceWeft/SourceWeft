@@ -27,8 +27,23 @@ async function resolveSkillContext(c: import("hono").Context) {
 
 export function registerSkillRoutes(app: Hono) {
   app.get("/skills/catalog", async (c) => {
-    const { teamId, workspaceId } = await resolveSkillContext(c);
-    const result = await contentSkillsService.listCatalog({ teamId, workspaceId });
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const result = await contentSkillsService.listCatalog({
+      teamId,
+      workspaceId,
+      userId: getSessionUserId(session),
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/skills/registry/search", async (c) => {
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const result = await contentSkillsService.searchRegistry({
+      teamId,
+      workspaceId,
+      userId: getSessionUserId(session),
+      query: c.req.query("q") ?? "",
+    });
     return ApiResponse.success(c, result);
   });
 
@@ -39,10 +54,11 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.get("/skills/catalog/:catalogId", async (c) => {
-    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const result = await contentSkillsService.getCatalogSkillDetail({
       teamId,
       workspaceId,
+      userId: getSessionUserId(session),
       catalogId: decodeURIComponent(requireRouteParam(c, "catalogId")),
     });
     return ApiResponse.success(c, result);
