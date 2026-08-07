@@ -97,10 +97,31 @@ export type SandboxRuntimeLimits = {
   maxCollectTotalBytes: number;
 };
 
+/**
+ * Sandbox network-isolation profile (docs/architecture/skill-registry-index.md
+ * §6b/§7.0). Two off-host isolation profiles ride on the same provider:
+ * - `default`          — provider default egress (existing behavior).
+ * - `ingestion-github` — egress restricted to the GitHub fetch hosts
+ *   (github.com / codeload.github.com / raw.githubusercontent.com) used by the
+ *   submit-time fetch+extract session; runs no skill code.
+ * - `block-all`        — no network access at all (Daytona `networkBlockAll`)
+ *   for the run-time execution session.
+ *
+ * The selected value is persisted on `agent_sandboxes.network_policy`; the
+ * provider adapter translates it into provider-native parameters at create
+ * time (see the Daytona adapter's `resolveDaytonaNetworkPolicyOptions`).
+ */
+export type SandboxNetworkPolicy = "default" | "ingestion-github" | "block-all";
+
 export type CreateSandboxInput = {
   labels: Record<string, string>;
   snapshot?: string;
   ttlSeconds: number;
+  /**
+   * Network isolation profile for this sandbox. Omitted / `undefined` behaves
+   * as `default` (provider default egress). See `SandboxNetworkPolicy`.
+   */
+  networkPolicy?: SandboxNetworkPolicy;
 };
 
 export type SandboxProvider = {

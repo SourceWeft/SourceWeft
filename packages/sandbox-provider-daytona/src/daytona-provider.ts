@@ -5,6 +5,7 @@ import {
 import type { DaytonaSandboxOptions } from "@langchain/daytona";
 import type { ExecuteResponse } from "deepagents";
 import type {
+  SandboxNetworkPolicy,
   SandboxProvider,
   SandboxProviderPathPolicy,
 } from "@sourceweft/builtin-tool-sandbox";
@@ -13,7 +14,70 @@ type CreateSandboxInput = {
   labels: Record<string, string>;
   snapshot?: string;
   ttlSeconds: number;
+  networkPolicy?: SandboxNetworkPolicy;
 };
+
+/**
+ * GitHub hosts the ingestion sandbox must reach to fetch+extract a submitted
+ * repo (docs/architecture/skill-registry-index.md §Stage2). Recorded here as
+ * the *intent* of the `ingestion-github` policy.
+ *
+ * NOTE (Daytona network API shape): Daytona exposes exactly two knobs on
+ * `CreateSandboxBaseParams` — `networkBlockAll: boolean` and
+ * `networkAllowList: string` (a comma-separated list of allowed **CIDR**
+ * ranges, NOT host names). There is no host-name allow-list primitive, so a
+ * faithful `ingestion-github` policy has to be expressed as GitHub's published
+ * IP ranges (https://api.github.com/meta → `git`/`web`/`api`, plus the Fastly
+ * ranges that serve raw.githubusercontent.com / codeload), which rotate over
+ * time.
+ */
+export const GITHUB_INGESTION_HOSTS = Object.freeze([
+  "github.com",
+  "codeload.github.com",
+  "raw.githubusercontent.com",
+]);
+
+// TODO(skill-registry R0 §7.0): resolve these from api.github.com/meta and
+// refresh periodically — the static ranges below WILL drift. They are a
+// best-effort stand-in until the ingestion-sandbox migration wires a live
+// resolver. (github.com/codeload = 140.82.112.0/20 & 143.55.64.0/20;
+// raw.githubusercontent.com is Fastly-served = 185.199.108.0/22; api =
+// 192.30.252.0/22.)
+export const GITHUB_INGESTION_ALLOW_CIDRS = Object.freeze([
+  "140.82.112.0/20",
+  "143.55.64.0/20",
+  "185.199.108.0/22",
+  "192.30.252.0/22",
+]);
+
+export type DaytonaNetworkOptions = {
+  networkBlockAll?: boolean;
+  networkAllowList?: string;
+};
+
+/**
+ * Translate a platform network policy into Daytona SDK create parameters.
+ * `default`/undefined leaves network options untouched (provider default
+ * egress); `block-all` maps to `networkBlockAll`; `ingestion-github` maps to a
+ * CIDR `networkAllowList` (see the drift TODO above).
+ */
+export function resolveDaytonaNetworkPolicyOptions(
+  policy: SandboxNetworkPolicy | undefined,
+): DaytonaNetworkOptions {
+  switch (policy) {
+    case "block-all":
+      return { networkBlockAll: true };
+    case "ingestion-github":
+      return { networkAllowList: GITHUB_INGESTION_ALLOW_CIDRS.join(",") };
+    case "default":
+    case undefined:
+      return {};
+    default: {
+      const exhaustive: never = policy;
+      throw new Error(`Unknown sandbox network policy: ${String(exhaustive)}`);
+    }
+  }
+}
 
 export const DAYTONA_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy =
   Object.freeze({
@@ -484,7 +548,19 @@ export class DaytonaSandboxProvider implements SandboxProvider {
             source: "request" as const,
           }
         : this.sandboxTarget;
-      const createOptions: DaytonaSandboxOptions = {
+      const networkOptions = resolveDaytonaNetworkPolicyOptions(
+        input.networkPolicy,
+      );
+      // TODO(skill-registry R0 §6b/§7.0): `@langchain/daytona@0.2.0`'s
+      // `DaytonaSandbox.initialize()` only forwards a fixed field set
+      // (image/snapshot, language, envVars, auto*Interval, labels, resources)
+      // to the underlying `@daytonaio/sdk` `daytona.create()` and DROPS
+      // `networkBlockAll`/`networkAllowList`. The SDK's `CreateSandboxBaseParams`
+      // DOES accept both. We translate the policy into SDK params here (the
+      // provider's job); end-to-end enforcement requires the wrapper to forward
+      // them or a direct `@daytonaio/sdk` call. Tracked with the ingestion-
+      // sandbox migration.
+      const createOptions: DaytonaSandboxOptions & DaytonaNetworkOptions = {
         auth: this.authOptions(),
         language: "typescript",
         labels: input.labels,
@@ -492,6 +568,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         ...(target.kind === "image"
           ? { image: target.value }
           : { snapshot: target.value }),
+        ...networkOptions,
       };
       const sandbox = await this.daytonaSandbox.create(createOptions);
       await this.waitForSandboxReady(sandbox.id);

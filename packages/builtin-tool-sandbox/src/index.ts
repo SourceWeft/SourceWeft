@@ -166,6 +166,8 @@ export type {
   SandboxRuntimeRequest,
 } from "./sandbox-service";
 export type {
+  CreateSandboxInput,
+  SandboxNetworkPolicy,
   SandboxProviderConfigurationStatus,
   SandboxProviderFactory,
   SandboxServiceConfig,

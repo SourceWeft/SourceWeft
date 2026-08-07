@@ -3,7 +3,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 import type {
@@ -13,6 +13,122 @@ import type {
 
 const githubUserAgent = "SourceWeft-MCP-Ingest/1.0";
 const shaRefPattern = /^[a-f0-9]{40}$/i;
+
+/**
+ * TODO(skill-registry R0 §Stage2/§7.0): these fetch+extract primitives run on
+ * the app host today. The registry design moves them into an egress-allowlisted
+ * *ingestion sandbox* so untrusted third-party bytes are never extracted on the
+ * host. The caps below are the interim hardening for the existing MCP-market
+ * ingest (archive-size / file-count limits, symlink + path-traversal rejection,
+ * `tar --no-same-owner`); full DoS / decompression-bomb isolation belongs in
+ * the sandbox migration. See docs/architecture/skill-registry-index.md.
+ */
+export const GITHUB_ARCHIVE_LIMITS = Object.freeze({
+  /** Hard cap on the downloaded (compressed) tarball. */
+  maxArchiveBytes: 100 * 1024 * 1024,
+  /** Hard cap on the number of file entries inside the archive. */
+  maxEntries: 20_000,
+});
+
+/**
+ * A pass-through stream that aborts the pipeline once more than `maxBytes` have
+ * flowed through it. Used to bound the compressed archive download so a hostile
+ * or runaway response cannot fill the host disk.
+ */
+export function createArchiveSizeLimitStream(maxBytes: number): Transform {
+  let total = 0;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      total += chunk.length;
+      if (total > maxBytes) {
+        callback(
+          new Error(
+            `GitHub archive exceeds the maximum allowed size of ${maxBytes} bytes`,
+          ),
+        );
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
+
+function runTarListing(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("tar", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(`tar exited with ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+function isUnsafeArchivePath(name: string) {
+  const normalized = name.replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+  return (
+    path.isAbsolute(normalized) ||
+    normalized.split("/").some((segment) => segment === "..")
+  );
+}
+
+/**
+ * Inspect a downloaded archive *before* extraction and reject anything that is
+ * unsafe to write on the host: symlinks/hardlinks (extraction-time escape),
+ * absolute or `..` paths (path traversal), or too many entries (DoS). Extraction
+ * only proceeds if this resolves.
+ */
+export async function inspectArchiveEntries(
+  archivePath: string,
+  options?: { maxEntries?: number },
+): Promise<void> {
+  const maxEntries = options?.maxEntries ?? GITHUB_ARCHIVE_LIMITS.maxEntries;
+
+  const names = (await runTarListing(["-tzf", archivePath]))
+    .split("\n")
+    .filter(Boolean);
+  const fileCount = names.filter((name) => !name.endsWith("/")).length;
+  if (fileCount > maxEntries) {
+    throw new Error(
+      `GitHub archive exceeds the maximum allowed ${maxEntries} files`,
+    );
+  }
+  for (const name of names) {
+    if (isUnsafeArchivePath(name)) {
+      throw new Error(`GitHub archive contains an unsafe path: ${name}`);
+    }
+  }
+
+  // Verbose listing: the leading mode-string character identifies the entry
+  // type ('l' symlink, 'h' hardlink) consistently across GNU tar and bsdtar.
+  const verbose = (await runTarListing(["-tzvf", archivePath]))
+    .split("\n")
+    .filter(Boolean);
+  for (const line of verbose) {
+    const typeChar = line[0];
+    if (typeChar === "l" || typeChar === "h") {
+      throw new Error(
+        "GitHub archive contains a symlink or hardlink, which is not allowed",
+      );
+    }
+  }
+}
 
 function stripGitSuffix(value: string) {
   return value.endsWith(".git") ? value.slice(0, -4) : value;
@@ -231,17 +347,36 @@ async function downloadTarball(input: {
     throw new Error(`GitHub tarball download failed ${response.status}: ${url}`);
   }
 
+  // Reject up front when the server advertises an over-limit body...
+  const contentLength = Number(response.headers.get("content-length"));
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > GITHUB_ARCHIVE_LIMITS.maxArchiveBytes
+  ) {
+    throw new Error(
+      `GitHub archive exceeds the maximum allowed size of ${GITHUB_ARCHIVE_LIMITS.maxArchiveBytes} bytes`,
+    );
+  }
+
+  // ...and enforce the cap on the actual bytes streamed (headers can lie).
   await pipeline(
     Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
+    createArchiveSizeLimitStream(GITHUB_ARCHIVE_LIMITS.maxArchiveBytes),
     createWriteStream(input.archivePath),
   );
 }
 
 async function runTarExtract(archivePath: string, targetDir: string) {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", ["-xzf", archivePath, "-C", targetDir], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    // `--no-same-owner` prevents restoring archive-embedded uid/gid on the host;
+    // symlinks/hardlinks are already rejected by inspectArchiveEntries().
+    const child = spawn(
+      "tar",
+      ["--no-same-owner", "-xzf", archivePath, "-C", targetDir],
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
@@ -287,6 +422,7 @@ export async function prepareGitHubRepository(
       ref: resolvedRef,
       repo: source.repo,
     });
+    await inspectArchiveEntries(archivePath);
     await runTarExtract(archivePath, extractDir);
 
     const entries = await readdir(extractDir);

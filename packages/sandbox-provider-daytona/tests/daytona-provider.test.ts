@@ -4,9 +4,11 @@ import {
   assertDaytonaCommandSucceeded,
   DAYTONA_SANDBOX_PATH_POLICY,
   DaytonaSandboxProvider,
+  GITHUB_INGESTION_ALLOW_CIDRS,
   isDaytonaImageReference,
   mapDaytonaProviderError,
   normalizeDaytonaDownloadResult,
+  resolveDaytonaNetworkPolicyOptions,
   resolveDaytonaSandboxTarget,
 } from "../src/daytona-provider";
 import type {
@@ -221,6 +223,25 @@ describe("resolveDaytonaSandboxTarget", () => {
   });
 });
 
+describe("resolveDaytonaNetworkPolicyOptions", () => {
+  test("leaves network options untouched for default/undefined", () => {
+    assert.deepEqual(resolveDaytonaNetworkPolicyOptions(undefined), {});
+    assert.deepEqual(resolveDaytonaNetworkPolicyOptions("default"), {});
+  });
+
+  test("maps block-all to networkBlockAll", () => {
+    assert.deepEqual(resolveDaytonaNetworkPolicyOptions("block-all"), {
+      networkBlockAll: true,
+    });
+  });
+
+  test("maps ingestion-github to a CIDR networkAllowList", () => {
+    assert.deepEqual(resolveDaytonaNetworkPolicyOptions("ingestion-github"), {
+      networkAllowList: GITHUB_INGESTION_ALLOW_CIDRS.join(","),
+    });
+  });
+});
+
 describe("DaytonaSandboxProvider", () => {
   test("exposes Daytona sandbox path policy", () => {
     const provider = new DaytonaSandboxProvider({
@@ -292,6 +313,68 @@ describe("DaytonaSandboxProvider", () => {
       Object.hasOwn(calls.create[0] as Record<string, unknown>, "snapshot"),
       false,
     );
+  });
+
+  test("translates block-all network policy into SDK create params", async () => {
+    const { calls, client } = createMockDaytonaSandboxClient();
+    const provider = new DaytonaSandboxProvider({
+      apiKey: "test-key",
+      snapshot: "sourceweft-sandbox",
+      maxOutputChars: 100,
+      daytonaSandbox: client,
+    });
+
+    await provider.createSandbox({
+      labels: { sourceweft: "true" },
+      ttlSeconds: 3600,
+      networkPolicy: "block-all",
+    });
+
+    const options = calls.create[0] as Record<string, unknown>;
+    assert.equal(options.networkBlockAll, true);
+    assert.equal(Object.hasOwn(options, "networkAllowList"), false);
+  });
+
+  test("translates ingestion-github network policy into a CIDR allow list", async () => {
+    const { calls, client } = createMockDaytonaSandboxClient();
+    const provider = new DaytonaSandboxProvider({
+      apiKey: "test-key",
+      snapshot: "sourceweft-sandbox",
+      maxOutputChars: 100,
+      daytonaSandbox: client,
+    });
+
+    await provider.createSandbox({
+      labels: { sourceweft: "true" },
+      ttlSeconds: 3600,
+      networkPolicy: "ingestion-github",
+    });
+
+    const options = calls.create[0] as Record<string, unknown>;
+    assert.equal(
+      options.networkAllowList,
+      GITHUB_INGESTION_ALLOW_CIDRS.join(","),
+    );
+    assert.equal(Object.hasOwn(options, "networkBlockAll"), false);
+  });
+
+  test("omits network options when no policy is provided", async () => {
+    const { calls, client } = createMockDaytonaSandboxClient();
+    const provider = new DaytonaSandboxProvider({
+      apiKey: "test-key",
+      snapshot: "sourceweft-sandbox",
+      maxOutputChars: 100,
+      daytonaSandbox: client,
+    });
+
+    await provider.createSandbox({
+      labels: { sourceweft: "true" },
+      ttlSeconds: 3600,
+    });
+
+    const options = calls.create[0] as Record<string, unknown>;
+    assert.equal(Object.hasOwn(options, "networkBlockAll"), false);
+    assert.equal(Object.hasOwn(options, "networkAllowList"), false);
   });
 
   test("connects by ID for execute and preserves raw command, cwd, and timeout", async () => {
