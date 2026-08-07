@@ -8,6 +8,10 @@ import {
   updateWorkspaceSkillRequestSchema,
 } from "@sourceweft/contracts";
 import { contentSkillsService } from "../../../modules/skills";
+import { submitRegistrySkillRequestSchema } from "../../../modules/skills/registry/contracts";
+import { RegistrySubmissionError } from "../../../modules/skills/registry/errors";
+import { requireSkillWorkspace } from "../../../modules/skills/registry/permissions";
+import { submitRegistrySkillFromGitHub } from "../../../modules/skills/registry/submit";
 import { requireContentWorkspace } from "../../../modules/workspace";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
@@ -45,6 +49,47 @@ export function registerSkillRoutes(app: Hono) {
       query: c.req.query("q") ?? "",
     });
     return ApiResponse.success(c, result);
+  });
+
+  // Stage 1 — Submit (docs/architecture/skill-registry-index.md §3 Stage 1).
+  // Any content contributor (skills.submit) can index a GitHub skill; the scan +
+  // triage gate (Stages 3-4) decides indexed-vs-queued, not this endpoint.
+  app.post("/skills/registry/submit", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const userId = getSessionUserId(session);
+    await requireSkillWorkspace({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId,
+      permission: "skills.submit",
+    });
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = submitRegistrySkillRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    try {
+      const result = await submitRegistrySkillFromGitHub({
+        repoUrl: parsed.data.repoUrl,
+        userId,
+      });
+      return ApiResponse.success(
+        c,
+        { status: result.status, slug: result.slug },
+        201,
+      );
+    } catch (error) {
+      if (error instanceof RegistrySubmissionError) {
+        throw new ApiError(422, error.code, error.message);
+      }
+      throw error;
+    }
   });
 
   app.get("/skills", async (c) => {

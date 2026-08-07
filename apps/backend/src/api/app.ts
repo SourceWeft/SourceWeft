@@ -23,6 +23,7 @@ import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerPublicShareRoutes } from "./routes/public-shares";
 import { registerMarketRoutes } from "./routes/market";
+import { registerSkillRegistryAdminRoutes } from "./routes/skills-registry";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerUserSettingsRoutes } from "./routes/user-settings";
 import { registerWorkspaceRoutes } from "./routes/workspace";
@@ -111,6 +112,7 @@ export function createApp() {
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerMarketRoutes(app);
+  registerSkillRegistryAdminRoutes(app);
   registerJobRoutes(app);
   registerPublicShareRoutes(app);
   registerTeamLlmObservabilityRoutes(app);
