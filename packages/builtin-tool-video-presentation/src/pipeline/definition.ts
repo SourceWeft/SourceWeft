@@ -16,12 +16,11 @@ import {
 } from "@sourceweft/contracts/video-presentation";
 import { VIDEO_PRESENTATION_PIPELINE_JOB_NAME } from "../artifact-records";
 import { buildVideoPresentationStageView } from "../pipeline-digests";
-import { generateAudioTracks, stageNarrationForRender } from "./audio";
+import { generateAudioTracks } from "./audio";
 import { MAX_ERROR_MESSAGE_LENGTH } from "./config";
 import { createVideoPipelineDeps, type VideoPipelineDeps } from "./deps";
 import { attachReadySourceJson } from "./finalize";
 import { uploadCoverImage } from "./preview-images";
-import { renderVideoSlideNumbers, uploadRenderedVideo } from "./render-video";
 import {
   runGeneratedProject,
   type RenderedVideoResult,
@@ -40,7 +39,6 @@ import {
   materializeAssets,
   planVideoProject,
   regenerateStoryboardSlides,
-  requestNarrationEnabled,
 } from "./storyboard";
 import { assignSlideThemes } from "./themes";
 import { normalizeProjectExecutionResults, truncateText } from "./util";
@@ -279,43 +277,20 @@ export function createVideoPresentationPipelineDefinition(options?: {
         }
 
         case "installing_project": {
-          // Narration bytes for the server-side mp4 render. The tracks were
-          // uploaded two stages ago and only their pointers survive on the
-          // payload, so they are read back through the storage port here — the
-          // sandbox has no network path to the asset route.
-          //
-          // Incomplete narration means no mp4 at all: `renderVideo` is omitted
-          // and the run is exactly the run that shipped before this path
-          // existed. The artifact still publishes and the browser preview still
-          // plays every track from its assetUrl; what must never happen is a
-          // finished-looking mp4 that is silent, so this degrades to "no video"
-          // rather than to "quiet video".
-          const narration = await stageNarrationForRender({
-            payload: state,
-            slideNumbers: renderVideoSlideNumbers(state),
-            storage: deps.storage,
-            probeDurationSeconds: (probeInput) =>
-              deps.audio.probeDurationSeconds(probeInput),
-            narrationExpected: requestNarrationEnabled(request),
-          });
-          if (!narration.ok) {
-            deps.logger.warn("video_presentation_render_narration_unavailable", {
-              artifactId: job.artifactId,
-              jobId: job.jobId,
-              reason: narration.reason,
-              slideNumber: narration.slideNumber,
-              detail: narration.detail,
-            });
-          }
+          // The sandbox installs the generated Remotion project, typechecks it,
+          // and smoke-renders slide stills for visual QA. It intentionally does
+          // NOT render a full mp4 (`renderVideo` is omitted): every surface —
+          // the owner's in-app preview AND the public share — plays the deck by
+          // client-compiling the Remotion project in the browser, so a
+          // server-side mp4 render only added generation latency (and a heavy
+          // sandbox render) for a file nothing consumes. Narration therefore no
+          // longer needs staging into the sandbox either.
           const run = normalizeProjectExecutionResults(
             await runGeneratedProject({
               deps,
               job,
               payload: state,
               request,
-              ...(narration.ok
-                ? { renderVideo: { narration: narration.tracks } }
-                : {}),
             }),
           );
           scratch.projectRun = run;
@@ -324,11 +299,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
           // QA → cover), surfaced where the user already watches progress.
           {
             const logTail: string[] = [];
-            if (!narration.ok) {
-              logTail.push(
-                `⚠ narration incomplete (${narration.reason ?? "unknown"}) — server mp4 skipped, browser preview unaffected`,
-              );
-            }
             for (const resolution of run.assetResolutions ?? []) {
               if (resolution.ok && resolution.rung !== "image") {
                 logTail.push(
@@ -531,37 +501,6 @@ export function createVideoPresentationPipelineDefinition(options?: {
             }
           }
 
-          // Store the server-rendered mp4 beside the cover still, on the same
-          // artifact-asset route. Best-effort in the same way: an upload that
-          // fails leaves `renderedVideo` unset and the presentation publishes.
-          //
-          // `renderedVideo` is always taken from *this* run and never carried
-          // forward. An edit run re-renders every scene, so a previously stored
-          // mp4 describes a deck that no longer exists; keeping it would show
-          // the old video under the new payload. Unsetting it falls back to the
-          // browser preview, which is always current.
-          let renderedVideo:
-            | Awaited<ReturnType<typeof uploadRenderedVideo>>
-            | undefined;
-          if (projectRun?.video) {
-            try {
-              renderedVideo = await uploadRenderedVideo({
-                artifactId: job.artifactId,
-                payload: state,
-                report: projectRun.video.report,
-                storage: deps.storage,
-                video: projectRun.video.data,
-                workspaceId: job.workspaceId,
-              });
-            } catch (error) {
-              deps.logger.warn("video_presentation_rendered_video_failed", {
-                artifactId: job.artifactId,
-                jobId: job.jobId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
-
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             project: {
@@ -573,7 +512,10 @@ export function createVideoPresentationPipelineDefinition(options?: {
               slideCount: state.slides.length,
               durationSeconds,
             },
-            renderedVideo: renderedVideo ?? undefined,
+            // No server-side mp4 is rendered any more (see installing_project);
+            // every surface client-compiles the Remotion project, so the deck
+            // always publishes as a browser-rendered presentation.
+            renderedVideo: undefined,
           });
           return state;
         }

@@ -6,11 +6,11 @@ import { createVideoPresentationPipelineDefinition } from "../src/pipeline/defin
 import { attachReadySourceJson } from "../src/pipeline/finalize";
 
 /**
- * The publishing half of the sandbox mp4 path: what the pipeline writes onto
- * the payload once a render came back, and what it writes when one did not.
- *
- * No test here renders anything — that needs a live sandbox, chromium and
- * ffmpeg. These drive the real stage function with a fake sandbox result.
+ * The server-side mp4 render was removed: every surface (owner preview AND
+ * public share) client-compiles the Remotion project, so the sandbox only
+ * installs/typechecks/smoke-renders stills and never muxes an mp4. These drive
+ * the real stage functions with a fake sandbox result to lock that in — the
+ * install stage never asks for a render, and publish never stores one.
  */
 
 const job = {
@@ -143,7 +143,9 @@ async function runPublishStage(input: {
   return { ...context, state };
 }
 
-test("a rendered mp4 is stored and persisted onto the payload at publish", async () => {
+test("the publish stage stores no mp4 even if a run carried one", async () => {
+  // `video` is the old sandbox-render shape; publish must ignore it now — no
+  // upload, no `renderedVideo` — because the deck is client-compiled.
   const { state, uploads } = await runPublishStage({
     scratch: {
       projectRun: {
@@ -155,23 +157,8 @@ test("a rendered mp4 is stored and persisted onto the payload at publish", async
       },
     },
   });
-
-  // Same write path (and same asset route) the narration tracks and the cover
-  // still already use — no second storage mechanism.
-  assert.deepEqual(uploads, [
-    {
-      key: "workspaces/workspace-1/artifacts/artifact-1/Quarterly-Review.mp4",
-      contentType: "video/mp4",
-      byteLength: 4,
-    },
-  ]);
-  assert.equal(
-    state.renderedVideo?.assetUrl,
-    "/v1/workspaces/workspace-1/artifacts/artifact-1/assets/Quarterly-Review.mp4",
-  );
-  assert.equal(state.renderedVideo?.hasAudio, true);
-  assert.equal(state.renderedVideo?.durationInFrames, 90);
-  assert.equal(state.renderedVideo?.mimeType, "video/mp4");
+  assert.equal(state.renderedVideo, undefined);
+  assert.deepEqual(uploads, []);
 });
 
 test("no render means no renderedVideo, and the deck still publishes", async () => {
@@ -189,23 +176,6 @@ test("no render means no renderedVideo, and the deck still publishes", async () 
   assert.deepEqual(uploads, []);
   // The presentation itself is complete: duration is still computed.
   assert.equal(state.project.durationSeconds, 3);
-});
-
-test("a failed mp4 upload warns and publishes without the video", async () => {
-  const { state, warnings } = await runPublishStage({
-    uploadFails: true,
-    scratch: {
-      projectRun: {
-        install: { ok: true, diagnostics: [] },
-        typecheck: { ok: true, diagnostics: [] },
-        smoke: { ok: true, diagnostics: [] },
-        stills: [],
-        video: { data: new Uint8Array([1, 2, 3, 4]), report },
-      },
-    },
-  });
-  assert.equal(state.renderedVideo, undefined);
-  assert.ok(warnings.includes("video_presentation_rendered_video_failed"));
 });
 
 test("a stale renderedVideo is dropped when this run produced none", async () => {
@@ -242,7 +212,7 @@ test("a stale renderedVideo is dropped when this run produced none", async () =>
 });
 
 /* -------------------------------------------------------------------------- */
-/* Asking for the render                                                      */
+/* Never asking for a render                                                  */
 /* -------------------------------------------------------------------------- */
 
 /** Runs `installing_project` and reports what it asked the sandbox for. */
@@ -304,57 +274,25 @@ async function runInstallStage(input: {
   return { request: requests[0], warnings: context.warnings };
 }
 
-test("the install stage stages narration bytes and asks for the mp4", async () => {
-  const { request } = await runInstallStage({
+test("the install stage never asks the sandbox to render an mp4", async () => {
+  // The sandbox is handed the project to install/typecheck/smoke only. It is
+  // never passed `renderVideo` — narrated or not — so no narration is staged
+  // and no server mp4 is produced.
+  const narrated = await runInstallStage({
     narrated: true,
     object: new Uint8Array([1, 2, 3]),
-    // The staged object measures 2.4s where the payload recorded 2s. Both
-    // numbers ride along: the payload's sized the scene, this one is what the
-    // manifest publishes for the smoke check to hold the scene to.
     probeSeconds: 2.4,
   });
-  const renderVideo = (request as { renderVideo?: { narration?: unknown[] } })
-    .renderVideo;
-  assert.deepEqual(renderVideo?.narration, [
-    {
-      slideNumber: 1,
-      fileName: "slide-1.mp3",
-      data: new Uint8Array([1, 2, 3]),
-      durationSeconds: 2.4,
-    },
-  ]);
-});
-
-test("narration whose length cannot be measured means no render is asked for", async () => {
-  // The bytes are there but they do not decode. Staging them anyway would put
-  // an unverifiable timeline into the mp4 — the one thing the re-probe exists
-  // to prevent — so this degrades to "no video" like every other staging
-  // failure, and the browser preview still plays every track.
-  const { request, warnings } = await runInstallStage({
-    narrated: true,
-    object: new Uint8Array([1, 2, 3]),
-    probeSeconds: null,
-  });
-  assert.equal((request as { renderVideo?: unknown }).renderVideo, undefined);
-  assert.ok(
-    warnings.includes("video_presentation_render_narration_unavailable"),
-  );
-});
-
-test("narration that cannot be assembled means no render is asked for", async () => {
-  // The object is gone. Rendering anyway would produce a finished-looking,
-  // silent mp4; omitting `renderVideo` leaves the run exactly as it was before
-  // this path existed, and the browser preview still has every track.
-  const { request, warnings } = await runInstallStage({
-    narrated: true,
-    object: null,
-  });
   assert.equal(
-    (request as { renderVideo?: unknown }).renderVideo,
+    (narrated.request as { renderVideo?: unknown }).renderVideo,
     undefined,
   );
-  assert.ok(
-    warnings.includes("video_presentation_render_narration_unavailable"),
+  assert.deepEqual(narrated.warnings, []);
+
+  const silent = await runInstallStage({ narrated: false });
+  assert.equal(
+    (silent.request as { renderVideo?: unknown }).renderVideo,
+    undefined,
   );
 });
 

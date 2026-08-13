@@ -184,4 +184,28 @@ export function registerPublicShareRoutes(app: Hono) {
     c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
     return c.body(preview.body);
   });
+
+  // Sub-assets (narration, images) for a share that client-renders in the
+  // viewer's browser. Access is the share token in the path — the same grant
+  // `/raw` and `/preview` use — so no authentication. The asset URLs the share
+  // projection hands the client already point here.
+  app.get("/v1/public/shares/:token/assets/:fileName", async (c) => {
+    const resolved = await sharingService.resolvePublicArtifactBytes(
+      requireRouteParam(c, "token"),
+    );
+    if (!resolved) {
+      throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
+    }
+
+    const asset = await contentArtifactsService.getSharedArtifactAsset(
+      resolved.artifact,
+      requireRouteParam(c, "fileName"),
+    );
+
+    c.header("Content-Type", asset.contentType);
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Referrer-Policy", "no-referrer");
+    c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
+    return c.body(asset.body);
+  });
 }

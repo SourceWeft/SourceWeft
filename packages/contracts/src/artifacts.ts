@@ -79,6 +79,33 @@ export type ArtifactViewHandler = {
     readonly fileName: string;
   }) => ArtifactAssetLocation | null;
   /**
+   * The artifact's canonical host-servable file when it has NO top-level
+   * `storageKey` column — i.e. the capability keeps its primary deliverable
+   * inside the payload (e.g. a video presentation's server-rendered mp4 under
+   * `payload.renderedVideo`). The host serves these bytes on the public `/raw`
+   * route and mints `fileUrl`/inline-preview from the returned content-type, so
+   * a shared artifact with no top-level file can still play/download. Returning
+   * null means "no host-servable primary file" and the share page falls back to
+   * the poster image. Only consulted when the top-level storageKey is absent.
+   */
+  readonly resolvePrimaryFile?: (input: {
+    readonly artifact: ArtifactViewRecord;
+  }) => ArtifactAssetLocation | null;
+  /**
+   * The payload a PUBLIC share may hand an anonymous browser so it can render
+   * the artifact client-side (the same path the owner's in-app preview uses).
+   * The handler owns what is safe to expose and rewrites any asset reference to
+   * the caller-provided share-token URL (`assetUrl(fileName)`), so the anonymous
+   * viewer can fetch sub-assets without the workspace-scoped, authenticated
+   * route. Returning null means "nothing safe to client-render" and the share
+   * page falls back to a file/poster. Only capabilities that render from a
+   * payload implement this; the generic host never inspects payload shape.
+   */
+  readonly buildPublicPayload?: (input: {
+    readonly artifact: ArtifactViewRecord;
+    readonly assetUrl: (fileName: string) => string;
+  }) => Record<string, unknown> | null;
+  /**
    * Download file name for the artifact's own stored file. Returning
    * null/undefined falls back to the host's generic naming (payload file name,
    * else the title).

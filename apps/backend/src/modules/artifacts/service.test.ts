@@ -243,6 +243,71 @@ test("a registered takeover makes an artifact client-renderable without a file",
   );
 });
 
+test("a handler's payload-stored primary file is downloadable without a top-level file", () => {
+  // A takeover whose deliverable lives in the payload (e.g. a video
+  // presentation's rendered mp4), not the top-level storageKey column.
+  const withPrimaryFile = createSyntheticTakeoverArtifactViewHandler({
+    resolvePrimaryFile: ({ artifact }) => {
+      const payload = artifact.payloadJson as { renderedVideo?: unknown };
+      const rendered = payload?.renderedVideo as
+        | { fileName?: string; storageKey?: string }
+        | undefined;
+      return rendered?.storageKey && rendered.fileName
+        ? {
+            contentType: "video/mp4",
+            fileName: rendered.fileName,
+            storageBucket: artifact.storageBucket,
+            storageKey: rendered.storageKey,
+          }
+        : null;
+    },
+  });
+
+  // Ready + a resolvable primary file → downloadable, still client-rendered.
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities(
+      {
+        artifactType: SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
+        status: "ready",
+        storageKey: null,
+        payloadJson: {
+          renderedVideo: {
+            fileName: "deck.mp4",
+            storageKey: "workspaces/w1/artifacts/a1/deck.mp4",
+          },
+        },
+      } as never,
+      withPrimaryFile,
+    ),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: false,
+      canRenderClientSide: true,
+    },
+  );
+
+  // Same handler, but the payload has no rendered mp4 (the browser-compiled
+  // path): resolvePrimaryFile returns null, so download stays off by design.
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities(
+      {
+        artifactType: SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
+        status: "ready",
+        storageKey: null,
+        payloadJson: { videoDownloadOnly: true },
+      } as never,
+      withPrimaryFile,
+    ),
+    {
+      canOpenFile: true,
+      canDownloadFile: false,
+      canPreviewInline: false,
+      canRenderClientSide: true,
+    },
+  );
+});
+
 test("artifact asset resolution delegates payload shapes to the type handler", () => {
   const registry = handlers;
   const artifact = {

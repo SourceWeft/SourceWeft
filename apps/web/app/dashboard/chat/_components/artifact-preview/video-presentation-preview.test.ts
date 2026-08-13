@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canRenderVideoPresentationScenes,
+  hasVideoPresentationRenderedVideo,
   isVideoPresentationFailed,
   resolveVideoProjectStageLabel,
 } from "@sourceweft/builtin-tool-video-presentation/ui";
@@ -86,6 +87,26 @@ describe("video presentation capability ui", () => {
         sceneModuleCount: 0,
         slideCount: 2,
       }),
+    ).toBe(false);
+  });
+
+  it("offers the toolbar download only when a server-rendered mp4 is stored", () => {
+    // Sandbox render path: a real mp4 the host can serve on the file route.
+    expect(
+      hasVideoPresentationRenderedVideo({
+        renderedVideo: {
+          fileName: "deck.mp4",
+          storageKey: "workspaces/w1/artifacts/a1/deck.mp4",
+        },
+      }),
+    ).toBe(true);
+    // Browser-compiled path: no server file, only the in-preview client render.
+    expect(
+      hasVideoPresentationRenderedVideo({ videoDownloadOnly: true }),
+    ).toBe(false);
+    // A malformed/partial renderedVideo is not servable, so no download.
+    expect(
+      hasVideoPresentationRenderedVideo({ renderedVideo: { fileName: "" } }),
     ).toBe(false);
   });
 

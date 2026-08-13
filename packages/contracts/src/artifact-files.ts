@@ -233,6 +233,50 @@ export function extensionForMimeType(
   return EXTENSION_BY_MIME_TYPE.get(normalizeMimeType(mimeType)) ?? fallback;
 }
 
+/**
+ * The audio container a byte buffer actually is, read from its magic bytes — or
+ * null when it is not an audio container we can identify unambiguously.
+ *
+ * Use this instead of trusting a provider's declared MIME. Some speech
+ * providers stream WAV even when mp3 is requested; a file whose bytes are PCM
+ * WAV but whose stored MIME says `audio/mpeg` makes a browser `<audio>` element
+ * hand PCM to its MP3 decoder, which stutters and mis-seeks (choppy playback +
+ * audio/video desync in the frame-synced preview). A server-side mp4 render is
+ * unaffected because ffmpeg sniffs the container itself. Only signatures that
+ * are unmistakable are returned, so a real mp3 is never re-labeled.
+ */
+export function sniffAudioMimeType(
+  bytes: Uint8Array,
+): ArtifactMimeType | "audio/mp4" | null {
+  if (bytes.length < 4) {
+    return null;
+  }
+  const tag = (offset: number, length: number) =>
+    String.fromCharCode(...bytes.subarray(offset, offset + length));
+  if (bytes.length >= 12 && tag(0, 4) === "RIFF" && tag(8, 4) === "WAVE") {
+    return ARTIFACT_MIME_TYPES.wav;
+  }
+  if (tag(0, 4) === "fLaC") {
+    return ARTIFACT_MIME_TYPES.flac;
+  }
+  if (tag(0, 4) === "OggS") {
+    // Opus/Vorbis both ride in an Ogg container; the artifact layer treats the
+    // container as the servable type.
+    return "audio/ogg" as ArtifactMimeType;
+  }
+  // ID3v2 tag, or a raw MPEG audio frame sync (11 bits set).
+  if (tag(0, 3) === "ID3") {
+    return ARTIFACT_MIME_TYPES.mp3;
+  }
+  if (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) {
+    return ARTIFACT_MIME_TYPES.mp3;
+  }
+  if (bytes.length >= 12 && tag(4, 4) === "ftyp") {
+    return "audio/mp4";
+  }
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Purpose-scoped allowlists                                                   */
 /* -------------------------------------------------------------------------- */

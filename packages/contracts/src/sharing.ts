@@ -75,6 +75,16 @@ export const publicSharedArtifactSchema = z.object({
   /** Signed URL to a preview image (social card + non-embeddable fallback). */
   previewImageUrl: z.string().nullable(),
   /**
+   * A capability-sanitized project payload for shares that client-render in the
+   * viewer's browser (e.g. a video presentation), with every asset URL rewritten
+   * to the share-token asset route. Null when the artifact has no
+   * client-renderable payload (the page then uses `fileUrl`/`previewImageUrl`).
+   * Only a capability's `buildPublicPayload` writes this: internal fields
+   * (source material, storage keys, workspace URLs) are stripped or rewritten
+   * before it crosses the public boundary.
+   */
+  payload: z.record(z.string(), z.unknown()).nullable(),
+  /**
    * A short, content-derived summary for SEO/social descriptions, or null. Kept
    * to non-sensitive, already-shown text (the preview image's alt caption) —
    * never `promptText` or any internal payload. The renderer falls back to a

@@ -8,7 +8,7 @@
  * result — plus the chrome that reports where a still-running job is. Writing a
  * file out of it is a separate concern and lives in `video-presentation-export`.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   compileVideoPresentationScenesOnBrowser,
@@ -26,9 +26,81 @@ import {
 } from "./artifact-view";
 import { VideoPresentationExportControls } from "./video-presentation-export";
 
+const BLOB_URL_PREFIX = "blob:";
+
+/**
+ * Download every scene's narration to a local blob URL and swap it in, so no
+ * scene's `<Audio>` waits on a network round-trip when its `<Sequence>`
+ * activates.
+ *
+ * Without this, only the first scene's audio is warm at playback start; every
+ * later scene fetches + decodes its clip the moment it becomes active, so its
+ * narration begins late and drifts out of sync with the visuals (the server mp4
+ * has no such gap because it muxes one continuous track). Prefetching to blobs
+ * — the same approach SurfSense uses for this per-scene shape — makes each
+ * clip local and instantly seekable. A clip that fails to fetch keeps its
+ * network URL, so playback still works, just without the head start.
+ */
+async function prefetchSceneAudioAsBlobs(
+  scenes: CompiledVideoPresentationScene[],
+): Promise<CompiledVideoPresentationScene[]> {
+  const blobByUrl = new Map<string, string>();
+  const uniqueUrls = [
+    ...new Set(
+      scenes
+        .map((scene) => scene.audioUrl)
+        .filter((url): url is string => Boolean(url)),
+    ),
+  ];
+  await Promise.all(
+    uniqueUrls.map(async (url) => {
+      try {
+        const response = await fetch(url, { credentials: "include" });
+        if (!response.ok) {
+          return;
+        }
+        blobByUrl.set(url, URL.createObjectURL(await response.blob()));
+      } catch {
+        // Leave the network URL in place — the scene still plays.
+      }
+    }),
+  );
+  return scenes.map((scene) =>
+    scene.audioUrl && blobByUrl.has(scene.audioUrl)
+      ? { ...scene, audioUrl: blobByUrl.get(scene.audioUrl) }
+      : scene,
+  );
+}
+
+function collectBlobUrls(scenes: CompiledVideoPresentationScene[]): string[] {
+  return scenes
+    .map((scene) => scene.audioUrl)
+    .filter((url): url is string => Boolean(url?.startsWith(BLOB_URL_PREFIX)));
+}
+
+function revokeBlobUrls(urls: readonly string[]): void {
+  for (const url of urls) {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export type VideoPresentationPreviewProps = {
   artifactStatus: string;
+  /**
+   * Chrome-less rendering for the public share page: only the player fills the
+   * space (fullscreen-friendly), with the client-render download as a top-right
+   * overlay and none of the in-app metadata/export bar. The in-app preview keeps
+   * its full chrome.
+   */
+  chromeless?: boolean;
   errorMessage?: string | null;
+  /**
+   * Public-share fallback: the URL of the server-rendered mp4. The public
+   * projection deliberately withholds the payload (it carries workspace-scoped
+   * asset URLs), so there is nothing to browser-compile; when a rendered file
+   * URL is supplied and no usable project is present, play the mp4 directly.
+   */
+  fileUrl?: string | null;
   payload: Record<string, unknown>;
   /**
    * Absolutizes a backend-relative asset path. Injected because per-scene audio
@@ -40,7 +112,9 @@ export type VideoPresentationPreviewProps = {
 
 export function VideoPresentationPreview({
   artifactStatus,
+  chromeless,
   errorMessage,
+  fileUrl,
   payload,
   resolveAssetUrl,
   title,
@@ -82,9 +156,22 @@ export function VideoPresentationPreview({
     VideoPresentationSceneCompileDiagnostic[]
   >([]);
   const [isCompilingScenes, setIsCompilingScenes] = useState(false);
+  // Blob URLs minted by the audio prefetch, tracked so they are revoked when the
+  // scenes are recompiled or the component unmounts (an unrevoked object URL
+  // pins its blob in memory for the page's lifetime).
+  const blobUrlsRef = useRef<string[]>([]);
   const isPreparing =
     artifactStatus === "pending" || artifactStatus === "running";
   const durationSeconds = project ? getVideoDurationSeconds(project) : null;
+
+  // Revoke any outstanding prefetched blob URLs on unmount.
+  useEffect(
+    () => () => {
+      revokeBlobUrls(blobUrlsRef.current);
+      blobUrlsRef.current = [];
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -106,12 +193,21 @@ export function VideoPresentationPreview({
       resolveAudioUrl: resolveAssetUrl,
       useFallbackForFailedScenes: false,
     })
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) {
           return;
         }
-        setCompiledScenes(result.scenes);
         setCompileDiagnostics(result.diagnostics);
+        // Warm every clip to a local blob BEFORE mounting the player, so later
+        // scenes' narration is not fetched lazily at their sequence boundary.
+        const scenes = await prefetchSceneAudioAsBlobs(result.scenes);
+        if (cancelled) {
+          revokeBlobUrls(collectBlobUrls(scenes));
+          return;
+        }
+        revokeBlobUrls(blobUrlsRef.current);
+        blobUrlsRef.current = collectBlobUrls(scenes);
+        setCompiledScenes(scenes);
       })
       .catch((error) => {
         if (cancelled) {
@@ -154,6 +250,26 @@ export function VideoPresentationPreview({
     );
   }
 
+  // Public share: no browser-compilable project, but a server-rendered mp4 was
+  // handed to us — play it directly. In-app always has the payload (so `project`
+  // is non-null) and never a fileUrl, so this branch is public-only.
+  if (!project && fileUrl) {
+    return (
+      <div className="w-full overflow-hidden rounded-xl border bg-background shadow-sm">
+        <div className="bg-[#0b1017] p-2">
+          <video
+            className="mx-auto max-h-[calc(100vh-8rem)] w-full rounded-lg bg-black"
+            controls
+            playsInline
+            preload="metadata"
+            src={fileUrl}
+            title={title}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const canRenderPreparedScenes =
     Boolean(project) &&
     canRenderVideoPresentationScenes({
@@ -191,6 +307,43 @@ export function VideoPresentationPreview({
           {generationError ??
             "The video presentation payload does not contain valid scene modules."}
         </p>
+      </div>
+    );
+  }
+
+  // Public share surface: just the player, full-bleed and fullscreen-friendly,
+  // with the client-render download as a top-right overlay. No metadata/export
+  // bar — the share shell already carries the title, and the player's own
+  // controls carry the timeline.
+  if (chromeless) {
+    return (
+      <div className="relative flex h-full w-full items-center justify-center bg-black">
+        {canRenderPreparedScenes ? (
+          <VideoPresentationPlayer
+            className="max-h-full max-w-full"
+            payload={project}
+            scenes={compiledScenes}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center px-6 text-center text-white">
+            <Loader2 className="mb-3 size-5 animate-spin text-white/60" />
+            <p className="text-sm font-medium">
+              {compileDiagnostics.length > 0
+                ? "Video scenes need repair"
+                : "Preparing video"}
+            </p>
+          </div>
+        )}
+        {canRenderPreparedScenes ? (
+          <div className="absolute right-3 top-3 z-10">
+            <VideoPresentationExportControls
+              canExport={canRenderPreparedScenes}
+              payload={project}
+              scenes={compiledScenes}
+              title={title}
+            />
+          </div>
+        ) : null}
       </div>
     );
   }

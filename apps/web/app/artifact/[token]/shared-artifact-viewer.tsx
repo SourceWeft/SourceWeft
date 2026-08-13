@@ -41,14 +41,14 @@ export function SharedArtifactViewer({
 
   // Resolve the artifact's own preview UI from the capability registry — the
   // same pluggable path the in-app panel uses, so each type's custom UI lives in
-  // its package rather than being hardcoded here. The context is PUBLIC: the
-  // only inputs are the token-gated `/raw` bytes (`proxyFileUrl`) and the
-  // preview image — there is no payload or workspace. Payload-only previews
-  // (which need the render host) are gated out by `fileUrl` and, defensively, by
-  // try/catch; they degrade to the poster/download fallback below.
-  // `layout: "page"` tells the capability to render full-bleed.
-  const capabilityContent = useMemo(() => {
-    if (!artifact.fileUrl) {
+  // its package rather than being hardcoded here. The context is PUBLIC: its
+  // inputs are the token-gated `/raw` bytes (`proxyFileUrl`), the preview image,
+  // and — for types that client-render — a capability-sanitized `payload` whose
+  // asset URLs already point at the token-scoped public asset route. A type with
+  // neither a file nor a payload has nothing to render here and degrades to the
+  // poster/download fallback below. `layout: "page"` renders full-bleed.
+  const capability = useMemo(() => {
+    if (!artifact.fileUrl && !artifact.payload) {
       return null;
     }
     const context: ArtifactPreviewContext = {
@@ -62,17 +62,23 @@ export function SharedArtifactViewer({
       downloadUrl: artifact.fileUrl,
       layout: "page",
       pageUrl: null,
-      payload: {},
+      payload: (artifact.payload as Record<string, unknown> | null) ?? {},
       proxyFileUrl: artifact.fileUrl,
+      surface: "share",
       title,
       workspaceId: null,
     };
     try {
-      return resolveArtifactPreview(context)?.content ?? null;
+      return resolveArtifactPreview(context) ?? null;
     } catch {
       return null;
     }
   }, [artifact, title]);
+  const capabilityContent = capability?.content ?? null;
+  // A capability that renders its own download (e.g. the video presentation's
+  // client-render overlay) suppresses the header's generic file download, so a
+  // viewer never sees two.
+  const capabilityOwnsDownload = Boolean(capability?.blocksDefaultDownload);
 
   const canInlineEmbed =
     Boolean(artifact.fileUrl) && artifact.inlinePreviewable;
@@ -177,7 +183,7 @@ export function SharedArtifactViewer({
               Fullscreen
             </button>
           ) : null}
-          {artifact.fileUrl ? (
+          {artifact.fileUrl && !capabilityOwnsDownload ? (
             <a
               className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               href={artifact.fileUrl}
@@ -209,7 +215,7 @@ export function SharedArtifactViewer({
       >
         {immersive ? (
           <button
-            className="absolute right-3 top-3 z-20 grid size-9 place-items-center rounded-full bg-black/25 text-white/90 backdrop-blur-sm transition hover:bg-black/45"
+            className="absolute left-3 top-3 z-20 grid size-9 place-items-center rounded-full bg-black/25 text-white/90 backdrop-blur-sm transition hover:bg-black/45"
             onClick={exitFullscreen}
             title="Exit fullscreen (Esc)"
             type="button"

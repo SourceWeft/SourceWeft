@@ -2,6 +2,8 @@ import {
   ARTIFACT_MIME_TYPES,
   extensionForMimeType,
   isInlinePreviewableMimeType,
+  normalizeMimeType,
+  sniffAudioMimeType,
 } from "@sourceweft/contracts/artifact-files";
 import { buildArtifactPreviewUrl as buildArtifactPreviewPageUrl } from "@sourceweft/contracts/artifact-urls";
 import type {
@@ -167,12 +169,24 @@ function buildArtifactCapabilities(
   handler?: ArtifactViewHandler | null,
 ): ArtifactCapabilities {
   const hasFile = Boolean(artifact?.status === "ready" && artifact.storageKey);
+  // A capability may keep its primary deliverable in the payload rather than the
+  // top-level storageKey column (e.g. a video presentation's server-rendered
+  // mp4 under `payload.renderedVideo`). Ask the handler the same way the public
+  // `/raw` serve does, so the projection reports a real downloadable file
+  // without the host knowing any artifact type. Only consulted when there is no
+  // top-level file and the artifact is ready.
+  const hasHandlerPrimaryFile = Boolean(
+    artifact &&
+      artifact.status === "ready" &&
+      !artifact.storageKey &&
+      handler?.resolvePrimaryFile?.({ artifact }),
+  );
   const canRenderClientSide = Boolean(
     artifact && handler && artifact.status !== "failed",
   );
   return {
     canOpenFile: hasFile || canRenderClientSide,
-    canDownloadFile: hasFile,
+    canDownloadFile: hasFile || hasHandlerPrimaryFile,
     canPreviewInline: hasArtifactPreviewFile(artifact, handler),
     canRenderClientSide,
   };
@@ -537,16 +551,34 @@ export class ContentArtifactsService {
     userId: string;
   }) {
     const { artifact } = await this.requireViewableArtifact(input);
-    if (!artifact.storageKey) {
-      throw new ContentError(
-        400,
-        "ARTIFACT_FILE_MISSING",
-        "Artifact has no stored file",
-      );
-    }
 
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+
+    // Capabilities that keep their deliverable in the payload (e.g. a video
+    // presentation's rendered mp4) have no top-level storageKey; serve the
+    // handler's declared primary file instead, mirroring getSharedArtifactFile
+    // so the authenticated /file and /download routes behave like the public
+    // /raw serve. No such file means there is genuinely nothing to download.
+    if (!artifact.storageKey) {
+      const primary = handler?.resolvePrimaryFile?.({ artifact });
+      if (!primary) {
+        throw new ContentError(
+          400,
+          "ARTIFACT_FILE_MISSING",
+          "Artifact has no stored file",
+        );
+      }
+      return {
+        body: await downloadArtifactObject({
+          bucket: primary.storageBucket,
+          key: primary.storageKey,
+        }),
+        contentType: primary.contentType,
+        fileName: primary.fileName,
+        renderer: resolveArtifactRenderer(artifact, handler),
+      };
+    }
 
     return {
       body: await downloadArtifactObject({
@@ -636,15 +668,30 @@ export class ContentArtifactsService {
   async getSharedArtifactFile(
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
   ) {
-    if (!artifact.storageKey) {
-      throw new ContentError(
-        400,
-        "ARTIFACT_FILE_MISSING",
-        "Artifact has no stored file",
-      );
-    }
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    // Capabilities that keep their deliverable in the payload (e.g. a video
+    // presentation's rendered mp4) have no top-level storageKey; serve the
+    // handler's declared primary file instead so the public share can play it.
+    if (!artifact.storageKey) {
+      const primary = handler?.resolvePrimaryFile?.({ artifact });
+      if (!primary) {
+        throw new ContentError(
+          400,
+          "ARTIFACT_FILE_MISSING",
+          "Artifact has no stored file",
+        );
+      }
+      return {
+        body: await downloadArtifactObject({
+          bucket: primary.storageBucket,
+          key: primary.storageKey,
+        }),
+        contentType: primary.contentType,
+        fileName: primary.fileName,
+        renderer: resolveArtifactRenderer(artifact, handler),
+      };
+    }
     return {
       body: await downloadArtifactObject({
         bucket: artifact.storageBucket,
@@ -665,14 +712,87 @@ export class ContentArtifactsService {
   async isSharedArtifactInlineRenderable(
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
   ): Promise<boolean> {
-    if (!artifact.storageKey) {
-      return false;
-    }
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    if (!artifact.storageKey) {
+      // Fall back to the handler's payload-stored primary file (e.g. a rendered
+      // mp4) and judge inline-renderability from its content type.
+      const primary = handler?.resolvePrimaryFile?.({ artifact });
+      return primary
+        ? isBrowserRenderableContentType(primary.contentType)
+        : false;
+    }
     return isBrowserRenderableContentType(
       resolveArtifactContentType(artifact, handler),
     );
+  }
+
+  /**
+   * Whether the public `/raw` route can serve bytes for this share at all —
+   * true when there's a top-level stored file OR a handler-declared primary
+   * file in the payload. Drives whether the projection mints a `fileUrl`.
+   */
+  async sharedArtifactHasServableFile(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ): Promise<boolean> {
+    if (artifact.storageKey) {
+      return true;
+    }
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    return Boolean(handler?.resolvePrimaryFile?.({ artifact }));
+  }
+
+  /**
+   * A capability-sanitized payload the public share page can client-render, or
+   * null when the type has none. Delegated to the handler's `buildPublicPayload`
+   * so the host never inspects payload shape; `assetUrl` maps a sub-asset file
+   * name to the token-scoped public asset route the handler rewrites into the
+   * payload.
+   */
+  async buildSharedArtifactPublicPayload(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+    assetUrl: (fileName: string) => string,
+  ): Promise<Record<string, unknown> | null> {
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    return handler?.buildPublicPayload?.({ artifact, assetUrl }) ?? null;
+  }
+
+  /**
+   * Sub-asset bytes (narration, images) for a *share*-authorized artifact,
+   * resolved by file name through the same handler path the authenticated asset
+   * route uses. No per-user check: the caller (the public share route) has
+   * already validated a live share token, which is the access grant. The
+   * content type is corrected from the bytes for the same reason `getArtifactAsset`
+   * does it (legacy narration is WAV mislabeled `audio/mpeg`).
+   */
+  async getSharedArtifactAsset(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+    fileName: string,
+  ) {
+    const registry = await loadArtifactViewHandlerRegistry();
+    const asset = resolveArtifactAsset(
+      artifact,
+      fileName,
+      registry.handlerFor(artifact.artifactType),
+    );
+    if (!asset) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_ASSET_NOT_FOUND",
+        "Artifact asset not found",
+      );
+    }
+    const body = await downloadArtifactObject({
+      bucket: asset.storageBucket,
+      key: asset.storageKey,
+    });
+    return {
+      body,
+      contentType: correctAudioContentTypeFromBytes(body, asset.contentType),
+      fileName: asset.fileName,
+    };
   }
 
   /** Preview-image bytes for a share-authorized artifact, or null if none. */
@@ -714,15 +834,40 @@ export class ContentArtifactsService {
       );
     }
 
+    const body = await downloadArtifactObject({
+      bucket: asset.storageBucket,
+      key: asset.storageKey,
+    });
     return {
-      body: await downloadArtifactObject({
-        bucket: asset.storageBucket,
-        key: asset.storageKey,
-      }),
-      contentType: asset.contentType,
+      body,
+      // Backfill: legacy narration is PCM/WAV stored under `audio/mpeg`/.mp3
+      // (the TTS streamed WAV even though mp3 was requested). Served with the
+      // wrong type, the browser preview's <audio> feeds PCM to its MP3 decoder
+      // and stutters + desyncs. Correct the type from the bytes so already
+      // stored tracks play right without a re-render — scoped to audio assets
+      // so a real `ftyp` mp4 video is never re-typed as audio.
+      contentType: correctAudioContentTypeFromBytes(body, asset.contentType),
       fileName: asset.fileName,
     };
   }
+}
+
+/**
+ * When a served asset is declared as some `audio/*` type but its bytes are a
+ * different, identifiable audio container, serve the type the bytes actually
+ * are. Only audio-declared assets are considered, so a video `ftyp` mp4 (which
+ * shares the container-sniff signature) is never touched.
+ */
+function correctAudioContentTypeFromBytes(
+  body: Uint8Array,
+  declared: string,
+): string {
+  const normalized = normalizeMimeType(declared);
+  if (!normalized.startsWith("audio/")) {
+    return declared;
+  }
+  const sniffed = sniffAudioMimeType(body);
+  return sniffed && sniffed !== normalized ? sniffed : declared;
 }
 
 export const contentArtifactsService = new ContentArtifactsService();

@@ -147,6 +147,14 @@ export type ArtifactPreviewContext = {
   readonly pageUrl: string | null;
   readonly payload: Record<string, unknown>;
   readonly proxyFileUrl: string | null;
+  /**
+   * Where the preview is shown. "app" (default) is the authenticated in-app
+   * panel/page. "share" is the public, anonymous share page, which wants a
+   * chrome-less, self-contained rendering — just the artifact's main content,
+   * fullscreen-friendly, with the capability owning its own download rather than
+   * the host chrome's, and no side metadata.
+   */
+  readonly surface?: "app" | "share";
   readonly title: string;
   readonly workspaceId?: string | null;
 };

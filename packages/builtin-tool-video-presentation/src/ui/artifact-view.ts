@@ -74,6 +74,28 @@ function readGeneration(payload: Record<string, unknown> | undefined) {
   return payload ? toRecord(payload.generation) : null;
 }
 
+/**
+ * Whether this payload carries a server-rendered mp4 — the sandbox render path's
+ * `payload.renderedVideo`. That file, and only it, is what the host can hand the
+ * toolbar's Download action directly. Keyed on the same `storageKey`+`fileName`
+ * fields the read-side handler's `resolvePrimaryFile`/`resolveAsset` require, so
+ * "download is offered" and "there are bytes to serve" can never disagree.
+ * Browser-compiled decks (no `renderedVideo`) return false and keep the toolbar
+ * download blocked in favour of the in-preview client render.
+ */
+export function hasVideoPresentationRenderedVideo(
+  payload: Record<string, unknown>,
+): boolean {
+  const renderedVideo = toRecord(payload.renderedVideo);
+  return Boolean(
+    renderedVideo &&
+      typeof renderedVideo.storageKey === "string" &&
+      renderedVideo.storageKey.trim().length > 0 &&
+      typeof renderedVideo.fileName === "string" &&
+      renderedVideo.fileName.trim().length > 0,
+  );
+}
+
 /** The stage words for an artifact payload, or null when it reports no stage. */
 export function getVideoPresentationPayloadStageWords(
   payload: Record<string, unknown> | undefined,

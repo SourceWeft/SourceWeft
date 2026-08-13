@@ -14,25 +14,45 @@ import {
   type ArtifactUiModule,
 } from "@sourceweft/contracts/artifact-ui";
 import { VIDEO_PRESENTATION_ARTIFACT_TYPE } from "../artifact-view";
+import { hasVideoPresentationRenderedVideo } from "./artifact-view";
 import { VideoPresentationArtifactBlock } from "./artifact-block";
 import { VideoPresentationPreview } from "./video-presentation-preview";
 
 function videoPresentationPreview(
   context: ArtifactPreviewContext,
 ): ArtifactPreviewResult {
-  const host = artifactRenderHost();
+  // The render host absolutizes workspace-relative narration URLs for the
+  // OWNER's in-app preview. A PUBLIC share has no host registered (and the
+  // payload it renders already carries absolute, token-scoped asset URLs), so
+  // fall back to identity instead of throwing — throwing here is what made the
+  // share page silently drop to the poster/iframe instead of client-rendering.
+  let resolveAssetUrl: (value: string) => string;
+  try {
+    resolveAssetUrl = artifactRenderHost().resolveApiAssetUrl;
+  } catch {
+    resolveAssetUrl = (value) => value;
+  }
+  // The sandbox render path stores a real mp4 under `payload.renderedVideo`; the
+  // host serves it on the artifact file route, so let the toolbar's default
+  // Download hand the user that file. Browser-compiled decks have no server file
+  // — the download exists only as the in-preview client render — so those keep
+  // the default download blocked. Open is always the client-rendered project.
+  const hasServerVideo = hasVideoPresentationRenderedVideo(context.payload);
+  const isShare = context.surface === "share";
   return {
-    // A video presentation owns both chrome actions: it has no server-side file
-    // to download or open, only a project the browser renders.
-    blocksDefaultDownload: true,
+    // The public share renders chrome-less and carries its OWN download (the
+    // client-render overlay), so the host chrome must not offer a second one.
+    blocksDefaultDownload: isShare ? true : !hasServerVideo,
     blocksDefaultOpen: true,
     id: "video-presentation",
     content: (
       <VideoPresentationPreview
         artifactStatus={context.artifact.status}
+        chromeless={isShare}
         errorMessage={context.artifact.errorMessage}
+        fileUrl={context.proxyFileUrl ?? context.downloadUrl}
         payload={context.payload}
-        resolveAssetUrl={host.resolveApiAssetUrl}
+        resolveAssetUrl={resolveAssetUrl}
         title={context.title}
       />
     ),
@@ -60,6 +80,7 @@ export {
   getVideoPresentationStageWords,
   getVideoPresentationToolCallBrief,
   getVideoPresentationToolCallTitle,
+  hasVideoPresentationRenderedVideo,
   isVideoPresentationFailed,
   resolveVideoPresentationArtifactRef,
   resolveVideoProjectStageLabel,

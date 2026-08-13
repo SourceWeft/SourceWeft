@@ -16,7 +16,7 @@
  * be reasoned about while reading the preview.
  */
 import { useCallback, useRef, useState } from "react";
-import { Loader2, Video } from "lucide-react";
+import { Loader2, TriangleAlert, Video } from "lucide-react";
 import { toast } from "sonner";
 import type { VideoPresentationProjectPayload } from "@sourceweft/contracts/video-presentation";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -186,23 +186,29 @@ export function VideoPresentationExportControls({
 
   if (isRendering) {
     return (
-      <div className="flex items-center gap-2">
-        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-        <span className="text-[11px] font-medium text-muted-foreground">
-          Rendering {renderFormat ?? "video"}{" "}
-          {renderProgress !== null
-            ? `${Math.round(renderProgress * 100)}%`
-            : ""}
-        </span>
-        <Button
-          className="h-7 px-2 text-[11px]"
-          onClick={handleCancelRender}
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          Cancel
-        </Button>
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex items-center gap-2">
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          <span className="text-[11px] font-medium text-muted-foreground">
+            Rendering {renderFormat ?? "video"}{" "}
+            {renderProgress !== null
+              ? `${Math.round(renderProgress * 100)}%`
+              : ""}
+          </span>
+          <Button
+            className="h-7 px-2 text-[11px]"
+            onClick={handleCancelRender}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            Cancel
+          </Button>
+        </div>
+        <p className="flex items-center gap-1 text-right text-[11px] leading-4 text-muted-foreground">
+          <TriangleAlert className="size-3.5 shrink-0 text-amber-500" />
+          Closing, refreshing, or leaving this page cancels the render.
+        </p>
       </div>
     );
   }

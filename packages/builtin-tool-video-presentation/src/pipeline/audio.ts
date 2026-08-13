@@ -10,7 +10,10 @@ import {
 } from "@sourceweft/contracts/artifact-storage";
 import type { VideoPipelineDeps } from "./deps";
 import { requestNarrationEnabled } from "./storyboard";
-import { extensionForMimeType as artifactExtensionForMimeType } from "@sourceweft/contracts/artifact-files";
+import {
+  extensionForMimeType as artifactExtensionForMimeType,
+  sniffAudioMimeType,
+} from "@sourceweft/contracts/artifact-files";
 import { artifactAssetUrl, safeStorageSegment } from "./util";
 
 /**
@@ -108,7 +111,15 @@ export async function generateAudioTracks(input: {
           `TTS generation failed for slide ${slide.slideNumber}: ${message}`,
         );
       }
-      const mimeType = speech.mimeType || "audio/mpeg";
+      // Trust the bytes, not the provider's claim. The DeepInfra TTS streams
+      // WAV even when mp3 is requested; a track stored as `audio/mpeg`/.mp3
+      // whose bytes are actually PCM/WAV renders fine in the ffmpeg-built mp4
+      // (ffmpeg sniffs) but makes the browser preview's <audio> element feed
+      // PCM to its MP3 decoder — choppy playback and audio/video desync. Label
+      // by the real container; fall back to the claim only for bytes we cannot
+      // identify.
+      const mimeType =
+        sniffAudioMimeType(speech.audio) ?? (speech.mimeType || "audio/mpeg");
       const extension = extensionForMimeType(mimeType);
       const fileName = `${baseName}-slide-${slide.slideNumber}${extension}`;
       const storageKey = input.deps.storage.buildArtifactStorageKey({

@@ -38,6 +38,10 @@ function publicRawUrl(token: string) {
 function publicPreviewUrl(token: string) {
   return `${config.auth.baseUrl}/v1/public/shares/${token}/preview`;
 }
+/** Token-scoped public URL for a sub-asset (narration, image) of a shared artifact. */
+function publicShareAssetUrl(token: string, fileName: string) {
+  return `${config.auth.baseUrl}/v1/public/shares/${token}/assets/${encodeURIComponent(fileName)}`;
+}
 
 function toShareLink(row: ShareLinkRow): ShareLink {
   return {
@@ -289,6 +293,20 @@ export class SharingService {
     const hasPreview = Boolean(artifact.previewStorageKey);
     const inlinePreviewable =
       await contentArtifactsService.isSharedArtifactInlineRenderable(artifact);
+    // A servable file can be the top-level stored file OR a capability's
+    // payload-stored primary file (e.g. a video presentation's rendered mp4),
+    // so `fileUrl` is not gated on the top-level `storageKey` alone.
+    const hasServableFile =
+      await contentArtifactsService.sharedArtifactHasServableFile(artifact);
+    // A capability-sanitized payload the share page can client-render (e.g. a
+    // video presentation compiled in the viewer's browser). Asset URLs inside
+    // are rewritten to the token-scoped public asset route; internal fields are
+    // stripped by the capability before they cross the boundary.
+    const publicPayload =
+      await contentArtifactsService.buildSharedArtifactPublicPayload(
+        artifact,
+        (fileName) => publicShareAssetUrl(token, fileName),
+      );
 
     // Content-derived SEO/social description, from the preview image's alt
     // caption only — already-shown, non-sensitive text. Never `promptText` or
@@ -316,8 +334,9 @@ export class SharingService {
       token,
       artifactType: artifact.artifactType,
       title: artifact.title,
-      fileUrl: artifact.storageKey ? publicRawUrl(token) : null,
+      fileUrl: hasServableFile ? publicRawUrl(token) : null,
       inlinePreviewable,
+      payload: publicPayload,
       previewImageUrl: hasPreview ? publicPreviewUrl(token) : null,
       description,
       viewCount: share.viewCount,

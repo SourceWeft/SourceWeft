@@ -73,14 +73,25 @@ function payload(input: {
   };
 }
 
-test("clamps scene duration up to cover the narration audio", () => {
-  // 5s audio at 30fps = 150 frames > declared 90 frames.
+test("clamps scene duration up to cover the narration audio plus the tail pad", () => {
+  // 5s audio + 0.75s tail pad at 30fps = ceil(5.75 * 30) = 173 frames, above
+  // the declared 90. The runtime must re-add the pad, not floor at the raw
+  // 150-frame audio length — the pad is what keeps the speech tail from being
+  // clipped at the <Sequence> boundary.
   const value = payload({ sceneFrames: 90, audioSeconds: 5 });
-  assert.equal(getSlideDurationInFrames(value, 1), 150);
-  assert.equal(getVideoDurationInFrames(value), 150);
+  assert.equal(getSlideDurationInFrames(value, 1), 173);
+  assert.equal(getVideoDurationInFrames(value), 173);
 });
 
-test("keeps the scene duration when it already covers the audio", () => {
+test("still applies the tail pad when the scene module is only slightly short", () => {
+  // 160 already exceeds the raw 150-frame audio length, so a pad-less floor
+  // would leave it untouched and drop the buffer. It must still be lifted to
+  // the padded 173.
+  const value = payload({ sceneFrames: 160, audioSeconds: 5 });
+  assert.equal(getSlideDurationInFrames(value, 1), 173);
+});
+
+test("keeps the scene duration when it already covers the audio and pad", () => {
   const value = payload({ sceneFrames: 200, audioSeconds: 5 });
   assert.equal(getSlideDurationInFrames(value, 1), 200);
 });

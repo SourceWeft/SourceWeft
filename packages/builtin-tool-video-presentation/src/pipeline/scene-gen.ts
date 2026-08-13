@@ -107,6 +107,8 @@ export function sceneSystemPrompt() {
     "- Never position text with absolute top/left/right/bottom values; arrange content with flex inside SafeArea (align/justify/gap props, or SplitLayout for two panes).",
     "- Derive font sizes from useVideoConfig(): titles <= height * 0.075, body text <= height * 0.032. Never hardcode sizes beyond these, and never use negative margins.",
     "- Animate with transform/opacity only; entrance offsets must settle at their final in-SafeArea position. Never animate width/height/fontSize of text.",
+    "- Give the scene a deliberate ENTRANCE and a graceful EXIT so the cut to the next scene is never abrupt: elements ease in and settle at the start, then the whole composition eases out (fade/scale/slide via transform/opacity) across the final narration-free tail. Do NOT hold a frozen frame into the boundary — the user message states the exact frame window and where the silent tail begins.",
+    "- The style preset's motion character and the supplied motion settings (pacing, animationIntensity, transitionStyle) decide HOW the entrance and exit feel — you author the actual transition; there is no cross-scene transition layer, each scene owns its own in/out.",
     "Honor the style preset direction, brand palette/typography and motion settings supplied in the user message; when a brand palette is supplied it overrides the theme's colors (the theme then only guides light/dark mode and rhythm).",
     "Do NOT dump markdown on screen. Extract only 1-2 high-impact visual phrases, numbers, metaphors, or labels.",
     "Vary layout and motion per slide: cinematic opener, editorial spread, process map, comparison, kinetic type, diagram, quote, or recap as appropriate.",
@@ -126,6 +128,14 @@ export function buildSceneUserPrompt(input: {
     ? input.audioTrack.durationSeconds +
       VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS
     : durationTargetFallbackSeconds(input.payload.renderProfile.durationTarget);
+  const fps = input.payload.project.fps;
+  // Mirror the runtime scene length (see generateSceneModules) so the frame
+  // numbers the model animates against are exactly the ones it is given.
+  const totalFrames = Math.max(60, Math.ceil(durationSeconds * fps));
+  const tailFrames = Math.round(
+    VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS * fps,
+  );
+  const entranceFrames = Math.max(6, Math.round(0.35 * fps));
   const stylePreset = input.payload.renderProfile.stylePreset;
   const brand = input.payload.project.brand;
   const motion = input.payload.project.motion;
@@ -142,7 +152,8 @@ export function buildSceneUserPrompt(input: {
   ].filter((part): part is string => part !== null);
   return [
     `Create slide ${input.slide.slideNumber} of ${input.payload.slides.length}.`,
-    `Duration: ${durationSeconds.toFixed(1)} seconds at ${input.payload.project.fps}fps (narration ends ~${VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS.toFixed(1)}s before the scene ends; let animations settle, not end early).`,
+    `Duration: ${durationSeconds.toFixed(1)}s at ${fps}fps = ${totalFrames} frames total; useCurrentFrame() runs 0..${totalFrames - 1}.`,
+    `Transitions (this scene owns its own in/out): animate the scene IN over roughly the first ${entranceFrames} frames and settle at the final in-SafeArea position; hold while the narration plays; then ease the scene OUT across the final ~${tailFrames} frames (the narration-free tail) so the handoff to the next scene is smooth. Never cut from a frozen frame; keep the exit to transform/opacity.`,
     `Canvas: ${input.payload.project.width}x${input.payload.project.height}.`,
     `Safe area (6% margins, already applied by <SafeArea>): content lands inside x:[${Math.round(input.payload.project.width * 0.06)}..${Math.round(input.payload.project.width * 0.94)}] y:[${Math.round(input.payload.project.height * 0.06)}..${Math.round(input.payload.project.height * 0.94)}]. Max on-screen text: ~90 characters across at most 3 text elements.`,
     `Theme: ${input.theme.themeName} / ${input.theme.mode}.`,
