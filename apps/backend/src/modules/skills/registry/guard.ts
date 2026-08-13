@@ -1,4 +1,3 @@
-import type { LicenseTier } from "./contracts";
 import { RegistrySubmissionError } from "./errors";
 
 /**
@@ -10,13 +9,8 @@ import { RegistrySubmissionError } from "./errors";
  *   - Sticky: once a definition/version is in review (draft) or tombstoned
  *     (deprecated / archived), a re-submit that merely drops the risky lines
  *     can't auto-index — only an admin moves it.
- *   - Triage: a clean, permissively-licensed submission indexes (version
- *     published); anything flagged, sticky, or non-permissive queues for review
- *     (version draft).
- *
- * The license tier is a triage input, not a scan flag: `permissive` may
- * auto-publish; `copyleft`/`unknown` are held for admin review before surfacing
- * (§5.5), fail-closed.
+ *   - Triage: a clean submission indexes (version published); anything flagged
+ *     or sticky queues for review (version draft).
  */
 
 export type RegistryExistingEntry = {
@@ -34,7 +28,6 @@ export type TriageInput = {
   existing: RegistryExistingEntry;
   submitterId: string;
   scan: { reviewRequired: boolean; flags: string[] };
-  licenseTier: LicenseTier;
 };
 
 export type TriageDecision = {
@@ -54,7 +47,7 @@ function isSticky(existing: NonNullable<RegistryExistingEntry>): boolean {
 }
 
 export function triageRegistrySubmission(input: TriageInput): TriageDecision {
-  const { existing, submitterId, scan, licenseTier } = input;
+  const { existing, submitterId, scan } = input;
 
   // Ownership guard: any existing entry owned by a different submitter — in any
   // state — is off-limits, so an attacker can't overwrite a victim's listing or
@@ -74,13 +67,8 @@ export function triageRegistrySubmission(input: TriageInput): TriageDecision {
   if (scan.reviewRequired) {
     reasons.push(...scan.flags);
   }
-  // License gate (§5.5): only `permissive` may auto-surface.
-  if (licenseTier !== "permissive") {
-    reasons.push(`license:${licenseTier}`);
-  }
 
-  const reviewRequired =
-    scan.reviewRequired || sticky || licenseTier !== "permissive";
+  const reviewRequired = scan.reviewRequired || sticky;
 
   return {
     outcome: reviewRequired ? "queued" : "indexed",

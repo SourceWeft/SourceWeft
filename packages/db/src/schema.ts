@@ -359,7 +359,7 @@ export type SkillManifestJson = {
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
-    licenseTier: "permissive" | "copyleft" | "unknown";
+    /** Declared license name (e.g. "MIT") — display-only. */
     license?: string;
     fileManifest: {
       path: string;

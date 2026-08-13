@@ -17,7 +17,7 @@ import type { RegistryExistingEntry } from "./guard";
  * docs/architecture/skill-registry-index.md §3 Stage 5 / build phase R2.
  *
  * Writes a `sourceType='registry_github'` definition + a `storageType='pointer'`
- * version carrying frozen metadata (frontmatter + capability/scan/licenseTier +
+ * version carrying frozen metadata (frontmatter + capability/scan +
  * `fileManifest`). It NEVER writes `skill_version_files`: this module does not
  * even import that table, so invariant 2 (the redistribution tripwire) is
  * enforced structurally, and the pointer write site additionally asserts

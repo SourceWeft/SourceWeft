@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SkillManifestJson } from "@sourceweft/db";
+import {
+  cleanupGitHubRepository,
+  prepareGitHubRepository,
+} from "../../market/parser/github";
 import type { SkillBundleFile } from "../builtin";
 
 /**
@@ -8,17 +13,27 @@ import type { SkillBundleFile } from "../builtin";
  * (docs/architecture/skill-registry-index.md §6a, build phase R5).
  *
  * A `storageType='pointer'` version stores ZERO file bodies (invariant 2 —
- * the redistribution tripwire). At resolve time we fetch each declared file
- * **individually by path** from GitHub raw at the pinned commit, using the
- * `fileManifest` captured at ingest. There is no tarball, no `tar`, no
- * extraction on the host, so the archive-bomb / symlink / dropped-executable
- * class never exists at runtime. Every fetched file is verified against its
- * manifest sha256; any mismatch rejects the whole skill (tamper/corruption).
+ * the redistribution tripwire). At resolve time we download the repo tarball
+ * at the pinned commit — ONE request instead of one per file — through the
+ * same hardened path the submit-time ingest uses (`prepareGitHubRepository`:
+ * archive-size / file-count caps, symlink + traversal rejection,
+ * `--no-same-owner`), then read exactly the files the ingest-time
+ * `fileManifest` declares and verify each against its manifest sha256. Any
+ * missing file or digest mismatch rejects the whole skill (tamper).
  *
- * Failure is graceful: a transient fetch failure, timeout, oversize file, or
- * integrity mismatch returns `null` so the caller can SKIP the skill without
- * failing the turn (§6a). No content is ever persisted — the only cache is an
- * ephemeral in-process LRU (legal control: fetch-on-use, no durable cache).
+ * ALL manifest roles are returned — `script` files included. Registry skills
+ * thereby match builtin-skill parity: scripts ride the same
+ * EnabledSkillDescriptor → /skills staging pipeline into the sandbox, which is
+ * what makes an `executable` registry skill actually executable
+ * (verified live 2026-08-12: the per-file/model-readable-only predecessor left
+ * pptx's 54 scripts behind and executable skills could never run).
+ *
+ * Failure is graceful: a download failure, oversize file, or integrity
+ * mismatch returns `null` so the caller SKIPS the skill without failing the
+ * turn (§6a). No content is ever persisted — the only cache is an ephemeral
+ * in-process LRU (legal control: fetch-on-use, no durable cache). Bundles are
+ * text-only (`contentText`), mirroring the ingest reader; binary assets are a
+ * known non-goal of v1.
  */
 
 type RegistryManifest = NonNullable<SkillManifestJson["registry"]>;
@@ -27,21 +42,19 @@ type RegistryFileManifestEntry = RegistryManifest["fileManifest"][number];
 /**
  * Hard per-file ceiling, independent of the manifest's declared `sizeBytes`.
  * The manifest is third-party metadata and must never be able to request an
- * unbounded fetch, so a file whose declared size exceeds this is rejected up
- * front and the read is aborted if the wire exceeds it anyway.
+ * unbounded read (mirrors REGISTRY_READ_LIMITS.maxSkillFileBytes).
  */
 const MAX_POINTER_FILE_BYTES = 512 * 1024; // 512 KiB
-const POINTER_FETCH_TIMEOUT_MS = 10_000;
-const POINTER_FETCH_MAX_RETRIES = 3;
-const POINTER_FETCH_BASE_BACKOFF_MS = 300;
-const POINTER_FETCH_MAX_TOTAL_WAIT_MS = 30_000;
-/** Ephemeral in-process cache only; keyed by the (sha-pinned) storagePointer. */
-const POINTER_LRU_LIMIT = 32;
+/** Mirrors REGISTRY_READ_LIMITS.maxSkillFilesPerBundle. */
+const MAX_POINTER_MANIFEST_FILES = 200;
+/**
+ * Ephemeral in-process cache only; keyed by the (sha-pinned) storagePointer.
+ * Full bundles (scripts included) are larger than the old model-readable-only
+ * entries, so the limit is small: 8 × worst-case ~a few MB stays bounded.
+ */
+const POINTER_LRU_LIMIT = 8;
 
-const RAW_HOST = "https://raw.githubusercontent.com";
-const USER_AGENT = "SourceWeft-Skill-Registry/1.0";
-
-// Mirrors builtin.ts TEXT_MIME_BY_EXTENSION — model-readable resources are text.
+// Mirrors builtin.ts TEXT_MIME_BY_EXTENSION; anything else serves as plain text.
 const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -64,11 +77,10 @@ const POINTER_PATTERN =
   /^github:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)@(?<sha>[a-f0-9]{40})(?:#(?<subpath>.*))?$/i;
 
 function cleanSubpath(value: string | undefined): string | null {
-  if (!value) {
+  if (value === undefined || value === "") {
     return "";
   }
   const segments = value.split("/").filter((segment) => segment.length > 0);
-  // Reject traversal — the subpath names a directory inside the pinned repo.
   if (segments.some((segment) => segment === "." || segment === "..")) {
     return null;
   }
@@ -86,8 +98,11 @@ export function parsePointer(storagePointer: string): ParsedPointer | null {
     return null;
   }
   const repo = groups.repo.endsWith(".git")
-    ? groups.repo.slice(0, -4)
+    ? groups.repo.slice(0, -".git".length)
     : groups.repo;
+  if (repo.length === 0) {
+    return null;
+  }
   return {
     owner: groups.owner,
     repo,
@@ -96,107 +111,21 @@ export function parsePointer(storagePointer: string): ParsedPointer | null {
   };
 }
 
-/**
- * A bundle-relative manifest path (e.g. `SKILL.md`, `scripts/run.py`) is safe
- * to fetch only if it stays inside the skill directory. Reject anything that
- * could escape the pinned subpath or hit an absolute/host path.
- */
+/** Bundle-relative manifest paths only: no absolute, no traversal. */
 function safeManifestPath(filePath: string): boolean {
-  if (!filePath || filePath.startsWith("/") || filePath.includes("\0")) {
+  if (filePath.length === 0 || filePath.startsWith("/")) {
     return false;
   }
   const normalized = path.posix.normalize(filePath);
   return (
-    normalized === filePath &&
-    !normalized.startsWith("../") &&
-    normalized !== ".." &&
-    !normalized.includes("/../")
+    !normalized.startsWith("..") &&
+    !normalized.includes("../") &&
+    normalized !== ".."
   );
-}
-
-function rawFileUrl(pointer: ParsedPointer, filePath: string): string {
-  const repoPath = pointer.subpath
-    ? `${pointer.subpath}/${filePath}`
-    : filePath;
-  const encoded = repoPath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `${RAW_HOST}/${pointer.owner}/${pointer.repo}/${pointer.sha}/${encoded}`;
-}
-
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
 }
 
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-/**
- * Fetch one raw file with bounded retries + per-attempt timeout, mirroring the
- * retry/rate-limit posture of market/parser/github.ts `githubFetch` but with an
- * injectable fetch (for tests) and a size cap. Returns `null` on any terminal
- * failure — the caller turns that into a skip.
- */
-async function fetchRawFile(input: {
-  url: string;
-  maxBytes: number;
-  fetchImpl: typeof fetch;
-}): Promise<Buffer | null> {
-  const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  }
-
-  let totalWaited = 0;
-  for (let attempt = 0; ; attempt += 1) {
-    let response: Response;
-    try {
-      response = await input.fetchImpl(input.url, {
-        headers,
-        signal: AbortSignal.timeout(POINTER_FETCH_TIMEOUT_MS),
-      });
-    } catch {
-      // Network error / timeout — retry within budget, else give up (skip).
-      if (attempt >= POINTER_FETCH_MAX_RETRIES) {
-        return null;
-      }
-      const delay = POINTER_FETCH_BASE_BACKOFF_MS * 2 ** attempt;
-      if (totalWaited + delay > POINTER_FETCH_MAX_TOTAL_WAIT_MS) {
-        return null;
-      }
-      totalWaited += delay;
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      continue;
-    }
-
-    if (response.ok) {
-      // Reject early if the server advertises a body over the cap.
-      const declared = Number(response.headers.get("content-length"));
-      if (Number.isFinite(declared) && declared > input.maxBytes) {
-        return null;
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength > input.maxBytes) {
-        return null;
-      }
-      return buffer;
-    }
-
-    if (
-      attempt >= POINTER_FETCH_MAX_RETRIES ||
-      !isRetryableStatus(response.status)
-    ) {
-      return null;
-    }
-    const delay = POINTER_FETCH_BASE_BACKOFF_MS * 2 ** attempt;
-    if (totalWaited + delay > POINTER_FETCH_MAX_TOTAL_WAIT_MS) {
-      return null;
-    }
-    totalWaited += delay;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
 }
 
 // Simple insertion-ordered LRU (mirrors sandbox-assets.ts zipCache): re-set on
@@ -230,23 +159,22 @@ export function __clearPointerBundleCache(): void {
 }
 
 export type LoadPointerSkillBundleOptions = {
-  /** Injectable fetch (tests); defaults to the global `fetch`. */
-  fetchImpl?: typeof fetch;
+  /**
+   * Injectable repository preparer (tests). Defaults to the hardened
+   * market-parser download+extract. Must resolve the tarball at the pinned
+   * commit into a temp dir and report `rootDir` + `tempRoot`.
+   */
+  prepareRepository?: typeof prepareGitHubRepository;
+  /** Injectable cleanup counterpart (tests). */
+  cleanupRepository?: typeof cleanupGitHubRepository;
 };
 
 /**
- * Resolve a registry skill's model-readable files by fetching each declared
- * `model-readable` file from GitHub raw at the pinned commit and verifying it
- * against the manifest sha256. Returns the verified `SkillBundleFile[]` (same
- * shape the `repo_builtin`/`db_text` branches produce), or `null` so the caller
- * skips the skill without failing the turn.
- *
- * `script`-role files are intentionally NOT fetched here: they are opaque bytes
- * that must be streamed straight into the execution sandbox, never opened on the
- * host (docs/architecture/skill-registry-index.md §6b execution sandbox). The
- * downstream /skills staging pipeline handles script execution once the
- * model-readable bundle is mounted, so no SelectedSkillsBackend change is
- * needed here.
+ * Resolve a registry skill's full bundle: one hardened tarball download at the
+ * pinned commit, then read + sha256-verify every `fileManifest` entry (all
+ * roles). Returns the verified `SkillBundleFile[]` (same shape the
+ * `repo_builtin`/`db_text` branches produce), or `null` so the caller skips
+ * the skill without failing the turn.
  */
 export async function loadPointerSkillBundle(
   storagePointer: string,
@@ -263,58 +191,94 @@ export async function loadPointerSkillBundle(
   if (!pointer) {
     return null;
   }
-  if (!registry || !Array.isArray(registry.fileManifest)) {
+  const manifest = registry?.fileManifest;
+  if (!Array.isArray(manifest) || manifest.length === 0) {
     return null;
   }
-
-  const modelReadable = registry.fileManifest.filter(
-    (entry): entry is RegistryFileManifestEntry =>
-      entry.role === "model-readable",
-  );
-  if (modelReadable.length === 0) {
+  if (manifest.length > MAX_POINTER_MANIFEST_FILES) {
     return null;
   }
-
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const files: SkillBundleFile[] = [];
-  for (const entry of modelReadable) {
+  for (const entry of manifest) {
     if (!safeManifestPath(entry.path)) {
       return null;
     }
-    // A declared size over the hard cap can never fetch to a matching hash.
+    // A declared size over the hard cap can never verify to a matching hash.
     if (
       typeof entry.sizeBytes === "number" &&
       entry.sizeBytes > MAX_POINTER_FILE_BYTES
     ) {
       return null;
     }
-    const buffer = await fetchRawFile({
-      url: rawFileUrl(pointer, entry.path),
-      maxBytes: MAX_POINTER_FILE_BYTES,
-      fetchImpl,
-    });
-    if (!buffer) {
-      return null;
-    }
-    const digest = sha256(buffer);
-    if (digest !== entry.sha256.toLowerCase()) {
-      return null;
-    }
-    // Ties the version's contentHash (sha256 of the analyzed SKILL.md) to the
-    // fetched SKILL.md — a defense-in-depth check beyond per-file integrity.
-    if (entry.path === "SKILL.md" && digest !== contentHash.toLowerCase()) {
-      return null;
-    }
-    const ext = path.posix.extname(entry.path).toLowerCase();
-    files.push({
-      path: entry.path,
-      contentText: buffer.toString("utf8"),
-      mimeType: TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain",
-      sizeBytes: buffer.byteLength,
-      contentHash: digest,
-    });
   }
 
-  cacheSet(storagePointer, files);
-  return files;
+  const prepare = options.prepareRepository ?? prepareGitHubRepository;
+  const cleanup = options.cleanupRepository ?? cleanupGitHubRepository;
+
+  // /tree/<sha> pins the tarball to the immutable commit; the prepared
+  // result's commitSha must agree or something upstream is lying.
+  const treeUrl = `https://github.com/${pointer.owner}/${pointer.repo}/tree/${pointer.sha}`;
+  let repository: Awaited<ReturnType<typeof prepareGitHubRepository>>;
+  try {
+    repository = await prepare(treeUrl);
+  } catch {
+    return null;
+  }
+
+  try {
+    if (repository.commitSha?.toLowerCase() !== pointer.sha) {
+      return null;
+    }
+    const skillRoot = pointer.subpath
+      ? path.join(repository.rootDir, pointer.subpath)
+      : repository.rootDir;
+    // The extracted tree is ours (hardened extract rejects traversal), but the
+    // joined skill root must still sit inside it.
+    const relativeRoot = path.relative(repository.rootDir, skillRoot);
+    if (relativeRoot.startsWith("..")) {
+      return null;
+    }
+
+    const files: SkillBundleFile[] = [];
+    for (const entry of manifest as RegistryFileManifestEntry[]) {
+      const filePath = path.join(skillRoot, entry.path);
+      let size: number;
+      try {
+        const info = await stat(filePath);
+        if (!info.isFile()) {
+          return null;
+        }
+        size = info.size;
+      } catch {
+        // Manifest promises a file the pinned tarball doesn't have → tamper
+        // or ingest drift; reject the whole skill.
+        return null;
+      }
+      if (size > MAX_POINTER_FILE_BYTES) {
+        return null;
+      }
+      const buffer = await readFile(filePath);
+      const digest = sha256(buffer);
+      if (digest !== entry.sha256.toLowerCase()) {
+        return null;
+      }
+      // Ties the version's contentHash (sha256 of the analyzed SKILL.md) to
+      // the extracted SKILL.md — defense-in-depth beyond per-file integrity.
+      if (entry.path === "SKILL.md" && digest !== contentHash.toLowerCase()) {
+        return null;
+      }
+      const ext = path.posix.extname(entry.path).toLowerCase();
+      files.push({
+        path: entry.path,
+        contentText: buffer.toString("utf8"),
+        mimeType: TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain",
+        sizeBytes: buffer.byteLength,
+        contentHash: digest,
+      });
+    }
+
+    cacheSet(storagePointer, files);
+    return files;
+  } finally {
+    await cleanup(repository);
+  }
 }

@@ -73,8 +73,8 @@ function isBuiltinSkillDefaultEnabled(skill: {
 
 // Registry catalog visibility (skill-registry-index.md §5.5): a `registry_github`
 // entry is teamId/workspaceId-NULL, so `public` is universal while `restricted`
-// (unknown/AGPL/no-license, or still under review) is visible ONLY to the user
-// who submitted it. A restricted entry must never leak to a non-submitter.
+// (still under review) is visible ONLY to the user who submitted it. A
+// restricted entry must never leak to a non-submitter.
 function isRegistryRowVisibleToViewer(input: {
   visibility: string;
   ownerUserId: string | null;

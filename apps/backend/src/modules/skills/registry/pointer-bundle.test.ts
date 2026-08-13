@@ -1,211 +1,261 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { beforeEach, test } from "vitest";
-import type { SkillManifestJson } from "@sourceweft/db";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, test } from "vitest";
 import {
   __clearPointerBundleCache,
   loadPointerSkillBundle,
   parsePointer,
 } from "./pointer-bundle";
 
-type RegistryManifest = NonNullable<SkillManifestJson["registry"]>;
+const SHA = "f".repeat(40);
+const POINTER = `github:acme/skills@${SHA}#skills/demo`;
 
-const SHA = "a".repeat(40);
-
-function sha256(value: string) {
-  return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+function digest(text: string): string {
+  return createHash("sha256").update(Buffer.from(text)).digest("hex");
 }
 
-function manifestEntry(
-  path: string,
-  contentText: string,
-  overrides: Partial<RegistryManifest["fileManifest"][number]> = {},
-): RegistryManifest["fileManifest"][number] {
-  return {
-    path,
-    sha256: sha256(contentText),
-    sizeBytes: Buffer.byteLength(contentText, "utf8"),
-    role: "model-readable",
-    ...overrides,
-  };
-}
+const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\nBody";
+const SCRIPT_PY = "print('hello from script')";
 
-function registry(
-  fileManifest: RegistryManifest["fileManifest"],
-): RegistryManifest {
+function manifestFor(files: Record<string, string>) {
   return {
-    identifier: "gh:acme/skill",
-    sourceUrl: "https://github.com/acme/skill",
-    repoUrl: "https://github.com/acme/skill",
+    identifier: "gh:acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    repoUrl: "https://github.com/acme/skills",
     submittedBy: "user-1",
-    capability: "prompt-only",
+    capability: "executable" as const,
     scan: { reviewRequired: false, flags: [] },
-    licenseTier: "permissive",
-    fileManifest,
+    fileManifest: Object.entries(files).map(([p, text]) => ({
+      path: p,
+      sha256: digest(text),
+      sizeBytes: Buffer.byteLength(text),
+      role: p.startsWith("scripts/")
+        ? ("script" as const)
+        : ("model-readable" as const),
+    })),
   };
 }
 
 /**
- * Mock fetch that serves file bodies keyed by their raw path suffix, counting
- * calls. Any path not in `bodies` yields a 404.
+ * Materialize a fake extracted repo on disk and return an injectable
+ * prepareRepository double that reports it (plus call/cleanup counters).
  */
-function mockFetch(bodies: Record<string, string>) {
-  const calls: string[] = [];
-  const fetchImpl = (async (url: string | URL) => {
-    const href = typeof url === "string" ? url : url.toString();
-    calls.push(href);
-    const match = Object.keys(bodies).find((path) =>
-      href.endsWith(`/${path}`),
-    );
-    if (!match) {
-      return new Response("not found", { status: 404 });
-    }
-    return new Response(bodies[match], { status: 200 });
-  }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+async function fakeRepository(input: {
+  files: Record<string, string>;
+  subpath?: string;
+  commitSha?: string;
+}) {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "pointer-bundle-test-"));
+  const rootDir = path.join(tempRoot, "extract", `skills-${SHA}`);
+  const skillRoot = path.join(rootDir, input.subpath ?? "skills/demo");
+  for (const [p, text] of Object.entries(input.files)) {
+    const abs = path.join(skillRoot, p);
+    await mkdir(path.dirname(abs), { recursive: true });
+    await writeFile(abs, text);
+  }
+  const calls = { prepare: 0, cleanup: 0 };
+  const repository = {
+    owner: "acme",
+    repo: "skills",
+    subpath: "",
+    repoUrl: "https://github.com/acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    commitSha: input.commitSha ?? SHA,
+    requestedRef: SHA,
+    resolvedRef: SHA,
+    rootDir,
+    workDir: rootDir,
+    tempRoot,
+  };
+  return {
+    calls,
+    tempRoot,
+    prepareRepository: (async () => {
+      calls.prepare += 1;
+      return repository;
+    }) as never,
+    cleanupRepository: (async () => {
+      calls.cleanup += 1;
+    }) as never,
+  };
 }
 
-beforeEach(() => {
+const tempRoots: string[] = [];
+afterEach(async () => {
   __clearPointerBundleCache();
+  await Promise.all(
+    tempRoots.splice(0).map((dir) =>
+      rm(dir, { recursive: true, force: true }).catch(() => {}),
+    ),
+  );
 });
 
-test("parsePointer parses github:<owner>/<repo>@<sha>#<path>", () => {
-  const parsed = parsePointer(`github:acme/skill@${SHA}#skills/writer`);
-  assert.deepEqual(parsed, {
+test("parsePointer accepts pinned pointers and rejects unsafe ones", () => {
+  assert.deepEqual(parsePointer(POINTER), {
     owner: "acme",
-    repo: "skill",
+    repo: "skills",
     sha: SHA,
-    subpath: "skills/writer",
+    subpath: "skills/demo",
   });
+  // Repo-root skill (no subpath).
+  assert.equal(parsePointer(`github:acme/solo@${SHA}`)?.subpath, "");
+  // .git suffix stripped.
+  assert.equal(parsePointer(`github:acme/skills.git@${SHA}`)?.repo, "skills");
+  // Abbreviated sha is not an immutable pin.
+  assert.equal(parsePointer("github:acme/skills@f17010c"), null);
+  // Traversal in subpath.
+  assert.equal(parsePointer(`github:acme/skills@${SHA}#../etc`), null);
+  assert.equal(parsePointer("not-a-pointer"), null);
 });
 
-test("parsePointer accepts a root-level skill (no subpath)", () => {
-  assert.deepEqual(parsePointer(`github:acme/skill@${SHA}`), {
-    owner: "acme",
-    repo: "skill",
-    sha: SHA,
-    subpath: "",
-  });
-});
+test("loads the FULL bundle — scripts included — with per-file verification", async () => {
+  const files = { "SKILL.md": SKILL_MD, "scripts/run.py": SCRIPT_PY };
+  const fake = await fakeRepository({ files });
+  tempRoots.push(fake.tempRoot);
 
-test("parsePointer rejects non-pointer, abbreviated sha, and traversal", () => {
-  assert.equal(parsePointer("db://version-1"), null);
-  assert.equal(parsePointer("acme/skill@abc123"), null);
-  assert.equal(parsePointer(`github:acme/skill@${"a".repeat(7)}`), null);
-  assert.equal(parsePointer(`github:acme/skill@${SHA}#../escape`), null);
-});
-
-test("fetches, verifies, and returns model-readable files (scripts skipped)", async () => {
-  const skillMd = "# Writer\ninstructions";
-  const resource = "extra notes";
-  const contentHash = sha256(skillMd);
-  const { fetchImpl, calls } = mockFetch({
-    "skills/writer/SKILL.md": skillMd,
-    "skills/writer/resources/notes.md": resource,
-    // A script body exists on the remote but must never be fetched here.
-    "skills/writer/scripts/run.py": "print('nope')",
-  });
-
-  const files = await loadPointerSkillBundle(
-    `github:acme/skill@${SHA}#skills/writer`,
-    contentHash,
-    registry([
-      manifestEntry("SKILL.md", skillMd),
-      manifestEntry("resources/notes.md", resource),
-      manifestEntry("scripts/run.py", "print('nope')", { role: "script" }),
-    ]),
-    { fetchImpl },
+  const bundle = await loadPointerSkillBundle(
+    POINTER,
+    digest(SKILL_MD),
+    manifestFor(files),
+    fake,
   );
 
-  assert.ok(files);
-  assert.equal(files.length, 2);
-  const skill = files.find((f) => f.path === "SKILL.md");
-  assert.ok(skill);
-  assert.equal(skill.contentText, skillMd);
-  assert.equal(skill.mimeType, "text/markdown");
-  assert.equal(skill.contentHash, contentHash);
-  // Script role is not fetched at runtime (§6b execution sandbox).
+  assert.ok(bundle);
+  assert.deepEqual(
+    bundle.map((f) => f.path).sort(),
+    ["SKILL.md", "scripts/run.py"],
+  );
+  const script = bundle.find((f) => f.path === "scripts/run.py");
+  assert.equal(script?.contentText, SCRIPT_PY);
+  assert.equal(script?.mimeType, "text/plain");
+  assert.equal(fake.calls.prepare, 1);
+  assert.equal(fake.calls.cleanup, 1);
+});
+
+test("second load hits the LRU without re-downloading", async () => {
+  const files = { "SKILL.md": SKILL_MD };
+  const fake = await fakeRepository({ files });
+  tempRoots.push(fake.tempRoot);
+
+  const first = await loadPointerSkillBundle(
+    POINTER,
+    digest(SKILL_MD),
+    manifestFor(files),
+    fake,
+  );
+  const second = await loadPointerSkillBundle(
+    POINTER,
+    digest(SKILL_MD),
+    manifestFor(files),
+    fake,
+  );
+
+  assert.ok(first && second);
+  assert.equal(fake.calls.prepare, 1);
+});
+
+test("rejects the whole skill on a hash mismatch (tamper)", async () => {
+  const files = { "SKILL.md": SKILL_MD, "scripts/run.py": "tampered" };
+  const fake = await fakeRepository({ files });
+  tempRoots.push(fake.tempRoot);
+  const manifest = manifestFor({
+    "SKILL.md": SKILL_MD,
+    "scripts/run.py": SCRIPT_PY, // manifest promises the original
+  });
+
+  const bundle = await loadPointerSkillBundle(
+    POINTER,
+    digest(SKILL_MD),
+    manifest,
+    fake,
+  );
+
+  assert.equal(bundle, null);
+  assert.equal(fake.calls.cleanup, 1);
+});
+
+test("rejects when a manifest file is missing from the pinned tarball", async () => {
+  const fake = await fakeRepository({ files: { "SKILL.md": SKILL_MD } });
+  tempRoots.push(fake.tempRoot);
+  const manifest = manifestFor({
+    "SKILL.md": SKILL_MD,
+    "scripts/gone.py": SCRIPT_PY,
+  });
+
   assert.equal(
-    calls.some((href) => href.endsWith("/scripts/run.py")),
-    false,
-  );
-});
-
-test("rejects the skill when a fetched file fails its manifest sha256", async () => {
-  const skillMd = "# Writer";
-  const { fetchImpl } = mockFetch({ "SKILL.md": "tampered body" });
-  const files = await loadPointerSkillBundle(
-    `github:acme/skill@${SHA}`,
-    sha256(skillMd),
-    // Manifest advertises the honest hash; the served body differs → tamper.
-    registry([manifestEntry("SKILL.md", skillMd)]),
-    { fetchImpl },
-  );
-  assert.equal(files, null);
-});
-
-test("rejects when the fetched SKILL.md hash disagrees with contentHash", async () => {
-  const skillMd = "# Writer";
-  const { fetchImpl } = mockFetch({ "SKILL.md": skillMd });
-  const files = await loadPointerSkillBundle(
-    `github:acme/skill@${SHA}`,
-    // Version contentHash does not match the (valid, self-consistent) file.
-    sha256("a different skill.md"),
-    registry([manifestEntry("SKILL.md", skillMd)]),
-    { fetchImpl },
-  );
-  assert.equal(files, null);
-});
-
-test("returns null (skip) on a fetch failure instead of throwing", async () => {
-  const skillMd = "# Writer";
-  // No bodies registered → mock returns 404 for every request.
-  const { fetchImpl } = mockFetch({});
-  const files = await loadPointerSkillBundle(
-    `github:acme/skill@${SHA}`,
-    sha256(skillMd),
-    registry([manifestEntry("SKILL.md", skillMd)]),
-    { fetchImpl },
-  );
-  assert.equal(files, null);
-});
-
-test("returns null for an invalid pointer or a missing registry manifest", async () => {
-  const { fetchImpl, calls } = mockFetch({ "SKILL.md": "# x" });
-  assert.equal(
-    await loadPointerSkillBundle("db://version-1", sha256("# x"), registry([]), {
-      fetchImpl,
-    }),
+    await loadPointerSkillBundle(POINTER, digest(SKILL_MD), manifest, fake),
     null,
   );
-  assert.equal(
-    await loadPointerSkillBundle(`github:acme/skill@${SHA}`, "hash", undefined, {
-      fetchImpl,
-    }),
-    null,
-  );
-  // No network was touched for either rejection.
-  assert.equal(calls.length, 0);
 });
 
-test("second resolve of the same pointer hits the in-process LRU (no refetch)", async () => {
-  const skillMd = "# Writer";
-  const contentHash = sha256(skillMd);
-  const { fetchImpl, calls } = mockFetch({ "SKILL.md": skillMd });
-  const pointer = `github:acme/skill@${SHA}`;
-  const manifest = registry([manifestEntry("SKILL.md", skillMd)]);
+test("rejects when SKILL.md disagrees with the version contentHash", async () => {
+  const files = { "SKILL.md": SKILL_MD };
+  const fake = await fakeRepository({ files });
+  tempRoots.push(fake.tempRoot);
 
-  const first = await loadPointerSkillBundle(pointer, contentHash, manifest, {
-    fetchImpl,
-  });
-  assert.ok(first);
-  const callsAfterFirst = calls.length;
-  assert.equal(callsAfterFirst, 1);
+  assert.equal(
+    await loadPointerSkillBundle(
+      POINTER,
+      digest("some other skill body"),
+      manifestFor(files),
+      fake,
+    ),
+    null,
+  );
+});
 
-  const second = await loadPointerSkillBundle(pointer, contentHash, manifest, {
-    fetchImpl,
+test("rejects when the prepared commit does not match the pin", async () => {
+  const files = { "SKILL.md": SKILL_MD };
+  const fake = await fakeRepository({ files, commitSha: "a".repeat(40) });
+  tempRoots.push(fake.tempRoot);
+
+  assert.equal(
+    await loadPointerSkillBundle(POINTER, digest(SKILL_MD), manifestFor(files), fake),
+    null,
+  );
+  assert.equal(fake.calls.cleanup, 1);
+});
+
+test("download failure degrades to null (skill skipped, turn survives)", async () => {
+  const bundle = await loadPointerSkillBundle(
+    POINTER,
+    digest(SKILL_MD),
+    manifestFor({ "SKILL.md": SKILL_MD }),
+    {
+      prepareRepository: (async () => {
+        throw new Error("network down");
+      }) as never,
+    },
+  );
+  assert.equal(bundle, null);
+});
+
+test("pre-checks refuse unsafe or oversized manifests without downloading", async () => {
+  const fake = await fakeRepository({ files: { "SKILL.md": SKILL_MD } });
+  tempRoots.push(fake.tempRoot);
+
+  const traversal = manifestFor({ "SKILL.md": SKILL_MD });
+  traversal.fileManifest.push({
+    path: "../outside.txt",
+    sha256: digest("x"),
+    sizeBytes: 1,
+    role: "model-readable",
   });
-  assert.deepEqual(second, first);
-  // Cache hit → no additional fetch.
-  assert.equal(calls.length, callsAfterFirst);
+  assert.equal(
+    await loadPointerSkillBundle(POINTER, digest(SKILL_MD), traversal, fake),
+    null,
+  );
+
+  const oversized = manifestFor({ "SKILL.md": SKILL_MD });
+  oversized.fileManifest[0]!.sizeBytes = 10 * 1024 * 1024;
+  assert.equal(
+    await loadPointerSkillBundle(POINTER, digest(SKILL_MD), oversized, fake),
+    null,
+  );
+
+  // Neither pre-check rejection should have downloaded anything.
+  assert.equal(fake.calls.prepare, 0);
 });

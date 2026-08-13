@@ -10,6 +10,16 @@ import {
 import { __clearPointerBundleCache } from "./registry/pointer-bundle";
 import type { WorkspaceSkillRecord } from "./types";
 
+// selection.ts calls loadPointerSkillBundle without an options bag, so the
+// tarball download can only be faked at the module seam. Everything else in
+// the module (parsePointer, cache reset) stays real.
+const loadPointerSkillBundleMock = vi.hoisted(() => vi.fn());
+vi.mock("./registry/pointer-bundle", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./registry/pointer-bundle")>();
+  return { ...actual, loadPointerSkillBundle: loadPointerSkillBundleMock };
+});
+
 const emptyWorkspaceSkillDependencies = {
   listEnabledWorkspaceSkills: async () => [],
   listWorkspaceSkillsByIds: async () => [],
@@ -259,7 +269,6 @@ function pointerBundle(input: {
           submittedBy: "user-1",
           capability: "prompt-only" as const,
           scan: { reviewRequired: false, flags: [] },
-          licenseTier: "permissive" as const,
           fileManifest: [
             {
               path: "SKILL.md",
@@ -281,6 +290,7 @@ function pointerBundle(input: {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  loadPointerSkillBundleMock.mockReset();
   __clearPointerBundleCache();
 });
 
@@ -289,10 +299,15 @@ test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use",
   const skillMdSha = createHash("sha256")
     .update(Buffer.from(skillMd, "utf8"))
     .digest("hex");
-  vi.stubGlobal(
-    "fetch",
-    async () => new Response(skillMd, { status: 200 }),
-  );
+  loadPointerSkillBundleMock.mockResolvedValue([
+    {
+      path: "SKILL.md",
+      contentText: skillMd,
+      mimeType: "text/markdown",
+      sizeBytes: Buffer.byteLength(skillMd),
+      contentHash: skillMdSha,
+    },
+  ]);
 
   const record = workspaceSkill();
   const skills = await resolveSelectedSkills({
@@ -313,10 +328,8 @@ test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use",
 
 test("resolveSelectedSkills skips a pointer skill whose fetch fails without failing the turn", async () => {
   const skillMdSha = createHash("sha256").update("x").digest("hex");
-  vi.stubGlobal(
-    "fetch",
-    async () => new Response("nope", { status: 404 }),
-  );
+  // Tarball download failed / integrity rejected → loader reports null.
+  loadPointerSkillBundleMock.mockResolvedValue(null);
 
   const record = workspaceSkill();
   const skills = await resolveSelectedSkills({

@@ -128,7 +128,6 @@ const MANIFEST: SkillManifestJson = {
     submittedBy: "me",
     capability: "prompt-only",
     scan: { reviewRequired: false, flags: [] },
-    licenseTier: "permissive",
     license: "MIT",
     fileManifest: [
       { path: "SKILL.md", sha256: "a".repeat(64), sizeBytes: 10, role: "model-readable" },

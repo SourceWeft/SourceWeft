@@ -63,7 +63,6 @@ test("prompt-only skill: no scripts, no shell, permissive license", () => {
     }),
   });
   assert.equal(analyzed.capability, "prompt-only");
-  assert.equal(analyzed.licenseTier, "permissive");
   assert.equal(analyzed.license, "MIT");
   assert.deepEqual(analyzed.scan.flags, []);
   assert.equal(analyzed.scan.reviewRequired, false);
@@ -112,7 +111,7 @@ test("capability classification: a fenced bash block declares execution (no mism
   );
 });
 
-test("license tier gate: copyleft and unknown are classified for the triage gate", () => {
+test("license string is captured for display; absent license is null and never flags", () => {
   const gpl = analyzeRegistrySkill({
     owner: OWNER,
     repo: REPO,
@@ -120,21 +119,10 @@ test("license tier gate: copyleft and unknown are classified for the triage gate
       files: [file("SKILL.md", skillMd({ name: "x", description: "d", license: "GPL-3.0" }))],
     }),
   });
-  assert.equal(gpl.licenseTier, "copyleft");
+  assert.equal(gpl.license, "GPL-3.0");
+  assert.deepEqual(gpl.scan.flags, []);
 
   const none = analyzeRegistrySkill({
-    owner: OWNER,
-    repo: REPO,
-    discovered: discovered({
-      files: [file("SKILL.md", skillMd({ name: "x", description: "d" }))],
-    }),
-  });
-  assert.equal(none.licenseTier, "unknown");
-  assert.equal(none.license, null);
-});
-
-test("a LICENSE file with no frontmatter license stays unknown and is flagged", () => {
-  const analyzed = analyzeRegistrySkill({
     owner: OWNER,
     repo: REPO,
     discovered: discovered({
@@ -144,8 +132,8 @@ test("a LICENSE file with no frontmatter license stays unknown and is flagged", 
       ],
     }),
   });
-  assert.equal(analyzed.licenseTier, "unknown");
-  assert.ok(analyzed.scan.flags.includes("license:file-present-unclassified"));
+  assert.equal(none.license, null);
+  assert.deepEqual(none.scan.flags, []);
 });
 
 test("fileManifest paths are bundle-relative with correct roles", () => {
@@ -187,7 +175,19 @@ test("a script referencing a path above the bundle is flagged (PR-4)", () => {
   assert.ok(analyzed.scan.flags.includes("script:out-of-bundle-path"));
 });
 
-test("frontmatter validation rejects a bad name, oversize description, and dir mismatch", () => {
+test("an oversize description is truncated to 1024 chars, not rejected", () => {
+  const analyzed = analyzeRegistrySkill({
+    owner: OWNER,
+    repo: REPO,
+    discovered: discovered({
+      files: [file("SKILL.md", skillMd({ name: "x", description: "d".repeat(1025) }))],
+    }),
+  });
+  assert.equal(analyzed.description.length, 1024);
+  assert.equal(analyzed.description, "d".repeat(1024));
+});
+
+test("frontmatter validation rejects a bad name, empty description, and dir mismatch", () => {
   assert.throws(
     () =>
       analyzeRegistrySkill({
@@ -202,13 +202,14 @@ test("frontmatter validation rejects a bad name, oversize description, and dir m
       error.code === "REGISTRY_SUBMISSION_INVALID_SKILL",
   );
 
+  // Empty description is still rejected (truncation only applies to oversize).
   assert.throws(
     () =>
       analyzeRegistrySkill({
         owner: OWNER,
         repo: REPO,
         discovered: discovered({
-          files: [file("SKILL.md", skillMd({ name: "x", description: "d".repeat(1025) }))],
+          files: [file("SKILL.md", skillMd({ name: "x", description: "" }))],
         }),
       }),
     RegistrySubmissionError,

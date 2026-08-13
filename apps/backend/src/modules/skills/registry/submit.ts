@@ -88,7 +88,6 @@ export async function submitRegistrySkillFromGitHub(input: {
         existing,
         submitterId: input.userId,
         scan: analyzed.scan,
-        licenseTier: analyzed.licenseTier,
       });
 
       const storagePointer = `github:${owner}/${repo}@${commitSha}${
@@ -114,7 +113,6 @@ export async function submitRegistrySkillFromGitHub(input: {
           submittedBy: input.userId,
           capability: analyzed.capability,
           scan: analyzed.scan,
-          licenseTier: analyzed.licenseTier,
           ...(analyzed.license ? { license: analyzed.license } : {}),
           fileManifest: analyzed.fileManifest,
         },

@@ -1,11 +1,7 @@
 import path from "node:path";
 import type { SkillManifestJson } from "@sourceweft/db";
 import { parseSkillFrontmatter } from "../frontmatter";
-import {
-  deriveRegistrySlug,
-  type LicenseTier,
-  resolveLicenseTier,
-} from "./contracts";
+import { deriveRegistrySlug } from "./contracts";
 import type { DiscoveredSkill } from "./read";
 import { RegistrySubmissionError } from "./errors";
 import { scanRegistrySkill } from "./scan";
@@ -15,10 +11,10 @@ import { scanRegistrySkill } from "./scan";
  * docs/architecture/skill-registry-index.md §3 Stage 3 / build phase R2.
  *
  * Produces the frozen metadata that Stage 5 persists behind a pointer: validated
- * frontmatter, the injection/safety scan verdict, the license tier gate, the
- * `capability` classification (with the "don't trust the manifest" mismatch
- * check), the `contentSha256` digest, and the bundle-relative `fileManifest` the
- * runtime uses to fetch individual files. No file body ever leaves this stage.
+ * frontmatter, the injection/safety scan verdict, the `capability`
+ * classification (with the "don't trust the manifest" mismatch check), the
+ * `contentSha256` digest, and the bundle-relative `fileManifest` the runtime
+ * uses to fetch individual files. No file body ever leaves this stage.
  */
 
 type RegistryFileManifest = NonNullable<SkillManifestJson["registry"]>["fileManifest"];
@@ -32,8 +28,8 @@ export type AnalyzedRegistrySkill = {
   /** Skill dir relative to the repo root — the pointer `#<subpath>`. */
   repoSubpath: string;
   capability: "prompt-only" | "executable";
+  /** Declared license name (e.g. "MIT") — display-only, never a gate. */
   license: string | null;
-  licenseTier: LicenseTier;
   /** sha256 of the analyzed SKILL.md bytes (§3 Stage 3). */
   contentSha256: string;
   scan: { reviewRequired: boolean; flags: string[] };
@@ -138,23 +134,6 @@ function referencesOutOfBundlePath(bundlePath: string, contentText: string): boo
 }
 
 /**
- * Detect a LICENSE/NOTICE file WITHOUT reading its body (§5.5: capture presence,
- * never the text — reading + storing it would flip us to redistributor).
- */
-function hasLicenseFile(skill: DiscoveredSkill): boolean {
-  return skill.files.some((file) => {
-    const base = file.bundlePath.toUpperCase();
-    return (
-      base === "LICENSE" ||
-      base === "LICENSE.MD" ||
-      base === "LICENSE.TXT" ||
-      base === "NOTICE" ||
-      base === "COPYING"
-    );
-  });
-}
-
-/**
  * Classify + verify capability (§3 Stage 3). `executable` when the bundle ships
  * scripts, model-readable content contains fenced shell blocks, or `allowed-tools`
  * implies execution. The mismatch flag is the "don't trust the manifest" gate: a
@@ -216,16 +195,17 @@ export function analyzeRegistrySkill(input: {
       `SKILL.md 'name' (${name}) must match its directory (${discovered.dirName})`,
     );
   }
-  if (
-    typeof description !== "string" ||
-    description.trim().length === 0 ||
-    description.length > MAX_DESCRIPTION_LENGTH
-  ) {
+  if (typeof description !== "string" || description.trim().length === 0) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_INVALID_SKILL",
-      `SKILL.md 'description' must be 1-${MAX_DESCRIPTION_LENGTH} chars`,
+      "SKILL.md 'description' must be a non-empty string",
     );
   }
+  // Overlong descriptions are truncated for display, not rejected — length is
+  // a cosmetic concern, not a validity one.
+  const normalizedDescription = description
+    .trim()
+    .slice(0, MAX_DESCRIPTION_LENGTH);
 
   const allowedTools = readAllowedTools(frontmatter);
   const fileManifest: RegistryFileManifest = discovered.files.map((file) => ({
@@ -262,15 +242,9 @@ export function analyzeRegistrySkill(input: {
     }
   }
 
+  // License name (e.g. "MIT") is captured for catalog display only — the
+  // registry is a pointer-only index, so no license gating applies.
   const license = firstString(frontmatter.license);
-  let licenseTier = resolveLicenseTier(license);
-  if (!license && hasLicenseFile(discovered)) {
-    // A LICENSE file exists but we don't read its body: we can't positively
-    // place the tier, so it stays `unknown` (fail-closed) and a reviewer is
-    // pointed at it.
-    flags.add("license:file-present-unclassified");
-    licenseTier = "unknown";
-  }
 
   const finalFlags = [...flags].sort();
   return {
@@ -281,11 +255,10 @@ export function analyzeRegistrySkill(input: {
     ),
     name,
     displayName: firstString(frontmatter.displayName, frontmatter.title) ?? titleCase(name),
-    description: description.trim(),
+    description: normalizedDescription,
     repoSubpath: discovered.repoSubpath,
     capability,
     license,
-    licenseTier,
     contentSha256: skillMd.sha256,
     scan: { reviewRequired: finalFlags.length > 0, flags: finalFlags },
     fileManifest,

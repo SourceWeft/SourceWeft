@@ -17,7 +17,6 @@ export type RegistryReviewQueueEntry = {
   description: string;
   submittedBy: string | null;
   capability: "prompt-only" | "executable" | null;
-  licenseTier: "permissive" | "copyleft" | "unknown" | null;
   license: string | null;
   sourceUrl: string | null;
   flags: string[];
@@ -52,7 +51,6 @@ export async function listRegistryReviewQueue(): Promise<
       description: row.definition.description,
       submittedBy: registry?.submittedBy ?? row.definition.ownerUserId ?? null,
       capability: registry?.capability ?? null,
-      licenseTier: registry?.licenseTier ?? null,
       license: registry?.license ?? null,
       sourceUrl: registry?.sourceUrl ?? null,
       flags: registry?.scan?.flags ?? [],

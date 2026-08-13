@@ -4,7 +4,7 @@ import { z } from "zod";
 /**
  * Wire contracts + pure helpers for the skill-registry submit pipeline
  * (docs/architecture/skill-registry-index.md §3, build phase R1). Kept free of
- * DB/IO imports so the license/slug logic — which the ingest pipeline (R2) and
+ * DB/IO imports so the slug logic — which the ingest pipeline (R2) and
  * catalog (R3) both depend on — stays trivially unit-testable.
  */
 
@@ -37,74 +37,6 @@ export const submitRegistrySkillResponseSchema = z.object({
 export type SubmitRegistrySkillResponse = z.infer<
   typeof submitRegistrySkillResponseSchema
 >;
-
-// --- License tier resolver (§3 Stage 3 / §5.5) -------------------------------
-
-export type LicenseTier = "permissive" | "copyleft" | "unknown";
-
-/**
- * Maps a declared license (SPDX id or free text) to the surfacing tier that
- * gates catalog-wide visibility (§5.5). This is a *legal* control, not a
- * cosmetic one:
- *   - `permissive` (MIT/Apache/BSD/ISC/CC-BY) → may auto-publish; attribution is
- *     satisfied at the index level.
- *   - `copyleft` (GPL/LGPL/MPL/CC-BY-SA) → held for review before catalog-wide
- *     surfacing.
- *   - `unknown` (no LICENSE / AGPL / anything unrecognized) → never auto-surface.
- *
- * Two ordering hazards drive the structure:
- *   1. AGPL is grouped with `unknown`, NOT `copyleft` — its network-use trigger
- *      against a hosted SaaS is exactly the obligation we won't auto-accept — and
- *      "AGPL" contains "GPL", so it MUST be matched before the GPL rule.
- *   2. CC-BY-SA (share-alike, copyleft) contains "CC-BY" (permissive), so the
- *      copyleft rule MUST run before the permissive rule.
- * Everything unmatched falls through to `unknown` (fail-closed): a license we
- * can't positively place never auto-surfaces.
- */
-export function resolveLicenseTier(
-  license: string | null | undefined,
-): LicenseTier {
-  const normalized = (license ?? "").trim().toUpperCase();
-  // No LICENSE = all-rights-reserved (§5.5): index the pointer, never surface.
-  if (normalized.length === 0) {
-    return "unknown";
-  }
-
-  // (1) AGPL / Affero first — before the generic GPL match below.
-  if (normalized.includes("AGPL") || normalized.includes("AFFERO")) {
-    return "unknown";
-  }
-
-  // (2) Copyleft before permissive so CC-BY-SA isn't read as CC-BY. Substring
-  // matching (not \b-anchored) so real-world spellings — "GPLv3", "0BSD",
-  // "MIT-0" — classify correctly.
-  if (
-    normalized.includes("GPL") || // GPL, LGPL (AGPL already returned above)
-    normalized.includes("MPL") ||
-    normalized.includes("MOZILLA PUBLIC LICENSE") ||
-    normalized.includes("GENERAL PUBLIC LICENSE") ||
-    normalized.includes("CC-BY-SA") ||
-    normalized.includes("CC BY-SA") ||
-    normalized.includes("SHAREALIKE") ||
-    normalized.includes("SHARE-ALIKE")
-  ) {
-    return "copyleft";
-  }
-
-  if (
-    normalized.includes("MIT") ||
-    normalized.includes("APACHE") ||
-    normalized.includes("BSD") ||
-    normalized.includes("ISC") ||
-    normalized.includes("CC-BY") ||
-    normalized.includes("CC BY") ||
-    normalized.includes("CREATIVE COMMONS ATTRIBUTION")
-  ) {
-    return "permissive";
-  }
-
-  return "unknown";
-}
 
 // --- Slug derivation (§2) ----------------------------------------------------
 

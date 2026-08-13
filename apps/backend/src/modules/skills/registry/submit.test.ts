@@ -57,7 +57,6 @@ function analyzed(overrides: Record<string, unknown> = {}) {
     repoSubpath: "skills/writer",
     capability: "prompt-only" as const,
     license: "MIT",
-    licenseTier: "permissive" as const,
     contentSha256: "h",
     scan: { reviewRequired: false, flags: [] as string[] },
     fileManifest: [
@@ -74,7 +73,7 @@ beforeEach(() => {
   mocks.upsert.mockResolvedValue({ status: "indexed" });
 });
 
-test("a clean, permissive, new skill indexes and stores a pointer + published version", async () => {
+test("a clean, new skill indexes and stores a pointer + published version", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(analyzed());
 

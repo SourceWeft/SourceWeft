@@ -8,12 +8,11 @@ import {
 
 const CLEAN = { reviewRequired: false, flags: [] as string[] };
 
-test("clean + permissive + new → indexed / published", () => {
+test("clean + new → indexed / published", () => {
   const decision = triageRegistrySubmission({
     existing: null,
     submitterId: "me",
     scan: CLEAN,
-    licenseTier: "permissive",
   });
   assert.equal(decision.outcome, "indexed");
   assert.equal(decision.versionStatus, "published");
@@ -25,24 +24,10 @@ test("a flagged scan queues for review", () => {
     existing: null,
     submitterId: "me",
     scan: { reviewRequired: true, flags: ["egress:pipe-to-shell"] },
-    licenseTier: "permissive",
   });
   assert.equal(decision.outcome, "queued");
   assert.equal(decision.versionStatus, "draft");
   assert.ok(decision.reasons.includes("egress:pipe-to-shell"));
-});
-
-test("the license gate holds copyleft and unknown for review", () => {
-  for (const licenseTier of ["copyleft", "unknown"] as const) {
-    const decision = triageRegistrySubmission({
-      existing: null,
-      submitterId: "me",
-      scan: CLEAN,
-      licenseTier,
-    });
-    assert.equal(decision.outcome, "queued");
-    assert.ok(decision.reasons.includes(`license:${licenseTier}`));
-  }
 });
 
 test("ownership: a different submitter cannot overwrite an existing entry", () => {
@@ -57,7 +42,6 @@ test("ownership: a different submitter cannot overwrite an existing entry", () =
         existing,
         submitterId: "attacker",
         scan: CLEAN,
-        licenseTier: "permissive",
       }),
     (error) =>
       error instanceof RegistrySubmissionError &&
@@ -75,7 +59,6 @@ test("the owner may re-submit their own clean entry and re-index", () => {
     existing,
     submitterId: "me",
     scan: CLEAN,
-    licenseTier: "permissive",
   });
   assert.equal(decision.outcome, "indexed");
 });
@@ -90,7 +73,6 @@ test("sticky: an in-review (draft) entry cannot auto-index on a clean re-submit"
     existing,
     submitterId: "me",
     scan: CLEAN,
-    licenseTier: "permissive",
   });
   assert.equal(decision.outcome, "queued");
   assert.ok(decision.reasons.includes("sticky-review"));
@@ -105,7 +87,6 @@ test("sticky: a deprecated version or archived definition stays queued", () => {
       existing,
       submitterId: "me",
       scan: CLEAN,
-      licenseTier: "permissive",
     });
     assert.equal(decision.outcome, "queued");
   }
