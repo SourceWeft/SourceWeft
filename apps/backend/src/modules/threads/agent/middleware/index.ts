@@ -1,6 +1,7 @@
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   modelRetryMiddleware,
+  todoListMiddleware,
   toolCallLimitMiddleware,
   toolRetryMiddleware,
   type AgentMiddleware,
@@ -57,6 +58,9 @@ export async function createSourceWeftAgentMiddlewareStack(
     });
 
   return [
+    // deepagents >=1.12 no longer includes the todo middleware by default;
+    // tool tracking and the todo panel depend on the write_todos tool.
+    todoListMiddleware(),
     createSourceWeftImageHistorySanitizerMiddleware(),
     createKnowledgeFilesystemToolDescriptionMiddleware({
       mounts: input.filesystemMounts,

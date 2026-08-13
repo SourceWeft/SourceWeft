@@ -171,8 +171,8 @@ importers:
         specifier: ^5.63.0
         version: 5.71.0
       deepagents:
-        specifier: ^1.11.0
-        version: 1.11.0(a311e2f801add2ee01eefc2380a8e08a)
+        specifier: ^1.12.3
+        version: 1.12.3(a311e2f801add2ee01eefc2380a8e08a)
       dotenv:
         specifier: ^17.2.3
         version: 17.3.1
@@ -946,8 +946,8 @@ importers:
         specifier: workspace:*
         version: link:../contracts
       deepagents:
-        specifier: ^1.11.0
-        version: 1.11.0(a311e2f801add2ee01eefc2380a8e08a)
+        specifier: ^1.12.3
+        version: 1.12.3(a311e2f801add2ee01eefc2380a8e08a)
       langchain:
         specifier: ^1.5.0
         version: 1.5.0(@langchain/core@1.2.3(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.1)(zod-to-json-schema@3.25.2(zod@4.3.6))
@@ -1057,8 +1057,8 @@ importers:
         specifier: workspace:*
         version: link:../contracts
       deepagents:
-        specifier: ^1.11.0
-        version: 1.11.0(a311e2f801add2ee01eefc2380a8e08a)
+        specifier: ^1.12.3
+        version: 1.12.3(a311e2f801add2ee01eefc2380a8e08a)
       langsmith:
         specifier: ^0.7.10
         version: 0.7.10(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
@@ -1261,13 +1261,13 @@ importers:
     dependencies:
       '@langchain/daytona':
         specifier: 0.2.0
-        version: 0.2.0(deepagents@1.11.0(a311e2f801add2ee01eefc2380a8e08a))(ws@8.21.1)
+        version: 0.2.0(deepagents@1.12.3(a311e2f801add2ee01eefc2380a8e08a))(ws@8.21.1)
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../builtin-tool-sandbox
       deepagents:
-        specifier: ^1.11.0
-        version: 1.11.0(a311e2f801add2ee01eefc2380a8e08a)
+        specifier: ^1.12.3
+        version: 1.12.3(a311e2f801add2ee01eefc2380a8e08a)
       langsmith:
         specifier: ^0.7.10
         version: 0.7.10(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
@@ -7084,8 +7084,8 @@ packages:
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
 
-  deepagents@1.11.0:
-    resolution: {integrity: sha512-HPKLmOoi23fRykXpJgrhYNhjm+Yrd3qVmvwm7mvJ2DeTcJBKu1mc+VYbYeHunIVfi9F05GgjZa9JjdWwuAVuPQ==}
+  deepagents@1.12.3:
+    resolution: {integrity: sha512-57wsIdBXpYuODC1MJnl9m0OKJ1PFYTomEPNa9dGejINovUyMggq3NryA4g0cu+RqA89C8rm4LOI2uJ0tgmYEkA==}
     peerDependencies:
       '@langchain/core': ^1.2.0
       '@langchain/langgraph': ^1.4.4
@@ -13497,10 +13497,10 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/daytona@0.2.0(deepagents@1.11.0(a311e2f801add2ee01eefc2380a8e08a))(ws@8.21.1)':
+  '@langchain/daytona@0.2.0(deepagents@1.12.3(a311e2f801add2ee01eefc2380a8e08a))(ws@8.21.1)':
     dependencies:
       '@daytonaio/sdk': 0.155.0(ws@8.21.1)
-      deepagents: 1.11.0(a311e2f801add2ee01eefc2380a8e08a)
+      deepagents: 1.12.3(a311e2f801add2ee01eefc2380a8e08a)
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -17482,7 +17482,7 @@ snapshots:
 
   deep-is@0.1.4: {}
 
-  deepagents@1.11.0(a311e2f801add2ee01eefc2380a8e08a):
+  deepagents@1.12.3(a311e2f801add2ee01eefc2380a8e08a):
     dependencies:
       '@langchain/core': 1.2.3(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
       '@langchain/langgraph': 1.4.4(@langchain/core@1.2.3(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)

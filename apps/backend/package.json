@@ -78,7 +78,7 @@
     "ai": "^6.0.190",
     "better-auth": "1.6.10",
     "bullmq": "^5.63.0",
-    "deepagents": "^1.11.0",
+    "deepagents": "^1.12.3",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
     "epub2": "^3.0.2",

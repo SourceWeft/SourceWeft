@@ -104,6 +104,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
     });
 
     const expectedMiddlewareOrder = [
+      "todoListMiddleware",
       "SourceWeftImageHistorySanitizer",
       "SourceWeftKnowledgeFilesystemDescriptions",
       "SourceWeftCommandToolChoice",
