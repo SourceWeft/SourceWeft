@@ -1,0 +1,25 @@
+{
+  "name": "@sourceweft/agent-interpreter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.7",
+    "@langchain/quickjs": "0.6.1",
+    "deepagents": "1.12.4",
+    "langchain": "^1.5.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "5.9.2"
+  }
+}

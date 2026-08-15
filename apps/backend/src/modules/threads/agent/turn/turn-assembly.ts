@@ -16,6 +16,7 @@ import { buildConnectorActionApprovalScope } from "../../../connectors/agent-too
 import type { SandboxActionExecutionCursor } from "./hitl-handler";
 import { mcpService } from "../../../mcp";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { TraceContext } from "../../../llm-observability";
 import { logger } from "../../../../shared/logger";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
@@ -54,7 +55,16 @@ import type { AgentRunnableConfig } from "./checkpoint";
 import { resolveAgentBaseConfig } from "./checkpoint";
 import type { TurnRuntime } from "./turn-runtime";
 import { PrefixedBackendAdapter } from "../composite-backend-adapter";
-import { filterAllowedTools, isToolDenied } from "./tool-utils";
+import {
+  filterAllowedTools,
+  getToolPermission,
+  isToolDenied,
+} from "./tool-utils";
+import {
+  INTERPRETER_MAX_TOOL_NAMES,
+  type InterpreterReadToolName,
+} from "@sourceweft/agent-interpreter";
+import { createInterpreterMiddlewareForTurn } from "../interpreter";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
 
@@ -555,6 +565,29 @@ export async function buildThreadAgentAssembly(
     ...mcpTools,
     ...(sandboxRuntime?.tools ?? []),
   ];
+  const searchSourcesTool = boundTools.find(
+    (candidate) => candidate.name === AGENT_TOOL_NAMES.searchSources,
+  ) as StructuredToolInterface | undefined;
+  const interpreterAllowedTools = INTERPRETER_MAX_TOOL_NAMES.filter(
+    (toolName): toolName is InterpreterReadToolName =>
+      getToolPermission(prepared, toolName) === "allow" &&
+      (toolName !== AGENT_TOOL_NAMES.searchSources ||
+        Boolean(searchSourcesTool)),
+  );
+  const interpreterMiddleware = createInterpreterMiddlewareForTurn({
+    allowedTools: interpreterAllowedTools,
+    backend: filesystemBackend.backend,
+    context: {
+      runId: prepared.runTraceId,
+      teamId: prepared.workspace.organizationId,
+      workspaceId: prepared.workspace.id,
+      threadId: prepared.thread.id,
+      turnId: prepared.userMessage.id,
+      userId: prepared.userId,
+    },
+    searchSourcesTool,
+    traceContext,
+  });
   const commandTargetToolName =
     prepared.commandSuccessCriteria.kind === "none"
       ? null
@@ -594,6 +627,7 @@ export async function buildThreadAgentAssembly(
     runtimePrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
+    extraMiddleware: interpreterMiddleware,
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
     toolObservabilityContext: {

@@ -53,6 +53,7 @@
     "@langchain/tavily": "^1.2.0",
     "@langchain/textsplitters": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@sourceweft/agent-interpreter": "workspace:*",
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",

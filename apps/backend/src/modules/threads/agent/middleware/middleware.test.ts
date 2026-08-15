@@ -17,6 +17,8 @@ vi.mock("../../../llm-observability", () => ({
   startSpan: vi.fn(),
 }));
 
+import { endSpan, startSpan } from "../../../llm-observability";
+
 import {
   createCommandToolChoiceMiddleware,
   createKnowledgeFilesystemToolDescriptionMiddleware,
@@ -485,6 +487,47 @@ test("tool observability logs thrown tool errors", async () => {
     infoSpy.mockRestore();
     errorSpy.mockRestore();
   }
+});
+
+test("tool observability never persists eval source or raw output", async () => {
+  const rawCode = "const secret = 'do-not-store'; secret";
+  const rawOutput = "do-not-store-output";
+  const middleware = createSourceWeftToolObservabilityMiddleware({
+    traceContext: {
+      traceId: "trace-eval",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+    },
+  });
+
+  await wrapToolCallHook(middleware)(
+    {
+      toolCall: {
+        id: "eval-call-1",
+        name: "eval",
+        args: { code: rawCode },
+      },
+    },
+    async () =>
+      new ToolMessage({
+        content: rawOutput,
+        name: "eval",
+        tool_call_id: "eval-call-1",
+      }),
+  );
+
+  const startInput = vi.mocked(startSpan).mock.calls.at(-1)?.[0];
+  const endInput = vi.mocked(endSpan).mock.calls.at(-1)?.[0];
+  assert.deepEqual(startInput?.input, {
+    codeChars: rawCode.length,
+    codeSha256:
+      "9d29e62caa25613b58c1ea859bd260d3baac88ea974c428e645761a88ac54524",
+  });
+  assert.deepEqual(endInput?.output, {
+    resultChars: rawOutput.length,
+    status: "completed",
+  });
+  assert.doesNotMatch(JSON.stringify({ startInput, endInput }), /do-not-store/);
 });
 
 test("tool observability logs execute failure diagnostics without raw command", async () => {
