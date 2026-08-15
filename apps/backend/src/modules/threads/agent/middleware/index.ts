@@ -1,6 +1,6 @@
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
-import type { AnyBackendProtocol, BackendFactory } from "deepagents";
+import type { AnyBackendProtocol } from "deepagents";
 import {
   modelRetryMiddleware,
   todoListMiddleware,
@@ -13,6 +13,7 @@ import type { AgentFilesystemMountCapability } from "../filesystem-capabilities"
 import { isRetryableModelContentError } from "../../../content/model-gateway-error";
 import { config } from "../../../../shared/config";
 import { createAskUserMiddleware } from "./ask-user";
+import { createRepeatToolCallReminderMiddleware } from "./repeat-tool-call-reminder";
 import {
   createCommandToolChoiceMiddleware,
   type CommandExecutionPolicy,
@@ -28,6 +29,7 @@ import {
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
 import type { TraceContext } from "../../../llm-observability";
+import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -37,8 +39,29 @@ const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.readFile,
 ];
 
+// Per-turn ceiling on proactive questions so an over-eager model can't stall a
+// turn re-prompting the user. exitBehavior "continue" blocks the excess call
+// with an error ToolMessage (the model reads it and moves on) rather than
+// aborting the turn. Complements the <asking_the_user> prompt policy and the
+// generic repeat-tool-call reminder.
+const ASK_USER_RUN_LIMIT = 3;
+
+function askUserMiddleware(): AgentMiddleware[] {
+  if (!config.chat.agent.askUserEnabled) {
+    return [];
+  }
+  return [
+    createAskUserMiddleware(),
+    toolCallLimitMiddleware({
+      toolName: AGENT_TOOL_NAMES.askUser,
+      runLimit: ASK_USER_RUN_LIMIT,
+      exitBehavior: "continue",
+    }),
+  ];
+}
+
 export type SourceWeftAgentMiddlewareStackInput = {
-  backend: AnyBackendProtocol | BackendFactory;
+  backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
   contextCompressionReportKey?: string;
@@ -53,7 +76,7 @@ export type SourceWeftAgentMiddlewareStackInput = {
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
-  backend: AnyBackendProtocol | BackendFactory;
+  backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
@@ -69,10 +92,12 @@ export function createSourceWeftSubagentMiddlewareStack(
   input: SourceWeftSubagentMiddlewareStackInput,
 ): AgentMiddleware[] {
   return [
+    createSourceWeftToolCallContextMiddleware(),
     // Sub-agents may also ask the user. The interrupt bubbles up to the parent
     // graph's updates stream; the resume is keyed by interrupt id so it targets
-    // the correct nested/parallel task. Same flag as the root stack.
-    ...(config.chat.agent.askUserEnabled ? [createAskUserMiddleware()] : []),
+    // the correct nested/parallel task. Same flag + per-turn cap as the root.
+    ...askUserMiddleware(),
+    createRepeatToolCallReminderMiddleware(),
     createSourceWeftToolObservabilityMiddleware({
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
@@ -111,12 +136,16 @@ export async function createSourceWeftAgentMiddlewareStack(
     });
 
   return [
+    createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
     todoListMiddleware(),
-    // Proactive `askUser` — root graph only (a delegated sub-agent has no human
-    // answerer). Gated off by default until the frontend question panel ships.
-    ...(config.chat.agent.askUserEnabled ? [createAskUserMiddleware()] : []),
+    // Proactive `askUser` (+ a per-turn call cap). Enabled by default; see
+    // config.chat.agent.askUserEnabled. Also added to the sub-agent stack.
+    ...askUserMiddleware(),
+    // Generic advisory loop guard for all tools (nudges out of identical-call
+    // loops; complements the askUser cap). Never blocks a call.
+    createRepeatToolCallReminderMiddleware(),
     createSourceWeftImageHistorySanitizerMiddleware(),
     createKnowledgeFilesystemToolDescriptionMiddleware({
       mounts: input.filesystemMounts,
@@ -173,3 +202,7 @@ export {
   createSourceWeftToolObservabilityMiddleware,
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
+export {
+  createSourceWeftToolCallContextMiddleware,
+  currentSourceWeftToolCallId,
+} from "./tool-call-context";
