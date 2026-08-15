@@ -25,7 +25,13 @@ import {
 import type { ChatResult } from "@langchain/core/outputs";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
-import { toolRetryMiddleware, type AgentMiddleware } from "langchain";
+import {
+  modelRetryMiddleware,
+  todoListMiddleware,
+  toolCallLimitMiddleware,
+  toolRetryMiddleware,
+  type AgentMiddleware,
+} from "langchain";
 import {
   createAskUserMiddleware,
   isAskUserInterruptValue,
@@ -299,6 +305,60 @@ test("commandResumeFromToolApprovalResume keys askUser resume by interrupt id", 
     } as never),
     { status: "cancelled" },
   );
+});
+
+test("askUser pauses + resumes under the full stable production middleware set", async () => {
+  // Mirrors the wrapToolCall/wrapModelCall middleware the real root stack adds
+  // (todos, observability, tool retry, tool-call limit, model retry) — proves
+  // none of them swallow the askUser interrupt or block its rebinding on resume.
+  const agent = buildAgent(
+    [
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            name: ASK_USER_TOOL_NAME,
+            args: { questions: [{ question: "Which env?", type: "text" }] },
+          },
+        ],
+      },
+      { content: "deploying to staging" },
+    ],
+    [
+      todoListMiddleware(),
+      createSourceWeftToolObservabilityMiddleware({}),
+      toolRetryMiddleware({ tools: ["searchSources"] }),
+      toolCallLimitMiddleware({
+        runLimit: 100,
+        threadLimit: 100,
+        exitBehavior: "continue",
+      }),
+      modelRetryMiddleware({ retryOn: () => false, onFailure: "error" }),
+    ],
+  );
+  const config = CONFIG();
+
+  const first = await drain(
+    (await agent.stream({ messages: [{ role: "user", content: "deploy" }] }, {
+      ...config,
+      streamMode: "values",
+    })) as AsyncGenerator<unknown>,
+  );
+  assert.ok(
+    findAskUserInterrupt(first),
+    "ask_user interrupt must survive the full middleware set",
+  );
+
+  const resumed = await drain(
+    (await agent.stream(
+      new Command({ resume: { status: "answered", answers: ["staging"] } }),
+      { ...config, streamMode: "values" },
+    )) as AsyncGenerator<unknown>,
+  );
+  const lastState = resumed.at(-1) as { messages?: BaseMessage[] } | undefined;
+  const finalAi = (lastState?.messages ?? []).at(-1);
+  assert.match(String(finalAi?.content), /deploying to staging/);
 });
 
 test("payloadHasAskUserInterrupt discriminates the interrupt shape", () => {
