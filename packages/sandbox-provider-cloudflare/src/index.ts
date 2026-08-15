@@ -2,6 +2,7 @@ export {
   CLOUDFLARE_SANDBOX_PATH_POLICY,
   CloudflareBridgeHttpError,
   CloudflareSandboxProvider,
+  EXEC_HEARTBEAT_MARKER,
   SOURCEWEFT_SANDBOX_STAMP_PATH,
   extractExitCode,
   extractSseText,
