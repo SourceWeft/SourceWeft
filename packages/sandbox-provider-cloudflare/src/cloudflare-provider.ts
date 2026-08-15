@@ -282,6 +282,21 @@ export function extractExitCode(data: string): number | null {
 /** Grace on top of the command budget before the client aborts the stream. */
 const EXECUTE_ABORT_GRACE_MS = 15_000;
 
+/**
+ * Live-measured (2026-08-16): an exec SSE stream that stays SILENT dies
+ * between 180s (passes) and 300s (reliably terminated) — an intermediary
+ * drops idle streams, surfacing as "terminated" only when the container
+ * finally writes. Chatty streams survive at least the 8-minute batch budget.
+ *
+ * Commands granted more than HEARTBEAT_THRESHOLD_MS are therefore wrapped
+ * with a background stderr heartbeat that keeps bytes flowing; the marker is
+ * control-character-delimited so it cannot collide with real output, and the
+ * client strips it from the accumulated stream.
+ */
+const HEARTBEAT_THRESHOLD_MS = 120_000;
+const HEARTBEAT_INTERVAL_SECONDS = 45;
+export const EXEC_HEARTBEAT_MARKER = "[sourceweft-heartbeat]";
+
 export class CloudflareSandboxProvider implements SandboxProvider {
   readonly id = "cloudflare";
   readonly pathPolicy = CLOUDFLARE_SANDBOX_PATH_POLICY;
@@ -366,9 +381,13 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     maxOutputChars: number;
   }): Promise<ExecuteResponse> {
     return this.withProviderErrorMapping("execute", async () => {
-      const command = input.cwd
+      const base = input.cwd
         ? `cd ${shellQuote(input.cwd)} && ${input.command}`
         : input.command;
+      const command =
+        input.timeoutMs > HEARTBEAT_THRESHOLD_MS
+          ? `( while true; do sleep ${HEARTBEAT_INTERVAL_SECONDS}; printf '%s\\n' ${shellQuote(EXEC_HEARTBEAT_MARKER)} >&2; done ) & __sw_hb=$!; ( ${base} ); __sw_rc=$?; kill "$__sw_hb" 2>/dev/null; exit "$__sw_rc"`
+          : base;
       const controller = new AbortController();
       const abortTimer = setTimeout(
         () => controller.abort(),
@@ -400,7 +419,15 @@ export class CloudflareSandboxProvider implements SandboxProvider {
             if (truncated) {
               continue; // Keep draining so the exit event still arrives.
             }
-            output += extractSseText(data);
+            const text = extractSseText(data)
+              .split(`${EXEC_HEARTBEAT_MARKER}\n`)
+              .join("")
+              .split(EXEC_HEARTBEAT_MARKER)
+              .join("");
+            if (!text) {
+              continue;
+            }
+            output += text;
             if (output.length > input.maxOutputChars) {
               output = output.slice(0, input.maxOutputChars);
               truncated = true;

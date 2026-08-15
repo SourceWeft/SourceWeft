@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  EXEC_HEARTBEAT_MARKER,
   CLOUDFLARE_SANDBOX_PATH_POLICY,
   CloudflareBridgeHttpError,
   CloudflareSandboxProvider,
@@ -295,6 +296,51 @@ describe("CloudflareSandboxProvider", () => {
 
     const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
     assert.equal(body.argv[2], "cd '/workspace/in put' && ls");
+  });
+
+  test("wraps long-budget commands with a heartbeat and filters the marker", async () => {
+    const b64 = (text: string) => Buffer.from(text).toString("base64");
+    const { provider, requests } = createProvider([
+      [
+        /^POST .*\/exec$/,
+        () =>
+          sseResponse([
+            { event: "stdout", data: b64("real output\n") },
+            { event: "stderr", data: b64(`${EXEC_HEARTBEAT_MARKER}\n`) },
+            { event: "stdout", data: b64("more output") },
+            { event: "exit", data: '{"exit_code":0}' },
+          ]),
+      ],
+    ]);
+
+    const result = await provider.execute({
+      providerSandboxId: "sb-1",
+      command: "long-silent-job",
+      timeoutMs: 480_000,
+      maxOutputChars: 10_000,
+    });
+
+    assert.equal(result.output, "real output\nmore output");
+    const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
+    assert.ok(body.argv[2]?.includes("( long-silent-job )"));
+    assert.ok(body.argv[2]?.includes(EXEC_HEARTBEAT_MARKER));
+  });
+
+  test("keeps short-budget commands unwrapped", async () => {
+    const { provider, requests } = createProvider([
+      [
+        /^POST .*\/exec$/,
+        () => sseResponse([{ event: "exit", data: "0" }]),
+      ],
+    ]);
+    await provider.execute({
+      providerSandboxId: "sb-1",
+      command: "quick-job",
+      timeoutMs: 120_000,
+      maxOutputChars: 100,
+    });
+    const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
+    assert.equal(body.argv[2], "quick-job");
   });
 
   test("returns non-zero exit codes as normal command results", async () => {

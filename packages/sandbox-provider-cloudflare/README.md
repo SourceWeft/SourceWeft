@@ -50,10 +50,16 @@ everything SourceWeft-specific lives client-side in this package).
   `SANDBOX_NOT_FOUND_OR_EXPIRED`, which makes the sandbox manager expire the
   DB row and recreate — the existing recovery path.
 - **Execute streams SSE.** The bridge's exec endpoint emits
-  `stdout`/`stderr`/`exit`/`error` events; the provider accumulates output up
-  to `maxOutputChars` (then keeps draining so the exit code still arrives),
-  wraps `cwd` into the shell line, and aborts client-side if the stream
-  outlives the command budget.
+  `stdout`/`stderr`/`exit`/`error` events (stdout/stderr data is the raw
+  base64 of the chunk); the provider accumulates output up to `maxOutputChars`
+  (then keeps draining so the exit code still arrives), wraps `cwd` into the
+  shell line, and aborts client-side if the stream outlives the command budget.
+- **Silent-stream heartbeat.** Live-measured: an exec stream with no output
+  dies between 3 and 5 minutes of silence (an intermediary drops idle
+  streams); chatty streams survive the full 8-minute batch budget. Commands
+  budgeted over 2 minutes are automatically wrapped with a background stderr
+  heartbeat (control-marker lines the client strips), so silent long jobs
+  complete instead of dying with "terminated".
 - **TTL is DB-enforced.** The manager's 1h rolling `expiresAt` drives explicit
   `deleteSandbox`; Cloudflare's default ~10m idle sleep only reduces cost.
 
