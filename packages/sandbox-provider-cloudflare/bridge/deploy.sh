@@ -30,7 +30,15 @@ if [ ! -d "$BRIDGE_DIR" ]; then
     --no-deploy --no-git
 else
   echo "==> Existing bridge directory found; updating @cloudflare/sandbox"
-  (cd "$BRIDGE_DIR" && npm update @cloudflare/sandbox)
+  # create-cloudflare scaffolds with whatever package manager invoked it, so
+  # match the scaffold's lockfile — npm crashes on a pnpm-shaped node_modules.
+  if [ -f "$BRIDGE_DIR/pnpm-lock.yaml" ]; then
+    (cd "$BRIDGE_DIR" && pnpm update @cloudflare/sandbox)
+  elif [ -f "$BRIDGE_DIR/yarn.lock" ]; then
+    (cd "$BRIDGE_DIR" && yarn upgrade @cloudflare/sandbox)
+  else
+    (cd "$BRIDGE_DIR" && npm update @cloudflare/sandbox)
+  fi
 fi
 
 cd "$BRIDGE_DIR"

@@ -141,6 +141,15 @@ describe("SSE payload extraction", () => {
     assert.equal(extractSseText("plain text"), "plain text");
   });
 
+  test("decodes raw-base64 payloads (deployed bridge format)", () => {
+    assert.equal(
+      extractSseText(Buffer.from("hello-stdout\n").toString("base64")),
+      "hello-stdout\n",
+    );
+    // Short non-multiple-of-4 strings pass through untouched.
+    assert.equal(extractSseText("200"), "200");
+  });
+
   test("extracts exit codes from JSON and plain payloads", () => {
     assert.equal(extractExitCode('{"exitCode":3}'), 3);
     assert.equal(extractExitCode('{"code":0}'), 0);
@@ -206,6 +215,22 @@ describe("CloudflareSandboxProvider", () => {
     );
   });
 
+  test("health check maps a format-rejected sandbox id to expired", async () => {
+    const { provider } = createProvider([
+      [
+        /^GET /,
+        () =>
+          new Response('{"error":"Invalid sandbox ID format"}', {
+            status: 400,
+          }),
+      ],
+    ]);
+    await assert.rejects(
+      provider.checkSandboxHealth("stale-db-row-id"),
+      /SANDBOX_NOT_FOUND_OR_EXPIRED/,
+    );
+  });
+
   test("health check reports an expired sandbox when the stamp mismatches", async () => {
     const { provider } = createProvider([
       [/^GET /, () => new Response("some-other-sandbox")],
@@ -217,15 +242,18 @@ describe("CloudflareSandboxProvider", () => {
   });
 
   test("executes commands over SSE and preserves the raw command", async () => {
+    // Deployed-bridge wire format: stdout/stderr data is raw base64 of the
+    // chunk, exit data is {"exit_code":N} (live-verified 2026-08-16).
+    const b64 = (text: string) => Buffer.from(text).toString("base64");
     const { provider, requests } = createProvider([
       [
         /^POST .*\/exec$/,
         () =>
           sseResponse([
-            { event: "stdout", data: '{"text":"hello "}' },
-            { event: "stdout", data: '{"text":"world"}' },
-            { event: "stderr", data: '{"text":"\\nwarn"}' },
-            { event: "exit", data: '{"exitCode":0}' },
+            { event: "stdout", data: b64("hello ") },
+            { event: "stdout", data: b64("world") },
+            { event: "stderr", data: b64("\nwarn") },
+            { event: "exit", data: '{"exit_code":0}' },
           ]),
       ],
     ]);
