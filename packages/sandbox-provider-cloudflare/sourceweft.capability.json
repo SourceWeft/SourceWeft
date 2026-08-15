@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/sandbox-provider-cloudflare",
+  "kind": "composite",
+  "name": "Cloudflare Sandbox Provider",
+  "description": "Supplies the 'cloudflare' sandbox provider (stock Sandbox Bridge worker) to the host's sandbox runtime.",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "hostServices": ["sandbox_provider"]
+}

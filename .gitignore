@@ -82,3 +82,4 @@ skills-lock.json
 thoughts
 .playwright-cli
 ARCHITECTURE_PLAN.md
+packages/sandbox-provider-cloudflare/bridge/sandbox-bridge/
