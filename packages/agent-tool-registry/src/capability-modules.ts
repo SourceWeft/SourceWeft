@@ -49,6 +49,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-tool-web-search"),
   "@sourceweft/sandbox-provider-daytona": () =>
     import("@sourceweft/sandbox-provider-daytona"),
+  "@sourceweft/sandbox-provider-cloudflare": () =>
+    import("@sourceweft/sandbox-provider-cloudflare"),
 };
 
 export function loadBuiltinCapabilityModule(packageName: string | null | undefined) {
