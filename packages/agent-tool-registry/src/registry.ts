@@ -26,6 +26,32 @@ import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-im
 import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact";
 import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation";
 import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck";
+import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+
+/**
+ * Proactive clarifying-question tool. It interrupts from inside its own tool
+ * body (LangGraph `interrupt()`), so it is never gated through `interruptOn`
+ * and carries no external side effect. Defined locally rather than in a builtin
+ * package because it is implemented as agent middleware, not a capability
+ * package. See docs/architecture/proactive-ask-user.md.
+ */
+export const askUserAgentTool = defineAgentTool({
+  id: "askUser",
+  name: "askUser",
+  domain: "interaction",
+  capabilities: [],
+  activation: {
+    default: "off",
+    userControl: "none",
+    skill: {
+      declarable: false,
+      activates: false,
+    },
+  },
+  defaultPermission: "allow",
+  riskLevel: "low",
+});
+
 export const AGENT_TOOLS = [
   ...filesystemAgentToolDefs,
   ...generateImageAgentToolDefs,
@@ -35,6 +61,7 @@ export const AGENT_TOOLS = [
   ...generateVideoPresentationAgentToolDefs,
   ...pptDeckAgentToolDefs,
   ...sandboxAgentToolDefs,
+  askUserAgentTool,
 ] as const;
 
 export type AgentToolDefinition = (typeof AGENT_TOOLS)[number];

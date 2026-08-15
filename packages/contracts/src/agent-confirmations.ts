@@ -83,9 +83,20 @@ export const toolApprovalResumeDecisionSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export const toolApprovalResumeSchema = z.object({
-  decisions: z.array(toolApprovalResumeDecisionSchema).min(1),
-  sourceweft: z
+// A proactive `askUser` answer is resumed here too — it rides the same replay
+// route as approvals, but is NOT a decision (JS langchain has no `respond`
+// decision, and a question has no side effect). Exactly one of `decisions` /
+// `askUser` is populated per resume; see docs/architecture/proactive-ask-user.md.
+export const askUserResumeAnswerSchema = z.object({
+  status: z.enum(["answered", "cancelled"]),
+  answers: z.array(z.string()).optional(),
+});
+
+export const toolApprovalResumeSchema = z
+  .object({
+    decisions: z.array(toolApprovalResumeDecisionSchema).default([]),
+    askUser: askUserResumeAnswerSchema.optional(),
+    sourceweft: z
     .object({
       connectorActions: z
         .array(
@@ -131,7 +142,11 @@ export const toolApprovalResumeSchema = z.object({
       sourceAssistantMessageId: z.string().min(1).optional(),
     })
     .optional(),
-});
+  })
+  .refine((resume) => (resume.decisions.length > 0) !== Boolean(resume.askUser), {
+    message:
+      "toolApprovalResume must carry either approval decisions or an askUser answer, not both",
+  });
 
 export const toolConfirmationDomainSchema = z.enum([
   "connector",

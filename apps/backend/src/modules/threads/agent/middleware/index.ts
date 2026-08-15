@@ -1,4 +1,6 @@
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
+import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import type { AnyBackendProtocol, BackendFactory } from "deepagents";
 import {
   modelRetryMiddleware,
   todoListMiddleware,
@@ -10,11 +12,15 @@ import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import type { AgentFilesystemMountCapability } from "../filesystem-capabilities";
 import { isRetryableModelContentError } from "../../../content/model-gateway-error";
 import { config } from "../../../../shared/config";
+import { createAskUserMiddleware } from "./ask-user";
 import {
   createCommandToolChoiceMiddleware,
   type CommandExecutionPolicy,
 } from "./command-tool-choice";
-import { createSourceWeftContextCompressionMiddleware } from "./context-compression";
+import {
+  createSourceWeftContextCompressionMiddleware,
+  createSourceWeftSummarizationMiddleware,
+} from "./context-compression";
 import { createKnowledgeFilesystemToolDescriptionMiddleware } from "./filesystem-descriptions";
 import { createSourceWeftImageHistorySanitizerMiddleware } from "./history-sanitizer";
 import {
@@ -32,6 +38,7 @@ const RETRYABLE_READ_TOOL_NAMES = [
 ];
 
 export type SourceWeftAgentMiddlewareStackInput = {
+  backend: AnyBackendProtocol | BackendFactory;
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
   contextCompressionReportKey?: string;
@@ -40,9 +47,51 @@ export type SourceWeftAgentMiddlewareStackInput = {
   filesystemMounts: AgentFilesystemMountCapability[];
   gatewayConfigId?: string | null;
   modelAlias: string;
+  model: BaseLanguageModel;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
   traceContext?: TraceContext;
 };
+
+export type SourceWeftSubagentMiddlewareStackInput = {
+  backend: AnyBackendProtocol | BackendFactory;
+  chatProfileConfig?: unknown;
+  model: BaseLanguageModel;
+  toolObservabilityContext?: SourceWeftToolObservabilityContext;
+  traceContext?: TraceContext;
+};
+
+/**
+ * Fresh middleware instances for each child graph. Deep Agents only propagates
+ * same-name replacements into its built-in general-purpose child, and custom
+ * children do not inherit parent middleware, so child governance is explicit.
+ */
+export function createSourceWeftSubagentMiddlewareStack(
+  input: SourceWeftSubagentMiddlewareStackInput,
+): AgentMiddleware[] {
+  return [
+    createSourceWeftToolObservabilityMiddleware({
+      context: input.toolObservabilityContext,
+      traceContext: input.traceContext,
+    }),
+    toolRetryMiddleware({
+      tools: RETRYABLE_READ_TOOL_NAMES,
+    }),
+    createSourceWeftSummarizationMiddleware({
+      backend: input.backend,
+      chatProfileConfig: input.chatProfileConfig,
+      model: input.model,
+    }),
+    modelRetryMiddleware({
+      retryOn: isRetryableModelContentError,
+      onFailure: "error",
+    }),
+    toolCallLimitMiddleware({
+      runLimit: config.chat.agent.toolCallRunLimit,
+      threadLimit: config.chat.agent.toolCallThreadLimit,
+      exitBehavior: "continue",
+    }),
+  ];
+}
 
 export async function createSourceWeftAgentMiddlewareStack(
   input: SourceWeftAgentMiddlewareStackInput,
@@ -61,6 +110,9 @@ export async function createSourceWeftAgentMiddlewareStack(
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
     todoListMiddleware(),
+    // Proactive `askUser` — root graph only (a delegated sub-agent has no human
+    // answerer). Gated off by default until the frontend question panel ships.
+    ...(config.chat.agent.askUserEnabled ? [createAskUserMiddleware()] : []),
     createSourceWeftImageHistorySanitizerMiddleware(),
     createKnowledgeFilesystemToolDescriptionMiddleware({
       mounts: input.filesystemMounts,
@@ -74,6 +126,14 @@ export async function createSourceWeftAgentMiddlewareStack(
     }),
     toolRetryMiddleware({
       tools: RETRYABLE_READ_TOOL_NAMES,
+    }),
+    // Deep Agents merges same-named middleware by replacement. This takes the
+    // place of its generic SummarizationMiddleware while retaining native
+    // checkpoint/history offloading semantics.
+    createSourceWeftSummarizationMiddleware({
+      backend: input.backend,
+      chatProfileConfig: input.chatProfileConfig,
+      model: input.model,
     }),
     ...contextCompressionMiddleware,
     modelRetryMiddleware({
@@ -96,7 +156,10 @@ export {
   messageToolCalls,
   type CommandExecutionPolicy,
 } from "./command-tool-choice";
-export { createSourceWeftContextCompressionMiddleware } from "./context-compression";
+export {
+  createSourceWeftContextCompressionMiddleware,
+  createSourceWeftSummarizationMiddleware,
+} from "./context-compression";
 export { createKnowledgeFilesystemToolDescriptionMiddleware } from "./filesystem-descriptions";
 export {
   createSourceWeftImageHistorySanitizerMiddleware,

@@ -135,22 +135,9 @@ export function extractHitlInterrupts(payload: unknown) {
     );
 }
 
-/**
- * Stable, payload-derived id for an interrupted action, used as the confirmation
- * / trace / render-block key in place of a checkpoint tool-call id. Deterministic
- * across the approve→resume round trip (the same interrupt re-fires at the same
- * checkpoint in the same order), and it never reads graph state, so an interrupt
- * raised inside a sub-agent subgraph (whose tool-call id never surfaces in the
- * top-level graph) binds correctly.
- */
-export function hitlActionRef(input: {
-  checkpointId: string;
-  index: number;
-  interruptId?: string;
-  toolName: string;
-}) {
-  return `hitl:${input.interruptId ?? input.checkpointId}:${input.index}:${input.toolName}`;
-}
+// The sub-agent-safe interrupt correlation key lives in its own leaf module so
+// it can be unit-tested without this module's service/config/graph imports.
+export { hitlActionRef } from "./hitl-action-ref";
 
 function withHitlEditableArgs(
   confirmation: ToolConfirmationRequest,
@@ -645,7 +632,17 @@ export async function createHitlConfirmation(input: {
 
 export function commandResumeFromToolApprovalResume(
   resume: ToolApprovalResume,
-): ToolApprovalResume | Record<string, ToolApprovalResume> {
+): unknown {
+  // askUser answers resume the bare `interrupt()` raised inside the askUser tool
+  // body. A single pending interrupt takes the bare resume value (not a
+  // decisions list, not an interrupt-id-keyed map) — see the spike in
+  // middleware/ask-user.spike.test.ts.
+  if (resume.askUser) {
+    return {
+      status: resume.askUser.status,
+      ...(resume.askUser.answers ? { answers: resume.askUser.answers } : {}),
+    };
+  }
   const interruptId = resume.sourceweft?.hitlInterruptId;
   const commandResume = { decisions: resume.decisions };
   return interruptId ? { [interruptId]: commandResume } : commandResume;

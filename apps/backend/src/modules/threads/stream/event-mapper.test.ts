@@ -115,6 +115,24 @@ test("normalizeToolOutputForSse preserves structured confirmation payloads", () 
   );
 });
 
+test("normalizeToolOutputForSse preserves structured askUser question payloads", () => {
+  const question = {
+    type: "user_question_request",
+    schemaVersion: 1,
+    id: "askq:ckpt-1:call_1",
+    toolCallId: "call_1",
+    questions: [
+      {
+        question: "Which format?",
+        type: "multiple_choice",
+        choices: [{ label: "PDF" }, { label: "Slides" }],
+      },
+    ],
+  };
+
+  assert.deepEqual(normalizeToolOutputForSse(question), question);
+});
+
 test("normalizeToolOutputForSse preserves structured video presentation outputs", () => {
   const structured = {
     type: "video_presentation_processing_result",

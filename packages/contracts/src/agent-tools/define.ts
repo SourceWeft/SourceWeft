@@ -10,7 +10,8 @@ export type AgentToolDomain =
   | "web"
   | "artifact"
   | "connector"
-  | "sandbox";
+  | "sandbox"
+  | "interaction";
 
 export type AgentToolCapability =
   | "artifact"

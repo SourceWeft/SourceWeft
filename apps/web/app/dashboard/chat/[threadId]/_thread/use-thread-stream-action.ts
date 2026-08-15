@@ -780,8 +780,12 @@ export function useThreadStreamAction({
           workspaceId,
         });
         receivedFinishEvent = streamResult.receivedFinishEvent;
+        // A proactive `askUser` question parks the run on the same
+        // `waiting_for_approval` status as a tool confirmation; both surface in
+        // the intervention bar and resume via the same replay route.
         waitingForApproval =
-          streamResult.finishReason === "tool_confirmation_requested";
+          streamResult.finishReason === "tool_confirmation_requested" ||
+          streamResult.finishReason === "user_question_requested";
 
         commitStreamingAssistantMessage();
 

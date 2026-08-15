@@ -1,4 +1,5 @@
 import { createMiddleware } from "langchain";
+import { isGraphBubbleUp } from "@langchain/langgraph";
 import {
   AGENT_TOOL_LOG_EVENTS,
   logAgentToolEvent,
@@ -13,6 +14,7 @@ import { getFilesystemToolFailureMetadata } from "../turn/output-normalizer";
 
 export type SourceWeftToolObservabilityContext = {
   runId?: string | null;
+  subagentType?: string | null;
   teamId?: string | null;
   threadId?: string | null;
   userId?: string | null;
@@ -68,6 +70,7 @@ function buildAgentToolLogMetadata(input: {
     teamId: input.context?.teamId,
     userId: input.context?.userId,
     runId: input.context?.runId,
+    subagentType: input.context?.subagentType,
     ...input.failureMetadata,
     durationMs: input.durationMs ?? undefined,
     error: input.error,
@@ -108,6 +111,7 @@ export function createSourceWeftToolObservabilityMiddleware(
           input: toolInput,
           metadata: {
             toolName,
+            subagent_type: input.context?.subagentType,
           },
         });
       }
@@ -155,12 +159,20 @@ export function createSourceWeftToolObservabilityMiddleware(
               : {}),
             metadata: {
               toolName,
+              subagent_type: input.context?.subagentType,
             },
           });
         }
 
         return result;
       } catch (error) {
+        // A LangGraph interrupt (e.g. `askUser` calling `interrupt()`, or a HITL
+        // approval gate) is a control-flow pause, not a tool failure. Re-raise
+        // it untouched so it is neither logged as `failed` nor closed as an
+        // error span — otherwise every pause is mis-recorded as a crash.
+        if (isGraphBubbleUp(error)) {
+          throw error;
+        }
         const latencyMs = Date.now() - startedAt;
         logAgentToolEvent(
           "error",
@@ -187,6 +199,7 @@ export function createSourceWeftToolObservabilityMiddleware(
               error instanceof Error ? error.message : String(error),
             metadata: {
               toolName,
+              subagent_type: input.context?.subagentType,
             },
           });
         }

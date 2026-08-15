@@ -447,6 +447,22 @@ export const config = {
         process.env.SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT,
         300,
       ),
+      // Expose purpose-built subagents (e.g. `researcher`) through the `task`
+      // tool. Off by default: the general-purpose delegate is always present;
+      // this adds named, tool-scoped delegates. Turning it off keeps only the
+      // explicitly governed general-purpose delegate.
+      subagentsEnabled: parseBoolean(
+        process.env.SOURCEWEFT_AGENT_SUBAGENTS_ENABLED,
+        false,
+      ),
+      // Proactive clarifying questions (Claude-Code-style `askUser`). Off by
+      // default until the frontend question panel ships; when on, the askUser
+      // middleware is added to the root graph only. See
+      // docs/architecture/proactive-ask-user.md.
+      askUserEnabled: parseBoolean(
+        process.env.SOURCEWEFT_AGENT_ASK_USER_ENABLED,
+        false,
+      ),
     },
   },
   sandbox: {
