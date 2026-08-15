@@ -638,10 +638,16 @@ export function commandResumeFromToolApprovalResume(
   // decisions list, not an interrupt-id-keyed map) — see the spike in
   // middleware/ask-user.spike.test.ts.
   if (resume.askUser) {
-    return {
+    const answer = {
       status: resume.askUser.status,
       ...(resume.askUser.answers ? { answers: resume.askUser.answers } : {}),
     };
+    // Key by the interrupt id when known so a question raised inside a sub-agent
+    // subgraph (or one of several parallel pending interrupts) resumes the right
+    // task. A bare value is only unambiguous with a single pending interrupt.
+    return resume.askUser.interruptId
+      ? { [resume.askUser.interruptId]: answer }
+      : answer;
   }
   const interruptId = resume.sourceweft?.hitlInterruptId;
   const commandResume = { decisions: resume.decisions };

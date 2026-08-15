@@ -817,13 +817,26 @@ export function ChatCanvas({
           // A question is not an approval: resume with an empty `decisions` and
           // the askUser answer. The contract's XOR refine requires exactly one
           // of the two to be populated.
+          // Echo the interrupt id so the backend keys Command.resume to the
+          // right pending interrupt (sub-agent / parallel questions).
+          const interruptId = item.question.interruptId;
           const toolApprovalResume: ToolApprovalResume =
             answer.status === "answered"
               ? {
                   decisions: [],
-                  askUser: { status: "answered", answers: answer.answers },
+                  askUser: {
+                    status: "answered",
+                    answers: answer.answers,
+                    ...(interruptId ? { interruptId } : {}),
+                  },
                 }
-              : { decisions: [], askUser: { status: "cancelled" } };
+              : {
+                  decisions: [],
+                  askUser: {
+                    status: "cancelled",
+                    ...(interruptId ? { interruptId } : {}),
+                  },
+                };
           onResumeToolConfirmation({
             approvalThreadRunId: item.threadRunId,
             assistantMessageId: item.assistantMessageId,

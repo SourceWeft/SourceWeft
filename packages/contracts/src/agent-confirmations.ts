@@ -90,6 +90,12 @@ export const toolApprovalResumeDecisionSchema = z.discriminatedUnion("type", [
 export const askUserResumeAnswerSchema = z.object({
   status: z.enum(["answered", "cancelled"]),
   answers: z.array(z.string()).optional(),
+  /**
+   * LangGraph interrupt id echoed from the question request. When present the
+   * resume is keyed by it (so a sub-agent / parallel interrupt resumes the right
+   * pending task); when absent the bare single-interrupt resume is used.
+   */
+  interruptId: z.string().min(1).optional(),
 });
 
 export const toolApprovalResumeSchema = z

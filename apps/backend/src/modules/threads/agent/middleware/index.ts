@@ -69,6 +69,10 @@ export function createSourceWeftSubagentMiddlewareStack(
   input: SourceWeftSubagentMiddlewareStackInput,
 ): AgentMiddleware[] {
   return [
+    // Sub-agents may also ask the user. The interrupt bubbles up to the parent
+    // graph's updates stream; the resume is keyed by interrupt id so it targets
+    // the correct nested/parallel task. Same flag as the root stack.
+    ...(config.chat.agent.askUserEnabled ? [createAskUserMiddleware()] : []),
     createSourceWeftToolObservabilityMiddleware({
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,

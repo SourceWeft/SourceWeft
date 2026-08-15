@@ -41,6 +41,7 @@ import {
 } from "../turn/ask-user-stream-handler";
 import { createTurnRuntime } from "../turn/turn-runtime";
 import type { DeepAgentTurnEvent } from "../turn/events";
+import { commandResumeFromToolApprovalResume } from "../turn/hitl-handler";
 
 /** Emits a scripted sequence of AI messages, one per model turn. */
 class ScriptedChatModel extends BaseChatModel {
@@ -267,6 +268,11 @@ test("handleAskUserStreamChunk emits the question request + parks with finishRea
   assert.equal(request.type, "user_question_request");
   assert.equal(request.toolCallId, "call_1");
   assert.equal(request.id, "askq:int_1:call_1");
+  assert.equal(
+    (request as { interruptId?: string }).interruptId,
+    "int_1",
+    "interrupt id must be echoed for sub-agent/parallel resume keying",
+  );
   assert.equal(request.questions[0]?.question, "Which format?");
 
   const done = events.find((e) => e.type === "done");
@@ -274,6 +280,25 @@ test("handleAskUserStreamChunk emits the question request + parks with finishRea
   assert.equal(done.outcome.finishReason, "user_question_requested");
   assert.equal(done.outcome.agentCheckpoint.resume?.checkpointId, "ckpt-1");
   assert.equal(result?.kind, "done");
+});
+
+test("commandResumeFromToolApprovalResume keys askUser resume by interrupt id", () => {
+  // With an interrupt id -> keyed map (targets a nested/parallel pending task).
+  assert.deepEqual(
+    commandResumeFromToolApprovalResume({
+      decisions: [],
+      askUser: { status: "answered", answers: ["PDF"], interruptId: "int_1" },
+    } as never),
+    { int_1: { status: "answered", answers: ["PDF"] } },
+  );
+  // Without one -> bare value (single pending interrupt).
+  assert.deepEqual(
+    commandResumeFromToolApprovalResume({
+      decisions: [],
+      askUser: { status: "cancelled" },
+    } as never),
+    { status: "cancelled" },
+  );
 });
 
 test("payloadHasAskUserInterrupt discriminates the interrupt shape", () => {

@@ -35,6 +35,13 @@ export const agentQuestionRequestSchema = z.object({
   id: z.string().min(1),
   /** Originating tool-call id of the askUser call. */
   toolCallId: z.string().min(1),
+  /**
+   * LangGraph interrupt id, when the runtime exposed one. The resume keys the
+   * `Command.resume` by this id so a question raised inside a sub-agent subgraph
+   * (or one of several parallel pending interrupts) resumes the right task
+   * rather than relying on a bare, single-interrupt resume.
+   */
+  interruptId: z.string().min(1).optional(),
   questions: z.array(agentQuestionItemSchema).min(1).max(4),
 });
 

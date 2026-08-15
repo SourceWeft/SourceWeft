@@ -144,6 +144,7 @@ export async function* handleAskUserStreamChunk(input: {
       schemaVersion: 1,
       id: requestId,
       toolCallId,
+      ...(interruptId ? { interruptId } : {}),
       questions: value.questions,
     };
     const input_ = { questions: value.questions } as Record<string, unknown>;
