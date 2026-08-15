@@ -273,6 +273,7 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      getOperationTimeline: async () => [],
       pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
@@ -323,6 +324,7 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      getOperationTimeline: async () => [],
       pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
@@ -401,6 +403,7 @@ Read this before creating slides.`;
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      getOperationTimeline: async () => [],
       pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });

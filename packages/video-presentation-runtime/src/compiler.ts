@@ -105,8 +105,7 @@ export async function compileSceneModuleOnBrowser(
   code: string,
   componentName: string,
 ) {
-  const babelPackageName = "@babel/standalone";
-  const babel = (await import(babelPackageName)) as BabelStandalone;
+  const babel = (await import("@babel/standalone")) as BabelStandalone;
   const transformed = babel.transform(code, {
     filename: `${componentName}.tsx`,
     presets: ["react", "typescript"],

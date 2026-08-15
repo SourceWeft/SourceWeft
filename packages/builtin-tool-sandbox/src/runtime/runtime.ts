@@ -1,6 +1,7 @@
 import type { BackendProtocolV2 } from "deepagents";
 import type {
   SandboxOperationStore,
+  SandboxOperationTimelineItem,
   SandboxProvider,
   SandboxProviderPathPolicy,
   SandboxRuntimeContext,
@@ -25,6 +26,7 @@ export interface SandboxRuntimeForTurn {
     sandboxPath: string;
   }): Promise<Buffer>;
   pathPolicy: SandboxProviderPathPolicy;
+  getOperationTimeline(): Promise<SandboxOperationTimelineItem[]>;
   tools: ReturnType<typeof createSandboxTools>;
   interruptOn: ReturnType<typeof createSandboxInterruptConfigs>;
 }
@@ -94,6 +96,12 @@ export function createSandboxRuntimeForTurn(input: {
   return {
     backend,
     pathPolicy: input.provider.pathPolicy,
+    async getOperationTimeline() {
+      return input.operationStore.listMessageOperations({
+        context: input.context,
+        limit: 50,
+      });
+    },
     async downloadFile(downloadInput) {
       const provider = manager.providerForSandbox();
       const sandboxPath = assertSandboxReadPath(

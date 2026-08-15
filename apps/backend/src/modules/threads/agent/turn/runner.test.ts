@@ -173,6 +173,117 @@ test("tool stream handler leaves generic tool logging to middleware", async () =
   }
 });
 
+test("tool stream handler attaches persisted sandbox operations on completion", async () => {
+  const prepared = createToolLoggingPreparedTurn();
+  const runtime = createTurnRuntime({ prepared });
+  const currentToolCall = {
+    id: "call-sandbox-execute",
+    tool: "execute",
+    input: { command: "printf done" },
+    output: null,
+    status: "running" as const,
+    latencyMs: null,
+    error: null,
+    sequence: 1,
+  };
+  const operations = [
+    {
+      operationType: "execute",
+      status: "succeeded",
+      durationMs: 12,
+      createdAt: "2026-08-16T08:00:00.000Z",
+      result: { exitCode: 0, outputChars: 4 },
+    },
+  ];
+  const getSandboxOperationTimeline = vi.fn(async () => operations);
+
+  const events = await collectToolStreamEvents(
+    handleToolEndStreamChunk({
+      prepared,
+      runtime,
+      getSandboxOperationTimeline,
+      snapshot: {
+        currentToolCall,
+        event: "on_tool_end",
+        normalizedInput: currentToolCall.input,
+        toolCallId: currentToolCall.id,
+        toolName: currentToolCall.tool,
+        toolPayload: {
+          output: { exitCode: 0, output: "done", truncated: false },
+        },
+      },
+    }),
+  );
+
+  assert.equal(getSandboxOperationTimeline.mock.calls.length, 1);
+  const resultEvent = events.find(
+    (event) => event.type === "tool-call-result",
+  );
+  const endEvent = events.find((event) => event.type === "tool-call-end");
+  const expectedOutput = {
+    exitCode: 0,
+    output: "done",
+    truncated: false,
+    operations,
+  };
+  assert.deepEqual(
+    resultEvent?.type === "tool-call-result" ? resultEvent.output : null,
+    expectedOutput,
+  );
+  assert.deepEqual(
+    endEvent?.type === "tool-call-end" ? endEvent.toolCall.output : null,
+    expectedOutput,
+  );
+});
+
+test("tool stream handler attaches persisted sandbox operations on errors", async () => {
+  const prepared = createToolLoggingPreparedTurn();
+  const runtime = createTurnRuntime({ prepared });
+  const currentToolCall = {
+    id: "call-sandbox-error",
+    tool: "execute",
+    input: { command: "false" },
+    output: null,
+    status: "running" as const,
+    latencyMs: null,
+    error: null,
+    sequence: 1,
+  };
+  const operations = [
+    {
+      operationType: "execute",
+      status: "failed",
+      durationMs: 8,
+      createdAt: "2026-08-16T08:00:00.000Z",
+      result: {},
+    },
+  ];
+
+  const events = await collectToolStreamEvents(
+    handleToolErrorStreamChunk({
+      prepared,
+      runtime,
+      getSandboxOperationTimeline: async () => operations,
+      snapshot: {
+        currentToolCall,
+        event: "on_tool_error",
+        normalizedInput: currentToolCall.input,
+        toolCallId: currentToolCall.id,
+        toolName: currentToolCall.tool,
+        toolPayload: { error: new Error("sandbox command failed") },
+      },
+    }),
+  );
+
+  const errorEvent = events.find((event) => event.type === "tool-call-error");
+  assert.deepEqual(
+    errorEvent?.type === "tool-call-error"
+      ? errorEvent.toolCall.output
+      : null,
+    { content: null, operations },
+  );
+});
+
 test("skill instruction read stream labels use selected skill display name", async () => {
   const prepared = {
     ...createToolLoggingPreparedTurn(),

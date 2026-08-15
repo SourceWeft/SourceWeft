@@ -440,6 +440,12 @@ export async function* invokeDeepAgentTurn(input: {
             runtime,
             snapshot: toolCallSnapshot,
             traceContext: input.traceContext,
+            ...(sandboxRuntime
+              ? {
+                  getSandboxOperationTimeline:
+                    sandboxRuntime.getOperationTimeline,
+                }
+              : {}),
           });
           continue;
         }
@@ -450,6 +456,12 @@ export async function* invokeDeepAgentTurn(input: {
             runtime,
             snapshot: toolCallSnapshot,
             traceContext: input.traceContext,
+            ...(sandboxRuntime
+              ? {
+                  getSandboxOperationTimeline:
+                    sandboxRuntime.getOperationTimeline,
+                }
+              : {}),
           });
         }
       }

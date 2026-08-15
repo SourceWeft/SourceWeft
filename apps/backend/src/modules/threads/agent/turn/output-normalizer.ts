@@ -923,6 +923,29 @@ export function normalizeToolOutputForObservability(
   return output;
 }
 
+export function isSandboxOperationTimelineTool(toolName: string) {
+  return (
+    toolName === AGENT_TOOL_NAMES.prepareSandboxWorkspace ||
+    toolName === AGENT_TOOL_NAMES.execute ||
+    toolName === AGENT_TOOL_NAMES.collectSandboxOutputs
+  );
+}
+
+export function appendSandboxOperationTimeline(
+  toolName: string,
+  output: unknown,
+  operations: readonly unknown[],
+) {
+  if (!isSandboxOperationTimelineTool(toolName) || operations.length === 0) {
+    return output;
+  }
+
+  const outputRecord = toObjectRecord(output);
+  return outputRecord
+    ? { ...outputRecord, operations: [...operations] }
+    : { content: output, operations: [...operations] };
+}
+
 function normalizeWebToolOutput(toolName: string, output: unknown) {
   if (!isAgentToolDomain(toolName, "web")) {
     return output;

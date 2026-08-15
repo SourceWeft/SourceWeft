@@ -194,7 +194,9 @@ test("capability-manifest.command runtime rejects sandbox artifact success crite
           },
         ],
       }),
-    /Invalid input/,
+    // zod's discriminated-union message wording varies across versions;
+    // the stable part is the rejected discriminator key.
+    /discriminator|Invalid input/,
   );
 });
 
