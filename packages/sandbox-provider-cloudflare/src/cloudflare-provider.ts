@@ -215,6 +215,14 @@ export async function* parseSseStream(
   }
 }
 
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * The deployed bridge (@cloudflare/sandbox 0.12.x) emits stdout/stderr `data:`
+ * payloads as the raw base64 of the chunk bytes (live-verified 2026-08-16).
+ * JSON shapes are kept as tolerance for other bridge versions, and anything
+ * that is neither strict base64 nor JSON passes through as plain text.
+ */
 export function extractSseText(data: string): string {
   if (!data) {
     return "";
@@ -234,7 +242,13 @@ export function extractSseText(data: string): string {
       return "";
     }
   } catch {
-    // Not JSON — the payload is the text itself.
+    // Not JSON — base64 or plain text.
+  }
+  if (data.length % 4 === 0 && BASE64_PATTERN.test(data)) {
+    const decoded = Buffer.from(data, "base64");
+    if (decoded.toString("base64") === data) {
+      return decoded.toString("utf8");
+    }
   }
   return data;
 }
@@ -475,9 +489,11 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         this.filePath(providerSandboxId, SOURCEWEFT_SANDBOX_STAMP_PATH),
       );
     } catch (error) {
+      // 404 = stamp file missing; 400 = the bridge rejected the sandbox id as
+      // format-invalid (live-verified), which means it cannot exist either way.
       if (
         error instanceof CloudflareBridgeHttpError &&
-        error.status === 404
+        (error.status === 404 || error.status === 400)
       ) {
         throw new Error(
           "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
