@@ -361,6 +361,58 @@ test("askUser pauses + resumes under the full stable production middleware set",
   assert.match(String(finalAi?.content), /deploying to staging/);
 });
 
+test("cancelled resume drives the run to a clean terminal state (no dangling)", async () => {
+  // A-5: dismissing a question (per-question Cancel, or a Stop that resumes as
+  // cancelled) must NOT strand the interrupt — the graph continues to completion
+  // with a `(cancelled)` tool result and finishes with no pending checkpoint.
+  const agent = buildAgent([
+    {
+      content: "",
+      toolCalls: [
+        {
+          id: "call_1",
+          name: ASK_USER_TOOL_NAME,
+          args: { questions: [{ question: "Which region?", type: "text" }] },
+        },
+      ],
+    },
+    { content: "no problem, standing by" },
+  ]);
+  const config = CONFIG();
+
+  await drain(
+    (await agent.stream({ messages: [{ role: "user", content: "deploy" }] }, {
+      ...config,
+      streamMode: "values",
+    })) as AsyncGenerator<unknown>,
+  );
+
+  const resumed = await drain(
+    (await agent.stream(new Command({ resume: { status: "cancelled" } }), {
+      ...config,
+      streamMode: "values",
+    })) as AsyncGenerator<unknown>,
+  );
+
+  const lastState = resumed.at(-1) as { messages?: BaseMessage[] } | undefined;
+  const messages = lastState?.messages ?? [];
+  const toolMessage = messages.find(
+    (m): m is ToolMessage =>
+      m instanceof ToolMessage && m.name === ASK_USER_TOOL_NAME,
+  );
+  assert.ok(toolMessage);
+  assert.match(String(toolMessage.content), /A: \(cancelled\)/);
+  assert.equal(toolMessage.status, "success");
+  // Run reached a normal terminal message — the checkpoint is not left pending.
+  assert.match(String(messages.at(-1)?.content), /standing by/);
+  const state = await agent.getState(config);
+  assert.equal(
+    (state as { next?: unknown[] }).next?.length ?? 0,
+    0,
+    "no pending tasks after a cancelled resume",
+  );
+});
+
 test("payloadHasAskUserInterrupt discriminates the interrupt shape", () => {
   assert.equal(
     payloadHasAskUserInterrupt({ __interrupt__: [{ value: { type: "ask_user" } }] }),
