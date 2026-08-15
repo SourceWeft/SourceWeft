@@ -16,18 +16,34 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
-    "prettier": "^3.6.0",
-    "prettier-plugin-tailwindcss": "^0.7.1",
-    "sharp": "^0.34.5",
-    "turbo": "^2.8.20"
+    "prettier": "^3.9.6",
+    "prettier-plugin-tailwindcss": "^0.7.4",
+    "sharp": "^0.35.3",
+    "turbo": "^2.10.9"
   },
   "packageManager": "pnpm@10.19.0",
   "pnpm": {
     "overrides": {
-      "fast-uri": "^3.1.5"
+      "fast-uri": "^3.1.5",
+      "axios": "^1.19.0",
+      "protobufjs@8": "^8.4.1",
+      "shell-quote": "^1.10.0",
+      "tmp": "^0.2.6",
+      "lodash": "^4.18.1",
+      "adm-zip": "^0.6.0",
+      "next>sharp": "^0.35.3",
+      "next>postcss": "^8.5.26",
+      "officeparser": "^7.5.1",
+      "pdfjs-dist": "^6.2.108",
+      "node-notifier>uuid": "^11.1.1",
+      "undici@5": "^6.28.0",
+      "shiki@4": "4.0.2",
+      "@opentelemetry/propagator-jaeger": "^2.9.0"
     },
     "peerDependencyRules": {
       "allowedVersions": {
+        "@better-auth/api-key>better-call": "2",
+        "@langchain/community>officeparser": "7",
         "@better-auth/core>better-call": "2",
         "@better-auth/passkey>better-call": "2",
         "@better-auth/oauth-provider>better-call": "2",

@@ -18,14 +18,14 @@ import type {
   AgentToolTurnPreflight,
   AgentToolTurnSelection,
 } from "@sourceweft/contracts/agent-tools";
-import { filesystemAgentToolDefs } from "@sourceweft/builtin-vfs";
-import { webAgentToolDefs } from "@sourceweft/builtin-tool-web-search";
-import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox";
-import { retrievalAgentToolDefs } from "@sourceweft/builtin-retrieval";
-import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-image";
-import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact";
-import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation";
-import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck";
+import { filesystemAgentToolDefs } from "@sourceweft/builtin-vfs/agent-tool-defs";
+import { webAgentToolDefs } from "@sourceweft/builtin-tool-web-search/agent-tool-defs";
+import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox/agent-tool-defs";
+import { retrievalAgentToolDefs } from "@sourceweft/builtin-retrieval/agent-tool-defs";
+import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-image/agent-tool-defs";
+import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact/agent-tool-defs";
+import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
+import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck/agent-tool-defs";
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 
 /**
@@ -52,6 +52,9 @@ export const askUserAgentTool = defineAgentTool({
   riskLevel: "low",
 });
 
+/** Tools implemented by the host agent stack rather than a capability package. */
+export const LOCAL_AGENT_TOOLS = [askUserAgentTool] as const;
+
 export const AGENT_TOOLS = [
   ...filesystemAgentToolDefs,
   ...generateImageAgentToolDefs,
@@ -61,7 +64,7 @@ export const AGENT_TOOLS = [
   ...generateVideoPresentationAgentToolDefs,
   ...pptDeckAgentToolDefs,
   ...sandboxAgentToolDefs,
-  askUserAgentTool,
+  ...LOCAL_AGENT_TOOLS,
 ] as const;
 
 export type AgentToolDefinition = (typeof AGENT_TOOLS)[number];
@@ -96,9 +99,7 @@ const registeredTools: AgentToolDefinitionShape[] = [];
  * {@link package-adapters.ts}).  Idempotent — re-registering the same tool
  * name is a no-op.
  */
-export function registerAgentTools(
-  tools: readonly AgentToolDefinitionShape[],
-) {
+export function registerAgentTools(tools: readonly AgentToolDefinitionShape[]) {
   for (const tool of tools) {
     if (getAgentToolDefinition(tool.name)) continue;
     registeredTools.push(tool);
@@ -111,13 +112,17 @@ function allAgentTools(): readonly AgentToolDefinitionShape[] {
 }
 
 export function isAgentToolName(value: string): value is AgentToolName {
-  return value in AGENT_TOOL_REGISTRY || registeredTools.some((t) => t.name === value);
+  return (
+    value in AGENT_TOOL_REGISTRY ||
+    registeredTools.some((t) => t.name === value)
+  );
 }
 
 export function getAgentToolDefinition(
   name: string,
 ): AgentToolDefinitionShape | null {
-  if (name in AGENT_TOOL_REGISTRY) return AGENT_TOOL_REGISTRY[name as AgentToolName];
+  if (name in AGENT_TOOL_REGISTRY)
+    return AGENT_TOOL_REGISTRY[name as AgentToolName];
   return registeredTools.find((t) => t.name === name) ?? null;
 }
 
@@ -158,7 +163,10 @@ export function getAgentToolSlashCommand(
 }
 
 export function isConfigurableAgentTool(value: string) {
-  return getAgentToolConfiguration(getAgentToolDefinition(value))?.configurable === true;
+  return (
+    getAgentToolConfiguration(getAgentToolDefinition(value))?.configurable ===
+    true
+  );
 }
 
 export function hasAgentToolCapability(
@@ -166,8 +174,7 @@ export function hasAgentToolCapability(
   capability: AgentToolCapability,
 ): value is AgentToolName {
   const capabilities = getAgentToolDefinition(value)?.capabilities as
-    | readonly AgentToolCapability[]
-    | undefined;
+    readonly AgentToolCapability[] | undefined;
   return capabilities?.includes(capability) === true;
 }
 
@@ -260,7 +267,9 @@ export function getAgentToolConnectorType(toolName: string): string | null {
 }
 
 export function getAgentToolConfigKeys(value: string): readonly string[] {
-  return getAgentToolConfiguration(getAgentToolDefinition(value))?.configKeys ?? [];
+  return (
+    getAgentToolConfiguration(getAgentToolDefinition(value))?.configKeys ?? []
+  );
 }
 
 /**
@@ -274,7 +283,9 @@ export function getArtifactProgressProtocol(
   if (!tool || !("artifactProgress" in tool)) {
     return null;
   }
-  return (tool.artifactProgress as ArtifactProgressProtocol | undefined) ?? null;
+  return (
+    (tool.artifactProgress as ArtifactProgressProtocol | undefined) ?? null
+  );
 }
 
 export type {
@@ -402,7 +413,9 @@ export function agentToolTurnSelections(): readonly {
   readonly turnSelection: AgentToolTurnSelection;
 }[] {
   return allAgentTools().flatMap((tool) =>
-    tool.turnSelection ? [{ name: tool.name, turnSelection: tool.turnSelection }] : [],
+    tool.turnSelection
+      ? [{ name: tool.name, turnSelection: tool.turnSelection }]
+      : [],
   );
 }
 
@@ -451,8 +464,7 @@ export function agentToolModelCatalogAnnotations(
   modelKind: string,
 ): readonly AgentToolModelCatalogAnnotation[] {
   return allAgentTools().flatMap((tool) =>
-    tool.modelCatalog &&
-    getAgentToolRequirements(tool)?.modelKind === modelKind
+    tool.modelCatalog && getAgentToolRequirements(tool)?.modelKind === modelKind
       ? [tool.modelCatalog]
       : [],
   );

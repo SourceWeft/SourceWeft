@@ -68,6 +68,8 @@ import {
   isSandboxToolResultFailure,
 } from "./sandbox-tool-result-display";
 import type { SandboxToolOperationTimelineItem } from "./sandbox-tool-result-display";
+import { DelegateToolCard } from "./delegate-tool-card";
+import { isDelegateToolName } from "./delegate-tool-card-state";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
   ThinkingStepRecord,
@@ -309,17 +311,7 @@ function SandboxOperationTimeline({
   );
 }
 
-export function AssistantToolCard({
-  artifactStatuses,
-  children,
-  contentClassName,
-  defaultOpen,
-  onWorkfileClick,
-  resolvedConfirmations = [],
-  toolCall,
-  toolStep,
-  workspaceId,
-}: {
+export type AssistantToolCardProps = {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   children?: ReactNode;
   contentClassName?: string;
@@ -329,7 +321,26 @@ export function AssistantToolCard({
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
   workspaceId?: string | null;
-}) {
+};
+
+export function AssistantToolCard(props: AssistantToolCardProps) {
+  if (isDelegateToolName(props.toolCall.tool)) {
+    return <DelegateToolCard toolCall={props.toolCall} />;
+  }
+  return <GenericAssistantToolCard {...props} />;
+}
+
+function GenericAssistantToolCard({
+  artifactStatuses,
+  children,
+  contentClassName,
+  defaultOpen,
+  onWorkfileClick,
+  resolvedConfirmations = [],
+  toolCall,
+  toolStep,
+  workspaceId,
+}: AssistantToolCardProps) {
   const confirmation = getToolConfirmationOutput(toolCall.output);
   const confirmationResolution = confirmation
     ? resolvedConfirmations.find(

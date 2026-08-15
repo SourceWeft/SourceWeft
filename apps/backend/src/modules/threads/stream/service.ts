@@ -1411,7 +1411,10 @@ class ContentThreadStreamService {
             availableCitations = event.availableCitations ?? event.citations;
           }
 
-          yield mapDeepAgentEventToSse(event, textId);
+          const sse = mapDeepAgentEventToSse(event, textId);
+          if (sse !== null) {
+            yield sse;
+          }
           yield* emitTitleUpdates();
         }
 

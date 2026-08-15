@@ -10,6 +10,7 @@ import type {
   ReadResult,
   WriteResult,
 } from "deepagents";
+import { applyGrepMaxCount } from "deepagents";
 import type { AgentCitationRegistry } from "./citation-registry";
 import {
   KB_READ_FILE_DEFAULT_LINE_LIMIT,
@@ -53,7 +54,10 @@ const MAX_GREP_REGEX_FALLBACK_CHUNKS = 300;
 const MAX_GREP_FALLBACK_CHUNKS = 120;
 const MAX_GREP_RECALL_TERMS = 8;
 
-export function normalizeGrepGlobPattern(glob: string | null | undefined, path: string | null | undefined) {
+export function normalizeGrepGlobPattern(
+  glob: string | null | undefined,
+  path: string | null | undefined,
+) {
   if (!glob || glob.trim().length === 0) {
     return "**";
   }
@@ -71,7 +75,10 @@ export function normalizeGrepGlobPattern(glob: string | null | undefined, path: 
   return `${base}/${trimmed}`.replace(/\/+/g, "/");
 }
 
-export function buildGrepGlobMatcher(glob: string | null | undefined, path: string | null | undefined) {
+export function buildGrepGlobMatcher(
+  glob: string | null | undefined,
+  path: string | null | undefined,
+) {
   return simpleGlobToRegExp(normalizeGrepGlobPattern(glob, path));
 }
 
@@ -117,27 +124,48 @@ function buildSourceHeader(source: VirtualFsSource) {
   const originalFile = source.fileName?.trim() || source.title;
   return [
     `Source: ${source.title}`,
-    source.sourceType === "directory" ? "Library entry: directory README" : null,
+    source.sourceType === "directory"
+      ? "Library entry: directory README"
+      : null,
     originalFile ? `Original file: ${originalFile}` : null,
     source.mimeType ? `Original MIME: ${source.mimeType}` : null,
     "Virtual MIME: text/markdown",
   ].filter((line): line is string => line !== null);
 }
 
-function buildCandidatePaths(sources: VirtualFsSource[], includeChunks: boolean) {
+function buildCandidatePaths(
+  sources: VirtualFsSource[],
+  includeChunks: boolean,
+) {
   const paths: FileInfo[] = [];
   for (const source of sources) {
     const modifiedAt = formatTimestamp(source.updatedAt);
-    paths.push({ path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt });
+    paths.push({
+      path: `${source.dirPath}/`,
+      is_dir: true,
+      modified_at: modifiedAt,
+    });
     if (source.readmePath) {
-      paths.push({ path: source.readmePath, is_dir: false, modified_at: modifiedAt });
+      paths.push({
+        path: source.readmePath,
+        is_dir: false,
+        modified_at: modifiedAt,
+      });
     }
     if (source.filePath) {
-      paths.push({ path: source.filePath, is_dir: false, modified_at: modifiedAt });
+      paths.push({
+        path: source.filePath,
+        is_dir: false,
+        modified_at: modifiedAt,
+      });
     }
     if (includeChunks) {
       for (let chunkNo = 0; chunkNo < source.chunkCount; chunkNo += 1) {
-        paths.push({ path: buildChunkFilePath(source, chunkNo), is_dir: false, modified_at: modifiedAt });
+        paths.push({
+          path: buildChunkFilePath(source, chunkNo),
+          is_dir: false,
+          modified_at: modifiedAt,
+        });
       }
     }
   }
@@ -157,12 +185,14 @@ function appendRegexMatches(input: {
   citationRegistry: AgentCitationRegistry;
 }) {
   const chunkPath = buildChunkFilePath(input.source, input.chunkNo);
-  if (!matchesGrepGlob({
-    glob: input.glob,
-    globMatcher: input.globMatcher,
-    sourceFilePath: input.source.filePath,
-    chunkPath,
-  })) {
+  if (
+    !matchesGrepGlob({
+      glob: input.glob,
+      globMatcher: input.globMatcher,
+      sourceFilePath: input.source.filePath,
+      chunkPath,
+    })
+  ) {
     return;
   }
 
@@ -247,7 +277,9 @@ export function lineForOffset(lineStartOffsets: number[], offset: number) {
 }
 
 function boundedReadLineLimit(limit: number) {
-  const requestedLimit = Number.isFinite(limit) ? Math.floor(limit) : DEFAULT_READ_LINE_LIMIT;
+  const requestedLimit = Number.isFinite(limit)
+    ? Math.floor(limit)
+    : DEFAULT_READ_LINE_LIMIT;
   return Math.max(1, Math.min(requestedLimit, MAX_READ_LINE_LIMIT));
 }
 
@@ -277,15 +309,21 @@ export function paginateSourceContent(
   }
 
   if (boundedOffset >= totalLines) {
-    throw new Error(`Line offset ${offset} exceeds file length (${totalLines} lines)`);
+    throw new Error(
+      `Line offset ${offset} exceeds file length (${totalLines} lines)`,
+    );
   }
 
   const startLineIndex = boundedOffset;
-  let endLineIndexExclusive = Math.min(totalLines, boundedOffset + boundedLimit);
+  let endLineIndexExclusive = Math.min(
+    totalLines,
+    boundedOffset + boundedLimit,
+  );
   const pageStartOffset = lineStartOffsets[startLineIndex] ?? 0;
-  let pageEndOffset = endLineIndexExclusive < totalLines
-    ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
-    : content.length;
+  let pageEndOffset =
+    endLineIndexExclusive < totalLines
+      ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
+      : content.length;
   let truncated = endLineIndexExclusive < totalLines;
 
   if (pageEndOffset - pageStartOffset > maxChars) {
@@ -298,14 +336,18 @@ export function paginateSourceContent(
       charBoundedEndLine += 1;
     }
     endLineIndexExclusive = Math.max(startLineIndex + 1, charBoundedEndLine);
-    pageEndOffset = endLineIndexExclusive < totalLines
-      ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
-      : content.length;
+    pageEndOffset =
+      endLineIndexExclusive < totalLines
+        ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
+        : content.length;
     truncated = true;
   }
 
   return {
-    text: content.slice(pageStartOffset, pageEndOffset).replace(/\r\n?/g, "\n").replace(/\n$/, ""),
+    text: content
+      .slice(pageStartOffset, pageEndOffset)
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n$/, ""),
     startLine: startLineIndex + 1,
     endLine: endLineIndexExclusive,
     totalLines,
@@ -332,27 +374,41 @@ export function addInlineSourceMarkers(input: {
 
   const markersByLine = new Map<number, string[]>();
   for (const item of input.citations) {
-    const offset = typeof item.chunk.startOffset === "number" ? item.chunk.startOffset : 0;
-    const line = Math.max(input.startLine, lineForOffset(input.lineStartOffsets, offset));
-    const lineIndex = Math.min(lines.length - 1, Math.max(0, line - input.startLine));
+    const offset =
+      typeof item.chunk.startOffset === "number" ? item.chunk.startOffset : 0;
+    const line = Math.max(
+      input.startLine,
+      lineForOffset(input.lineStartOffsets, offset),
+    );
+    const lineIndex = Math.min(
+      lines.length - 1,
+      Math.max(0, line - input.startLine),
+    );
     const markers = markersByLine.get(lineIndex) ?? [];
     markers.push(`[citation:${item.citation}]`);
     markersByLine.set(lineIndex, markers);
   }
 
-  for (const [lineIndex, markers] of [...markersByLine.entries()].sort((a, b) => a[0] - b[0])) {
-    lines[lineIndex] = `${lines[lineIndex]} ${Array.from(new Set(markers)).join(" ")}`;
+  for (const [lineIndex, markers] of [...markersByLine.entries()].sort(
+    (a, b) => a[0] - b[0],
+  )) {
+    lines[lineIndex] =
+      `${lines[lineIndex]} ${Array.from(new Set(markers)).join(" ")}`;
   }
 
   if (input.nextOffset !== null) {
     const lastIndex = lines.length - 1;
-    lines[lastIndex] = `${lines[lastIndex]} [Output truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(file_path: "${input.sourcePath}", offset: ${input.nextOffset}, limit: ${input.limit}).]`;
+    lines[lastIndex] =
+      `${lines[lastIndex]} [Output truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(file_path: "${input.sourcePath}", offset: ${input.nextOffset}, limit: ${input.limit}).]`;
   }
 
   return lines.join("\n");
 }
 
-function listDirectChildren(sources: VirtualFsSource[], parentSourceId: string | null) {
+function listDirectChildren(
+  sources: VirtualFsSource[],
+  parentSourceId: string | null,
+) {
   return sources.filter((source) => source.parentSourceId === parentSourceId);
 }
 
@@ -364,7 +420,11 @@ function listDescendantSources(sources: VirtualFsSource[], sourceId: string) {
   while (frontier.length > 0) {
     const next: string[] = [];
     for (const source of sources) {
-      if (!source.parentSourceId || !frontier.includes(source.parentSourceId) || visited.has(source.sourceId)) {
+      if (
+        !source.parentSourceId ||
+        !frontier.includes(source.parentSourceId) ||
+        visited.has(source.sourceId)
+      ) {
         continue;
       }
       visited.add(source.sourceId);
@@ -380,7 +440,11 @@ function listDescendantSources(sources: VirtualFsSource[], sourceId: string) {
 function buildTreeEntry(source: VirtualFsSource): FileInfo {
   const modifiedAt = formatTimestamp(source.updatedAt);
   if (source.sourceType === "directory") {
-    return { path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt };
+    return {
+      path: `${source.dirPath}/`,
+      is_dir: true,
+      modified_at: modifiedAt,
+    };
   }
   return {
     path: source.filePath ?? source.dirPath,
@@ -431,7 +495,9 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             modified_at: formatTimestamp(source.updatedAt),
           });
         }
-        files.push(...listDirectChildren(sources, source.sourceId).map(buildTreeEntry));
+        files.push(
+          ...listDirectChildren(sources, source.sourceId).map(buildTreeEntry),
+        );
         return { files };
       }
       if (target.kind === "sourceChunksDir") {
@@ -444,7 +510,9 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           })),
         };
       }
-      return { error: `ENOTDIR: not a directory, ls '${normalizeVirtualPath(path)}'` };
+      return {
+        error: `ENOTDIR: not a directory, ls '${normalizeVirtualPath(path)}'`,
+      };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
@@ -454,20 +522,30 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
     try {
       const sources = await this.sources();
       const base = normalizeVirtualPath(path);
-      const normalizedPattern = pattern.startsWith("/") ? pattern : `${base}/${pattern}`.replace(/\/+/g, "/");
-      const includeChunks = normalizedPattern.includes("chunks") || normalizedPattern.includes("**");
+      const normalizedPattern = pattern.startsWith("/")
+        ? pattern
+        : `${base}/${pattern}`.replace(/\/+/g, "/");
+      const includeChunks =
+        normalizedPattern.includes("chunks") ||
+        normalizedPattern.includes("**");
       const matcher = simpleGlobToRegExp(normalizedPattern);
+      const files = buildCandidatePaths(sources, includeChunks).filter(
+        (candidate) => matcher.test(candidate.path),
+      );
       return {
-        files: buildCandidatePaths(sources, includeChunks)
-          .filter((candidate) => matcher.test(candidate.path))
-          .slice(0, MAX_GLOB_RESULTS),
+        files: files.slice(0, MAX_GLOB_RESULTS),
+        ...(files.length > MAX_GLOB_RESULTS ? { truncated: true } : {}),
       };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  async read(filePath: string, offset = 0, limit = DEFAULT_READ_LINE_LIMIT): Promise<ReadResult> {
+  async read(
+    filePath: string,
+    offset = 0,
+    limit = DEFAULT_READ_LINE_LIMIT,
+  ): Promise<ReadResult> {
     try {
       const sources = await this.sources();
       const target = parseVirtualPath(filePath, sources);
@@ -480,7 +558,9 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           chunkNo: target.chunkNo,
         });
         if (!chunk) {
-          return { error: `ENOENT: no such chunk, ${AGENT_TOOL_NAMES.readFile} '${filePath}'` };
+          return {
+            error: `ENOENT: no such chunk, ${AGENT_TOOL_NAMES.readFile} '${filePath}'`,
+          };
         }
         const citation = this.input.citationRegistry.addChunk({
           origin: AGENT_TOOL_NAMES.readFile,
@@ -509,7 +589,10 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         };
       }
 
-      if (target.kind === "sourceFile" || target.kind === "libraryDirectoryReadme") {
+      if (
+        target.kind === "sourceFile" ||
+        target.kind === "libraryDirectoryReadme"
+      ) {
         const source = findVirtualSource(sources, target.sourceId);
         const document = await getVirtualFsDocument({
           teamId: this.input.teamId,
@@ -530,49 +613,56 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               ].join("\n"),
             };
           }
-          return { error: `ENOENT: no readable content, ${AGENT_TOOL_NAMES.readFile} '${filePath}'` };
+          return {
+            error: `ENOENT: no readable content, ${AGENT_TOOL_NAMES.readFile} '${filePath}'`,
+          };
         }
 
         let page: PaginatedSourceContent;
         try {
           page = paginateSourceContent(content, offset, limit);
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) };
+          return {
+            error: error instanceof Error ? error.message : String(error),
+          };
         }
 
         const lineStartOffsets = computeLineStartOffsets(content);
-        const visibleChunks = page.pageEndOffset > page.pageStartOffset
-          ? await listVirtualFsChunksForSpan({
-              teamId: this.input.teamId,
-              workspaceId: this.input.workspaceId,
-              sourceId: target.sourceId,
-              startOffset: page.pageStartOffset,
-              endOffset: page.pageEndOffset,
-              limit: MAX_READ_VISIBLE_CITATIONS,
-            })
-          : [];
-        const citations = [...visibleChunks].sort((a, b) => {
-          const left = a.startOffset ?? Number.MAX_SAFE_INTEGER;
-          const right = b.startOffset ?? Number.MAX_SAFE_INTEGER;
-          return left - right || a.chunkNo - b.chunkNo;
-        }).map((chunk) => {
-          const chunkPath = buildChunkFilePath(source, chunk.chunkNo);
-          const citation = this.input.citationRegistry.addChunk({
-            origin: AGENT_TOOL_NAMES.readFile,
-            sourceId: chunk.sourceId,
-            sourceTitle: chunk.sourceTitle,
-            documentId: chunk.documentId,
-            chunkId: chunk.chunkId,
-            chunkNo: chunk.chunkNo,
-            content: chunk.content,
-            score: 1,
-            path: chunkPath,
+        const visibleChunks =
+          page.pageEndOffset > page.pageStartOffset
+            ? await listVirtualFsChunksForSpan({
+                teamId: this.input.teamId,
+                workspaceId: this.input.workspaceId,
+                sourceId: target.sourceId,
+                startOffset: page.pageStartOffset,
+                endOffset: page.pageEndOffset,
+                limit: MAX_READ_VISIBLE_CITATIONS,
+              })
+            : [];
+        const citations = [...visibleChunks]
+          .sort((a, b) => {
+            const left = a.startOffset ?? Number.MAX_SAFE_INTEGER;
+            const right = b.startOffset ?? Number.MAX_SAFE_INTEGER;
+            return left - right || a.chunkNo - b.chunkNo;
+          })
+          .map((chunk) => {
+            const chunkPath = buildChunkFilePath(source, chunk.chunkNo);
+            const citation = this.input.citationRegistry.addChunk({
+              origin: AGENT_TOOL_NAMES.readFile,
+              sourceId: chunk.sourceId,
+              sourceTitle: chunk.sourceTitle,
+              documentId: chunk.documentId,
+              chunkId: chunk.chunkId,
+              chunkNo: chunk.chunkNo,
+              content: chunk.content,
+              score: 1,
+              path: chunkPath,
+            });
+            return {
+              chunk,
+              citation: citation.citation,
+            };
           });
-          return {
-            chunk,
-            citation: citation.citation,
-          };
-        });
         const pageText = addInlineSourceMarkers({
           text: page.text,
           startLine: page.startLine,
@@ -588,7 +678,9 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         };
       }
 
-      return { error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalizeVirtualPath(filePath)}'` };
+      return {
+        error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalizeVirtualPath(filePath)}'`,
+      };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
@@ -604,7 +696,12 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
     }
   }
 
-  async grep(pattern: string, path: string | null = "/kb", glob?: string | null): Promise<GrepResult> {
+  async grep(
+    pattern: string,
+    path: string | null = "/kb",
+    glob?: string | null,
+    maxCount?: number | null,
+  ): Promise<GrepResult> {
     const startedAt = Date.now();
     const logContext = {
       teamId: this.input.teamId,
@@ -649,12 +746,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           });
           return { error: `ENOENT: no such chunk, grep '${path}'` };
         }
-        if (matchesGrepGlob({
-          glob,
-          globMatcher: matcher,
-          sourceFilePath: source.filePath,
-          chunkPath: buildChunkFilePath(source, chunk.chunkNo),
-        })) {
+        if (
+          matchesGrepGlob({
+            glob,
+            globMatcher: matcher,
+            sourceFilePath: source.filePath,
+            chunkPath: buildChunkFilePath(source, chunk.chunkNo),
+          })
+        ) {
           globMatchedChunkCount += 1;
         }
         appendRegexMatches({
@@ -679,7 +778,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           truncated: matches.length >= MAX_GREP_RESULTS,
           latencyMs: Date.now() - startedAt,
         });
-        return { matches };
+        return applyGrepMaxCount({
+          result: {
+            matches,
+            ...(matches.length >= MAX_GREP_RESULTS ? { truncated: true } : {}),
+          },
+          maxCount,
+        });
       }
 
       const targetSources = (() => {
@@ -711,12 +816,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             limit: source.chunkCount,
           });
           for (const chunk of chunks) {
-            if (matchesGrepGlob({
-              glob,
-              globMatcher: matcher,
-              sourceFilePath: source.filePath,
-              chunkPath: buildChunkFilePath(source, chunk.chunkNo),
-            })) {
+            if (
+              matchesGrepGlob({
+                glob,
+                globMatcher: matcher,
+                sourceFilePath: source.filePath,
+                chunkPath: buildChunkFilePath(source, chunk.chunkNo),
+              })
+            ) {
               globMatchedChunkCount += 1;
             }
             appendRegexMatches({
@@ -749,7 +856,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           truncated: matches.length >= MAX_GREP_RESULTS,
           latencyMs: Date.now() - startedAt,
         });
-        return { matches };
+        return applyGrepMaxCount({
+          result: {
+            matches,
+            ...(matches.length >= MAX_GREP_RESULTS ? { truncated: true } : {}),
+          },
+          maxCount,
+        });
       }
 
       const recallTerms = extractSearchTermsForRegex(pattern);
@@ -774,16 +887,20 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
       });
 
       for (const candidate of candidates) {
-        const source = sources.find((item) => item.sourceId === candidate.sourceId);
+        const source = sources.find(
+          (item) => item.sourceId === candidate.sourceId,
+        );
         if (!source) {
           continue;
         }
-        if (matchesGrepGlob({
-          glob,
-          globMatcher: matcher,
-          sourceFilePath: source.filePath,
-          chunkPath: buildChunkFilePath(source, candidate.chunkNo),
-        })) {
+        if (
+          matchesGrepGlob({
+            glob,
+            globMatcher: matcher,
+            sourceFilePath: source.filePath,
+            chunkPath: buildChunkFilePath(source, candidate.chunkNo),
+          })
+        ) {
           globMatchedChunkCount += 1;
         }
         appendRegexMatches({
@@ -822,16 +939,20 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         });
 
         for (const candidate of regexCandidates) {
-          const source = sources.find((item) => item.sourceId === candidate.sourceId);
+          const source = sources.find(
+            (item) => item.sourceId === candidate.sourceId,
+          );
           if (!source) {
             continue;
           }
-          if (matchesGrepGlob({
-            glob,
-            globMatcher: matcher,
-            sourceFilePath: source.filePath,
-            chunkPath: buildChunkFilePath(source, candidate.chunkNo),
-          })) {
+          if (
+            matchesGrepGlob({
+              glob,
+              globMatcher: matcher,
+              sourceFilePath: source.filePath,
+              chunkPath: buildChunkFilePath(source, candidate.chunkNo),
+            })
+          ) {
             globMatchedChunkCount += 1;
           }
           appendRegexMatches({
@@ -864,7 +985,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         truncated: matches.length >= MAX_GREP_RESULTS,
         latencyMs: Date.now() - startedAt,
       });
-      return { matches };
+      return applyGrepMaxCount({
+        result: {
+          matches,
+          ...(matches.length >= MAX_GREP_RESULTS ? { truncated: true } : {}),
+        },
+        maxCount,
+      });
     } catch (error) {
       logger.error("Database knowledge grep failed", {
         ...logContext,
@@ -876,10 +1003,19 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
   }
 
   async write(filePath: string, _content: string): Promise<WriteResult> {
-    return { error: `EROFS: /kb is a read-only database-backed filesystem, write '${filePath}' is not allowed` };
+    return {
+      error: `EROFS: /kb is a read-only database-backed filesystem, write '${filePath}' is not allowed`,
+    };
   }
 
-  async edit(filePath: string, _oldString: string, _newString: string, _replaceAll?: boolean): Promise<EditResult> {
-    return { error: `EROFS: /kb is a read-only database-backed filesystem, edit '${filePath}' is not allowed` };
+  async edit(
+    filePath: string,
+    _oldString: string,
+    _newString: string,
+    _replaceAll?: boolean,
+  ): Promise<EditResult> {
+    return {
+      error: `EROFS: /kb is a read-only database-backed filesystem, edit '${filePath}' is not allowed`,
+    };
   }
 }

@@ -442,26 +442,30 @@ export async function upsertWorkspaceMcpTools(input: {
   workspaceId: string;
   installId: string;
   serverSlug: string;
-  tools: MarketMcpToolManifest[];
+  tools: Array<MarketMcpToolManifest & { normalizedToolName?: string }>;
   /**
-   * When true, an existing tool row keeps its richer metadata (title,
-   * inputSchema, outputSchema, annotations, risk) instead of being overwritten.
-   * Used by connection tests, which only confirm a tool still exists and have
-   * no schema/risk of their own — overwriting would downgrade signed-manifest
-   * tools to risk:"unknown" with an empty schema.
+   * When true, live discovery refreshes the server-owned name, description,
+   * input schema, and annotations while preserving catalog-owned output schema
+   * and risk. This prevents an unsigned server response from downgrading a
+   * verified catalog risk classification.
    */
   preserveExistingMetadata?: boolean;
 }) {
   for (const tool of input.tools) {
-    const normalizedToolName = normalizedMcpToolName({
-      serverSlug: input.serverSlug,
-      toolName: tool.name,
-    });
+    const normalizedToolName =
+      tool.normalizedToolName ??
+      normalizedMcpToolName({
+        serverSlug: input.serverSlug,
+        toolName: tool.name,
+      });
     const lastDiscoveredHash = hashJson(tool);
     const conflictSet = input.preserveExistingMetadata
       ? {
           normalizedToolName,
+          title: tool.title ?? null,
           description: tool.description ?? null,
+          inputSchema: tool.inputSchema ?? {},
+          annotations: tool.annotations ?? {},
           lastDiscoveredHash,
           updatedAt: new Date(),
         }
@@ -695,7 +699,9 @@ export async function listUserCredentialInstallIds(input: {
  * points at (confused-deputy). Mirrors deleteMcpOAuthSessionsForInstall; users
  * re-enter credentials against the new endpoint.
  */
-export async function deleteWorkspaceMcpCredentialsForInstall(installId: string) {
+export async function deleteWorkspaceMcpCredentialsForInstall(
+  installId: string,
+) {
   await db
     .delete(workspaceMcpCredentials)
     .where(eq(workspaceMcpCredentials.installId, installId));
@@ -808,12 +814,14 @@ export async function updateMcpActionRun(input: {
   };
   if (input.status !== undefined) updates.status = input.status;
   if (input.requestJson !== undefined) updates.requestJson = input.requestJson;
-  if (input.requestPreview !== undefined) updates.requestPreview = input.requestPreview;
+  if (input.requestPreview !== undefined)
+    updates.requestPreview = input.requestPreview;
   if (input.resultJson !== undefined) updates.resultJson = input.resultJson;
   if (input.approvedBy !== undefined) updates.approvedBy = input.approvedBy;
   if (input.executedBy !== undefined) updates.executedBy = input.executedBy;
   if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
-  if (input.errorMessage !== undefined) updates.errorMessage = input.errorMessage;
+  if (input.errorMessage !== undefined)
+    updates.errorMessage = input.errorMessage;
 
   const [row] = await db
     .update(mcpActionRuns)

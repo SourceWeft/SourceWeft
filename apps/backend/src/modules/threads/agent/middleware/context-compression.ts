@@ -16,6 +16,10 @@ import {
   type TokenCounter,
 } from "langchain";
 import {
+  createSummarizationMiddleware,
+  type AnyBackendProtocol,
+} from "deepagents";
+import {
   endSpan,
   startSpan,
   type TraceContext,
@@ -81,7 +85,7 @@ Return exactly these Markdown headings, in this order, with concise bullets wher
 ${SOURCEWEFT_SUMMARY_SECTIONS.join("\n")}
 
 <messages>
-{messages}
+{conversation}
 </messages>`;
 
 export const SOURCEWEFT_SUMMARY_PREFIX =
@@ -314,6 +318,160 @@ export function sanitizeSourceWeftSummaryText(text: string) {
     .replace(/\[citation:([^\]\s]+)\]/gi, "old citation marker $1 removed")
     .replace(/\bcitation:([a-z0-9_-]+)\b/gi, "old citation marker $1")
     .replace(/<citation\b[^>]*>.*?<\/citation>/gis, "old citation removed");
+}
+
+function sanitizeSourceWeftSummaryContent(content: unknown): unknown {
+  if (typeof content === "string") {
+    return sanitizeSourceWeftSummaryText(content);
+  }
+  if (!Array.isArray(content)) {
+    return content;
+  }
+  return content.map((block) => {
+    if (
+      !block ||
+      typeof block !== "object" ||
+      typeof (block as { text?: unknown }).text !== "string"
+    ) {
+      return block;
+    }
+    return {
+      ...block,
+      text: sanitizeSourceWeftSummaryText((block as { text: string }).text),
+    };
+  });
+}
+
+function sanitizeSourceWeftSummaryMessage<T extends BaseMessage>(
+  message: T,
+): T {
+  const sanitizedContent = sanitizeSourceWeftSummaryContent(message.content);
+  if (sanitizedContent === message.content) {
+    return message;
+  }
+  return Object.assign(Object.create(Object.getPrototypeOf(message)), message, {
+    content: sanitizedContent,
+  }) as T;
+}
+
+export function sanitizeSourceWeftSummaryResponse<T>(response: T): T {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+  const content = (response as { content?: unknown }).content;
+  const sanitizedContent = sanitizeSourceWeftSummaryContent(content);
+  if (sanitizedContent === content) {
+    return response;
+  }
+  return Object.assign(
+    Object.create(Object.getPrototypeOf(response)),
+    response,
+    { content: sanitizedContent },
+  ) as T;
+}
+
+/**
+ * Preserve the billed model's complete runtime identity while sanitizing only
+ * the summary response that Deep Agents will persist in checkpoint state.
+ */
+export function createSourceWeftSummaryModel(model: BaseLanguageModel) {
+  return new Proxy(model, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === "invoke" && typeof value === "function") {
+        return async (...args: unknown[]) => {
+          const response = await Promise.resolve(value.apply(target, args));
+          const messages = args[0];
+          const firstContent = Array.isArray(messages)
+            ? (messages[0] as { content?: unknown } | undefined)?.content
+            : null;
+          // Deep Agents receives this wrapper as request.model so its internal
+          // summary call cannot bypass sanitation. The middleware adapter
+          // restores the original runtime model before normal generation.
+          // Only the dedicated summary invocation may rewrite citations.
+          return typeof firstContent === "string" &&
+            firstContent.startsWith(
+              "You are SourceWeft's conversation memory compressor.",
+            )
+            ? sanitizeSourceWeftSummaryResponse(response)
+            : response;
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+export function createSourceWeftSummarizationMiddleware(input: {
+  backend: AnyBackendProtocol;
+  chatProfileConfig?: unknown;
+  model: BaseLanguageModel;
+}) {
+  const budget = resolveSourceWeftContextCompressionBudget(
+    input.chatProfileConfig,
+  );
+  const summaryModel = createSourceWeftSummaryModel(input.model);
+  const middleware = createSummarizationMiddleware({
+    backend: input.backend,
+    model: summaryModel,
+    trigger: [
+      { type: "tokens", value: budget.summarizationTriggerTokens },
+      { type: "messages", value: budget.summaryMessageTrigger },
+    ],
+    keep: { type: "messages", value: budget.recentMessagesToKeep },
+    summaryPrompt: SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
+    historyPathPrefix: budget.historyPathPrefix,
+  });
+  const wrapModelCall = middleware.wrapModelCall;
+  if (typeof wrapModelCall !== "function") {
+    throw new Error(
+      "Deep Agents SummarizationMiddleware is missing wrapModelCall.",
+    );
+  }
+
+  return {
+    ...middleware,
+    wrapModelCall: (
+      request: Parameters<typeof wrapModelCall>[0],
+      handler: Parameters<typeof wrapModelCall>[1],
+    ) => {
+      const originalMessages = new WeakMap<object, BaseMessage>();
+      const sanitizedMessages = request.messages.map((message) => {
+        const sanitized = sanitizeSourceWeftSummaryMessage(message);
+        if (sanitized !== message) {
+          originalMessages.set(sanitized, message);
+        }
+        return sanitized;
+      });
+
+      return wrapModelCall(
+        {
+          ...request,
+          // Deep Agents writes the messages it summarizes to the backend
+          // before generating the condensed summary. Give that internal flow
+          // citation-safe copies so stale markers never enter checkpoint files.
+          messages: sanitizedMessages,
+          // Deep Agents prefers request.model over options.model. Supplying the
+          // scoped wrapper here ensures summary sanitation is actually active.
+          model: summaryModel,
+        },
+        (forwardedRequest) =>
+          // Preserve any runtime model binding/settings for the real agent
+          // generation. Only Deep Agents' internal summary call uses the
+          // scoped wrapper above.
+          handler({
+            ...forwardedRequest,
+            // Messages retained for the actual agent call remain current-turn
+            // evidence. Restore their original citation markers by identity;
+            // generated summary messages have no mapping and stay sanitized.
+            messages: forwardedRequest.messages.map(
+              (message) => originalMessages.get(message) ?? message,
+            ),
+            model: request.model,
+          }),
+      );
+    },
+  };
 }
 
 export function estimateSourceWeftMessageTokens(messages: BaseMessage[]) {

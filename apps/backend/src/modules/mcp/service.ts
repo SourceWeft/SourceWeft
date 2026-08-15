@@ -15,6 +15,7 @@ import { McpError } from "./errors";
 import {
   createLangChainMcpClient,
   langChainMcpServerKey,
+  langChainMcpToolName,
 } from "./langchain-client";
 import { McpOAuthClientProvider } from "./oauth-provider";
 import {
@@ -88,13 +89,16 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
 
 /**
  * Does this endpoint demand authentication? One cheap unauthenticated MCP
- * initialize; a 401 is the spec's signal for OAuth. Network failure or any
- * other status reads as "no" so a flaky probe never blocks an install.
+ * initialize; a 401 is the spec's signal for OAuth. A network/protocol failure
+ * aborts installation because treating an unverified probe as "no auth" would
+ * silently create an unusable install.
  */
-async function mcpEndpointRequiresAuth(endpointUrl: string): Promise<boolean> {
+export async function mcpEndpointRequiresAuth(
+  endpointUrl: string,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(endpointUrl, {
       method: "POST",
       // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
@@ -117,10 +121,18 @@ async function mcpEndpointRequiresAuth(endpointUrl: string): Promise<boolean> {
       }),
       signal: controller.signal,
     });
-    clearTimeout(timer);
     return response.status === 401;
-  } catch {
-    return false;
+  } catch (error) {
+    throw new McpError(
+      502,
+      "MCP_AUTH_PROBE_FAILED",
+      `MCP endpoint authentication probe failed: ${redactErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      )}`,
+      { recoverable: true },
+    );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -134,7 +146,10 @@ function headersFromCredential(input: {
     return {};
   }
   if (input.authType === "custom_headers") {
-    const decrypted = decryptSecret(input.encryptedHeaders ?? "", encryptionSecret());
+    const decrypted = decryptSecret(
+      input.encryptedHeaders ?? "",
+      encryptionSecret(),
+    );
     if (!decrypted) {
       return {};
     }
@@ -152,7 +167,9 @@ function headersFromCredential(input: {
   if (input.authType === "bearer") {
     return secret ? { Authorization: `Bearer ${secret}` } : {};
   }
-  const headerName = input.headerName ? sanitizeHeaderName(input.headerName) : "";
+  const headerName = input.headerName
+    ? sanitizeHeaderName(input.headerName)
+    : "";
   return headerName && secret ? { [headerName]: secret } : {};
 }
 
@@ -160,6 +177,22 @@ function toObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function discoveredMcpToolSchema(tool: DynamicStructuredTool) {
+  const schema = toObject(tool.schema);
+  if (Object.keys(schema).length === 0) {
+    throw new McpError(
+      502,
+      "MCP_TOOL_SCHEMA_INVALID",
+      `MCP tool '${tool.name}' did not provide a usable input schema`,
+    );
+  }
+  return schema;
+}
+
+function discoveredMcpToolAnnotations(tool: DynamicStructuredTool) {
+  return toObject(toObject(tool.metadata).annotations);
 }
 
 function isHighRisk(risk: McpRiskLevel) {
@@ -267,6 +300,13 @@ function findInstallToolByLangChainName(
   });
   return (
     install.tools.find((candidate) => candidate.serverToolName === rawName) ??
+    install.tools.find(
+      (candidate) =>
+        langChainMcpToolName({
+          install,
+          serverToolName: candidate.serverToolName,
+        }) === langChainToolName,
+    ) ??
     install.tools.find(
       (candidate) => candidate.normalizedToolName === langChainToolName,
     ) ??
@@ -748,7 +788,10 @@ export class McpService {
     });
     if (
       existingInstall?.marketVersion &&
-      compareDottedVersions(parsed.data.version, existingInstall.marketVersion) < 0
+      compareDottedVersions(
+        parsed.data.version,
+        existingInstall.marketVersion,
+      ) < 0
     ) {
       throw new McpError(
         409,
@@ -778,10 +821,9 @@ export class McpService {
 
     // The official registry carries no auth metadata, so federated manifests
     // all claim auth "none" — which left OAuth-gated servers (GitHub, Notion…)
-    // installed with no Connect path and silently skipped at turn time. Probe
+    // installed with no Connect path and failed at turn time. Probe
     // the (already SSRF-validated) endpoint once at install: a 401 means the
-    // server wants OAuth per the MCP spec. Probe failure keeps the manifest
-    // value.
+    // server wants OAuth per the MCP spec. Probe failure aborts installation.
     if (
       manifestForInstall.auth.type === "none" &&
       manifestForInstall.endpointUrl &&
@@ -906,18 +948,29 @@ export class McpService {
     let headerName: string | null = null;
     if (input.authType === "bearer") {
       if (!input.bearerToken) {
-        throw new McpError(400, "MCP_CREDENTIAL_REQUIRED", "Bearer token is required");
+        throw new McpError(
+          400,
+          "MCP_CREDENTIAL_REQUIRED",
+          "Bearer token is required",
+        );
       }
       encryptedSecret = encryptSecret(input.bearerToken, encryptionSecret());
     } else if (input.authType === "api_key_header") {
       if (!input.apiKeyHeaderName || !input.apiKey) {
-        throw new McpError(400, "MCP_CREDENTIAL_REQUIRED", "API key header and value are required");
+        throw new McpError(
+          400,
+          "MCP_CREDENTIAL_REQUIRED",
+          "API key header and value are required",
+        );
       }
       headerName = sanitizeHeaderName(input.apiKeyHeaderName);
       encryptedSecret = encryptSecret(input.apiKey, encryptionSecret());
     } else if (input.authType === "custom_headers") {
       const headers = sanitizeHeaders(input.headers ?? {});
-      encryptedHeaders = encryptSecret(JSON.stringify(headers), encryptionSecret());
+      encryptedHeaders = encryptSecret(
+        JSON.stringify(headers),
+        encryptionSecret(),
+      );
     }
 
     // Credentials are per-user: store them keyed to the caller and DON'T touch
@@ -961,7 +1014,11 @@ export class McpService {
     if (!install) {
       throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
     }
-    if (install.transport === "stdio" || install.desktopOnly || !install.webExecutable) {
+    if (
+      install.transport === "stdio" ||
+      install.desktopOnly ||
+      !install.webExecutable
+    ) {
       throw new McpError(
         400,
         "MCP_DESKTOP_ONLY",
@@ -969,7 +1026,11 @@ export class McpService {
       );
     }
     if (!install.endpointUrl) {
-      throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
+      throw new McpError(
+        400,
+        "MCP_ENDPOINT_REQUIRED",
+        "MCP endpoint is required",
+      );
     }
     await assertSafeMcpEndpoint(install.endpointUrl, {
       allowLocalhost: isDevelopment(),
@@ -1026,17 +1087,24 @@ export class McpService {
         installId: install.id,
         serverSlug: install.marketIdentifier ?? install.id,
         preserveExistingMetadata: true,
-        tools: tools.map((tool) => ({
-          name: stripLangChainMcpToolPrefix({
+        tools: tools.map((tool) => {
+          const serverToolName = stripLangChainMcpToolPrefix({
             serverKey: langChainMcpServerKey(install),
             toolName: tool.name,
-          }),
-          title: tool.name,
-          description: tool.description,
-          inputSchema: {},
-          annotations: {},
-          risk: "unknown",
-        })),
+          });
+          return {
+            name: serverToolName,
+            normalizedToolName: langChainMcpToolName({
+              install,
+              serverToolName,
+            }),
+            title: serverToolName,
+            description: tool.description,
+            inputSchema: discoveredMcpToolSchema(tool),
+            annotations: discoveredMcpToolAnnotations(tool),
+            risk: "unknown" as const,
+          };
+        }),
       });
       const updated = await updateWorkspaceMcpInstall({
         teamId: workspace.organizationId,
@@ -1089,139 +1157,291 @@ export class McpService {
     // One cursor shared across every wrapped tool this turn: an approved ref is
     // consumed once, so a resumed turn that approved the same call twice runs it
     // twice rather than collapsing to one execution.
-    const mcpActionCursor: McpActionExecutionCursor | undefined = input.mcpActions
-      ?.length
+    const mcpActionCursor: McpActionExecutionCursor | undefined = input
+      .mcpActions?.length
       ? { refs: input.mcpActions }
       : undefined;
     const installs = await listWorkspaceMcpInstalls({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
-    const selected = installs.filter(
-      (install) =>
-        input.installIds.includes(install.id) &&
-        install.enabled &&
-        install.status === "active" &&
-        install.transport !== "stdio" &&
-        !install.desktopOnly &&
-        install.webExecutable,
+    const requestedInstallIds = Array.from(new Set(input.installIds));
+    const installsById = new Map(
+      installs.map((install) => [install.id, install]),
     );
+    const missingInstallIds = requestedInstallIds.filter(
+      (installId) => !installsById.has(installId),
+    );
+    if (missingInstallIds.length > 0) {
+      throw new McpError(
+        404,
+        "MCP_INSTALL_NOT_FOUND",
+        "One or more selected MCP installs are not available in this workspace",
+        { installIds: missingInstallIds },
+      );
+    }
+    const selected = requestedInstallIds.map((installId) => {
+      const install = installsById.get(installId)!;
+      if (!install.enabled || install.status !== "active") {
+        throw new McpError(
+          409,
+          "MCP_INSTALL_UNAVAILABLE",
+          `Selected MCP install '${install.name}' is not active`,
+          {
+            installId: install.id,
+            enabled: install.enabled,
+            status: install.status,
+          },
+        );
+      }
+      if (
+        install.transport === "stdio" ||
+        install.desktopOnly ||
+        !install.webExecutable
+      ) {
+        throw new McpError(
+          400,
+          "MCP_DESKTOP_ONLY",
+          `Selected MCP install '${install.name}' cannot execute in the hosted backend`,
+          { installId: install.id, transport: install.transport },
+        );
+      }
+      return install;
+    });
     const clients: Array<{ close: () => Promise<void> }> = [];
     const tools: DynamicStructuredTool[] = [];
+    const boundToolNames = new Set<string>();
     const interruptOn: Record<string, InterruptOnConfig> = {};
-    for (const install of selected) {
-      // Re-validate the stored endpoint at execution time. The install-time
-      // check is not enough on its own: a hostname can be repointed at an
-      // internal/metadata address after install (DNS rebinding). Skip — rather
-      // than connect to — any install whose endpoint now resolves unsafely.
-      if (install.endpointUrl) {
-        try {
-          await assertSafeMcpEndpoint(install.endpointUrl, {
-            allowLocalhost: isDevelopment(),
-            allowPrivateNetwork: isDevelopment(),
-          });
-        } catch {
-          continue;
+    const availableToolIds = new Set<string>();
+    try {
+      for (const install of selected) {
+        // Re-validate the stored endpoint at execution time. The install-time
+        // check is not enough on its own: a hostname can be repointed at an
+        // internal/metadata address after install (DNS rebinding).
+        if (install.endpointUrl) {
+          try {
+            await assertSafeMcpEndpoint(install.endpointUrl, {
+              allowLocalhost: isDevelopment(),
+              allowPrivateNetwork: isDevelopment(),
+            });
+          } catch (error) {
+            if (error instanceof McpError) {
+              throw error;
+            }
+            throw new McpError(
+              400,
+              "MCP_ENDPOINT_UNSAFE",
+              `Selected MCP install '${install.name}' failed endpoint validation`,
+              {
+                installId: install.id,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            );
+          }
         }
-      }
-      // Resolve auth per install: OAuth installs use a per-user token provider
-      // (the SDK attaches the bearer and refreshes on 401); the other auth types
-      // use static credential headers. An OAuth install the user hasn't
-      // connected yet is skipped rather than failing the turn.
-      let headers: Record<string, string> = {};
-      let authProvider: OAuthClientProvider | undefined;
-      if (install.authType === "oauth") {
-        const scope = {
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          installId: install.id,
-          userId: input.userId,
-        };
-        const status = await getMcpOAuthStatus(scope);
-        if (!status.connected || !status.issuer) {
-          continue;
-        }
-        authProvider = new McpOAuthClientProvider({
-          redirectUrl: config.mcpOAuth.redirectUrl,
-          clientName: config.mcpOAuth.clientName,
-          issuer: status.issuer,
-          configuredClients: config.mcpOAuth.clients,
-          store: createDbMcpOAuthStore(scope, status.issuer),
-        });
-      } else {
-        // Static credentials are per-user: use the INVOKING user's own
-        // credential, never a workspace-shared one. A user who hasn't
-        // configured this install has no headers (the connection fails as
-        // unauthenticated) rather than borrowing another member's token.
-        const credential = await findWorkspaceMcpCredential({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          installId: install.id,
-          userId: input.userId,
-        });
-        headers = credential ? headersFromCredential(credential) : {};
-      }
-      // Each install is isolated: one server being unreachable (getTools throws,
-      // since onConnectionError is "throw") must neither leak its transport nor
-      // abort the whole turn. Close the client and move on.
-      const client = createLangChainMcpClient({ install, headers, authProvider });
-      let installTools: DynamicStructuredTool[];
-      try {
-        installTools = await withTimeout(
-          client.getTools(),
-          MCP_GET_TOOLS_TIMEOUT_MS,
-          `MCP ${install.name} tool discovery`,
-        );
-      } catch {
-        await client.close().catch(() => undefined);
-        continue;
-      }
-      clients.push(client);
-      for (const tool of installTools) {
-        if (tools.length >= MCP_MAX_BOUND_TOOLS) {
-          logger.warn("MCP bound-tool cap reached; dropping remaining tools", {
-            cap: MCP_MAX_BOUND_TOOLS,
-            installId: install.id,
-            installName: install.name,
-          });
-          break;
-        }
-        const knownTool = findInstallToolByLangChainName(install, tool.name);
-        // A tool disabled via updateInstall/setWorkspaceMcpToolsEnabled must not
-        // be bound, regardless of whether an explicit toolIds filter is present.
-        if (knownTool && !knownTool.enabled) {
-          continue;
-        }
-        if (input.toolIds?.length && (!knownTool || !input.toolIds.includes(knownTool.id))) {
-          continue;
-        }
-        // Gate on the EFFECTIVE risk, not the manifest's self-asserted value: an
-        // unverified install's tools are all forced to "unknown" (hard-requires
-        // approval), and a tool with no DB record is "unknown" too — so it MUST
-        // get an interrupt here, or every call dead-ends in
-        // MCP_APPROVAL_REQUIRED with no approval surface ever shown.
-        const risk = effectiveMcpRisk({ install, tool: knownTool });
-        if (isHighRisk(risk)) {
-          interruptOn[tool.name] = {
-            allowedDecisions: ["approve", "edit", "reject"],
-            description: `${install.name} MCP tool ${knownTool?.serverToolName ?? tool.name} may perform external ${risk} actions. Review before execution.`,
-            argsSchema: knownTool?.inputSchema,
-          };
-        }
-        tools.push(
-          this.wrapLangChainMcpTool({
-            install,
-            originalTool: tool,
-            tool: knownTool,
+        // Resolve auth per install: OAuth installs use a per-user token provider
+        // (the SDK attaches the bearer and refreshes on 401); the other auth types
+        // use static credential headers. A selected install without its required
+        // per-user credential fails preparation.
+        let headers: Record<string, string> = {};
+        let authProvider: OAuthClientProvider | undefined;
+        if (install.authType === "oauth") {
+          const scope = {
             teamId: workspace.organizationId,
             workspaceId: workspace.id,
+            installId: install.id,
             userId: input.userId,
-            threadId: input.threadId ?? null,
-            runId: input.runId ?? null,
-            mcpActionCursor,
-          }),
+          };
+          const status = await getMcpOAuthStatus(scope);
+          if (!status.connected || !status.issuer) {
+            throw new McpError(
+              409,
+              "MCP_OAUTH_NOT_CONNECTED",
+              `Selected MCP install '${install.name}' is not connected for this user`,
+              { installId: install.id },
+            );
+          }
+          authProvider = new McpOAuthClientProvider({
+            redirectUrl: config.mcpOAuth.redirectUrl,
+            clientName: config.mcpOAuth.clientName,
+            issuer: status.issuer,
+            configuredClients: config.mcpOAuth.clients,
+            store: createDbMcpOAuthStore(scope, status.issuer),
+          });
+        } else {
+          // Static credentials are per-user: use the INVOKING user's own
+          // credential, never a workspace-shared one. A user who hasn't
+          // configured this install has no headers (the connection fails as
+          // unauthenticated) rather than borrowing another member's token.
+          const credential = await findWorkspaceMcpCredential({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            installId: install.id,
+            userId: input.userId,
+          });
+          if (install.authType !== "none" && !credential) {
+            throw new McpError(
+              409,
+              "MCP_CREDENTIAL_REQUIRED",
+              `Selected MCP install '${install.name}' has no credential for this user`,
+              { installId: install.id },
+            );
+          }
+          headers = credential ? headersFromCredential(credential) : {};
+        }
+        // Discovery is strict (`onConnectionError: "throw"`). Any selected
+        // server failure closes all clients opened for this turn.
+        const client = createLangChainMcpClient({
+          install,
+          headers,
+          authProvider,
+        });
+        let installTools: DynamicStructuredTool[];
+        try {
+          installTools = await withTimeout(
+            client.getTools(),
+            MCP_GET_TOOLS_TIMEOUT_MS,
+            `MCP ${install.name} tool discovery`,
+          );
+        } catch (error) {
+          await client.close().catch(() => undefined);
+          throw new McpError(
+            502,
+            "MCP_CONNECTION_FAILED",
+            `Failed to discover tools for selected MCP install '${install.name}': ${redactErrorMessage(
+              error instanceof Error ? error.message : String(error),
+            )}`,
+            {
+              details: { installId: install.id },
+              sourceRef: {
+                kind: "mcp_tool",
+                serverInstallId: install.id,
+              },
+              recoverable: true,
+            },
+          );
+        }
+        clients.push(client);
+        const discoveredToolIds = new Set<string>();
+        for (const tool of installTools) {
+          const serverToolName = stripLangChainMcpToolPrefix({
+            serverKey: langChainMcpServerKey(install),
+            toolName: tool.name,
+          });
+          const boundToolName = langChainMcpToolName({
+            install,
+            serverToolName,
+          });
+          const storedTool = findInstallToolByLangChainName(install, tool.name);
+          const liveInputSchema = discoveredMcpToolSchema(tool);
+          const liveAnnotations = discoveredMcpToolAnnotations(tool);
+          if (!storedTool) {
+            throw new McpError(
+              502,
+              "MCP_TOOL_DISCOVERY_MISMATCH",
+              `Selected MCP install '${install.name}' exposed an unregistered tool`,
+              { installId: install.id, serverToolName },
+            );
+          }
+          const knownTool = {
+            ...storedTool,
+            normalizedToolName: boundToolName,
+            description: tool.description || storedTool.description,
+            inputSchema: liveInputSchema,
+            annotations: liveAnnotations,
+          };
+          discoveredToolIds.add(knownTool.id);
+          // A tool disabled via updateInstall/setWorkspaceMcpToolsEnabled must not
+          // be bound, regardless of whether an explicit toolIds filter is present.
+          if (!knownTool.enabled) {
+            if (input.toolIds?.includes(knownTool.id)) {
+              throw new McpError(
+                409,
+                "MCP_TOOL_DISABLED",
+                `Selected MCP tool '${knownTool.serverToolName}' is disabled`,
+                { installId: install.id, toolId: knownTool.id },
+              );
+            }
+            continue;
+          }
+          if (input.toolIds?.length && !input.toolIds.includes(knownTool.id)) {
+            continue;
+          }
+          if (boundToolNames.has(boundToolName)) {
+            throw new McpError(
+              502,
+              "MCP_TOOL_NAME_COLLISION",
+              `Two selected MCP tools resolve to the same model-visible name '${boundToolName}'`,
+              { installId: install.id, serverToolName },
+            );
+          }
+          if (tools.length >= MCP_MAX_BOUND_TOOLS) {
+            throw new McpError(
+              413,
+              "MCP_TOOL_LIMIT_EXCEEDED",
+              `Selected MCP tools exceed the per-turn limit of ${MCP_MAX_BOUND_TOOLS}`,
+              { installId: install.id, limit: MCP_MAX_BOUND_TOOLS },
+            );
+          }
+          // Gate on the EFFECTIVE risk, not the manifest's self-asserted value: an
+          // unverified install's tools are all forced to "unknown" and therefore
+          // require an approval interrupt.
+          const risk = effectiveMcpRisk({ install, tool: knownTool });
+          if (isHighRisk(risk)) {
+            interruptOn[boundToolName] = {
+              allowedDecisions: ["approve", "edit", "reject"],
+              description: `${install.name} MCP tool ${knownTool?.serverToolName ?? tool.name} may perform external ${risk} actions. Review before execution.`,
+              argsSchema: liveInputSchema,
+            };
+          }
+          tools.push(
+            this.wrapLangChainMcpTool({
+              install,
+              originalTool: tool,
+              tool: knownTool,
+              boundToolName,
+              teamId: workspace.organizationId,
+              workspaceId: workspace.id,
+              userId: input.userId,
+              threadId: input.threadId ?? null,
+              runId: input.runId ?? null,
+              mcpActionCursor,
+            }),
+          );
+          boundToolNames.add(boundToolName);
+          availableToolIds.add(knownTool.id);
+        }
+        const missingEnabledToolIds = install.tools
+          .filter(
+            (tool) =>
+              tool.enabled &&
+              (!input.toolIds?.length || input.toolIds.includes(tool.id)),
+          )
+          .filter((tool) => !discoveredToolIds.has(tool.id))
+          .map((tool) => tool.id);
+        if (missingEnabledToolIds.length > 0) {
+          throw new McpError(
+            502,
+            "MCP_TOOL_DISCOVERY_MISMATCH",
+            `Selected MCP install '${install.name}' did not expose every enabled tool`,
+            { installId: install.id, toolIds: missingEnabledToolIds },
+          );
+        }
+      }
+      const missingRequestedToolIds = (input.toolIds ?? []).filter(
+        (toolId) => !availableToolIds.has(toolId),
+      );
+      if (missingRequestedToolIds.length > 0) {
+        throw new McpError(
+          404,
+          "MCP_TOOL_NOT_AVAILABLE",
+          "One or more selected MCP tools could not be bound",
+          { toolIds: missingRequestedToolIds },
         );
       }
+    } catch (error) {
+      await Promise.allSettled(clients.map((client) => client.close()));
+      throw error;
     }
     return {
       tools,
@@ -1235,7 +1455,8 @@ export class McpService {
   private wrapLangChainMcpTool(input: {
     install: WorkspaceMcpInstallRecord;
     originalTool: DynamicStructuredTool;
-    tool?: WorkspaceMcpToolRecord;
+    tool: WorkspaceMcpToolRecord;
+    boundToolName: string;
     teamId: string;
     workspaceId: string;
     userId: string;
@@ -1243,22 +1464,13 @@ export class McpService {
     runId: string | null;
     mcpActionCursor?: McpActionExecutionCursor;
   }) {
-    const toolRecord =
-      input.tool ??
-      ({
-        id: null,
-        serverToolName: input.originalTool.name,
-        normalizedToolName: input.originalTool.name,
-        title: input.originalTool.name,
-        description: input.originalTool.description,
-        inputSchema: {},
-        risk: "unknown",
-      } as const);
+    const toolRecord = input.tool;
     const risk = effectiveMcpRisk({ install: input.install, tool: input.tool });
     return new DynamicStructuredTool({
-      name: input.originalTool.name,
+      name: input.boundToolName,
       description: input.originalTool.description,
       schema: input.originalTool.schema,
+      metadata: input.originalTool.metadata,
       func: async (args, _runManager, configValue) => {
         const requestJson = redactMcpSecrets(toObject(args)) as Record<
           string,
@@ -1269,7 +1481,7 @@ export class McpService {
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           installId: input.install.id,
-          toolId: input.tool?.id ?? null,
+          toolId: input.tool.id,
           serverToolName: toolRecord.serverToolName,
           normalizedToolName: toolRecord.normalizedToolName,
           risk,
@@ -1277,7 +1489,7 @@ export class McpService {
           requestJson,
           requestPreview: buildMcpRequestPreview({
             install: input.install,
-            tool: toolRecord as WorkspaceMcpToolRecord,
+            tool: toolRecord,
             args: requestJson,
           }),
           idempotencyKey:
@@ -1286,7 +1498,7 @@ export class McpService {
             // one) so two calls differing only in a sensitive-named field don't
             // collide onto one action run. The key is a hash, never stored
             // plaintext.
-            `${input.runId ?? input.threadId ?? input.workspaceId}:${input.originalTool.name}:${hashJson(toObject(args))}`,
+            `${input.runId ?? input.threadId ?? input.workspaceId}:${input.boundToolName}:${hashJson(toObject(args))}`,
         });
         if (isHighRisk(risk)) {
           // Approval is resolved by args from the refs threaded into this
@@ -1299,7 +1511,7 @@ export class McpService {
           // un-approved args.
           const approvedRef = resolveApprovedMcpActionRef(
             input.mcpActionCursor,
-            { toolName: input.originalTool.name, requestJson },
+            { toolName: input.boundToolName, requestJson },
           );
           const approvedRun = approvedRef
             ? await findMcpActionRun({
@@ -1322,7 +1534,7 @@ export class McpService {
                   serverInstallId: input.install.id,
                   serverToolName: toolRecord.serverToolName,
                   normalizedToolName: toolRecord.normalizedToolName,
-                  toolId: input.tool?.id ?? null,
+                  toolId: input.tool.id,
                 },
                 recoverable: true,
               },
@@ -1336,7 +1548,7 @@ export class McpService {
           runId: input.runId,
           toolCallId,
           installId: input.install.id,
-          toolId: input.tool?.id ?? null,
+          toolId: input.tool.id,
           actionRunId: actionRun.id,
           serverToolName: toolRecord.serverToolName,
           normalizedToolName: toolRecord.normalizedToolName,
@@ -1383,7 +1595,8 @@ export class McpService {
           ]);
           return capMcpModelOutput(output);
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           // A hostile/buggy server (or an auth failure echoing the presented
           // header) can put secrets into the error text; redact before it is
           // persisted or later streamed to co-participants.
@@ -1439,8 +1652,7 @@ export class McpService {
     // id is null for a synthesized (no-DB-record) tool; the fields below are all
     // that the confirmation/action-run need — never the id.
     let tool:
-      | (Omit<WorkspaceMcpToolRecord, "id"> & { id: string | null })
-      | undefined;
+      (Omit<WorkspaceMcpToolRecord, "id"> & { id: string | null }) | undefined;
     for (const candidate of installs) {
       const match = findInstallToolByLangChainName(candidate, input.toolName);
       if (match) {
@@ -1532,7 +1744,11 @@ export class McpService {
       actionRunId: input.confirmationId,
     });
     if (!action) {
-      throw new McpError(404, "MCP_CONFIRMATION_NOT_FOUND", "MCP confirmation request not found");
+      throw new McpError(
+        404,
+        "MCP_CONFIRMATION_NOT_FOUND",
+        "MCP confirmation request not found",
+      );
     }
     if (action.status !== "proposed") {
       throw new McpError(
@@ -1588,12 +1804,17 @@ export class McpService {
           errorMessage: input.note ?? null,
         })) ?? action;
       return {
-        confirmation: mcpConfirmationPayload({ action: rejected, install, tool }),
+        confirmation: mcpConfirmationPayload({
+          action: rejected,
+          install,
+          tool,
+        }),
         resume: {
           decisions: [
             {
               type: "reject" as const,
-              message: input.note ?? "User rejected the MCP action in SourceWeft.",
+              message:
+                input.note ?? "User rejected the MCP action in SourceWeft.",
             },
           ],
         },

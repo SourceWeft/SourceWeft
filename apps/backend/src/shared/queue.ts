@@ -1,4 +1,5 @@
 import { Queue, QueueEvents } from "bullmq";
+import type { Redis } from "ioredis";
 import { config } from "./config";
 import { buildAuditInputFromJob, recordJobAudit } from "./jobs-audit";
 import { connectionOptions } from "./redis-connection";
@@ -32,6 +33,18 @@ export const jobsQueue = new Proxy(
     },
   },
 );
+
+/**
+ * The shared BullMQ Redis connection, typed as the raw ioredis client.
+ *
+ * bullmq >=5.8x types `queue.client` as its driver-agnostic `IRedisClient`,
+ * which omits native commands (zadd, rpush, publish, …). With an ioredis
+ * `connection`, the resolved client is the ioredis instance behind a
+ * forwarding proxy, so the native surface is intact at runtime.
+ */
+export async function jobsRedisClient(): Promise<Redis> {
+  return (await jobsQueue.client) as unknown as Redis;
+}
 
 function getDeliverablesQueue() {
   deliverablesQueueInstance ??= new Queue<QueueJobPayload, unknown, string>(

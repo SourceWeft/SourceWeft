@@ -117,6 +117,38 @@ test("mounted backend exposes optional /skills mount as read-only", async () => 
   );
 });
 
+test("mounted backend enforces grep maxCount without changing shorter results", async () => {
+  const matches = [
+    { path: "/kb/a.md", line: 1, text: "match a" },
+    { path: "/kb/b.md", line: 2, text: "match b" },
+  ];
+  const readonlyBackend = {
+    ls: async () => ({ files: [] }),
+    read: async () => ({ content: "" }),
+    readRaw: async () => textData(""),
+    grep: async () => ({ matches }),
+    glob: async () => ({ files: [] }),
+    write: async () => ({ error: "readonly" }),
+    edit: async () => ({ error: "readonly" }),
+  };
+  const backend = new MountedAgentFilesystemBackend({
+    knowledge: readonlyBackend,
+    working: readonlyBackend,
+  });
+
+  assert.deepEqual(await backend.grep("match", "/kb", null, null), {
+    matches,
+  });
+  assert.deepEqual(await backend.grep("match", "/kb", null, 2), {
+    matches,
+  });
+  assert.deepEqual(await backend.grep("match", "/kb", null, 1), {
+    error: undefined,
+    matches: matches.slice(0, 1),
+    truncated: true,
+  });
+});
+
 test("mounted backend routes upload and download by mount", async () => {
   const calls: string[] = [];
   let knowledgeReadRawCalls = 0;

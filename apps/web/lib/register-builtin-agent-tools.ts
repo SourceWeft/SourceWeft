@@ -1,5 +1,5 @@
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
-import { notionAgentToolDefs } from "@sourceweft/builtin-connector-notion";
+import { notionAgentToolDefs } from "@sourceweft/builtin-connector-notion/agent-tool-defs";
 
 /**
  * Runtime-registered tools only. Everything statically known lives in the

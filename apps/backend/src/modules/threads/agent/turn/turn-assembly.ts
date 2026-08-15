@@ -27,15 +27,17 @@ import {
 import {
   createDefaultFilesystemMounts,
   createSandboxFilesystemMount,
+  filesystemPermissionsForMounts,
 } from "../filesystem-capabilities";
 import { MountedAgentFilesystemBackend } from "@sourceweft/builtin-vfs";
 import {
   CompositeBackend,
   StateBackend,
-  type BackendFactory,
   type BackendProtocolV2,
   type SandboxBackendProtocolV2,
+  type SkillMetadata,
 } from "deepagents";
+import { Overwrite } from "@langchain/langgraph";
 import {
   createCapabilityAgentToolsForTurn,
   type AgentTurnTool,
@@ -48,6 +50,10 @@ import { artifactStorage } from "../../../sources/storage";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
 import { config } from "../../../../shared/config";
+import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
+import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
+import { createExploreSubagent } from "../subagents/explore";
+import { createPlanSubagent } from "../subagents/plan";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -65,6 +71,8 @@ import {
   type InterpreterReadToolName,
 } from "@sourceweft/agent-interpreter";
 import { createInterpreterMiddlewareForTurn } from "../interpreter";
+import { currentSourceWeftToolCallId } from "../middleware";
+import { ContentError } from "../../../content/errors";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
 
@@ -159,29 +167,41 @@ export function filesystemMountsForPrompt(input: {
 
 export function buildAgentBackend(input: {
   filesystemBackend: FilesystemBackend;
+  /** Test seam; production uses a LangGraph-context-aware StateBackend. */
+  internalContextBackend?: BackendProtocolV2;
   executeToolCallId?: string | null;
   sandboxRuntime: AgentSandboxRuntimeForTurn | null;
 }): BackendProtocolV2 {
-  const { executeToolCallId, filesystemBackend, sandboxRuntime } = input;
-  if (!sandboxRuntime) {
-    return filesystemBackend.backend;
-  }
-
-  const defaultBackend = executeToolCallId
+  const {
+    executeToolCallId,
+    filesystemBackend,
+    internalContextBackend = new StateBackend(),
+    sandboxRuntime,
+  } = input;
+  const defaultBackend = sandboxRuntime
     ? new SandboxExecuteToolCallBackend(
         sandboxRuntime.backend,
         executeToolCallId,
       )
-    : sandboxRuntime.backend;
+    : filesystemBackend.backend;
+  const sandboxRoot = sandboxRuntime
+    ? sandboxRuntime.pathPolicy.workspaceRoot ||
+      sandboxRuntime.pathPolicy.defaultCwd ||
+      "/workspace"
+    : "/";
 
   return new CompositeBackend(defaultBackend, {
+    // Deep Agents uses these paths to preserve context that no longer fits in
+    // the model request. They must be backed by LangGraph state even when the
+    // turn has no execution sandbox; the mounted SourceWeft VFS deliberately
+    // permits writes only under /workfiles.
     "/conversation_history/": new PrefixedBackendAdapter(
       "/conversation_history",
-      new StateBackend(),
+      internalContextBackend,
     ),
     "/large_tool_results/": new PrefixedBackendAdapter(
       "/large_tool_results",
-      new StateBackend(),
+      internalContextBackend,
     ),
     "/kb/": new PrefixedBackendAdapter(
       "/kb",
@@ -194,6 +214,17 @@ export function buildAgentBackend(input: {
     ...(filesystemBackend.skillsBackend
       ? { "/skills/": filesystemBackend.skillsBackend }
       : {}),
+    ...(sandboxRuntime
+      ? {
+          "/": new PrefixedBackendAdapter("/", defaultBackend),
+          ...(sandboxRoot === "/"
+            ? {}
+            : {
+                [`${sandboxRoot.replace(/\/+$/g, "")}/`]:
+                  new PrefixedBackendAdapter(sandboxRoot, defaultBackend),
+              }),
+        }
+      : {}),
   });
 }
 
@@ -202,7 +233,7 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
 
   constructor(
     private readonly backend: AgentSandboxRuntimeForTurn["backend"],
-    private readonly toolCallId: string,
+    private readonly fallbackToolCallId: string | null = null,
   ) {
     this.id = backend.id;
   }
@@ -219,8 +250,13 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
     return this.backend.readRaw(filePath);
   }
 
-  grep(pattern: string, path?: string | null, glob?: string | null) {
-    return this.backend.grep(pattern, path, glob);
+  grep(
+    pattern: string,
+    path?: string | null,
+    glob?: string | null,
+    maxCount?: number | null,
+  ) {
+    return this.backend.grep(pattern, path, glob, maxCount);
   }
 
   glob(pattern: string, path?: string) {
@@ -255,28 +291,21 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
   }
 
   execute(command: string) {
-    return this.backend.execute(command, { toolCallId: this.toolCallId });
+    return this.backend.execute(command, {
+      toolCallId: currentSourceWeftToolCallId() ?? this.fallbackToolCallId,
+    });
   }
 }
 
-export function buildAgentBackendFactory(input: {
-  filesystemBackend: FilesystemBackend;
-  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
-}): BackendFactory {
-  return (runtime) => {
-    const runtimeRecord =
-      runtime && typeof runtime === "object"
-        ? (runtime as unknown as { toolCallId?: unknown })
-        : null;
-    const toolCallId =
-      typeof runtimeRecord?.toolCallId === "string"
-        ? runtimeRecord.toolCallId
-        : null;
-    return buildAgentBackend({
-      ...input,
-      executeToolCallId: toolCallId,
-    });
-  };
+export function skillMetadataForTurn(
+  skills: PreparedThreadTurn["enabledSkills"],
+): SkillMetadata[] {
+  return skills.map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+    path: `/skills/${skill.name}/SKILL.md`,
+    ...(skill.tools?.length ? { allowedTools: [...skill.tools] } : {}),
+  }));
 }
 
 export interface RuntimePromptContextInput {
@@ -462,9 +491,7 @@ function skillAssetsForPreparedTurn(prepared: PreparedThreadTurn) {
   if (!config.sandbox.skillStagingEnabled) {
     return null;
   }
-  const plans = buildSkillSandboxAssetPlans(prepared.enabledSkills, {
-    warn: (message, meta) => logger.warn(message, meta),
-  });
+  const plans = buildSkillSandboxAssetPlans(prepared.enabledSkills);
   if (plans.length === 0) {
     return null;
   }
@@ -555,10 +582,16 @@ export async function buildThreadAgentAssembly(
     filesystemBackend,
     sandboxRuntime,
   });
-  const backend = buildAgentBackendFactory({
+  const backend = buildAgentBackend({
     filesystemBackend,
     sandboxRuntime,
+    executeToolCallId: sandboxExecuteToolCallIdFromResume(
+      prepared.toolApprovalResume,
+    ),
   });
+  const filesystemPermissions = filesystemPermissionsForMounts(
+    promptFilesystemMounts,
+  );
   const boundTools = [
     ...filterAllowedTools(prepared, capabilityTools),
     ...connectorActionTools,
@@ -615,15 +648,58 @@ export async function buildThreadAgentAssembly(
     });
   }
 
+  const skills = skillsBackend ? ["/skills/"] : undefined;
+  const childMiddleware = (subagentType: string) =>
+    createSourceWeftSubagentMiddlewareStack({
+      backend,
+      chatProfileConfig: prepared.chatProfile.configJson,
+      model,
+      traceContext,
+      toolObservabilityContext: {
+        runId: prepared.runTraceId,
+        teamId: prepared.workspace.organizationId,
+        workspaceId: prepared.workspace.id,
+        threadId: prepared.thread.id,
+        userId: prepared.userId,
+        userMessageId: prepared.userMessage.id,
+        subagentType,
+      },
+    });
+
+  // Define general-purpose explicitly so child retries, limits, summary policy,
+  // billing model, skills, HITL, and observability do not depend on Deep Agents'
+  // partial parent-middleware propagation. The roster mirrors Claude's Agent
+  // tool: general-purpose (full) plus the read-only explore and plan delegates.
+  const subagents = [
+    createGeneralPurposeSubagent({
+      availableTools: boundTools,
+      interruptOn,
+      middleware: childMiddleware("general-purpose"),
+      skills,
+    }),
+    createExploreSubagent({
+      availableTools: boundTools,
+      backend,
+      middleware: childMiddleware("explore"),
+    }),
+    createPlanSubagent({
+      availableTools: boundTools,
+      backend,
+      middleware: childMiddleware("plan"),
+    }),
+  ];
+
   const agent = await createThreadAgent({
     model,
     modelAlias: prepared.modelAlias,
     providerModel: prepared.providerModel,
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,
     tools: boundTools,
+    subagents,
     backend,
     filesystemMounts: promptFilesystemMounts,
-    skills: skillsBackend ? ["/skills/"] : undefined,
+    skills,
+    permissions: filesystemPermissions,
     runtimePrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
@@ -718,6 +794,14 @@ export async function buildThreadAgentAssembly(
       selected_skill_count: prepared.enabledSkills.length,
     },
     streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
+    // NOTE: `subgraphs: true` is intentionally NOT set. Under it, deepagents
+    // moves the MAIN agent's own model/tool events to a non-empty namespace
+    // (depth 1: ["model_request:…"]) while a delegate's events sit at depth 2
+    // (["tools:…","model_request:…"]). Surfacing sub-agent execution that way
+    // means classifying by deepagents' internal node names — fragile and
+    // version-coupled — and a naive "namespace non-empty = sub-agent" rule would
+    // swallow the main agent's answer. Sub-agent activity stays observable via
+    // the child's tool-observability trace instead.
     // Cancels the LLM stream and stops scheduling further steps when the run is
     // aborted; LangGraph propagates it to tools via config.signal.
     ...(abortSignal ? { signal: abortSignal } : {}),
@@ -725,11 +809,45 @@ export async function buildThreadAgentAssembly(
 
   const runAgentStream = (
     messages: Array<{ role: "user"; content: unknown }>,
-  ) =>
-    agent.stream(
-      { messages: messages as never },
-      runConfig as AgentRunnableConfig,
-    ) as Promise<AsyncGenerator<unknown>>;
+  ) => {
+    const stream = async () => {
+      let effectiveRunConfig = runConfig as AgentRunnableConfig;
+      if (skills) {
+        const checkpointConfig = await agent.updateState(effectiveRunConfig, {
+          skillsMetadata: new Overwrite(
+            skillMetadataForTurn(prepared.enabledSkills),
+          ),
+        });
+        if (!checkpointConfig || typeof checkpointConfig !== "object") {
+          throw new ContentError(
+            500,
+            "SKILL_CHECKPOINT_UPDATE_FAILED",
+            "Deep Agents did not return a checkpoint configuration after replacing turn skills",
+            { recoverable: true },
+          );
+        }
+        const checkpointRunConfig = checkpointConfig as AgentRunnableConfig;
+        effectiveRunConfig = {
+          ...runConfig,
+          ...checkpointRunConfig,
+          configurable: {
+            ...((runConfig as { configurable?: Record<string, unknown> })
+              .configurable ?? {}),
+            ...((
+              checkpointRunConfig as {
+                configurable?: Record<string, unknown>;
+              }
+            ).configurable ?? {}),
+          },
+        } as AgentRunnableConfig;
+      }
+      return agent.stream(
+        { messages: messages as never },
+        effectiveRunConfig,
+      ) as Promise<AsyncGenerator<unknown>>;
+    };
+    return stream();
+  };
 
   return {
     agent,

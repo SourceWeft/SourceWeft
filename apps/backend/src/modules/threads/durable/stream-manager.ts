@@ -1,4 +1,4 @@
-import { jobsQueue } from "../../../shared/queue";
+import { jobsRedisClient } from "../../../shared/queue";
 import { CHAT_RUN_STREAM_TTL_SECONDS } from "./constants";
 
 export type ChatRunStreamEvent = {
@@ -27,7 +27,7 @@ function parseStreamEvent(value: string): ChatRunStreamEvent | null {
 }
 
 async function getRedisClient() {
-  return jobsQueue.client;
+  return jobsRedisClient();
 }
 
 function cancelChannel(runId: string) {

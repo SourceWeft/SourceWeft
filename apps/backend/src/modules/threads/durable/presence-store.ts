@@ -1,4 +1,4 @@
-import { jobsQueue } from "../../../shared/queue";
+import { jobsRedisClient } from "../../../shared/queue";
 import { PRESENCE_TTL_MS, PRESENCE_TTL_SECONDS } from "./constants";
 
 /**
@@ -38,7 +38,7 @@ export async function touchPresence(
   userId: string,
   connId: string,
 ): Promise<void> {
-  const redis = await jobsQueue.client;
+  const redis = await jobsRedisClient();
   await redis
     .multi()
     .zadd(presenceKey(threadId), Date.now(), presenceMember(userId, connId))
@@ -52,13 +52,13 @@ export async function dropPresence(
   userId: string,
   connId: string,
 ): Promise<void> {
-  const redis = await jobsQueue.client;
+  const redis = await jobsRedisClient();
   await redis.zrem(presenceKey(threadId), presenceMember(userId, connId));
 }
 
 /** Current distinct viewer userIds, sweeping stale members on the way (lazy). */
 export async function readPresence(threadId: string): Promise<string[]> {
-  const redis = await jobsQueue.client;
+  const redis = await jobsRedisClient();
   const cutoff = Date.now() - PRESENCE_TTL_MS;
   const results = await redis
     .multi()

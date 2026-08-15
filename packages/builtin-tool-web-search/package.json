@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent-tool-defs": "./src/agent-tool-defs.ts",
     "./providers": "./src/providers/index.ts",
     "./providers/anycrawl": "./src/providers/anycrawl.ts"
   },
@@ -14,16 +15,16 @@
   },
   "dependencies": {
     "@anycrawl/js-sdk": "^0.0.5",
-    "@langchain/core": "^1.2.3",
+    "@langchain/core": "^1.2.7",
     "@sourceweft/contracts": "workspace:*",
-    "langchain": "^1.5.0",
-    "zod": "^4.2.1"
+    "langchain": "^1.5.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/capability-runtime": "workspace:*",
-    "@types/node": "^22.15.30",
-    "tsx": "^4.20.6",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
     "typescript": "5.9.2"
   }
 }

@@ -53,6 +53,9 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
 
   private toInner(path: string | null | undefined) {
     const normalized = normalizePath(path);
+    if (this.prefix === "/") {
+      return normalized;
+    }
     return normalized === "/" ? this.prefix : `${this.prefix}${normalized}`;
   }
 
@@ -113,13 +116,20 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
     pattern: string,
     path: string | null = "/",
     glob?: string | null,
+    maxCount?: number | null,
   ): Promise<GrepResult> {
-    const result = await this.backend.grep(pattern, this.toInner(path), glob);
+    const result = await this.backend.grep(
+      pattern,
+      this.toInner(path),
+      glob,
+      maxCount,
+    );
     if (result.error) {
       return result;
     }
     return {
       matches: (result.matches ?? []).map((match) => this.grepMatch(match)),
+      truncated: result.truncated,
     };
   }
 
@@ -133,6 +143,7 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
     }
     return {
       files: (result.files ?? []).map((file) => this.fileInfo(file)),
+      truncated: result.truncated,
     };
   }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { buildSkillSandboxAssetPlans } from "./sandbox-assets";
+import { ContentError } from "../content/errors";
 import type { EnabledSkillDescriptor } from "./types";
 import type { SkillBundleFile } from "./builtin";
 
@@ -77,25 +78,24 @@ test("loadContent returns a zip whose bytes hash to the plan sha", async () => {
 });
 
 test("normalizes unsafe version strings without losing content authority", () => {
-  const [plan] = buildSkillSandboxAssetPlans([skill({ version: "2.0 β/beta" })]);
+  const [plan] = buildSkillSandboxAssetPlans([
+    skill({ version: "2.0 β/beta" }),
+  ]);
   assert.ok(plan);
   assert.match(plan.version, /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u);
 });
 
-test("skips ineligible skills instead of failing the batch", () => {
-  const warnings: string[] = [];
-  const logger = {
-    warn: (_message: string, meta?: Record<string, unknown>) => {
-      warnings.push(String(meta?.reason ?? ""));
-    },
-  };
-  const plans = buildSkillSandboxAssetPlans(
+test("fails fast when a selected skill cannot be staged", () => {
+  for (const [invalidSkill, expectedReason] of [
+    [skill({ name: "../evil" }), "unsafe_name"],
     [
-      skill({ name: "../evil" }),
       skill({
         name: "no-skill-md",
         files: [bundleFile("README.md", "no entry")],
       }),
+      "missing_skill_md",
+    ],
+    [
       skill({
         name: "traversal",
         files: [
@@ -103,6 +103,9 @@ test("skips ineligible skills instead of failing the batch", () => {
           bundleFile("../outside.txt", "escape"),
         ],
       }),
+      "unsafe_file_path",
+    ],
+    [
       skill({
         name: "too-big",
         files: [
@@ -110,17 +113,16 @@ test("skips ineligible skills instead of failing the batch", () => {
           bundleFile("blob.txt", "x", { sizeBytes: 5 * 1024 * 1024 }),
         ],
       }),
-      skill({ name: "empty-bundle", files: [] }),
-      skill(),
+      "bundle_too_large",
     ],
-    logger,
-  );
-  assert.equal(plans.length, 1);
-  assert.equal(plans[0]?.name, "ppt-deck");
-  assert.deepEqual(warnings.sort(), [
-    "bundle_too_large",
-    "missing_skill_md",
-    "unsafe_file_path",
-    "unsafe_name",
-  ]);
+    [skill({ name: "empty-bundle", files: [] }), "empty_bundle"],
+  ] as const) {
+    assert.throws(
+      () => buildSkillSandboxAssetPlans([invalidSkill]),
+      (error) =>
+        error instanceof ContentError &&
+        error.code === "SKILL_SANDBOX_ASSET_INVALID" &&
+        (error.details as { reason?: string }).reason === expectedReason,
+    );
+  }
 });

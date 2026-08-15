@@ -102,6 +102,9 @@ function createOperationStore(): SandboxOperationStore & {
   } = {
     completed: [],
     inserted: [],
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation() {
       return null;
     },
@@ -132,6 +135,9 @@ function createOperationStore(): SandboxOperationStore & {
 
 function createNullOperationStore(): SandboxOperationStore {
   return {
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation() {
       return null;
     },
@@ -186,6 +192,9 @@ function createReplayOperationStore(): SandboxOperationStore & {
 
   return {
     inserts,
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation(input) {
       const operation = operations.get(keyFor(input));
       return operation
@@ -447,6 +456,34 @@ test("SourceWeftSandboxBackend returns recoverable errors for sandbox file paths
     assert.match(result.error ?? "", /\/workspace/u);
   }
   assert.deepEqual(provider.systemExecuted, []);
+});
+
+test("SourceWeftSandboxBackend enforces grep maxCount at the protocol boundary", async () => {
+  const { provider } = createProvider();
+  provider.executeSystem = async () => ({
+    output: ["/workspace/a.md:1:match a", "/workspace/b.md:2:match b"].join(
+      "\n",
+    ),
+    exitCode: 0,
+    truncated: false,
+  });
+  const { backend } = createBackendWithProvider(provider);
+  const allMatches = [
+    { path: "/workspace/a.md", line: 1, text: "match a" },
+    { path: "/workspace/b.md", line: 2, text: "match b" },
+  ];
+
+  assert.deepEqual(await backend.grep("match", "/workspace", null, null), {
+    matches: allMatches,
+  });
+  assert.deepEqual(await backend.grep("match", "/workspace", null, 2), {
+    matches: allMatches,
+  });
+  assert.deepEqual(await backend.grep("match", "/workspace", null, 1), {
+    error: undefined,
+    matches: allMatches.slice(0, 1),
+    truncated: true,
+  });
 });
 
 test("SourceWeftSandboxBackend treats /skills as a SourceWeft DB-backed VFS path outside sandbox file tools", async () => {

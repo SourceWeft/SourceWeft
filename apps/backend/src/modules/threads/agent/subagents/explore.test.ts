@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import type { StructuredTool } from "@langchain/core/tools";
+import { StateBackend } from "deepagents";
+import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
+import {
+  EXPLORE_SUBAGENT_NAME,
+  createExploreSubagent,
+  exploreResponseSchema,
+} from "./explore";
+
+function fakeTool(name: string): StructuredTool {
+  return { name } as unknown as StructuredTool;
+}
+
+function build(availableTools: StructuredTool[] = []) {
+  return createExploreSubagent({
+    availableTools,
+    backend: new StateBackend({ state: { files: {} } } as never),
+    middleware: [],
+  });
+}
+
+test("explore is read-only: keeps search, drops mutating tools", () => {
+  const sub = build([
+    fakeTool(AGENT_TOOL_NAMES.searchSources),
+    fakeTool("write_file"),
+    fakeTool("publish_artifact"),
+  ]);
+  const toolNames = (sub.tools ?? []).map((tool) => tool.name);
+  assert.deepEqual(toolNames, [AGENT_TOOL_NAMES.searchSources]);
+});
+
+test("explore inherits the billed model and raises no HITL", () => {
+  const sub = build();
+  // No model override → inherits the billed defaultModel.
+  assert.equal(sub.model, undefined);
+  // Explicit empty interruptOn → never inherits parent HITL.
+  assert.deepEqual(sub.interruptOn, {});
+});
+
+test("explore is selectable, read-only-described, and returns structured findings", () => {
+  const sub = build();
+  assert.equal(sub.name, EXPLORE_SUBAGENT_NAME);
+  assert.equal(sub.name, "explore");
+  assert.match(sub.description, /read-only/i);
+  assert.ok(sub.systemPrompt.length > 0);
+  assert.equal(sub.responseFormat, exploreResponseSchema);
+});
+
+test("explore carries a filesystem middleware for working-file reads", () => {
+  const sub = build();
+  assert.ok((sub.middleware ?? []).length >= 1);
+});

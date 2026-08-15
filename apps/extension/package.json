@@ -17,9 +17,9 @@
   },
   "devDependencies": {
     "@rolldown/binding-darwin-arm64": "1.0.0-rc.11",
-    "@types/chrome": "^0.1.10",
-    "@types/node": "^22.15.30",
+    "@types/chrome": "^0.1.43",
+    "@types/node": "^22.20.1",
     "typescript": "5.9.2",
-    "wxt": "^0.20.7"
+    "wxt": "^0.20.27"
   }
 }

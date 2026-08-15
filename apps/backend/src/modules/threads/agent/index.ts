@@ -8,8 +8,12 @@
  * current turn's visible sources when source-grounded answers need evidence.
  */
 
-import { createDeepAgent } from "deepagents";
-import type { AnyBackendProtocol, BackendFactory } from "deepagents";
+import { createDeepAgent, StateBackend } from "deepagents";
+import type {
+  AnyBackendProtocol,
+  FilesystemPermission,
+  SubAgent,
+} from "deepagents";
 import type { AgentMiddleware, InterruptOnConfig } from "langchain";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
@@ -44,9 +48,17 @@ export interface CreateThreadAgentParams {
   gatewayConfigId?: string | null;
   execution?: LangChainModelExecutionConfig;
   tools?: Array<ClientTool | ServerTool>;
-  backend?: AnyBackendProtocol | BackendFactory;
+  backend?: AnyBackendProtocol;
+  /**
+   * Purpose-built subagents exposed to the model through the `task` tool. When
+   * omitted, deepagents still provides the general-purpose delegate; these are
+   * additional named delegates (e.g. `explore`, `plan`). Each inherits the billed
+   * gateway `model` unless it overrides it, so child model calls stay billed.
+   */
+  subagents?: SubAgent[];
   skills?: string[];
   filesystemMounts?: AgentFilesystemMountCapability[];
+  permissions?: FilesystemPermission[];
   runtimePrompt?: string;
   chatProfileConfig?: unknown;
   contextCompressionReportKey?: string;
@@ -73,11 +85,14 @@ export interface CreateThreadAgentParams {
  * @param params - Agent creation parameters
  * @returns A configured DeepAgent instance with PostgresSaver checkpointer
  */
-export async function createThreadAgent(params: CreateThreadAgentParams): Promise<ReturnType<typeof createDeepAgent>> {
+export async function createThreadAgent(
+  params: CreateThreadAgentParams,
+): Promise<ReturnType<typeof createDeepAgent>> {
   const checkpointer = await getChatCheckpointer();
 
   const modelAlias = params.modelAlias || config.chat.defaultModelAlias;
   const providerModel = params.providerModel || modelAlias;
+  const backend = params.backend ?? new StateBackend();
 
   const filesystemMounts =
     params.filesystemMounts ??
@@ -85,7 +100,9 @@ export async function createThreadAgent(params: CreateThreadAgentParams): Promis
       skillsEnabled: Boolean(params.skills?.length),
     });
   const middleware = await createSourceWeftAgentMiddlewareStack({
+    backend,
     modelAlias,
+    model: params.model,
     gatewayConfigId: params.gatewayConfigId,
     execution: params.execution,
     chatProfileConfig: params.chatProfileConfig,
@@ -105,8 +122,10 @@ export async function createThreadAgent(params: CreateThreadAgentParams): Promis
     }),
     middleware,
     checkpointer,
-    backend: params.backend as DeepAgentBackend,
+    backend: backend as DeepAgentBackend,
+    ...(params.subagents ? { subagents: params.subagents } : {}),
     skills: params.skills,
+    permissions: params.permissions,
     interruptOn: params.interruptOn,
   });
 

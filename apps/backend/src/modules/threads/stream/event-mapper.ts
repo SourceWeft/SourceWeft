@@ -324,11 +324,18 @@ export function mapDeepAgentEventToSse(
     });
   }
 
-  return toSseData({
-    type: "citations",
-    citations: event.citations,
-    ...(event.availableCitations
-      ? { availableCitations: event.availableCitations }
-      : {}),
-  });
+  if (event.type === "citations") {
+    return toSseData({
+      type: "citations",
+      citations: event.citations,
+      ...(event.availableCitations
+        ? { availableCitations: event.availableCitations }
+        : {}),
+    });
+  }
+
+  // Unhandled event types produce no SSE frame. Previously this fell through to
+  // the citations branch, so any new event variant was mis-emitted as a broken
+  // `citations` event; returning null lets callers skip it safely instead.
+  return null;
 }

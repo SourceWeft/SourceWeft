@@ -28,9 +28,10 @@ import type { SkillBundleFile } from "../builtin";
  * (verified live 2026-08-12: the per-file/model-readable-only predecessor left
  * pptx's 54 scripts behind and executable skills could never run).
  *
- * Failure is graceful: a download failure, oversize file, or integrity
- * mismatch returns `null` so the caller SKIPS the skill without failing the
- * turn (§6a). No content is ever persisted — the only cache is an ephemeral
+ * A download failure, oversize file, or integrity mismatch returns `null` as a
+ * precise loader failure signal. Turn preparation treats that signal as fatal
+ * for a selected skill; it is never silently removed. No content is ever
+ * persisted — the only cache is an ephemeral
  * in-process LRU (legal control: fetch-on-use, no durable cache). Bundles are
  * text-only (`contentText`), mirroring the ingest reader; binary assets are a
  * known non-goal of v1.
@@ -173,8 +174,8 @@ export type LoadPointerSkillBundleOptions = {
  * Resolve a registry skill's full bundle: one hardened tarball download at the
  * pinned commit, then read + sha256-verify every `fileManifest` entry (all
  * roles). Returns the verified `SkillBundleFile[]` (same shape the
- * `repo_builtin`/`db_text` branches produce), or `null` so the caller skips
- * the skill without failing the turn.
+ * `repo_builtin`/`db_text` branches produce), or `null` when loading or
+ * integrity verification fails.
  */
 export async function loadPointerSkillBundle(
   storagePointer: string,

@@ -6,9 +6,10 @@ import {
 } from "./event-mapper";
 import type { DeepAgentTurnEvent } from "../agent/turn/runner";
 
-function parseSseData(value: string) {
-  assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<
+function parseSseData(value: string | null) {
+  assert.notEqual(value, null);
+  assert.equal(value!.startsWith("data: "), true);
+  return JSON.parse(value!.slice("data: ".length).trim()) as Record<
     string,
     unknown
   >;
@@ -406,4 +407,24 @@ test("mapDeepAgentEventToSse sends delta-only reasoning segment metadata", () =>
     Object.hasOwn(data.segment as Record<string, unknown>, "text"),
     false,
   );
+});
+
+test("mapDeepAgentEventToSse still maps citations events", () => {
+  const event: DeepAgentTurnEvent = {
+    type: "citations",
+    citations: [],
+    availableCitations: [],
+  } as DeepAgentTurnEvent;
+  const data = parseSseData(mapDeepAgentEventToSse(event as never, "text-1"));
+  assert.equal(data.type, "citations");
+});
+
+test("mapDeepAgentEventToSse returns null for an unrecognized event type", () => {
+  // A future variant (e.g. sub-agent activity) must NOT fall through to the
+  // citations branch; it produces no SSE frame so callers can skip it.
+  const result = mapDeepAgentEventToSse(
+    { type: "subagent-activity" } as never,
+    "text-1",
+  );
+  assert.equal(result, null);
 });

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import type { BackendProtocolV2, SandboxBackendProtocolV2 } from "deepagents";
+import {
+  StateBackend,
+  type BackendProtocolV2,
+  type SandboxBackendProtocolV2,
+} from "deepagents";
 import { afterEach, beforeAll, beforeEach, describe, test } from "vitest";
 import { config } from "../../../../shared/config";
 import type { PreparedThreadTurn } from "../..";
@@ -14,11 +18,11 @@ import {
 } from "../../../../test/synthetic-capability";
 import {
   buildAgentBackend,
-  buildAgentBackendFactory,
   buildRuntimePromptContext,
   buildSandboxRuntimeForPreparedTurn,
   filesystemMountsForPrompt,
 } from "./turn-assembly";
+import { createSourceWeftToolCallContextMiddleware } from "../middleware";
 
 const SANDBOX_PATH_POLICY_STUB = {
   workspaceRoot: "/workspace",
@@ -100,9 +104,11 @@ function stubBackend(label: string): BackendProtocolV2 {
   };
 }
 
-function stubSandboxBackend(input: {
-  executeCalls?: Array<{ command: string; toolCallId?: string | null }>;
-} = {}): SandboxBackendProtocolV2 {
+function stubSandboxBackend(
+  input: {
+    executeCalls?: Array<{ command: string; toolCallId?: string | null }>;
+  } = {},
+): SandboxBackendProtocolV2 {
   return {
     ...stubBackend("sandbox"),
     id: "sandbox-test",
@@ -212,6 +218,46 @@ function toolNames(
   return runtime.tools.map((tool) => tool.name).sort();
 }
 
+test("agent backend preserves Deep Agents context paths without a sandbox", async () => {
+  const workingWrites: string[] = [];
+  const workingBackend = {
+    ...stubBackend("work"),
+    write: async (path: string) => {
+      workingWrites.push(path);
+      return { path, filesUpdate: null };
+    },
+  } satisfies BackendProtocolV2;
+  const backend = buildAgentBackend({
+    filesystemBackend: {
+      backend: stubBackend("mounted") as never,
+      knowledgeBackend: stubBackend("kb") as never,
+      workingFilesBackend: workingBackend as never,
+      filesystemMounts: [],
+      skillsBackend: null,
+    },
+    internalContextBackend: new StateBackend({ state: { files: {} } } as never),
+    sandboxRuntime: null,
+  });
+
+  const history = await backend.write(
+    "/conversation_history/messages.md",
+    "history",
+  );
+  const largeResult = await backend.write(
+    "/large_tool_results/tool-call.txt",
+    "large result",
+  );
+  await backend.write("/workfiles/notes.md", "notes");
+
+  assert.equal(history.error, undefined);
+  assert.equal(largeResult.error, undefined);
+  assert.deepEqual(workingWrites, ["/workfiles/notes.md"]);
+  assert.equal(
+    (await backend.read("/kb/source.md")).content,
+    "kb:read:/kb/source.md",
+  );
+});
+
 test("agent backend routes VFS paths while execute stays on sandbox default", async () => {
   const backend = buildAgentBackend({
     filesystemBackend: {
@@ -260,9 +306,10 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
   );
 });
 
-test("agent backend factory passes runtime tool call id to sandbox execute", async () => {
-  const executeCalls: Array<{ command: string; toolCallId?: string | null }> = [];
-  const factory = buildAgentBackendFactory({
+test("preconstructed agent backend receives concurrent-safe tool call context", async () => {
+  const executeCalls: Array<{ command: string; toolCallId?: string | null }> =
+    [];
+  const backend = buildAgentBackend({
     filesystemBackend: {
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
@@ -279,14 +326,26 @@ test("agent backend factory passes runtime tool call id to sandbox execute", asy
       pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
-  const backend = await factory({
-    state: {},
-    toolCallId: "call-runtime-execute",
-  } as never);
+  const middleware = createSourceWeftToolCallContextMiddleware() as unknown as {
+    wrapToolCall: (
+      request: unknown,
+      handler: (request: unknown) => Promise<unknown>,
+    ) => Promise<unknown>;
+  };
 
   assert.deepEqual(
-    await (backend as SandboxBackendProtocolV2).execute(
-      "node /workspace/ppt-deck/a.js",
+    await middleware.wrapToolCall(
+      {
+        toolCall: {
+          id: "call-runtime-execute",
+          name: AGENT_TOOL_NAMES.execute,
+          args: { command: "node /workspace/ppt-deck/a.js" },
+        },
+      },
+      async () =>
+        (backend as SandboxBackendProtocolV2).execute(
+          "node /workspace/ppt-deck/a.js",
+        ),
     ),
     {
       output: "executed:node /workspace/ppt-deck/a.js",

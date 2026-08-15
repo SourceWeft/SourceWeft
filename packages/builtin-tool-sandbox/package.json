@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./agent-tool-defs": "./src/agent-tool-defs.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -14,15 +15,15 @@
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/capability-runtime": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
-    "deepagents": "^1.12.3",
-    "langchain": "^1.5.0",
-    "langsmith": "^0.7.10",
-    "zod": "^4.3.6"
+    "deepagents": "1.12.4",
+    "langchain": "^1.5.8",
+    "langsmith": "^0.7.17",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@sourceweft/capability-runtime": "workspace:*",
-    "@types/node": "^22.15.30",
-    "tsx": "^4.20.6",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
     "typescript": "5.9.2"
   }
 }

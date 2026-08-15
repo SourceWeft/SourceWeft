@@ -21,11 +21,28 @@ import {
   rootInfo,
   stripMount,
 } from "./mounted-paths";
-import {
-  downloadMountedFiles,
-  uploadMountedFiles,
-} from "./mounted-transfer";
+import { downloadMountedFiles, uploadMountedFiles } from "./mounted-transfer";
 import type { MountedBackend } from "./mounted-types";
+
+function applyGrepMaxCount(params: {
+  result: GrepResult;
+  maxCount?: number | null;
+}): GrepResult {
+  const { result, maxCount } = params;
+  if (
+    maxCount == null ||
+    result.matches == null ||
+    result.matches.length <= maxCount
+  ) {
+    return result;
+  }
+
+  return {
+    error: result.error,
+    matches: result.matches.slice(0, maxCount),
+    truncated: true,
+  };
+}
 
 export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
   private readonly mounts: MountedBackend[];
@@ -45,9 +62,11 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
       capabilities.find((mount) => mount.root === KNOWLEDGE_MOUNT.root) ??
       KNOWLEDGE_MOUNT;
     const workingCapability =
-      capabilities.find((mount) => mount.root === WORK_MOUNT.root) ?? WORK_MOUNT;
+      capabilities.find((mount) => mount.root === WORK_MOUNT.root) ??
+      WORK_MOUNT;
     const skillsCapability =
-      capabilities.find((mount) => mount.root === SKILLS_MOUNT.root) ?? SKILLS_MOUNT;
+      capabilities.find((mount) => mount.root === SKILLS_MOUNT.root) ??
+      SKILLS_MOUNT;
     this.mounts = [
       { capability: knowledgeCapability, backend: input.knowledge },
       { capability: workingCapability, backend: input.working },
@@ -56,9 +75,12 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
         : []),
     ];
     this.defaultMount =
-      this.mounts.find((mount) => mount.capability.evidenceRole === "source_evidence") ??
-      this.mounts[0]!;
-    this.writableMounts = this.mounts.filter((mount) => mount.capability.writable);
+      this.mounts.find(
+        (mount) => mount.capability.evidenceRole === "source_evidence",
+      ) ?? this.mounts[0]!;
+    this.writableMounts = this.mounts.filter(
+      (mount) => mount.capability.writable,
+    );
   }
 
   private route(path: string | null | undefined) {
@@ -93,7 +115,9 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     }
     const mount = this.routeOrDefault(path);
     if (mount.capability.root === SKILLS_MOUNT.root) {
-      const result = await mount.backend.ls(stripMount(path, mount.capability.root));
+      const result = await mount.backend.ls(
+        stripMount(path, mount.capability.root),
+      );
       if (result.error) return result;
       return {
         files: prefixMountedFiles(result.files, mount.capability.root),
@@ -102,7 +126,11 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     return mount.backend.ls(path);
   }
 
-  async read(filePath: string, offset?: number, limit?: number): Promise<ReadResult> {
+  async read(
+    filePath: string,
+    offset?: number,
+    limit?: number,
+  ): Promise<ReadResult> {
     const mount = this.routeOrDefault(filePath);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       return mount.backend.read(
@@ -126,12 +154,14 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     pattern: string,
     path: string | null = KNOWLEDGE_MOUNT.root,
     glob?: string | null,
+    maxCount?: number | null,
   ): Promise<GrepResult> {
     if (path === "/") {
       return this.defaultMount.backend.grep(
         pattern,
         this.defaultMount.capability.root,
         glob,
+        maxCount,
       );
     }
     const mount = this.routeOrDefault(path);
@@ -140,6 +170,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
         pattern,
         stripMount(path ?? mount.capability.root, mount.capability.root),
         glob,
+        maxCount,
       );
       if (result.error) return result;
       return {
@@ -150,9 +181,13 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
             "/",
           ),
         })),
+        truncated: result.truncated,
       };
     }
-    return mount.backend.grep(pattern, path, glob);
+    return applyGrepMaxCount({
+      result: await mount.backend.grep(pattern, path, glob, maxCount),
+      maxCount,
+    });
   }
 
   async glob(pattern: string, path = "/"): Promise<GlobResult> {
@@ -170,6 +205,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
               result.files,
               patternMount.capability.root,
             ),
+            truncated: result.truncated,
           };
         }
         return patternMount.backend.glob(pattern, patternMount.capability.root);
@@ -188,6 +224,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
       if (result.error) return result;
       return {
         files: prefixMountedFiles(result.files, mount.capability.root),
+        truncated: result.truncated,
       };
     }
     return mount.backend.glob(pattern, path);

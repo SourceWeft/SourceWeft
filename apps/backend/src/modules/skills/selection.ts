@@ -1,5 +1,4 @@
 import { ContentError } from "../content/errors";
-import { logger } from "../../shared/logger";
 import {
   getBuiltinSkillBySlug,
   loadBuiltinSkillBundle,
@@ -148,11 +147,7 @@ export async function resolveSelectedSkills(input: {
       workspaceId: input.workspaceId,
       loadWorkspaceSkillVersion,
     });
-    // A `pointer` (registry) skill whose fetch-on-use failed resolves to null:
-    // skip it so the rest of the turn's skills still resolve (§6a).
-    if (resolved) {
-      result.push(resolved);
-    }
+    result.push(resolved);
   }
 
   return result;
@@ -229,7 +224,7 @@ async function resolveWorkspaceRuntimeSkill(input: {
   teamId: string;
   workspaceId: string;
   loadWorkspaceSkillVersion: typeof loadSkillVersionBundle;
-}): Promise<EnabledSkillDescriptor | null> {
+}): Promise<EnabledSkillDescriptor> {
   const bundle = await input.loadWorkspaceSkillVersion({
     teamId: input.teamId,
     workspaceId: input.workspaceId,
@@ -258,26 +253,34 @@ async function resolveWorkspaceRuntimeSkill(input: {
 
   let files: SkillBundleFile[] | undefined;
   if (bundle.version.storageType === "repo_builtin") {
-    files = (await loadBuiltinSkillBundle(bundle.version.storagePointer))?.files;
+    files = (await loadBuiltinSkillBundle(bundle.version.storagePointer))
+      ?.files;
   } else if (bundle.version.storageType === "pointer") {
     // R5 fetch-on-use: a registry (`registry_github`) version stores no file
-    // bodies (invariant 2). Fetch each model-readable file by path from the
-    // pinned commit, verifying per-file sha256. A transient failure / integrity
-    // reject returns null → skip the skill, never fail the turn (§6a).
+    // bodies (invariant 2). Fetch from the pinned commit and verify every file.
+    // A selected skill is part of the turn contract, so failure is fatal rather
+    // than silently changing the agent's instruction set.
     const pointerFiles = await loadPointerSkillBundle(
       bundle.version.storagePointer,
       bundle.version.contentHash,
       bundle.version.manifestJson.registry,
     );
     if (!pointerFiles) {
-      logger.warn("SKILL_FILES_NOT_FOUND", {
-        reason: "pointer_fetch_failed",
-        workspaceSkillId: input.record.id,
-        skillId: input.record.skillId,
-        skillVersionId: input.record.skillVersionId,
-        storageType: "pointer",
-      });
-      return null;
+      throw new ContentError(
+        502,
+        "SKILL_PREPARATION_FAILED",
+        `Selected skill '${bundle.definition.slug}' could not be loaded from its pinned registry source`,
+        {
+          details: {
+            reason: "pointer_fetch_or_integrity_verification_failed",
+            workspaceSkillId: input.record.id,
+            skillId: input.record.skillId,
+            skillVersionId: input.record.skillVersionId,
+            storageType: "pointer",
+          },
+          recoverable: true,
+        },
+      );
     }
     files = pointerFiles;
   } else {

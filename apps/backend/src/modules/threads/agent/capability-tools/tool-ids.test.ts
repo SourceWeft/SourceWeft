@@ -3,7 +3,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
-import { resolveCapabilityRecordToolIds } from "./index";
+import {
+  resolveCapabilityRecordToolIds,
+  resolveCapabilityToolOwners,
+} from "./index";
 
 const HOST_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -95,6 +98,66 @@ test("ids are de-duplicated across top-level and skill runtime sources", () => {
     bindAll,
   );
   assert.deepEqual([...ids].sort(), ["generate_image", "review_deck_visuals"]);
+});
+
+type CapabilityRecord = Parameters<
+  typeof resolveCapabilityToolOwners
+>[0][number];
+
+function capabilityRecord(input: {
+  id: string;
+  tools?: readonly string[];
+  skillRuntimeTools?: readonly (readonly string[])[];
+}): CapabilityRecord {
+  return {
+    manifest: {
+      id: input.id,
+      contributes: contributions({
+        tools: input.tools,
+        skillRuntimeTools: input.skillRuntimeTools,
+      }),
+    },
+    rootDir: `/capabilities/${input.id}`,
+    manifestPath: `/capabilities/${input.id}/sourceweft.capability.json`,
+    packageName: null,
+  } as unknown as CapabilityRecord;
+}
+
+test("top-level capability ownership overrides a skill runtime reference", () => {
+  const owners = resolveCapabilityToolOwners([
+    capabilityRecord({ id: "sourceweft/web", tools: ["web_search"] }),
+    capabilityRecord({
+      id: "sourceweft/research-skill",
+      skillRuntimeTools: [["web_search"]],
+    }),
+  ]);
+
+  assert.equal(owners.get("web_search"), "sourceweft/web");
+});
+
+test("a skill can own a runtime tool absent from top-level contributions", () => {
+  const owners = resolveCapabilityToolOwners([
+    capabilityRecord({
+      id: "sourceweft/ppt-skill",
+      skillRuntimeTools: [["review_deck_visuals"]],
+    }),
+  ]);
+
+  assert.equal(owners.get("review_deck_visuals"), "sourceweft/ppt-skill");
+});
+
+test("ambiguous capability tool ownership fails preparation", () => {
+  assert.throws(
+    () =>
+      resolveCapabilityToolOwners([
+        capabilityRecord({ id: "sourceweft/web-a", tools: ["web_search"] }),
+        capabilityRecord({ id: "sourceweft/web-b", tools: ["web_search"] }),
+      ]),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "CAPABILITY_TOOL_OWNER_AMBIGUOUS",
+  );
 });
 
 // ── Manifest-level invariant ────────────────────────────────────────────────

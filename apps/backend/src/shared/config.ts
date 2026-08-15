@@ -563,14 +563,6 @@ export const config = {
         ),
         limits: agentInterpreterLimits,
       },
-      // Expose purpose-built subagents (e.g. `researcher`) through the `task`
-      // tool. Off by default: the general-purpose delegate is always present;
-      // this adds named, tool-scoped delegates. Turning it off keeps only the
-      // explicitly governed general-purpose delegate.
-      subagentsEnabled: parseBoolean(
-        process.env.SOURCEWEFT_AGENT_SUBAGENTS_ENABLED,
-        false,
-      ),
       // Proactive clarifying questions (Claude-Code-style `askUser`). On by
       // default; the askUser middleware is added to the root and sub-agent
       // graphs. Set SOURCEWEFT_AGENT_ASK_USER_ENABLED=false (or 0) to disable.

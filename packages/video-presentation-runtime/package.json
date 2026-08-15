@@ -13,17 +13,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@babel/standalone": "^7.28.5",
-    "@remotion/media": "^4.0.468",
-    "@remotion/player": "^4.0.468",
-    "@remotion/web-renderer": "^4.0.468",
+    "@babel/standalone": "^7.29.8",
+    "@remotion/media": "^4.0.509",
+    "@remotion/player": "^4.0.509",
+    "@remotion/web-renderer": "^4.0.509",
     "@sourceweft/contracts": "workspace:*",
-    "react": "^19.2.1",
-    "remotion": "^4.0.468"
+    "react": "^19.2.8",
+    "remotion": "^4.0.509"
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
-    "@types/react": "^19.1.0",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
     "jsdom": "^26.1.0",
     "typescript": "5.9.2",
     "vitest": "4.1.7"
