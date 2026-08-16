@@ -38,7 +38,9 @@ export function resolveModelCapabilities(
     >) {
       const value = rule.capabilities[key];
       if (value !== undefined && !set.has(key)) {
-        resolved[key] = value;
+        // key is a dynamic keyof, so the field's specific type collapses to
+        // `never` under indexing; the value is the matching union member.
+        (resolved as Record<keyof ModelCapabilities, unknown>)[key] = value;
         set.add(key);
       }
     }

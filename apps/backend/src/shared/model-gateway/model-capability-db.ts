@@ -29,4 +29,10 @@ export const MODEL_CAPABILITY_DB: readonly ModelCapabilityRule[] = [
   // (verified live against deepseek-v4-pro, 2026-08-05; the storyboard-402
   // incident's true root cause).
   { modelMatch: "deepseek", capabilities: { toolCallArgumentJsonRepair: true } },
+  // DeepSeek rejects a `json_schema` response_format (hard 400). langchain's
+  // first-party ChatDeepSeek pins structured output to `function_calling` (and
+  // normalizes json_schema to it); declaring it here gives the same model the
+  // same method when reached through a generic openai-compatible gateway
+  // (OpenRouter), where the ChatOpenAI default would otherwise be json_schema.
+  { modelMatch: "deepseek", capabilities: { structuredOutputMethod: "function_calling" } },
 ];

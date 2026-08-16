@@ -91,6 +91,15 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     .trim();
 }
 
+/** Map a gateway structured-output method to LangChain's `withStructuredOutput` name. */
+function langChainStructuredOutputMethod(
+  method: "json_schema" | "json_mode" | "function_calling",
+): "jsonSchema" | "jsonMode" | "functionCalling" {
+  if (method === "json_schema") return "jsonSchema";
+  if (method === "json_mode") return "jsonMode";
+  return "functionCalling";
+}
+
 /** Adapter guarantee lookup that tolerates injected/test provider kinds. */
 function adapterGuaranteesThinkingDisable(kind: ProviderKind): boolean {
   try {
@@ -297,12 +306,56 @@ function createObservedLangChainChatModel(input: {
    * against the raw model (not the proxy) so that whatever it does internally —
    * typically `bindTools` plus `invoke` — cannot re-enter this shim and emit a
    * second generation for the same call.
+   *
+   * Provider differences are applied here from the model's capabilities, so a
+   * generic caller (LangChain agent `responseFormat`) gets the same handling the
+   * model's first-party class would give — mirroring, e.g., how ChatDeepSeek
+   * pins `function_calling`:
+   *  - the capability's `structuredOutputMethod` is applied when the caller
+   *    didn't pin one (DeepSeek → function_calling instead of json_schema);
+   *  - for a model that rejects a forced tool_choice while thinking
+   *    (`forcedToolChoiceBlockedByThinking`), the structured call is made against
+   *    a thinking-off rebuild of the model, so function_calling's forced
+   *    tool_choice is accepted — the agent's own tool loop keeps thinking.
    */
   const withStructuredOutput: LangChainChatModelLike["withStructuredOutput"] = (
     schema,
     structuredConfig,
   ) => {
-    const structured = input.model.withStructuredOutput!(schema, structuredConfig);
+    const capabilities = resolveModelCapabilities(
+      input.target.providerModel,
+      input.config.modelCapabilities,
+    );
+    const callerMethod = (
+      structuredConfig as
+        | { method?: "jsonSchema" | "jsonMode" | "functionCalling" }
+        | undefined
+    )?.method;
+    const method =
+      callerMethod ??
+      (capabilities.structuredOutputMethod
+        ? langChainStructuredOutputMethod(capabilities.structuredOutputMethod)
+        : undefined);
+    const resolvedConfig =
+      method !== undefined
+        ? { ...(structuredConfig ?? {}), method }
+        : structuredConfig;
+
+    const needsThinkingOff =
+      capabilities.forcedToolChoiceBlockedByThinking &&
+      resolveThinkingMode(input.payload.thinking) !== "off";
+    const structuredModel = needsThinkingOff
+      ? (getChatAdapter(input.target.providerKind).createModel(
+          input.target,
+          { ...input.payload, thinking: { mode: "off" }, stream: false },
+          input.options,
+        ) as unknown as LangChainChatModelLike)
+      : input.model;
+
+    const structured = structuredModel.withStructuredOutput!(
+      schema,
+      resolvedConfig,
+    );
     return {
       invoke: async (structuredInput, structuredOptions) =>
         observeInvocation(

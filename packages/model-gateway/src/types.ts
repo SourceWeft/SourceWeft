@@ -345,6 +345,16 @@ export interface ModelCapabilities {
    * malformed output should fail loudly, not be silently patched.
    */
   toolCallArgumentJsonRepair: boolean;
+  /**
+   * The structured-output method this model needs, applied when the caller does
+   * not pin one. Mirrors what langchain's first-party provider class would
+   * default to — e.g. `ChatDeepSeek.withStructuredOutput` pins
+   * `function_calling` (and normalizes `json_schema` to it) because DeepSeek
+   * rejects a `json_schema` response_format. Declaring it here makes the same
+   * model reached through a generic openai-compatible gateway (OpenRouter) pick
+   * the method its first-party class would, instead of the adapter's default.
+   */
+  structuredOutputMethod?: "json_schema" | "json_mode" | "function_calling";
 }
 
 /** A capability rule matched by a case-insensitive substring of the model name. */
