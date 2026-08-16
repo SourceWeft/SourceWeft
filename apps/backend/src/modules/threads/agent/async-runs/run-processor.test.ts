@@ -114,6 +114,32 @@ test("getRunConfig round-trips the persisted input + tenancy context", async () 
   assert.equal(cfg?.input.messages[0]?.content, "investigate X");
 });
 
+test("an out-of-process cancel aborts the in-flight executor via polling", async () => {
+  const { threadId, runId } = await runningRun();
+  let sawAbort = false;
+  const status = await processRun({
+    store,
+    threadId,
+    runId,
+    cancelPollMs: 20,
+    // A long-running executor that resolves only when its signal aborts — the
+    // stand-in for a delegate graph that stops when cancelled.
+    executor: (run, signal) =>
+      new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          sawAbort = true;
+          reject(new Error("aborted"));
+        });
+        // Simulate the API endpoint cancelling the run in another process.
+        setTimeout(() => {
+          void store.transition(run.runId, "cancelled");
+        }, 40);
+      }),
+  });
+  assert.ok(sawAbort, "the executor's signal aborted on the out-of-process cancel");
+  assert.equal(status, "cancelled");
+});
+
 test("a concurrent interrupt is not overwritten by a late success", async () => {
   const { threadId, runId } = await runningRun();
   const status = await processRun({
