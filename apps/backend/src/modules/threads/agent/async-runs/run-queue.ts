@@ -37,6 +37,15 @@ export async function enqueueRun(
   await queue.add("run", data, {
     removeOnComplete: true,
     removeOnFail: 100,
+    // Crash recovery: if a worker dies mid-run, the job is retried rather than
+    // left as a run stuck in `running`. Re-running is safe — `processRun`
+    // re-checks terminal status and never overwrites one, and the delegate graph
+    // resumes from its checkpoint instead of restarting (so completed model
+    // calls aren't repeated). Legitimate executor *errors* don't retry: the
+    // processor catches them and resolves the job, so `attempts` only ever fires
+    // on a true crash/stall.
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
   });
 }
 
