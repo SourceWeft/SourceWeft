@@ -690,9 +690,25 @@ export async function buildThreadAgentAssembly(
     }),
     // Background (async) delegates: deepagents auto-wires the async task tools
     // (check/list/update/cancel) that drive the self-hosted runs endpoint. Off
-    // by default; requires the endpoint + run worker (see async-runs).
+    // by default; requires the endpoint + run worker (see async-runs). The
+    // per-turn billing/tenancy context rides a header (deepagents forwards no
+    // metadata otherwise) so the worker rebuilds the billed model + tenant scope.
     ...(config.chat.agent.asyncSubagentsEnabled
-      ? buildAsyncDelegates(config.chat.agent.asyncRunsEndpointUrl)
+      ? buildAsyncDelegates(
+          config.chat.agent.asyncRunsEndpointUrl,
+          {
+            teamId: prepared.workspace.organizationId,
+            workspaceId: prepared.workspace.id,
+            userId: prepared.userId,
+            modelAlias: prepared.modelAlias,
+            providerModel: prepared.providerModel,
+            profileAlias: prepared.profileAlias,
+            gatewayConfigId: prepared.chatProfile.gatewayConfigId,
+            parentThreadId: prepared.thread.id,
+            sourceIds: prepared.sourceIds,
+          },
+          config.chat.agent.asyncRunsInternalToken,
+        )
       : []),
   ];
 

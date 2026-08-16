@@ -14,6 +14,7 @@ import { DELEGATE_GRAPH_IDS } from "./delegate-graph";
 import type { RunContextConfig } from "./types";
 import {
   RUN_CONTEXT_HEADER,
+  RUN_INTERNAL_TOKEN_HEADER,
   encodeRunContextHeader,
 } from "./run-context-header";
 
@@ -23,14 +24,22 @@ import {
  *   forwards it as a header on every request (the only channel it offers), so
  *   the endpoint can scope the run + rebuild the billed model. Omit only where
  *   no turn context exists (e.g. the exposure introspection test).
+ * @param internalToken - shared secret the endpoint's guard requires. Sent as a
+ *   header on every request; omit only in tests that don't hit the guarded mount.
  */
 export function buildAsyncDelegates(
   endpointBaseUrl: string,
   context?: RunContextConfig,
+  internalToken?: string,
 ): AsyncSubAgent[] {
-  const headers = context
-    ? { [RUN_CONTEXT_HEADER]: encodeRunContextHeader(context) }
-    : undefined;
+  const headers: Record<string, string> = {};
+  if (context) {
+    headers[RUN_CONTEXT_HEADER] = encodeRunContextHeader(context);
+  }
+  if (internalToken) {
+    headers[RUN_INTERNAL_TOKEN_HEADER] = internalToken;
+  }
+  const hasHeaders = Object.keys(headers).length > 0;
   return DELEGATE_GRAPH_IDS.map((graphId) => ({
     name: `${graphId}-async`,
     description:
@@ -41,6 +50,6 @@ export function buildAsyncDelegates(
       `\`task\` tool when you can wait for the result inline.`,
     graphId,
     url: endpointBaseUrl,
-    ...(headers ? { headers } : {}),
+    ...(hasHeaders ? { headers } : {}),
   }));
 }

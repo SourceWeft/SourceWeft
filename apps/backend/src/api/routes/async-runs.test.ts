@@ -103,6 +103,9 @@ test("a started run is enqueued once, carrying the persisted input + context", a
     workspaceId: "ws_1",
     userId: "user_1",
     modelAlias: "chat-default",
+    providerModel: "deepseek-chat",
+    profileAlias: "default",
+    gatewayConfigId: "gw_1",
     parentThreadId: "thread_parent",
   };
   const runRes = await hono.request(`/threads/${thread.thread_id}/runs`, {

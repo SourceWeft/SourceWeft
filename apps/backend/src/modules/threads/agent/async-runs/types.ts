@@ -68,8 +68,14 @@ export interface RunContextConfig {
   teamId: string;
   workspaceId: string;
   userId: string;
+  /** Billing identity, mirrored from the parent turn (see turn-billing-scope). */
   modelAlias: string;
-  gatewayConfigId?: string | null;
+  /** The alias passed to `agentChatModel` (parent's `providerModel`). */
+  providerModel: string;
+  /** Billing profile alias (parent's `profileAlias`). */
+  profileAlias: string;
+  /** Gateway config id — required to bill the child model call. */
+  gatewayConfigId: string;
   /** The parent turn's thread, for scoping the delegate's working-files backend. */
   parentThreadId: string;
   /** Source ids the delegate may search / read, from the parent turn. */

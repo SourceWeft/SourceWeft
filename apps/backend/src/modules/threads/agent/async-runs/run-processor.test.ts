@@ -103,6 +103,9 @@ test("getRunConfig round-trips the persisted input + tenancy context", async () 
       workspaceId: "ws_1",
       userId: "user_1",
       modelAlias: "chat-default",
+      providerModel: "deepseek-chat",
+      profileAlias: "default",
+      gatewayConfigId: "gw_1",
       parentThreadId: "thread_parent",
     },
   });

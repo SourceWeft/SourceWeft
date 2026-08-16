@@ -16,6 +16,8 @@ const context: RunContextConfig = {
   workspaceId: "ws_1",
   userId: "user_1",
   modelAlias: "chat-default",
+  providerModel: "deepseek-chat",
+  profileAlias: "default",
   gatewayConfigId: "gw_1",
   parentThreadId: "thread_parent",
   sourceIds: ["src_a", "src_b"],
@@ -32,11 +34,13 @@ test("optional fields are omitted when absent", () => {
     workspaceId: "ws_1",
     userId: "user_1",
     modelAlias: "chat-default",
+    providerModel: "deepseek-chat",
+    profileAlias: "default",
+    gatewayConfigId: "gw_1",
     parentThreadId: "thread_parent",
   };
   const decoded = decodeRunContextHeader(encodeRunContextHeader(minimal));
   assert.deepEqual(decoded, minimal);
-  assert.ok(!("gatewayConfigId" in (decoded as object)));
   assert.ok(!("sourceIds" in (decoded as object)));
 });
 

@@ -17,11 +17,21 @@ import type { RunContextConfig } from "./types";
 
 export const RUN_CONTEXT_HEADER = "x-sourceweft-run-context";
 
+/**
+ * Shared-secret header guarding the internal runs endpoint. The parent turn
+ * sends it; the endpoint rejects any request whose value doesn't match the
+ * configured token (fail-closed when unset).
+ */
+export const RUN_INTERNAL_TOKEN_HEADER = "x-sourceweft-internal-token";
+
 const REQUIRED_STRING_KEYS = [
   "teamId",
   "workspaceId",
   "userId",
   "modelAlias",
+  "providerModel",
+  "profileAlias",
+  "gatewayConfigId",
   "parentThreadId",
 ] as const;
 
@@ -61,11 +71,11 @@ export function decodeRunContextHeader(
     workspaceId: record.workspaceId as string,
     userId: record.userId as string,
     modelAlias: record.modelAlias as string,
+    providerModel: record.providerModel as string,
+    profileAlias: record.profileAlias as string,
+    gatewayConfigId: record.gatewayConfigId as string,
     parentThreadId: record.parentThreadId as string,
   };
-  if (typeof record.gatewayConfigId === "string") {
-    context.gatewayConfigId = record.gatewayConfigId;
-  }
   if (
     Array.isArray(record.sourceIds) &&
     record.sourceIds.every((id) => typeof id === "string")

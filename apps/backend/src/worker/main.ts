@@ -28,6 +28,8 @@ import {
 } from "./processors/thread-chat-run";
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
+import { startAsyncRunsWorker } from "./async-runs-worker";
+import { ASYNC_RUNS_QUEUE } from "../modules/threads/agent/async-runs/run-queue";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
@@ -164,6 +166,17 @@ function registerWorkerListeners(
 registerWorkerListeners(primaryWorker, config.queueName);
 registerWorkerListeners(deliverablesWorker, config.deliverablesQueueName);
 
+// Background delegate runs (flag-gated; null when disabled).
+const asyncRunsWorker = await startAsyncRunsWorker();
+if (asyncRunsWorker) {
+  // The listeners only read generic Job fields (name/data/id/timings); the run
+  // worker's payload is a specific interface, hence the widening cast.
+  registerWorkerListeners(
+    asyncRunsWorker as unknown as Worker<JobPayload>,
+    ASYNC_RUNS_QUEUE,
+  );
+}
+
 // Deliverable jobs that die outside the processor (stalled on worker
 // restart/crash, BullMQ-level failures) never reach the host's catch block —
 // mark their artifacts failed so they don't stay "running" forever.
@@ -217,7 +230,11 @@ void agentSandboxService.logStartupWarning("worker");
 
 async function shutdown() {
   logger.info("Worker shutting down");
-  await Promise.all([primaryWorker.close(), deliverablesWorker.close()]);
+  await Promise.all([
+    primaryWorker.close(),
+    deliverablesWorker.close(),
+    ...(asyncRunsWorker ? [asyncRunsWorker.close()] : []),
+  ]);
   process.exit(0);
 }
 

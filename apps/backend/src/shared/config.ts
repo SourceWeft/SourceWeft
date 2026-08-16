@@ -581,6 +581,12 @@ export const config = {
       asyncRunsEndpointUrl:
         process.env.SOURCEWEFT_ASYNC_RUNS_URL?.trim() ||
         `http://127.0.0.1:${Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001)}/internal/async-runs`,
+      // Shared secret guarding the internal runs endpoint. The parent turn sends
+      // it as a header; the endpoint rejects any request missing/mismatching it.
+      // Fail-closed: empty ⇒ the endpoint refuses every request, so enabling
+      // async subagents requires setting this.
+      asyncRunsInternalToken:
+        process.env.SOURCEWEFT_AGENT_ASYNC_RUNS_INTERNAL_TOKEN?.trim() || "",
     },
   },
   sandbox: {
