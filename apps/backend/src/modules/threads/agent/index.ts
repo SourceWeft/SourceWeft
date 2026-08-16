@@ -11,8 +11,8 @@
 import { createDeepAgent, StateBackend } from "deepagents";
 import type {
   AnyBackendProtocol,
+  AnySubAgent,
   FilesystemPermission,
-  SubAgent,
 } from "deepagents";
 import type { AgentMiddleware, InterruptOnConfig } from "langchain";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
@@ -55,7 +55,7 @@ export interface CreateThreadAgentParams {
    * additional named delegates (e.g. `explore`, `plan`). Each inherits the billed
    * gateway `model` unless it overrides it, so child model calls stay billed.
    */
-  subagents?: SubAgent[];
+  subagents?: AnySubAgent[];
   skills?: string[];
   filesystemMounts?: AgentFilesystemMountCapability[];
   permissions?: FilesystemPermission[];

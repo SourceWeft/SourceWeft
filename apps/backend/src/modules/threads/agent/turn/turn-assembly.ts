@@ -54,6 +54,7 @@ import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
 import { createExploreSubagent } from "../subagents/explore";
 import { createPlanSubagent } from "../subagents/plan";
+import { buildAsyncDelegates } from "../async-runs/async-subagents";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -687,6 +688,12 @@ export async function buildThreadAgentAssembly(
       backend,
       middleware: childMiddleware("plan"),
     }),
+    // Background (async) delegates: deepagents auto-wires the async task tools
+    // (check/list/update/cancel) that drive the self-hosted runs endpoint. Off
+    // by default; requires the endpoint + run worker (see async-runs).
+    ...(config.chat.agent.asyncSubagentsEnabled
+      ? buildAsyncDelegates(config.chat.agent.asyncRunsEndpointUrl)
+      : []),
   ];
 
   const agent = await createThreadAgent({
