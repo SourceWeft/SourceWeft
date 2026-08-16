@@ -65,6 +65,8 @@ import {
 } from "./sandbox-tool-card";
 import { DelegateToolCard } from "./delegate-tool-card";
 import { isDelegateToolName } from "./delegate-tool-card-state";
+import { AsyncTaskToolCard } from "./async-task-tool-card";
+import { isAsyncTaskToolName } from "./async-task-tool-card-state";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
   ThinkingStepRecord,
@@ -269,6 +271,9 @@ export type AssistantToolCardProps = {
 export function AssistantToolCard(props: AssistantToolCardProps) {
   if (isDelegateToolName(props.toolCall.tool)) {
     return <DelegateToolCard toolCall={props.toolCall} />;
+  }
+  if (isAsyncTaskToolName(props.toolCall.tool)) {
+    return <AsyncTaskToolCard toolCall={props.toolCall} />;
   }
   if (isSandboxToolCardToolName(props.toolCall.tool)) {
     return (
