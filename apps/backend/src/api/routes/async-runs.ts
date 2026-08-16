@@ -20,8 +20,33 @@ import {
   handleGetThreadState,
   handleListRuns,
 } from "../../modules/threads/agent/async-runs/http-router";
+import {
+  RUN_CONTEXT_HEADER,
+  decodeRunContextHeader,
+} from "../../modules/threads/agent/async-runs/run-context-header";
 
-export function registerAsyncRunsRoutes(app: Hono, store: RunsStore) {
+/** A newly created, ready-to-run job the worker should pick up. */
+export interface EnqueueRunJob {
+  runId: string;
+  threadId: string;
+  graphId: string;
+}
+
+export interface AsyncRunsRoutesOptions {
+  /**
+   * Enqueue a created run for the worker. The store only records the run row;
+   * this hands it to BullMQ. Called only for runs that start immediately
+   * (status `running`) — `pending` (enqueue-strategy) runs are chained when the
+   * active run finishes (not yet implemented; deepagents never sends enqueue).
+   */
+  enqueue?: (job: EnqueueRunJob) => Promise<void>;
+}
+
+export function registerAsyncRunsRoutes(
+  app: Hono,
+  store: RunsStore,
+  options: AsyncRunsRoutesOptions = {},
+) {
   app.post("/threads", async (c) => {
     const r = await handleCreateThread(store);
     return c.json(r.body, r.status as ContentfulStatusCode);
@@ -29,7 +54,23 @@ export function registerAsyncRunsRoutes(app: Hono, store: RunsStore) {
 
   app.post("/threads/:threadId/runs", async (c) => {
     const body = await c.req.json().catch(() => null);
-    const r = await handleCreateRun(store, c.req.param("threadId"), body);
+    const context = decodeRunContextHeader(c.req.header(RUN_CONTEXT_HEADER));
+    const r = await handleCreateRun(
+      store,
+      c.req.param("threadId"),
+      body,
+      context,
+    );
+    // Enqueue only a run that actually started; the store applied the multitask
+    // policy, so a superseded/rejected create never reaches here as `running`.
+    const run = r.body as { run_id?: string; status?: string; assistant_id?: string };
+    if (r.status === 201 && run.status === "running" && options.enqueue) {
+      await options.enqueue({
+        runId: run.run_id!,
+        threadId: c.req.param("threadId"),
+        graphId: run.assistant_id!,
+      });
+    }
     return c.json(r.body, r.status as ContentfulStatusCode);
   });
 

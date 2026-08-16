@@ -52,6 +52,36 @@ export interface ThreadRecord {
   createdAt: string;
 }
 
+/** The delegated prompt deepagents sends in `runs.create` ‘s `input`. */
+export interface RunInput {
+  messages: Array<{ role: string; content: unknown }>;
+}
+
+/**
+ * The billing / tenancy context a run executes under. The parent turn owns it
+ * (team, workspace, user, model); deepagents forwards no metadata over the wire,
+ * so it rides an `AsyncSubAgent.headers` value into the endpoint and is stored on
+ * the run. The worker replays it to rebuild the billed gateway model + tenant
+ * backend (the billing invariant the sync path guards).
+ */
+export interface RunContextConfig {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  modelAlias: string;
+  gatewayConfigId?: string | null;
+  /** The parent turn's thread, for scoping the delegate's working-files backend. */
+  parentThreadId: string;
+  /** Source ids the delegate may search / read, from the parent turn. */
+  sourceIds?: string[];
+}
+
+/** The persisted per-run config the worker replays (`getRunConfig`). */
+export interface RunConfig {
+  input: RunInput;
+  context: RunContextConfig;
+}
+
 /**
  * The operations the async endpoint exposes, matching the langgraph-sdk calls
  * deepagents makes. A BullMQ + Postgres implementation backs it; the HTTP layer
@@ -61,16 +91,27 @@ export interface RunsStore {
   createThread(): Promise<ThreadRecord>;
   /**
    * Create a run on a thread. When the thread has an active run, the
-   * `multitaskStrategy` decides what happens (see `resolveMultitask`).
+   * `multitaskStrategy` decides what happens (see `resolveMultitask`). The
+   * delegated `input` and billing/tenancy `context` are persisted so the worker
+   * can replay them out of the request context.
    */
   createRun(input: {
     threadId: string;
     graphId: string;
     multitaskStrategy: MultitaskStrategy;
+    input?: RunInput;
+    context?: RunContextConfig;
   }): Promise<RunRecord>;
   getRun(threadId: string, runId: string): Promise<RunRecord | null>;
   listRuns(threadId: string): Promise<RunRecord[]>;
   cancelRun(threadId: string, runId: string): Promise<RunRecord | null>;
   /** The thread's current checkpoint state (delegate transcript / result). */
   getThreadState(threadId: string): Promise<unknown>;
+  /** The persisted input + tenancy config the worker replays for a run. */
+  getRunConfig(runId: string): Promise<RunConfig | null>;
+  /**
+   * Persist a completed run's final graph state (thread-scoped), so
+   * `getThreadState` surfaces it to deepagents' `check_async_task`.
+   */
+  saveResult(threadId: string, runId: string, values: unknown): Promise<void>;
 }

@@ -10,16 +10,22 @@
 import type { AsyncRunStatus, RunRecord } from "./types";
 import { isTerminalRunStatus } from "./run-state";
 
-/** Executes a run's delegate graph. Resolves on completion, throws on failure. */
+/**
+ * Executes a run's delegate graph. Resolves with the graph's final state on
+ * completion (persisted so `check_async_task` can read the result); throws on
+ * failure.
+ */
 export type RunExecutor = (
   run: RunRecord,
   signal: AbortSignal,
-) => Promise<void>;
+) => Promise<unknown>;
 
 /** The subset of the store the processor needs. */
 export interface RunLifecycleStore {
   getRun(threadId: string, runId: string): Promise<RunRecord | null>;
   transition(runId: string, to: AsyncRunStatus): Promise<RunRecord>;
+  /** Persist a completed run's final graph state (thread-scoped). Optional. */
+  saveResult?(threadId: string, runId: string, values: unknown): Promise<void>;
 }
 
 export async function processRun(input: {
@@ -48,8 +54,9 @@ export async function processRun(input: {
   const active =
     run.status === "running" ? run : await store.transition(runId, "running");
 
+  let values: unknown;
   try {
-    await executor(active, signal);
+    values = await executor(active, signal);
   } catch {
     // A concurrent interrupt/cancel wins over a late failure.
     const after = await store.getRun(threadId, runId);
@@ -67,5 +74,8 @@ export async function processRun(input: {
   if (after && isTerminalRunStatus(after.status)) {
     return after.status;
   }
+  // Persist the final state BEFORE marking success, so a reader that sees
+  // `success` is guaranteed to find the result (durable in the store, not memory).
+  await store.saveResult?.(threadId, runId, values);
   return (await store.transition(runId, "success")).status;
 }

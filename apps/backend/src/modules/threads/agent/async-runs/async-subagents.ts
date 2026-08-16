@@ -11,8 +11,26 @@
  */
 import type { AsyncSubAgent } from "deepagents";
 import { DELEGATE_GRAPH_IDS } from "./delegate-graph";
+import type { RunContextConfig } from "./types";
+import {
+  RUN_CONTEXT_HEADER,
+  encodeRunContextHeader,
+} from "./run-context-header";
 
-export function buildAsyncDelegates(endpointBaseUrl: string): AsyncSubAgent[] {
+/**
+ * @param endpointBaseUrl - our internal Agent-Protocol endpoint base.
+ * @param context - the parent turn's billing/tenancy context. deepagents
+ *   forwards it as a header on every request (the only channel it offers), so
+ *   the endpoint can scope the run + rebuild the billed model. Omit only where
+ *   no turn context exists (e.g. the exposure introspection test).
+ */
+export function buildAsyncDelegates(
+  endpointBaseUrl: string,
+  context?: RunContextConfig,
+): AsyncSubAgent[] {
+  const headers = context
+    ? { [RUN_CONTEXT_HEADER]: encodeRunContextHeader(context) }
+    : undefined;
   return DELEGATE_GRAPH_IDS.map((graphId) => ({
     name: `${graphId}-async`,
     description:
@@ -23,5 +41,6 @@ export function buildAsyncDelegates(endpointBaseUrl: string): AsyncSubAgent[] {
       `\`task\` tool when you can wait for the result inline.`,
     graphId,
     url: endpointBaseUrl,
+    ...(headers ? { headers } : {}),
   }));
 }

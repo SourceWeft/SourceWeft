@@ -7,6 +7,9 @@
 import type {
   AsyncRunStatus,
   MultitaskStrategy,
+  RunConfig,
+  RunContextConfig,
+  RunInput,
   RunRecord,
   RunsStore,
   ThreadRecord,
@@ -29,6 +32,9 @@ export class InMemoryRunsStore implements RunsStore {
   private readonly threads = new Map<string, ThreadRecord>();
   /** Insertion-ordered so the newest non-terminal run is the active one. */
   private readonly runs = new Map<string, RunRecord>();
+  private readonly configs = new Map<string, RunConfig>();
+  /** Thread-scoped final graph state, surfaced by getThreadState. */
+  private readonly results = new Map<string, unknown>();
   private seq = 0;
 
   constructor(private readonly now: () => string = () => new Date().toISOString()) {}
@@ -62,6 +68,8 @@ export class InMemoryRunsStore implements RunsStore {
     threadId: string;
     graphId: string;
     multitaskStrategy: MultitaskStrategy;
+    input?: RunInput;
+    context?: RunContextConfig;
   }): Promise<RunRecord> {
     const active = this.activeRun(input.threadId);
     const decision = resolveMultitask({
@@ -91,7 +99,25 @@ export class InMemoryRunsStore implements RunsStore {
       updatedAt: at,
     };
     this.runs.set(run.runId, run);
+    if (input.input && input.context) {
+      this.configs.set(run.runId, {
+        input: input.input,
+        context: input.context,
+      });
+    }
     return run;
+  }
+
+  async getRunConfig(runId: string): Promise<RunConfig | null> {
+    return this.configs.get(runId) ?? null;
+  }
+
+  async saveResult(
+    threadId: string,
+    _runId: string,
+    values: unknown,
+  ): Promise<void> {
+    this.results.set(threadId, values);
   }
 
   async getRun(threadId: string, runId: string): Promise<RunRecord | null> {
@@ -114,9 +140,10 @@ export class InMemoryRunsStore implements RunsStore {
     return this.transition(runId, "cancelled");
   }
 
-  async getThreadState(_threadId: string): Promise<unknown> {
-    // The in-memory reference runs no graph, so it holds no checkpoint state.
-    return null;
+  async getThreadState(threadId: string): Promise<unknown> {
+    // The reference store runs no graph itself, but surfaces whatever a worker
+    // saved via saveResult so check_async_task reads a completed delegate result.
+    return this.results.get(threadId) ?? null;
   }
 
   /**

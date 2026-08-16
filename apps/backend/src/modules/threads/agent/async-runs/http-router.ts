@@ -10,7 +10,14 @@
  * Wire shapes are snake_case per the Agent Protocol; `assistant_id` carries the
  * delegate graph id (deepagents' `AsyncSubAgent.graphId`).
  */
-import type { MultitaskStrategy, RunRecord, RunsStore, ThreadRecord } from "./types";
+import type {
+  MultitaskStrategy,
+  RunContextConfig,
+  RunInput,
+  RunRecord,
+  RunsStore,
+  ThreadRecord,
+} from "./types";
 import { RunConflictError } from "./in-memory-store";
 
 export interface HandlerResult {
@@ -41,10 +48,36 @@ function threadToWire(thread: ThreadRecord) {
   return { thread_id: thread.threadId, created_at: thread.createdAt };
 }
 
-/** Parse a create-run body: `assistant_id` (required) + `multitask_strategy`. */
-export function parseCreateRunBody(
-  body: unknown,
-): { assistantId: string; multitaskStrategy: MultitaskStrategy } | null {
+/** The delegated messages deepagents sends in `runs.create`’s `input`. */
+function parseRunInput(value: unknown): RunInput | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const messages = (value as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  const parsed = messages
+    .filter(
+      (m): m is { role?: unknown; content: unknown } =>
+        typeof m === "object" && m !== null && "content" in m,
+    )
+    .map((m) => ({
+      role: typeof m.role === "string" ? m.role : "user",
+      content: m.content,
+    }));
+  return parsed.length > 0 ? { messages: parsed } : undefined;
+}
+
+/**
+ * Parse a create-run body: `assistant_id` (required) + `multitask_strategy` +
+ * the delegated `input` (messages deepagents forwards).
+ */
+export function parseCreateRunBody(body: unknown): {
+  assistantId: string;
+  multitaskStrategy: MultitaskStrategy;
+  input?: RunInput;
+} | null {
   if (typeof body !== "object" || body === null) {
     return null;
   }
@@ -60,7 +93,12 @@ export function parseCreateRunBody(
     typeof raw === "string" && MULTITASK_STRATEGIES.has(raw)
       ? (raw as MultitaskStrategy)
       : "reject";
-  return { assistantId: assistantId.trim(), multitaskStrategy };
+  const input = parseRunInput(record.input);
+  return {
+    assistantId: assistantId.trim(),
+    multitaskStrategy,
+    ...(input ? { input } : {}),
+  };
 }
 
 export async function handleCreateThread(
@@ -73,6 +111,7 @@ export async function handleCreateRun(
   store: RunsStore,
   threadId: string,
   body: unknown,
+  context?: RunContextConfig | null,
 ): Promise<HandlerResult> {
   const parsed = parseCreateRunBody(body);
   if (!parsed) {
@@ -83,6 +122,8 @@ export async function handleCreateRun(
       threadId,
       graphId: parsed.assistantId,
       multitaskStrategy: parsed.multitaskStrategy,
+      input: parsed.input,
+      context: context ?? undefined,
     });
     return { status: 201, body: runToWire(run) };
   } catch (error) {

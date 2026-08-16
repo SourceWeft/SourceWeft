@@ -7,7 +7,12 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { Hono } from "hono";
 import { InMemoryRunsStore } from "../../modules/threads/agent/async-runs/in-memory-store";
-import { registerAsyncRunsRoutes } from "./async-runs";
+import {
+  RUN_CONTEXT_HEADER,
+  encodeRunContextHeader,
+} from "../../modules/threads/agent/async-runs/run-context-header";
+import type { RunContextConfig } from "../../modules/threads/agent/async-runs/types";
+import { registerAsyncRunsRoutes, type EnqueueRunJob } from "./async-runs";
 
 function app() {
   const store = new InMemoryRunsStore(() => "2026-01-01T00:00:00.000Z");
@@ -78,6 +83,66 @@ test("invalid create-run body returns 400; unknown run 404", async () => {
   assert.equal(bad.status, 400);
   const missing = await hono.request(`/threads/${thread.thread_id}/runs/nope`);
   assert.equal(missing.status, 404);
+});
+
+test("a started run is enqueued once, carrying the persisted input + context", async () => {
+  const store = new InMemoryRunsStore(() => "2026-01-01T00:00:00.000Z");
+  const hono = new Hono();
+  const enqueued: EnqueueRunJob[] = [];
+  registerAsyncRunsRoutes(hono, store, {
+    enqueue: async (job) => {
+      enqueued.push(job);
+    },
+  });
+
+  const thread = (await (await hono.request("/threads", { method: "POST" })).json()) as {
+    thread_id: string;
+  };
+  const context: RunContextConfig = {
+    teamId: "team_1",
+    workspaceId: "ws_1",
+    userId: "user_1",
+    modelAlias: "chat-default",
+    parentThreadId: "thread_parent",
+  };
+  const runRes = await hono.request(`/threads/${thread.thread_id}/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [RUN_CONTEXT_HEADER]: encodeRunContextHeader(context),
+    },
+    body: JSON.stringify({
+      assistant_id: "explore",
+      input: { messages: [{ role: "user", content: "investigate X" }] },
+    }),
+  });
+  const run = (await runRes.json()) as { run_id: string };
+
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0]?.graphId, "explore");
+  assert.equal(enqueued[0]?.threadId, thread.thread_id);
+
+  const cfg = await store.getRunConfig(run.run_id);
+  assert.equal(cfg?.context.teamId, "team_1");
+  assert.equal(cfg?.input.messages[0]?.content, "investigate X");
+});
+
+test("a rejected (409) create-run does not enqueue", async () => {
+  const store = new InMemoryRunsStore(() => "2026-01-01T00:00:00.000Z");
+  const hono = new Hono();
+  let enqueues = 0;
+  registerAsyncRunsRoutes(hono, store, {
+    enqueue: async () => {
+      enqueues += 1;
+    },
+  });
+  const thread = (await (await hono.request("/threads", { method: "POST" })).json()) as {
+    thread_id: string;
+  };
+  await hono.request(`/threads/${thread.thread_id}/runs`, json({ assistant_id: "explore" }));
+  await hono.request(`/threads/${thread.thread_id}/runs`, json({ assistant_id: "explore" }));
+  // First started + enqueued; second rejected (reject strategy) → no enqueue.
+  assert.equal(enqueues, 1);
 });
 
 test("thread state endpoint returns { values }", async () => {

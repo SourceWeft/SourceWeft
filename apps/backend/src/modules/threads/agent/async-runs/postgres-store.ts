@@ -11,6 +11,9 @@ import type { Pool } from "pg";
 import type {
   AsyncRunStatus,
   MultitaskStrategy,
+  RunConfig,
+  RunContextConfig,
+  RunInput,
   RunRecord,
   RunsStore,
   ThreadRecord,
@@ -45,12 +48,25 @@ function rowToRun(row: RunRow): RunRecord {
 export class PostgresRunsStore implements RunsStore {
   constructor(private readonly pool: Pool) {}
 
-  /** Idempotent schema bootstrap. Call once before use. */
+  /**
+   * Idempotent schema bootstrap. Call once before use.
+   *
+   * Guarded by a transaction-scoped advisory lock on a single client so that
+   * concurrent callers (e.g. parallel test files, or the API + worker booting
+   * together) don't deadlock issuing overlapping `CREATE TABLE` / `ALTER TABLE`
+   * DDL against the same tables.
+   */
   async ensureSchema(): Promise<void> {
-    await this.pool.query(`
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Arbitrary constant key, unique to this schema bootstrap.
+      await client.query("SELECT pg_advisory_xact_lock($1)", [994127011]);
+      await client.query(`
       CREATE TABLE IF NOT EXISTS async_threads (
-        thread_id  text PRIMARY KEY,
-        created_at timestamptz NOT NULL DEFAULT now()
+        thread_id     text PRIMARY KEY,
+        created_at    timestamptz NOT NULL DEFAULT now(),
+        result_values jsonb
       );
       CREATE TABLE IF NOT EXISTS async_runs (
         seq                bigserial,
@@ -59,12 +75,25 @@ export class PostgresRunsStore implements RunsStore {
         graph_id           text NOT NULL,
         status             text NOT NULL,
         multitask_strategy text NOT NULL,
+        input              jsonb,
+        context            jsonb,
         created_at         timestamptz NOT NULL DEFAULT now(),
         updated_at         timestamptz NOT NULL DEFAULT now()
       );
       CREATE INDEX IF NOT EXISTS async_runs_thread_seq_idx
         ON async_runs (thread_id, seq);
+      -- Additive columns for stores created before result-surfacing / tenancy.
+      ALTER TABLE async_threads ADD COLUMN IF NOT EXISTS result_values jsonb;
+      ALTER TABLE async_runs    ADD COLUMN IF NOT EXISTS input   jsonb;
+      ALTER TABLE async_runs    ADD COLUMN IF NOT EXISTS context jsonb;
     `);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createThread(): Promise<ThreadRecord> {
@@ -95,6 +124,8 @@ export class PostgresRunsStore implements RunsStore {
     threadId: string;
     graphId: string;
     multitaskStrategy: MultitaskStrategy;
+    input?: RunInput;
+    context?: RunContextConfig;
   }): Promise<RunRecord> {
     const active = await this.activeRun(input.threadId);
     const decision = resolveMultitask({
@@ -116,11 +147,43 @@ export class PostgresRunsStore implements RunsStore {
     const status: AsyncRunStatus =
       decision.kind === "enqueue" ? "pending" : "running";
     const { rows } = await this.pool.query<RunRow>(
-      `INSERT INTO async_runs (run_id, thread_id, graph_id, status, multitask_strategy)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [runId, input.threadId, input.graphId, status, input.multitaskStrategy],
+      `INSERT INTO async_runs
+         (run_id, thread_id, graph_id, status, multitask_strategy, input, context)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [
+        runId,
+        input.threadId,
+        input.graphId,
+        status,
+        input.multitaskStrategy,
+        input.input ? JSON.stringify(input.input) : null,
+        input.context ? JSON.stringify(input.context) : null,
+      ],
     );
     return rowToRun(rows[0]!);
+  }
+
+  async getRunConfig(runId: string): Promise<RunConfig | null> {
+    const { rows } = await this.pool.query<{
+      input: RunInput | null;
+      context: RunContextConfig | null;
+    }>(`SELECT input, context FROM async_runs WHERE run_id = $1`, [runId]);
+    const row = rows[0];
+    if (!row || !row.input || !row.context) {
+      return null;
+    }
+    return { input: row.input, context: row.context };
+  }
+
+  async saveResult(
+    threadId: string,
+    _runId: string,
+    values: unknown,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE async_threads SET result_values = $2 WHERE thread_id = $1`,
+      [threadId, JSON.stringify(values ?? null)],
+    );
   }
 
   async getRun(threadId: string, runId: string): Promise<RunRecord | null> {
@@ -150,10 +213,14 @@ export class PostgresRunsStore implements RunsStore {
     return this.transition(runId, "cancelled");
   }
 
-  async getThreadState(_threadId: string): Promise<unknown> {
-    // Checkpoint state is owned by the PostgresSaver keyed on the run's graph
-    // thread; wired with the processor. Null until then.
-    return null;
+  async getThreadState(threadId: string): Promise<unknown> {
+    // The delegate graph's final state, saved by the worker on completion
+    // (saveResult). deepagents' check_async_task reads `.values.messages` here.
+    const { rows } = await this.pool.query<{ result_values: unknown }>(
+      `SELECT result_values FROM async_threads WHERE thread_id = $1`,
+      [threadId],
+    );
+    return rows[0]?.result_values ?? null;
   }
 
   /** Guarded status advance (used by the worker to mark success/error/timeout). */

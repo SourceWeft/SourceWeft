@@ -75,6 +75,42 @@ test("an aborted signal cancels before executing", async () => {
   assert.equal(status, "cancelled");
 });
 
+test("a successful run's final state is persisted and surfaced via getThreadState", async () => {
+  const { threadId, runId } = await runningRun();
+  const finalState = { messages: [{ role: "assistant", content: "the report" }] };
+  const status = await processRun({
+    store,
+    threadId,
+    runId,
+    executor: async () => finalState,
+  });
+  assert.equal(status, "success");
+  // This is exactly what deepagents' check_async_task reads: `.values.messages`.
+  assert.deepEqual(await store.getThreadState(threadId), finalState);
+});
+
+test("getRunConfig round-trips the persisted input + tenancy context", async () => {
+  await store.ensureSchema();
+  const thread = await store.createThread();
+  createdThreads.push(thread.threadId);
+  const run = await store.createRun({
+    threadId: thread.threadId,
+    graphId: "explore",
+    multitaskStrategy: "reject",
+    input: { messages: [{ role: "user", content: "investigate X" }] },
+    context: {
+      teamId: "team_1",
+      workspaceId: "ws_1",
+      userId: "user_1",
+      modelAlias: "chat-default",
+      parentThreadId: "thread_parent",
+    },
+  });
+  const cfg = await store.getRunConfig(run.runId);
+  assert.equal(cfg?.context.teamId, "team_1");
+  assert.equal(cfg?.input.messages[0]?.content, "investigate X");
+});
+
 test("a concurrent interrupt is not overwritten by a late success", async () => {
   const { threadId, runId } = await runningRun();
   const status = await processRun({

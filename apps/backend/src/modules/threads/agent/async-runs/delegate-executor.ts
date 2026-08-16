@@ -44,7 +44,9 @@ export function createDelegateRunExecutor(
       availableTools: context.availableTools,
     });
 
-    await (
+    // The final graph state (with `messages`) is persisted by the processor and
+    // surfaced to deepagents' check_async_task via getThreadState.
+    return await (
       graph as never as {
         invoke: (input: unknown, config: unknown) => Promise<unknown>;
       }
