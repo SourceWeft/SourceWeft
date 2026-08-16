@@ -8,7 +8,15 @@ import type { ModelCapabilityRule } from "@sourceweft/model-gateway";
  * points at. See docs/architecture/model-capabilities.md.
  *
  * `modelMatch` is a case-insensitive substring, catching the model through every
- * gateway that reaches it (`deepseek-v4-pro`, `deepseek/deepseek-v4-pro`).
+ * gateway that reaches it (`deepseek-v4-pro`, `deepseek/deepseek-v4-pro`), so a
+ * rule applies whether the model is reached via OpenRouter (ChatOpenAI) or the
+ * official gateway (ChatDeepSeek).
+ *
+ * These DeepSeek-family rules are the JS mirror of langchain-python's
+ * `disabled_params`: @langchain/openai has no `disabled_params`, so we declare
+ * the same disabled behaviour here (drop a forced `tool_choice`, pin structured
+ * output to `function_calling`, repair broken tool-argument JSON) and the bridge
+ * (`planStructuredOutput` / `downgradeForcedToolChoiceInKwargs`) enforces it.
  *
  * `deepseek-v4-pro` / `deepseek-v4-flash` think by provider default and reject
  * a forced `tool_choice` *while thinking* with a hard 400

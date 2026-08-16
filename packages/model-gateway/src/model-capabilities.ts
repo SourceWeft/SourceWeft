@@ -121,7 +121,7 @@ export function effectiveForcedToolChoiceSupport(input: {
  * bare tool name, or a `{type:"function"|"tool", ...}` object. `"auto"`/`"none"`
  * (and unset) leave the model free and are never forced.
  */
-function isForcedToolChoice(toolChoice: unknown): boolean {
+export function isForcedToolChoice(toolChoice: unknown): boolean {
   if (typeof toolChoice === "string") {
     return toolChoice !== "auto" && toolChoice !== "none";
   }

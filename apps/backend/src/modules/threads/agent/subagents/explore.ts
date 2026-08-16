@@ -65,6 +65,14 @@ const EXPLORE_SYSTEM_PROMPT = [
  * omitted so the billed parent model is inherited; `interruptOn` is explicitly
  * empty so Deep Agents cannot inherit parent HITL.
  *
+ * No `responseFormat`: the delegate investigates read-only and produces free-text
+ * findings. The structured {@link exploreResponseSchema} report is produced by a
+ * dedicated `model.withStructuredOutput(...).invoke(...)` call after the agent
+ * finishes (see the async-runs delegate executor). Inline `responseFormat` binds
+ * the schema as an auto tool each loop, which is ~50% unreliable on DeepSeek (the
+ * model answers text instead of calling it → GraphRecursionError); one dedicated
+ * structured call is DeepSeek-safe.
+ *
  * @param input - Bound business tools, shared backend, and child governance.
  * @returns A seam-shaped {@link SubAgent} definition for the `task` tool.
  */
@@ -85,6 +93,5 @@ export function createExploreSubagent(input: {
       middleware: input.middleware,
     }),
     interruptOn: {},
-    responseFormat: exploreResponseSchema,
   };
 }

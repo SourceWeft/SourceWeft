@@ -1,10 +1,13 @@
 /**
- * Regression for the DeepSeek structured-output 400: run the REAL explore
- * delegate graph (which sets `responseFormat`) on a REAL DeepSeek model, end to
- * end through createDelegateRunExecutor → createDelegateGraph. Before the
- * capability fix this threw `400 This response_format type is unavailable now`;
- * now the bridge applies functionCalling + thinking-off from capabilities, so it
- * completes.
+ * Regression for the DeepSeek structured-output 400: run the REAL explore/plan
+ * delegate on a REAL DeepSeek model, end to end through
+ * createDelegateRunExecutor → createDelegateGraph. The delegate investigates
+ * read-only (no inline `responseFormat`), then the executor makes ONE dedicated
+ * `model.withStructuredOutput(...).invoke(...)` call to produce the plan. Before
+ * the capability fix a forced tool_choice / json_schema threw `400 This
+ * response_format type is unavailable now`; now the bridge binds the schema as an
+ * available tool with salvage from capabilities, so it completes and yields a
+ * structured result.
  *
  * Opt-in: RUN_REAL_MODEL_SMOKE=1 + OPENROUTER_API_KEY (real model calls).
  */
@@ -35,21 +38,23 @@ const resolver: RunContextResolver = async () => ({
       {
         role: "user",
         content:
-          "In one sentence, summarize what makes a good git commit message.",
+          "Briefly plan how to add a dark-mode toggle to a small web app.",
       },
     ],
   },
 });
 
-const RUN: RunRecord = {
-  runId: "run_reg",
-  threadId: "thread_reg",
-  graphId: "explore",
-  status: "running",
-  multitaskStrategy: "reject",
-  createdAt: "2026-01-01T00:00:00.000Z",
-  updatedAt: "2026-01-01T00:00:00.000Z",
-};
+function run(graphId: string): RunRecord {
+  return {
+    runId: `run_reg_${graphId}`,
+    threadId: `thread_reg_${graphId}`,
+    graphId,
+    status: "running",
+    multitaskStrategy: "reject",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
 
 beforeAll(async () => {
   if (!ENABLED) return;
@@ -57,17 +62,37 @@ beforeAll(async () => {
   await ensureModelConfigAvailable();
 });
 
-test.skipIf(!ENABLED)(
-  "the real explore delegate (responseFormat) runs on real DeepSeek without the 400",
-  async () => {
-    const execute = createDelegateRunExecutor(resolver);
-    const finalState = (await execute(RUN, new AbortController().signal)) as {
-      messages?: unknown[];
-    };
-    assert.ok(
-      finalState && Array.isArray(finalState.messages) && finalState.messages.length > 0,
-      `expected a final state with messages; got ${JSON.stringify(finalState)?.slice(0, 200)}`,
-    );
-  },
-  120_000,
-);
+// Both delegates produce a structured result via a dedicated withStructuredOutput
+// call; `plan`'s schema is deeply nested (steps[] of objects), which stresses
+// DeepSeek's structured output harder.
+for (const graphId of ["explore", "plan"] as const) {
+  test.skipIf(!ENABLED)(
+    `the real ${graphId} delegate runs a dedicated structured call on real DeepSeek without the 400`,
+    async () => {
+      const execute = createDelegateRunExecutor(resolver);
+      const finalState = (await execute(run(graphId), new AbortController().signal)) as {
+        messages?: Array<{ content?: unknown }>;
+        structuredResponse?: unknown;
+      };
+      // The delegate must actually PRODUCE its structured output (not merely
+      // finish): the executor puts it on `structuredResponse` and stringifies it
+      // into the last message. A dropped/failed structured call would finish with
+      // no structured response.
+      const structured =
+        finalState?.structuredResponse ??
+        (() => {
+          const last = finalState?.messages?.at(-1)?.content;
+          try {
+            return typeof last === "string" ? JSON.parse(last) : undefined;
+          } catch {
+            return undefined;
+          }
+        })();
+      assert.ok(
+        structured && typeof structured === "object",
+        `expected a structured ${graphId} response; got ${JSON.stringify(finalState)?.slice(0, 300)}`,
+      );
+    },
+    120_000,
+  );
+}

@@ -71,6 +71,20 @@ class ScriptedChatModel extends BaseChatModel {
     });
     return { generations: [{ text: "the delegate's answer", message }] };
   }
+  /**
+   * The delegate makes a dedicated structured call after investigating. Model it
+   * as a single model invocation (so it counts + emits usage for billing) that
+   * returns a valid structured object — the harness stands in for the bridge's
+   * available-tool strip, which on real DeepSeek succeeds and therefore settles.
+   */
+  withStructuredOutput(_schema: unknown, _config?: unknown) {
+    return {
+      invoke: async (messages: BaseMessage[]) => {
+        await this._generate(messages);
+        return { summary: "structured", steps: [] };
+      },
+    };
+  }
 }
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });

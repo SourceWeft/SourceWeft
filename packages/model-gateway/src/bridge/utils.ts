@@ -53,6 +53,10 @@ import {
   extractResponseMetadata,
   extractUsage,
 } from "./chat";
+import {
+  executeStructuredOutput,
+  type StructuredOutputMethod,
+} from "./structured-output";
 import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
@@ -89,15 +93,6 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     .map((part) => (part.type === "text" ? part.text : "[image]"))
     .join("\n")
     .trim();
-}
-
-/** Map a gateway structured-output method to LangChain's `withStructuredOutput` name. */
-function langChainStructuredOutputMethod(
-  method: "json_schema" | "json_mode" | "function_calling",
-): "jsonSchema" | "jsonMode" | "functionCalling" {
-  if (method === "json_schema") return "jsonSchema";
-  if (method === "json_mode") return "jsonMode";
-  return "functionCalling";
 }
 
 /** Adapter guarantee lookup that tolerates injected/test provider kinds. */
@@ -261,6 +256,30 @@ const UNOBSERVED_ENTRY_POINTS = new Set([
 
 const warnedUnobservedEntryPoints = new Set<string>();
 
+/** Map LangChain's `withStructuredOutput` method name back to gateway vocabulary. */
+function fromLangChainStructuredOutputMethod(
+  method: "jsonSchema" | "jsonMode" | "functionCalling" | undefined,
+): StructuredOutputMethod | undefined {
+  if (method === "jsonSchema") return "json_schema";
+  if (method === "jsonMode") return "json_mode";
+  if (method === "functionCalling") return "function_calling";
+  return undefined;
+}
+
+/**
+ * Narrow a LangChain runnable-config passed to `withStructuredOutput().invoke`
+ * to the gateway {@link RequestOptions} the executor understands (only the abort
+ * signal travels through).
+ */
+function structuredRequestOptions(options: unknown): RequestOptions | undefined {
+  const record =
+    options && typeof options === "object"
+      ? (options as Record<string, unknown>)
+      : undefined;
+  const signal = record?.signal;
+  return signal instanceof AbortSignal ? { signal } : undefined;
+}
+
 function createObservedLangChainChatModel(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -276,7 +295,8 @@ function createObservedLangChainChatModel(input: {
 
   const bindTools: LangChainChatModelLike["bindTools"] = (tools, kwargs) => {
     // Runtime bind path (e.g. the agent's command-tool-choice middleware forcing
-    // a specific tool). Downgrade a forced tool_choice the model can't take.
+    // a specific tool). Downgrade a forced tool_choice the model can't take
+    // (mirrors langchain-python's disabled_params dropping tool_choice).
     const resolvedKwargs = downgradeForcedToolChoiceInKwargs(
       resolveBindToolsKwargs({
         kwargs,
@@ -301,22 +321,23 @@ function createObservedLangChainChatModel(input: {
   };
 
   /**
-   * `withStructuredOutput` returns a runnable, not a chat model, so the
-   * returned object's `invoke` is wrapped directly. The underlying call is made
-   * against the raw model (not the proxy) so that whatever it does internally —
-   * typically `bindTools` plus `invoke` — cannot re-enter this shim and emit a
-   * second generation for the same call.
+   * `withStructuredOutput` returns a runnable, not a chat model, so the returned
+   * object's `invoke` is wrapped directly. Rather than blindly forwarding to the
+   * model's own `withStructuredOutput`, it routes through the SAME
+   * {@link executeStructuredOutput} the chat.complete path uses, so a dedicated
+   * `model.withStructuredOutput(schema).invoke(messages)` becomes DeepSeek-safe:
+   * the JS mirror of langchain-python's `disabled_params`. For a model whose
+   * effective capabilities disable a forced `tool_choice` it binds the schema as
+   * an *available* tool (drop-forced); otherwise it uses native
+   * `withStructuredOutput` with the caller-pinned method, falling back to the
+   * capability's method (DeepSeek → function_calling).
    *
-   * Provider differences are applied here from the model's capabilities, so a
-   * generic caller (LangChain agent `responseFormat`) gets the same handling the
-   * model's first-party class would give — mirroring, e.g., how ChatDeepSeek
-   * pins `function_calling`:
-   *  - the capability's `structuredOutputMethod` is applied when the caller
-   *    didn't pin one (DeepSeek → function_calling instead of json_schema);
-   *  - for a model that rejects a forced tool_choice while thinking
-   *    (`forcedToolChoiceBlockedByThinking`), the structured call is made against
-   *    a thinking-off rebuild of the model, so function_calling's forced
-   *    tool_choice is accepted — the agent's own tool loop keeps thinking.
+   * The executor runs against the raw model (`input.model`, not the proxy) so
+   * its internal `bindTools`/`withStructuredOutput` + `invoke` cannot re-enter
+   * this shim and emit a second generation. Observation wraps the whole call and
+   * bills against the underlying model response (the raw message), while the
+   * returned runnable yields langchain `withStructuredOutput` semantics: the
+   * parsed object by default, `{ raw, parsed }` when `includeRaw` is set.
    */
   const withStructuredOutput: LangChainChatModelLike["withStructuredOutput"] = (
     schema,
@@ -326,42 +347,45 @@ function createObservedLangChainChatModel(input: {
       input.target.providerModel,
       input.config.modelCapabilities,
     );
-    const callerMethod = (
-      structuredConfig as
-        | { method?: "jsonSchema" | "jsonMode" | "functionCalling" }
-        | undefined
-    )?.method;
-    const method =
-      callerMethod ??
-      (capabilities.structuredOutputMethod
-        ? langChainStructuredOutputMethod(capabilities.structuredOutputMethod)
-        : undefined);
-    const resolvedConfig =
-      method !== undefined
-        ? { ...(structuredConfig ?? {}), method }
-        : structuredConfig;
-
-    const needsThinkingOff =
-      capabilities.forcedToolChoiceBlockedByThinking &&
-      resolveThinkingMode(input.payload.thinking) !== "off";
-    const structuredModel = needsThinkingOff
-      ? (getChatAdapter(input.target.providerKind).createModel(
-          input.target,
-          { ...input.payload, thinking: { mode: "off" }, stream: false },
-          input.options,
-        ) as unknown as LangChainChatModelLike)
-      : input.model;
-
-    const structured = structuredModel.withStructuredOutput!(
-      schema,
-      resolvedConfig,
-    );
+    const cfg = (structuredConfig ?? {}) as {
+      method?: "jsonSchema" | "jsonMode" | "functionCalling";
+      name?: string;
+      includeRaw?: boolean;
+      strict?: boolean;
+    };
+    const pinnedMethod = fromLangChainStructuredOutputMethod(cfg.method);
+    const name = cfg.name?.trim() ? cfg.name : "extract";
+    const includeRaw = cfg.includeRaw === true;
+    const strict = cfg.strict;
     return {
-      invoke: async (structuredInput, structuredOptions) =>
-        observeInvocation(
-          () => structured.invoke(structuredInput, structuredOptions),
-          structuredInput,
-        ),
+      invoke: async (structuredInput, structuredOptions) => {
+        let shaped: unknown;
+        await observeInvocation(async () => {
+          const { parsed, rawMessage } = await executeStructuredOutput({
+            model: input.model,
+            schema: schema as Record<string, unknown>,
+            name,
+            messages: structuredInput,
+            target: input.target,
+            supportsForcedToolChoice: requestForcedToolChoiceSupport(input),
+            ...(pinnedMethod !== undefined ? { method: pinnedMethod } : {}),
+            ...(capabilities.structuredOutputMethod !== undefined
+              ? { fallbackMethod: capabilities.structuredOutputMethod }
+              : {}),
+            ...(strict !== undefined ? { strict } : {}),
+            allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+            ...(structuredRequestOptions(structuredOptions) !== undefined
+              ? { options: structuredRequestOptions(structuredOptions) }
+              : {}),
+            logger: input.config.logger,
+          });
+          shaped = includeRaw ? { raw: rawMessage, parsed } : parsed;
+          // Observe against the raw model response so usage/billing and
+          // finish-reason extraction see the real message, not the parsed shape.
+          return rawMessage;
+        }, structuredInput);
+        return shaped;
+      },
     };
   };
 

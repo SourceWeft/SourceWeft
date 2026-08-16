@@ -39,13 +39,28 @@ test("explore inherits the billed model and raises no HITL", () => {
   assert.deepEqual(sub.interruptOn, {});
 });
 
-test("explore is selectable, read-only-described, and returns structured findings", () => {
+test("explore is selectable and read-only-described", () => {
   const sub = build();
   assert.equal(sub.name, EXPLORE_SUBAGENT_NAME);
   assert.equal(sub.name, "explore");
   assert.match(sub.description, /read-only/i);
   assert.ok(sub.systemPrompt.length > 0);
-  assert.equal(sub.responseFormat, exploreResponseSchema);
+});
+
+test("explore carries no inline responseFormat (structured report is a dedicated call)", () => {
+  const sub = build();
+  // No inline responseFormat: the schema tool is not auto-bound each loop
+  // (unreliable on DeepSeek). The structured report is produced by a dedicated
+  // withStructuredOutput call after investigation, keyed on this exported schema.
+  assert.equal(sub.responseFormat, undefined);
+  const parsed = exploreResponseSchema.parse({
+    summary: "answer",
+    findings: [
+      { claim: "c1", citationMarkers: ["[1]"], sourceReferences: ["s1"] },
+    ],
+    limitations: ["unknown x"],
+  });
+  assert.equal(parsed.findings[0]?.claim, "c1");
 });
 
 test("explore carries a filesystem middleware for working-file reads", () => {

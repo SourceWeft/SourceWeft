@@ -66,7 +66,15 @@ const PLAN_SYSTEM_PROMPT = [
 
 /**
  * Build the `plan` delegate definition. Read-only architect: same tool scope as
- * `explore`, a plan-shaped `responseFormat`, inherited billed model, no HITL.
+ * `explore`, inherited billed model, no HITL.
+ *
+ * No `responseFormat`: the delegate investigates read-only and produces free-text
+ * findings. The structured {@link planResponseSchema} plan is produced by a
+ * dedicated `model.withStructuredOutput(...).invoke(...)` call after the agent
+ * finishes (see the async-runs delegate executor). Inline `responseFormat` binds
+ * the schema as an auto tool each loop, which is ~50% unreliable on DeepSeek (the
+ * model answers text instead of calling it → GraphRecursionError); one dedicated
+ * structured call is DeepSeek-safe.
  *
  * @param input - Bound business tools, shared backend, and child governance.
  * @returns A seam-shaped {@link SubAgent} definition for the `task` tool.
@@ -88,6 +96,5 @@ export function createPlanSubagent(input: {
       middleware: input.middleware,
     }),
     interruptOn: {},
-    responseFormat: planResponseSchema,
   };
 }

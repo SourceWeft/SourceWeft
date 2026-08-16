@@ -46,16 +46,21 @@ function createFakeModel(calls: string[]): LangChainChatModelLike {
       calls.push("bindTools");
       return model;
     },
-    withStructuredOutput: () => {
+    withStructuredOutput: (_schema, config) => {
       calls.push("withStructuredOutput");
+      const includeRaw =
+        (config as { includeRaw?: boolean } | undefined)?.includeRaw === true;
       return {
         invoke: async () => {
           calls.push("structured.invoke");
-          return {
+          // A real langchain model returns { raw, parsed } under includeRaw —
+          // the shape the bridge's shared structured executor reads.
+          const raw = {
             content: '{"ok":true}',
             usage_metadata: { input_tokens: 7, output_tokens: 3, total_tokens: 10 },
             response_metadata: { finish_reason: "stop" },
           };
+          return includeRaw ? { raw, parsed: { ok: true } } : { ok: true };
         },
       };
     },

@@ -11,9 +11,20 @@
  */
 import type { AnyBackendProtocol } from "deepagents";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import {
+  AIMessage,
+  HumanMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
+import { z } from "zod";
 import type { RunRecord } from "./types";
 import type { RunExecutor } from "./run-processor";
-import { createDelegateGraph, isDelegateGraphId } from "./delegate-graph";
+import {
+  createDelegateGraph,
+  DELEGATE_STRUCTURED_SCHEMAS,
+  isDelegateGraphId,
+  type DelegateGraphId,
+} from "./delegate-graph";
 
 export interface RunContext {
   model: BaseLanguageModel;
@@ -27,6 +38,29 @@ export interface RunContext {
 export type RunContextResolver = (run: RunRecord) => Promise<RunContext>;
 
 const DELEGATE_RECURSION_LIMIT = 24;
+
+/**
+ * Instruction appended to the investigation transcript for the dedicated
+ * structured call. The agent has already gathered evidence as free text; this
+ * turns that transcript into the schema-shaped report/plan in one shot.
+ */
+const STRUCTURED_HANDOFF_INSTRUCTION =
+  "Investigation complete. Now return your final answer as the structured " +
+  "response defined by the schema, grounded only in what you found above.";
+
+/** Minimal structural view of a graph's final state — what we merge into. */
+type DelegateFinalState = {
+  messages?: BaseMessage[];
+  [key: string]: unknown;
+};
+
+/** The billed gateway model exposes langchain's structured-output composer. */
+type StructuredCapableModel = BaseLanguageModel & {
+  withStructuredOutput: (
+    schema: unknown,
+    config?: unknown,
+  ) => { invoke: (messages: unknown, config?: unknown) => Promise<unknown> };
+};
 
 export function createDelegateRunExecutor(
   resolve: RunContextResolver,
@@ -44,9 +78,7 @@ export function createDelegateRunExecutor(
       availableTools: context.availableTools,
     });
 
-    // The final graph state (with `messages`) is persisted by the processor and
-    // surfaced to deepagents' check_async_task via getThreadState.
-    return await (
+    const finalState = (await (
       graph as never as {
         invoke: (input: unknown, config: unknown) => Promise<unknown>;
       }
@@ -54,6 +86,41 @@ export function createDelegateRunExecutor(
       configurable: { thread_id: run.threadId },
       recursionLimit: DELEGATE_RECURSION_LIMIT,
       ...(signal ? { signal } : {}),
-    });
+    })) as DelegateFinalState;
+
+    // After the read-only investigation finishes, produce the structured result
+    // with ONE dedicated `withStructuredOutput` call on the SAME billed gateway
+    // model. On DeepSeek the bridge (post-Core) binds the schema as an available
+    // tool with salvage instead of a forced tool_choice / json_schema, so this
+    // single call is reliable where an inline auto-bound response tool is not.
+    const { schema, name } = DELEGATE_STRUCTURED_SCHEMAS[run.graphId as DelegateGraphId];
+    const investigation: BaseMessage[] = Array.isArray(finalState?.messages)
+      ? finalState.messages
+      : [];
+    const structuredMessages: BaseMessage[] = [
+      ...investigation,
+      new HumanMessage(STRUCTURED_HANDOFF_INSTRUCTION),
+    ];
+
+    const structured = await (context.model as StructuredCapableModel)
+      .withStructuredOutput(z.toJSONSchema(schema), { name })
+      .invoke(structuredMessages, {
+        configurable: { thread_id: run.threadId },
+        ...(signal ? { signal } : {}),
+      });
+
+    // Match the shape deepagents' `responseFormat` produced so downstream
+    // (getThreadState → check_async_task, async-runs surfacing, DelegateToolCard)
+    // keeps working: the parsed object on `structuredResponse`, and the same JSON
+    // stringified into the last message so the check_async_task text path also
+    // sees it. The final state (with `messages`) is persisted by the processor.
+    return {
+      ...finalState,
+      messages: [
+        ...investigation,
+        new AIMessage({ content: JSON.stringify(structured) }),
+      ],
+      structuredResponse: structured,
+    };
   };
 }

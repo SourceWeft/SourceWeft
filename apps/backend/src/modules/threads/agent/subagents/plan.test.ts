@@ -46,9 +46,12 @@ test("plan is selectable and describes itself as read-only planning", () => {
   assert.ok(sub.systemPrompt.length > 0);
 });
 
-test("plan returns a structured plan (steps, risks, open questions)", () => {
+test("plan carries no inline responseFormat but exports a plan schema (steps, risks, open questions)", () => {
   const sub = build();
-  assert.equal(sub.responseFormat, planResponseSchema);
+  // No inline responseFormat: the schema tool is not auto-bound each loop
+  // (unreliable on DeepSeek). The structured plan is produced by a dedicated
+  // withStructuredOutput call after investigation, keyed on this exported schema.
+  assert.equal(sub.responseFormat, undefined);
   const parsed = planResponseSchema.parse({
     summary: "objective",
     steps: [{ title: "s1", detail: "d1", keyReferences: ["ref"] }],
