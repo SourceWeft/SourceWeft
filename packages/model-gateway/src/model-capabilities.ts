@@ -117,6 +117,50 @@ export function effectiveForcedToolChoiceSupport(input: {
 }
 
 /**
+ * Strip disabled params from a request kwargs object — the JS mirror of
+ * langchain-python's `ChatOpenAI._filter_disabled_params`. For each entry in
+ * `disabledParams`: `null` removes the param entirely; a list removes it only
+ * when the param's current value is one of the listed values. Provider-agnostic
+ * and value-general (any param). Returns the same reference when nothing changed.
+ */
+export function filterDisabledParams(
+  kwargs: Record<string, unknown> | undefined,
+  disabledParams: Record<string, null | readonly unknown[]> | undefined,
+): Record<string, unknown> | undefined {
+  if (!kwargs || !disabledParams) {
+    return kwargs;
+  }
+  let out: Record<string, unknown> | undefined;
+  for (const [param, disabled] of Object.entries(disabledParams)) {
+    if (!(param in kwargs)) {
+      continue;
+    }
+    const drop =
+      disabled === null ||
+      (Array.isArray(disabled) && disabled.includes(kwargs[param]));
+    if (drop) {
+      out ??= { ...kwargs };
+      delete out[param];
+    }
+  }
+  return out ?? kwargs;
+}
+
+/**
+ * Whether a forced `tool_choice` may be sent to the model. False when
+ * `tool_choice` is disabled entirely (`disabledParams: { tool_choice: null }`) —
+ * not sending it defaults the API to `auto` (an available tool). Drives the
+ * structured-output strategy (availableTool when forcing is off), mirroring
+ * langchain-python defaulting `function_calling` once the disabled tool_choice
+ * is dropped.
+ */
+export function forcedToolChoiceDisabled(
+  disabledParams: Record<string, null | readonly unknown[]> | undefined,
+): boolean {
+  return disabledParams?.tool_choice === null;
+}
+
+/**
  * A `tool_choice` that forces the model to call a tool: `"required"`/`"any"`, a
  * bare tool name, or a `{type:"function"|"tool", ...}` object. `"auto"`/`"none"`
  * (and unset) leave the model free and are never forced.

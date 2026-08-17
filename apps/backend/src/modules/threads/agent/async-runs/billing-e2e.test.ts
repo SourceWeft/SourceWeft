@@ -83,7 +83,7 @@ class ScriptedChatModel extends BaseChatModel {
         await this._generate(messages);
         return { summary: "structured", steps: [] };
       },
-    };
+    } as never;
   }
 }
 

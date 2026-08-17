@@ -325,6 +325,17 @@ export interface ProviderRoutingConfig {
  * Grows as the gateway takes on more model-specific adaptations.
  */
 export interface ModelCapabilities {
+  /**
+   * Request params to disable for this model — the JS mirror of
+   * langchain-python's `ChatOpenAI.disabled_params`. Shape `{ param: null |
+   * [values] }`: `null` drops the param entirely, a list drops it only when its
+   * value is one of the listed ones. A general, provider-agnostic knob (any
+   * model, any param); the bridge strips these from request kwargs before
+   * sending. DeepSeek uses `{ tool_choice: null }` (it rejects a forced
+   * tool_choice), which also decides the structured-output strategy
+   * (`availableTool` when `tool_choice` is disabled). @see filterDisabledParams
+   */
+  disabledParams?: Record<string, null | readonly unknown[]>;
   supportsForcedToolChoice: boolean;
   /**
    * The model accepts a forced `tool_choice` only while thinking is off

@@ -29,9 +29,12 @@ import type { ModelCapabilityRule } from "@sourceweft/model-gateway";
  * synced and is declared here.
  */
 export const MODEL_CAPABILITY_DB: readonly ModelCapabilityRule[] = [
-  { modelMatch: "deepseek-v4-pro", capabilities: { forcedToolChoiceBlockedByThinking: true } },
-  { modelMatch: "deepseek-v4-flash", capabilities: { forcedToolChoiceBlockedByThinking: true } },
-  { modelMatch: "deepseek-reasoner", capabilities: { supportsForcedToolChoice: false } },
+  // The whole DeepSeek family rejects a forced `tool_choice` (V4 while thinking —
+  // its provider default — with a hard 400, https://github.com/deepseek-ai/
+  // DeepSeek-V3/issues/1376; reasoner cannot leave thinking at all). Declared as
+  // langchain-python's `disabled_params` (drop `tool_choice` entirely → API
+  // default `auto` = an available tool). Unconditional, mirroring python.
+  { modelMatch: "deepseek", capabilities: { disabledParams: { tool_choice: null } } },
   // The whole family (any gateway prefix) emits unescaped ASCII quotes inside
   // Chinese tool-argument strings — invalid JSON that a strict parser drops
   // (verified live against deepseek-v4-pro, 2026-08-05; the storyboard-402
