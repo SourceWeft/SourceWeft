@@ -287,8 +287,8 @@ function isStructuredOutputParseError(error: unknown) {
 
 /**
  * Structured output by binding the schema as an *available* tool — the strategy
- * {@link planStructuredOutput} selects for models that reject a forced
- * `tool_choice` (e.g. DeepSeek V4, always in thinking mode).
+ * {@link planStructuredOutput} selects for models that disable a forced
+ * `tool_choice` via `disabled_params: { tool_choice: null }` (e.g. DeepSeek).
  *
  * This is the JS equivalent of what Python LangChain's
  * `ChatOpenAI.with_structured_output(method="function_calling")` produces once a
@@ -380,8 +380,9 @@ export interface ExecuteStructuredOutputInput {
   messages: unknown;
   target: ResolvedRequestTarget;
   /**
-   * Effective forced-`tool_choice` support for THIS request — already refined
-   * by thinking mode and adapter guarantee (see `effectiveForcedToolChoiceSupport`).
+   * Whether a forced `tool_choice` may be sent for THIS request — the negation
+   * of `forcedToolChoiceDisabled(disabledParams)` (the langchain-python
+   * `disabled_params` mirror; false when `{ tool_choice: null }` is declared).
    * Drives the availableTool-vs-native strategy via {@link planStructuredOutput}.
    */
   supportsForcedToolChoice: boolean;
