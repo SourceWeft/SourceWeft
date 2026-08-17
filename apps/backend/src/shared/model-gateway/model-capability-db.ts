@@ -16,15 +16,16 @@ import type { ModelCapabilityRule } from "@sourceweft/model-gateway";
  * `disabled_params`: @langchain/openai has no `disabled_params`, so we declare
  * the same disabled behaviour here (drop a forced `tool_choice`, pin structured
  * output to `function_calling`, repair broken tool-argument JSON) and the bridge
- * (`planStructuredOutput` / `downgradeForcedToolChoiceInKwargs`) enforces it.
+ * (`filterDisabledParams` / `planStructuredOutput`) enforces it — one general
+ * mechanism, no DeepSeek-specific machinery.
  *
  * `deepseek-v4-pro` / `deepseek-v4-flash` think by provider default and reject
  * a forced `tool_choice` *while thinking* with a hard 400
- * (https://github.com/deepseek-ai/DeepSeek-V3/issues/1376); with thinking
- * explicitly disabled they accept it, so the restriction is declared as the
- * conditional `forcedToolChoiceBlockedByThinking`. `deepseek-reasoner` (V3.1)
- * cannot leave thinking mode at all, so it keeps the unconditional flag.
- * LiteLLM's `supports_tool_choice` is too coarse to express either (it reports
+ * (https://github.com/deepseek-ai/DeepSeek-V3/issues/1376); `deepseek-reasoner`
+ * (V3.1) cannot leave thinking mode at all. Rather than translate thinking off,
+ * we mirror python and drop `tool_choice` unconditionally — the schema rides as
+ * an available tool (API default `auto`), which every DeepSeek variant accepts.
+ * LiteLLM's `supports_tool_choice` is too coarse to express this (it reports
  * `true` — the param is accepted, just not forced values), so it cannot be
  * synced and is declared here.
  */

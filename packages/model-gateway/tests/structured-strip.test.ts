@@ -62,11 +62,15 @@ function gatewayFor(
     providers: {
       deepseek: { kind: "deepseek", baseUrl: "https://api.deepseek.com", apiKey: "k" },
     },
-    // Capability is declared at the config level and resolved by model name.
-    ...(supportsForcedToolChoice !== undefined
+    // A model that can't take a forced tool_choice declares it via
+    // disabled_params (`{ tool_choice: null }`); otherwise no rule (default).
+    ...(supportsForcedToolChoice === false
       ? {
           modelCapabilities: [
-            { modelMatch: model, capabilities: { supportsForcedToolChoice } },
+            {
+              modelMatch: model,
+              capabilities: { disabledParams: { tool_choice: null } },
+            },
           ],
         }
       : {}),
@@ -136,7 +140,7 @@ test("no tool call on the strip path surfaces as invalid structured output", asy
   assert.equal(capture.usedBindTools, true);
 });
 
-test("a forced tool_choice on a regular tool call downgrades to auto (request-wide)", async () => {
+test("a forced tool_choice on a regular tool call is dropped (disabled_params, request-wide)", async () => {
   const capture: { usedBindTools?: boolean; bindKwargs?: Record<string, unknown> } = {};
   const gateway = gatewayFor("deepseek-v4-pro", capture, undefined, false);
 
@@ -148,13 +152,15 @@ test("a forced tool_choice on a regular tool call downgrades to auto (request-wi
   });
 
   assert.equal(capture.usedBindTools, true);
-  assert.equal(capture.bindKwargs?.tool_choice, "auto");
+  // Python-faithful: `disabled_params: { tool_choice: null }` drops the param
+  // entirely rather than rewriting it — the API then defaults to `auto`.
+  assert.equal("tool_choice" in (capture.bindKwargs ?? {}), false);
 });
 
-test("config override reaches the target: true re-enables the table-corrected V4", async () => {
+test("no tool_choice disable rule keeps the default forced path", async () => {
   const capture: { usedWithStructuredOutput?: boolean; usedBindTools?: boolean } = {};
-  // Route target declares supportsForcedToolChoice: true — overrides the code
-  // correction table, so structured output keeps the default forced path.
+  // With no `disabled_params` rule declared for the model, forcing is on and
+  // structured output keeps the default withStructuredOutput (forced) path.
   const gateway = gatewayFor("deepseek-v4-pro", capture, { title: "x" }, true);
 
   const result = await gateway.chat.complete({

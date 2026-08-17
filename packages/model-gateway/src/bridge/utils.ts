@@ -8,13 +8,10 @@ import {
 } from "@langchain/core/messages";
 import { getChatAdapter, getEmbeddingsAdapter } from "../adapters/registry";
 import {
-  downgradeForcedToolChoiceInKwargs,
-  effectiveForcedToolChoiceSupport,
   filterDisabledParams,
   forcedToolChoiceDisabled,
   resolveModelCapabilities,
 } from "../model-capabilities";
-import { resolveThinkingMode } from "../thinking";
 import type {
   ChatCompleteInput,
   EmbedBatchInput,
@@ -97,41 +94,18 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     .trim();
 }
 
-/** Adapter guarantee lookup that tolerates injected/test provider kinds. */
-function adapterGuaranteesThinkingDisable(kind: ProviderKind): boolean {
-  try {
-    return getChatAdapter(kind).guaranteesThinkingDisable === true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Whether a forced `tool_choice` may be sent for this request. False when the
- * model disables `tool_choice` (`disabledParams: { tool_choice: null }` — the JS
- * mirror of langchain-python's disabled_params, unconditional), OR when the
- * legacy thinking-aware capability withholds it (`supportsForcedToolChoice`
- * refined by thinking mode). The disabled_params path is what DeepSeek uses.
+ * Whether a forced `tool_choice` may be sent for this request — false when the
+ * model disables `tool_choice` (`disabledParams: { tool_choice: null }`, the JS
+ * mirror of langchain-python's disabled_params). Drives the structured-output
+ * strategy (availableTool when forcing is off).
  */
 export function requestForcedToolChoiceSupport(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
   payload: ChatCompleteInput;
 }): boolean {
-  const capabilities = resolveModelCapabilities(
-    input.target.providerModel,
-    input.config.modelCapabilities,
-  );
-  return (
-    !forcedToolChoiceDisabled(capabilities.disabledParams) &&
-    effectiveForcedToolChoiceSupport({
-      capabilities,
-      thinkingMode: resolveThinkingMode(input.payload.thinking),
-      adapterGuaranteesThinkingDisable: adapterGuaranteesThinkingDisable(
-        input.target.providerKind,
-      ),
-    })
-  );
+  return !forcedToolChoiceDisabled(requestDisabledParams(input));
 }
 
 /** Resolve the model's disabled request params (langchain-python disabled_params). */
@@ -169,26 +143,25 @@ export function createChatModel(input: {
     ? model
     : model.bindTools(
         input.payload.tools,
-        // Strip the model's disabled params (langchain-python disabled_params);
-        // then downgrade any remaining forced tool_choice a legacy
-        // `supportsForcedToolChoice: false` model still can't take.
-        downgradeForcedToolChoiceInKwargs(
-          filterDisabledParams(
-            resolveBindToolsKwargs({
-              toolBindingOptions: input.payload.toolBindingOptions,
-              toolChoice: input.payload.toolChoice,
-            }),
-            requestDisabledParams(input),
-          ),
-          requestForcedToolChoiceSupport(input),
+        // Strip the model's disabled params (langchain-python disabled_params):
+        // DeepSeek disables `tool_choice`, so a forced choice it can't take is
+        // dropped → API default `auto` (an available tool).
+        filterDisabledParams(
+          resolveBindToolsKwargs({
+            toolBindingOptions: input.payload.toolBindingOptions,
+            toolChoice: input.payload.toolChoice,
+          }),
+          requestDisabledParams(input),
         ),
       ) as LangChainChatModelLike;
 
+  const disabledParams = requestDisabledParams(input);
   const modelWithDefaultToolBindingOptions =
     createDefaultToolBindingOptionsLangChainChatModel({
       model: boundModel,
       toolBindingOptions: input.payload.toolBindingOptions,
       toolChoice: input.payload.toolChoice,
+      ...(disabledParams ? { disabledParams } : {}),
     });
 
   return createObservedLangChainChatModel({
@@ -234,6 +207,7 @@ function createDefaultToolBindingOptionsLangChainChatModel(input: {
   model: LangChainChatModelLike;
   toolBindingOptions?: ToolBindingOptions;
   toolChoice?: ChatCompleteInput["toolChoice"];
+  disabledParams?: Record<string, null | readonly unknown[]>;
 }) {
   const defaultKwargs = resolveBindToolsKwargs({
     toolBindingOptions: input.toolBindingOptions,
@@ -249,15 +223,22 @@ function createDefaultToolBindingOptionsLangChainChatModel(input: {
       model: input.model.bindTools
         ? input.model.bindTools(
             tools,
-            resolveBindToolsKwargs({
-              kwargs,
-              toolBindingOptions: input.toolBindingOptions,
-              toolChoice: input.toolChoice,
-            }),
+            // Re-merging the request defaults can reintroduce a param the model
+            // disables (e.g. the original `tool_choice`), so filter again here —
+            // the same disabled_params mirror every other bind site applies.
+            filterDisabledParams(
+              resolveBindToolsKwargs({
+                kwargs,
+                toolBindingOptions: input.toolBindingOptions,
+                toolChoice: input.toolChoice,
+              }),
+              input.disabledParams,
+            ),
           )
         : input.model,
       toolBindingOptions: input.toolBindingOptions,
       toolChoice: input.toolChoice,
+      ...(input.disabledParams ? { disabledParams: input.disabledParams } : {}),
     });
   return wrapped;
 }
@@ -319,18 +300,14 @@ function createObservedLangChainChatModel(input: {
   const bindTools: LangChainChatModelLike["bindTools"] = (tools, kwargs) => {
     // Runtime bind path (e.g. the agent's command-tool-choice middleware forcing
     // a specific tool). Strip the model's disabled params (langchain-python
-    // disabled_params), then downgrade a forced tool_choice a legacy
-    // `supportsForcedToolChoice: false` model still can't take.
-    const resolvedKwargs = downgradeForcedToolChoiceInKwargs(
-      filterDisabledParams(
-        resolveBindToolsKwargs({
-          kwargs,
-          toolBindingOptions: input.payload.toolBindingOptions,
-          toolChoice: input.payload.toolChoice,
-        }),
-        requestDisabledParams(input),
-      ),
-      requestForcedToolChoiceSupport(input),
+    // disabled_params) — DeepSeek's disabled `tool_choice` is dropped.
+    const resolvedKwargs = filterDisabledParams(
+      resolveBindToolsKwargs({
+        kwargs,
+        toolBindingOptions: input.payload.toolBindingOptions,
+        toolChoice: input.payload.toolChoice,
+      }),
+      requestDisabledParams(input),
     );
     return createObservedLangChainChatModel({
       ...input,

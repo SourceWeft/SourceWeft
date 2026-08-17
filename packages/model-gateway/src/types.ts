@@ -336,17 +336,6 @@ export interface ModelCapabilities {
    * (`availableTool` when `tool_choice` is disabled). @see filterDisabledParams
    */
   disabledParams?: Record<string, null | readonly unknown[]>;
-  supportsForcedToolChoice: boolean;
-  /**
-   * The model accepts a forced `tool_choice` only while thinking is off
-   * (DeepSeek V4: thinking is the provider default and a forced choice under
-   * it is a hard 400). Conditional refinement of `supportsForcedToolChoice`:
-   * that flag stays `true` for such models, and the effective support is
-   * resolved against the request's thinking mode. Models whose thinking
-   * cannot be disabled at all (deepseek-reasoner) keep the unconditional
-   * `supportsForcedToolChoice: false` instead.
-   */
-  forcedToolChoiceBlockedByThinking: boolean;
   /**
    * The model is known to emit tool-call arguments that are not valid JSON
    * (DeepSeek: unescaped ASCII quotes inside Chinese string content), so a

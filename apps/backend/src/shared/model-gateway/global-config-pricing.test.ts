@@ -84,12 +84,26 @@ test("loadGlobalModelGatewayConfig folds an inline target into a one-element tar
 test("parses deployment modelCapabilities rules (override layer)", async () => {
   const config = baseConfig();
   config.modelCapabilities = [
-    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+    {
+      modelMatch: "deepseek-v4-pro",
+      capabilities: {
+        disabledParams: { tool_choice: null },
+        toolCallArgumentJsonRepair: true,
+        structuredOutputMethod: "function_calling",
+      },
+    },
   ];
   const loaded = await loadConfig(config);
   // Held as-is; the shipped DB is merged in at runtime, not here.
   assert.deepEqual(loaded?.modelCapabilities, [
-    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+    {
+      modelMatch: "deepseek-v4-pro",
+      capabilities: {
+        disabledParams: { tool_choice: null },
+        toolCallArgumentJsonRepair: true,
+        structuredOutputMethod: "function_calling",
+      },
+    },
   ]);
 });
 

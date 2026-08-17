@@ -2,14 +2,11 @@ import type {
   ModelCapabilities,
   ModelCapabilityRule,
   StructuredOutputConfig,
-  ThinkingMode,
 } from "./types";
 
 type StructuredOutputMethod = NonNullable<StructuredOutputConfig["method"]>;
 
 const DEFAULTS: ModelCapabilities = {
-  supportsForcedToolChoice: true,
-  forcedToolChoiceBlockedByThinking: false,
   toolCallArgumentJsonRepair: false,
 };
 
@@ -87,36 +84,6 @@ export function planStructuredOutput(input: {
 }
 
 /**
- * Whether a forced `tool_choice` may actually be sent on *this* request —
- * `supportsForcedToolChoice` refined by the thinking-conditional restriction.
- *
- * A `forcedToolChoiceBlockedByThinking` model regains forced tool_choice only
- * when both hold: the request's thinking mode is `"off"`, and the adapter's
- * "off" is a hard provider-level disable (`guaranteesThinkingDisable`). "auto"
- * counts as thinking ON for such models — thinking-by-default is precisely why
- * the flag exists — and a best-effort disable (OpenRouter fan-out) must not be
- * trusted with a forced choice the upstream may still 400 on.
- */
-export function effectiveForcedToolChoiceSupport(input: {
-  capabilities: Pick<
-    ModelCapabilities,
-    "supportsForcedToolChoice" | "forcedToolChoiceBlockedByThinking"
-  >;
-  thinkingMode: ThinkingMode;
-  adapterGuaranteesThinkingDisable: boolean;
-}): boolean {
-  if (!input.capabilities.supportsForcedToolChoice) {
-    return false;
-  }
-  if (!input.capabilities.forcedToolChoiceBlockedByThinking) {
-    return true;
-  }
-  return (
-    input.thinkingMode === "off" && input.adapterGuaranteesThinkingDisable
-  );
-}
-
-/**
  * Strip disabled params from a request kwargs object — the JS mirror of
  * langchain-python's `ChatOpenAI._filter_disabled_params`. For each entry in
  * `disabledParams`: `null` removes the param entirely; a list removes it only
@@ -158,59 +125,4 @@ export function forcedToolChoiceDisabled(
   disabledParams: Record<string, null | readonly unknown[]> | undefined,
 ): boolean {
   return disabledParams?.tool_choice === null;
-}
-
-/**
- * A `tool_choice` that forces the model to call a tool: `"required"`/`"any"`, a
- * bare tool name, or a `{type:"function"|"tool", ...}` object. `"auto"`/`"none"`
- * (and unset) leave the model free and are never forced.
- */
-export function isForcedToolChoice(toolChoice: unknown): boolean {
-  if (typeof toolChoice === "string") {
-    return toolChoice !== "auto" && toolChoice !== "none";
-  }
-  return (
-    typeof toolChoice === "object" &&
-    toolChoice !== null &&
-    !Array.isArray(toolChoice)
-  );
-}
-
-/**
- * Downgrade a forced `tool_choice` to `"auto"` when the model rejects a forced
- * one — the request-wide analogue of {@link planStructuredOutput}'s strategy,
- * matching LiteLLM's request-level `drop_params` handling (LangChain scopes its
- * `disabled_params` to `with_structured_output` only). A no-op when forced
- * tool_choice is supported and for non-forcing values.
- */
-export function normalizeToolChoiceForModel(input: {
-  toolChoice: unknown;
-  supportsForcedToolChoice: boolean;
-}): unknown {
-  if (input.supportsForcedToolChoice || !isForcedToolChoice(input.toolChoice)) {
-    return input.toolChoice;
-  }
-  return "auto";
-}
-
-/**
- * Apply {@link normalizeToolChoiceForModel} to a bindTools kwargs object,
- * returning it unchanged (same reference) when nothing needs downgrading.
- * `supportsForcedToolChoice` is the *effective* support for this request —
- * callers resolve it via {@link effectiveForcedToolChoiceSupport}.
- */
-export function downgradeForcedToolChoiceInKwargs(
-  kwargs: Record<string, unknown> | undefined,
-  supportsForcedToolChoice: boolean,
-): Record<string, unknown> | undefined {
-  if (!kwargs || !("tool_choice" in kwargs)) {
-    return kwargs;
-  }
-  const normalized = normalizeToolChoiceForModel({
-    toolChoice: kwargs.tool_choice,
-    supportsForcedToolChoice,
-  });
-  return normalized === kwargs.tool_choice
-    ? kwargs
-    : { ...kwargs, tool_choice: normalized };
 }

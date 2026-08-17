@@ -205,43 +205,6 @@ export function extractReasoning(raw: {
   );
 }
 
-/**
- * Structured output on a thinking-by-default model: an unstated thinking mode
- * ("auto") resolves to the provider default, which for such models means the
- * response budget is spent on hidden reasoning before the structured answer —
- * the classic empty-content death of a schema call. A caller that asked for a
- * schema and expressed no thinking preference gets reliability: "auto" is
- * translated to "off". An explicit "effort" request is respected untouched —
- * that caller owns the token-budget consequence.
- */
-function adjustPayloadForStructuredOutput(input: {
-  config: ResolvedModelGatewayConfig;
-  target: ResolvedRequestTarget;
-  payload: ChatCompleteInput;
-}): ChatCompleteInput {
-  if (!input.payload.structuredOutput) {
-    return input.payload;
-  }
-  const capabilities = resolveModelCapabilities(
-    input.target.providerModel,
-    input.config.modelCapabilities,
-  );
-  if (!capabilities.forcedToolChoiceBlockedByThinking) {
-    return input.payload;
-  }
-  if (resolveThinkingMode(input.payload.thinking) !== "auto") {
-    return input.payload;
-  }
-  return {
-    ...input.payload,
-    thinking: {
-      ...input.payload.thinking,
-      mode: "off",
-      enabled: false,
-    },
-  };
-}
-
 export async function runBridgeChatComplete(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -249,7 +212,7 @@ export async function runBridgeChatComplete(input: {
   options?: RequestOptions;
 }): Promise<ChatCompleteResult> {
   try {
-    const payload = adjustPayloadForStructuredOutput(input);
+    const payload = input.payload;
     const request = { ...input, payload };
     const model = createChatModel(request);
     const messages = toLangChainMessages(payload.messages);
@@ -266,12 +229,12 @@ export async function runBridgeChatComplete(input: {
         input.target.providerModel,
         input.config.modelCapabilities,
       );
-      // The shared executor applies the disabled_params mirror: with thinking
-      // now off on a hard-disable adapter, DeepSeek V4 regains forced
-      // function_calling and takes the native path; otherwise the schema tool is
-      // bound as an available tool. `method`/`strict` come from the caller only
-      // (capability plays no part in the dispatch — chat.complete pins no
-      // fallback method, preserving its long-standing behavior).
+      // The shared executor applies the disabled_params mirror: when a model
+      // disables `tool_choice` (DeepSeek) the schema is bound as an available
+      // tool; otherwise the native withStructuredOutput path is used.
+      // `method`/`strict` come from the caller only (capability plays no part in
+      // the dispatch — chat.complete pins no fallback method, preserving its
+      // long-standing behavior).
       const executed = await executeStructuredOutput({
         model,
         schema,
