@@ -95,6 +95,9 @@ function createOperationStore(): SandboxOperationStore & {
     }>;
   } = {
     completed: [],
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation() {
       return null;
     },

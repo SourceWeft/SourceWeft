@@ -70,8 +70,16 @@ vi.mock("./security", async (importOriginal) => {
 
 vi.mock("./langchain-client", () => ({
   createLangChainMcpClient: mocks.createLangChainMcpClient,
-  langChainMcpServerKey: (install: { marketIdentifier: string | null; id: string }) =>
+  langChainMcpServerKey: (install: {
+    marketIdentifier: string | null;
+    id: string;
+  }) =>
     (install.marketIdentifier ?? install.id).replace(/[^a-zA-Z0-9_-]/g, "_"),
+  langChainMcpToolName: (input: {
+    install: { marketIdentifier: string | null; id: string };
+    serverToolName: string;
+  }) =>
+    `mcp__${(input.install.marketIdentifier ?? input.install.id).replace(/[^a-zA-Z0-9_-]/g, "_")}__${input.serverToolName}`,
 }));
 
 vi.mock("./market-service", () => ({
@@ -107,7 +115,11 @@ vi.mock("./repository", () => ({
   upsertWorkspaceMcpTools: mocks.upsertWorkspaceMcpTools,
 }));
 
-import { McpService, stripLangChainMcpToolPrefix } from "./service";
+import {
+  McpService,
+  mcpEndpointRequiresAuth,
+  stripLangChainMcpToolPrefix,
+} from "./service";
 import { assertSafeMcpEndpoint } from "./security";
 
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -260,6 +272,7 @@ function originalTool(input: {
   name: string;
   output?: unknown;
   invoke?: ReturnType<typeof vi.fn>;
+  metadata?: Record<string, unknown>;
 }) {
   const invoke = input.invoke ?? vi.fn(async () => input.output ?? "ok");
   return {
@@ -270,6 +283,7 @@ function originalTool(input: {
       properties: { query: { type: "string" } },
       additionalProperties: true,
     },
+    metadata: input.metadata,
     invoke,
   } as unknown as DynamicStructuredTool;
 }
@@ -351,7 +365,23 @@ function resetMcpServiceMocks() {
   );
 }
 
-test("buildLangChainToolsForTurn only loads active web-executable installs", async () => {
+test("MCP auth probing fails installation preparation on network errors", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => {
+    throw new Error("connection refused");
+  });
+  try {
+    await assert.rejects(
+      () => mcpEndpointRequiresAuth("https://mcp.example.com/mcp"),
+      (error) =>
+        error instanceof McpError && error.code === "MCP_AUTH_PROBE_FAILED",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("buildLangChainToolsForTurn rejects an unavailable selected install", async () => {
   resetMcpServiceMocks();
   const active = mcpInstall({ id: "active" });
   const disabled = mcpInstall({ id: "disabled", enabled: false });
@@ -369,30 +399,19 @@ test("buildLangChainToolsForTurn only loads active web-executable installs", asy
     originalTool({ name: "mcp__github__read_repo" }),
   ]);
 
-  const runtime = await new McpService().buildLangChainToolsForTurn(
-    serviceInput({
-      installIds: [
-        active.id,
-        disabled.id,
-        desktopOnly.id,
-        stdio.id,
-        webDisabled.id,
-      ],
-    }),
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [active.id, disabled.id] }),
+      ),
+    (error) =>
+      error instanceof McpError && error.code === "MCP_INSTALL_UNAVAILABLE",
   );
 
-  assert.deepEqual(
-    mocks.createLangChainMcpClient.mock.calls.map(
-      ([input]) => input.install.id,
-    ),
-    ["active"],
-  );
-  assert.equal(runtime.tools.length, 1);
-  await runtime.close();
-  assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
 });
 
-test("buildLangChainToolsForTurn isolates a failing install without leaking or aborting", async () => {
+test("buildLangChainToolsForTurn fails the turn and closes clients when discovery fails", async () => {
   resetMcpServiceMocks();
   const healthy = mcpInstall({ id: "healthy" });
   const broken = mcpInstall({ id: "broken", marketIdentifier: "broken" });
@@ -417,16 +436,37 @@ test("buildLangChainToolsForTurn isolates a failing install without leaking or a
     },
   );
 
-  const runtime = await new McpService().buildLangChainToolsForTurn(
-    serviceInput({ installIds: [healthy.id, broken.id] }),
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [healthy.id, broken.id] }),
+      ),
+    (error) =>
+      error instanceof McpError && error.code === "MCP_CONNECTION_FAILED",
   );
 
-  // The healthy install still produced its tool; the turn did not throw.
-  assert.equal(runtime.tools.length, 1);
-  // The broken install's client was closed immediately (not leaked).
+  // Both the already-open healthy client and the failing client are closed.
+  assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
   assert.equal(clientCloseMocks[1]?.mock.calls.length, 1);
-  await runtime.close();
-  // The healthy client is closed via the returned handle exactly once.
+});
+
+test("buildLangChainToolsForTurn rejects unregistered tools exposed by a selected server", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({ id: "mcp_install_1" });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+    originalTool({ name: "mcp__github__new_unregistered_tool" }),
+  ]);
+
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [install.id] }),
+      ),
+    (error) =>
+      error instanceof McpError && error.code === "MCP_TOOL_DISCOVERY_MISMATCH",
+  );
   assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
 });
 
@@ -516,6 +556,11 @@ test("buildLangChainToolsForTurn resolves the invoking user's own static credent
   resetMcpServiceMocks();
   const install = mcpInstall({ id: "mcp_install_1", authType: "bearer" });
   mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "encrypted-user-token",
+  });
+  mocks.decryptSecret.mockReturnValue("user-token");
   toolsByInstallId.set(install.id, [
     originalTool({ name: "mcp__github__read_repo" }),
   ]);
@@ -573,7 +618,12 @@ test("testInstall preserves existing tool metadata instead of clobbering it", as
   mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
   mocks.updateWorkspaceMcpInstall.mockResolvedValue(install);
   toolsByInstallId.set(install.id, [
-    originalTool({ name: "mcp__github__read_repo" }),
+    originalTool({
+      name: "mcp__github__read_repo",
+      metadata: {
+        annotations: { readOnlyHint: true, idempotentHint: true },
+      },
+    }),
   ]);
   mocks.createLangChainMcpClient.mockImplementation(
     ({ install: target }: { install: WorkspaceMcpInstallRecord }) => {
@@ -596,6 +646,18 @@ test("testInstall preserves existing tool metadata instead of clobbering it", as
     mocks.upsertWorkspaceMcpTools.mock.calls[0]?.[0]?.preserveExistingMetadata,
     true,
   );
+  const discovered =
+    mocks.upsertWorkspaceMcpTools.mock.calls[0]?.[0]?.tools?.[0];
+  assert.deepEqual(discovered?.inputSchema, {
+    type: "object",
+    properties: { query: { type: "string" } },
+    additionalProperties: true,
+  });
+  assert.equal(discovered?.normalizedToolName, "mcp__github__read_repo");
+  assert.deepEqual(discovered?.annotations, {
+    readOnlyHint: true,
+    idempotentHint: true,
+  });
 });
 
 test("development MCP checks allow fake-IP DNS while production stays fail-closed", async () => {
@@ -642,7 +704,10 @@ test("all backend dev entrypoints explicitly select development endpoint policy"
   ) as { scripts?: Record<string, string> };
 
   for (const script of ["dev:api", "dev:worker", "dev:scheduler"]) {
-    assert.match(packageJson.scripts?.[script] ?? "", /^NODE_ENV=development\s/);
+    assert.match(
+      packageJson.scripts?.[script] ?? "",
+      /^NODE_ENV=development\s/,
+    );
   }
 });
 
@@ -841,7 +906,11 @@ test("high-risk MCP tools are exposed with interrupt config and blocked before a
     allowedDecisions: ["approve", "edit", "reject"],
     description:
       "GitHub MCP tool create_issue may perform external write actions. Review before execution.",
-    argsSchema: writeTool.inputSchema,
+    argsSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      additionalProperties: true,
+    },
   });
   const wrappedTool = runtime.tools[0];
   assert.ok(wrappedTool);
@@ -1172,10 +1241,7 @@ test("respondToApproval rejects stale MCP confirmation actions", async () => {
     }),
     (error: unknown) => {
       assert.equal(error instanceof McpError, true);
-      assert.equal(
-        (error as McpError).code,
-        "MCP_CONFIRMATION_INVALID_STATE",
-      );
+      assert.equal((error as McpError).code, "MCP_CONFIRMATION_INVALID_STATE");
       return true;
     },
   );

@@ -8,12 +8,13 @@ import {
 import type { ChatResult } from "@langchain/core/outputs";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
-import { createDeepAgent } from "deepagents";
+import { createDeepAgent, StateBackend } from "deepagents";
 import { z } from "zod";
 import type { ObserveSink, UsageInfo } from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import type { ModelUsageContext } from "./context";
 import { openBillingScope } from "./scope";
+import { createSourceWeftSummarizationMiddleware } from "../../../modules/threads/agent/middleware/context-compression";
 
 const rawMocks = vi.hoisted(() => ({
   getRawModelGatewayClient: vi.fn(),
@@ -122,6 +123,10 @@ function createScope() {
  */
 async function buildDeepAgentWithBilledModel(
   script: Array<{ content: string; toolCalls?: unknown[] }>,
+  options: {
+    buildMiddleware?: (model: unknown) => unknown[];
+    subagents?: unknown[];
+  } = {},
 ) {
   const scope = createScope();
   let underlying: ScriptedChatModel | undefined;
@@ -154,6 +159,10 @@ async function buildDeepAgentWithBilledModel(
     model: model as never,
     tools: [echo],
     checkpointer: new MemorySaver(),
+    ...(options.buildMiddleware
+      ? { middleware: options.buildMiddleware(model) }
+      : {}),
+    ...(options.subagents ? { subagents: options.subagents } : {}),
   } as never);
 
   return { agent, scope, getUnderlying: () => underlying };
@@ -220,4 +229,111 @@ test("deepagents: a streamed turn bills every model call", async () => {
     actualModelCalls,
     `agent made ${actualModelCalls} model calls but ${scope.meteredCalls().length} were billed`,
   );
+});
+
+test("deepagents: a subagent's model calls settle against the parent billing scope", async () => {
+  // A subagent that omits `model` inherits the billed defaultModel — this is the
+  // billing-propagation contract the read-only delegates rely on. Delegating
+  // to it must bill the child's model call, not leak it unbilled.
+  const { agent, scope, getUnderlying } = await buildDeepAgentWithBilledModel(
+    [
+      // 1) parent delegates to the child via the task tool
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            name: "task",
+            args: { description: "look something up", subagent_type: "child" },
+          },
+        ],
+      },
+      // 2) the child runs and returns its report — its own billed model call
+      { content: "child report" },
+      // 3) parent resumes with the final answer
+      { content: "all done" },
+    ],
+    {
+      subagents: [
+        {
+          name: "child",
+          description: "A child delegate used to prove billing propagation.",
+          systemPrompt: "You are a child agent. Answer briefly.",
+          // `model` intentionally omitted → inherits the billed defaultModel.
+        },
+      ],
+    },
+  );
+
+  await (
+    agent as never as {
+      invoke: (i: unknown, c: unknown) => Promise<unknown>;
+    }
+  ).invoke({ messages: [new HumanMessage("delegate please")] }, runConfig);
+
+  const actualModelCalls = getUnderlying()?.generateCount ?? 0;
+  // parent (task call) + child (report) + parent (final) = at least 3 calls.
+  assert.ok(
+    actualModelCalls >= 3,
+    `expected >=3 model calls incl. the subagent, got ${actualModelCalls}`,
+  );
+  // Every call — parent and child alike — settled against the one scope.
+  assert.equal(
+    scope.meteredCalls().length,
+    actualModelCalls,
+    `agent made ${actualModelCalls} model calls (incl. subagent) but ${scope.meteredCalls().length} were billed`,
+  );
+});
+
+test("deepagents: SourceWeft summary generation uses the billed model", async () => {
+  const { agent, scope, getUnderlying } = await buildDeepAgentWithBilledModel(
+    [
+      { content: "compressed memory [citation:old-1]" },
+      { content: "answer after summary" },
+    ],
+    {
+      buildMiddleware: (model) => [
+        createSourceWeftSummarizationMiddleware({
+          backend: new StateBackend(),
+          chatProfileConfig: { contextLength: 100_000 },
+          model: model as never,
+        }),
+      ],
+    },
+  );
+
+  const result = await (
+    agent as never as {
+      invoke: (i: unknown, c: unknown) => Promise<unknown>;
+    }
+  ).invoke(
+    {
+      messages: Array.from(
+        { length: 41 },
+        (_, index) =>
+          new HumanMessage(
+            index === 0
+              ? "historical message 0 [citation:stale]"
+              : `historical message ${index}`,
+          ),
+      ),
+    },
+    runConfig,
+  );
+
+  const actualModelCalls = getUnderlying()?.generateCount ?? 0;
+  assert.ok(
+    actualModelCalls >= 2,
+    `expected summary + agent generation calls, got ${actualModelCalls}`,
+  );
+  assert.equal(scope.meteredCalls().length, actualModelCalls);
+  const files = (result as { files?: Record<string, { content?: unknown }> })
+    .files;
+  const historyPath = Object.keys(files ?? {}).find((path) =>
+    path.startsWith("/conversation_history/"),
+  );
+  assert.ok(historyPath);
+  const historyContent = String(files?.[historyPath]?.content ?? "");
+  assert.match(historyContent, /old citation marker stale removed/);
+  assert.doesNotMatch(historyContent, /\[citation:stale\]/);
 });

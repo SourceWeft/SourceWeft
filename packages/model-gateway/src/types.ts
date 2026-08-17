@@ -325,17 +325,17 @@ export interface ProviderRoutingConfig {
  * Grows as the gateway takes on more model-specific adaptations.
  */
 export interface ModelCapabilities {
-  supportsForcedToolChoice: boolean;
   /**
-   * The model accepts a forced `tool_choice` only while thinking is off
-   * (DeepSeek V4: thinking is the provider default and a forced choice under
-   * it is a hard 400). Conditional refinement of `supportsForcedToolChoice`:
-   * that flag stays `true` for such models, and the effective support is
-   * resolved against the request's thinking mode. Models whose thinking
-   * cannot be disabled at all (deepseek-reasoner) keep the unconditional
-   * `supportsForcedToolChoice: false` instead.
+   * Request params to disable for this model — the JS mirror of
+   * langchain-python's `ChatOpenAI.disabled_params`. Shape `{ param: null |
+   * [values] }`: `null` drops the param entirely, a list drops it only when its
+   * value is one of the listed ones. A general, provider-agnostic knob (any
+   * model, any param); the bridge strips these from request kwargs before
+   * sending. DeepSeek uses `{ tool_choice: null }` (it rejects a forced
+   * tool_choice), which also decides the structured-output strategy
+   * (`availableTool` when `tool_choice` is disabled). @see filterDisabledParams
    */
-  forcedToolChoiceBlockedByThinking: boolean;
+  disabledParams?: Record<string, null | readonly unknown[]>;
   /**
    * The model is known to emit tool-call arguments that are not valid JSON
    * (DeepSeek: unescaped ASCII quotes inside Chinese string content), so a
@@ -345,6 +345,16 @@ export interface ModelCapabilities {
    * malformed output should fail loudly, not be silently patched.
    */
   toolCallArgumentJsonRepair: boolean;
+  /**
+   * The structured-output method this model needs, applied when the caller does
+   * not pin one. Mirrors what langchain's first-party provider class would
+   * default to — e.g. `ChatDeepSeek.withStructuredOutput` pins
+   * `function_calling` (and normalizes `json_schema` to it) because DeepSeek
+   * rejects a `json_schema` response_format. Declaring it here makes the same
+   * model reached through a generic openai-compatible gateway (OpenRouter) pick
+   * the method its first-party class would, instead of the adapter's default.
+   */
+  structuredOutputMethod?: "json_schema" | "json_mode" | "function_calling";
 }
 
 /** A capability rule matched by a case-insensitive substring of the model name. */

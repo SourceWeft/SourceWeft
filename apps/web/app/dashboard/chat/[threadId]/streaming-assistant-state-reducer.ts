@@ -22,7 +22,10 @@ export function resolveFinishedThreadRunStatus(input: {
   ) {
     return input.existingStatus;
   }
-  if (input.finishReason === "tool_confirmation_requested") {
+  if (
+    input.finishReason === "tool_confirmation_requested" ||
+    input.finishReason === "user_question_requested"
+  ) {
     return "waiting_for_approval";
   }
   return "completed";

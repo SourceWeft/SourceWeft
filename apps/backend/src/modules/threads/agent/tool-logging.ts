@@ -52,6 +52,7 @@ export type AgentToolLogMetadata = {
   maxAttempts?: unknown;
   repeatCount?: unknown;
   runId?: unknown;
+  subagentType?: unknown;
   counts?: unknown;
   outputFormat?: unknown;
   error?: unknown;
@@ -76,6 +77,7 @@ const stringFields = [
   "failureMessage",
   "requestKey",
   "runId",
+  "subagentType",
   "stage",
   "status",
   "outputFormat",

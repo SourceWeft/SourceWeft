@@ -326,24 +326,29 @@ test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use",
   assert.equal(skills[0]?.files[0]?.contentText, skillMd);
 });
 
-test("resolveSelectedSkills skips a pointer skill whose fetch fails without failing the turn", async () => {
+test("resolveSelectedSkills fails when a selected pointer skill cannot be prepared", async () => {
   const skillMdSha = createHash("sha256").update("x").digest("hex");
   // Tarball download failed / integrity rejected → loader reports null.
   loadPointerSkillBundleMock.mockResolvedValue(null);
 
   const record = workspaceSkill();
-  const skills = await resolveSelectedSkills({
-    teamId: "team-1",
-    workspaceId: "workspace-1",
-    skillIds: [record.id],
-    listEnabledWorkspaceSkills: async () => [],
-    listWorkspaceSkillsByIds: async () => [record],
-    loadWorkspaceSkillVersion: async () =>
-      pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
-  });
-
-  // Fetch-on-use failed → the skill is skipped, the turn is not failed.
-  assert.deepEqual(skills, []);
+  await assert.rejects(
+    () =>
+      resolveSelectedSkills({
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        skillIds: [record.id],
+        listEnabledWorkspaceSkills: async () => [],
+        listWorkspaceSkillsByIds: async () => [record],
+        loadWorkspaceSkillVersion: async () =>
+          pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
+      }),
+    (error) =>
+      error instanceof ContentError &&
+      error.code === "SKILL_PREPARATION_FAILED" &&
+      (error.details as { workspaceSkillId?: string }).workspaceSkillId ===
+        record.id,
+  );
 });
 
 test("resolveSelectedSkills rejects explicitly selected disabled workspace skills", async () => {
@@ -357,7 +362,6 @@ test("resolveSelectedSkills rejects explicitly selected disabled workspace skill
         listEnabledWorkspaceSkills: async () => [],
         listWorkspaceSkillsByIds: async () => [record],
       }),
-    (error) =>
-      error instanceof ContentError && error.code === "SKILL_DISABLED",
+    (error) => error instanceof ContentError && error.code === "SKILL_DISABLED",
   );
 });

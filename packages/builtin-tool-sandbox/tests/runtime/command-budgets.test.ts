@@ -128,6 +128,9 @@ function createSandboxStore(): SandboxStore {
 
 function createOperationStore(): SandboxOperationStore {
   return {
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation() {
       return null;
     },
@@ -151,6 +154,7 @@ function createOperationStore(): SandboxOperationStore {
 function createRuntime(input: {
   limits?: SandboxRuntimeLimits;
   commandBudget?: SandboxCommandBudget;
+  operationStore?: SandboxOperationStore;
 } = {}) {
   const provider = createProvider();
   const runtime = createSandboxRuntimeForTurn({
@@ -159,12 +163,32 @@ function createRuntime(input: {
     limits: input.limits ?? createLimits(),
     provider,
     sandboxStore: createSandboxStore(),
-    operationStore: createOperationStore(),
+    operationStore: input.operationStore ?? createOperationStore(),
     toolApprovalEnabled: false,
     commandBudget: input.commandBudget,
   });
   return { provider, runtime };
 }
+
+test("sandbox runtime exposes the current message's persisted operation timeline", async () => {
+  const expected = [
+    {
+      operationType: "execute" as const,
+      status: "succeeded" as const,
+      durationMs: 42,
+      createdAt: "2026-08-16T08:00:00.000Z",
+      result: { exitCode: 0, outputChars: 2 },
+    },
+  ];
+  const operationStore = createOperationStore();
+  operationStore.listMessageOperations = async (input) => {
+    assert.deepEqual(input, { context, limit: 50 });
+    return expected;
+  };
+  const { runtime } = createRuntime({ operationStore });
+
+  assert.deepEqual(await runtime.getOperationTimeline(), expected);
+});
 
 test("sandbox commands use the interactive budget when no budget is named", async () => {
   // The agent turn builds its runtime exactly like this — no commandBudget —

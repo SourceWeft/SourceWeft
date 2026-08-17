@@ -58,10 +58,6 @@ function buildDeepSeekThinkingKwargs(input: ChatCompleteInput) {
 export class DeepSeekChatAdapter implements ChatAdapter {
   readonly kind = "deepseek" as const;
 
-  // `thinking: {type: "disabled"}` is DeepSeek's own first-party disable — a
-  // hard guarantee, so forced tool_choice may be restored once thinking is off.
-  readonly guaranteesThinkingDisable = true;
-
   createModel(
     target: Parameters<ChatAdapter["createModel"]>[0],
     input: Parameters<ChatAdapter["createModel"]>[1],

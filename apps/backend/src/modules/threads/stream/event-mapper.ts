@@ -1,5 +1,8 @@
 import type { DeepAgentTurnEvent } from "../agent/turn/runner";
-import { toolConfirmationRequestSchema } from "@sourceweft/contracts";
+import {
+  agentQuestionRequestSchema,
+  toolConfirmationRequestSchema,
+} from "@sourceweft/contracts";
 import { isArtifactProgressOutputType } from "@sourceweft/agent-tool-registry";
 import type { ToolCallTrace } from "../turn/types";
 import { toSseData } from "./helpers";
@@ -65,6 +68,12 @@ function extractToolConfirmationRequest(output: unknown): unknown | null {
   return confirmation.success ? confirmation.data : null;
 }
 
+function extractUserQuestionRequest(output: unknown): unknown | null {
+  const record = toObjectRecord(output);
+  const question = agentQuestionRequestSchema.safeParse(record);
+  return question.success ? question.data : null;
+}
+
 function isRedactedSkillInstructionRead(output: unknown) {
   const record = toObjectRecord(output);
   return record?.type === "skill_instruction_read" && record.redacted === true;
@@ -111,6 +120,11 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
   const confirmation = extractToolConfirmationRequest(output);
   if (confirmation) {
     return confirmation;
+  }
+
+  const question = extractUserQuestionRequest(output);
+  if (question) {
+    return question;
   }
 
   if (typeof output === "string") {
@@ -310,11 +324,18 @@ export function mapDeepAgentEventToSse(
     });
   }
 
-  return toSseData({
-    type: "citations",
-    citations: event.citations,
-    ...(event.availableCitations
-      ? { availableCitations: event.availableCitations }
-      : {}),
-  });
+  if (event.type === "citations") {
+    return toSseData({
+      type: "citations",
+      citations: event.citations,
+      ...(event.availableCitations
+        ? { availableCitations: event.availableCitations }
+        : {}),
+    });
+  }
+
+  // Unhandled event types produce no SSE frame. Previously this fell through to
+  // the citations branch, so any new event variant was mis-emitted as a broken
+  // `citations` event; returning null lets callers skip it safely instead.
+  return null;
 }

@@ -60,14 +60,13 @@ import {
 import { WorkfileMutationPreview } from "./workfile-mutation-preview";
 import { resolveWorkfileMutationPreview } from "./workfile-mutation-state";
 import {
-  getSandboxCollectedWorkfilePaths,
-  getSandboxToolOperationTimeline,
-  getSandboxToolResultDetails,
-  getSandboxToolResultSummary,
-  getSandboxToolSafeErrorMessage,
-  isSandboxToolResultFailure,
-} from "./sandbox-tool-result-display";
-import type { SandboxToolOperationTimelineItem } from "./sandbox-tool-result-display";
+  isSandboxToolCardToolName,
+  SandboxToolCard,
+} from "./sandbox-tool-card";
+import { DelegateToolCard } from "./delegate-tool-card";
+import { isDelegateToolName } from "./delegate-tool-card-state";
+import { AsyncTaskToolCard } from "./async-task-tool-card";
+import { isAsyncTaskToolName } from "./async-task-tool-card-state";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
   ThinkingStepRecord,
@@ -121,14 +120,6 @@ function getStatusKey(input: {
     return "needs-approval";
   }
   if (input.toolCall.status === "error") {
-    return "failed";
-  }
-  if (
-    isSandboxToolResultFailure({
-      output: input.toolCall.output,
-      toolName: input.toolCall.tool,
-    })
-  ) {
     return "failed";
   }
   return "done";
@@ -223,13 +214,6 @@ function getOutputSummary(toolCall: ToolCallRecord) {
   if (confirmation) {
     return null;
   }
-  const sandboxSummary = getSandboxToolResultSummary({
-    output: toolCall.output,
-    toolName: toolCall.tool,
-  });
-  if (sandboxSummary) {
-    return compactText(sandboxSummary, 220);
-  }
   const content = getToolOutputContent(toolCall.output);
   return content && content !== "{}" ? compactText(content, 220) : null;
 }
@@ -272,54 +256,7 @@ function ReadFileBinaryUnsupportedDetails({
   );
 }
 
-function SandboxOperationTimeline({
-  items,
-}: {
-  items: SandboxToolOperationTimelineItem[];
-}) {
-  return (
-    <div className="space-y-1">
-      <p className="font-medium text-foreground/70">Sandbox timeline</p>
-      <ol className="space-y-1 border-muted/60 border-l pl-3">
-        {items.map((item) => (
-          <li className="relative" key={item.key}>
-            <span className="-left-[15px] absolute mt-2 size-1.5 rounded-full bg-muted-foreground/40" />
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              <span className="text-foreground/80">{item.label}</span>
-              {item.status ? (
-                <span className="text-muted-foreground/60 text-xs">
-                  {item.status}
-                </span>
-              ) : null}
-              {item.duration ? (
-                <span className="text-muted-foreground/60 text-xs">
-                  {item.duration}
-                </span>
-              ) : null}
-            </div>
-            {item.detail ? (
-              <p className="break-words text-muted-foreground/75">
-                {item.detail}
-              </p>
-            ) : null}
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
-
-export function AssistantToolCard({
-  artifactStatuses,
-  children,
-  contentClassName,
-  defaultOpen,
-  onWorkfileClick,
-  resolvedConfirmations = [],
-  toolCall,
-  toolStep,
-  workspaceId,
-}: {
+export type AssistantToolCardProps = {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   children?: ReactNode;
   contentClassName?: string;
@@ -329,7 +266,43 @@ export function AssistantToolCard({
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
   workspaceId?: string | null;
-}) {
+};
+
+export function AssistantToolCard(props: AssistantToolCardProps) {
+  if (isDelegateToolName(props.toolCall.tool)) {
+    return <DelegateToolCard toolCall={props.toolCall} />;
+  }
+  if (isAsyncTaskToolName(props.toolCall.tool)) {
+    return <AsyncTaskToolCard toolCall={props.toolCall} />;
+  }
+  if (isSandboxToolCardToolName(props.toolCall.tool)) {
+    return (
+      <SandboxToolCard
+        contentClassName={props.contentClassName}
+        defaultOpen={props.defaultOpen}
+        onWorkfileClick={props.onWorkfileClick}
+        resolvedConfirmations={props.resolvedConfirmations}
+        toolCall={props.toolCall}
+        toolStep={props.toolStep}
+      >
+        {props.children}
+      </SandboxToolCard>
+    );
+  }
+  return <GenericAssistantToolCard {...props} />;
+}
+
+function GenericAssistantToolCard({
+  artifactStatuses,
+  children,
+  contentClassName,
+  defaultOpen,
+  onWorkfileClick,
+  resolvedConfirmations = [],
+  toolCall,
+  toolStep,
+  workspaceId,
+}: AssistantToolCardProps) {
   const confirmation = getToolConfirmationOutput(toolCall.output);
   const confirmationResolution = confirmation
     ? resolvedConfirmations.find(
@@ -391,29 +364,7 @@ export function AssistantToolCard({
         effectiveArtifactStatuses,
       );
   const outputSummary = getOutputSummary(toolCall);
-  const collectedWorkfilePaths = isRedactedSkillRead
-    ? []
-    : getSandboxCollectedWorkfilePaths({
-        output: toolCall.output,
-        toolName: toolCall.tool,
-      });
-  const sandboxDetails = isRedactedSkillRead
-    ? []
-    : getSandboxToolResultDetails({
-        input: toolCall.input,
-        output: toolCall.output,
-        toolName: toolCall.tool,
-      });
-  const sandboxTimeline = isRedactedSkillRead
-    ? []
-    : getSandboxToolOperationTimeline({
-        output: toolCall.output,
-        toolName: toolCall.tool,
-      });
-  const toolError = getSandboxToolSafeErrorMessage({
-    error: toolCall.error,
-    toolName: toolCall.tool,
-  });
+  const toolError = toolCall.error;
   const isDeliverableGeneratingNow = isDeliverableTool
     ? isDeliverableGenerationActive({
         artifactSnapshot: deliverableSnapshot,
@@ -466,9 +417,6 @@ export function AssistantToolCard({
     Boolean(readFileBinaryUnsupported) ||
     Boolean(workfileMutationPreview) ||
     Boolean(outputSummary) ||
-    sandboxDetails.length > 0 ||
-    sandboxTimeline.length > 0 ||
-    collectedWorkfilePaths.length > 0 ||
     (!isRedactedSkillRead && Boolean(toolStep?.detail)) ||
     Boolean(toolError) ||
     Boolean(resolvedConfirmationMessage) ||
@@ -550,37 +498,6 @@ export function AssistantToolCard({
           ) : null}
           {hasDetails && outputSummary ? (
             <p className="break-words">{outputSummary}</p>
-          ) : null}
-          {hasDetails && sandboxDetails.length > 0 ? (
-            <dl className="grid gap-1">
-              {sandboxDetails.map((detail) => (
-                <div className="grid gap-0.5" key={detail.label}>
-                  <dt className="font-medium text-foreground/70">
-                    {detail.label}
-                  </dt>
-                  <dd className="break-words">{detail.value}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : null}
-          {hasDetails && sandboxTimeline.length > 0 ? (
-            <SandboxOperationTimeline items={sandboxTimeline} />
-          ) : null}
-          {hasDetails && collectedWorkfilePaths.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {collectedWorkfilePaths.map((path) => (
-                <button
-                  className="max-w-[260px] truncate rounded-md bg-primary/10 px-1.5 py-0.5 text-primary underline-offset-2 hover:underline disabled:cursor-default disabled:text-muted-foreground disabled:no-underline"
-                  disabled={!onWorkfileClick}
-                  key={path}
-                  onClick={() => onWorkfileClick?.(path)}
-                  title={path}
-                  type="button"
-                >
-                  {path}
-                </button>
-              ))}
-            </div>
           ) : null}
           {hasDetails && toolError ? (
             <p className="break-words text-destructive">{toolError}</p>

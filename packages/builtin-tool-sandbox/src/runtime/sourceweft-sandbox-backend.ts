@@ -28,6 +28,26 @@ import type {
 import { SandboxManager } from "./sandbox-manager";
 import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
 
+function applyGrepMaxCount(params: {
+  result: GrepResult;
+  maxCount?: number | null;
+}): GrepResult {
+  const { result, maxCount } = params;
+  if (
+    maxCount == null ||
+    result.matches == null ||
+    result.matches.length <= maxCount
+  ) {
+    return result;
+  }
+
+  return {
+    error: result.error,
+    matches: result.matches.slice(0, maxCount),
+    truncated: true,
+  };
+}
+
 const TEXT_MIME_TYPE = "text/plain";
 const EXECUTE_TOOL_NAME = "execute";
 const READ_FILE_BINARY_UNSUPPORTED_CODE = "READ_FILE_BINARY_UNSUPPORTED";
@@ -415,6 +435,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     pattern: string,
     path: string | null = "/",
     glob?: string | null,
+    maxCount?: number | null,
   ): Promise<GrepResult> {
     const policy = this.pathPolicy();
     let normalized: string;
@@ -448,9 +469,14 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         line: lineNo,
         text: parts.slice(2).join(":"),
       });
-      if (matches.length >= 50) break;
+      if (matches.length >= 50) {
+        return applyGrepMaxCount({
+          result: { matches, truncated: true },
+          maxCount,
+        });
+      }
     }
-    return { matches };
+    return applyGrepMaxCount({ result: { matches }, maxCount });
   }
 
   async glob(pattern: string, path = "/"): Promise<GlobResult> {
@@ -826,7 +852,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         sandboxId,
         status: "failed",
         result: {
-          error: compactRecoverableToolOutput(redactSandboxText(compactError(error))),
+          error: compactRecoverableToolOutput(
+            redactSandboxText(compactError(error)),
+          ),
           ...(errorCode ? { errorCode, failureCode: errorCode } : {}),
           commandFingerprint,
           runId: this.input.context.runId,

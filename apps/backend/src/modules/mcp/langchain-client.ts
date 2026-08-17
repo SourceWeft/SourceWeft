@@ -1,9 +1,17 @@
-import { MultiServerMCPClient, type ClientConfig } from "@langchain/mcp-adapters";
+import {
+  MultiServerMCPClient,
+  type ClientConfig,
+} from "@langchain/mcp-adapters";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { McpError } from "./errors";
 import type { WorkspaceMcpInstallRecord } from "./types";
+import { createHash } from "node:crypto";
 
-function langChainTransportFor(transport: WorkspaceMcpInstallRecord["transport"]) {
+const MAX_MCP_TOOL_NAME_LENGTH = 64;
+
+function langChainTransportFor(
+  transport: WorkspaceMcpInstallRecord["transport"],
+) {
   if (transport === "stdio") {
     throw new McpError(
       400,
@@ -44,12 +52,42 @@ export function langChainMcpServerKey(install: {
     .slice(0, 32);
   // Disambiguate installs whose identifiers sanitize to the same key
   // (`io.github.a/b` and `io.github.a.b` both collapse to `io_github_a_b`):
-  // append a short slice of the globally-unique install id. Without this two
+  // append a short hash of the globally-unique install id. Without this two
   // installs share a server key, their tool names collide, and their
   // interruptOn entries overwrite each other — the approval gate then applies to
   // the wrong server.
-  const suffix = install.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
-  return suffix ? `${base}_${suffix}` : base;
+  const suffix = createHash("sha256")
+    .update(install.id)
+    .digest("hex")
+    .slice(0, 8);
+  return `${base || "server"}_${suffix}`;
+}
+
+/**
+ * Produce the provider-safe leaf used in the model-visible MCP tool name.
+ * The hash suffix is added whenever normalization is lossy or the raw name is
+ * too long, preventing two distinct server names from collapsing to one tool.
+ */
+export function langChainMcpToolName(input: {
+  install: Pick<WorkspaceMcpInstallRecord, "id" | "marketIdentifier">;
+  serverToolName: string;
+}) {
+  const prefix = `mcp__${langChainMcpServerKey(input.install)}__`;
+  const available = Math.max(9, MAX_MCP_TOOL_NAME_LENGTH - prefix.length);
+  const normalized = input.serverToolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const lossless =
+    normalized === input.serverToolName &&
+    normalized.length > 0 &&
+    normalized.length <= available;
+  const leaf = lossless
+    ? normalized
+    : `${(normalized || "tool").slice(0, Math.max(1, available - 9))}_${createHash(
+        "sha256",
+      )
+        .update(input.serverToolName)
+        .digest("hex")
+        .slice(0, 8)}`;
+  return `${prefix}${leaf}`;
 }
 
 export function createLangChainMcpClient(input: {
@@ -64,7 +102,11 @@ export function createLangChainMcpClient(input: {
 }) {
   const transport = langChainTransportFor(input.install.transport);
   if (!input.install.endpointUrl) {
-    throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
+    throw new McpError(
+      400,
+      "MCP_ENDPOINT_REQUIRED",
+      "MCP endpoint is required",
+    );
   }
   const config: ClientConfig = {
     throwOnLoadError: true,

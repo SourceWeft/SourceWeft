@@ -551,14 +551,14 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       const networkOptions = resolveDaytonaNetworkPolicyOptions(
         input.networkPolicy,
       );
-      // TODO(skill-registry R0 §6b/§7.0): `@langchain/daytona@0.2.0`'s
-      // `DaytonaSandbox.initialize()` only forwards a fixed field set
+      // TODO(skill-registry R0 §6b/§7.0): `@langchain/daytona@0.2.2`'s
+      // `DaytonaSandbox.initialize()` still only forwards a fixed field set
       // (image/snapshot, language, envVars, auto*Interval, labels, resources)
-      // to the underlying `@daytonaio/sdk` `daytona.create()` and DROPS
+      // to the underlying `@daytona/sdk` `daytona.create()` and DROPS
       // `networkBlockAll`/`networkAllowList`. The SDK's `CreateSandboxBaseParams`
       // DOES accept both. We translate the policy into SDK params here (the
       // provider's job); end-to-end enforcement requires the wrapper to forward
-      // them or a direct `@daytonaio/sdk` call. Tracked with the ingestion-
+      // them or a direct `@daytona/sdk` call. Tracked with the ingestion-
       // sandbox migration.
       const createOptions: DaytonaSandboxOptions & DaytonaNetworkOptions = {
         auth: this.authOptions(),

@@ -33,6 +33,7 @@ import {
 } from "./tool-utils";
 import {
   compactTraceText,
+  appendSandboxOperationTimeline,
   formatToolInputItems,
   getConnectorToolErrorTextContentError,
   getConnectorToolOutputContentError,
@@ -51,6 +52,7 @@ import {
   getWebToolStartTitle,
   extractToolOutputField,
   normalizeToolOutputForObservability,
+  isSandboxOperationTimelineTool,
   redactFilesystemToolOutputForClient,
   sanitizeFilesystemToolInputForClient,
   type SkillInstructionDisplayOptions,
@@ -340,6 +342,7 @@ export async function* handleToolEndStreamChunk(input: {
   runtime: TurnRuntime;
   snapshot: ToolsStreamToolCallSnapshot;
   traceContext?: TraceContext;
+  getSandboxOperationTimeline?: () => Promise<readonly unknown[]>;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const { runtime, snapshot } = input;
   const skillDisplayOptions = getSkillInstructionDisplayOptions(input.prepared);
@@ -362,7 +365,7 @@ export async function* handleToolEndStreamChunk(input: {
   const measuredLatency =
     typeof startedAt === "number" ? Date.now() - startedAt : null;
   const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
-  const output = retrievalCall
+  const normalizedOutput = retrievalCall
     ? {
         query: retrievalCall.query,
         hitCount: retrievalCall.hitCount,
@@ -372,6 +375,16 @@ export async function* handleToolEndStreamChunk(input: {
         toolPayload.output,
         normalizedInput,
       );
+  const sandboxOperations =
+    input.getSandboxOperationTimeline &&
+    isSandboxOperationTimelineTool(toolName)
+      ? await input.getSandboxOperationTimeline()
+      : [];
+  const output = appendSandboxOperationTimeline(
+    toolName,
+    normalizedOutput,
+    sandboxOperations,
+  );
   const connectorContentError = getConnectorToolOutputContentError(output);
   const outputError =
     connectorContentError?.message ??
@@ -596,6 +609,7 @@ export async function* handleToolErrorStreamChunk(input: {
   runtime: TurnRuntime;
   snapshot: ToolsStreamToolCallSnapshot;
   traceContext?: TraceContext;
+  getSandboxOperationTimeline?: () => Promise<readonly unknown[]>;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const { runtime, snapshot } = input;
   const skillDisplayOptions = getSkillInstructionDisplayOptions(input.prepared);
@@ -627,9 +641,19 @@ export async function* handleToolErrorStreamChunk(input: {
     : errorText;
   const connectorContentError =
     getConnectorToolErrorTextContentError(errorText);
+  const sandboxOperations =
+    input.getSandboxOperationTimeline &&
+    isSandboxOperationTimelineTool(toolName)
+      ? await input.getSandboxOperationTimeline()
+      : [];
   const nextToolCall = applyToolsStreamToolError({
     currentToolCall: {
       ...currentToolCall,
+      output: appendSandboxOperationTimeline(
+        toolName,
+        currentToolCall.output,
+        sandboxOperations,
+      ),
       input: sanitizeFilesystemToolInputForClient(
         toolName,
         normalizedInput,

@@ -13,6 +13,37 @@ import type {
 } from "@sourceweft/builtin-tool-sandbox";
 import { agentSandboxes, agentSandboxOperations, db } from "@sourceweft/db";
 
+function sandboxTimelineResult(input: {
+  operationType: SandboxOperationType;
+  result: Record<string, unknown>;
+}) {
+  const projected: Record<string, unknown> = {};
+  for (const key of [
+    "exitCode",
+    "outputChars",
+    "totalBytes",
+    "truncated",
+  ] as const) {
+    const value = input.result[key];
+    if (
+      (typeof value === "number" && Number.isFinite(value)) ||
+      typeof value === "boolean"
+    ) {
+      projected[key] = value;
+    }
+  }
+  if (input.operationType === "prepare" && Array.isArray(input.result.files)) {
+    projected.fileCount = input.result.files.length;
+  }
+  if (
+    input.operationType === "collect" &&
+    Array.isArray(input.result.outputs)
+  ) {
+    projected.outputCount = input.result.outputs.length;
+  }
+  return projected;
+}
+
 export class DrizzleSandboxStore implements SandboxStore {
   async findLatestActiveThreadSandbox(input: {
     provider: SandboxProviderId;
@@ -140,6 +171,39 @@ export class DrizzleSandboxStore implements SandboxStore {
 }
 
 export class DrizzleSandboxOperationStore implements SandboxOperationStore {
+  async listMessageOperations(input: {
+    context: SandboxRuntimeContext;
+    limit: number;
+  }) {
+    const requestedLimit = Number.isFinite(input.limit)
+      ? Math.floor(input.limit)
+      : 50;
+    const limit = Math.max(1, Math.min(100, requestedLimit));
+    const rows = await db.query.agentSandboxOperations.findMany({
+      where: and(
+        eq(agentSandboxOperations.teamId, input.context.teamId),
+        eq(agentSandboxOperations.workspaceId, input.context.workspaceId),
+        eq(agentSandboxOperations.threadId, input.context.threadId),
+        eq(agentSandboxOperations.messageId, input.context.messageId),
+      ),
+      orderBy: [
+        desc(agentSandboxOperations.createdAt),
+        desc(agentSandboxOperations.id),
+      ],
+      limit,
+    });
+    return rows.reverse().map((row) => ({
+      operationType: row.operationType,
+      status: row.status,
+      durationMs: row.durationMs,
+      createdAt: row.createdAt.toISOString(),
+      result: sandboxTimelineResult({
+        operationType: row.operationType,
+        result: row.resultJsonRedacted,
+      }),
+    }));
+  }
+
   async findLatestToolOperation(input: {
     context: SandboxRuntimeContext;
     operationType: SandboxBridgeOperationType;

@@ -3,6 +3,7 @@ import { zipSync } from "fflate";
 import type { RuntimeAssetPlan } from "@sourceweft/builtin-tool-sandbox";
 import { SOURCEWEFT_SKILLS_ROOT } from "@sourceweft/builtin-tool-sandbox";
 import type { EnabledSkillDescriptor } from "./types";
+import { ContentError } from "../content/errors";
 
 /**
  * Skill bundles as sandbox runtime assets
@@ -20,9 +21,8 @@ import type { EnabledSkillDescriptor } from "./types";
 const SAFE_SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u;
 
 /**
- * Per-skill staging caps. A skill over these limits degrades to the
- * file-tools-only view with a warning; it never blocks provisioning or the
- * other skills (docs/architecture/sandbox-skill-staging.md, risks table).
+ * Per-skill staging caps. A selected skill over these limits fails preparation;
+ * silently dropping it would change the turn's declared instruction contract.
  */
 const MAX_SKILL_BUNDLE_FILES = 200;
 const MAX_SKILL_BUNDLE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -36,10 +36,6 @@ type SkillZip = { sha256: string; content: Uint8Array };
 
 /** Content-keyed zip cache: repeat turns with unchanged bundles never rezip. */
 const zipCache = new Map<string, SkillZip>();
-
-type SkillAssetLogger = {
-  warn?(message: string, meta?: Record<string, unknown>): void;
-};
 
 function safeBundleFilePath(path: string) {
   return (
@@ -88,7 +84,10 @@ function buildSkillZip(skill: EnabledSkillDescriptor): SkillZip {
   for (const file of [...skill.files].sort((a, b) =>
     a.path.localeCompare(b.path),
   )) {
-    entries[file.path] = [encoder.encode(file.contentText), { mtime: ZIP_MTIME }];
+    entries[file.path] = [
+      encoder.encode(file.contentText),
+      { mtime: ZIP_MTIME },
+    ];
   }
   const content = zipSync(entries, { mtime: ZIP_MTIME });
   const zip: SkillZip = {
@@ -106,50 +105,54 @@ function buildSkillZip(skill: EnabledSkillDescriptor): SkillZip {
 }
 
 /**
- * Build runtime-asset plans for the skills whose bundles can be staged.
- * Ineligible skills (unsafe name, missing SKILL.md, tampered paths, over
- * limits) are skipped with a warning — they keep today's file-tools-only
- * behavior while the rest of the turn's skills stage normally.
+ * Build runtime-asset plans for selected skills. Any invalid or unstaged
+ * bundle fails the turn before sandbox provisioning.
  */
 export function buildSkillSandboxAssetPlans(
   skills: readonly EnabledSkillDescriptor[],
-  logger?: SkillAssetLogger,
 ): RuntimeAssetPlan[] {
   const plans: RuntimeAssetPlan[] = [];
   for (const skill of skills) {
-    const skip = (reason: string, meta: Record<string, unknown> = {}) => {
-      logger?.warn?.("skill_sandbox_asset_skipped", {
-        skill: skill.name,
-        reason,
-        ...meta,
-      });
+    const fail = (
+      reason: string,
+      details: Record<string, unknown> = {},
+    ): never => {
+      throw new ContentError(
+        422,
+        "SKILL_SANDBOX_ASSET_INVALID",
+        `Selected skill '${skill.name}' cannot be staged in the sandbox`,
+        {
+          details: {
+            reason,
+            workspaceSkillId: skill.workspaceSkillId,
+            skill: skill.name,
+            ...details,
+          },
+          recoverable: false,
+        },
+      );
     };
     if (skill.files.length === 0) {
-      continue;
+      fail("empty_bundle");
     }
     if (!SAFE_SEGMENT.test(skill.name)) {
-      skip("unsafe_name");
-      continue;
+      fail("unsafe_name");
     }
     if (!skill.files.some((file) => file.path === "SKILL.md")) {
-      skip("missing_skill_md");
-      continue;
+      fail("missing_skill_md");
     }
     if (skill.files.length > MAX_SKILL_BUNDLE_FILES) {
-      skip("too_many_files", { fileCount: skill.files.length });
-      continue;
+      fail("too_many_files", { fileCount: skill.files.length });
     }
     if (!skill.files.every((file) => safeBundleFilePath(file.path))) {
-      skip("unsafe_file_path");
-      continue;
+      fail("unsafe_file_path");
     }
     const totalBytes = skill.files.reduce(
       (sum, file) => sum + file.sizeBytes,
       0,
     );
     if (totalBytes > MAX_SKILL_BUNDLE_TOTAL_BYTES) {
-      skip("bundle_too_large", { totalBytes });
-      continue;
+      fail("bundle_too_large", { totalBytes });
     }
     const { sha256, content } = buildSkillZip(skill);
     plans.push({

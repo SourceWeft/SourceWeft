@@ -777,19 +777,75 @@ function parseModelCapabilities(value: unknown): ModelCapabilityRule[] {
       throw new Error(`Invalid global model gateway config field: ${field}.capabilities`);
     }
     const caps = capabilities as Record<string, unknown>;
-    const supportsForcedToolChoice = asOptionalBoolean(
-      caps.supportsForcedToolChoice,
-      `${field}.capabilities.supportsForcedToolChoice`,
+    const disabledParams = parseDisabledParams(
+      caps.disabledParams,
+      `${field}.capabilities.disabledParams`,
+    );
+    const toolCallArgumentJsonRepair = asOptionalBoolean(
+      caps.toolCallArgumentJsonRepair,
+      `${field}.capabilities.toolCallArgumentJsonRepair`,
+    );
+    const structuredOutputMethod = asOptionalStructuredOutputMethod(
+      caps.structuredOutputMethod,
+      `${field}.capabilities.structuredOutputMethod`,
     );
     return {
       modelMatch: asNonEmptyString(record.modelMatch, `${field}.modelMatch`),
       capabilities: {
-        ...(supportsForcedToolChoice !== undefined
-          ? { supportsForcedToolChoice }
+        ...(disabledParams !== undefined ? { disabledParams } : {}),
+        ...(toolCallArgumentJsonRepair !== undefined
+          ? { toolCallArgumentJsonRepair }
+          : {}),
+        ...(structuredOutputMethod !== undefined
+          ? { structuredOutputMethod }
           : {}),
       },
     };
   });
+}
+
+/**
+ * Validate a disabled_params map (langchain-python `disabled_params` mirror):
+ * each value must be `null` (drop the param entirely) or an array (drop only
+ * those values). Returns undefined when absent.
+ */
+function parseDisabledParams(
+  value: unknown,
+  field: string,
+): Record<string, null | readonly unknown[]> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+  const out: Record<string, null | readonly unknown[]> = {};
+  for (const [param, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry !== null && !Array.isArray(entry)) {
+      throw new Error(
+        `Invalid global model gateway config field: ${field}.${param}`,
+      );
+    }
+    out[param] = entry as null | readonly unknown[];
+  }
+  return out;
+}
+
+function asOptionalStructuredOutputMethod(
+  value: unknown,
+  field: string,
+): "json_schema" | "json_mode" | "function_calling" | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (
+    value !== "json_schema" &&
+    value !== "json_mode" &&
+    value !== "function_calling"
+  ) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+  return value;
 }
 
 function parseProfileTarget(input: {

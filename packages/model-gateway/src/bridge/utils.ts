@@ -8,11 +8,10 @@ import {
 } from "@langchain/core/messages";
 import { getChatAdapter, getEmbeddingsAdapter } from "../adapters/registry";
 import {
-  downgradeForcedToolChoiceInKwargs,
-  effectiveForcedToolChoiceSupport,
+  filterDisabledParams,
+  forcedToolChoiceDisabled,
   resolveModelCapabilities,
 } from "../model-capabilities";
-import { resolveThinkingMode } from "../thinking";
 import type {
   ChatCompleteInput,
   EmbedBatchInput,
@@ -53,6 +52,10 @@ import {
   extractResponseMetadata,
   extractUsage,
 } from "./chat";
+import {
+  executeStructuredOutput,
+  type StructuredOutputMethod,
+} from "./structured-output";
 import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
@@ -91,34 +94,29 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     .trim();
 }
 
-/** Adapter guarantee lookup that tolerates injected/test provider kinds. */
-function adapterGuaranteesThinkingDisable(kind: ProviderKind): boolean {
-  try {
-    return getChatAdapter(kind).guaranteesThinkingDisable === true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Effective forced-tool_choice support for this request: the model capability
- * refined by the request's thinking mode and the adapter's disable guarantee.
+ * Whether a forced `tool_choice` may be sent for this request — false when the
+ * model disables `tool_choice` (`disabledParams: { tool_choice: null }`, the JS
+ * mirror of langchain-python's disabled_params). Drives the structured-output
+ * strategy (availableTool when forcing is off).
  */
 export function requestForcedToolChoiceSupport(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
   payload: ChatCompleteInput;
 }): boolean {
-  return effectiveForcedToolChoiceSupport({
-    capabilities: resolveModelCapabilities(
-      input.target.providerModel,
-      input.config.modelCapabilities,
-    ),
-    thinkingMode: resolveThinkingMode(input.payload.thinking),
-    adapterGuaranteesThinkingDisable: adapterGuaranteesThinkingDisable(
-      input.target.providerKind,
-    ),
-  });
+  return !forcedToolChoiceDisabled(requestDisabledParams(input));
+}
+
+/** Resolve the model's disabled request params (langchain-python disabled_params). */
+function requestDisabledParams(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+}): Record<string, null | readonly unknown[]> | undefined {
+  return resolveModelCapabilities(
+    input.target.providerModel,
+    input.config.modelCapabilities,
+  ).disabledParams;
 }
 
 export function createChatModel(input: {
@@ -145,23 +143,25 @@ export function createChatModel(input: {
     ? model
     : model.bindTools(
         input.payload.tools,
-        // Downgrade a forced tool_choice the model can't take (DeepSeek V4
-        // while thinking) — the request-wide counterpart of the
-        // structured-output strategy.
-        downgradeForcedToolChoiceInKwargs(
+        // Strip the model's disabled params (langchain-python disabled_params):
+        // DeepSeek disables `tool_choice`, so a forced choice it can't take is
+        // dropped → API default `auto` (an available tool).
+        filterDisabledParams(
           resolveBindToolsKwargs({
             toolBindingOptions: input.payload.toolBindingOptions,
             toolChoice: input.payload.toolChoice,
           }),
-          requestForcedToolChoiceSupport(input),
+          requestDisabledParams(input),
         ),
       ) as LangChainChatModelLike;
 
+  const disabledParams = requestDisabledParams(input);
   const modelWithDefaultToolBindingOptions =
     createDefaultToolBindingOptionsLangChainChatModel({
       model: boundModel,
       toolBindingOptions: input.payload.toolBindingOptions,
       toolChoice: input.payload.toolChoice,
+      ...(disabledParams ? { disabledParams } : {}),
     });
 
   return createObservedLangChainChatModel({
@@ -207,6 +207,7 @@ function createDefaultToolBindingOptionsLangChainChatModel(input: {
   model: LangChainChatModelLike;
   toolBindingOptions?: ToolBindingOptions;
   toolChoice?: ChatCompleteInput["toolChoice"];
+  disabledParams?: Record<string, null | readonly unknown[]>;
 }) {
   const defaultKwargs = resolveBindToolsKwargs({
     toolBindingOptions: input.toolBindingOptions,
@@ -222,15 +223,22 @@ function createDefaultToolBindingOptionsLangChainChatModel(input: {
       model: input.model.bindTools
         ? input.model.bindTools(
             tools,
-            resolveBindToolsKwargs({
-              kwargs,
-              toolBindingOptions: input.toolBindingOptions,
-              toolChoice: input.toolChoice,
-            }),
+            // Re-merging the request defaults can reintroduce a param the model
+            // disables (e.g. the original `tool_choice`), so filter again here —
+            // the same disabled_params mirror every other bind site applies.
+            filterDisabledParams(
+              resolveBindToolsKwargs({
+                kwargs,
+                toolBindingOptions: input.toolBindingOptions,
+                toolChoice: input.toolChoice,
+              }),
+              input.disabledParams,
+            ),
           )
         : input.model,
       toolBindingOptions: input.toolBindingOptions,
       toolChoice: input.toolChoice,
+      ...(input.disabledParams ? { disabledParams: input.disabledParams } : {}),
     });
   return wrapped;
 }
@@ -252,6 +260,30 @@ const UNOBSERVED_ENTRY_POINTS = new Set([
 
 const warnedUnobservedEntryPoints = new Set<string>();
 
+/** Map LangChain's `withStructuredOutput` method name back to gateway vocabulary. */
+function fromLangChainStructuredOutputMethod(
+  method: "jsonSchema" | "jsonMode" | "functionCalling" | undefined,
+): StructuredOutputMethod | undefined {
+  if (method === "jsonSchema") return "json_schema";
+  if (method === "jsonMode") return "json_mode";
+  if (method === "functionCalling") return "function_calling";
+  return undefined;
+}
+
+/**
+ * Narrow a LangChain runnable-config passed to `withStructuredOutput().invoke`
+ * to the gateway {@link RequestOptions} the executor understands (only the abort
+ * signal travels through).
+ */
+function structuredRequestOptions(options: unknown): RequestOptions | undefined {
+  const record =
+    options && typeof options === "object"
+      ? (options as Record<string, unknown>)
+      : undefined;
+  const signal = record?.signal;
+  return signal instanceof AbortSignal ? { signal } : undefined;
+}
+
 function createObservedLangChainChatModel(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -267,14 +299,15 @@ function createObservedLangChainChatModel(input: {
 
   const bindTools: LangChainChatModelLike["bindTools"] = (tools, kwargs) => {
     // Runtime bind path (e.g. the agent's command-tool-choice middleware forcing
-    // a specific tool). Downgrade a forced tool_choice the model can't take.
-    const resolvedKwargs = downgradeForcedToolChoiceInKwargs(
+    // a specific tool). Strip the model's disabled params (langchain-python
+    // disabled_params) — DeepSeek's disabled `tool_choice` is dropped.
+    const resolvedKwargs = filterDisabledParams(
       resolveBindToolsKwargs({
         kwargs,
         toolBindingOptions: input.payload.toolBindingOptions,
         toolChoice: input.payload.toolChoice,
       }),
-      requestForcedToolChoiceSupport(input),
+      requestDisabledParams(input),
     );
     return createObservedLangChainChatModel({
       ...input,
@@ -292,23 +325,71 @@ function createObservedLangChainChatModel(input: {
   };
 
   /**
-   * `withStructuredOutput` returns a runnable, not a chat model, so the
-   * returned object's `invoke` is wrapped directly. The underlying call is made
-   * against the raw model (not the proxy) so that whatever it does internally —
-   * typically `bindTools` plus `invoke` — cannot re-enter this shim and emit a
-   * second generation for the same call.
+   * `withStructuredOutput` returns a runnable, not a chat model, so the returned
+   * object's `invoke` is wrapped directly. Rather than blindly forwarding to the
+   * model's own `withStructuredOutput`, it routes through the SAME
+   * {@link executeStructuredOutput} the chat.complete path uses, so a dedicated
+   * `model.withStructuredOutput(schema).invoke(messages)` becomes DeepSeek-safe:
+   * the JS mirror of langchain-python's `disabled_params`. For a model whose
+   * effective capabilities disable a forced `tool_choice` it binds the schema as
+   * an *available* tool (drop-forced); otherwise it uses native
+   * `withStructuredOutput` with the caller-pinned method, falling back to the
+   * capability's method (DeepSeek → function_calling).
+   *
+   * The executor runs against the raw model (`input.model`, not the proxy) so
+   * its internal `bindTools`/`withStructuredOutput` + `invoke` cannot re-enter
+   * this shim and emit a second generation. Observation wraps the whole call and
+   * bills against the underlying model response (the raw message), while the
+   * returned runnable yields langchain `withStructuredOutput` semantics: the
+   * parsed object by default, `{ raw, parsed }` when `includeRaw` is set.
    */
   const withStructuredOutput: LangChainChatModelLike["withStructuredOutput"] = (
     schema,
     structuredConfig,
   ) => {
-    const structured = input.model.withStructuredOutput!(schema, structuredConfig);
+    const capabilities = resolveModelCapabilities(
+      input.target.providerModel,
+      input.config.modelCapabilities,
+    );
+    const cfg = (structuredConfig ?? {}) as {
+      method?: "jsonSchema" | "jsonMode" | "functionCalling";
+      name?: string;
+      includeRaw?: boolean;
+      strict?: boolean;
+    };
+    const pinnedMethod = fromLangChainStructuredOutputMethod(cfg.method);
+    const name = cfg.name?.trim() ? cfg.name : "extract";
+    const includeRaw = cfg.includeRaw === true;
+    const strict = cfg.strict;
     return {
-      invoke: async (structuredInput, structuredOptions) =>
-        observeInvocation(
-          () => structured.invoke(structuredInput, structuredOptions),
-          structuredInput,
-        ),
+      invoke: async (structuredInput, structuredOptions) => {
+        let shaped: unknown;
+        await observeInvocation(async () => {
+          const { parsed, rawMessage } = await executeStructuredOutput({
+            model: input.model,
+            schema: schema as Record<string, unknown>,
+            name,
+            messages: structuredInput,
+            target: input.target,
+            supportsForcedToolChoice: requestForcedToolChoiceSupport(input),
+            ...(pinnedMethod !== undefined ? { method: pinnedMethod } : {}),
+            ...(capabilities.structuredOutputMethod !== undefined
+              ? { fallbackMethod: capabilities.structuredOutputMethod }
+              : {}),
+            ...(strict !== undefined ? { strict } : {}),
+            allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+            ...(structuredRequestOptions(structuredOptions) !== undefined
+              ? { options: structuredRequestOptions(structuredOptions) }
+              : {}),
+            logger: input.config.logger,
+          });
+          shaped = includeRaw ? { raw: rawMessage, parsed } : parsed;
+          // Observe against the raw model response so usage/billing and
+          // finish-reason extraction see the real message, not the parsed shape.
+          return rawMessage;
+        }, structuredInput);
+        return shaped;
+      },
     };
   };
 

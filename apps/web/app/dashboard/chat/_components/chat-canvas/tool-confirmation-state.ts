@@ -1,6 +1,8 @@
 import {
+  agentQuestionRequestSchema,
   isPendingToolConfirmation,
   toolConfirmationRequestSchema,
+  type AgentQuestionRequest,
   type ToolConfirmationRequest,
   type ToolApprovalResume,
 } from "@sourceweft/contracts";
@@ -26,6 +28,20 @@ import {
 
 type ToolConfirmationItem = {
   confirmation: ToolConfirmationRequest;
+  assistantMessageId: string;
+  messageId: string;
+  threadRunId: string | null;
+  toolCall: ToolCallRecord;
+};
+
+/**
+ * A pending proactive `askUser` question, surfaced on the same intervention
+ * channel as tool confirmations but rendered by its own panel. A question rides
+ * the run's `waiting_for_approval` status just like a confirmation, but is not an
+ * approval: the answer resumes with `{ decisions: [], askUser: {...} }`.
+ */
+type UserQuestionItem = {
+  question: AgentQuestionRequest;
   assistantMessageId: string;
   messageId: string;
   threadRunId: string | null;
@@ -124,6 +140,74 @@ export function getToolConfirmationOutput(
   }
   const parsedConfirmation = toolConfirmationRequestSchema.safeParse(record);
   return parsedConfirmation.success ? parsedConfirmation.data : null;
+}
+
+/**
+ * Detects a proactive `askUser` question request on a tool-call output, mirroring
+ * {@link getToolConfirmationOutput}. Returns null once the question has been
+ * answered (the tool output is replaced by the answer transcript on resume).
+ */
+export function getUserQuestionOutput(
+  output: unknown,
+): AgentQuestionRequest | null {
+  const parsed = parseJsonOutput(output);
+  const record = getObjectRecord(parsed);
+  if (!record) {
+    return null;
+  }
+  if (record.type !== "user_question_request") {
+    return null;
+  }
+  const parsedQuestion = agentQuestionRequestSchema.safeParse(record);
+  return parsedQuestion.success ? parsedQuestion.data : null;
+}
+
+function getPendingUserQuestionItemsForVersion(
+  version: MessageVersion,
+): UserQuestionItem[] {
+  if (isCancelledMessageVersion(version)) {
+    return [];
+  }
+
+  return (version.toolCalls ?? [])
+    .map((toolCall) => {
+      const question = getUserQuestionOutput(toolCall.output);
+      return question
+        ? {
+            question,
+            assistantMessageId: version.id,
+            messageId: version.id,
+            threadRunId: getThreadRunId(version),
+            toolCall,
+          }
+        : null;
+    })
+    .filter((item): item is UserQuestionItem => item !== null);
+}
+
+/**
+ * Run-scoped pending question lookup, parallel to
+ * {@link getToolConfirmationItemsForRun}. A question surfaces from the persisted
+ * assistant message's tool calls (the ask-user handler emits the request as a
+ * tool-call output, not a `liveConfirmations` payload), so there is no separate
+ * live-signal path.
+ */
+export function getUserQuestionItemsForRun(input: {
+  activeThreadRun: ActiveToolConfirmationRun | null | undefined;
+  assistantVersionById: ReadonlyMap<string, AssistantVersionIndexEntry>;
+}): UserQuestionItem[] {
+  if (input.activeThreadRun?.status !== "waiting_for_approval") {
+    return [];
+  }
+  const assistantMessageId = input.activeThreadRun.assistantMessageId;
+  if (!assistantMessageId) {
+    return [];
+  }
+  const entry = input.assistantVersionById.get(assistantMessageId);
+  if (!entry) {
+    return [];
+  }
+  return getPendingUserQuestionItemsForVersion(entry.version);
 }
 
 function getPendingConfirmationItemsForVersion(
@@ -693,4 +777,5 @@ export function hasActivelyRunningToolWork(input: {
 export type {
   ToolConfirmationItem,
   ToolConfirmationRequest as ToolConfirmationRequestOutput,
+  UserQuestionItem,
 };

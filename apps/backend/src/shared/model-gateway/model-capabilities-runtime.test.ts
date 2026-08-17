@@ -19,7 +19,7 @@ test("deployment rules merge ahead of the shipped DB", () => {
   // deployment rule placed ahead of the DB overrides it.
   const rule: ModelCapabilityRule = {
     modelMatch: "deepseek-v4-pro",
-    capabilities: { supportsForcedToolChoice: true },
+    capabilities: { disabledParams: { tool_choice: null } },
   };
   const built = buildRoutedModelGatewayConfig({
     versionId: "v",

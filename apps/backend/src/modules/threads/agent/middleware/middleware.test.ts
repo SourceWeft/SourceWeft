@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { tool } from "langchain";
+import { StateBackend } from "deepagents";
 import { test, vi } from "vitest";
 import { config } from "../../../../shared/config";
 import { logger } from "../../../../shared/logger";
@@ -10,6 +11,9 @@ vi.mock("./context-compression", () => ({
   createSourceWeftContextCompressionMiddleware: vi.fn(async () => [
     { name: "SourceWeftContextCompressionTrace" },
   ]),
+  createSourceWeftSummarizationMiddleware: vi.fn(() => ({
+    name: "SummarizationMiddleware",
+  })),
 }));
 
 vi.mock("../../../llm-observability", () => ({
@@ -17,10 +21,13 @@ vi.mock("../../../llm-observability", () => ({
   startSpan: vi.fn(),
 }));
 
+import { endSpan, startSpan } from "../../../llm-observability";
+
 import {
   createCommandToolChoiceMiddleware,
   createKnowledgeFilesystemToolDescriptionMiddleware,
   createSourceWeftAgentMiddlewareStack,
+  createSourceWeftSubagentMiddlewareStack,
   createSourceWeftImageHistorySanitizerMiddleware,
   createSourceWeftToolObservabilityMiddleware,
   forcedToolChoice,
@@ -91,12 +98,18 @@ function wrapToolCallHook(middleware: unknown) {
   return hook;
 }
 
+const middlewareRuntime = {
+  backend: new StateBackend({ state: { files: {} } } as never),
+  model: {} as never,
+};
+
 test("middleware stack keeps SourceWeft middleware order stable", async () => {
   const previousCompaction = process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED;
   process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED = "0";
 
   try {
     const stack = await createSourceWeftAgentMiddlewareStack({
+      ...middlewareRuntime,
       modelAlias: "chat-default",
       filesystemMounts: [],
       commandExecutionPolicy: { targetToolName: "target_tool" },
@@ -104,12 +117,19 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
     });
 
     const expectedMiddlewareOrder = [
+      "SourceWeftToolCallContext",
       "todoListMiddleware",
+      ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
+      ...(config.chat.agent.askUserEnabled
+        ? ["ToolCallLimitMiddleware[askUser]"]
+        : []),
+      "SourceWeftRepeatToolCallReminder",
       "SourceWeftImageHistorySanitizer",
       "SourceWeftKnowledgeFilesystemDescriptions",
       "SourceWeftCommandToolChoice",
       "SourceWeftToolObservability",
       "toolRetryMiddleware",
+      "SummarizationMiddleware",
       "SourceWeftContextCompressionTrace",
       "modelRetryMiddleware",
       "ToolCallLimitMiddleware",
@@ -131,8 +151,37 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
   }
 });
 
+test("subagent middleware receives fresh retry, summary, limit, and observability governance", () => {
+  const input = {
+    ...middlewareRuntime,
+    toolObservabilityContext: { subagentType: "explore" },
+  };
+  const first = createSourceWeftSubagentMiddlewareStack(input);
+  const second = createSourceWeftSubagentMiddlewareStack(input);
+
+  assert.deepEqual(
+    first.map((middleware) => middleware.name),
+    [
+      "SourceWeftToolCallContext",
+      ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
+      ...(config.chat.agent.askUserEnabled
+        ? ["ToolCallLimitMiddleware[askUser]"]
+        : []),
+      "SourceWeftRepeatToolCallReminder",
+      "SourceWeftToolObservability",
+      "toolRetryMiddleware",
+      "SummarizationMiddleware",
+      "modelRetryMiddleware",
+      "ToolCallLimitMiddleware",
+    ],
+  );
+  assert.notStrictEqual(first[0], second[0]);
+  assert.notStrictEqual(first.at(-1), second.at(-1));
+});
+
 test("tool retry only wraps safe read-only tools", async () => {
   const stack = await createSourceWeftAgentMiddlewareStack({
+    ...middlewareRuntime,
     modelAlias: "chat-default",
     filesystemMounts: [],
   });
@@ -192,6 +241,7 @@ test("tool call limit blocks calls beyond the configured run limit", async () =>
     config.chat.agent.toolCallThreadLimit = 10;
 
     const stack = await createSourceWeftAgentMiddlewareStack({
+      ...middlewareRuntime,
       modelAlias: "chat-default",
       filesystemMounts: [],
     });
@@ -400,6 +450,7 @@ test("tool observability logs start and completion", async () => {
       userId: "user-1",
       userMessageId: "message-1",
       workspaceId: "workspace-1",
+      subagentType: "explore",
     },
   });
 
@@ -434,6 +485,7 @@ test("tool observability logs start and completion", async () => {
       teamId: "team-1",
       userId: "user-1",
       runId: "run-1",
+      subagentType: "explore",
       status: "running",
     });
     assert.equal(
@@ -485,6 +537,47 @@ test("tool observability logs thrown tool errors", async () => {
     infoSpy.mockRestore();
     errorSpy.mockRestore();
   }
+});
+
+test("tool observability never persists eval source or raw output", async () => {
+  const rawCode = "const secret = 'do-not-store'; secret";
+  const rawOutput = "do-not-store-output";
+  const middleware = createSourceWeftToolObservabilityMiddleware({
+    traceContext: {
+      traceId: "trace-eval",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+    },
+  });
+
+  await wrapToolCallHook(middleware)(
+    {
+      toolCall: {
+        id: "eval-call-1",
+        name: "eval",
+        args: { code: rawCode },
+      },
+    },
+    async () =>
+      new ToolMessage({
+        content: rawOutput,
+        name: "eval",
+        tool_call_id: "eval-call-1",
+      }),
+  );
+
+  const startInput = vi.mocked(startSpan).mock.calls.at(-1)?.[0];
+  const endInput = vi.mocked(endSpan).mock.calls.at(-1)?.[0];
+  assert.deepEqual(startInput?.input, {
+    codeChars: rawCode.length,
+    codeSha256:
+      "9d29e62caa25613b58c1ea859bd260d3baac88ea974c428e645761a88ac54524",
+  });
+  assert.deepEqual(endInput?.output, {
+    resultChars: rawOutput.length,
+    status: "completed",
+  });
+  assert.doesNotMatch(JSON.stringify({ startInput, endInput }), /do-not-store/);
 });
 
 test("tool observability logs execute failure diagnostics without raw command", async () => {

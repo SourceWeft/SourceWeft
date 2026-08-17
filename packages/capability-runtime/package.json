@@ -14,8 +14,8 @@
     "@sourceweft/capability-contracts": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
-    "tsx": "^4.20.6",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
     "typescript": "5.9.2"
   }
 }

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { createMiddleware } from "langchain";
+import { isGraphBubbleUp } from "@langchain/langgraph";
 import {
   AGENT_TOOL_LOG_EVENTS,
   logAgentToolEvent,
@@ -13,6 +15,7 @@ import { getFilesystemToolFailureMetadata } from "../turn/output-normalizer";
 
 export type SourceWeftToolObservabilityContext = {
   runId?: string | null;
+  subagentType?: string | null;
   teamId?: string | null;
   threadId?: string | null;
   userId?: string | null;
@@ -39,6 +42,45 @@ function toolCallArgs(value: unknown) {
   return args && typeof args === "object" && !Array.isArray(args)
     ? args
     : undefined;
+}
+
+function interpreterToolInput(value: unknown) {
+  const args = toolCallArgs(value);
+  const codeValue = (args as { code?: unknown } | undefined)?.code;
+  const code = typeof codeValue === "string" ? codeValue : "";
+  return {
+    codeChars: code.length,
+    codeSha256: createHash("sha256").update(code).digest("hex"),
+  };
+}
+
+function interpreterResultSummary(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { resultChars: 0 };
+  }
+  const content = (value as { content?: unknown }).content;
+  const resultChars =
+    typeof content === "string"
+      ? content.length
+      : content === undefined
+        ? 0
+        : JSON.stringify(content).length;
+  return {
+    resultChars,
+    status:
+      (value as { status?: unknown }).status === "error"
+        ? "error"
+        : "completed",
+  };
+}
+
+function safeToolError(toolName: string, error: unknown) {
+  if (toolName !== "eval") return error;
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : undefined;
+  return { code, name: error instanceof Error ? error.name : "Error" };
 }
 
 function resolveToolStatus(result: unknown): "completed" | "error" {
@@ -68,6 +110,7 @@ function buildAgentToolLogMetadata(input: {
     teamId: input.context?.teamId,
     userId: input.context?.userId,
     runId: input.context?.runId,
+    subagentType: input.context?.subagentType,
     ...input.failureMetadata,
     durationMs: input.durationMs ?? undefined,
     error: input.error,
@@ -84,7 +127,10 @@ export function createSourceWeftToolObservabilityMiddleware(
       const toolName = request.toolCall.name;
       const toolCallId = safeString(request.toolCall.id);
       const startedAt = Date.now();
-      const toolInput = toolCallArgs(request.toolCall);
+      const toolInput =
+        toolName === "eval"
+          ? interpreterToolInput(request.toolCall)
+          : toolCallArgs(request.toolCall);
 
       logAgentToolEvent(
         "info",
@@ -108,6 +154,7 @@ export function createSourceWeftToolObservabilityMiddleware(
           input: toolInput,
           metadata: {
             toolName,
+            subagent_type: input.context?.subagentType,
           },
         });
       }
@@ -116,10 +163,12 @@ export function createSourceWeftToolObservabilityMiddleware(
         const result = await handler(request);
         const latencyMs = Date.now() - startedAt;
         const status = resolveToolStatus(result);
-        const error =
+        const rawError =
           status === "error" && result && typeof result === "object"
             ? (result as { content?: unknown }).content
             : undefined;
+        const error =
+          status === "error" ? safeToolError(toolName, rawError) : undefined;
         const failureMetadata =
           status === "error"
             ? getFilesystemToolFailureMetadata(toolName, result)
@@ -149,26 +198,43 @@ export function createSourceWeftToolObservabilityMiddleware(
             spanId: toolCallId,
             status: status === "error" ? "error" : "ok",
             latencyMs,
-            output: result,
+            output:
+              toolName === "eval"
+                ? interpreterResultSummary(result)
+                : result,
             ...(status === "error" && error
-              ? { errorMessage: String(error) }
+              ? {
+                  errorMessage:
+                    toolName === "eval"
+                      ? JSON.stringify(error)
+                      : String(error),
+                }
               : {}),
             metadata: {
               toolName,
+              subagent_type: input.context?.subagentType,
             },
           });
         }
 
         return result;
       } catch (error) {
+        // A LangGraph interrupt (e.g. `askUser` calling `interrupt()`, or a HITL
+        // approval gate) is a control-flow pause, not a tool failure. Re-raise
+        // it untouched so it is neither logged as `failed` nor closed as an
+        // error span — otherwise every pause is mis-recorded as a crash.
+        if (isGraphBubbleUp(error)) {
+          throw error;
+        }
         const latencyMs = Date.now() - startedAt;
+        const safeError = safeToolError(toolName, error);
         logAgentToolEvent(
           "error",
           AGENT_TOOL_LOG_EVENTS.failed,
           buildAgentToolLogMetadata({
             context: input.context,
             durationMs: latencyMs,
-            error,
+            error: safeError,
             status: "error",
             toolCallId,
             toolName,
@@ -184,9 +250,14 @@ export function createSourceWeftToolObservabilityMiddleware(
             status: "error",
             latencyMs,
             errorMessage:
-              error instanceof Error ? error.message : String(error),
+              toolName === "eval"
+                ? JSON.stringify(safeError)
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
             metadata: {
               toolName,
+              subagent_type: input.context?.subagentType,
             },
           });
         }

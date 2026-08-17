@@ -17,6 +17,7 @@ vi.mock("@langchain/mcp-adapters", () => ({
 import {
   createLangChainMcpClient,
   langChainMcpServerKey,
+  langChainMcpToolName,
 } from "./langchain-client";
 
 function install(
@@ -78,6 +79,29 @@ test("createLangChainMcpClient configures streamable HTTP MCP servers", () => {
       },
     },
   });
+});
+
+test("langChainMcpToolName is provider-safe, bounded, and collision-resistant", () => {
+  const record = install({
+    id: "install-with-a-stable-suffix",
+    marketIdentifier: "io.github.acme/repository",
+  });
+  const first = langChainMcpToolName({
+    install: record,
+    serverToolName: "issues/create or update a very long record name",
+  });
+  const second = langChainMcpToolName({
+    install: record,
+    serverToolName: "issues:create or update a very long record name",
+  });
+
+  assert.match(first, /^[a-zA-Z0-9_-]+$/u);
+  assert.ok(first.length <= 64);
+  assert.notEqual(first, second);
+  assert.equal(
+    langChainMcpToolName({ install: record, serverToolName: "read_repo" }),
+    `mcp__${langChainMcpServerKey(record)}__read_repo`,
+  );
 });
 
 test("createLangChainMcpClient enables SSE fallback for http_sse_compat manifests", () => {
@@ -142,11 +166,11 @@ test("langChainMcpServerKey disambiguates identifiers that sanitize alike", () =
   // (and interruptOn entries) never collide.
   const a = langChainMcpServerKey({
     marketIdentifier: "io.github.a/b",
-    id: "install_aaaa",
+    id: "install_shared_prefix_aaaa",
   });
   const b = langChainMcpServerKey({
     marketIdentifier: "io.github.a.b",
-    id: "install_bbbb",
+    id: "install_shared_prefix_bbbb",
   });
   assert.notEqual(a, b);
   assert.match(a, /^[a-zA-Z0-9_-]+$/);

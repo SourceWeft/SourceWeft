@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  appendSandboxOperationTimeline,
   formatToolInputItems,
   getFilesystemToolClientMetadata,
   getFilesystemToolDescription,
@@ -15,6 +16,35 @@ import {
   sanitizeThreadMessageMetadataForClient,
   sanitizeFilesystemToolInputForClient,
 } from "./output-normalizer";
+
+test("sandbox operation timeline augments client observability without changing model output", () => {
+  const operations = [
+    {
+      operationType: "execute",
+      status: "succeeded",
+      durationMs: 42,
+      createdAt: "2026-08-16T08:00:00.000Z",
+      result: { exitCode: 0, outputChars: 5 },
+    },
+  ];
+
+  assert.deepEqual(
+    appendSandboxOperationTimeline("execute", "hello", operations),
+    { content: "hello", operations },
+  );
+  assert.deepEqual(
+    appendSandboxOperationTimeline(
+      "collect_sandbox_outputs",
+      { ok: true, outputs: [] },
+      operations,
+    ),
+    { ok: true, outputs: [], operations },
+  );
+  assert.equal(
+    appendSandboxOperationTimeline("read_file", "hello", operations),
+    "hello",
+  );
+});
 
 /**
  * The output shapes below are written out as literals rather than built with a

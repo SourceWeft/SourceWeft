@@ -27,6 +27,7 @@ import { registerSkillRegistryAdminRoutes } from "./routes/skills-registry";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerUserSettingsRoutes } from "./routes/user-settings";
 import { registerWorkspaceRoutes } from "./routes/workspace";
+import { mountInternalAsyncRuns } from "./routes/async-runs-endpoint";
 import { withBetterAuthClientIp } from "./better-auth-request";
 
 export function createApp() {
@@ -116,6 +117,9 @@ export function createApp() {
   registerJobRoutes(app);
   registerPublicShareRoutes(app);
   registerTeamLlmObservabilityRoutes(app);
+  // Internal, guarded, flag-gated: background delegate runs endpoint. No-op when
+  // async subagents are disabled.
+  mountInternalAsyncRuns(app);
 
   app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
 

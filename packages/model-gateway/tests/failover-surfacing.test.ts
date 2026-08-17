@@ -228,7 +228,7 @@ test("structured-output failure still fails over to a genuinely different model"
   assert.deepEqual(result.structuredOutput, { ok: true });
 });
 
-test("structured output on a thinking-by-default model: 'auto' is translated to off, forced strategy behind a hard disable", async () => {
+test("structured output on a tool_choice-disabled model: thinking is untouched, available-tool strategy", async () => {
   const seenThinkingModes: Array<string | undefined> = [];
   let structuredCalls = 0;
   let bindToolsCalls = 0;
@@ -239,7 +239,7 @@ test("structured output on a thinking-by-default model: 'auto' is translated to 
       modelCapabilities: [
         {
           modelMatch: "deepseek-v4-pro",
-          capabilities: { forcedToolChoiceBlockedByThinking: true },
+          capabilities: { disabledParams: { tool_choice: null } },
         },
       ],
       onCreateModel: (payload) => {
@@ -282,13 +282,13 @@ test("structured output on a thinking-by-default model: 'auto' is translated to 
     },
   });
 
-  // The model factory saw the translated payload: "auto" became "off".
-  assert.deepEqual(seenThinkingModes, ["off"]);
-  // Hard-disable adapter (deepseek) + thinking now off → the plan upgrades to
-  // the forced withStructuredOutput strategy; the available-tool fallback is
-  // not used.
-  assert.equal(structuredCalls, 1);
-  assert.equal(bindToolsCalls, 0);
+  // No thinking translation any more: the disabled_params mirror leaves
+  // thinking alone ("auto" stays "auto") — the provider handles it.
+  assert.deepEqual(seenThinkingModes, ["auto"]);
+  // tool_choice disabled → the plan binds the schema as an available tool;
+  // the forced withStructuredOutput path is not used.
+  assert.equal(structuredCalls, 0);
+  assert.equal(bindToolsCalls, 1);
   assert.deepEqual(result.structuredOutput, { ok: true });
 });
 
@@ -302,7 +302,7 @@ test("structured output with an explicit effort request keeps thinking and the a
       modelCapabilities: [
         {
           modelMatch: "deepseek-v4-pro",
-          capabilities: { forcedToolChoiceBlockedByThinking: true },
+          capabilities: { disabledParams: { tool_choice: null } },
         },
       ],
       models: {
@@ -515,7 +515,7 @@ test("available-tool path salvages arguments from the raw wire kwargs", async ()
         {
           modelMatch: "deepseek-v4-pro",
           capabilities: {
-            forcedToolChoiceBlockedByThinking: true,
+            disabledParams: { tool_choice: null },
             toolCallArgumentJsonRepair: true,
           },
         },

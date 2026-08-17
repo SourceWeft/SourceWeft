@@ -14,6 +14,7 @@ import type {
   ReadResult,
   WriteResult,
 } from "deepagents";
+import { applyGrepMaxCount } from "deepagents";
 import type { AgentCitation, AgentCitationRegistry } from "./citation-registry";
 import type {
   WorkingFileRecord,
@@ -534,6 +535,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
     pattern: string,
     path: string | null = WORK_ROOT,
     glob?: string | null,
+    maxCount?: number | null,
   ): Promise<GrepResult> {
     try {
       const normalized = normalizeWorkingFsPath(path || WORK_ROOT);
@@ -563,7 +565,10 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         const lines = file.contentText.split(/\r?\n/);
         for (const [index, line] of lines.entries()) {
           if (matches.length >= MAX_GREP_RESULTS) {
-            return { matches };
+            return applyGrepMaxCount({
+              result: { matches, truncated: true },
+              maxCount,
+            });
           }
           if (regex.test(line)) {
             matches.push({
@@ -574,7 +579,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
           }
         }
       }
-      return { matches };
+      return applyGrepMaxCount({ result: { matches }, maxCount });
     } catch (error) {
       return { error: toError(error) };
     }

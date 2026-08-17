@@ -343,16 +343,46 @@ function readDeploymentModelCapabilities(
     if (typeof modelMatch !== "string" || modelMatch.trim().length === 0) {
       continue;
     }
+    const disabledParams = readDisabledParams(capabilities.disabledParams);
     rules.push({
       modelMatch,
       capabilities: {
-        ...(typeof capabilities.supportsForcedToolChoice === "boolean"
-          ? { supportsForcedToolChoice: capabilities.supportsForcedToolChoice }
+        ...(disabledParams ? { disabledParams } : {}),
+        ...(typeof capabilities.toolCallArgumentJsonRepair === "boolean"
+          ? {
+              toolCallArgumentJsonRepair:
+                capabilities.toolCallArgumentJsonRepair,
+            }
+          : {}),
+        ...(capabilities.structuredOutputMethod === "json_schema" ||
+        capabilities.structuredOutputMethod === "json_mode" ||
+        capabilities.structuredOutputMethod === "function_calling"
+          ? { structuredOutputMethod: capabilities.structuredOutputMethod }
           : {}),
       },
     });
   }
   return rules;
+}
+
+/**
+ * Parse a disabled_params map (langchain-python `disabled_params` mirror): each
+ * value is `null` (drop the param entirely) or an array (drop only those
+ * values). Malformed values are skipped; returns undefined when nothing valid.
+ */
+function readDisabledParams(
+  raw: unknown,
+): Record<string, null | readonly unknown[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: Record<string, null | readonly unknown[]> = {};
+  for (const [param, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (value === null || Array.isArray(value)) {
+      out[param] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function getRoutedGatewayCacheSignature(config: RoutedGatewayConfig) {

@@ -8,25 +8,43 @@ import type { ModelCapabilityRule } from "@sourceweft/model-gateway";
  * points at. See docs/architecture/model-capabilities.md.
  *
  * `modelMatch` is a case-insensitive substring, catching the model through every
- * gateway that reaches it (`deepseek-v4-pro`, `deepseek/deepseek-v4-pro`).
+ * gateway that reaches it (`deepseek-v4-pro`, `deepseek/deepseek-v4-pro`), so a
+ * rule applies whether the model is reached via OpenRouter (ChatOpenAI) or the
+ * official gateway (ChatDeepSeek).
+ *
+ * These DeepSeek-family rules are the JS mirror of langchain-python's
+ * `disabled_params`: @langchain/openai has no `disabled_params`, so we declare
+ * the same disabled behaviour here (drop a forced `tool_choice`, pin structured
+ * output to `function_calling`, repair broken tool-argument JSON) and the bridge
+ * (`filterDisabledParams` / `planStructuredOutput`) enforces it — one general
+ * mechanism, no DeepSeek-specific machinery.
  *
  * `deepseek-v4-pro` / `deepseek-v4-flash` think by provider default and reject
  * a forced `tool_choice` *while thinking* with a hard 400
- * (https://github.com/deepseek-ai/DeepSeek-V3/issues/1376); with thinking
- * explicitly disabled they accept it, so the restriction is declared as the
- * conditional `forcedToolChoiceBlockedByThinking`. `deepseek-reasoner` (V3.1)
- * cannot leave thinking mode at all, so it keeps the unconditional flag.
- * LiteLLM's `supports_tool_choice` is too coarse to express either (it reports
+ * (https://github.com/deepseek-ai/DeepSeek-V3/issues/1376); `deepseek-reasoner`
+ * (V3.1) cannot leave thinking mode at all. Rather than translate thinking off,
+ * we mirror python and drop `tool_choice` unconditionally — the schema rides as
+ * an available tool (API default `auto`), which every DeepSeek variant accepts.
+ * LiteLLM's `supports_tool_choice` is too coarse to express this (it reports
  * `true` — the param is accepted, just not forced values), so it cannot be
  * synced and is declared here.
  */
 export const MODEL_CAPABILITY_DB: readonly ModelCapabilityRule[] = [
-  { modelMatch: "deepseek-v4-pro", capabilities: { forcedToolChoiceBlockedByThinking: true } },
-  { modelMatch: "deepseek-v4-flash", capabilities: { forcedToolChoiceBlockedByThinking: true } },
-  { modelMatch: "deepseek-reasoner", capabilities: { supportsForcedToolChoice: false } },
+  // The whole DeepSeek family rejects a forced `tool_choice` (V4 while thinking —
+  // its provider default — with a hard 400, https://github.com/deepseek-ai/
+  // DeepSeek-V3/issues/1376; reasoner cannot leave thinking at all). Declared as
+  // langchain-python's `disabled_params` (drop `tool_choice` entirely → API
+  // default `auto` = an available tool). Unconditional, mirroring python.
+  { modelMatch: "deepseek", capabilities: { disabledParams: { tool_choice: null } } },
   // The whole family (any gateway prefix) emits unescaped ASCII quotes inside
   // Chinese tool-argument strings — invalid JSON that a strict parser drops
   // (verified live against deepseek-v4-pro, 2026-08-05; the storyboard-402
   // incident's true root cause).
   { modelMatch: "deepseek", capabilities: { toolCallArgumentJsonRepair: true } },
+  // DeepSeek rejects a `json_schema` response_format (hard 400). langchain's
+  // first-party ChatDeepSeek pins structured output to `function_calling` (and
+  // normalizes json_schema to it); declaring it here gives the same model the
+  // same method when reached through a generic openai-compatible gateway
+  // (OpenRouter), where the ChatOpenAI default would otherwise be json_schema.
+  { modelMatch: "deepseek", capabilities: { structuredOutputMethod: "function_calling" } },
 ];

@@ -12,6 +12,7 @@ import type {
   ReadResult,
   WriteResult,
 } from "deepagents";
+import { applyGrepMaxCount } from "deepagents";
 import type { EnabledSkillDescriptor } from "./types";
 import { sanitizeNonCitableCitationMarkers } from "../threads/agent/fs-utils";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
@@ -28,7 +29,9 @@ type SkillFileEntry = {
 function normalizePath(value: string | null | undefined) {
   const raw = value?.trim() || "/";
   const normalized = raw.replace(/\\/g, "/").replace(/\/+/g, "/");
-  const withLeading = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  const withLeading = normalized.startsWith("/")
+    ? normalized
+    : `/${normalized}`;
   return withLeading.length > 1 ? withLeading.replace(/\/$/g, "") : "/";
 }
 
@@ -71,7 +74,9 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
 
   constructor(skills: EnabledSkillDescriptor[]) {
     const now = new Date().toISOString();
-    this.skillNames = skills.map((skill) => skill.name).sort((a, b) => a.localeCompare(b));
+    this.skillNames = skills
+      .map((skill) => skill.name)
+      .sort((a, b) => a.localeCompare(b));
     for (const skill of skills) {
       this.directoryPaths.add(`/${skill.name}`);
       this.directoryPaths.add(`/${skill.name}/`);
@@ -109,7 +114,11 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
 
     for (const dir of this.directoryPaths) {
       const dirPath = dir.endsWith("/") ? dir : `${dir}/`;
-      if (dirPath === "/" || !dirPath.startsWith(prefix) || dirPath === prefix) {
+      if (
+        dirPath === "/" ||
+        !dirPath.startsWith(prefix) ||
+        dirPath === prefix
+      ) {
         continue;
       }
       const rest = dirPath.slice(prefix.length);
@@ -120,7 +129,10 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       if (!segment) {
         continue;
       }
-      entries.set(`${prefix}${segment}/`, { path: `${prefix}${segment}/`, is_dir: true });
+      entries.set(`${prefix}${segment}/`, {
+        path: `${prefix}${segment}/`,
+        is_dir: true,
+      });
     }
 
     for (const file of this.filesByPath.values()) {
@@ -139,12 +151,17 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       });
     }
 
-    return Array.from(entries.values()).sort((a, b) => a.path.localeCompare(b.path));
+    return Array.from(entries.values()).sort((a, b) =>
+      a.path.localeCompare(b.path),
+    );
   }
 
   async ls(path: string): Promise<LsResult> {
     const normalized = normalizePath(path);
-    if (!this.directoryPaths.has(normalized) && !this.directoryPaths.has(`${normalized}/`)) {
+    if (
+      !this.directoryPaths.has(normalized) &&
+      !this.directoryPaths.has(`${normalized}/`)
+    ) {
       if (this.filesByPath.has(normalized)) {
         return { error: `ENOTDIR: not a directory, ls '${normalized}'` };
       }
@@ -157,10 +174,17 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const normalized = normalizePath(filePath);
     const file = this.filesByPath.get(normalized);
     if (!file) {
-      if (this.directoryPaths.has(normalized) || this.directoryPaths.has(`${normalized}/`)) {
-        return { error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
+      if (
+        this.directoryPaths.has(normalized) ||
+        this.directoryPaths.has(`${normalized}/`)
+      ) {
+        return {
+          error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalized}'`,
+        };
       }
-      return { error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
+      return {
+        error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'`,
+      };
     }
 
     if (normalized.endsWith("/SKILL.md")) {
@@ -175,9 +199,10 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const boundedOffset = Math.max(0, offset);
     const boundedLimit = Math.max(1, Math.min(limit, 1000));
     const selected = lines.slice(boundedOffset, boundedOffset + boundedLimit);
-    const more = boundedOffset + selected.length < lines.length
-      ? `\n\nOutput truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
-      : "";
+    const more =
+      boundedOffset + selected.length < lines.length
+        ? `\n\nOutput truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
+        : "";
     return {
       mimeType: file.mimeType,
       content: [
@@ -194,7 +219,9 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const normalized = normalizePath(filePath);
     const file = this.filesByPath.get(normalized);
     if (!file) {
-      return { error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
+      return {
+        error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'`,
+      };
     }
     const data: FileData = {
       content: sanitizeNonCitableCitationMarkers(file.contentText),
@@ -213,11 +240,16 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       if (file) {
         return {
           path: filePath,
-          content: encoder.encode(sanitizeNonCitableCitationMarkers(file.contentText)),
+          content: encoder.encode(
+            sanitizeNonCitableCitationMarkers(file.contentText),
+          ),
           error: null,
         };
       }
-      if (this.directoryPaths.has(normalized) || this.directoryPaths.has(`${normalized}/`)) {
+      if (
+        this.directoryPaths.has(normalized) ||
+        this.directoryPaths.has(`${normalized}/`)
+      ) {
         return {
           path: filePath,
           content: null,
@@ -240,8 +272,14 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const matcher = simpleGlobToRegExp(normalizedPattern);
     const files = [
       ...Array.from(this.directoryPaths)
-        .filter((dir) => dir !== "/" && matcher.test(dir.endsWith("/") ? dir : `${dir}/`))
-        .map((dir) => ({ path: dir.endsWith("/") ? dir : `${dir}/`, is_dir: true })),
+        .filter(
+          (dir) =>
+            dir !== "/" && matcher.test(dir.endsWith("/") ? dir : `${dir}/`),
+        )
+        .map((dir) => ({
+          path: dir.endsWith("/") ? dir : `${dir}/`,
+          is_dir: true,
+        })),
       ...Array.from(this.filesByPath.values())
         .filter((file) => matcher.test(file.path))
         .map((file) => ({
@@ -254,18 +292,30 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     return { files };
   }
 
-  async grep(pattern: string, path: string | null = "/", glob?: string | null): Promise<GrepResult> {
+  async grep(
+    pattern: string,
+    path: string | null = "/",
+    glob?: string | null,
+    maxCount?: number | null,
+  ): Promise<GrepResult> {
     const regex = compileGrepRegex(pattern);
     if (typeof regex === "string") {
       return { error: regex };
     }
     const base = normalizePath(path || "/");
     const globMatcher = glob
-      ? simpleGlobToRegExp(glob.startsWith("/") ? normalizePath(glob) : normalizePath(`${base}/${glob}`))
+      ? simpleGlobToRegExp(
+          glob.startsWith("/")
+            ? normalizePath(glob)
+            : normalizePath(`${base}/${glob}`),
+        )
       : null;
     const matches: GrepMatch[] = [];
     for (const file of this.filesByPath.values()) {
-      if (!file.path.startsWith(base === "/" ? "/" : `${base}/`) && file.path !== base) {
+      if (
+        !file.path.startsWith(base === "/" ? "/" : `${base}/`) &&
+        file.path !== base
+      ) {
         continue;
       }
       if (globMatcher && !globMatcher.test(file.path)) {
@@ -280,19 +330,31 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
             text: sanitizeNonCitableCitationMarkers(line.trim()),
           });
           if (matches.length >= 50) {
-            return { matches };
+            return applyGrepMaxCount({
+              result: { matches, truncated: true },
+              maxCount,
+            });
           }
         }
       }
     }
-    return { matches };
+    return applyGrepMaxCount({ result: { matches }, maxCount });
   }
 
   async write(filePath: string, _content: string): Promise<WriteResult> {
-    return { error: `EROFS: /skills is a read-only skills filesystem, write '${filePath}' is not allowed` };
+    return {
+      error: `EROFS: /skills is a read-only skills filesystem, write '${filePath}' is not allowed`,
+    };
   }
 
-  async edit(filePath: string, _oldString: string, _newString: string, _replaceAll?: boolean): Promise<EditResult> {
-    return { error: `EROFS: /skills is a read-only skills filesystem, edit '${filePath}' is not allowed` };
+  async edit(
+    filePath: string,
+    _oldString: string,
+    _newString: string,
+    _replaceAll?: boolean,
+  ): Promise<EditResult> {
+    return {
+      error: `EROFS: /skills is a read-only skills filesystem, edit '${filePath}' is not allowed`,
+    };
   }
 }

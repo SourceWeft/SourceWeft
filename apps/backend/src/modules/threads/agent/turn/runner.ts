@@ -35,6 +35,8 @@ import {
 } from "./command-success";
 import { handleCustomStreamChunk } from "./custom-stream-handler";
 import { buildFinalOutcome } from "./final-outcome";
+import { handleAskUserStreamChunk } from "./ask-user-stream-handler";
+import { payloadHasAskUserInterrupt } from "../middleware/ask-user";
 import {
   handleHitlStreamChunk,
   type HitlStreamHandlerResult,
@@ -342,6 +344,26 @@ export async function* invokeDeepAgentTurn(input: {
         }
 
         if (mode === "updates") {
+          // A question interrupt (askUser calling `interrupt()`) has no
+          // actionRequests/reviewConfigs, so the approval handler would treat it
+          // as "continue" and strand the checkpoint. Route it first.
+          if (payloadHasAskUserInterrupt(payload)) {
+            const askUserResult = yield* handleAskUserStreamChunk({
+              agent,
+              beforeInputCheckpoint,
+              finalCheckpoint,
+              payload,
+              runConfig,
+              runtime,
+              threadId: input.prepared.thread.id,
+              userId: input.prepared.userId,
+              workspaceId: input.prepared.workspace.id,
+            });
+            if (askUserResult.kind === "done") {
+              return;
+            }
+            continue;
+          }
           const result: HitlStreamHandlerResult = yield* handleHitlStreamChunk({
             agent,
             autoApprovedHitlResumeCount,
@@ -418,6 +440,12 @@ export async function* invokeDeepAgentTurn(input: {
             runtime,
             snapshot: toolCallSnapshot,
             traceContext: input.traceContext,
+            ...(sandboxRuntime
+              ? {
+                  getSandboxOperationTimeline:
+                    sandboxRuntime.getOperationTimeline,
+                }
+              : {}),
           });
           continue;
         }
@@ -428,6 +456,12 @@ export async function* invokeDeepAgentTurn(input: {
             runtime,
             snapshot: toolCallSnapshot,
             traceContext: input.traceContext,
+            ...(sandboxRuntime
+              ? {
+                  getSandboxOperationTimeline:
+                    sandboxRuntime.getOperationTimeline,
+                }
+              : {}),
           });
         }
       }

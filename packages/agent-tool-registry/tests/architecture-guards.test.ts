@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { AGENT_TOOLS } from "../src/registry";
+import { AGENT_TOOLS, LOCAL_AGENT_TOOLS } from "../src/registry";
 
 /**
  * Architecture guards for this package's hand-written static tables, and for
@@ -159,8 +159,11 @@ test("every capability package exporting agent tool defs is spread into AGENT_TO
       `Missing: ${missing.join(", ")}`,
   );
 
+  const localNames = new Set<string>(
+    LOCAL_AGENT_TOOLS.map((tool) => tool.name),
+  );
   const stale = AGENT_TOOLS.map((tool) => tool.name)
-    .filter((name) => !exportedNames.has(name))
+    .filter((name) => !exportedNames.has(name) && !localNames.has(name))
     .sort();
 
   assert.deepEqual(
@@ -207,7 +210,11 @@ function packagesListedInArtifactUiModules(): string[] {
       continue;
     }
     for (const binding of clause.split(",")) {
-      const local = binding.trim().split(/\s+as\s+/).pop()?.trim();
+      const local = binding
+        .trim()
+        .split(/\s+as\s+/)
+        .pop()
+        ?.trim();
       if (local) {
         importedFrom.set(local, specifier);
       }
@@ -237,7 +244,7 @@ function packagesListedInArtifactUiModules(): string[] {
   return [...listed].sort();
 }
 
-test("every capability package with a \"./ui\" export is listed in ARTIFACT_UI_MODULES", () => {
+test('every capability package with a "./ui" export is listed in ARTIFACT_UI_MODULES', () => {
   const declared = packagesListedInArtifactUiModules();
 
   const actual = capabilityPackages()
@@ -302,11 +309,18 @@ function relativeImportsFrom(filePath: string): string[] {
   return specifiers;
 }
 
-function resolveLocalModule(fromFile: string, specifier: string): string | null {
+function resolveLocalModule(
+  fromFile: string,
+  specifier: string,
+): string | null {
   const base = join(dirname(fromFile), specifier);
   // Extensions first, then the directory form: `existsSync(base)` is true for a
   // directory too, so probing it bare would resolve `./foo` to the folder.
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
+  for (const candidate of [
+    `${base}.ts`,
+    `${base}.tsx`,
+    join(base, "index.ts"),
+  ]) {
     if (existsSync(candidate)) {
       return candidate;
     }
@@ -357,5 +371,49 @@ test("the main entry does not reach the server-only modules", () => {
       `import() does not help — the bundler still has to resolve the chunk. ` +
       `Import from "@sourceweft/agent-tool-registry/server" instead: ` +
       `${leaked.join(", ")}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Guard 4 — capability definitions enter the isomorphic graph through a
+// definition-only package subpath
+// ---------------------------------------------------------------------------
+
+test('capability packages expose an "./agent-tool-defs" entry', () => {
+  const missing = capabilityPackages()
+    .filter((pkg) => existsSync(join(pkg.dir, "src", "agent-tool-defs.ts")))
+    .filter(
+      (pkg) =>
+        pkg.packageJson.exports?.["./agent-tool-defs"] !==
+        "./src/agent-tool-defs.ts",
+    )
+    .map((pkg) => pkg.name);
+
+  assert.deepEqual(
+    missing,
+    [],
+    `These capability packages define agent-tool-defs.ts but do not expose ` +
+      `the definition-only subpath. Isomorphic registries must not import a ` +
+      `capability's root barrel because that barrel may also export Node-only ` +
+      `adapters or publishers: ${missing.join(", ")}`,
+  );
+});
+
+test("the isomorphic registry imports capability definitions only from definition subpaths", () => {
+  const source = readFileSync(join(REGISTRY_ROOT, "src", "registry.ts"), "utf8");
+  const capabilityImports = [...source.matchAll(/from\s+"(@sourceweft\/builtin-[^"]+)"/g)]
+    .map((match) => match[1])
+    .filter((specifier): specifier is string => Boolean(specifier));
+  const unsafe = capabilityImports.filter(
+    (specifier) => !specifier.endsWith("/agent-tool-defs"),
+  );
+
+  assert.deepEqual(
+    unsafe,
+    [],
+    `The isomorphic registry is part of the browser graph. Import capability ` +
+      `metadata through each package's "/agent-tool-defs" subpath so root ` +
+      `barrels cannot pull Node-only implementations into the client bundle: ` +
+      `${unsafe.join(", ")}`,
   );
 });

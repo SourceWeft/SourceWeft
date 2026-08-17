@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  getSandboxExecuteView,
   getSandboxCollectedWorkfilePaths,
   getSandboxToolOperationTimeline,
   getSandboxToolResultDetails,
   getSandboxToolResultSummary,
   getSandboxToolSafeErrorMessage,
+  getSandboxTransferView,
   isSandboxToolResultFailure,
   parseSandboxToolResultDisplay,
+  resolveSandboxToolUiState,
 } from "./sandbox-tool-result-display";
 
 test("parses sandbox prepare result JSON", () => {
@@ -101,6 +104,209 @@ test("parses sandbox execution metadata when present", () => {
       truncated: true,
       exitCode: 2,
     },
+  );
+});
+
+test("builds an execute view without treating a non-zero exit as a tool failure", () => {
+  assert.deepEqual(
+    getSandboxExecuteView({
+      input: { command: "pnpm test" },
+      output: {
+        output: "tests failed",
+        exitCode: 1,
+        truncated: true,
+      },
+      toolName: "execute",
+    }),
+    {
+      code: null,
+      command: "pnpm test",
+      exitCode: 1,
+      message: null,
+      output: "tests failed",
+      recoverable: null,
+      resultFailed: false,
+      truncated: true,
+    },
+  );
+});
+
+test("recognizes recoverable execute preflight failures returned as exit code one", () => {
+  const output =
+    "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute cannot use /workfiles/report.md\nHint: prepare the file first.";
+
+  assert.deepEqual(
+    getSandboxExecuteView({
+      input: { command: "cat /workfiles/report.md" },
+      output: {
+        output,
+        exitCode: 1,
+        truncated: false,
+      },
+      toolName: "execute",
+    }),
+    {
+      code: "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+      command: "cat /workfiles/report.md",
+      exitCode: 1,
+      message: null,
+      output,
+      recoverable: true,
+      resultFailed: true,
+      truncated: false,
+    },
+  );
+  assert.equal(
+    resolveSandboxToolUiState({
+      output: { output, exitCode: 1, truncated: false },
+      status: "completed",
+      toolName: "execute",
+    }),
+    "output-error",
+  );
+});
+
+test("builds prepare transfer mappings from requests and completed sizes", () => {
+  assert.deepEqual(
+    getSandboxTransferView({
+      input: {
+        files: [
+          {
+            artifactId: "artifact-1",
+            sandboxPath: "/workspace/input/image.png",
+          },
+          {
+            sourcePath: "/workfiles/report.md",
+            sandboxPath: "/workspace/input/report.md",
+          },
+        ],
+      },
+      output: {
+        ok: true,
+        totalBytes: 300,
+        files: [
+          {
+            sourcePath: "artifact:artifact-1",
+            sandboxPath: "/workspace/input/image.png",
+            sizeBytes: 200,
+          },
+          {
+            sourcePath: "/workfiles/report.md",
+            sandboxPath: "/workspace/input/report.md",
+            sizeBytes: 100,
+          },
+        ],
+      },
+      toolName: "prepare_sandbox_workspace",
+    }),
+    {
+      code: null,
+      direction: "prepare",
+      mappings: [
+        {
+          key: "requested-0:artifact:artifact-1->/workspace/input/image.png",
+          sizeBytes: 200,
+          source: "artifact:artifact-1",
+          target: "/workspace/input/image.png",
+        },
+        {
+          key: "requested-1:/workfiles/report.md->/workspace/input/report.md",
+          sizeBytes: 100,
+          source: "/workfiles/report.md",
+          target: "/workspace/input/report.md",
+        },
+      ],
+      message: null,
+      recoverable: null,
+      resultFailed: false,
+      resultSucceeded: true,
+      totalBytes: 300,
+    },
+  );
+});
+
+test("builds collect mappings with clickable Workfile targets", () => {
+  const view = getSandboxTransferView({
+    input: {
+      outputs: [
+        {
+          sandboxPath: "/workspace/output/report.md",
+          target: { kind: "workfile", path: "/workfiles/report.md" },
+        },
+      ],
+    },
+    output: {
+      ok: true,
+      totalBytes: 512,
+      outputs: [
+        {
+          sandboxPath: "/workspace/output/report.md",
+          targetPath: "/workfiles/report.md",
+          sizeBytes: 512,
+        },
+      ],
+    },
+    toolName: "collect_sandbox_outputs",
+  });
+
+  assert.equal(view?.direction, "collect");
+  assert.deepEqual(
+    view?.mappings.map(({ sizeBytes, source, target }) => ({
+      sizeBytes,
+      source,
+      target,
+    })),
+    [
+      {
+        sizeBytes: 512,
+        source: "/workspace/output/report.md",
+        target: "/workfiles/report.md",
+      },
+    ],
+  );
+});
+
+test("maps SourceWeft sandbox tool states to AI SDK UI states", () => {
+  assert.equal(
+    resolveSandboxToolUiState({
+      output: null,
+      status: "approval_requested",
+      toolName: "execute",
+    }),
+    "approval-requested",
+  );
+  assert.equal(
+    resolveSandboxToolUiState({
+      output: null,
+      status: "running",
+      toolName: "execute",
+    }),
+    "input-available",
+  );
+  assert.equal(
+    resolveSandboxToolUiState({
+      output: { output: "failed", exitCode: 1 },
+      status: "completed",
+      toolName: "execute",
+    }),
+    "output-available",
+  );
+  assert.equal(
+    resolveSandboxToolUiState({
+      output: { ok: false, status: "failed" },
+      status: "completed",
+      toolName: "execute",
+    }),
+    "output-error",
+  );
+  assert.equal(
+    resolveSandboxToolUiState({
+      approvalState: "rejected",
+      output: null,
+      status: "completed",
+      toolName: "execute",
+    }),
+    "output-denied",
   );
 });
 
@@ -479,6 +685,67 @@ test("formats sandbox operations array as operation timeline", () => {
       { label: "Prepared workspace", detail: "1 file · 2 KiB" },
       { label: "Collected outputs", detail: "1 output · 512 B" },
     ],
+  );
+});
+
+test("formats compact persisted operation counts", () => {
+  assert.deepEqual(
+    getSandboxToolOperationTimeline({
+      toolName: "collect_sandbox_outputs",
+      output: {
+        operations: [
+          {
+            operationType: "prepare",
+            status: "succeeded",
+            result: { fileCount: 3, totalBytes: 2048 },
+          },
+          {
+            operationType: "collect",
+            status: "succeeded",
+            result: { outputCount: 2, totalBytes: 512 },
+          },
+        ],
+      },
+    }).map(({ label, detail }) => ({ label, detail })),
+    [
+      { label: "Prepared workspace", detail: "3 files · 2 KiB" },
+      { label: "Collected outputs", detail: "2 outputs · 512 B" },
+    ],
+  );
+});
+
+test("preserves outer operation records when a structured tool result is wrapped as content", () => {
+  const output = {
+    content: JSON.stringify({
+      ok: true,
+      files: [{ sandboxPath: "/workspace/input/a.md" }],
+      totalBytes: 12,
+    }),
+    operations: [
+      {
+        operationType: "prepare",
+        status: "succeeded",
+        result: {
+          files: [{ sandboxPath: "/workspace/input/a.md" }],
+          totalBytes: 12,
+        },
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    getSandboxToolOperationTimeline({
+      toolName: "prepare_sandbox_workspace",
+      output,
+    }).map(({ label, detail }) => ({ label, detail })),
+    [{ label: "Prepared workspace", detail: "1 file · 12 B" }],
+  );
+  assert.equal(
+    getSandboxToolResultSummary({
+      toolName: "prepare_sandbox_workspace",
+      output,
+    }),
+    "Prepared 1 file · 12 B · /workspace/input/a.md",
   );
 });
 

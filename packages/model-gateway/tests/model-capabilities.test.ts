@@ -1,16 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  downgradeForcedToolChoiceInKwargs,
-  effectiveForcedToolChoiceSupport,
-  normalizeToolChoiceForModel,
+  filterDisabledParams,
+  forcedToolChoiceDisabled,
   planStructuredOutput,
   resolveModelCapabilities,
 } from "../src/model-capabilities";
 import type { ModelCapabilityRule } from "../src/types";
 
+test("filterDisabledParams mirrors python disabled_params: null drops, list drops matching value", () => {
+  // null → param dropped entirely.
+  assert.deepEqual(
+    filterDisabledParams(
+      { tool_choice: { type: "function" }, temperature: 0 },
+      { tool_choice: null },
+    ),
+    { temperature: 0 },
+  );
+  // list → dropped only when the current value is listed; other values kept.
+  assert.deepEqual(
+    filterDisabledParams({ reasoning_effort: "high" }, { reasoning_effort: ["low"] }),
+    { reasoning_effort: "high" },
+  );
+  assert.deepEqual(
+    filterDisabledParams({ reasoning_effort: "low" }, { reasoning_effort: ["low"] }),
+    {},
+  );
+  // no disabledParams / absent param → same reference, no change.
+  const kwargs = { tool_choice: "auto" };
+  assert.equal(filterDisabledParams(kwargs, undefined), kwargs);
+  assert.equal(filterDisabledParams(kwargs, { parallel_tool_calls: null }), kwargs);
+});
+
+test("forcedToolChoiceDisabled is true only when tool_choice is disabled entirely", () => {
+  assert.equal(forcedToolChoiceDisabled({ tool_choice: null }), true);
+  assert.equal(forcedToolChoiceDisabled({ tool_choice: ["required"] }), false);
+  assert.equal(forcedToolChoiceDisabled({ parallel_tool_calls: null }), false);
+  assert.equal(forcedToolChoiceDisabled(undefined), false);
+});
+
 const RULES: ModelCapabilityRule[] = [
-  { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+  { modelMatch: "deepseek-v4-pro", capabilities: { disabledParams: { tool_choice: null } } },
 ];
 
 test("resolveModelCapabilities matches by case-insensitive substring", () => {
@@ -19,32 +49,29 @@ test("resolveModelCapabilities matches by case-insensitive substring", () => {
     "deepseek/deepseek-v4-pro",
     "openrouter/deepseek/DeepSeek-V4-Pro",
   ]) {
-    assert.equal(
-      resolveModelCapabilities(model, RULES).supportsForcedToolChoice,
-      false,
+    assert.deepEqual(
+      resolveModelCapabilities(model, RULES).disabledParams,
+      { tool_choice: null },
       model,
     );
   }
 });
 
 test("resolveModelCapabilities: unmatched model and no rules fall to defaults", () => {
+  assert.equal(resolveModelCapabilities("gpt-5", RULES).disabledParams, undefined);
   assert.equal(
-    resolveModelCapabilities("gpt-5", RULES).supportsForcedToolChoice,
-    true,
-  );
-  assert.equal(
-    resolveModelCapabilities("deepseek-v4-pro", undefined).supportsForcedToolChoice,
-    true,
+    resolveModelCapabilities("deepseek-v4-pro", undefined).disabledParams,
+    undefined,
   );
 });
 
 test("resolveModelCapabilities: first matching rule wins per flag", () => {
   const rules: ModelCapabilityRule[] = [
-    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: true } }, // override first
-    { modelMatch: "deepseek-v4-pro", capabilities: { supportsForcedToolChoice: false } },
+    { modelMatch: "deepseek-v4-pro", capabilities: { toolCallArgumentJsonRepair: true } }, // override first
+    { modelMatch: "deepseek-v4-pro", capabilities: { toolCallArgumentJsonRepair: false } },
   ];
   assert.equal(
-    resolveModelCapabilities("deepseek-v4-pro", rules).supportsForcedToolChoice,
+    resolveModelCapabilities("deepseek-v4-pro", rules).toolCallArgumentJsonRepair,
     true,
   );
 });
@@ -69,100 +96,3 @@ test("plan: a caller-pinned method is authoritative, capability ignored", () => 
   );
 });
 
-test("tool_choice: forced values downgrade to auto only when unsupported", () => {
-  for (const forced of [
-    "required",
-    "any",
-    "get_weather",
-    { type: "function", function: { name: "get_weather" } },
-  ]) {
-    assert.equal(
-      normalizeToolChoiceForModel({ toolChoice: forced, supportsForcedToolChoice: false }),
-      "auto",
-      JSON.stringify(forced),
-    );
-    assert.equal(
-      normalizeToolChoiceForModel({ toolChoice: forced, supportsForcedToolChoice: true }),
-      forced,
-    );
-  }
-  for (const value of ["auto", "none", undefined]) {
-    assert.equal(
-      normalizeToolChoiceForModel({ toolChoice: value, supportsForcedToolChoice: false }),
-      value,
-    );
-  }
-});
-
-test("kwargs downgrade rewrites tool_choice and leaves the rest intact", () => {
-  assert.deepEqual(
-    downgradeForcedToolChoiceInKwargs(
-      { tool_choice: "required", parallel_tool_calls: false },
-      false,
-    ),
-    { tool_choice: "auto", parallel_tool_calls: false },
-  );
-  const kwargs = { tool_choice: "required" };
-  assert.equal(downgradeForcedToolChoiceInKwargs(kwargs, true), kwargs);
-});
-
-test("effectiveForcedToolChoiceSupport: blocked-by-thinking model regains forced choice only off + guaranteed disable", () => {
-  const blocked = {
-    supportsForcedToolChoice: true,
-    forcedToolChoiceBlockedByThinking: true,
-  };
-  // "auto" counts as thinking ON for a thinking-by-default model.
-  for (const thinkingMode of ["auto", "effort"] as const) {
-    assert.equal(
-      effectiveForcedToolChoiceSupport({
-        capabilities: blocked,
-        thinkingMode,
-        adapterGuaranteesThinkingDisable: true,
-      }),
-      false,
-      thinkingMode,
-    );
-  }
-  // Off through a best-effort channel (OpenRouter) must not be trusted.
-  assert.equal(
-    effectiveForcedToolChoiceSupport({
-      capabilities: blocked,
-      thinkingMode: "off",
-      adapterGuaranteesThinkingDisable: false,
-    }),
-    false,
-  );
-  // Off behind a hard provider disable restores the forced choice.
-  assert.equal(
-    effectiveForcedToolChoiceSupport({
-      capabilities: blocked,
-      thinkingMode: "off",
-      adapterGuaranteesThinkingDisable: true,
-    }),
-    true,
-  );
-  // The unconditional flag stays authoritative (deepseek-reasoner).
-  assert.equal(
-    effectiveForcedToolChoiceSupport({
-      capabilities: {
-        supportsForcedToolChoice: false,
-        forcedToolChoiceBlockedByThinking: false,
-      },
-      thinkingMode: "off",
-      adapterGuaranteesThinkingDisable: true,
-    }),
-    false,
-  );
-  // An unblocked model is unaffected by thinking state.
-  assert.equal(
-    effectiveForcedToolChoiceSupport({
-      capabilities: {
-        supportsForcedToolChoice: true,
-        forcedToolChoiceBlockedByThinking: false,
-      },
-      thinkingMode: "effort",
-      adapterGuaranteesThinkingDisable: false,
-    }),
-    true,
-  );
-});

@@ -264,7 +264,19 @@ export type ExistingSandboxOperation = {
   resultJsonRedacted: Record<string, unknown>;
 };
 
+export type SandboxOperationTimelineItem = {
+  operationType: SandboxOperationType;
+  status: SandboxOperationStatus;
+  durationMs: number | null;
+  createdAt: string;
+  result: Record<string, unknown>;
+};
+
 export type SandboxOperationStore = {
+  listMessageOperations(input: {
+    context: SandboxRuntimeContext;
+    limit: number;
+  }): Promise<SandboxOperationTimelineItem[]>;
   findLatestToolOperation(input: {
     context: SandboxRuntimeContext;
     operationType: SandboxBridgeOperationType;

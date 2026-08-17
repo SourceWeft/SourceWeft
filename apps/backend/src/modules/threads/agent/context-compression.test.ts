@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { StateBackend } from "deepagents";
 import { ContentError } from "../../content/errors";
 import {
   SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
@@ -8,10 +9,12 @@ import {
   SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER,
   assertSourceWeftCurrentUserMessageFits,
   createSourceWeftContextCompressionMiddleware,
+  createSourceWeftSummarizationMiddleware,
   createSourceWeftToolOutputEdit,
   estimateSourceWeftMessageTokens,
   fallbackSourceWeftMessagesToRecentWindow,
   resolveSourceWeftContextCompressionBudget,
+  sanitizeSourceWeftSummaryResponse,
   sanitizeSourceWeftSummaryText,
 } from "./context-compression";
 
@@ -23,7 +26,127 @@ test("summary prompt requires the fixed SourceWeft sections", () => {
     previousIndex = index;
   }
   assert.match(SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT, /not source evidence/i);
-  assert.match(SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT, /\{messages\}/);
+  assert.match(SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT, /\{conversation\}/);
+});
+
+test("summary response sanitizer cleans text blocks before checkpointing", () => {
+  const response = new AIMessage({
+    content: [
+      { type: "text", text: "Fact [citation:c12]" },
+      { type: "reasoning", reasoning: "untouched" },
+    ],
+  });
+  const sanitized = sanitizeSourceWeftSummaryResponse(response);
+
+  assert.ok(AIMessage.isInstance(sanitized));
+  assert.deepEqual(sanitized.content, [
+    { type: "text", text: "Fact old citation marker c12 removed" },
+    { type: "reasoning", reasoning: "untouched" },
+  ]);
+  assert.deepEqual(response.content, [
+    { type: "text", text: "Fact [citation:c12]" },
+    { type: "reasoning", reasoning: "untouched" },
+  ]);
+});
+
+test("SourceWeft summarizer uses the native Deep Agents history flow and sanitizes only summaries", async () => {
+  const prompts: string[] = [];
+  const model = {
+    profile: { maxInputTokens: 1_000 },
+    invoke: async (messages: Array<{ content?: unknown }>) => {
+      const prompt = String(messages[0]?.content ?? "");
+      prompts.push(prompt);
+      if (
+        prompt.startsWith(
+          "You are SourceWeft's conversation memory compressor.",
+        )
+      ) {
+        return new AIMessage("Condensed fact [citation:old-1]");
+      }
+      return new AIMessage("Ordinary answer [citation:keep-1]");
+    },
+  };
+  const middleware = createSourceWeftSummarizationMiddleware({
+    backend: new StateBackend({ state: { files: {} } } as never),
+    chatProfileConfig: { contextLength: 1_000 },
+    model: model as never,
+  });
+  const wrapModelCall = middleware.wrapModelCall;
+  if (typeof wrapModelCall !== "function") {
+    throw new Error("Expected summarization wrapModelCall hook");
+  }
+
+  let forwardedMessages: Array<{ content?: unknown }> = [];
+  let forwardedModel: unknown = null;
+  let ordinaryContent: unknown = null;
+  const handler: Parameters<typeof wrapModelCall>[1] = async (request) => {
+    forwardedMessages = request.messages;
+    forwardedModel = request.model;
+    const ordinaryResponse = await request.model.invoke([
+      new HumanMessage("ordinary request"),
+    ]);
+    ordinaryContent = (ordinaryResponse as { content?: unknown }).content;
+    return ordinaryResponse as never;
+  };
+  const result = await wrapModelCall(
+    {
+      messages: Array.from(
+        { length: 41 },
+        (_, index) =>
+          new HumanMessage(
+            index === 0
+              ? "old message 0 [citation:input-old]"
+              : index === 40
+                ? "recent message 40 [citation:current]"
+                : `old message ${index}`,
+          ),
+      ),
+      model: model as never,
+      state: { files: {} },
+      tools: [],
+    } as never,
+    handler,
+  );
+
+  assert.equal(prompts.length, 2);
+  assert.strictEqual(forwardedModel, model);
+  assert.match(prompts[0] ?? "", /old message 0/);
+  assert.match(
+    prompts[0] ?? "",
+    /old citation marker input-old removed/,
+  );
+  assert.doesNotMatch(prompts[0] ?? "", /\[citation:input-old\]/);
+  assert.doesNotMatch(prompts[0] ?? "", /\{conversation\}/);
+  assert.equal(ordinaryContent, "Ordinary answer [citation:keep-1]");
+  assert.equal(forwardedMessages.length, 21);
+  assert.equal(
+    forwardedMessages.at(-1)?.content,
+    "recent message 40 [citation:current]",
+  );
+  assert.match(
+    String(forwardedMessages[0]?.content ?? ""),
+    /old citation marker old-1 removed/,
+  );
+  assert.doesNotMatch(
+    String(forwardedMessages[0]?.content ?? ""),
+    /\[citation:old-1\]/,
+  );
+  assert.equal(
+    (result as { constructor?: { name?: string } }).constructor?.name,
+    "Command",
+  );
+  assert.match(
+    String(
+      (
+        result as {
+          update?: {
+            _summarizationEvent?: { filePath?: string | null };
+          };
+        }
+      ).update?._summarizationEvent?.filePath ?? "",
+    ),
+    /^\/conversation_history\/session_[a-z0-9]+\.md$/,
+  );
 });
 
 test("summary sanitizer removes reusable citation markers", () => {

@@ -26,6 +26,32 @@ function parseBoolean(value: string | undefined, fallback: boolean) {
   return fallback;
 }
 
+function parseStrictBooleanEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  throw new Error(`${name} must be one of: true, false, 1, 0.`);
+}
+
+function parseBoundedIntegerEnv(input: {
+  name: string;
+  fallback: number;
+  min: number;
+  max: number;
+}) {
+  const value = process.env[input.name];
+  if (value === undefined) return input.fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < input.min || parsed > input.max) {
+    throw new Error(
+      `${input.name} must be an integer between ${input.min} and ${input.max}.`,
+    );
+  }
+  return parsed;
+}
+
 function parsePositiveNumber(value: string | undefined, fallback: number) {
   if (value === undefined) {
     return fallback;
@@ -388,6 +414,89 @@ const requestedBillingProvider = parseBillingProvider(
 const effectiveBillingProvider: BillingProvider =
   saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
 const queueName = process.env.JOB_QUEUE_NAME || "sourceweft-jobs";
+const agentInterpreterLimits = {
+  executionTimeoutMs: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_EXECUTION_TIMEOUT_MS",
+    fallback: 3_000,
+    min: 100,
+    max: 5_000,
+  }),
+  memoryLimitBytes: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MEMORY_LIMIT_BYTES",
+    fallback: 32 * 1024 * 1024,
+    min: 8 * 1024 * 1024,
+    max: 64 * 1024 * 1024,
+  }),
+  maxStackSizeBytes: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_STACK_SIZE_BYTES",
+    fallback: 320 * 1024,
+    min: 64 * 1024,
+    max: 512 * 1024,
+  }),
+  maxResultChars: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_RESULT_CHARS",
+    fallback: 2_000,
+    min: 256,
+    max: 8_000,
+  }),
+  maxPtcCallsPerEval: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_PTC_CALLS_PER_EVAL",
+    fallback: 8,
+    min: 1,
+    max: 16,
+  }),
+  maxPtcCallsPerTurn: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_PTC_CALLS_PER_TURN",
+    fallback: 24,
+    min: 1,
+    max: 64,
+  }),
+  maxEvalsPerTurn: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_EVALS_PER_TURN",
+    fallback: 6,
+    min: 1,
+    max: 12,
+  }),
+  maxConcurrentEvals: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_CONCURRENT_EVALS",
+    fallback: 4,
+    min: 1,
+    max: 8,
+  }),
+  maxConcurrentPtcPerTurn: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_CONCURRENT_PTC_PER_TURN",
+    fallback: 4,
+    min: 1,
+    max: 8,
+  }),
+  evalQueueTimeoutMs: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_EVAL_QUEUE_TIMEOUT_MS",
+    fallback: 1_000,
+    min: 100,
+    max: 5_000,
+  }),
+  ptcCallTimeoutMs: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_PTC_CALL_TIMEOUT_MS",
+    fallback: 5_000,
+    min: 100,
+    max: 10_000,
+  }),
+  maxCodeChars: parseBoundedIntegerEnv({
+    name: "SOURCEWEFT_AGENT_INTERPRETER_MAX_CODE_CHARS",
+    fallback: 20_000,
+    min: 1_000,
+    max: 50_000,
+  }),
+};
+
+if (
+  agentInterpreterLimits.maxPtcCallsPerTurn <
+  agentInterpreterLimits.maxPtcCallsPerEval
+) {
+  throw new Error(
+    "SOURCEWEFT_AGENT_INTERPRETER_MAX_PTC_CALLS_PER_TURN must be greater than or equal to SOURCEWEFT_AGENT_INTERPRETER_MAX_PTC_CALLS_PER_EVAL.",
+  );
+}
 
 export const config = {
   apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
@@ -447,6 +556,37 @@ export const config = {
         process.env.SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT,
         300,
       ),
+      interpreter: {
+        enabled: parseStrictBooleanEnv(
+          "SOURCEWEFT_AGENT_INTERPRETER_ENABLED",
+          false,
+        ),
+        limits: agentInterpreterLimits,
+      },
+      // Proactive clarifying questions (Claude-Code-style `askUser`). On by
+      // default; the askUser middleware is added to the root and sub-agent
+      // graphs. Set SOURCEWEFT_AGENT_ASK_USER_ENABLED=false (or 0) to disable.
+      // See docs/architecture/proactive-ask-user.md.
+      askUserEnabled: parseBoolean(
+        process.env.SOURCEWEFT_AGENT_ASK_USER_ENABLED,
+        true,
+      ),
+      // Background (continuable) delegates via deepagents' async task tools over
+      // the self-hosted runs endpoint (docs/architecture/async-subagent-runs.md).
+      // Off by default: requires the endpoint mounted + run worker started.
+      asyncSubagentsEnabled: parseBoolean(
+        process.env.SOURCEWEFT_AGENT_ASYNC_SUBAGENTS_ENABLED,
+        false,
+      ),
+      asyncRunsEndpointUrl:
+        process.env.SOURCEWEFT_ASYNC_RUNS_URL?.trim() ||
+        `http://127.0.0.1:${Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001)}/internal/async-runs`,
+      // Shared secret guarding the internal runs endpoint. The parent turn sends
+      // it as a header; the endpoint rejects any request missing/mismatching it.
+      // Fail-closed: empty ⇒ the endpoint refuses every request, so enabling
+      // async subagents requires setting this.
+      asyncRunsInternalToken:
+        process.env.SOURCEWEFT_AGENT_ASYNC_RUNS_INTERNAL_TOKEN?.trim() || "",
     },
   },
   sandbox: {

@@ -25,6 +25,7 @@ import {
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
+import { UserQuestionInterventionBar } from "./user-question-panel";
 import type {
   ActiveThreadRun,
   ChatExecutionState,
@@ -34,6 +35,7 @@ import {
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
+  getUserQuestionItemsForRun,
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
   hasActivelyRunningToolWork,
@@ -323,6 +325,12 @@ export function ChatCanvas({
   const missingAssistantMessageRefreshKeyRef = useRef<string | null>(null);
   const reportedMissingAssistantRunKeyRef = useRef<string | null>(null);
   const handledInterventionSignalIdRef = useRef<string | null>(null);
+  // Question ids answered/cancelled locally this render — hides the panel the
+  // instant the user acts, before the resume stream flips the run off
+  // `waiting_for_approval`. Reset when the parked run changes (see below).
+  const [resolvedQuestionIds, setResolvedQuestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const toolConfirmationLookup = useMemo(
     () =>
       getToolConfirmationItemsForRun({
@@ -347,6 +355,25 @@ export function ChatCanvas({
     ? liveConfirmationItems
     : toolConfirmationLookup.items;
   const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
+  const questionItems = useMemo(
+    () =>
+      getUserQuestionItemsForRun({
+        activeThreadRun,
+        assistantVersionById: assistantVersionById ?? new Map(),
+      }),
+    [activeThreadRun, assistantVersionById],
+  );
+  const pendingQuestionItems = useMemo(
+    () =>
+      questionItems.filter(
+        (item) => !resolvedQuestionIds.has(item.question.id),
+      ),
+    [questionItems, resolvedQuestionIds],
+  );
+  useEffect(() => {
+    // The answered/cancelled set is scoped to a single parked run.
+    setResolvedQuestionIds(new Set());
+  }, [toolConfirmationRunKey]);
   const derivedConfirmationResolutions = useMemo(
     () =>
       deriveTerminalToolConfirmationResolutions({
@@ -375,6 +402,11 @@ export function ChatCanvas({
   const isWaitingForApproval =
     activeThreadRun?.status === "waiting_for_approval";
   const hasPendingConfirmationItems = pendingConfirmationItems.length > 0;
+  const hasPendingQuestionItems = pendingQuestionItems.length > 0;
+  // A pending intervention is either a tool approval or an askUser question;
+  // both park the run and must block a plain send / free-send-during-wait.
+  const hasPendingInterventionItems =
+    hasPendingConfirmationItems || hasPendingQuestionItems;
   const hasActivelyRunningToolWorkState = useMemo(
     () =>
       hasActivelyRunningToolWork({
@@ -398,7 +430,9 @@ export function ChatCanvas({
     shouldLockComposerForApproval({
       isWaitingForApproval,
       pendingConfirmationCount: pendingConfirmationItems.length,
-    }) || hasActivelyRunningToolWorkState;
+    }) ||
+    (isWaitingForApproval && hasPendingQuestionItems) ||
+    hasActivelyRunningToolWorkState;
   const composerStopStreaming =
     !otherUserRunActive &&
     (chatExecutionState === "executing" || chatExecutionState === "stopping")
@@ -587,11 +621,11 @@ export function ChatCanvas({
       surface: mode === "new" ? "empty_state" : "thread",
       toolCount: countSelectedTools(input.tools),
     });
-    if (isWaitingForApproval && !hasPendingConfirmationItems) {
+    if (isWaitingForApproval && !hasPendingInterventionItems) {
       onStopStreaming?.();
     }
     onSendMessage?.(input, {
-      allowWhileStreaming: isWaitingForApproval && !hasPendingConfirmationItems,
+      allowWhileStreaming: isWaitingForApproval && !hasPendingInterventionItems,
     });
   }
 
@@ -768,6 +802,68 @@ export function ChatCanvas({
         }}
         resolvedConfirmations={confirmationResolutions}
         workspaceId={workspaceId}
+      />
+
+      <UserQuestionInterventionBar
+        items={pendingQuestionItems}
+        onSettled={({ answer, item }) => {
+          setResolvedQuestionIds((previous) =>
+            new Set(previous).add(item.question.id),
+          );
+          if (!onResumeToolConfirmation) {
+            toast.error("Tool confirmation resume handler is not available.");
+            return;
+          }
+          // A question is not an approval: resume with an empty `decisions` and
+          // the askUser answer. The contract's XOR refine requires exactly one
+          // of the two to be populated.
+          // Echo the interrupt id so the backend keys Command.resume to the
+          // right pending interrupt (sub-agent / parallel questions).
+          const interruptId = item.question.interruptId;
+          const toolApprovalResume: ToolApprovalResume =
+            answer.status === "answered"
+              ? {
+                  decisions: [],
+                  askUser: {
+                    status: "answered",
+                    answers: answer.answers,
+                    ...(interruptId ? { interruptId } : {}),
+                  },
+                }
+              : {
+                  decisions: [],
+                  askUser: {
+                    status: "cancelled",
+                    ...(interruptId ? { interruptId } : {}),
+                  },
+                };
+          onResumeToolConfirmation({
+            approvalThreadRunId: item.threadRunId,
+            assistantMessageId: item.assistantMessageId,
+            resolvedConfirmationIds: [item.question.id],
+            toolApprovalResume,
+          });
+        }}
+        onStopWaiting={() => {
+          setResolvedQuestionIds((previous) => {
+            const next = new Set(previous);
+            for (const item of pendingQuestionItems) {
+              next.add(item.question.id);
+            }
+            return next;
+          });
+          onStopStreaming?.();
+          if (!onReloadMessages) {
+            return;
+          }
+          void Promise.resolve(onReloadMessages()).catch((error) => {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Failed to reload thread messages.";
+            toast.error(message);
+          });
+        }}
       />
 
       <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">

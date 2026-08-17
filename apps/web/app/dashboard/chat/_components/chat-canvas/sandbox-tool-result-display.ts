@@ -1,3 +1,5 @@
+import type { ToolUIPart } from "ai";
+
 export type SandboxToolResultDisplay = {
   code: string | null;
   message: string | null;
@@ -10,6 +12,35 @@ export type SandboxToolResultDisplay = {
   outputPaths: string[];
   truncated: boolean | null;
   exitCode: number | null;
+};
+
+export type SandboxExecuteViewModel = {
+  code: string | null;
+  command: string;
+  exitCode: number | null;
+  message: string | null;
+  output: string;
+  recoverable: boolean | null;
+  resultFailed: boolean;
+  truncated: boolean;
+};
+
+export type SandboxTransferMapping = {
+  key: string;
+  sizeBytes: number | null;
+  source: string;
+  target: string;
+};
+
+export type SandboxTransferViewModel = {
+  code: string | null;
+  direction: "collect" | "prepare";
+  mappings: SandboxTransferMapping[];
+  message: string | null;
+  recoverable: boolean | null;
+  resultFailed: boolean;
+  resultSucceeded: boolean;
+  totalBytes: number | null;
 };
 
 export type SandboxToolResultDetail = {
@@ -30,6 +61,13 @@ const SANDBOX_TOOL_NAMES = new Set([
   "prepare_sandbox_workspace",
   "execute",
   "collect_sandbox_outputs",
+]);
+
+const RECOVERABLE_EXECUTE_FAILURE_CODES = new Set([
+  "SANDBOX_EXECUTE_COMMAND_DENIED",
+  "SANDBOX_EXECUTE_CWD_DENIED",
+  "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+  "SANDBOX_SKILL_STAGING_UNAVAILABLE",
 ]);
 
 function record(value: unknown) {
@@ -69,7 +107,20 @@ function parseResult(value: unknown) {
       stringValue(wrapper?.displayContent) ?? stringValue(wrapper?.content);
     if (wrappedContent) {
       try {
-        return JSON.parse(wrappedContent);
+        const parsedContent: unknown = JSON.parse(wrappedContent);
+        const parsedRecord = record(parsedContent);
+        if (!parsedRecord) {
+          return parsedContent;
+        }
+        return {
+          ...parsedRecord,
+          ...(Array.isArray(wrapper?.timeline)
+            ? { timeline: wrapper.timeline }
+            : {}),
+          ...(Array.isArray(wrapper?.operations)
+            ? { operations: wrapper.operations }
+            : {}),
+        };
       } catch {
         return value;
       }
@@ -84,6 +135,17 @@ function parseResult(value: unknown) {
   }
 }
 
+function recoverableExecuteFailureCode(
+  result: SandboxToolResultDisplay | null,
+) {
+  if (result?.exitCode !== 1 || !result.output) {
+    return null;
+  }
+  const match = result.output.match(/^([A-Z0-9_]+):/u);
+  const code = match?.[1] ?? null;
+  return code && RECOVERABLE_EXECUTE_FAILURE_CODES.has(code) ? code : null;
+}
+
 function targetPath(value: Record<string, unknown>) {
   const target = record(value.target);
   return (
@@ -95,7 +157,12 @@ function targetPath(value: Record<string, unknown>) {
 }
 
 function prepareSourcePath(value: Record<string, unknown>) {
-  return stringValue(value.sourcePath) ?? stringValue(value.path);
+  const artifactId = stringValue(value.artifactId);
+  return (
+    stringValue(value.sourcePath) ??
+    (artifactId ? `artifact:${artifactId}` : null) ??
+    stringValue(value.path)
+  );
 }
 
 function prepareSandboxPath(value: Record<string, unknown>) {
@@ -145,6 +212,171 @@ export function parseSandboxToolResultDisplay(
   };
 }
 
+function transferMapping(input: {
+  fallbackKey: string;
+  sizeBytes: number | null;
+  source: string | null;
+  target: string | null;
+}): SandboxTransferMapping | null {
+  if (!input.source && !input.target) {
+    return null;
+  }
+  const source = input.source ?? "Unknown source";
+  const target = input.target ?? "Unknown target";
+  return {
+    key: `${input.fallbackKey}:${source}->${target}`,
+    sizeBytes: input.sizeBytes,
+    source,
+    target,
+  };
+}
+
+function mergeTransferMappings(
+  requested: SandboxTransferMapping[],
+  completed: SandboxTransferMapping[],
+) {
+  if (requested.length === 0) {
+    return completed;
+  }
+
+  const remaining = [...completed];
+  const merged = requested.map((request) => {
+    const matchIndex = remaining.findIndex(
+      (item) =>
+        (item.source === request.source && item.target === request.target) ||
+        item.target === request.target,
+    );
+    if (matchIndex < 0) {
+      return request;
+    }
+    const [match] = remaining.splice(matchIndex, 1);
+    return {
+      ...request,
+      sizeBytes: match?.sizeBytes ?? request.sizeBytes,
+    };
+  });
+
+  return [...merged, ...remaining];
+}
+
+export function getSandboxExecuteView(input: {
+  input: unknown;
+  output: unknown;
+  toolName: string;
+}): SandboxExecuteViewModel | null {
+  if (input.toolName !== "execute") {
+    return null;
+  }
+
+  const commandValue = record(input.input)?.command;
+  const result = parseSandboxToolResultDisplay(input.output);
+  const recoverableFailureCode = recoverableExecuteFailureCode(result);
+  return {
+    code: result?.code ?? recoverableFailureCode,
+    command: typeof commandValue === "string" ? commandValue : "",
+    exitCode: result?.exitCode ?? null,
+    message: result?.message ?? null,
+    output: result?.output ?? "",
+    recoverable: result?.recoverable ?? (recoverableFailureCode ? true : null),
+    resultFailed:
+      result?.ok === false ||
+      result?.status === "failed" ||
+      recoverableFailureCode !== null,
+    truncated: result?.truncated === true,
+  };
+}
+
+export function getSandboxTransferView(input: {
+  input: unknown;
+  output: unknown;
+  toolName: string;
+}): SandboxTransferViewModel | null {
+  if (
+    input.toolName !== "prepare_sandbox_workspace" &&
+    input.toolName !== "collect_sandbox_outputs"
+  ) {
+    return null;
+  }
+
+  const request = record(input.input);
+  const resultRecord = record(parseResult(input.output));
+  const result = parseSandboxToolResultDisplay(input.output);
+  const direction =
+    input.toolName === "prepare_sandbox_workspace" ? "prepare" : "collect";
+
+  const requested = arrayRecord(
+    direction === "prepare" ? request?.files : request?.outputs,
+  )
+    .map((item, index) =>
+      transferMapping({
+        fallbackKey: `requested-${index}`,
+        sizeBytes: null,
+        source:
+          direction === "prepare"
+            ? prepareSourcePath(item)
+            : stringValue(item.sandboxPath),
+        target:
+          direction === "prepare" ? prepareSandboxPath(item) : targetPath(item),
+      }),
+    )
+    .filter((item): item is SandboxTransferMapping => Boolean(item));
+
+  const completed = arrayRecord(
+    direction === "prepare" ? resultRecord?.files : resultRecord?.outputs,
+  )
+    .map((item, index) =>
+      transferMapping({
+        fallbackKey: `completed-${index}`,
+        sizeBytes: finiteNumber(item.sizeBytes),
+        source:
+          direction === "prepare"
+            ? prepareSourcePath(item)
+            : stringValue(item.sandboxPath),
+        target:
+          direction === "prepare" ? prepareSandboxPath(item) : targetPath(item),
+      }),
+    )
+    .filter((item): item is SandboxTransferMapping => Boolean(item));
+
+  return {
+    code: result?.code ?? null,
+    direction,
+    mappings: mergeTransferMappings(requested, completed),
+    message: result?.message ?? null,
+    recoverable: result?.recoverable ?? null,
+    resultFailed: result?.ok === false || result?.status === "failed",
+    resultSucceeded: result?.ok === true,
+    totalBytes: result?.totalBytes ?? null,
+  };
+}
+
+export function resolveSandboxToolUiState(input: {
+  approvalState?: "approved" | "rejected";
+  output: unknown;
+  status: "running" | "approval_requested" | "completed" | "error";
+  toolName: string;
+}): ToolUIPart["state"] {
+  if (input.approvalState === "rejected") {
+    return "output-denied";
+  }
+  if (input.status === "approval_requested") {
+    return "approval-requested";
+  }
+  if (
+    input.status === "error" ||
+    isSandboxToolResultFailure({
+      output: input.output,
+      toolName: input.toolName,
+    })
+  ) {
+    return "output-error";
+  }
+  if (input.status === "completed") {
+    return "output-available";
+  }
+  return "input-available";
+}
+
 export function isSandboxToolResultFailure(input: {
   output: unknown;
   toolName: string;
@@ -153,10 +385,15 @@ export function isSandboxToolResultFailure(input: {
     return false;
   }
   const result = parseSandboxToolResultDisplay(input.output);
-  return result?.ok === false || result?.status === "failed";
+  return (
+    result?.ok === false ||
+    result?.status === "failed" ||
+    (input.toolName === "execute" &&
+      recoverableExecuteFailureCode(result) !== null)
+  );
 }
 
-function formatByteCount(value: number | null) {
+export function formatSandboxByteCount(value: number | null) {
   if (value === null) {
     return null;
   }
@@ -291,15 +528,17 @@ function resultDetailFromOperation(
 
   const result = record(operation.result) ?? operation;
   const details: string[] = [];
-  const byteCount = formatByteCount(finiteNumber(result.totalBytes));
+  const byteCount = formatSandboxByteCount(finiteNumber(result.totalBytes));
 
   if (type === "prepare" || type === "prepare_sandbox_workspace") {
-    const fileCount = arrayRecord(result.files).length;
+    const fileCount =
+      finiteNumber(result.fileCount) ?? arrayRecord(result.files).length;
     if (fileCount > 0) {
       details.push(plural(fileCount, "file"));
     }
   } else if (type === "collect" || type === "collect_sandbox_outputs") {
-    const outputCount = arrayRecord(result.outputs).length;
+    const outputCount =
+      finiteNumber(result.outputCount) ?? arrayRecord(result.outputs).length;
     if (outputCount > 0) {
       details.push(plural(outputCount, "output"));
     }
@@ -338,7 +577,7 @@ export function getSandboxToolResultSummary(input: {
   }
 
   const parts: string[] = [];
-  const byteCount = formatByteCount(result.totalBytes);
+  const byteCount = formatSandboxByteCount(result.totalBytes);
 
   if (result.ok === false || result.status === "failed") {
     return formatSandboxFailureSummary(result);
@@ -396,7 +635,7 @@ export function getSandboxToolResultDetails(input: {
   }
 
   const details: SandboxToolResultDetail[] = [];
-  const byteCount = formatByteCount(result.totalBytes);
+  const byteCount = formatSandboxByteCount(result.totalBytes);
 
   if (input.toolName === "prepare_sandbox_workspace") {
     const requestedFiles = arrayRecord(record(input.input)?.files);
@@ -518,6 +757,8 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The sandbox returned an unsupported download result. Try collecting a plain text output file instead.",
   SANDBOX_EXECUTE_CWD_DENIED:
     "The command working directory must stay inside the provider sandbox workspace root.",
+  SANDBOX_EXECUTE_COMMAND_DENIED:
+    "The command was rejected before execution because it was empty or contained unsafe control characters. Revise the command and try again.",
   SANDBOX_EXECUTE_VFS_PATH_DENIED:
     "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
   SANDBOX_FILE_NOT_FOUND:

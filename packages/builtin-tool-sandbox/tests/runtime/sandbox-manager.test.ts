@@ -82,6 +82,9 @@ function createMessageScopedOperationStore() {
 
   const store: SandboxOperationStore & { inserts: string[] } = {
     inserts: [],
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation(input) {
       const operation = operations.get(keyFor(input));
       return operation && input.statuses.includes(operation.status)
@@ -289,6 +292,9 @@ test("beginToolOperation releases stale running operation and claims a new one",
   let insertAttempts = 0;
   const staleCreatedAt = new Date(Date.now() - 120_000);
   const operationStore: SandboxOperationStore = {
+    async listMessageOperations() {
+      return [];
+    },
     async findLatestToolOperation() {
       return operationStatus === "running"
         ? {
