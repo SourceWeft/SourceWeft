@@ -9,7 +9,10 @@ import {
   VIDEO_PRESENTATION_THEME_PRESETS,
 } from "../theme-presets";
 import type { VideoPipelineDeps } from "./deps";
-import { videoPresentationProviderError } from "./errors";
+import {
+  videoPresentationGeneratedContentError,
+  videoPresentationProviderError,
+} from "./errors";
 import { summarizeStructuredValidationError } from "./storyboard";
 
 const {
@@ -102,7 +105,7 @@ export async function assignSlideThemes(input: {
 
   const parsed = outputSchema.safeParse(response);
   if (!parsed.success) {
-    throw videoPresentationProviderError(
+    throw videoPresentationGeneratedContentError(
       VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED,
       "Theme provider returned invalid structured content.",
     );
@@ -115,7 +118,7 @@ export async function assignSlideThemes(input: {
   for (const item of parsed.data.assignments) {
     const { slideNumber, themeName, mode } = item;
     if (!slideNumbers.has(slideNumber) || bySlide.has(slideNumber)) {
-      throw videoPresentationProviderError(
+      throw videoPresentationGeneratedContentError(
         VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED,
         "Theme provider returned an invalid or duplicate slide assignment.",
       );
@@ -128,7 +131,7 @@ export async function assignSlideThemes(input: {
   }
 
   if (bySlide.size !== input.payload.slides.length) {
-    throw videoPresentationProviderError(
+    throw videoPresentationGeneratedContentError(
       VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED,
       "Theme provider did not assign every slide.",
     );

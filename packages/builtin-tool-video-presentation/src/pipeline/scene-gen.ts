@@ -20,7 +20,7 @@ import {
   VISUAL_QA_BATCH_SIZE,
 } from "./config";
 import type { VideoPipelineDeps } from "./deps";
-import { videoPresentationProviderError } from "./errors";
+import { videoPresentationGeneratedContentError } from "./errors";
 import { durationTargetFallbackSeconds } from "./storyboard";
 import { VIDEO_STYLE_PRESET_DIRECTIONS } from "./style-directions";
 
@@ -399,7 +399,7 @@ export async function generateSceneModules(input: {
       }
       const theme = themeBySlide.get(slide.slideNumber);
       if (!theme) {
-        throw videoPresentationProviderError(
+        throw videoPresentationGeneratedContentError(
           VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED,
           `No provider-generated theme assignment exists for slide ${slide.slideNumber}.`,
         );

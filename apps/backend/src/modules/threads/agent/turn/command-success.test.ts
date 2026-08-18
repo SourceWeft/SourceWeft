@@ -128,3 +128,56 @@ test("video presentation command failure uses the artifact error", () => {
     "Command failed because generate_video_presentation reported: Theme provider returned invalid JSON content.",
   );
 });
+
+test("a ready regeneration satisfies the command after an earlier failure", () => {
+  const toolCall = (input: {
+    id: string;
+    output: Record<string, unknown>;
+    sequence: number;
+  }) => ({
+    id: input.id,
+    input: {},
+    output: input.output,
+    status: "completed" as const,
+    tool: "generate_video_presentation",
+    latencyMs: 10,
+    error: null,
+    sequence: input.sequence,
+  });
+
+  assert.equal(
+    isCommandSuccessSatisfied({
+      criteria: {
+        kind: "artifact",
+        artifactType: "video_presentation",
+        toolName: "generate_video_presentation",
+      },
+      toolCalls: [
+        toolCall({
+          id: "tool-failed",
+          sequence: 1,
+          output: {
+            artifact_id: "artifact-1",
+            artifact_url: "/artifact-preview?artifactId=artifact-1",
+            error: "Theme provider returned invalid structured content.",
+            job_id: "video-presentation-render-artifact-1",
+            status: "failed",
+            type: "video_presentation_artifact_result",
+          },
+        }),
+        toolCall({
+          id: "tool-ready",
+          sequence: 2,
+          output: {
+            artifact_id: "artifact-1",
+            artifact_url: "/artifact-preview?artifactId=artifact-1",
+            job_id: "video-presentation-render-artifact-1-edit-2",
+            status: "ready",
+            type: "video_presentation_artifact_result",
+          },
+        }),
+      ],
+    }),
+    true,
+  );
+});

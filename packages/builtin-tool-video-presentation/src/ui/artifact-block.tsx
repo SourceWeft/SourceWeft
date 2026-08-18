@@ -175,6 +175,12 @@ export function VideoPresentationArtifactBlock({
   const stageWords = getVideoPresentationPayloadStageWords(
     artifactSnapshot?.payloadJson ?? previewRecord?.payloadJson,
   );
+  const failureMessage =
+    artifactSnapshot?.errorMessage ??
+    host.readToolOutputField(toolCall.output, "error") ??
+    stageWords ??
+    getVideoPresentationStageWords("failed") ??
+    "Generation failed.";
   const sourceJsonUrl = artifact?.sourceJsonUrl
     ? host.resolveApiAssetUrl(artifact.sourceJsonUrl)
     : null;
@@ -200,11 +206,7 @@ export function VideoPresentationArtifactBlock({
         }}
         badges={badges}
         description={description}
-        errorText={
-          stageWords ??
-          getVideoPresentationStageWords("failed") ??
-          "Generation failed."
-        }
+        errorText={failureMessage}
         fallbackIcon={<Presentation className="size-5 text-foreground/80" />}
         isError={isError}
         isPending={isPending}

@@ -23,6 +23,7 @@ import {
   isDeliverableGenerationActive,
   isDeliverableToolName,
   resolveDeliverableElapsedMs,
+  resolveDeliverableProgress,
   resolveDeliverableStatus,
   shouldSuppressDeliverableOutputSummary,
 } from "./artifact-progress";
@@ -363,6 +364,11 @@ function GenericAssistantToolCard({
         confirmationResolution,
         effectiveArtifactStatuses,
       );
+  const visibleDetailParts = isDeliverableTool
+    ? detailParts.filter(
+        (part) => !part.startsWith("status: ") && !part.startsWith("time: "),
+      )
+    : detailParts;
   const outputSummary = getOutputSummary(toolCall);
   const toolError = toolCall.error;
   const isDeliverableGeneratingNow = isDeliverableTool
@@ -398,7 +404,23 @@ function GenericAssistantToolCard({
       ? deliverableElapsedMs
       : toolCall.latencyMs,
   );
-  const visibleStatus = statusKey === "done" ? null : statusLabel;
+  const deliverableProgress = isDeliverableTool
+    ? resolveDeliverableProgress({
+        artifactSnapshot: deliverableSnapshot,
+        toolCallOutput: toolCall.output,
+        toolCallStatus: toolCall.status,
+        toolName: toolCall.tool,
+      })
+    : null;
+  const activeStageLabel = deliverableProgress?.steps.find(
+    (step) => step.status === "running",
+  )?.label;
+  const visibleStatus =
+    statusKey === "done"
+      ? null
+      : statusKey === "generating" && activeStageLabel
+        ? activeStageLabel
+        : statusLabel;
   const resolvedConfirmationMessage = getResolvedToolConfirmationMessage({
     confirmation,
     confirmationResolution,
@@ -411,7 +433,7 @@ function GenericAssistantToolCard({
   });
   const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
   const hasDetails =
-    detailParts.length > 0 ||
+    visibleDetailParts.length > 0 ||
     Boolean(skillReadFileLabel) ||
     Boolean(readFilePreview) ||
     Boolean(readFileBinaryUnsupported) ||
@@ -470,8 +492,8 @@ function GenericAssistantToolCard({
       </button>
       {isOpen && hasExpandableContent ? (
         <div className={cn(ASSISTANT_ACTIVITY_DETAIL_CLASS, contentClassName)}>
-          {hasDetails && detailParts.length > 0 ? (
-            <p className="break-words">{detailParts.join(" · ")}</p>
+          {hasDetails && visibleDetailParts.length > 0 ? (
+            <p className="break-words">{visibleDetailParts.join(" · ")}</p>
           ) : null}
           {hasDetails && skillReadFileLabel ? (
             <p className="break-words">Read file: {skillReadFileLabel}</p>
@@ -499,7 +521,11 @@ function GenericAssistantToolCard({
           {hasDetails && outputSummary ? (
             <p className="break-words">{outputSummary}</p>
           ) : null}
-          {hasDetails && toolError ? (
+          {hasDetails &&
+          toolError &&
+          !(isDeliverableTool && deliverableArtifactId) ? (
+            // Deliverable failures are shown in the pipeline below (per-step,
+            // with context), so don't also repeat the raw error line here.
             <p className="break-words text-destructive">{toolError}</p>
           ) : null}
           {isDeliverableTool && deliverableArtifactId ? (
@@ -508,7 +534,6 @@ function GenericAssistantToolCard({
               toolCallOutput={toolCall.output}
               toolCallStatus={toolCall.status}
               toolName={toolCall.tool}
-              workspaceId={workspaceId}
             />
           ) : null}
           {children}

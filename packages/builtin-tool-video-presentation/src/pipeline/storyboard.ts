@@ -8,7 +8,10 @@ import {
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
 import type { VideoPipelineDeps } from "./deps";
-import { videoPresentationProviderError } from "./errors";
+import {
+  videoPresentationGeneratedContentError,
+  videoPresentationProviderError,
+} from "./errors";
 import { artifactAssetUrl, imageExtensionForMimeType, safeStorageSegment } from "./util";
 
 const {
@@ -384,7 +387,7 @@ export async function planStoryboard(input: {
     ? normalizePlannedSlides(parsed.data.slides, slideCount)
     : null;
   if (!parsed.success || !slides) {
-    throw videoPresentationProviderError(
+    throw videoPresentationGeneratedContentError(
       VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED,
       `Storyboard provider returned invalid structured content; expected exactly one complete entry for slides 1-${slideCount}.`,
     );
@@ -782,7 +785,7 @@ export async function regenerateStoryboardSlides(input: {
 
   const parsed = outputSchema.safeParse(response);
   if (!parsed.success) {
-    throw videoPresentationProviderError(
+    throw videoPresentationGeneratedContentError(
       "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED",
       `Storyboard edit provider returned invalid structured content for slides ${targets.join(", ")}.`,
     );

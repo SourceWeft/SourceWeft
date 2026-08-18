@@ -99,6 +99,7 @@ export interface ArtifactProgressView {
   completedStepCount: number;
   totalStepCount: number;
   status: ArtifactPipelineGenerationStatus;
+  errorCode?: string;
   errorMessage?: string;
 }
 
@@ -238,6 +239,7 @@ export interface ArtifactProgressInput {
   artifactSnapshot?: {
     status?: string;
     payloadJson?: unknown;
+    errorCode?: string | null;
     errorMessage?: string | null;
   } | null;
 }
@@ -332,6 +334,19 @@ export function resolveArtifactProgressView(
       .length,
     totalStepCount: steps.length,
     status,
+    ...(generation?.errorCode ??
+    input.artifactSnapshot?.errorCode ??
+    readArtifactOutputField(input.toolCallOutput, "error_code") ??
+    readArtifactOutputField(input.toolCallOutput, "errorCode")
+      ? {
+          errorCode:
+            generation?.errorCode ??
+            input.artifactSnapshot?.errorCode ??
+            readArtifactOutputField(input.toolCallOutput, "error_code") ??
+            readArtifactOutputField(input.toolCallOutput, "errorCode") ??
+            undefined,
+        }
+      : {}),
     ...(generation?.errorMessage ??
     input.artifactSnapshot?.errorMessage ??
     readArtifactOutputField(input.toolCallOutput, "error_message") ??

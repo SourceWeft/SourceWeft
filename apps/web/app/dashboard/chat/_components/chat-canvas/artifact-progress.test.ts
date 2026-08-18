@@ -211,12 +211,14 @@ test("failed artifact surfaces its error message", () => {
     artifactSnapshot: {
       id: "artifact-1",
       status: "failed",
+      errorCode: "ROW_ERROR_SHOULD_NOT_WIN",
       errorMessage: "Theme provider call failed",
       payloadJson: {
         generation: {
           status: "failed",
           stage: "failed",
           checkpointStage: "assigning_slide_themes",
+          errorCode: "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
           errorMessage: "Theme provider call failed",
         },
       },
@@ -225,7 +227,27 @@ test("failed artifact surfaces its error message", () => {
 
   assert.ok(progress);
   assert.equal(progress.status, "failed");
+  assert.equal(
+    progress.errorCode,
+    "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
+  );
   assert.equal(progress.errorMessage, "Theme provider call failed");
+});
+
+test("failed artifact falls back to the row error code without generation metadata", () => {
+  const progress = resolveDeliverableProgress({
+    toolName,
+    artifactSnapshot: {
+      id: "artifact-1",
+      status: "failed",
+      errorCode: "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE",
+      errorMessage: "Sandbox is unavailable",
+      payloadJson: {},
+    } as never,
+  });
+
+  assert.equal(progress?.errorCode, "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE");
+  assert.equal(progress?.errorMessage, "Sandbox is unavailable");
 });
 
 test("generation.status running wins over artifact row status ready", () => {

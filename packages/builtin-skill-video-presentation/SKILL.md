@@ -159,3 +159,11 @@ Allowed input fields:
 - If the tool returns a processing/still-generating result, do NOT call it
   again for the same request — the artifact keeps building in the background
   and a retry duplicates it. Report that generation is in progress instead.
+- A failed result is not task completion. Read the error before deciding the
+  next step. If changing the generation request can address it, retry by
+  setting `regeneration.artifactId` to the failed artifact id and explain the
+  corrective instruction. Do not repeat an identical request or create a
+  duplicate artifact.
+- Do not implicitly switch the model, provider, implementation, tool, or data
+  source after a failure. Report credential, permission, configuration,
+  sandbox, or missing-input blockers instead of bypassing them.

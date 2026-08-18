@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronRight, Circle, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, CircleDot, XCircle } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { ChatErrorNotice } from "./chat-error-notice";
 
 export type ArtifactPipelineStepView = {
   id: string;
@@ -25,9 +26,7 @@ function StepStatusIcon({
     case "completed":
       return <CheckCircle2 className="size-3.5 text-emerald-600" />;
     case "running":
-      return (
-        <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
-      );
+      return <CircleDot className="size-3.5 text-primary" />;
     case "failed":
       return <XCircle className="size-3.5 text-destructive" />;
     default:
@@ -66,9 +65,11 @@ function renderDisplayText(value: string) {
 
 function PipelineStepRow({
   defaultOpen,
+  errorCode,
   step,
 }: {
   defaultOpen: boolean;
+  errorCode?: string;
   step: ArtifactPipelineStepView;
 }) {
   const hasDetails = Boolean(
@@ -116,7 +117,7 @@ function PipelineStepRow({
           {step.status === "running" ? (
             <span className="ml-1 text-primary">· Running</span>
           ) : null}
-          {step.status === "running" &&
+          {(step.status === "running" || step.status === "failed") &&
           typeof step.attempt === "number" &&
           typeof step.maxAttempts === "number" &&
           step.maxAttempts > 1 ? (
@@ -137,7 +138,11 @@ function PipelineStepRow({
       {open && hasDetails ? (
         <div className="mt-1.5 ml-5 space-y-1.5 border-l border-border/50 pl-3">
           {step.errorMessage ? (
-            <p className="text-destructive/90">{step.errorMessage}</p>
+            <ChatErrorNotice
+              code={errorCode}
+              compact
+              message={step.errorMessage}
+            />
           ) : null}
           {step.display ? (
             <div className="space-y-0.5 break-words">
@@ -158,6 +163,7 @@ function PipelineStepRow({
 export function ArtifactPipeline({
   activeStepId,
   className,
+  errorCode,
   errorMessage,
   footerRight,
   mode = "live",
@@ -167,6 +173,7 @@ export function ArtifactPipeline({
 }: {
   activeStepId?: string | null;
   className?: string;
+  errorCode?: string;
   errorMessage?: string;
   footerRight?: string;
   mode?: "live" | "history";
@@ -175,6 +182,14 @@ export function ArtifactPipeline({
   title: string;
 }) {
   const [historyOpen, setHistoryOpen] = useState(mode !== "history");
+  // A failed step row auto-opens and already shows its own error, so the
+  // pipeline-level error line would repeat it when the history is expanded.
+  const errorShownByFailedStep =
+    historyOpen &&
+    Boolean(errorMessage) &&
+    steps.some(
+      (step) => step.status === "failed" && step.errorMessage === errorMessage,
+    );
 
   return (
     <div className={cn("space-y-2 rounded-md border border-border/60 p-3", className)}>
@@ -211,6 +226,7 @@ export function ArtifactPipeline({
                 step.id === activeStepId ||
                 step.status === "failed"
               }
+              errorCode={step.status === "failed" ? errorCode : undefined}
               key={step.id}
               step={step}
             />
@@ -222,8 +238,8 @@ export function ArtifactPipeline({
           {steps.length} stages completed
         </p>
       )}
-      {status === "failed" && errorMessage ? (
-        <p className="text-xs text-destructive">{errorMessage}</p>
+      {status === "failed" && errorMessage && !errorShownByFailedStep ? (
+        <ChatErrorNotice code={errorCode} compact message={errorMessage} />
       ) : null}
     </div>
   );

@@ -15,6 +15,23 @@ export function videoPresentationProviderError(code: string, message: string) {
   });
 }
 
+/**
+ * Model-generated content can change on the stage's next attempt, unlike
+ * provider configuration or sandbox failures, so it uses the retry budget the
+ * pipeline already declares.
+ */
+export function videoPresentationGeneratedContentError(
+  code: string,
+  message: string,
+) {
+  return new DeliverablePipelineError({
+    code,
+    message,
+    category: "validation",
+    retryable: true,
+  });
+}
+
 export function videoPresentationSandboxError(code: string, message: string) {
   return new DeliverablePipelineError({
     code,

@@ -99,10 +99,13 @@ test("structurally non-retryable errors stop the retry loop", async () => {
       stageId: "build",
       fn: async () => {
         attempts += 1;
-        throw new Error("transient");
+        throw Object.assign(new Error("generated content invalid"), {
+          code: "GENERATED_CONTENT_INVALID",
+          retryable: true,
+        });
       },
     }),
-    /transient/,
+    /generated content invalid/,
   );
   assert.equal(attempts, 3);
 });

@@ -946,7 +946,6 @@ export function createGenerateVideoPresentationTool(
       name: GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
       description:
         "Generate one narrated video presentation artifact from a short brief. Provide brief plus optional title, sourceDigest, audience, tone, language, durationTarget, stylePreset, renderProfile, narrationEnabled, narration, assets, and regeneration. Do not provide a storyboard or blueprint; the worker builds the Remotion project internally and returns immediately while generation continues in the background.",
-      returnDirect: true,
       schema: generateVideoPresentationSchema,
     },
   );

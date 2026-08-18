@@ -363,7 +363,7 @@ test("generate_video_presentation returns a failed artifact result when worker f
     },
   );
 
-  assert.equal(tool.returnDirect, true);
+  assert.equal(tool.returnDirect, false);
   const output = await tool.invoke(baseRequest);
   assert.equal(
     (output as Record<string, unknown>).type,
