@@ -41,6 +41,7 @@ import {
   type AskUserQuestion,
 } from "./ask-user";
 import { createSourceWeftToolObservabilityMiddleware } from "./tool-observability";
+import { createSourceWeftToolErrorMiddleware } from "./tool-error";
 import {
   extractAskUserInterrupts,
   handleAskUserStreamChunk,
@@ -194,8 +195,9 @@ test("interrupt survives the observability + retry middleware stack (fix #2)", a
       { content: "ok" },
     ],
     [
+      createSourceWeftToolErrorMiddleware(),
       createSourceWeftToolObservabilityMiddleware({}),
-      toolRetryMiddleware({ tools: ["searchSources"] }),
+      toolRetryMiddleware({ tools: ["searchSources"], onFailure: "error" }),
     ],
   );
   const config = CONFIG();
@@ -208,7 +210,7 @@ test("interrupt survives the observability + retry middleware stack (fix #2)", a
   // The pause must still surface — not be swallowed or logged as a tool failure.
   assert.ok(
     findAskUserInterrupt(first),
-    "ask_user interrupt must survive observability + retry middleware",
+    "ask_user interrupt must survive error + observability + retry middleware",
   );
 });
 

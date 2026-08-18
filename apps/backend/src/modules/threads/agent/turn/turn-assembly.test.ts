@@ -22,7 +22,10 @@ import {
   buildSandboxRuntimeForPreparedTurn,
   filesystemMountsForPrompt,
 } from "./turn-assembly";
-import { createSourceWeftToolCallContextMiddleware } from "../middleware";
+import {
+  createSourceWeftToolCallContextMiddleware,
+  currentSourceWeftToolCallContext,
+} from "../middleware";
 
 const SANDBOX_PATH_POLICY_STUB = {
   workspaceRoot: "/workspace",
@@ -33,6 +36,33 @@ const SANDBOX_PATH_POLICY_STUB = {
 } as const;
 
 const originalSandboxConfig = structuredClone(config.sandbox);
+
+test("tool-call context attributes sub-agent artifact publishers", async () => {
+  const middleware = createSourceWeftToolCallContextMiddleware({
+    subagentType: "general-purpose",
+  }) as unknown as {
+    wrapToolCall: (
+      request: unknown,
+      handler: (request: unknown) => Promise<unknown>,
+    ) => Promise<unknown>;
+  };
+
+  const observed = await middleware.wrapToolCall(
+    {
+      toolCall: {
+        id: "publish-call-1",
+        name: "publish_artifact",
+        args: {},
+      },
+    },
+    async () => currentSourceWeftToolCallContext(),
+  );
+
+  assert.deepEqual(observed, {
+    producer: { kind: "subagent", subagentType: "general-purpose" },
+    toolCallId: "publish-call-1",
+  });
+});
 
 /**
  * The sandbox tests below run against a synthetic provider supplied through the

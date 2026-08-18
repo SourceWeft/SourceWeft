@@ -28,8 +28,10 @@ import {
   createSourceWeftToolObservabilityMiddleware,
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
+import { createSourceWeftToolErrorMiddleware } from "./tool-error";
 import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
+import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -92,18 +94,25 @@ export function createSourceWeftSubagentMiddlewareStack(
   input: SourceWeftSubagentMiddlewareStackInput,
 ): AgentMiddleware[] {
   return [
-    createSourceWeftToolCallContextMiddleware(),
+    // Must precede every toolCallLimitMiddleware so the count channels bind to a
+    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    createSourceWeftToolCallCountChannelsMiddleware(),
+    createSourceWeftToolCallContextMiddleware({
+      subagentType: input.toolObservabilityContext?.subagentType,
+    }),
     // Sub-agents may also ask the user. The interrupt bubbles up to the parent
     // graph's updates stream; the resume is keyed by interrupt id so it targets
     // the correct nested/parallel task. Same flag + per-turn cap as the root.
     ...askUserMiddleware(),
     createRepeatToolCallReminderMiddleware(),
+    createSourceWeftToolErrorMiddleware(),
     createSourceWeftToolObservabilityMiddleware({
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
     }),
     toolRetryMiddleware({
       tools: RETRYABLE_READ_TOOL_NAMES,
+      onFailure: "error",
     }),
     createSourceWeftSummarizationMiddleware({
       backend: input.backend,
@@ -136,6 +145,9 @@ export async function createSourceWeftAgentMiddlewareStack(
     });
 
   return [
+    // Must precede every toolCallLimitMiddleware so the count channels bind to a
+    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    createSourceWeftToolCallCountChannelsMiddleware(),
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -153,12 +165,14 @@ export async function createSourceWeftAgentMiddlewareStack(
     ...(input.commandExecutionPolicy
       ? [createCommandToolChoiceMiddleware(input.commandExecutionPolicy)]
       : []),
+    createSourceWeftToolErrorMiddleware(),
     createSourceWeftToolObservabilityMiddleware({
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
     }),
     toolRetryMiddleware({
       tools: RETRYABLE_READ_TOOL_NAMES,
+      onFailure: "error",
     }),
     // Deep Agents merges same-named middleware by replacement. This takes the
     // place of its generic SummarizationMiddleware while retaining native
@@ -199,10 +213,15 @@ export {
   sanitizeMessagesForHistory,
 } from "./history-sanitizer";
 export {
+  createSourceWeftToolErrorMiddleware,
+  formatSourceWeftToolError,
+} from "./tool-error";
+export {
   createSourceWeftToolObservabilityMiddleware,
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
 export {
   createSourceWeftToolCallContextMiddleware,
+  currentSourceWeftToolCallContext,
   currentSourceWeftToolCallId,
 } from "./tool-call-context";

@@ -117,6 +117,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
     });
 
     const expectedMiddlewareOrder = [
+      "SourceWeftToolCallCountChannels",
       "SourceWeftToolCallContext",
       "todoListMiddleware",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
@@ -127,6 +128,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftImageHistorySanitizer",
       "SourceWeftKnowledgeFilesystemDescriptions",
       "SourceWeftCommandToolChoice",
+      "toolErrorMiddleware",
       "SourceWeftToolObservability",
       "toolRetryMiddleware",
       "SummarizationMiddleware",
@@ -162,12 +164,14 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
   assert.deepEqual(
     first.map((middleware) => middleware.name),
     [
+      "SourceWeftToolCallCountChannels",
       "SourceWeftToolCallContext",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
       ...(config.chat.agent.askUserEnabled
         ? ["ToolCallLimitMiddleware[askUser]"]
         : []),
       "SourceWeftRepeatToolCallReminder",
+      "toolErrorMiddleware",
       "SourceWeftToolObservability",
       "toolRetryMiddleware",
       "SummarizationMiddleware",
@@ -179,7 +183,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
   assert.notStrictEqual(first.at(-1), second.at(-1));
 });
 
-test("tool retry only wraps safe read-only tools", async () => {
+test("tool retry only retries safe read-only tools", async () => {
   const stack = await createSourceWeftAgentMiddlewareStack({
     ...middlewareRuntime,
     modelAlias: "chat-default",
