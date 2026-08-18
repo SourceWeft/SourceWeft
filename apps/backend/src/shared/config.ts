@@ -571,17 +571,6 @@ export const config = {
         process.env.SOURCEWEFT_AGENT_ASK_USER_ENABLED,
         true,
       ),
-      // Surface sub-agent (`task` delegate) tool activity to the client so the UI
-      // can group each sub-agent's tool calls under its own card. Turns on
-      // LangGraph `subgraphs: true`, under which every streamed chunk becomes
-      // `[namespace, mode, payload]`; the runner classifies the namespace and
-      // drops sub-agent non-`tools` events so a delegate's model text/checkpoints
-      // never pollute the main answer. Kill switch: turning this off restores the
-      // pre-grouping behavior exactly (flat 2-tuple stream, no sub-agent cards).
-      subgraphStreamingEnabled: parseBoolean(
-        process.env.SOURCEWEFT_AGENT_SUBGRAPH_STREAMING_ENABLED,
-        true,
-      ),
       // Background (continuable) delegates via deepagents' async task tools over
       // the self-hosted runs endpoint (docs/architecture/async-subagent-runs.md).
       // Off by default: requires the endpoint mounted + run worker started.

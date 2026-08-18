@@ -322,10 +322,10 @@ export async function* invokeDeepAgentTurn(input: {
           continue;
         }
 
-        // Under LangGraph `subgraphs: true` (config.chat.agent
-        // .subgraphStreamingEnabled) each chunk is `[namespace, mode, payload]`;
-        // without it, `[mode, payload]`. Detecting the namespace by shape keeps
-        // the flag a clean kill switch — the rest of the loop is unchanged.
+        // Under LangGraph `subgraphs: true` each chunk is
+        // `[namespace, mode, payload]`; a bare graph yields `[mode, payload]`.
+        // Detecting the namespace by shape tolerates both, so the loop does not
+        // depend on how the stream was configured.
         const hasNamespace = Array.isArray(streamChunk[0]);
         if (hasNamespace && streamChunk.length < 3) {
           continue;

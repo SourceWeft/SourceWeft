@@ -827,8 +827,8 @@ export async function buildThreadAgentAssembly(
     // load-bearing guard — drops every sub-agent event EXCEPT `tools`, so a
     // delegate's model text/reasoning/checkpoints/HITL updates can never pollute
     // the main answer or the parent's bookkeeping (the concern that first kept
-    // this off). Kill switch: config.chat.agent.subgraphStreamingEnabled.
-    ...(config.chat.agent.subgraphStreamingEnabled ? { subgraphs: true } : {}),
+    // this off).
+    subgraphs: true,
     // Cancels the LLM stream and stops scheduling further steps when the run is
     // aborted; LangGraph propagates it to tools via config.signal.
     ...(abortSignal ? { signal: abortSignal } : {}),
