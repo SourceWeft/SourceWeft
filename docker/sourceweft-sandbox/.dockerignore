@@ -1,4 +1,5 @@
-# Ignore everything — we only need the Dockerfile.
+# Ignore everything — we only need the Dockerfile and the shared base script.
 # Context is docker/sourceweft-sandbox/.
 *
 !Dockerfile
+!install-base.sh

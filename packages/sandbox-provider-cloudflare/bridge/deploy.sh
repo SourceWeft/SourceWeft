@@ -16,7 +16,9 @@
 #   BRIDGE_DIR=~/cf-bridge ./deploy.sh
 set -euo pipefail
 
-BRIDGE_DIR="${BRIDGE_DIR:-$(dirname "$0")/sandbox-bridge}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+BRIDGE_DIR="${BRIDGE_DIR:-$SCRIPT_DIR/sandbox-bridge}"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "ERROR: Docker must be installed and running (the bridge template builds its container image locally)." >&2
@@ -57,6 +59,22 @@ if ! npx wrangler secret list 2>/dev/null | grep -q SANDBOX_API_KEY; then
   echo ""
 else
   echo "==> SANDBOX_API_KEY already set (rotate with: openssl rand -hex 32 | npx wrangler secret put SANDBOX_API_KEY)"
+fi
+
+# ── Inject the SourceWeft custom image over the stock scaffold ──────────────
+# The scaffold is stock cloudflare/sandbox (bare Debian, no Node/pnpm/Python).
+# Overwrite its Dockerfile with our version-controlled one and drop in the
+# base-provisioning script it COPYs — the SAME script the Daytona image uses,
+# so both providers build an identical base environment. wrangler.jsonc already
+# points image: "./Dockerfile", so this is all that's needed.
+echo "==> Injecting SourceWeft custom image (Dockerfile + install-base.sh)"
+cp "$SCRIPT_DIR/Dockerfile" "$BRIDGE_DIR/Dockerfile"
+cp "$REPO_ROOT/docker/sourceweft-sandbox/install-base.sh" "$BRIDGE_DIR/install-base.sh"
+# The stock template may ship a restrictive .dockerignore (e.g. `*` + !Dockerfile);
+# make sure our COPYd script is not excluded from the build context.
+if [ -f "$BRIDGE_DIR/.dockerignore" ]; then
+  grep -qxF '!install-base.sh' "$BRIDGE_DIR/.dockerignore" \
+    || printf '\n!install-base.sh\n' >> "$BRIDGE_DIR/.dockerignore"
 fi
 
 echo "==> Deploying"
