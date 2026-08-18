@@ -341,6 +341,33 @@ test("continuation metadata replaces render blocks from resumed runs", () => {
   ]);
 });
 
+test("finalization preserves artifact outputs committed by a background worker", () => {
+  const output = {
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    id: "artifact-output:run-1:artifact-1:version-1",
+    placement: "terminal",
+    producer: { kind: "main" },
+    sequence: 1,
+    sourceToolCallId: "video-tool",
+    threadRunId: "run-1",
+    type: "artifact_output",
+  };
+  const metadata = testExports.preserveAssistantMetadataForContinuation({
+    existingMetadata: { renderBlocks: [output] },
+    nextMetadata: {
+      renderBlocks: [
+        { id: "tool-video", type: "tool", toolCallId: "video-tool" },
+      ],
+    },
+  });
+
+  assert.deepEqual(metadata.renderBlocks, [
+    { id: "tool-video", type: "tool", toolCallId: "video-tool" },
+    output,
+  ]);
+});
+
 test("continuation metadata does not rewrite duplicate reasoning ids with new sequences", () => {
   const metadata = testExports.preserveAssistantMetadataForContinuation({
     existingMetadata: {

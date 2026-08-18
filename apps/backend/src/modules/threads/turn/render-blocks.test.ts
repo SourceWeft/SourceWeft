@@ -29,24 +29,53 @@ test("replaceText preserves existing text segmentation when final text has same 
   ]);
 });
 
-test("marks artifact blocks as terminal placement", () => {
+test("orders, attributes, and deduplicates committed artifact outputs", () => {
   const builder = createMessageRenderBlockBuilder();
 
-  builder.appendArtifact("image-tool");
-  builder.appendArtifact("presentation-tool");
+  builder.appendArtifactOutput({
+    artifactId: "image-1",
+    artifactVersionId: "image-v1",
+    producer: { kind: "main" },
+    sourceToolCallId: "image-tool",
+    threadRunId: "run-1",
+  });
+  builder.appendArtifactOutput({
+    artifactId: "slides-1",
+    artifactVersionId: "slides-v1",
+    producer: { kind: "subagent", subagentType: "general-purpose" },
+    sourceToolCallId: "presentation-tool",
+    threadRunId: "run-1",
+  });
+  builder.appendArtifactOutput({
+    artifactId: "image-1",
+    artifactVersionId: "image-v1",
+    producer: { kind: "main" },
+    sourceToolCallId: "retry-tool",
+    threadRunId: "run-1",
+  });
 
   assert.deepEqual(builder.list(), [
     {
-      id: "artifact-image-tool",
+      artifactId: "image-1",
+      artifactVersionId: "image-v1",
+      id: "artifact-output:run-1:image-1:image-v1",
       placement: "terminal",
-      type: "artifact",
-      toolCallId: "image-tool",
+      producer: { kind: "main" },
+      sequence: 1,
+      sourceToolCallId: "image-tool",
+      threadRunId: "run-1",
+      type: "artifact_output",
     },
     {
-      id: "artifact-presentation-tool",
+      artifactId: "slides-1",
+      artifactVersionId: "slides-v1",
+      id: "artifact-output:run-1:slides-1:slides-v1",
       placement: "terminal",
-      type: "artifact",
-      toolCallId: "presentation-tool",
+      producer: { kind: "subagent", subagentType: "general-purpose" },
+      sequence: 2,
+      sourceToolCallId: "presentation-tool",
+      threadRunId: "run-1",
+      type: "artifact_output",
     },
   ]);
 });

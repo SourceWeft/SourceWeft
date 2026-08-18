@@ -757,10 +757,8 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     },
   );
 
-  // Uniform: every artifact tool reconstructs a tool block (progress) plus a
-  // terminal artifact block (result); a non-artifact tool gets only a tool
-  // block. The deck artifact block appears as soon as the tool is seen, not
-  // gated on publication.
+  // Tool events reconstruct progress blocks only. A committed artifact output
+  // arrives through the publisher-owned result path, never from tool presence.
   assert.deepEqual(searchSnapshotBeforePublish.renderBlocks, [
     {
       id: "text-1",
@@ -771,18 +769,6 @@ test("run snapshots preserve generated artifact render blocks generically", () =
       id: "tool-image-tool",
       type: "tool",
       toolCallId: "image-tool",
-    },
-    {
-      id: "artifact-image-tool",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "image-tool",
-    },
-    {
-      id: "artifact-pptx-tool",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "pptx-tool",
     },
     {
       id: "tool-pptx-tool",
@@ -827,8 +813,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     },
   );
 
-  // The deck's blocks already exist from when the tool first appeared, so its
-  // completion adds nothing — the artifact block was never publication-gated.
+  // A tool result alone cannot synthesize a published artifact output.
   assert.deepEqual(searchSnapshot.renderBlocks, [
     {
       id: "text-1",
@@ -839,18 +824,6 @@ test("run snapshots preserve generated artifact render blocks generically", () =
       id: "tool-image-tool",
       type: "tool",
       toolCallId: "image-tool",
-    },
-    {
-      id: "artifact-image-tool",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "image-tool",
-    },
-    {
-      id: "artifact-pptx-tool",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "pptx-tool",
     },
     {
       id: "tool-pptx-tool",

@@ -62,6 +62,7 @@ export type DeliverableArtifactsAdapter = {
     workspaceId: string;
   }): Promise<{
     payloadJson?: unknown;
+    status?: string;
     /**
      * The artifact's published version pointer, read in the same row read that
      * supplies the payload. An edit run carries it to the completion as its
@@ -69,6 +70,8 @@ export type DeliverableArtifactsAdapter = {
      * republishes onto are guaranteed to be the same one.
      */
     currentVersionNo?: number;
+    /** Stable identity of the currently published version, when one exists. */
+    latestVersionId?: string | null;
     /** The artifact's own title, used to complete it through the write path. */
     title?: string | null;
   } | null>;
@@ -779,7 +782,16 @@ export function createDefaultDeliverableRuntimeResolver(input: {
     return {
       ctx,
       artifacts: {
-        find: repository.findArtifactRecord,
+        find: async (input) => {
+          const artifact = await repository.findArtifactRecord(input);
+          if (!artifact) {
+            return null;
+          }
+          return {
+            ...artifact,
+            latestVersionId: await repository.findLatestArtifactVersionId(input),
+          };
+        },
         // Failure closes the same two-phase write `completeArtifact` closes, so
         // it goes through the same door. The host has already classified and
         // truncated the failure against its pipeline definition, which is

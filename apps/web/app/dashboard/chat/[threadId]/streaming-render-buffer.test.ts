@@ -28,79 +28,34 @@ test("keeps assistant text, tool block, and continued text in order", () => {
   ]);
 });
 
-test("keeps text, tool, artifact, and trailing text in order", () => {
+test("replaces streamed blocks with committed artifact outputs", () => {
   const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
 
-  buffer.appendText("before");
-  buffer.appendToolBlock("tool-1");
-  buffer.appendText("middle");
-  buffer.appendArtifactBlock("tool-2");
-  buffer.appendText("after");
-
-  assert.deepEqual(buffer.snapshotRenderBlocks(), [
+  buffer.replaceRenderBlocks([
     {
-      id: "stream-text-1",
-      type: "text",
-      text: "before",
-    },
-    {
-      id: "stream-tool-tool-1",
-      type: "tool",
-      toolCallId: "tool-1",
-    },
-    {
-      id: "stream-text-2",
-      type: "text",
-      text: "middle",
-    },
-    {
-      id: "stream-artifact-tool-2",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      id: "artifact-output:run-1:artifact-1:version-1",
       placement: "terminal",
-      type: "artifact",
-      toolCallId: "tool-2",
-    },
-    {
-      id: "stream-text-3",
-      type: "text",
-      text: "after",
+      producer: { kind: "main" },
+      sequence: 1,
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+      type: "artifact_output",
     },
   ]);
-});
-
-test("marks artifact blocks as terminal placement", () => {
-  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
-
-  buffer.appendArtifactBlock("image-tool");
-  buffer.appendArtifactBlock("presentation-tool");
 
   assert.deepEqual(buffer.snapshotRenderBlocks(), [
     {
-      id: "stream-artifact-image-tool",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      id: "artifact-output:run-1:artifact-1:version-1",
       placement: "terminal",
-      type: "artifact",
-      toolCallId: "image-tool",
-    },
-    {
-      id: "stream-artifact-presentation-tool",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "presentation-tool",
-    },
-  ]);
-});
-
-test("deduplicates artifact blocks by tool call id", () => {
-  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
-
-  buffer.appendArtifactBlock("tool-1");
-  buffer.appendArtifactBlock("tool-1");
-
-  assert.deepEqual(buffer.snapshotRenderBlocks(), [
-    {
-      id: "stream-artifact-tool-1",
-      placement: "terminal",
-      type: "artifact",
-      toolCallId: "tool-1",
+      producer: { kind: "main" },
+      sequence: 1,
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+      type: "artifact_output",
     },
   ]);
 });

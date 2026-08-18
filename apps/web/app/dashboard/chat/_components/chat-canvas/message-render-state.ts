@@ -54,6 +54,9 @@ function blockSignature(blocks: MessageRenderState["bodyBlocks"]) {
       if (block.type === "reasoning") {
         return `${block.id}:reasoning:${placement}:${block.durationMs ?? ""}:${block.text}`;
       }
+      if (block.type === "artifact_output") {
+        return `${block.id}:artifact_output:${placement}:${block.artifactId}:${block.artifactVersionId}`;
+      }
       return `${block.id}:${block.type}:${placement}:${block.toolCallId}`;
     })
     .join("|");

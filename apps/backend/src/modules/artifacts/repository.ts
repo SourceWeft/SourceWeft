@@ -517,6 +517,34 @@ export async function findArtifactRecord(input: {
   return row ? mapArtifact(row) : null;
 }
 
+export async function findLatestArtifactVersionId(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+}) {
+  const [artifact] = await db
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!artifact) {
+    return null;
+  }
+  const [latestVersion] = await db
+    .select({ id: artifactVersions.id })
+    .from(artifactVersions)
+    .where(eq(artifactVersions.artifactId, artifact.id))
+    .orderBy(desc(artifactVersions.versionNo))
+    .limit(1);
+  return latestVersion?.id ?? null;
+}
+
 /**
  * Delete the artifact row. Versions and artifact-source rows go with it via
  * `ON DELETE CASCADE`; stored object cleanup is the caller's business, since

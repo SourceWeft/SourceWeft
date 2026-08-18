@@ -1,7 +1,4 @@
-import {
-  getAgentToolRenderAs,
-  hasAgentToolCapability,
-} from "@sourceweft/agent-tool-registry";
+import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import type { CommandSuccessCriteria } from "../..";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
@@ -164,12 +161,7 @@ export function appendPromotedToolRenderBlock(input: {
   if (isDeepAgentsWriteTodosTool(input.toolName)) {
     return;
   }
-  // Uniform: every visible tool gets a tool block for its progress; a tool that
-  // produces an artifact also gets a terminal artifact block for the result.
-  // No capability is special-cased — the artifact block's body (resolved from
-  // renderAs on the client) shows nothing until the artifact is ready.
+  // A tool block is progress. Artifact output blocks are appended only after a
+  // publish commits a concrete artifact version.
   input.runtime.renderBlocks.appendTool(input.toolCallId);
-  if (getAgentToolRenderAs(input.toolName)) {
-    input.runtime.renderBlocks.appendArtifact(input.toolCallId);
-  }
 }

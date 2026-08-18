@@ -1,7 +1,6 @@
 import {
   getAgentToolPresentation,
   getAgentToolTurnPreflight,
-  getAgentToolRenderAs,
   hasAgentToolCapability,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
@@ -178,15 +177,10 @@ export async function* handleToolStartStreamChunk(input: {
     };
     runtime.hasTextSinceLastToolBoundary = false;
   }
-  // Uniform: a visible tool gets a tool block for progress; an artifact tool
-  // also gets a terminal artifact block. Artifact tools always get their tool
-  // block (their card renders live progress) even if not otherwise streamed.
-  const artifactRenderAs = getAgentToolRenderAs(toolName);
-  if (shouldStreamVisibleToolCall || artifactRenderAs) {
+  // Tool blocks report progress. A result block is recorded separately by the
+  // artifact publisher only after a concrete version commits.
+  if (shouldStreamVisibleToolCall) {
     runtime.renderBlocks.appendTool(toolCallId);
-  }
-  if (artifactRenderAs) {
-    runtime.renderBlocks.appendArtifact(toolCallId);
   }
   if (shouldStreamVisibleToolCall) {
     yield {

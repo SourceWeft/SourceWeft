@@ -19,24 +19,6 @@ export function createStreamingRenderBuffer({
   const deltaBatchLimit = Math.max(1, maxDeltaBatchChars);
 
   return {
-    appendArtifactBlock(toolCallId: string) {
-      if (
-        renderBlocks.some(
-          (block) =>
-            block.type === "artifact" && block.toolCallId === toolCallId,
-        )
-      ) {
-        return;
-      }
-
-      renderBlocks.push({
-        id: `stream-artifact-${toolCallId}`,
-        placement: "terminal",
-        type: "artifact",
-        toolCallId,
-      });
-    },
-
     appendToolBlock(toolCallId: string) {
       if (
         renderBlocks.some(

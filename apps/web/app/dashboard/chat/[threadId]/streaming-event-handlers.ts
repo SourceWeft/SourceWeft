@@ -1,4 +1,3 @@
-import { getAgentToolRenderAs } from "@sourceweft/agent-tool-registry";
 import type {
   CitationRecord,
   ModelReasoningSegmentRecord,
@@ -326,15 +325,10 @@ export function handleStreamingToolCallEvent<
 
   context.streamToolCallsById.set(nextToolCall.id, nextToolCall);
   if (event.type === "tool-call-start") {
-    // Every visible tool renders a progress tool card; tools whose capability
-    // declares a renderAs also emit a terminal artifact block (matching the
-    // backend, which emits both). Block/body selection is driven purely by
-    // getAgentToolRenderAs — never per-medium block types or capability tags.
+    // Tool blocks are progress only. Artifact outputs arrive as explicit
+    // committed result blocks after publishing succeeds.
     drainQueuedDeltasNow();
     context.streamRenderBuffer.appendToolBlock(nextToolCall.id);
-    if (getAgentToolRenderAs(nextToolCall.tool)) {
-      context.streamRenderBuffer.appendArtifactBlock(nextToolCall.id);
-    }
   }
   const traceEvent = context.resolveTraceEventFromStreamEvent({
     event,
@@ -923,6 +917,11 @@ export function handleStreamingAssistantMessage<
     metadata: {
       ...message.metadata,
       isError: false,
+      // Clear the persisted failure alongside isError so a restarted run does
+      // not inherit a stale "failed" status (resolveAssistantStatus keys off
+      // errorCode too) or flash the previous error banner before content lands.
+      error: null,
+      errorCode: null,
       excludeFromContext: false,
       userMessageId: nextUserMessageId,
       sourceUserMessageId: nextUserMessageId,

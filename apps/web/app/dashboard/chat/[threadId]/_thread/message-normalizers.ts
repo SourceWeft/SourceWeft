@@ -1653,18 +1653,6 @@ function normalizeMessageRenderBlock(
       : null;
   }
 
-  if (record.type === "artifact") {
-    const toolCallId = toNullableString(record.toolCallId);
-    return toolCallId
-      ? {
-          id,
-          ...(placement ? { placement } : {}),
-          type: "artifact",
-          toolCallId,
-        }
-      : null;
-  }
-
   if (record.type === "tool") {
     const toolCallId = toNullableString(record.toolCallId);
     return toolCallId
@@ -1675,6 +1663,41 @@ function normalizeMessageRenderBlock(
           toolCallId,
         }
       : null;
+  }
+
+  if (record.type === "artifact_output") {
+    const artifactId = toNullableString(record.artifactId);
+    const artifactVersionId = toNullableString(record.artifactVersionId);
+    const sourceToolCallId = toNullableString(record.sourceToolCallId);
+    const threadRunId = toNullableString(record.threadRunId);
+    const sequence = toNullableNumber(record.sequence);
+    const producer = toObjectRecord(record.producer);
+    const kind = producer?.kind;
+    if (
+      !artifactId ||
+      !artifactVersionId ||
+      !sourceToolCallId ||
+      !threadRunId ||
+      sequence === null ||
+      (kind !== "main" && kind !== "subagent")
+    ) {
+      return null;
+    }
+    const subagentType = toNullableString(producer?.subagentType);
+    return {
+      artifactId,
+      artifactVersionId,
+      id,
+      placement: "terminal",
+      producer: {
+        kind,
+        ...(subagentType ? { subagentType } : {}),
+      },
+      sequence,
+      sourceToolCallId,
+      threadRunId,
+      type: "artifact_output",
+    };
   }
 
   return null;

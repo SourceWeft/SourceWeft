@@ -22,6 +22,8 @@ import { guardCancellableWrite } from "../../run-cancellation";
 import { logger } from "../../../../shared/logger";
 import { createAgentToolModelGatewayService } from "../../../../shared/model-gateway";
 import { runToolRetrieval } from "../turn/retrieval-runner";
+import type { TurnRuntime } from "../turn/turn-runtime";
+import { currentSourceWeftToolCallContext } from "../middleware/tool-call-context";
 import type {
   CapabilityAgentToolHostServices,
   CapabilityAgentToolsForTurnInput,
@@ -34,6 +36,22 @@ type PendingArtifactRecordInput = Parameters<
 type ReusableArtifactRecordQuery = Parameters<
   typeof findReusableArtifactRecord
 >[0];
+
+export function recordPublishedArtifactOutput(input: {
+  origin: {
+    producer: { kind: "main" | "subagent"; subagentType?: string };
+    sourceToolCallId: string;
+    threadRunId: string;
+  };
+  result: { artifactId: string; versionId: string };
+  runtime: Pick<TurnRuntime, "renderBlocks">;
+}) {
+  input.runtime.renderBlocks.appendArtifactOutput({
+    artifactId: input.result.artifactId,
+    artifactVersionId: input.result.versionId,
+    ...input.origin,
+  });
+}
 
 /**
  * Everything the host lends a capability for the duration of a turn.
@@ -69,6 +87,31 @@ export function createCapabilityAgentToolHostServices(
     runCancellation,
   } = input;
 
+  function requireArtifactOutputOrigin() {
+    const call = currentSourceWeftToolCallContext();
+    if (!prepared.threadRunId || !call?.toolCallId) {
+      throw new Error(
+        "ARTIFACT_OUTPUT_CONTEXT_REQUIRED: publishing a chat artifact requires a durable thread run and tool call id",
+      );
+    }
+    return {
+      producer: call.producer,
+      sourceToolCallId: call.toolCallId,
+      threadRunId: prepared.threadRunId,
+    };
+  }
+
+  function recordArtifactOutput(
+    origin: ReturnType<typeof requireArtifactOutputOrigin>,
+    result: { artifactId: string; versionId: string },
+  ) {
+    recordPublishedArtifactOutput({
+      origin,
+      result,
+      runtime,
+    });
+  }
+
   return {
     artifacts: {
       /**
@@ -79,11 +122,13 @@ export function createCapabilityAgentToolHostServices(
        * that finished its work after the user pressed Stop cannot still commit
        * an artifact. The wrapper is a pass-through when no gate is wired.
        */
-      publishArtifact: guardCancellableWrite(
-        runCancellation,
-        "publishing the artifact",
-        publishArtifact,
-      ),
+      publishArtifact: async (publishInput) => {
+        const origin = requireArtifactOutputOrigin();
+        await runCancellation?.throwIfCancelled("publishing the artifact");
+        const result = await publishArtifact(publishInput);
+        recordArtifactOutput(origin, result);
+        return result;
+      },
       /**
        * The two-phase half of the same door, for a capability whose artifact
        * outlives the call that asked for it.
@@ -104,8 +149,9 @@ export function createCapabilityAgentToolHostServices(
         spec: Parameters<typeof completeArtifact>[0]["spec"];
         expectedVersionNo?: number;
       }) => {
+        const origin = requireArtifactOutputOrigin();
         await runCancellation?.throwIfCancelled("republishing the artifact");
-        return completeArtifact({
+        const result = await completeArtifact({
           artifactId: republishInput.artifactId,
           context: republishInput.context,
           spec: republishInput.spec,
@@ -114,6 +160,8 @@ export function createCapabilityAgentToolHostServices(
             ? { expectedVersionNo: republishInput.expectedVersionNo }
             : {}),
         });
+        recordArtifactOutput(origin, result);
+        return result;
       },
       /**
        * The generic artifact-row primitives. Each takes the artifact type as a
@@ -198,10 +246,14 @@ export function createCapabilityAgentToolHostServices(
         // A late cancel must not still detach a background render job onto the
         // deliverables queue, which would outlive the cancelled turn.
         await runCancellation?.throwIfCancelled("enqueueing the deliverable");
+        const origin = requireArtifactOutputOrigin();
         return enqueueDeliverableJob({
           jobName: job.jobName,
           jobId: job.jobId,
-          payload: job.payload as DeliverableJobPayload,
+          payload: {
+            ...job.payload,
+            artifactOutputOrigin: origin,
+          } as DeliverableJobPayload,
         });
       },
     },

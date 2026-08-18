@@ -7,6 +7,7 @@ import {
 } from "../web-tool-results-state";
 import { findLastAnswerSegmentId } from "./message-evidence";
 import {
+  resolveAssistantFallbackActivity,
   shouldShowAssistantBottomLoading,
   shouldShowAssistantLiveThinking,
 } from "./message-list-state";
@@ -102,6 +103,33 @@ test("shouldShowAssistantLiveThinking only shows during uncancelled streams", ()
     false,
   );
   assert.equal(shouldShowAssistantLiveThinking({ isStreaming: false }), false);
+});
+
+test("assistant fallback yields to a concrete active task", () => {
+  assert.equal(
+    resolveAssistantFallbackActivity({
+      hasConcreteActiveActivity: true,
+      isLive: true,
+      text: "Building a presentation",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveAssistantFallbackActivity({
+      hasConcreteActiveActivity: false,
+      isLive: true,
+      text: "",
+    }),
+    "thinking",
+  );
+  assert.equal(
+    resolveAssistantFallbackActivity({
+      hasConcreteActiveActivity: false,
+      isLive: true,
+      text: "Partial answer",
+    }),
+    "responding",
+  );
 });
 
 test("shouldShowAssistantBottomLoading shows while streaming even before answer text", () => {

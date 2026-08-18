@@ -239,6 +239,8 @@ export type PreparedThreadTurn = {
   timezone: string;
   userMessage: MessageRecord;
   runTraceId: string;
+  /** Durable chat-run identity. Set before capability tools are bound. */
+  threadRunId?: string;
   createdUserMessage: boolean;
   assistantMessageParentId: string | null;
   assistantMessageId: string | null;
@@ -346,14 +348,18 @@ export type MessageRenderBlock =
       toolCallId: string;
     }
   | {
-      // A tool's finished artifact. One block for every medium; the web
-      // renderer dispatches to a body by the capability's renderAs. There is
-      // deliberately no per-medium block type — image/pptx/video carried no
-      // information beyond toolCallId, which already resolves the capability.
+      artifactId: string;
+      artifactVersionId: string;
       id: string;
-      placement?: "inline" | "terminal";
-      type: "artifact";
-      toolCallId: string;
+      placement: "terminal";
+      producer: {
+        kind: "main" | "subagent";
+        subagentType?: string;
+      };
+      sequence: number;
+      sourceToolCallId: string;
+      threadRunId: string;
+      type: "artifact_output";
     };
 
 export type ThinkingStepTrace = {

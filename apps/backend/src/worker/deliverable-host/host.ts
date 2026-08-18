@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/capability-contracts";
 import type { ArtifactPipelineStep } from "@sourceweft/contracts/artifact-pipeline";
 import { ContentError } from "../../modules/content/errors";
+import { appendArtifactOutputToChatRun } from "../../modules/threads/durable/repository";
 import { logger } from "../../shared/logger";
 import {
   createDeliverableStageRunner,
@@ -335,6 +336,35 @@ export function createDeliverableProcessor<
       });
 
       if (!result) {
+        const current =
+          runMode === "create"
+            ? await runtime.artifacts.find({
+                artifactId: envelope.artifactId,
+                teamId: envelope.teamId,
+                workspaceId: envelope.workspaceId,
+              })
+            : null;
+        const outputOrigin = envelope.artifactOutputOrigin;
+        if (
+          current?.latestVersionId &&
+          outputOrigin &&
+          current.status === "ready"
+        ) {
+          await appendArtifactOutputToChatRun({
+            artifactId: envelope.artifactId,
+            artifactVersionId: current.latestVersionId,
+            producer: outputOrigin.producer,
+            runId: outputOrigin.threadRunId,
+            sourceToolCallId: outputOrigin.sourceToolCallId,
+            teamId: envelope.teamId,
+            workspaceId: envelope.workspaceId,
+          });
+          return {
+            artifactId: envelope.artifactId,
+            status: "ready" as const,
+            versionId: current.latestVersionId,
+          };
+        }
         logger.warn("Deliverable pipeline publish superseded", {
           pipeline: definition.id,
           artifactId: envelope.artifactId,
@@ -354,6 +384,19 @@ export function createDeliverableProcessor<
         jobId: envelope.jobId,
         versionId: result.versionId,
       });
+
+      const outputOrigin = envelope.artifactOutputOrigin;
+      if (outputOrigin) {
+        await appendArtifactOutputToChatRun({
+          artifactId: result.artifactId,
+          artifactVersionId: result.versionId,
+          producer: outputOrigin.producer,
+          runId: outputOrigin.threadRunId,
+          sourceToolCallId: outputOrigin.sourceToolCallId,
+          teamId: envelope.teamId,
+          workspaceId: envelope.workspaceId,
+        });
+      }
 
       return {
         artifactId: envelope.artifactId,

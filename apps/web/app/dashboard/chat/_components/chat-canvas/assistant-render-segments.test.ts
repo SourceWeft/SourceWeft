@@ -13,10 +13,15 @@ function tool(id: string): MessageRenderBlock {
 
 function terminalArtifact(id: string): MessageRenderBlock {
   return {
+    artifactId: id,
+    artifactVersionId: `${id}-v1`,
     id,
     placement: "terminal",
-    toolCallId: id,
-    type: "artifact",
+    producer: { kind: "main" },
+    sequence: 1,
+    sourceToolCallId: `${id}-tool`,
+    threadRunId: "run-1",
+    type: "artifact_output",
   };
 }
 

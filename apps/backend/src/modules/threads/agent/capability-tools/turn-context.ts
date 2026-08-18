@@ -32,6 +32,7 @@ export function createCapabilityAgentToolTurnContext(
     sourceUserMessageId: resolveSourceUserMessageId(prepared),
     teamId: prepared.workspace.organizationId,
     threadId: prepared.thread.id,
+    threadRunId: prepared.threadRunId,
     traceId: traceContext?.traceId,
     userId: prepared.userId,
     userMessageId: prepared.userMessage.id,

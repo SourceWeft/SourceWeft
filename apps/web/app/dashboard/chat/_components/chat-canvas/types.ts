@@ -244,10 +244,18 @@ export type MessageRenderBlock =
       toolCallId: string;
     }
   | {
+      artifactId: string;
+      artifactVersionId: string;
       id: string;
-      placement?: "inline" | "terminal";
-      type: "artifact";
-      toolCallId: string;
+      placement: "terminal";
+      producer: {
+        kind: "main" | "subagent";
+        subagentType?: string;
+      };
+      sequence: number;
+      sourceToolCallId: string;
+      threadRunId: string;
+      type: "artifact_output";
     };
 
 export type ThinkingStepRecord = {

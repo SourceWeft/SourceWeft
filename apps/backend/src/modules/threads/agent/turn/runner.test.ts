@@ -3757,7 +3757,13 @@ test("builds generated image render blocks in event order", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Intro\n");
-  builder.appendArtifact("tool-1");
+  builder.appendArtifactOutput({
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    producer: { kind: "main" },
+    sourceToolCallId: "tool-1",
+    threadRunId: "run-1",
+  });
   builder.appendText("\nDetails");
 
   assert.deepEqual(
@@ -3772,10 +3778,15 @@ test("builds generated image render blocks in event order", () => {
         text: "Intro\n",
       },
       {
-        id: "artifact-tool-1",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        id: "artifact-output:run-1:artifact-1:version-1",
         placement: "terminal",
-        type: "artifact",
-        toolCallId: "tool-1",
+        producer: { kind: "main" },
+        sequence: 1,
+        sourceToolCallId: "tool-1",
+        threadRunId: "run-1",
+        type: "artifact_output",
       },
       {
         id: "text-2",
@@ -3822,7 +3833,13 @@ test("builds generated presentation render blocks in event order", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Intro\n");
-  builder.appendArtifact("tool-1");
+  builder.appendArtifactOutput({
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    producer: { kind: "main" },
+    sourceToolCallId: "tool-1",
+    threadRunId: "run-1",
+  });
   builder.appendText("\nHere is the deck summary.");
 
   assert.deepEqual(
@@ -3837,10 +3854,15 @@ test("builds generated presentation render blocks in event order", () => {
         text: "Intro\n",
       },
       {
-        id: "artifact-tool-1",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        id: "artifact-output:run-1:artifact-1:version-1",
         placement: "terminal",
-        type: "artifact",
-        toolCallId: "tool-1",
+        producer: { kind: "main" },
+        sequence: 1,
+        sourceToolCallId: "tool-1",
+        threadRunId: "run-1",
+        type: "artifact_output",
       },
       {
         id: "text-2",
@@ -3855,7 +3877,13 @@ test("can clear leaked planning text while preserving generated artifact blocks"
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText('{"schemaVersion":1,"slides":[]}');
-  builder.appendArtifact("tool-1");
+  builder.appendArtifactOutput({
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    producer: { kind: "main" },
+    sourceToolCallId: "tool-1",
+    threadRunId: "run-1",
+  });
   builder.replaceText("");
 
   assert.deepEqual(
@@ -3865,10 +3893,15 @@ test("can clear leaked planning text while preserving generated artifact blocks"
     }),
     [
       {
-        id: "artifact-tool-1",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        id: "artifact-output:run-1:artifact-1:version-1",
         placement: "terminal",
-        type: "artifact",
-        toolCallId: "tool-1",
+        producer: { kind: "main" },
+        sequence: 1,
+        sourceToolCallId: "tool-1",
+        threadRunId: "run-1",
+        type: "artifact_output",
       },
     ],
   );
@@ -3878,7 +3911,13 @@ test("preserves render blocks when final text diverges", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Before citation [citation:missing]");
-  builder.appendArtifact("tool-1");
+  builder.appendArtifactOutput({
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    producer: { kind: "main" },
+    sourceToolCallId: "tool-1",
+    threadRunId: "run-1",
+  });
 
   assert.deepEqual(
     testExports.finalizeMessageRenderBlocks({
@@ -3892,10 +3931,15 @@ test("preserves render blocks when final text diverges", () => {
         text: "Before citation [citation:missing]",
       },
       {
-        id: "artifact-tool-1",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        id: "artifact-output:run-1:artifact-1:version-1",
         placement: "terminal",
-        type: "artifact",
-        toolCallId: "tool-1",
+        producer: { kind: "main" },
+        sequence: 1,
+        sourceToolCallId: "tool-1",
+        threadRunId: "run-1",
+        type: "artifact_output",
       },
     ],
   );

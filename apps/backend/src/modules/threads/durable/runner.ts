@@ -3,7 +3,6 @@ import type {
   ThreadChatRunJobResult,
 } from "../../content/queue";
 import { buildErrorTurnBilling } from "../turn/error-turn-billing";
-import { getAgentToolRenderAs } from "@sourceweft/agent-tool-registry";
 import { type MeterConsumeResponse } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
@@ -539,15 +538,46 @@ function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
     };
   }
 
-  if (
-    (record.type === "tool" || record.type === "artifact") &&
-    typeof record.toolCallId === "string"
-  ) {
+  if (record.type === "tool" && typeof record.toolCallId === "string") {
     return {
       id,
       ...(placement ? { placement } : {}),
-      type: record.type,
+      type: "tool",
       toolCallId: record.toolCallId,
+    };
+  }
+
+  if (
+    record.type === "artifact_output" &&
+    typeof record.artifactId === "string" &&
+    typeof record.artifactVersionId === "string" &&
+    typeof record.sourceToolCallId === "string" &&
+    typeof record.threadRunId === "string" &&
+    typeof record.sequence === "number" &&
+    (record.producer as { kind?: unknown } | undefined)?.kind !== undefined
+  ) {
+    const producer = getObjectRecord(record.producer);
+    const kind = producer?.kind;
+    if (kind !== "main" && kind !== "subagent") {
+      return null;
+    }
+    const subagentType =
+      typeof producer?.subagentType === "string"
+        ? producer.subagentType
+        : undefined;
+    return {
+      artifactId: record.artifactId,
+      artifactVersionId: record.artifactVersionId,
+      id,
+      placement: "terminal",
+      producer: {
+        kind,
+        ...(subagentType ? { subagentType } : {}),
+      },
+      sequence: record.sequence,
+      sourceToolCallId: record.sourceToolCallId,
+      threadRunId: record.threadRunId,
+      type: "artifact_output",
     };
   }
 
@@ -701,59 +731,6 @@ function appendToolRenderBlock(input: {
   ];
 }
 
-function appendArtifactRenderBlock(input: {
-  blocks: unknown[] | undefined;
-  toolCallId: string;
-  toolName: string | null;
-  output?: unknown;
-  status?: unknown;
-}) {
-  // Any tool that declares an artifact rendering gets one artifact block. The
-  // block's body reveals the result when ready, so there is no output/status
-  // gating and no per-capability block type.
-  if (!input.toolName || !getAgentToolRenderAs(input.toolName)) {
-    return normalizeRenderBlocks(input.blocks);
-  }
-
-  const blocks = normalizeRenderBlocks(input.blocks);
-  if (
-    blocks.some(
-      (block) =>
-        block.type === "artifact" && block.toolCallId === input.toolCallId,
-    )
-  ) {
-    return blocks;
-  }
-
-  return [
-    ...blocks,
-    {
-      id: `artifact-${input.toolCallId}`,
-      placement: "terminal" as const,
-      type: "artifact" as const,
-      toolCallId: input.toolCallId,
-    },
-  ];
-}
-
-function appendArtifactBlocksFromToolCalls(snapshot: ChatRunSnapshot) {
-  const toolCalls = Array.isArray(snapshot.toolCalls) ? snapshot.toolCalls : [];
-  return toolCalls.reduce<MessageRenderBlock[]>((blocks, toolCall) => {
-    const record = getObjectRecord(toolCall);
-    const toolCallId = typeof record?.id === "string" ? record.id : null;
-    const toolName = typeof record?.tool === "string" ? record.tool : null;
-    return toolCallId
-      ? appendArtifactRenderBlock({
-          blocks,
-          output: record?.output,
-          status: record?.status,
-          toolCallId,
-          toolName,
-        })
-      : normalizeRenderBlocks(blocks);
-  }, normalizeRenderBlocks(snapshot.renderBlocks));
-}
-
 function updateSnapshotFromPayload(
   snapshot: ChatRunSnapshot,
   payload: Record<string, unknown> | null,
@@ -854,36 +831,6 @@ function updateSnapshotFromPayload(
         toolCallId,
       });
     }
-  }
-  if (
-    payload.type === "tool-call-start" ||
-    payload.type === "tool-call-event" ||
-    payload.type === "tool-call-result" ||
-    payload.type === "tool-call-end"
-  ) {
-    const toolCallId = getToolCallIdFromPayload(payload);
-    const toolName = getToolNameFromPayload(payload);
-    const toolCall = toolCallId
-      ? findToolCallSnapshotById(next.toolCalls, toolCallId)
-      : null;
-    if (toolCallId) {
-      next.renderBlocks = appendArtifactRenderBlock({
-        blocks: next.renderBlocks,
-        output:
-          toolCall?.output ??
-          payload.output ??
-          getObjectRecord(payload.toolCall)?.output,
-        status:
-          toolCall?.status ??
-          getObjectRecord(payload.toolCall)?.status ??
-          payload.status,
-        toolCallId,
-        toolName,
-      });
-    }
-  }
-  if (payload.type === "finish") {
-    next.renderBlocks = appendArtifactBlocksFromToolCalls(next);
   }
   if (payload.type === "finish") {
     next.finishReason =
@@ -1630,6 +1577,7 @@ export async function processThreadChatRunJob(
         shouldCancel: () => durableChatRunService.shouldCancel(run),
         abortSignal: abortController.signal,
         onPrepared: async (prepared) => {
+          prepared.threadRunId = run.id;
           run =
             (await updateChatThreadRunProgress({
               runId: run.id,

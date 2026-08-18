@@ -85,6 +85,8 @@ export type AgentToolTurnContext = {
   readonly sourceUserMessageId?: string;
   readonly teamId: string;
   readonly threadId: string;
+  /** Root durable chat run that owns user-visible outputs from this tool. */
+  readonly threadRunId?: string;
   readonly traceId?: string;
   readonly userId: string;
   readonly userMessageId: string;

@@ -40,6 +40,14 @@ export type DeliverableJobEnvelope = {
   readonly traceId?: string;
   readonly parentSpanId?: string;
   readonly toolCallId?: string;
+  readonly artifactOutputOrigin?: {
+    readonly producer: {
+      readonly kind: "main" | "subagent";
+      readonly subagentType?: string;
+    };
+    readonly sourceToolCallId: string;
+    readonly threadRunId: string;
+  };
   readonly llm?: unknown;
 };
 

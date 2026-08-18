@@ -20,6 +20,7 @@ export type ThreadEventKind =
   | "run_cancel_requested"
   | "run_finished"
   | "run_status"
+  | "artifact_output"
   // Presence: an ID-only wake-up that the viewer roster changed (join/leave).
   // Carries NO roster — the room generator reads it from Redis inside the
   // authorized stream and emits it in the SSE frame.

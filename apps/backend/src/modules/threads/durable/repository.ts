@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { chatThreadRuns, db } from "@sourceweft/db";
+import { chatThreadRuns, db, messages } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
 import {
   publishThreadEvent,
@@ -13,6 +13,7 @@ import type {
   ChatThreadRunStatus,
   DurableRunRequestSnapshot,
 } from "./types";
+import type { MessageRenderBlock } from "../turn/types";
 
 const ACTIVE_RUN_STATUSES: ChatThreadRunStatus[] = [
   "queued",
@@ -308,6 +309,171 @@ export async function updateChatThreadRunProgress(input: {
     .returning();
 
   return row ? mapRun(row) : null;
+}
+
+type ArtifactOutputBlock = Extract<
+  MessageRenderBlock,
+  { type: "artifact_output" }
+>;
+
+/**
+ * Append one committed artifact version to a durable run and its assistant
+ * message. The run row is the serialization point for concurrent publishers
+ * (including sibling sub-agents and a background deliverable worker).
+ */
+export async function appendArtifactOutputToChatRun(input: {
+  artifactId: string;
+  artifactVersionId: string;
+  producer: ArtifactOutputBlock["producer"];
+  runId: string;
+  sourceToolCallId: string;
+  teamId: string;
+  workspaceId: string;
+}) {
+  const result = await db.transaction(async (tx) => {
+    const [runRow] = await tx
+      .select()
+      .from(chatThreadRuns)
+      .where(
+        and(
+          eq(chatThreadRuns.id, input.runId),
+          eq(chatThreadRuns.teamId, input.teamId),
+          eq(chatThreadRuns.workspaceId, input.workspaceId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!runRow) {
+      throw new Error(
+        `ARTIFACT_OUTPUT_RUN_NOT_FOUND: chat run ${input.runId} was not found`,
+      );
+    }
+
+    const id = `artifact-output:${input.runId}:${input.artifactId}:${input.artifactVersionId}`;
+    const snapshot = (runRow.snapshotJson ?? {}) as Record<string, unknown>;
+    const snapshotBlocks = Array.isArray(snapshot.renderBlocks)
+      ? snapshot.renderBlocks
+      : [];
+    const [messageRow] = runRow.assistantMessageId
+      ? await tx
+          .select({ metadata: messages.metadata })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.id, runRow.assistantMessageId),
+              eq(messages.teamId, input.teamId),
+              eq(messages.workspaceId, input.workspaceId),
+            ),
+          )
+          .for("update")
+          .limit(1)
+      : [];
+    const messageBlocks = Array.isArray(messageRow?.metadata?.renderBlocks)
+      ? messageRow.metadata.renderBlocks
+      : [];
+    const currentBlocks = [...snapshotBlocks];
+    const knownIds = new Set(
+      snapshotBlocks.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return [];
+        }
+        const blockId = (value as { id?: unknown }).id;
+        return typeof blockId === "string" ? [blockId] : [];
+      }),
+    );
+    for (const value of messageBlocks) {
+      const blockId =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as { id?: unknown }).id
+          : undefined;
+      if (typeof blockId !== "string" || knownIds.has(blockId)) {
+        continue;
+      }
+      knownIds.add(blockId);
+      currentBlocks.push(value);
+    }
+    const existing = currentBlocks.find(
+      (value) =>
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        (value as { id?: unknown }).id === id,
+    );
+    const sequence =
+      currentBlocks.reduce((highest, value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return highest;
+        }
+        const record = value as { sequence?: unknown; type?: unknown };
+        return record.type === "artifact_output" &&
+          typeof record.sequence === "number" &&
+          Number.isFinite(record.sequence)
+          ? Math.max(highest, record.sequence)
+          : highest;
+      }, 0) + 1;
+    const block: ArtifactOutputBlock = existing
+      ? (existing as ArtifactOutputBlock)
+      : {
+          artifactId: input.artifactId,
+          artifactVersionId: input.artifactVersionId,
+          id,
+          placement: "terminal",
+          producer: input.producer,
+          sequence,
+          sourceToolCallId: input.sourceToolCallId,
+          threadRunId: input.runId,
+          type: "artifact_output",
+        };
+    const renderBlocks = existing ? currentBlocks : [...currentBlocks, block];
+    const nextSnapshot = { ...snapshot, renderBlocks };
+
+    const [updatedRun] = await tx
+      .update(chatThreadRuns)
+      .set({ snapshotJson: nextSnapshot, updatedAt: new Date() })
+      .where(eq(chatThreadRuns.id, runRow.id))
+      .returning();
+    if (!updatedRun) {
+      throw new Error(
+        `ARTIFACT_OUTPUT_RUN_UPDATE_FAILED: chat run ${input.runId} could not be updated`,
+      );
+    }
+
+    if (runRow.assistantMessageId) {
+      if (messageRow) {
+        await tx
+          .update(messages)
+          .set({
+            metadata: {
+              ...(messageRow.metadata ?? {}),
+              renderBlocks,
+            },
+          })
+          .where(eq(messages.id, runRow.assistantMessageId));
+      }
+    }
+
+    return { block, run: mapRun(updatedRun) };
+  });
+
+  void publishThreadEvent({
+    threadId: result.run.threadId,
+    workspaceId: result.run.workspaceId,
+    kind: "artifact_output",
+    actorUserId: result.run.userId,
+    runId: result.run.id,
+    status: result.run.status,
+    ...(result.run.assistantMessageId
+      ? { assistantMessageId: result.run.assistantMessageId }
+      : {}),
+  }).catch((error) => {
+    logger.warn("Failed to publish artifact output thread event", {
+      runId: result.run.id,
+      artifactId: input.artifactId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
+  return result.block;
 }
 
 export async function requestChatThreadRunCancel(input: {

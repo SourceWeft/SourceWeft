@@ -18,8 +18,10 @@ export function useArtifactSnapshot(input: {
   const [snapshot, setSnapshot] = useState<ArtifactStatusSnapshot | undefined>(
     input.artifactSnapshot,
   );
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setError(null);
     setSnapshot((current) =>
       preferArtifactSnapshot(current, input.artifactSnapshot),
     );
@@ -51,7 +53,9 @@ export function useArtifactSnapshot(input: {
         }
       })
       .catch(() => {
-        // Keep tool-output fallback when REST is unavailable.
+        if (!cancelled) {
+          setError("Artifact details could not be loaded.");
+        }
       });
 
     return () => {
@@ -63,6 +67,7 @@ export function useArtifactSnapshot(input: {
 
   return {
     artifactId,
+    error,
     snapshot,
   };
 }

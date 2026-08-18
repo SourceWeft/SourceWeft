@@ -32,11 +32,7 @@ import {
 import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
-import {
-  getAgentToolRenderAs,
-  getAgentToolSlashCommand,
-} from "@sourceweft/agent-tool-registry";
+import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
 import { getActionIcon } from "../action-icons";
 import { expandSelectedSources, type SourceItem } from "../source-types";
@@ -50,33 +46,36 @@ import { CitationAwareMessageResponse } from "./message-response";
 import {
   AssistantActivityPlaceholder,
   AssistantActivityRenderItems,
-  type AssistantActivityPlaceholderPhase,
 } from "./assistant-activity-stack";
 import { AssistantToolCard } from "./assistant-tool-card";
+import { ArtifactOutputCard } from "./artifact-output-card";
 import {
   buildAssistantRenderSegments,
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
-// The artifact-UI index is the only artifact-block dispatcher: a capability's
-// `renderAs` token maps straight to the component the capability registered.
-// Importing the render host installs the app-shell facilities that capability
-// components reach for.
-import { resolveArtifactBlock } from "@sourceweft/agent-tool-registry/ui";
 import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
+import {
+  isArtifactSnapshotActive,
+  isToolOutputClaimingInProgress,
+  resolveToolCallArtifactId,
+} from "./artifact-work-state";
 import { findLastAnswerSegmentId } from "./message-evidence";
 import {
   buildMessageRenderState,
   getVisibleAssistantAnswerText,
   type MessageRenderState,
 } from "./message-render-state";
+import { resolveAssistantFallbackActivity } from "./message-list-state";
 import {
   mergeSourceIds,
   SourceIcon,
   toAttachmentData,
   UserMessageText,
 } from "./source-rendering";
+import { ChatErrorNotice } from "./chat-error-notice";
+import { shouldShowRunErrorBanner } from "./run-error-display";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import type {
   ArtifactStatusSnapshot,
@@ -491,7 +490,31 @@ function AssistantMessageBody({
     attachedToolCallIds: attachedWebToolCallIds,
     toolCalls: version.toolCalls,
   });
-  const shouldShowBottomLoading = renderState.shouldShowBottomLoading;
+  const hasConcreteActiveActivity =
+    (version.toolCalls ?? []).some((toolCall) => {
+      if (
+        toolCall.status === "running" ||
+        toolCall.status === "approval_requested"
+      ) {
+        return true;
+      }
+      const artifactId = resolveToolCallArtifactId(toolCall.output);
+      return artifactId
+        ? isArtifactSnapshotActive(mergedArtifactStatuses.get(artifactId)) ||
+            isToolOutputClaimingInProgress(toolCall.output)
+        : false;
+    }) ||
+    (isWorkflowRunning &&
+      segments.some((segment) =>
+        segment.type === "workflow"
+          ? segment.blocks.some((block) => block.type === "reasoning")
+          : false,
+      ));
+  const fallbackPhase = resolveAssistantFallbackActivity({
+    hasConcreteActiveActivity,
+    isLive: renderState.shouldShowLiveThinking,
+    text: renderState.text,
+  });
   let didRenderWebResultsFallback = false;
 
   function renderWorkflowBlockAsActivity(input: {
@@ -561,46 +584,18 @@ function AssistantMessageBody({
       );
     }
 
-    const toolCall = version.toolCalls?.find(
-      (item) => item.id === block.toolCallId,
-    );
-    if (!toolCall) {
-      return null;
-    }
-
-    if (block.type === "artifact") {
-      const ArtifactBody = resolveArtifactBlock(
-        getAgentToolRenderAs(toolCall.tool),
-      );
-      if (ArtifactBody) {
-        return (
-          <ArtifactBody
-            artifactStatuses={mergedArtifactStatuses}
-            onArtifactPreview={onArtifactPreview}
-            toolCall={toolCall}
-            workspaceId={workspaceId}
-          />
-        );
-      }
-    }
-
-    return (
-      <div>
-        <AssistantToolCard
+    if (block.type === "artifact_output") {
+      return (
+        <ArtifactOutputCard
           artifactStatuses={mergedArtifactStatuses}
-          onWorkfileClick={onWorkfileClick}
-          resolvedConfirmations={resolvedConfirmations}
-          toolCall={toolCall}
+          block={block}
+          onArtifactPreview={onArtifactPreview}
           workspaceId={workspaceId}
         />
-        <WebToolResults
-          availableCitations={renderState.availableCitations}
-          onCitationClick={onCitationClick}
-          toolCall={toolCall}
-          variant="activity-row"
-        />
-      </div>
-    );
+      );
+    }
+
+    return null;
   }
 
   function renderTerminalBlock(block: AssistantTerminalBlock) {
@@ -617,27 +612,22 @@ function AssistantMessageBody({
       );
     }
 
+    if (block.type === "artifact_output") {
+      return (
+        <ArtifactOutputCard
+          artifactStatuses={mergedArtifactStatuses}
+          block={block}
+          onArtifactPreview={onArtifactPreview}
+          workspaceId={workspaceId}
+        />
+      );
+    }
+
     const toolCall = version.toolCalls?.find(
       (item) => item.id === block.toolCallId,
     );
     if (!toolCall) {
       return null;
-    }
-
-    if (block.type === "artifact") {
-      const ArtifactBody = resolveArtifactBlock(
-        getAgentToolRenderAs(toolCall.tool),
-      );
-      if (ArtifactBody) {
-        return (
-          <ArtifactBody
-            artifactStatuses={mergedArtifactStatuses}
-            onArtifactPreview={onArtifactPreview}
-            toolCall={toolCall}
-            workspaceId={workspaceId}
-          />
-        );
-      }
     }
 
     return (
@@ -663,8 +653,16 @@ function AssistantMessageBody({
     <>
       {segments.map((segment) => {
         if (segment.type === "terminal") {
+          const artifactCount = segment.blocks.filter(
+            (block) => block.type === "artifact_output",
+          ).length;
           return (
             <div className="mt-2 max-w-3xl space-y-3" key={segment.id}>
+              {artifactCount > 1 ? (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {artifactCount} artifacts
+                </p>
+              ) : null}
               {segment.blocks.map((block) => (
                 <div key={block.id}>{renderTerminalBlock(block)}</div>
               ))}
@@ -739,7 +737,11 @@ function AssistantMessageBody({
           toolCalls={version.toolCalls}
         />
       ) : null}
-      {shouldShowBottomLoading ? <LoadingDots className="ml-1" /> : null}
+      {fallbackPhase ? (
+        <div className="my-1.5">
+          <AssistantActivityPlaceholder phase={fallbackPhase} />
+        </div>
+      ) : null}
       {cancelledNotice ? (
         <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
       ) : null}
@@ -749,7 +751,6 @@ function AssistantMessageBody({
 
 function AssistantTimeline({
   artifactStatuses,
-  activityPlaceholderPhase,
   onArtifactPreview,
   onCitationClick,
   onWorkfileClick,
@@ -758,7 +759,6 @@ function AssistantTimeline({
   workspaceId,
 }: {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
-  activityPlaceholderPhase?: AssistantActivityPlaceholderPhase | null;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
@@ -767,22 +767,15 @@ function AssistantTimeline({
   workspaceId?: string | null;
 }) {
   return (
-    <>
-      {renderState.shouldShowLiveThinking && activityPlaceholderPhase ? (
-        <div className="my-1.5">
-          <AssistantActivityPlaceholder phase={activityPlaceholderPhase} />
-        </div>
-      ) : null}
-      <AssistantMessageBody
-        artifactStatuses={artifactStatuses}
-        onArtifactPreview={onArtifactPreview}
-        onCitationClick={onCitationClick}
-        onWorkfileClick={onWorkfileClick}
-        renderState={renderState}
-        resolvedConfirmations={resolvedConfirmations}
-        workspaceId={workspaceId}
-      />
-    </>
+    <AssistantMessageBody
+      artifactStatuses={artifactStatuses}
+      onArtifactPreview={onArtifactPreview}
+      onCitationClick={onCitationClick}
+      onWorkfileClick={onWorkfileClick}
+      renderState={renderState}
+      resolvedConfirmations={resolvedConfirmations}
+      workspaceId={workspaceId}
+    />
   );
 }
 
@@ -1091,13 +1084,16 @@ const MessageGroupItem = memo(function MessageGroupItem({
                 .map((sourceId) => sourceById.get(sourceId))
                 .filter((source): source is SourceItem => Boolean(source))
             : [];
-          const activityPlaceholderPhase: AssistantActivityPlaceholderPhase | null =
+          const hasActiveRunOnThisGroup =
             isAssistant &&
             versionIndex === activeVisibleBranchIndex &&
-            renderState.status !== "cancelled" &&
-            isStreamingThisVersion
-              ? "thinking"
-              : null;
+            isLatestAssistantGroup &&
+            Boolean(activeThreadRun);
+          const showRunErrorBanner = shouldShowRunErrorBanner({
+            hasActiveRunOnThisGroup,
+            isStreamingThisVersion,
+            renderState,
+          });
 
           return (
             <div
@@ -1147,7 +1143,6 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     <div className="space-y-3">
                       <AssistantTimeline
                         artifactStatuses={artifactStatuses}
-                        activityPlaceholderPhase={activityPlaceholderPhase}
                         onArtifactPreview={onArtifactPreview}
                         onCitationClick={onCitationClick}
                         onWorkfileClick={onWorkfileClick}
@@ -1155,20 +1150,16 @@ const MessageGroupItem = memo(function MessageGroupItem({
                         resolvedConfirmations={resolvedConfirmations}
                         workspaceId={workspaceId}
                       />
-                      {renderState.error ? (
-                        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                          <p className="font-medium">Message failed</p>
-                          <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
-                            {sanitizeClientErrorMessage(
+                      {showRunErrorBanner && renderState.error ? (
+                        <ChatErrorNotice
+                          code={renderState.error.code}
+                          message={
+                            sanitizeClientErrorMessage(
                               renderState.error.message,
-                            ) ?? "Model error"}
-                          </p>
-                          {renderState.error.code ? (
-                            <p className="mt-1 text-xs text-destructive/70">
-                              {renderState.error.code}
-                            </p>
-                          ) : null}
-                        </div>
+                            ) ?? "Model error"
+                          }
+                          title="Message failed"
+                        />
                       ) : null}
                     </div>
                   )}

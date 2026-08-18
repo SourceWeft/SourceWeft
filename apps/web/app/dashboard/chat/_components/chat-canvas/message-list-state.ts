@@ -16,3 +16,14 @@ export function shouldShowAssistantBottomLoading(input: {
     input.threadRunStatus !== "waiting_for_approval"
   );
 }
+
+export function resolveAssistantFallbackActivity(input: {
+  hasConcreteActiveActivity: boolean;
+  isLive: boolean;
+  text: string;
+}): "thinking" | "responding" | null {
+  if (!input.isLive || input.hasConcreteActiveActivity) {
+    return null;
+  }
+  return input.text.trim().length > 0 ? "responding" : "thinking";
+}

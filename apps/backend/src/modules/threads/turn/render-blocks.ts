@@ -44,21 +44,33 @@ export function createMessageRenderBlockBuilder() {
   let nextTextId = 1;
 
   return {
-    appendArtifact(toolCallId: string) {
+    appendArtifactOutput(input: {
+      artifactId: string;
+      artifactVersionId: string;
+      producer: {
+        kind: "main" | "subagent";
+        subagentType?: string;
+      };
+      sourceToolCallId: string;
+      threadRunId: string;
+    }) {
+      const id = `artifact-output:${input.threadRunId}:${input.artifactId}:${input.artifactVersionId}`;
       if (
-        blocks.some(
-          (block) =>
-            block.type === "artifact" && block.toolCallId === toolCallId,
-        )
+        blocks.some((block) => block.type === "artifact_output" && block.id === id)
       ) {
         return;
       }
 
       blocks.push({
-        id: `artifact-${toolCallId}`,
+        artifactId: input.artifactId,
+        artifactVersionId: input.artifactVersionId,
+        id,
         placement: "terminal",
-        type: "artifact",
-        toolCallId,
+        producer: input.producer,
+        sequence: blocks.filter((block) => block.type === "artifact_output").length + 1,
+        sourceToolCallId: input.sourceToolCallId,
+        threadRunId: input.threadRunId,
+        type: "artifact_output",
       });
     },
     appendTool(toolCallId: string) {

@@ -1169,7 +1169,7 @@ test("streaming trace events preserve live display order across tools and reason
   );
 });
 
-test("presentation artifact tool calls render a card and refresh artifacts", () => {
+test("presentation artifact tool calls render progress and refresh after commit", () => {
   let message: ChatMessageItem = {
     id: "assistant-1",
     role: "assistant",
@@ -1308,19 +1308,13 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  // tool-call-start appends the progress tool card plus the terminal artifact
-  // block (publish_artifact renders as "pptx"), draining pending text once.
+  // Tool start appends progress only; committed artifact output is delivered
+  // separately by the publisher-owned result path.
   assert.equal(drainCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-tool-pptx-tool",
       type: "tool",
-      toolCallId: "pptx-tool",
-    },
-    {
-      id: "stream-artifact-pptx-tool",
-      placement: "terminal",
-      type: "artifact",
       toolCallId: "pptx-tool",
     },
   ]);
@@ -1342,20 +1336,13 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  // tool-call-result no longer appends a block (emitted at start); it only
-  // triggers the artifact refresh and does not drain.
+  // Tool result refreshes the artifact library but cannot infer a result block.
   assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-tool-pptx-tool",
       type: "tool",
-      toolCallId: "pptx-tool",
-    },
-    {
-      id: "stream-artifact-pptx-tool",
-      placement: "terminal",
-      type: "artifact",
       toolCallId: "pptx-tool",
     },
   ]);
@@ -1370,7 +1357,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   });
 });
 
-test("presentation artifact result appends after earlier progress without reordering", () => {
+test("presentation artifact result keeps earlier progress ordering", () => {
   let message: ChatMessageItem = {
     id: "assistant-1",
     role: "assistant",
@@ -1496,8 +1483,8 @@ test("presentation artifact result appends after earlier progress without reorde
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  // The tool card + terminal artifact block are appended at tool-call-start,
-  // after the earlier assistant text, and are never reordered by the result.
+  // The progress tool card remains after the earlier assistant text. The tool
+  // result itself does not infer or append an artifact output block.
   assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
@@ -1509,12 +1496,6 @@ test("presentation artifact result appends after earlier progress without reorde
     {
       id: "stream-tool-pptx-tool",
       type: "tool",
-      toolCallId: "pptx-tool",
-    },
-    {
-      id: "stream-artifact-pptx-tool",
-      placement: "terminal",
-      type: "artifact",
       toolCallId: "pptx-tool",
     },
   ]);
@@ -1604,7 +1585,7 @@ test("presentation artifact result without a published URL does not append card"
   assert.deepEqual(message.metadata.renderBlocks, []);
 });
 
-test("video presentation artifact end appends shared presentation card after progress", () => {
+test("video presentation end keeps only progress until artifact commit", () => {
   let message: ChatMessageItem = {
     id: "assistant-1",
     role: "assistant",
@@ -1724,19 +1705,13 @@ test("video presentation artifact end appends shared presentation card after pro
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  // The video tool renders as "video"; the tool card + shared terminal
-  // artifact block are appended at start (draining once), after the progress.
+  // The video tool starts with one progress card. Its artifact output is
+  // appended only after the background publisher commits a version.
   assert.equal(drainCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-tool-video-tool",
       type: "tool",
-      toolCallId: "video-tool",
-    },
-    {
-      id: "stream-artifact-video-tool",
-      placement: "terminal",
-      type: "artifact",
       toolCallId: "video-tool",
     },
   ]);
@@ -1758,20 +1733,13 @@ test("video presentation artifact end appends shared presentation card after pro
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  // tool-call-end only refreshes; the block sequence is unchanged and no
-  // additional drain occurs.
+  // Tool end only refreshes; the publisher-owned output arrives separately.
   assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-tool-video-tool",
       type: "tool",
-      toolCallId: "video-tool",
-    },
-    {
-      id: "stream-artifact-video-tool",
-      placement: "terminal",
-      type: "artifact",
       toolCallId: "video-tool",
     },
   ]);

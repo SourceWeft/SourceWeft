@@ -276,9 +276,41 @@ export function preserveTraceMetadata(input: {
       existingMetadata.thinkingSteps,
       input.nextMetadata.thinkingSteps,
     ),
-    renderBlocks:
-      input.nextMetadata.renderBlocks !== undefined
-        ? input.nextMetadata.renderBlocks
-        : existingMetadata.renderBlocks,
+    renderBlocks: mergeCommittedArtifactOutputs(
+      existingMetadata.renderBlocks,
+      input.nextMetadata.renderBlocks,
+    ),
   };
+}
+
+function mergeCommittedArtifactOutputs(existing: unknown, next: unknown) {
+  if (!Array.isArray(next)) {
+    return existing;
+  }
+  if (!Array.isArray(existing)) {
+    return next;
+  }
+  const nextIds = new Set(
+    next.flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return [];
+      }
+      const record = value as { id?: unknown; type?: unknown };
+      return record.type === "artifact_output" && typeof record.id === "string"
+        ? [record.id]
+        : [];
+    }),
+  );
+  const committedOnly = existing.filter((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const record = value as { id?: unknown; type?: unknown };
+    return (
+      record.type === "artifact_output" &&
+      typeof record.id === "string" &&
+      !nextIds.has(record.id)
+    );
+  });
+  return [...next, ...committedOnly];
 }
