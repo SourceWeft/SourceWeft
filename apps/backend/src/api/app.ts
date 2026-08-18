@@ -29,6 +29,7 @@ import { registerUserSettingsRoutes } from "./routes/user-settings";
 import { registerWorkspaceRoutes } from "./routes/workspace";
 import { mountInternalAsyncRuns } from "./routes/async-runs-endpoint";
 import { withBetterAuthClientIp } from "./better-auth-request";
+import { rejectUnsupportedOAuthResource } from "./oauth-resource-guard";
 
 export function createApp() {
   const app = new Hono();
@@ -69,6 +70,12 @@ export function createApp() {
 
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
     const authRequest = withBetterAuthClientIp(c);
+
+    const rejectedOAuthResource =
+      await rejectUnsupportedOAuthResource(authRequest);
+    if (rejectedOAuthResource) {
+      return rejectedOAuthResource;
+    }
 
     if (c.req.method === "POST") {
       const scheduledCancelResponse = await handleCreemScheduledCancelWebhook(
