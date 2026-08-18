@@ -314,6 +314,19 @@ export type ToolCallStatus =
   | "completed"
   | "error";
 
+/**
+ * Which agent produced a tool call. `main` is the top-level thread agent (the
+ * default, left implicit); `subagent` is a `task` delegate, keyed by the parent
+ * `task` tool call id so the UI can group all of one delegate's tool calls —
+ * even parallel, interleaved ones — under a single card. Populated only when
+ * sub-graph streaming is on (config.chat.agent.subgraphStreamingEnabled).
+ */
+export type ToolProducer = {
+  kind: "main" | "subagent";
+  subagentType?: string;
+  taskCallId?: string;
+};
+
 export type ToolCallTrace = {
   id: string;
   tool: string;
@@ -325,6 +338,7 @@ export type ToolCallTrace = {
   sequence: number;
   approvalState?: "approved" | "rejected";
   approvalConfirmationId?: string;
+  producer?: ToolProducer;
 };
 
 export type MessageRenderBlock =

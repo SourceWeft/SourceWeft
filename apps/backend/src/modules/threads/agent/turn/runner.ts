@@ -43,6 +43,11 @@ import {
 } from "./hitl-stream-handler";
 import { handleMessagesStreamChunk } from "./message-stream-handler";
 import {
+  isSubagentNamespace,
+  recordToolCallNamespace,
+  resolveToolProducer,
+} from "./subagent-namespace";
+import {
   handleToolEventStreamChunk,
   handleToolEndStreamChunk,
   handleToolErrorStreamChunk,
@@ -185,6 +190,13 @@ export async function* invokeDeepAgentTurn(input: {
     setThinkingStep,
   } = runtime;
 
+  // Maps each streamed tool event's subgraph namespace to its tool call id, so a
+  // `task` delegate's child tool events can be correlated back to the parent
+  // `task` call (its namespace is the child's parent prefix). Persists across the
+  // streamLoop restarts a HITL resume triggers. Only populated under
+  // `subgraphs: true`; empty otherwise.
+  const taskCallIdByNamespaceKey = new Map<string, string>();
+
   // Declare variables that need to be accessible in finally and after try/finally
   let mcpToolRuntime!: ToolCollection["mcpToolRuntime"];
   let agent!: ThreadAgentAssembly["agent"];
@@ -310,8 +322,27 @@ export async function* invokeDeepAgentTurn(input: {
           continue;
         }
 
-        const mode = streamChunk[0];
-        const payload = streamChunk[1];
+        // Under LangGraph `subgraphs: true` (config.chat.agent
+        // .subgraphStreamingEnabled) each chunk is `[namespace, mode, payload]`;
+        // without it, `[mode, payload]`. Detecting the namespace by shape keeps
+        // the flag a clean kill switch — the rest of the loop is unchanged.
+        const hasNamespace = Array.isArray(streamChunk[0]);
+        if (hasNamespace && streamChunk.length < 3) {
+          continue;
+        }
+        const namespace = hasNamespace ? (streamChunk[0] as unknown[]) : [];
+        const mode = hasNamespace ? streamChunk[1] : streamChunk[0];
+        const payload = hasNamespace ? streamChunk[2] : streamChunk[1];
+
+        // A `task` delegate's events reach the client only to group its tool
+        // cards. Every other sub-agent event (model text, reasoning, checkpoints,
+        // HITL updates) is dropped here so a delegate can never pollute the main
+        // answer or the parent's checkpoint/interrupt bookkeeping. Main-agent
+        // events (namespace without a `tools:` segment) always pass through.
+        const subagentEvent = isSubagentNamespace(namespace);
+        if (subagentEvent && mode !== "tools") {
+          continue;
+        }
 
         if (mode === "checkpoints") {
           const checkpoint = checkpointRefFromConfig(
@@ -404,9 +435,16 @@ export async function* invokeDeepAgentTurn(input: {
           continue;
         }
 
+        const producer = subagentEvent
+          ? resolveToolProducer(namespace, {
+              toolCallsById,
+              taskCallIdByNamespaceKey,
+            })
+          : undefined;
         const toolCallSnapshot = resolveToolsStreamToolCall({
           pendingToolStreamsByRunId: runtime.pendingToolStreamsByRunId,
           payload,
+          ...(producer ? { producer } : {}),
           resolveToolCallSequence,
           toolCallOrder,
           toolCallsById,
@@ -414,6 +452,13 @@ export async function* invokeDeepAgentTurn(input: {
         if (!toolCallSnapshot) {
           continue;
         }
+        // Remember this event's namespace → tool call id (main events included),
+        // so a later child event can resolve its parent `task` call by prefix.
+        recordToolCallNamespace(
+          namespace,
+          toolCallSnapshot.toolCallId,
+          taskCallIdByNamespaceKey,
+        );
         const { event } = toolCallSnapshot;
 
         if (event === "on_tool_start") {

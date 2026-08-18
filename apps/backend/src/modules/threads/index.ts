@@ -57,6 +57,7 @@ export type {
   ThinkingStepTrace,
   ToolCallStatus,
   ToolCallTrace,
+  ToolProducer,
 } from "./turn/types";
 export type { EditThreadInput, RefreshThreadInput, ResumeThreadInput } from "./stream/types";
 

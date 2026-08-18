@@ -24,6 +24,11 @@ import {
   handleToolStartStreamChunk,
 } from "./tool-stream-handler";
 import { normalizeToolOutputForObservability } from "./output-normalizer";
+import {
+  applyToolsStreamToolStart,
+  resolveToolsStreamToolCall,
+} from "./tool-tracker";
+import type { ToolCallTrace } from "../..";
 import { testExports } from "./runner";
 import { createTurnRuntime } from "./turn-runtime";
 import type { DeepAgentTurnEvent } from "./events";
@@ -107,6 +112,58 @@ async function collectToolStreamEvents(
   }
   return events;
 }
+
+test("sub-agent producer is stamped on the tool trace and preserved across events", () => {
+  const toolCallsById = new Map<string, ToolCallTrace>();
+  const toolCallOrder: string[] = [];
+  const producer = {
+    kind: "subagent" as const,
+    taskCallId: "task-1",
+    subagentType: "explore",
+  };
+
+  const snapshot = resolveToolsStreamToolCall({
+    payload: {
+      event: "on_tool_start",
+      name: "grep",
+      toolCallId: "child-1",
+      input: { pattern: "foo" },
+    },
+    producer,
+    resolveToolCallSequence: () => 1,
+    toolCallOrder,
+    toolCallsById,
+  });
+  assert.ok(snapshot);
+  assert.deepEqual(toolCallsById.get("child-1")?.producer, producer);
+
+  // The apply* helpers spread the current trace, so the producer must survive a
+  // subsequent lifecycle event.
+  const next = applyToolsStreamToolStart({
+    currentToolCall: snapshot.currentToolCall,
+    normalizedInput: { pattern: "foo" },
+    toolCallId: "child-1",
+    toolCallsById,
+    toolName: "grep",
+  });
+  assert.deepEqual(next.producer, producer);
+});
+
+test("main-agent tool calls carry no producer tag", () => {
+  const toolCallsById = new Map<string, ToolCallTrace>();
+  resolveToolsStreamToolCall({
+    payload: {
+      event: "on_tool_start",
+      name: "read_file",
+      toolCallId: "main-1",
+      input: {},
+    },
+    resolveToolCallSequence: () => 1,
+    toolCallOrder: [],
+    toolCallsById,
+  });
+  assert.equal(toolCallsById.get("main-1")?.producer, undefined);
+});
 
 test("tool stream handler leaves generic tool logging to middleware", async () => {
   const prepared = createToolLoggingPreparedTurn();

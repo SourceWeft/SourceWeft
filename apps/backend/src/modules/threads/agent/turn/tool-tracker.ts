@@ -2,6 +2,7 @@ import type {
   PreparedThreadTurn,
   ThinkingStepTrace,
   ToolCallTrace,
+  ToolProducer,
 } from "../..";
 import { toObjectRecord } from "./content";
 import {
@@ -393,6 +394,7 @@ export type PromotedPendingToolStream = {
 export function resolveToolsStreamToolCall(input: {
   pendingToolStreamsByRunId?: Map<string, PendingToolStream>;
   payload: unknown;
+  producer?: ToolProducer;
   resolveToolCallSequence: (toolCallId: string) => number;
   toolCallOrder: string[];
   toolCallsById: Map<string, ToolCallTrace>;
@@ -447,12 +449,19 @@ export function resolveToolsStreamToolCall(input: {
       latencyMs: null,
       error: null,
       sequence: input.resolveToolCallSequence(toolCallId),
+      ...(input.producer ? { producer: input.producer } : {}),
     });
   }
 
   const currentToolCall = input.toolCallsById.get(toolCallId);
   if (!currentToolCall) {
     return null;
+  }
+  // A tool's first surfaced event can be an `on_tool_end` (no prior `on_tool_start`
+  // reached us), so backfill the producer onto an already-tracked trace too. The
+  // apply* helpers preserve it thereafter (they spread the current trace).
+  if (input.producer && !currentToolCall.producer) {
+    currentToolCall.producer = input.producer;
   }
 
   return {

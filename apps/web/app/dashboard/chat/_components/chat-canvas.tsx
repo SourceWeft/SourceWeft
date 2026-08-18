@@ -36,6 +36,7 @@ export type {
   ThinkingMode,
   ThinkingStepRecord,
   ToolCallRecord,
+  ToolProducer,
   TracePartRecord,
   VersionedMessageGroup,
 } from "./chat-canvas/types";

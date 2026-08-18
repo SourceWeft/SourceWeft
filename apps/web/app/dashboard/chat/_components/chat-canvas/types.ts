@@ -210,6 +210,19 @@ export type CitationRecord = {
   externalUri?: string;
 };
 
+/**
+ * Which agent produced a tool call. Mirrors the backend `ToolProducer`
+ * (threads/turn/types.ts). `main` is left implicit (absent); `subagent` tags a
+ * `task` delegate's tool call with the parent task id so the UI can group all of
+ * one delegate's calls — parallel and interleaved included — under a single
+ * Agent card. Populated only when sub-graph streaming is on server-side.
+ */
+export type ToolProducer = {
+  kind: "main" | "subagent";
+  subagentType?: string;
+  taskCallId?: string;
+};
+
 export type ToolCallRecord = {
   id: string;
   tool: string;
@@ -221,6 +234,7 @@ export type ToolCallRecord = {
   sequence?: number;
   approvalState?: "approved" | "rejected";
   approvalConfirmationId?: string;
+  producer?: ToolProducer;
 };
 
 export type MessageRenderBlock =
@@ -339,6 +353,7 @@ export type TracePartRecord =
       title?: string;
       approvalState?: ToolCallRecord["approvalState"];
       approvalConfirmationId?: string;
+      producer?: ToolProducer;
     }
   | {
       id: string;

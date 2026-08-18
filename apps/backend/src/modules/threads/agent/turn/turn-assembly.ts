@@ -820,14 +820,15 @@ export async function buildThreadAgentAssembly(
       selected_skill_count: prepared.enabledSkills.length,
     },
     streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
-    // NOTE: `subgraphs: true` is intentionally NOT set. Under it, deepagents
-    // moves the MAIN agent's own model/tool events to a non-empty namespace
-    // (depth 1: ["model_request:…"]) while a delegate's events sit at depth 2
-    // (["tools:…","model_request:…"]). Surfacing sub-agent execution that way
-    // means classifying by deepagents' internal node names — fragile and
-    // version-coupled — and a naive "namespace non-empty = sub-agent" rule would
-    // swallow the main agent's answer. Sub-agent activity stays observable via
-    // the child's tool-observability trace instead.
+    // `subgraphs: true` surfaces a `task` delegate's tool events (namespaced
+    // `["tools:<parentCallId>",…]`) so the UI can group each sub-agent's tool
+    // calls under its own card. Under it every chunk becomes
+    // `[namespace, mode, payload]`; the runner reshapes both forms and — the
+    // load-bearing guard — drops every sub-agent event EXCEPT `tools`, so a
+    // delegate's model text/reasoning/checkpoints/HITL updates can never pollute
+    // the main answer or the parent's bookkeeping (the concern that first kept
+    // this off). Kill switch: config.chat.agent.subgraphStreamingEnabled.
+    ...(config.chat.agent.subgraphStreamingEnabled ? { subgraphs: true } : {}),
     // Cancels the LLM stream and stops scheduling further steps when the run is
     // aborted; LangGraph propagates it to tools via config.signal.
     ...(abortSignal ? { signal: abortSignal } : {}),

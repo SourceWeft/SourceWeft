@@ -645,6 +645,7 @@ function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
     latencyMs: toolCall.latencyMs,
     approvalState: toolCall.approvalState,
     approvalConfirmationId: toolCall.approvalConfirmationId,
+    ...(toolCall.producer ? { producer: toolCall.producer } : {}),
   };
 }
 

@@ -30,6 +30,11 @@ import {
   getAttachmentLabel,
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+import {
+  Agent,
+  AgentContent,
+  AgentHeader,
+} from "@sourceweft/ui-web/components/ai-elements/agent";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
@@ -54,6 +59,10 @@ import {
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
+import {
+  partitionWorkflowBlocksBySubagent,
+  subagentDisplayName,
+} from "./subagent-grouping";
 import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
 import {
@@ -517,6 +526,14 @@ function AssistantMessageBody({
   });
   let didRenderWebResultsFallback = false;
 
+  function resolveWorkflowBlockProducer(block: AssistantWorkflowBlock) {
+    if (block.type !== "tool") {
+      return undefined;
+    }
+    return version.toolCalls?.find((tool) => tool.id === block.toolCallId)
+      ?.producer;
+  }
+
   function renderWorkflowBlockAsActivity(input: {
     block: AssistantWorkflowBlock;
     isRunning: boolean;
@@ -677,17 +694,43 @@ function AssistantMessageBody({
               data-assistant-activity-stack="true"
               key={segment.id}
             >
-              {segment.blocks.map((block, blockIndex) => (
-                <div key={block.id}>
-                  {renderWorkflowBlockAsActivity({
-                    block,
-                    isRunning:
-                      segment.id === lastWorkflowSegmentId &&
-                      isWorkflowRunning &&
-                      blockIndex === segment.blocks.length - 1,
-                  })}
-                </div>
-              ))}
+              {partitionWorkflowBlocksBySubagent(
+                segment.blocks,
+                resolveWorkflowBlockProducer,
+              ).map((item) => {
+                const lastBlockIndex = segment.blocks.length - 1;
+                const isBlockRunning = (blockIndex: number) =>
+                  segment.id === lastWorkflowSegmentId &&
+                  isWorkflowRunning &&
+                  blockIndex === lastBlockIndex;
+                if (item.kind === "agent-group") {
+                  return (
+                    <Agent key={item.key}>
+                      <AgentHeader
+                        name={subagentDisplayName(item.subagentType)}
+                      />
+                      <AgentContent className="space-y-1 p-3 pt-0">
+                        {item.entries.map((entry) => (
+                          <div key={entry.block.id}>
+                            {renderWorkflowBlockAsActivity({
+                              block: entry.block,
+                              isRunning: isBlockRunning(entry.index),
+                            })}
+                          </div>
+                        ))}
+                      </AgentContent>
+                    </Agent>
+                  );
+                }
+                return (
+                  <div key={item.block.id}>
+                    {renderWorkflowBlockAsActivity({
+                      block: item.block,
+                      isRunning: isBlockRunning(item.index),
+                    })}
+                  </div>
+                );
+              })}
             </div>
           );
         }

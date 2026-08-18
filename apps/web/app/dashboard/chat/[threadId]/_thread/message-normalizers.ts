@@ -21,6 +21,7 @@ import type {
   ReasoningTraceEventRecord,
   ThinkingStepRecord,
   ToolCallRecord,
+  ToolProducer,
   TracePartRecord,
 } from "../../_components/chat-canvas";
 import type { contentClient } from "../../../../../lib/sdk";
@@ -646,6 +647,23 @@ function normalizeToolCallRecord(
     approvalState: normalizeApprovalState(record.approvalState),
     approvalConfirmationId:
       toNullableString(record.approvalConfirmationId) ?? undefined,
+    ...(normalizeToolProducer(record.producer)
+      ? { producer: normalizeToolProducer(record.producer) }
+      : {}),
+  };
+}
+
+function normalizeToolProducer(value: unknown): ToolProducer | undefined {
+  const record = toObjectRecord(value);
+  if (!record || record.kind !== "subagent") {
+    return undefined;
+  }
+  const subagentType = toNullableString(record.subagentType);
+  const taskCallId = toNullableString(record.taskCallId);
+  return {
+    kind: "subagent",
+    ...(subagentType ? { subagentType } : {}),
+    ...(taskCallId ? { taskCallId } : {}),
   };
 }
 
@@ -1347,6 +1365,11 @@ function resolveToolCallFromStreamEvent(input: {
     approvalConfirmationId:
       normalizedToolCall?.approvalConfirmationId ??
       existing?.approvalConfirmationId,
+    ...(normalizedToolCall?.producer ?? existing?.producer
+      ? {
+          producer: normalizedToolCall?.producer ?? existing?.producer,
+        }
+      : {}),
   };
 }
 
