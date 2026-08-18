@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import Ansi from "ansi-to-react";
 import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import {
@@ -14,6 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { parseTerminalAnsi } from "./terminal-ansi";
 
 interface TerminalContextType {
   output: string;
@@ -187,6 +187,18 @@ export const TerminalClearButton = ({
 
 export type TerminalContentProps = HTMLAttributes<HTMLDivElement>;
 
+function TerminalAnsiText({ output }: { output: string }) {
+  return (
+    <code>
+      {parseTerminalAnsi(output).map((segment, index) => (
+        <span key={`${index}:${segment.content.length}`} style={segment.style}>
+          {segment.content}
+        </span>
+      ))}
+    </code>
+  );
+}
+
 export const TerminalContent = ({
   className,
   children,
@@ -212,7 +224,7 @@ export const TerminalContent = ({
     >
       {children ?? (
         <pre className="whitespace-pre-wrap break-words">
-          <Ansi>{output}</Ansi>
+          <TerminalAnsiText output={output} />
           {isStreaming && (
             <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-100" />
           )}

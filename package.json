@@ -40,7 +40,11 @@
       "node-notifier>uuid": "^11.1.1",
       "undici@5": "^6.28.0",
       "shiki@4": "4.0.2",
-      "@opentelemetry/propagator-jaeger": "^2.9.0"
+      "@opentelemetry/propagator-jaeger": "^2.9.0",
+      "tsup>esbuild": "^0.28.2",
+      "bundle-require>esbuild": "^0.28.2",
+      "@esbuild-kit/core-utils>esbuild": "^0.25.12",
+      "pptxgenjs>image-size": "-"
     },
     "peerDependencyRules": {
       "allowedVersions": {
