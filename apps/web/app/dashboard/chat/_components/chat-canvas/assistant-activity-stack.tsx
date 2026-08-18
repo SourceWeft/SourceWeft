@@ -109,6 +109,7 @@ function AssistantToolGroup({
                   availableCitations={availableCitations}
                   item={item}
                   key={item.key}
+                  nested
                   onCitationClick={onCitationClick}
                   onWorkfileClick={onWorkfileClick}
                   resolvedConfirmations={resolvedConfirmations}

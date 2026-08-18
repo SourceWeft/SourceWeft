@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot, ChevronDown, Loader2 } from "lucide-react";
 import {
   Task,
   TaskContent,
@@ -27,9 +28,19 @@ export function DelegateToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
 
   return (
     <Task>
-      <TaskTrigger
-        title={`Delegated to ${view.subagentType} · ${STATUS_LABEL[view.status]}`}
-      />
+      <TaskTrigger title={`Delegated to ${view.subagentType}`}>
+        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {view.status === "running" ? (
+            <Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" />
+          ) : (
+            <Bot className="size-4" />
+          )}
+          <p className="text-sm">
+            Delegated to {view.subagentType} · {STATUS_LABEL[view.status]}
+          </p>
+          <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       <TaskContent>
         {view.prompt.length > 0 ? (
           <TaskItem>{view.prompt}</TaskItem>

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
+  CircleDot,
   Lightbulb,
   Loader2,
 } from "lucide-react";
@@ -43,8 +44,17 @@ function ActivityDisclosureIcon({ isOpen }: { isOpen: boolean }) {
   );
 }
 
-function StepStatusIcon({ status }: { status: "pending" | "in_progress" | "completed" }) {
+function StepStatusIcon({
+  nested,
+  status,
+}: {
+  nested: boolean;
+  status: "pending" | "in_progress" | "completed";
+}) {
   if (status === "in_progress") {
+    if (nested) {
+      return <CircleDot className="size-3.5 text-primary" />;
+    }
     return (
       <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
     );
@@ -55,7 +65,13 @@ function StepStatusIcon({ status }: { status: "pending" | "in_progress" | "compl
   return <Circle className="size-3.5 text-muted-foreground/70" />;
 }
 
-function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { type: "step" }> }) {
+function AssistantStepRow({
+  item,
+  nested,
+}: {
+  item: Extract<AssistantActivityItem, { type: "step" }>;
+  nested: boolean;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const metadataKeys: Array<readonly [string, string]> = [
     ["sourceCount", "sources"],
@@ -83,7 +99,7 @@ function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { typ
         type="button"
       >
         <ActivityStatusCell>
-          <StepStatusIcon status={item.status} />
+          <StepStatusIcon nested={nested} status={item.status} />
         </ActivityStatusCell>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span className="truncate text-[13px] text-foreground/80">
@@ -170,6 +186,7 @@ export function AssistantActivitySegment({
   availableCitations,
   isStreaming = false,
   item,
+  nested = false,
   onCitationClick,
   onWorkfileClick,
   resolvedConfirmations,
@@ -177,6 +194,7 @@ export function AssistantActivitySegment({
   availableCitations?: CitationRecord[];
   isStreaming?: boolean;
   item: AssistantActivityItem;
+  nested?: boolean;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
@@ -186,7 +204,7 @@ export function AssistantActivitySegment({
   }
 
   if (item.type === "step") {
-    return <AssistantStepRow item={item} />;
+    return <AssistantStepRow item={item} nested={nested} />;
   }
 
   return (

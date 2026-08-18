@@ -5,11 +5,13 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
+  CircleDot,
   Clock3,
   Download,
   FileCode2,
   ListTree,
   Loader2,
+  SquareTerminal,
   Upload,
 } from "lucide-react";
 import {
@@ -20,24 +22,6 @@ import {
   CodeBlockHeader,
   CodeBlockTitle,
 } from "@sourceweft/ui-web/components/ai-elements/code-block";
-import {
-  Sandbox,
-  SandboxContent,
-  SandboxHeader,
-  SandboxTabContent,
-  SandboxTabs,
-  SandboxTabsBar,
-  SandboxTabsList,
-  SandboxTabsTrigger,
-} from "@sourceweft/ui-web/components/ai-elements/sandbox";
-import {
-  Terminal,
-  TerminalActions,
-  TerminalContent,
-  TerminalCopyButton,
-  TerminalHeader,
-  TerminalTitle,
-} from "@sourceweft/ui-web/components/ai-elements/terminal";
 import {
   Task,
   TaskContent,
@@ -142,7 +126,7 @@ function outputPlaceholder(input: {
 function OperationStatusIcon({ status }: { status: string | null }) {
   const normalized = status?.toLowerCase();
   if (normalized === "running") {
-    return <Loader2 className="size-3.5 animate-spin text-primary" />;
+    return <CircleDot className="size-3.5 text-primary" />;
   }
   if (normalized === "succeeded") {
     return <CheckCircle2 className="size-3.5 text-emerald-600" />;
@@ -223,6 +207,51 @@ function SandboxOperationActivity({
   );
 }
 
+function sandboxToolStatusKey(
+  state: ReturnType<typeof resolveSandboxToolUiState>,
+) {
+  switch (state) {
+    case "approval-requested":
+      return "needs-approval" as const;
+    case "input-available":
+      return "running" as const;
+    case "output-denied":
+      return "rejected" as const;
+    case "output-error":
+      return "failed" as const;
+    default:
+      return "done" as const;
+  }
+}
+
+const SANDBOX_STATUS_LABELS = {
+  done: "Done",
+  failed: "Failed",
+  "needs-approval": "Needs approval",
+  rejected: "Rejected",
+  running: "Running",
+} as const;
+
+function ExecuteStatusIcon({
+  statusKey,
+}: {
+  statusKey: ReturnType<typeof sandboxToolStatusKey>;
+}) {
+  if (statusKey === "running") {
+    return <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />;
+  }
+  if (statusKey === "failed") {
+    return <AlertTriangle className="size-3.5 text-destructive" />;
+  }
+  if (statusKey === "rejected") {
+    return <AlertTriangle className="size-3.5 text-orange-600" />;
+  }
+  if (statusKey === "needs-approval") {
+    return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
+  }
+  return <SquareTerminal className="size-3.5 text-muted-foreground/75" />;
+}
+
 function SandboxExecuteCard({
   children,
   contentClassName,
@@ -242,6 +271,7 @@ function SandboxExecuteCard({
     status: toolCall.status,
     toolName: toolCall.tool,
   });
+  const statusKey = sandboxToolStatusKey(state);
   const toolError = getSandboxToolSafeErrorMessage({
     error: toolCall.error,
     toolName: toolCall.tool,
@@ -250,22 +280,12 @@ function SandboxExecuteCard({
     resolvedConfirmations,
     toolCall,
   });
-  const preferredTab =
-    state === "approval-requested" ||
-    state === "input-available" ||
-    state === "output-denied"
-      ? "command"
-      : "output";
-  const [activeTab, setActiveTab] = useState(preferredTab);
-  const [isOpen, setIsOpen] = useState(defaultOpen ?? true);
+  const effectiveDefaultOpen = defaultOpen ?? statusKey !== "done";
+  const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
 
   useEffect(() => {
-    setActiveTab(preferredTab);
-  }, [preferredTab]);
-
-  useEffect(() => {
-    setIsOpen(defaultOpen ?? true);
-  }, [defaultOpen]);
+    setIsOpen(effectiveDefaultOpen);
+  }, [effectiveDefaultOpen]);
 
   if (!view) {
     return null;
@@ -276,9 +296,6 @@ function SandboxExecuteCard({
     output: toolCall.output,
     toolName: toolCall.tool,
   });
-  const title = duration
-    ? `Execute sandbox command · ${duration}`
-    : "Execute sandbox command";
   const failureMessage =
     toolError ??
     (view.resultFailed
@@ -287,137 +304,141 @@ function SandboxExecuteCard({
           toolName: toolCall.tool,
         }) ?? "The sandbox command could not be executed.")
       : null);
+  const hasDetails =
+    Boolean(view.command) ||
+    Boolean(view.output) ||
+    Boolean(failureMessage) ||
+    operationTimeline.length > 0 ||
+    Boolean(confirmation.message) ||
+    Boolean(toolStep?.detail) ||
+    Boolean(children);
 
   return (
-    <Sandbox className="mb-1" onOpenChange={setIsOpen} open={isOpen}>
-      <SandboxHeader state={state} title={title} />
-      <SandboxContent className={contentClassName}>
-        <SandboxTabs onValueChange={setActiveTab} value={activeTab}>
-          <SandboxTabsBar>
-            <SandboxTabsList>
-              <SandboxTabsTrigger value="command">Command</SandboxTabsTrigger>
-              <SandboxTabsTrigger value="output">Output</SandboxTabsTrigger>
-              {operationTimeline.length > 0 ? (
-                <SandboxTabsTrigger value="activity">
-                  Activity
-                </SandboxTabsTrigger>
-              ) : null}
-            </SandboxTabsList>
-          </SandboxTabsBar>
-          <SandboxTabContent className="space-y-3 p-3" value="command">
-            {view.command ? (
-              <CodeBlock
-                className="[&_pre]:max-h-80 [&_pre]:overflow-auto"
-                code={view.command}
-                language="bash"
-              >
-                <CodeBlockHeader>
-                  <CodeBlockTitle>
-                    <FileCode2 className="size-3.5" />
-                    <CodeBlockFilename>command</CodeBlockFilename>
-                  </CodeBlockTitle>
-                  <CodeBlockActions>
-                    <CodeBlockCopyButton aria-label="Copy sandbox command" />
-                  </CodeBlockActions>
-                </CodeBlockHeader>
-              </CodeBlock>
-            ) : (
-              <p className="text-muted-foreground text-sm">
-                Command input is unavailable.
-              </p>
-            )}
-            {confirmation.message ? (
-              <p className="text-muted-foreground text-sm">
-                {confirmation.message}
-              </p>
-            ) : null}
-            {toolStep?.detail ? (
-              <p className="break-words text-muted-foreground text-sm">
-                {toolStep.detail}
-              </p>
-            ) : null}
-          </SandboxTabContent>
-          <SandboxTabContent className="space-y-3 p-3" value="output">
-            {failureMessage ? (
-              <div
-                className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive text-sm"
-                role="alert"
-              >
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <span className="break-words">{failureMessage}</span>
-              </div>
-            ) : null}
-            {view.output ? (
-              <Terminal className="rounded-md" output={view.output}>
-                <TerminalHeader>
-                  <TerminalTitle>Command output</TerminalTitle>
-                  <div className="flex min-w-0 items-center gap-2">
-                    {view.exitCode !== null ? (
-                      <span
-                        className={cn(
-                          "text-xs",
-                          view.exitCode === 0
-                            ? "text-emerald-400"
-                            : "text-red-400",
-                        )}
-                      >
-                        Exit {view.exitCode}
-                      </span>
-                    ) : null}
-                    {view.truncated ? (
-                      <span className="text-amber-300 text-xs">Truncated</span>
-                    ) : null}
-                    <TerminalActions>
-                      <TerminalCopyButton aria-label="Copy sandbox output" />
-                    </TerminalActions>
-                  </div>
-                </TerminalHeader>
-                <TerminalContent />
-              </Terminal>
-            ) : failureMessage ? null : (
-              <div className="rounded-md border border-dashed p-4 text-muted-foreground text-sm">
-                {outputPlaceholder({
-                  state,
-                  toolError,
-                  viewMessage: view.message,
-                })}
-              </div>
-            )}
-            {view.recoverable !== null ? (
-              <p className="text-muted-foreground text-xs">
-                Recoverable: {view.recoverable ? "Yes" : "No"}
-              </p>
-            ) : null}
-          </SandboxTabContent>
-          {operationTimeline.length > 0 ? (
-            <SandboxTabContent className="p-3" value="activity">
-              <SandboxOperationActivity items={operationTimeline} />
-            </SandboxTabContent>
+    <div className="group text-muted-foreground transition-colors hover:text-foreground">
+      <button
+        aria-expanded={hasDetails ? isOpen : undefined}
+        className={ASSISTANT_ACTIVITY_ROW_CLASS}
+        disabled={!hasDetails}
+        onClick={() => setIsOpen((value) => !value)}
+        type="button"
+      >
+        <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
+          <ExecuteStatusIcon statusKey={statusKey} />
+        </span>
+        <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
+          <span className="truncate text-[13px] text-foreground/80">
+            Execute sandbox command
+          </span>
+          {duration ? (
+            <span className="shrink-0 text-muted-foreground/60 text-xs">
+              {duration}
+            </span>
           ) : null}
-        </SandboxTabs>
-        {children ? (
-          <div className="space-y-1 border-t p-3">{children}</div>
+          {statusKey !== "done" ? (
+            <span className="shrink-0 text-muted-foreground/60 text-xs">
+              {SANDBOX_STATUS_LABELS[statusKey]}
+            </span>
+          ) : null}
+        </span>
+        {hasDetails ? (
+          <span className="grid size-4 shrink-0 place-items-center">
+            <ChevronRight
+              className={cn(
+                "size-3 text-muted-foreground/50 transition-transform",
+                isOpen && "rotate-90",
+              )}
+            />
+          </span>
         ) : null}
-      </SandboxContent>
-    </Sandbox>
+      </button>
+      {isOpen && hasDetails ? (
+        <div className={cn(ASSISTANT_ACTIVITY_DETAIL_CLASS, contentClassName)}>
+          {view.command ? (
+            <CodeBlock
+              className="[&_pre]:max-h-72 [&_pre]:overflow-auto"
+              code={view.command}
+              language="bash"
+            >
+              <CodeBlockHeader>
+                <CodeBlockTitle>
+                  <FileCode2 className="size-3.5" />
+                  <CodeBlockFilename>command</CodeBlockFilename>
+                </CodeBlockTitle>
+                <CodeBlockActions>
+                  <CodeBlockCopyButton aria-label="Copy sandbox command" />
+                </CodeBlockActions>
+              </CodeBlockHeader>
+            </CodeBlock>
+          ) : (
+            <p className="break-words">Command input is unavailable.</p>
+          )}
+          {failureMessage ? (
+            <div
+              className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive text-xs"
+              role="alert"
+            >
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span className="break-words">{failureMessage}</span>
+            </div>
+          ) : null}
+          {view.output ? (
+            <div className="overflow-hidden rounded-md border bg-background">
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/80 px-3 py-1.5 text-muted-foreground text-xs">
+                <span className="flex items-center gap-2">
+                  <SquareTerminal className="size-3.5" />
+                  <span className="font-mono">output</span>
+                </span>
+                <span className="flex items-center gap-2 font-mono">
+                  {view.exitCode !== null ? (
+                    <span
+                      className={cn(
+                        view.exitCode === 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-red-600 dark:text-red-400",
+                      )}
+                    >
+                      exit {view.exitCode}
+                    </span>
+                  ) : null}
+                  {view.truncated ? (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      truncated
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[13px] text-foreground leading-relaxed">
+                {view.output}
+              </pre>
+            </div>
+          ) : failureMessage ? null : (
+            <div className="rounded-md border border-dashed p-3 text-muted-foreground text-xs">
+              {outputPlaceholder({
+                state,
+                toolError,
+                viewMessage: view.message,
+              })}
+            </div>
+          )}
+          {view.recoverable !== null ? (
+            <p className="text-muted-foreground text-xs">
+              Recoverable: {view.recoverable ? "Yes" : "No"}
+            </p>
+          ) : null}
+          {confirmation.message ? (
+            <p className="break-words">{confirmation.message}</p>
+          ) : null}
+          {toolStep?.detail ? (
+            <p className="break-words">{toolStep.detail}</p>
+          ) : null}
+          {operationTimeline.length > 0 ? (
+            <SandboxOperationActivity items={operationTimeline} />
+          ) : null}
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
-}
-
-function transferStatusKey(
-  state: ReturnType<typeof resolveSandboxToolUiState>,
-) {
-  switch (state) {
-    case "approval-requested":
-      return "needs-approval" as const;
-    case "input-available":
-      return "running" as const;
-    case "output-denied":
-      return "rejected" as const;
-    case "output-error":
-      return "failed" as const;
-    default:
-      return "done" as const;
-  }
 }
 
 function TransferStatusIcon({
@@ -425,10 +446,10 @@ function TransferStatusIcon({
   statusKey,
 }: {
   direction: "collect" | "prepare";
-  statusKey: ReturnType<typeof transferStatusKey>;
+  statusKey: ReturnType<typeof sandboxToolStatusKey>;
 }) {
   if (statusKey === "running") {
-    return <Loader2 className="size-3.5 animate-spin text-primary" />;
+    return <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />;
   }
   if (statusKey === "failed") {
     return <AlertTriangle className="size-3.5 text-destructive" />;
@@ -445,14 +466,6 @@ function TransferStatusIcon({
     <Download className="size-3.5 text-muted-foreground/75" />
   );
 }
-
-const TRANSFER_STATUS_LABELS = {
-  done: "Done",
-  failed: "Failed",
-  "needs-approval": "Needs approval",
-  rejected: "Rejected",
-  running: "Running",
-} as const;
 
 function SandboxTransferCard({
   children,
@@ -474,7 +487,7 @@ function SandboxTransferCard({
     status: toolCall.status,
     toolName: toolCall.tool,
   });
-  const statusKey = transferStatusKey(state);
+  const statusKey = sandboxToolStatusKey(state);
   const confirmation = getConfirmationDisplay({
     resolvedConfirmations,
     toolCall,
@@ -542,7 +555,7 @@ function SandboxTransferCard({
           ) : null}
           {statusKey !== "done" ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
-              {TRANSFER_STATUS_LABELS[statusKey]}
+              {SANDBOX_STATUS_LABELS[statusKey]}
             </span>
           ) : null}
         </span>

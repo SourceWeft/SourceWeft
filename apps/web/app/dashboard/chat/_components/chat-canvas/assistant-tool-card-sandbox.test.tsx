@@ -54,7 +54,7 @@ afterEach(async () => {
   container = null;
 });
 
-test("AssistantToolCard renders execute with Sandbox command and terminal tabs", async () => {
+test("AssistantToolCard renders execute command and output together", async () => {
   const element = await renderToolCard({
     toolCall: toolCall({
       input: { command: "pnpm test" },
@@ -67,16 +67,13 @@ test("AssistantToolCard renders execute with Sandbox command and terminal tabs",
   });
 
   assert.match(element.textContent ?? "", /Execute sandbox command/);
-  assert.match(element.textContent ?? "", /Completed/);
-  assert.match(element.textContent ?? "", /Command output/);
+  assert.match(element.textContent ?? "", /pnpm test/);
   assert.match(element.textContent ?? "", /tests failed/);
-  assert.match(element.textContent ?? "", /Exit 1/);
-  assert.match(element.textContent ?? "", /Truncated/);
-
-  assert.doesNotMatch(element.textContent ?? "", /pnpm test/);
+  assert.match(element.textContent ?? "", /exit 1/);
+  assert.match(element.textContent ?? "", /truncated/);
 });
 
-test("AssistantToolCard defaults running execute calls to the command tab", async () => {
+test("AssistantToolCard shows the running execute command with pending output", async () => {
   const element = await renderToolCard({
     toolCall: toolCall({
       input: { command: "pnpm build" },
@@ -87,13 +84,13 @@ test("AssistantToolCard defaults running execute calls to the command tab", asyn
   assert.match(element.textContent ?? "", /Running/);
   assert.match(element.textContent ?? "", /pnpm build/);
   assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
-  assert.doesNotMatch(
+  assert.match(
     element.textContent ?? "",
     /Command is running\. Output will appear/,
   );
 });
 
-test("AssistantToolCard renders persisted sandbox operations in an Activity task", async () => {
+test("AssistantToolCard renders persisted sandbox operations", async () => {
   const element = await renderToolCard({
     toolCall: toolCall({
       input: { command: "printf done" },
@@ -120,16 +117,6 @@ test("AssistantToolCard renders persisted sandbox operations in an Activity task
       },
     }),
   });
-  const activityTab = [...element.querySelectorAll("button")].find(
-    (button) => button.textContent === "Activity",
-  );
-  assert.ok(activityTab);
-
-  await act(async () => {
-    activityTab.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
-    );
-  });
 
   assert.match(element.textContent ?? "", /Recorded operations/);
   assert.match(element.textContent ?? "", /Created sandbox/);
@@ -151,7 +138,7 @@ test("AssistantToolCard renders recoverable execute preflight failures as errors
     }),
   });
 
-  assert.match(element.textContent ?? "", /Error/);
+  assert.match(element.textContent ?? "", /Failed/);
   assert.doesNotMatch(element.textContent ?? "", /Completed/);
   assert.match(
     element.textContent ?? "",
@@ -311,7 +298,7 @@ test("AssistantToolCard uses safe messages for transfer failures", async () => {
   assert.doesNotMatch(element.textContent ?? "", /internal storage detail/);
 });
 
-test("AssistantToolCard defaults denied execute calls to the command tab", async () => {
+test("AssistantToolCard renders denied execute calls with the command", async () => {
   const element = await renderToolCard({
     toolCall: toolCall({
       approvalState: "rejected",
@@ -319,7 +306,7 @@ test("AssistantToolCard defaults denied execute calls to the command tab", async
     }),
   });
 
-  assert.match(element.textContent ?? "", /Denied/);
+  assert.match(element.textContent ?? "", /Rejected/);
   assert.match(element.textContent ?? "", /curl https:\/\/example\.com/);
   assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
 });

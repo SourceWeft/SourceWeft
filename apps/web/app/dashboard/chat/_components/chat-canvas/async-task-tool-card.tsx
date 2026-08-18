@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot, ChevronDown, Loader2 } from "lucide-react";
 import {
   Task,
   TaskContent,
@@ -47,7 +48,17 @@ export function AsyncTaskToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
 
   return (
     <Task>
-      <TaskTrigger title={title(view)} />
+      <TaskTrigger title={title(view)}>
+        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {view.status === "running" || view.reportedStatus === "running" ? (
+            <Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" />
+          ) : (
+            <Bot className="size-4" />
+          )}
+          <p className="text-sm">{title(view)}</p>
+          <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       <TaskContent>
         {view.instructions ? <TaskItem>{view.instructions}</TaskItem> : null}
         {view.verb === "check" ? (
