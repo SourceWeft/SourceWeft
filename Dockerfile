@@ -50,7 +50,8 @@ ENV NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=${NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED}
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
-RUN pnpm --filter web build
+RUN --mount=type=cache,id=sourceweft-next-cache,target=/app/apps/web/.next/cache,sharing=locked \
+  pnpm --filter web build
 # The backend build runs tsc over the whole workspace graph; the default heap
 # ceiling OOMs on CI runners (exit 134).
 RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm --filter @sourceweft/backend build

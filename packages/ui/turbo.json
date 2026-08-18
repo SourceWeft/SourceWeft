@@ -13,6 +13,9 @@
     "dev": {
       "with": ["dev:styles", "dev:components"]
     },
+    "dev:fast": {
+      "with": ["dev:styles", "dev:components"]
+    },
     "dev:styles": {
       "cache": false,
       "persistent": true

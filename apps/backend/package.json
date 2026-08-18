@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm run check-types && tsup && node scripts/copy-runtime-assets.mjs",
+    "build": "pnpm run check-types:build && tsup && node scripts/copy-runtime-assets.mjs",
     "dev": "concurrently -k -n api,worker,scheduler -c cyan,magenta,yellow \"pnpm run dev:api\" \"pnpm run dev:worker\" \"pnpm run dev:scheduler\"",
+    "dev:fast": "pnpm run dev:api",
     "dev:api": "NODE_ENV=development tsx watch src/api/main.ts",
     "dev:worker": "NODE_ENV=development tsx watch src/worker/main.ts",
     "dev:scheduler": "NODE_ENV=development tsx watch src/scheduler/main.ts",
@@ -27,7 +28,8 @@
     "creem:product:create": "tsx src/scripts/create-creem-product.ts",
     "creem:product:delete": "tsx src/scripts/delete-creem-product.ts",
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "check-types:build": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.67",

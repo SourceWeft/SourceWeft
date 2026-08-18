@@ -4,6 +4,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --continue --filter=@sourceweft/ui-web --filter=web --filter=@sourceweft/backend",
+    "dev:fast": "turbo run dev:fast --filter=@sourceweft/ui-web --filter=web --filter=@sourceweft/backend",
     "dev:web": "turbo run dev --filter=@sourceweft/ui-web --filter=web",
     "dev:backend": "pnpm --filter @sourceweft/backend dev",
     "dev:chrome": "pnpm --filter @sourceweft/extension dev",
@@ -13,6 +14,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "check-types": "turbo run check-types",
+    "clean:web-cache": "node scripts/clean-web-cache.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {

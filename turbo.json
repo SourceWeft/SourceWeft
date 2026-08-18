@@ -6,13 +6,20 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "tsconfig*.tsbuildinfo"
+      ]
     },
     "lint": {
       "dependsOn": ["^lint"]
     },
     "check-types": {
-      "dependsOn": ["^check-types", "^build"]
+      "dependsOn": ["^check-types", "^build"],
+      "outputs": ["tsconfig*.tsbuildinfo", ".next/types/**"]
     },
     "test": {
       "dependsOn": ["^build"],
@@ -27,6 +34,10 @@
       "outputs": []
     },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:fast": {
       "cache": false,
       "persistent": true
     }

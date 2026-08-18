@@ -37,6 +37,7 @@ yarn-error.log*
 
 # turbo
 .turbo
+*.tsbuildinfo
 
 # extension (wxt)
 .wxt/
