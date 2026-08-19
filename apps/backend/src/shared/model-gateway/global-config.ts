@@ -32,6 +32,14 @@ export type GlobalGatewayEntry = {
     kinds?: Array<
       "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "image" | "video"
     >;
+    /**
+     * Optional discovery-format override. Defaults to the provider-kind's
+     * generic OpenAI `/models` shape (id-only, priced from LiteLLM). Set to
+     * "orcarouter" to parse OrcaRouter's richer catalog (inline pricing,
+     * `supported_endpoint_types`, `architecture`) — reused across an
+     * openai-compatible provider without a first-class provider kind.
+     */
+    format?: "orcarouter";
   };
 };
 
@@ -712,6 +720,10 @@ function parseGatewayEntry(
             (entry.modelCatalog as Record<string, unknown>).kinds,
             `gateways[${index}].modelCatalog.kinds`,
           ),
+          ...((entry.modelCatalog as Record<string, unknown>).format ===
+          "orcarouter"
+            ? { format: "orcarouter" as const }
+            : {}),
         }
       : undefined;
 

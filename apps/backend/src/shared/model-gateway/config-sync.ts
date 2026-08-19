@@ -558,7 +558,7 @@ async function loadDynamicCatalogProfiles(input: {
 
     try {
       const candidates = await discoverGatewayCatalog({
-        gateway,
+        gateway: { ...gateway, catalogFormat: catalog.format },
         kinds: catalog.kinds,
         litellmData: litellmData ?? undefined,
       });

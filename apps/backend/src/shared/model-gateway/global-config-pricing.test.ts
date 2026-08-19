@@ -536,12 +536,15 @@ test("loadGlobalModelGatewayConfig allows omitted rerank profiles", async () => 
   assert.deepEqual(loaded?.rerankProfiles, []);
 });
 
-test("default global config is OpenRouter-only with OSS default models", async () => {
+test("default global config routes through OpenRouter with a dormant OrcaRouter gateway", async () => {
   const loaded = await loadGlobalModelGatewayConfig(
     resolve("config/model-gateway.global.json"),
   );
   const openRouterGateway = loaded?.gateways.find(
     (entry) => entry.slug === "openrouter-default",
+  );
+  const orcaRouterGateway = loaded?.gateways.find(
+    (entry) => entry.slug === "orcarouter-default",
   );
   const chatDefault = loaded?.chatProfiles.find(
     (entry) => entry.profileAlias === "chat-default",
@@ -555,8 +558,23 @@ test("default global config is OpenRouter-only with OSS default models", async (
 
   assert.deepEqual(
     loaded?.gateways.map((entry) => entry.slug),
-    ["openrouter-default"],
+    ["openrouter-default", "orcarouter-default"],
   );
+  // OrcaRouter ships alongside OpenRouter but dormant: it is an openai-compatible
+  // provider with the richer catalog format, inactive until a deployment sets
+  // ORCAROUTER_API_KEY and flips isActive.
+  assert.equal(orcaRouterGateway?.isActive, false);
+  assert.equal(orcaRouterGateway?.isDefault, false);
+  assert.equal(orcaRouterGateway?.providerKind, "openai-compatible");
+  assert.equal(orcaRouterGateway?.providerName, "orcarouter");
+  assert.equal(orcaRouterGateway?.modelCatalog?.format, "orcarouter");
+  assert.deepEqual(orcaRouterGateway?.modelCatalog?.kinds, [
+    "chat",
+    "vision",
+    "embedding",
+    "image",
+    "tts",
+  ]);
   assert.deepEqual(openRouterGateway?.defaultHeaders, {
     "X-OpenRouter-Title": "SourceWeft",
     "X-Title": "SourceWeft",

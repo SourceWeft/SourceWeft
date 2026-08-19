@@ -18,6 +18,7 @@ import { OpenAICompatibleAsrTransport } from "./openai-compatible-asr";
 import { OpenAICompatibleChatAdapter } from "./openai-compatible-chat";
 import { OpenAICompatibleImageGenerationTransport } from "./openai-compatible-images";
 import { OpenAICompatibleRerankTransport } from "./openai-compatible-rerank";
+import { OpenAICompatibleTtsTransport } from "./openai-compatible-tts";
 import { OpenRouterChatAdapter } from "./openrouter-chat";
 import { OpenRouterImageGenerationTransport } from "./openrouter-images";
 import { OpenRouterTtsTransport } from "./openrouter-tts";
@@ -42,6 +43,7 @@ const openAICompatibleEmbeddings = new OpenAICompatibleEmbeddingsAdapter();
 const openAICompatibleRerank = new OpenAICompatibleRerankTransport();
 const openAICompatibleAsr = new OpenAICompatibleAsrTransport();
 const openAICompatibleImages = new OpenAICompatibleImageGenerationTransport();
+const openAICompatibleTts = new OpenAICompatibleTtsTransport();
 const deepInfraImages = new DeepInfraImagesGenerationTransport();
 const openRouterImages = new OpenRouterImageGenerationTransport();
 const openRouterTts = new OpenRouterTtsTransport();
@@ -96,6 +98,8 @@ const asrTransports = new Map<ProviderKind, AsrTransport>([
 ]);
 
 const ttsTransports = new Map<ProviderKind, TtsTransport>([
+  ["openai-compatible", openAICompatibleTts],
+  ["openai", openAICompatibleTts],
   ["openrouter", openRouterTts],
   ["deepinfra", deepInfraTts],
 ]);

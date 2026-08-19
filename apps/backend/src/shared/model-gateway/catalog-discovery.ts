@@ -43,6 +43,12 @@ export type CatalogDiscoveryGateway = {
   apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
   supports: string[];
+  /**
+   * Discovery-format override (from `modelCatalog.format`). "orcarouter" routes
+   * an openai-compatible gateway through {@link discoverOrcaRouterCatalog}
+   * instead of the LiteLLM-priced generic `/models` path.
+   */
+  catalogFormat?: "orcarouter";
 };
 
 
@@ -358,6 +364,138 @@ async function discoverOpenRouterCatalog(input: {
   return items;
 }
 
+// OrcaRouter tags every text endpoint "openai", so a TTS model is
+// indistinguishable from chat by `supported_endpoint_types` — only the id
+// carries the signal (openai/tts-1, gpt-4o-mini-tts, gemini-*-tts, ...).
+const ORCAROUTER_TTS_PATTERN = /(^|[/-])tts(-|$)/;
+
+// OrcaRouter's catalog does not advertise per-model `supported_parameters`, so
+// reasoning support can't be read off the payload the way OpenRouter's can.
+// We stamp `reasoning_effort` only for the documented reasoning families;
+// anything unmatched falls back to the native `-{effort}` model-name suffix.
+const ORCAROUTER_REASONING_PATTERNS: RegExp[] = [
+  /openai\/o[134](\b|-)/, // o1 / o3 / o4-mini families
+  /openai\/gpt-5[\w.]*-pro/, // gpt-5-pro / gpt-5.x-pro family
+  /anthropic\/claude-(opus|sonnet)-4/, // Claude 4.x extended thinking
+  /google\/gemini-(2\.5|3)/, // Gemini 2.5 / 3.x thinking
+  /deepseek.*reasoner/,
+  /grok.*(reasoning|-3-mini)/,
+];
+
+function isOrcaRouterReasoningModel(modelId: string) {
+  const id = modelId.toLowerCase();
+  return ORCAROUTER_REASONING_PATTERNS.some((pattern) => pattern.test(id));
+}
+
+async function discoverOrcaRouterCatalog(input: {
+  gateway: CatalogDiscoveryGateway;
+  kinds?: Set<CatalogModelKind>;
+}) {
+  const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
+    headers: {
+      ...(input.gateway.defaultHeaders ?? {}),
+      ...buildAuthHeaders(input.gateway),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load OrcaRouter model catalog: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as { data?: unknown };
+  const data = Array.isArray(payload.data) ? payload.data : [];
+  const items: CatalogModelCandidate[] = [];
+
+  for (const rawModel of data) {
+    const model = toObjectRecord(rawModel);
+    const modelId = typeof model?.id === "string" ? model.id.trim() : "";
+    if (!modelId) {
+      continue;
+    }
+
+    const architecture = toObjectRecord(model?.architecture) ?? {};
+    const topProvider = toObjectRecord(model?.top_provider);
+    const endpointTypes = toStringArray(model?.supported_endpoint_types);
+    const inputModalities = toStringArray(architecture.input_modalities);
+    const outputModalities = toStringArray(architecture.output_modalities);
+    const hasImageInput = inputModalities.includes("image");
+    // Text-only endpoints (chat, tts, embeddings) leave output_modalities empty
+    // in this catalog; treat "unset" as text so they are not silently dropped.
+    const hasTextOutput =
+      outputModalities.length === 0 || outputModalities.includes("text");
+    const isEmbedding = endpointTypes.includes("embeddings");
+    const isImage =
+      endpointTypes.includes("image-generation") ||
+      outputModalities.includes("image");
+    const isVideo =
+      endpointTypes.includes("openai-video") ||
+      outputModalities.includes("video");
+    const isTts = ORCAROUTER_TTS_PATTERN.test(modelId.toLowerCase());
+    const isReasoning =
+      !isEmbedding && !isImage && !isTts && isOrcaRouterReasoningModel(modelId);
+
+    const displayName =
+      typeof model?.name === "string" && model.name.trim().length > 0
+        ? model.name.trim()
+        : modelId;
+    const supportedParameters = isReasoning ? ["reasoning_effort"] : [];
+    const common = {
+      architecture,
+      contextLength:
+        toFiniteNumber(model?.context_length) ??
+        toFiniteNumber(topProvider?.context_length),
+      displayName,
+      maxCompletionTokens:
+        toFiniteNumber(model?.max_completion_tokens) ??
+        toFiniteNumber(topProvider?.max_completion_tokens),
+      modelId,
+      // OrcaRouter's inline pricing uses the same prompt/completion keys as
+      // OpenRouter; static price is a fallback — runtime usage.cost is primary.
+      pricing: parseOpenRouterPricing(model?.pricing),
+      providerCatalogGatewaySlug: input.gateway.slug,
+      providerCatalogSource: "orcarouter-models",
+      supportedEfforts: normalizeSupportedEfforts(supportedParameters),
+      supportedParameters,
+    };
+
+    const push = (
+      kind: CatalogModelKind,
+      extra: Partial<CatalogModelCandidate> = {},
+    ) => {
+      if (
+        !kindAllowed(kind, input.kinds) ||
+        !providerSupportsKind(input.gateway, kind)
+      ) {
+        return;
+      }
+      items.push({ ...common, kind, ...extra });
+    };
+
+    if (isVideo) {
+      continue;
+    }
+    if (isImage) {
+      push("image");
+      continue;
+    }
+    if (isEmbedding) {
+      push("embedding");
+      continue;
+    }
+    if (isTts) {
+      push("tts");
+      continue;
+    }
+    if (hasTextOutput) {
+      if (hasImageInput) {
+        push("vision", { supportsImageInput: true });
+      }
+      push("chat");
+    }
+  }
+
+  return items;
+}
+
 async function discoverOpenAICompatibleCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
@@ -405,6 +543,10 @@ export async function discoverGatewayCatalog(input: {
       kinds,
       litellmData: input.litellmData,
     });
+  }
+
+  if (input.gateway.catalogFormat === "orcarouter") {
+    return discoverOrcaRouterCatalog({ gateway: input.gateway, kinds });
   }
 
   const litellmData = input.litellmData ?? await fetchLiteLLMPricing(config.litellmPricingUrl);

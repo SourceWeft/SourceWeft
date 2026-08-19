@@ -141,6 +141,57 @@ test("tts.speech sends DeepInfra OpenAI-compatible speech request", async () => 
   assert.equal(result.mimeType, "audio/wav");
 });
 
+test("tts.speech sends OpenAI-compatible speech request with top-level instructions", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return audioResponse("audio/mpeg");
+    },
+    providers: {
+      orcarouter: {
+        kind: "openai-compatible",
+        baseUrl: "https://api.orcarouter.ai/v1",
+        apiKey: "sk-orca-key",
+      },
+    },
+    modelRoutes: {
+      "tts-default": {
+        strategy: "priority",
+        targets: [
+          { provider: "orcarouter", model: "openai/gpt-4o-mini-tts", priority: 1 },
+        ],
+      },
+    },
+  });
+
+  const result = await gateway.tts.speech({
+    model: "tts-default",
+    input: "Hello from SourceWeft",
+    voice: "alloy",
+    instructions: "Use a crisp narration voice.",
+    responseFormat: "mp3",
+    extraBody: { sample_rate: 24000 },
+  });
+
+  assert.equal(requests[0]?.url, "https://api.orcarouter.ai/v1/audio/speech");
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string>)?.Authorization,
+    "Bearer sk-orca-key",
+  );
+  // OrcaRouter takes OpenAI-native top-level instructions — no provider wrapper.
+  assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
+    model: "openai/gpt-4o-mini-tts",
+    input: "Hello from SourceWeft",
+    voice: "alloy",
+    response_format: "mp3",
+    instructions: "Use a crisp narration voice.",
+    sample_rate: 24000,
+  });
+  assert.equal(result.provider, "orcarouter");
+  assert.equal(result.mimeType, "audio/mpeg");
+});
+
 test("OpenRouter TTS supports custom API key headers", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
   const gateway = createModelGateway({

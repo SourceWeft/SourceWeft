@@ -128,6 +128,102 @@ test("OpenRouter catalog discovery sends attribution headers", async () => {
   assert.equal(headers["HTTP-Referer"], "https://sourceweft.com");
 });
 
+test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", async () => {
+  const models = [
+    {
+      id: "openai/gpt-4o-mini",
+      name: "OpenAI: GPT-4o-mini",
+      supported_endpoint_types: ["openai", "openai-response"],
+      context_length: 128000,
+      max_completion_tokens: 16384,
+      architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+      pricing: { prompt: "0.00000015", completion: "0.0000006" },
+    },
+    {
+      id: "anthropic/claude-opus-4.6",
+      supported_endpoint_types: ["openai", "anthropic"],
+      context_length: 200000,
+      architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+      pricing: { prompt: "0.000015", completion: "0.000075" },
+    },
+    {
+      id: "deepseek/deepseek-v4",
+      supported_endpoint_types: ["openai"],
+      architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+      pricing: { prompt: "0.0000003", completion: "0.0000012" },
+    },
+    {
+      id: "openai/text-embedding-3-small",
+      supported_endpoint_types: ["embeddings"],
+      pricing: { prompt: "0.00000002", completion: "0" },
+    },
+    {
+      id: "openai/gpt-image-1",
+      supported_endpoint_types: ["image-generation"],
+      architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+    },
+    {
+      id: "openai/tts-1",
+      supported_endpoint_types: ["openai"],
+    },
+    {
+      id: "kling/kling-3",
+      supported_endpoint_types: ["openai-video"],
+      architecture: { input_modalities: ["text"], output_modalities: ["video"] },
+    },
+  ];
+
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ object: "list", data: models }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    }),
+  );
+
+  const candidates = await discoverGatewayCatalog({
+    gateway: {
+      slug: "orcarouter-default",
+      providerName: "orcarouter",
+      providerKind: "openai-compatible",
+      catalogFormat: "orcarouter",
+      baseUrl: "https://api.orcarouter.ai/v1",
+      apiKey: "sk-orca-test",
+      supports: ["chat", "embeddings", "image", "tts", "tool_calling"],
+    },
+  });
+
+  // Hits the gateway's own /models with bearer auth (not the OpenRouter URL).
+  assert.equal(fetchMock.mock.calls.length, 1);
+  assert.equal(fetchMock.mock.calls[0]?.[0], "https://api.orcarouter.ai/v1/models");
+  const headers = (fetchMock.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>;
+  assert.equal(headers.Authorization, "Bearer sk-orca-test");
+
+  const byId = (id: string, kind: string) =>
+    candidates.find((c) => c.modelId === id && c.kind === kind);
+
+  // Modality classification.
+  assert.ok(byId("openai/text-embedding-3-small", "embedding"), "embedding classified");
+  assert.ok(byId("openai/gpt-image-1", "image"), "image classified");
+  assert.ok(byId("openai/tts-1", "tts"), "tts classified by id heuristic");
+  assert.ok(byId("openai/gpt-4o-mini", "vision"), "vision from image input");
+  assert.ok(byId("openai/gpt-4o-mini", "chat"), "chat emitted");
+  assert.ok(byId("deepseek/deepseek-v4", "chat"), "text-only chat");
+  // Video is dropped entirely.
+  assert.equal(candidates.some((c) => c.modelId === "kling/kling-3"), false);
+
+  // Reasoning family gets reasoning_effort; a plain chat model does not.
+  const opus = byId("anthropic/claude-opus-4.6", "chat");
+  assert.deepEqual(opus?.supportedParameters, ["reasoning_effort"]);
+  assert.ok((opus?.supportedEfforts?.length ?? 0) > 0);
+  const gpt = byId("openai/gpt-4o-mini", "chat");
+  assert.deepEqual(gpt?.supportedParameters, []);
+
+  // Inline pricing + context carried straight from the OrcaRouter catalog.
+  assert.equal(gpt?.pricing?.inputCostPerToken, 0.00000015);
+  assert.equal(gpt?.contextLength, 128000);
+  assert.equal(gpt?.providerCatalogSource, "orcarouter-models");
+});
+
 test("OpenAI-compatible catalog discovery supports custom API key headers", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({ data: [] }), {

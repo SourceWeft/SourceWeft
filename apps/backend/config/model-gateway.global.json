@@ -1,5 +1,5 @@
 {
-  "_comment": "OSS defaults use OpenRouter only. SaaS and self-hosted deployments can replace this file by setting MODEL_GATEWAY_GLOBAL_CONFIG_PATH to an external config with additional providers. Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
+  "_comment": "OSS defaults route through OpenRouter. An OrcaRouter gateway ships alongside it but dormant (isActive:false) — set ORCAROUTER_API_KEY and flip isActive:true (SaaS/self-hosted deployments do this in the config that MODEL_GATEWAY_GLOBAL_CONFIG_PATH points at). Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
   "gateways": [
     {
       "slug": "openrouter-default",
@@ -34,6 +34,38 @@
       "maxRetries": 2,
       "isDefault": true,
       "isActive": true,
+      "isBYOK": false
+    },
+    {
+      "slug": "orcarouter-default",
+      "providerName": "orcarouter",
+      "providerKind": "openai-compatible",
+      "baseUrl": "https://api.orcarouter.ai/v1",
+      "baseUrlEnv": "ORCAROUTER_API_BASE",
+      "apiKeyEnv": "ORCAROUTER_API_KEY",
+      "supports": [
+        "chat",
+        "embeddings",
+        "image",
+        "tts",
+        "tool_calling",
+        "json_schema"
+      ],
+      "modelCatalog": {
+        "enabled": true,
+        "format": "orcarouter",
+        "kinds": [
+          "chat",
+          "vision",
+          "embedding",
+          "image",
+          "tts"
+        ]
+      },
+      "timeoutMs": 30000,
+      "maxRetries": 2,
+      "isDefault": false,
+      "isActive": false,
       "isBYOK": false
     }
   ],
