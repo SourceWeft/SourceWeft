@@ -178,6 +178,48 @@ export function adaptMessagesEvent(
   return [];
 }
 
+/**
+ * Extract a streaming tool-call argument fragment from a v3 `messages`
+ * content-block-delta. These are the partial tool_call_chunks
+ * ({@link adaptMessagesEvent} intentionally leaves them for this dedicated path)
+ * that carry incremental arg JSON (`args` is a substring, concatenated by
+ * `index`). The runner accumulates these to surface incremental write_file
+ * `content` before the authoritative fully-formed call arrives via the `tools`
+ * method. Returns null for any non tool_call_chunk delta.
+ */
+export function adaptToolArgDelta(
+  data: unknown,
+): { index: number; id?: string; name?: string; args: string } | null {
+  const record = toObjectRecord(data);
+  if (!record || record.event !== "content-block-delta") {
+    return null;
+  }
+  const delta = toObjectRecord(record.delta);
+  if (!delta || delta.type !== "block-delta") {
+    return null;
+  }
+  const fields = toObjectRecord(delta.fields);
+  if (!fields || fields.type !== "tool_call_chunk") {
+    return null;
+  }
+  const blockIndex =
+    typeof record.index === "number"
+      ? record.index
+      : typeof fields.index === "number"
+        ? fields.index
+        : 0;
+  return {
+    index: blockIndex,
+    ...(typeof fields.id === "string" && fields.id.length > 0
+      ? { id: fields.id }
+      : {}),
+    ...(typeof fields.name === "string" && fields.name.length > 0
+      ? { name: fields.name }
+      : {}),
+    args: typeof fields.args === "string" ? fields.args : "",
+  };
+}
+
 /** v3 wraps custom `writer(...)` payloads as `{ payload: <data> }`; unwrap it. */
 export function unwrapCustomEvent(data: unknown): unknown {
   const record = toObjectRecord(data);

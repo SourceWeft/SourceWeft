@@ -41,6 +41,22 @@ function sandboxTimelineResult(input: {
   ) {
     projected.outputCount = input.result.outputs.length;
   }
+  // Expose the (already secret-redacted) command output/error so the UI can show
+  // what actually ran, not just a char count. Kept as a bounded preview so the
+  // persisted-then-forwarded timeline payload stays small.
+  const TIMELINE_TEXT_PREVIEW_CHARS = 2_000;
+  for (const key of ["output", "error"] as const) {
+    const value = input.result[key];
+    if (typeof value === "string" && value.length > 0) {
+      projected[key] =
+        value.length > TIMELINE_TEXT_PREVIEW_CHARS
+          ? value.slice(0, TIMELINE_TEXT_PREVIEW_CHARS)
+          : value;
+      if (value.length > TIMELINE_TEXT_PREVIEW_CHARS) {
+        projected[`${key}Truncated`] = true;
+      }
+    }
+  }
   return projected;
 }
 

@@ -100,6 +100,116 @@ test("main-agent tool calls and reasoning stay ungrouped and in place", () => {
   );
 });
 
+test("children fold into the parent `task` delegate block, anchored at it", () => {
+  // Stream: parent `task` block, then its two child tool blocks.
+  const producers: Record<string, ToolProducer> = {
+    c1: { kind: "subagent", taskCallId: "task1", subagentType: "general-purpose" },
+    c2: { kind: "subagent", taskCallId: "task1", subagentType: "general-purpose" },
+  };
+  const blocks = [toolBlock("task1"), toolBlock("c1"), toolBlock("c2")];
+  const items = partitionWorkflowBlocksBySubagent(
+    blocks,
+    (block) => producers[block.id ?? ""],
+    (block) => (block.id === "task1" ? { taskCallId: "task1" } : undefined),
+  );
+  assert.equal(items.length, 1);
+  const item = items[0]!;
+  assert.equal(item.kind, "delegate");
+  if (item.kind === "delegate") {
+    assert.equal(item.taskCallId, "task1");
+    assert.equal(item.taskBlock.block.id, "task1");
+    assert.equal(item.subagentType, "general-purpose");
+    assert.deepEqual(
+      item.entries.map((entry) => entry.block.id),
+      ["c1", "c2"],
+    );
+    // Child original indices preserved for the running-state check.
+    assert.deepEqual(
+      item.entries.map((entry) => entry.index),
+      [1, 2],
+    );
+  }
+});
+
+test("delegate item anchors at the parent even when children stream first", () => {
+  const producers: Record<string, ToolProducer> = {
+    c1: { kind: "subagent", taskCallId: "T", subagentType: "explore" },
+  };
+  // Child appears before the parent `task` block on the stream.
+  const blocks = [toolBlock("c1"), toolBlock("T")];
+  const items = partitionWorkflowBlocksBySubagent(
+    blocks,
+    (block) => producers[block.id ?? ""],
+    (block) => (block.id === "T" ? { taskCallId: "T" } : undefined),
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "delegate");
+  if (items[0]?.kind === "delegate") {
+    assert.equal(items[0].taskBlock.index, 1);
+    assert.deepEqual(
+      items[0].entries.map((entry) => entry.block.id),
+      ["c1"],
+    );
+  }
+});
+
+test("parallel delegates each fold under their own parent block", () => {
+  const producers: Record<string, ToolProducer> = {
+    a1: { kind: "subagent", taskCallId: "A", subagentType: "general-purpose" },
+    b1: { kind: "subagent", taskCallId: "B", subagentType: "general-purpose" },
+  };
+  const delegateIds: Record<string, string> = { A: "A", B: "B" };
+  const blocks = [
+    toolBlock("A"),
+    toolBlock("B"),
+    toolBlock("a1"),
+    toolBlock("b1"),
+  ];
+  const items = partitionWorkflowBlocksBySubagent(
+    blocks,
+    (block) => producers[block.id ?? ""],
+    (block) =>
+      delegateIds[block.id ?? ""]
+        ? { taskCallId: delegateIds[block.id ?? ""]! }
+        : undefined,
+  );
+  assert.equal(items.length, 2);
+  assert.deepEqual(
+    items.map((item) => (item.kind === "delegate" ? item.taskCallId : "?")),
+    ["A", "B"],
+  );
+});
+
+test("a delegate parent with no streamed children still emits an empty box", () => {
+  // Sub-graph streaming off / children elsewhere: parent present, no producers.
+  const blocks = [toolBlock("task1")];
+  const items = partitionWorkflowBlocksBySubagent(
+    blocks,
+    () => undefined,
+    (block) => (block.id === "task1" ? { taskCallId: "task1" } : undefined),
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "delegate");
+  if (items[0]?.kind === "delegate") {
+    assert.equal(items[0].entries.length, 0);
+  }
+});
+
+test("orphan children (parent not in segment) still fall back to a group", () => {
+  const producers: Record<string, ToolProducer> = {
+    c1: { kind: "subagent", taskCallId: "gone", subagentType: "explore" },
+  };
+  const blocks = [toolBlock("c1")];
+  // resolveDelegate provided, but no parent block matches "gone".
+  const items = partitionWorkflowBlocksBySubagent(
+    blocks,
+    (block) => producers[block.id ?? ""],
+    () => undefined,
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "agent-group");
+});
+
 test("subagentDisplayName humanizes the delegate type", () => {
   assert.equal(subagentDisplayName("general-purpose"), "General purpose");
   assert.equal(subagentDisplayName("explore"), "Explore");

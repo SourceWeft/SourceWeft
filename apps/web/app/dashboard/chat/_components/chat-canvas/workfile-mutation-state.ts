@@ -80,6 +80,20 @@ export function isWorkfilePath(
   return Boolean(value?.startsWith("/workfiles/"));
 }
 
+/** Code authored directly into the provider sandbox (`/workspace`). */
+export function isSandboxCodePath(
+  value: string | null | undefined,
+): value is string {
+  return Boolean(value?.startsWith("/workspace/"));
+}
+
+/** Any path we render as a syntax-highlighted code preview. */
+export function isCodeFilePath(
+  value: string | null | undefined,
+): value is string {
+  return isWorkfilePath(value) || isSandboxCodePath(value);
+}
+
 function resolveToolPath(toolCall: ToolCallRecord) {
   const output = isObjectRecord(toolCall.output) ? toolCall.output : undefined;
   return (
@@ -148,7 +162,7 @@ export function resolveWorkfileMutationPreview(
   toolCall: ToolCallRecord,
 ): WorkfileMutationPreviewModel | null {
   const path = resolveToolPath(toolCall);
-  if (!isWorkfilePath(path)) {
+  if (!isCodeFilePath(path)) {
     return null;
   }
 
@@ -208,14 +222,15 @@ export function resolveWorkfileMutationPreview(
 
 export function getWorkfileMutationToolTitle(toolCall: ToolCallRecord) {
   const path = resolveToolPath(toolCall);
-  if (!isWorkfilePath(path)) {
+  if (!isCodeFilePath(path)) {
     return null;
   }
+  const location = isWorkfilePath(path) ? "Workfile" : "sandbox file";
   if (toolCall.tool === "write_file") {
-    return `Wrote Workfile: ${basename(path)}`;
+    return `Wrote ${location}: ${basename(path)}`;
   }
   if (toolCall.tool === "edit_file") {
-    return `Edited Workfile: ${basename(path)}`;
+    return `Edited ${location}: ${basename(path)}`;
   }
   return null;
 }

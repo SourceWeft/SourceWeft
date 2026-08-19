@@ -38,6 +38,12 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const toolStartedAtById = new Map<string, number>();
   const pendingToolStreamsByRunId = new Map<string, PendingToolStream>();
   const observedToolCallsById = new Map<string, ObservedAgentToolCall>();
+  // Per-tool-call-slot accumulator for streamed partial tool-call args (used to
+  // surface incremental write_file `content` before the tool call is complete).
+  const partialToolArgsBySlot = new Map<
+    string,
+    import("./tool-arg-stream-handler").PartialToolArgStreamState
+  >();
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
@@ -61,6 +67,7 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     toolCallOrder,
     toolStartedAtById,
     pendingToolStreamsByRunId,
+    partialToolArgsBySlot,
     observedToolCallsById,
     thinkingStepsById,
     thinkingStepOrder,

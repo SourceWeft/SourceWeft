@@ -55,6 +55,8 @@ export type SandboxToolOperationTimelineItem = {
   detail: string | null;
   duration: string | null;
   timestamp: string | null;
+  output: string | null;
+  outputTruncated: boolean;
 };
 
 const SANDBOX_TOOL_NAMES = new Set([
@@ -726,17 +728,39 @@ export function getSandboxToolOperationTimeline(input: {
   const fallbackOperations =
     operations.length > 0 ? operations : arrayRecord(result.operations);
 
-  return fallbackOperations.map((operation, index) => {
-    const type = operationType(operation);
-    return {
-      key: `${index}-${type ?? "operation"}`,
-      label: formatOperationLabel(type),
-      status: trimmedStringValue(operation.status),
-      detail: resultDetailFromOperation(operation, type),
-      duration: formatDurationMs(operationDuration(operation)),
-      timestamp: operationTimestamp(operation),
-    };
-  });
+  // Order the timeline by when each operation actually STARTED. Command ops
+  // (execute/prepare/collect) are claimed at start, so their `createdAt` is the
+  // start. The `create` (sandbox cold start) row is written at *completion*
+  // (recordOperation), and because an execute triggers that cold start its row
+  // is claimed first — so a naive createdAt sort wrongly lists "Created sandbox"
+  // after the commands. Recover its real start as createdAt − duration (minus an
+  // epsilon so it precedes the command that waited on it at an equal start).
+  return fallbackOperations
+    .map((operation, index) => {
+      const type = operationType(operation);
+      const createdAtMs = Date.parse(operationTimestamp(operation) ?? "");
+      const durationMs = operationDuration(operation) ?? 0;
+      const startMs = Number.isFinite(createdAtMs)
+        ? createdAtMs - (type === "create" ? durationMs + 1 : 0)
+        : Number.POSITIVE_INFINITY;
+      const opResult = record(operation.result) ?? operation;
+      return {
+        index,
+        startMs,
+        item: {
+          key: `${index}-${type ?? "operation"}`,
+          label: formatOperationLabel(type),
+          status: trimmedStringValue(operation.status),
+          detail: resultDetailFromOperation(operation, type),
+          duration: formatDurationMs(operationDuration(operation)),
+          timestamp: operationTimestamp(operation),
+          output: trimmedStringValue(opResult.output),
+          outputTruncated: booleanValue(opResult.outputTruncated) === true,
+        },
+      };
+    })
+    .sort((a, b) => a.startMs - b.startMs || a.index - b.index)
+    .map((entry) => entry.item);
 }
 
 function extractSandboxErrorCode(error: string) {

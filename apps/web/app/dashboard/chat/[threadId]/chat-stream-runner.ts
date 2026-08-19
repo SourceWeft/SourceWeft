@@ -90,6 +90,7 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
 
 export type ChatStreamToolCallEventType =
   | "tool-call-start"
+  | "tool-input-delta"
   | "tool-call-event"
   | "tool-call-result"
   | "tool-call-error"
@@ -235,6 +236,7 @@ function isToolCallEventType(
 ): value is ChatStreamToolCallEventType {
   return (
     value === "tool-call-start" ||
+    value === "tool-input-delta" ||
     value === "tool-call-event" ||
     value === "tool-call-result" ||
     value === "tool-call-error" ||

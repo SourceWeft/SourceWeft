@@ -2,10 +2,47 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   adaptMessagesEvent,
+  adaptToolArgDelta,
   adaptToolsEvent,
   interruptsToLegacyUpdatesPayload,
   unwrapCustomEvent,
 } from "./v3-protocol";
+
+test("adaptToolArgDelta extracts a tool_call_chunk fragment", () => {
+  const delta = adaptToolArgDelta({
+    event: "content-block-delta",
+    index: 2,
+    delta: {
+      type: "block-delta",
+      fields: {
+        type: "tool_call_chunk",
+        id: "call_9",
+        name: "write_file",
+        args: '{"content":"pri',
+      },
+    },
+  });
+  assert.deepEqual(delta, {
+    index: 2,
+    id: "call_9",
+    name: "write_file",
+    args: '{"content":"pri',
+  });
+});
+
+test("adaptToolArgDelta ignores text/reasoning deltas", () => {
+  assert.equal(
+    adaptToolArgDelta({
+      event: "content-block-delta",
+      delta: { type: "text-delta", text: "hi" },
+    }),
+    null,
+  );
+  assert.equal(
+    adaptToolArgDelta({ event: "message-start" }),
+    null,
+  );
+});
 
 test("adaptToolsEvent maps tool-started to on_tool_start with parsed input", () => {
   const names = new Map<string, string>();

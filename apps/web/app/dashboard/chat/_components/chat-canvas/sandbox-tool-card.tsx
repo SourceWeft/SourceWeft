@@ -8,7 +8,6 @@ import {
   CircleDot,
   Clock3,
   Download,
-  FileCode2,
   ListTree,
   Loader2,
   SquareTerminal,
@@ -18,10 +17,13 @@ import {
   CodeBlock,
   CodeBlockActions,
   CodeBlockCopyButton,
-  CodeBlockFilename,
   CodeBlockHeader,
-  CodeBlockTitle,
 } from "@sourceweft/ui-web/components/ai-elements/code-block";
+import {
+  Snippet,
+  SnippetCopyButton,
+  SnippetInput,
+} from "@sourceweft/ui-web/components/ai-elements/snippet";
 import {
   Task,
   TaskContent,
@@ -155,24 +157,26 @@ function SandboxOperationActivity({
   items: SandboxToolOperationTimelineItem[];
 }) {
   return (
-    <Task
-      className="rounded-md border border-border/60 bg-muted/15"
-      defaultOpen
-    >
+    // Borderless flat collapsible (matches the CoT/sub-agent grouping idiom);
+    // the timeline items sit under TaskContent's left rule. No nested card box.
+    // Collapsed by default — it's secondary detail, expand to inspect.
+    <Task defaultOpen={false}>
       <TaskTrigger title="Recorded sandbox operations">
         <button
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground"
+          className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-muted-foreground text-sm transition-colors hover:text-foreground"
           type="button"
         >
-          <ListTree className="size-4" />
+          <ListTree className="size-3.5 text-muted-foreground/75" />
           <span className="font-medium text-foreground/80">
             Recorded operations
           </span>
-          <span className="text-xs">{items.length}</span>
-          <ChevronRight className="ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+          <span className="text-muted-foreground/60 text-xs">
+            {items.length}
+          </span>
+          <ChevronRight className="ml-auto size-3.5 text-muted-foreground/50 transition-transform group-data-[state=open]:rotate-90" />
         </button>
       </TaskTrigger>
-      <TaskContent className="px-3 pb-3">
+      <TaskContent>
         {items.map((item) => {
           const timestamp = formatOperationTimestamp(item.timestamp);
           return (
@@ -189,6 +193,12 @@ function SandboxOperationActivity({
                   <span className="block break-words text-xs">
                     {item.detail}
                   </span>
+                ) : null}
+                {item.output ? (
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground/75 leading-4">
+                    {item.output}
+                    {item.outputTruncated ? "\n…" : ""}
+                  </pre>
                 ) : null}
               </span>
               {item.duration || timestamp ? (
@@ -354,21 +364,33 @@ function SandboxExecuteCard({
       {isOpen && hasDetails ? (
         <div className={cn(ASSISTANT_ACTIVITY_DETAIL_CLASS, contentClassName)}>
           {view.command ? (
-            <CodeBlock
-              className="[&_pre]:max-h-72 [&_pre]:overflow-auto"
-              code={view.command}
-              language="bash"
-            >
-              <CodeBlockHeader>
-                <CodeBlockTitle>
-                  <FileCode2 className="size-3.5" />
-                  <CodeBlockFilename>command</CodeBlockFilename>
-                </CodeBlockTitle>
-                <CodeBlockActions>
-                  <CodeBlockCopyButton aria-label="Copy sandbox command" />
-                </CodeBlockActions>
-              </CodeBlockHeader>
-            </CodeBlock>
+            view.command.includes("\n") ? (
+              // Multi-line command (rare, e.g. a heredoc): keep a code block, but
+              // drop the redundant "command" header — the card title already
+              // says "Execute sandbox command".
+              <CodeBlock
+                className="[&_pre]:max-h-72 [&_pre]:overflow-auto"
+                code={view.command}
+                language="bash"
+              >
+                <CodeBlockHeader className="justify-end">
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton aria-label="Copy sandbox command" />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+              </CodeBlock>
+            ) : (
+              // Single-line command (the norm): a compact one-line snippet with
+              // copy — the real code authoring now lives in write_file previews,
+              // so the command here is just an identifiable, copyable invocation.
+              <Snippet className="w-full" code={view.command}>
+                <SnippetInput
+                  aria-label="Sandbox command"
+                  className="text-xs"
+                />
+                <SnippetCopyButton aria-label="Copy sandbox command" />
+              </Snippet>
+            )
           ) : (
             <p className="break-words">Command input is unavailable.</p>
           )}
@@ -411,7 +433,10 @@ function SandboxExecuteCard({
                 {view.output}
               </pre>
             </div>
-          ) : failureMessage ? null : (
+          ) : failureMessage || statusKey === "done" ? null : (
+            // Only surface a placeholder for states that are actually waiting on
+            // something (running / approval / denied). A finished command that
+            // simply produced no output needs no "completed without output" box.
             <div className="rounded-md border border-dashed p-3 text-muted-foreground text-xs">
               {outputPlaceholder({
                 state,

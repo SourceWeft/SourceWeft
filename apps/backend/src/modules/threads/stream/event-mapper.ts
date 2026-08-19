@@ -260,6 +260,16 @@ export function mapDeepAgentEventToSse(
     });
   }
 
+  if (event.type === "tool-input-delta") {
+    return toSseData({
+      type: "tool-input-delta",
+      id: event.id,
+      tool: event.tool,
+      input: event.input,
+      toolCall: normalizeToolCallForSse(event.toolCall),
+    });
+  }
+
   if (event.type === "tool-call-event") {
     return toSseData({
       type: "tool-call-event",

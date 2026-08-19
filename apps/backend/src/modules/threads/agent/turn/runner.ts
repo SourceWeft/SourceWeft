@@ -40,6 +40,7 @@ import {
   type HitlStreamHandlerResult,
 } from "./hitl-stream-handler";
 import { handleMessagesStreamChunk } from "./message-stream-handler";
+import { handleToolArgDeltaChunk } from "./tool-arg-stream-handler";
 import {
   isSubagentNamespace,
   recordToolCallNamespace,
@@ -47,6 +48,7 @@ import {
 } from "./subagent-namespace";
 import {
   adaptMessagesEvent,
+  adaptToolArgDelta,
   adaptToolsEvent,
   interruptsToLegacyUpdatesPayload,
   unwrapCustomEvent,
@@ -358,6 +360,13 @@ export async function* invokeDeepAgentTurn(input: {
               llm: input.llm,
               operation: input.operation ?? "chat.stream",
             });
+          }
+          // Additively surface incremental write_file `content` from the same
+          // messages stream (subagent messages are already dropped above, so
+          // this only streams the main agent's code authoring).
+          const argDelta = adaptToolArgDelta(data);
+          if (argDelta) {
+            yield* handleToolArgDeltaChunk({ delta: argDelta, runtime });
           }
           continue;
         }

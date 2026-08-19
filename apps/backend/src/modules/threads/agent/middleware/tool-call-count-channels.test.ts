@@ -34,6 +34,20 @@ test("mergeToolCallCounts starts from an empty base", () => {
   });
 });
 
+test("state schema parses without the count fields so invoke can initialize it", () => {
+  // Regression: langchain >=1.5 `initializeMiddlewareStates` zod-parses each
+  // middleware stateSchema at invoke time and rejects any required public field
+  // that the caller didn't pass, failing the turn with "has required state
+  // fields that must be initialized". Only a zod-level default/optional counts
+  // here (the withLangGraph channel default is ignored), so both fields must
+  // parse a state that omits them.
+  const middleware = createSourceWeftToolCallCountChannelsMiddleware();
+  const parsed = (middleware.stateSchema as never as {
+    parse: (value: unknown) => Record<string, unknown>;
+  }).parse({});
+  assert.deepEqual(parsed, { threadToolCallCount: {}, runToolCallCount: {} });
+});
+
 test("count channels declare a reducer so they are not LastValue", () => {
   const middleware = createSourceWeftToolCallCountChannelsMiddleware();
   const shape = getInteropZodObjectShape(middleware.stateSchema as never);

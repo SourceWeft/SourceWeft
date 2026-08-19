@@ -1,5 +1,11 @@
 import { memo, useMemo, useState } from "react";
-import { Copy, Loader2, Pencil, RotateCcw } from "lucide-react";
+import { Bot, ChevronDown, Copy, Loader2, Pencil, RotateCcw } from "lucide-react";
+import {
+  Task,
+  TaskContent,
+  TaskTrigger,
+} from "@sourceweft/ui-web/components/ai-elements/task";
+import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -17,6 +23,7 @@ import {
   MessageBranchPrevious,
   MessageBranchSelector,
   MessageContent,
+  MessageResponse,
   MessageToolbar,
 } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
@@ -30,12 +37,12 @@ import {
   getAttachmentLabel,
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
-import {
-  Agent,
-  AgentContent,
-  AgentHeader,
-} from "@sourceweft/ui-web/components/ai-elements/agent";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import {
+  ASSISTANT_ACTIVITY_ICON_CLASS,
+  ASSISTANT_ACTIVITY_LABEL_CLASS,
+  ASSISTANT_ACTIVITY_ROW_CLASS,
+} from "./assistant-activity-layout";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
@@ -63,6 +70,12 @@ import {
   partitionWorkflowBlocksBySubagent,
   subagentDisplayName,
 } from "./subagent-grouping";
+import {
+  getDelegateChipTitle,
+  isDelegateToolName,
+  parseDelegateToolCall,
+} from "./delegate-tool-card-state";
+import { formatCompactDuration } from "./duration-format";
 import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
 import {
@@ -534,6 +547,18 @@ function AssistantMessageBody({
       ?.producer;
   }
 
+  function resolveWorkflowDelegate(block: AssistantWorkflowBlock) {
+    if (block.type !== "tool") {
+      return undefined;
+    }
+    const toolCall = version.toolCalls?.find(
+      (tool) => tool.id === block.toolCallId,
+    );
+    return toolCall && isDelegateToolName(toolCall.tool)
+      ? { taskCallId: toolCall.id }
+      : undefined;
+  }
+
   function renderWorkflowBlockAsActivity(input: {
     block: AssistantWorkflowBlock;
     isRunning: boolean;
@@ -697,29 +722,118 @@ function AssistantMessageBody({
               {partitionWorkflowBlocksBySubagent(
                 segment.blocks,
                 resolveWorkflowBlockProducer,
+                resolveWorkflowDelegate,
               ).map((item) => {
                 const lastBlockIndex = segment.blocks.length - 1;
                 const isBlockRunning = (blockIndex: number) =>
                   segment.id === lastWorkflowSegmentId &&
                   isWorkflowRunning &&
                   blockIndex === lastBlockIndex;
-                if (item.kind === "agent-group") {
+                if (item.kind === "delegate" || item.kind === "agent-group") {
+                  const taskBlock =
+                    item.kind === "delegate" ? item.taskBlock.block : undefined;
+                  const toolCall =
+                    taskBlock && taskBlock.type === "tool"
+                      ? version.toolCalls?.find(
+                          (tool) => tool.id === taskBlock.toolCallId,
+                        )
+                      : undefined;
+                  const view = toolCall
+                    ? parseDelegateToolCall(toolCall)
+                    : null;
+                  const isRunning = view?.status === "running";
+                  const chipTitle =
+                    (view ? getDelegateChipTitle(view.prompt) : null) ??
+                    subagentDisplayName(view?.subagentType ?? item.subagentType);
+                  const duration =
+                    toolCall?.latencyMs != null &&
+                    Number.isFinite(toolCall.latencyMs)
+                      ? formatCompactDuration(toolCall.latencyMs)
+                      : null;
                   return (
-                    <Agent key={item.key}>
-                      <AgentHeader
-                        name={subagentDisplayName(item.subagentType)}
-                      />
-                      <AgentContent className="space-y-1 p-3 pt-0">
-                        {item.entries.map((entry) => (
-                          <div key={entry.block.id}>
-                            {renderWorkflowBlockAsActivity({
-                              block: entry.block,
-                              isRunning: isBlockRunning(entry.index),
-                            })}
-                          </div>
-                        ))}
-                      </AgentContent>
-                    </Agent>
+                    // LobeChat-style delegate row: "Call sub-agent" + a task pill
+                    // + duration, collapsible into the brief / steps / report.
+                    <Task defaultOpen key={item.key}>
+                      <TaskTrigger title="Call sub-agent">
+                        <div
+                          className={cn(
+                            ASSISTANT_ACTIVITY_ROW_CLASS,
+                            "cursor-pointer text-muted-foreground text-sm transition-colors hover:text-foreground",
+                          )}
+                        >
+                          <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
+                            {isRunning ? (
+                              <Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" />
+                            ) : (
+                              <Bot className="size-4" />
+                            )}
+                          </span>
+                          <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
+                            <span className="shrink-0 font-medium text-foreground/80">
+                              Call sub-agent
+                            </span>
+                            <Badge
+                              className="min-w-0 truncate font-normal text-foreground/70"
+                              variant="secondary"
+                            >
+                              {chipTitle}
+                            </Badge>
+                            {duration ? (
+                              <span className="shrink-0 text-muted-foreground/60 text-xs">
+                                {duration}
+                              </span>
+                            ) : null}
+                            {view?.status === "error" ? (
+                              <span className="shrink-0 text-destructive text-xs">
+                                Failed
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="grid size-4 shrink-0 place-items-center">
+                            <ChevronDown className="size-3 text-muted-foreground/50 transition-transform group-data-[state=open]:rotate-180" />
+                          </span>
+                        </div>
+                      </TaskTrigger>
+                      <TaskContent>
+                        <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
+                          {view?.prompt ? (
+                            <section className="space-y-1">
+                              <span className="block pl-1 font-medium text-[11px] text-muted-foreground/50 tracking-wide">
+                                Instruction
+                              </span>
+                              <div className="pl-1 text-[13px] text-muted-foreground/75">
+                                <MessageResponse>{view.prompt}</MessageResponse>
+                              </div>
+                            </section>
+                          ) : null}
+                          {item.entries.map((entry) => (
+                            <div key={entry.block.id}>
+                              {renderWorkflowBlockAsActivity({
+                                block: entry.block,
+                                isRunning: isBlockRunning(entry.index),
+                              })}
+                            </div>
+                          ))}
+                          {item.entries.length === 0 && isRunning ? (
+                            <p className="pl-1 text-[13px] text-muted-foreground/75 leading-5">
+                              Working…
+                            </p>
+                          ) : null}
+                          {view?.report ? (
+                            <section className="space-y-1 border-border/50 border-t pt-2">
+                              <span className="block pl-1 font-medium text-[11px] text-muted-foreground/50 tracking-wide">
+                                Result
+                              </span>
+                              <div className="pl-1 text-sm">
+                                <CitationAwareMessageResponse citations={undefined}>
+                                  {view.report}
+                                </CitationAwareMessageResponse>
+                              </div>
+                            </section>
+                          ) : null}
+                        </div>
+                      </TaskContent>
+                    </Task>
                   );
                 }
                 return (

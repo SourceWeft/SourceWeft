@@ -324,9 +324,11 @@ export function handleStreamingToolCallEvent<
   }
 
   context.streamToolCallsById.set(nextToolCall.id, nextToolCall);
-  if (event.type === "tool-call-start") {
+  if (event.type === "tool-call-start" || event.type === "tool-input-delta") {
     // Tool blocks are progress only. Artifact outputs arrive as explicit
-    // committed result blocks after publishing succeeds.
+    // committed result blocks after publishing succeeds. `tool-input-delta`
+    // creates the block early so streamed write_file content renders live; the
+    // later `tool-call-start` (same id) reuses it.
     drainQueuedDeltasNow();
     context.streamRenderBuffer.appendToolBlock(nextToolCall.id);
   }

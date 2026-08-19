@@ -42,7 +42,13 @@ export type SandboxSkillStaging = {
 };
 
 const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
-const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 15_000;
+// How long a sibling execute waits for another call's in-flight cold start
+// before giving up. Must comfortably exceed a real provider cold start (~30s
+// observed) so parallel `task`/execute calls that share one thread sandbox
+// don't fail with SANDBOX_CREATION_WAIT_TIMEOUT while the winner is still
+// legitimately provisioning. Kept well under SANDBOX_CREATING_STALE_MS so a
+// genuinely dead creation is still reclaimable as stale.
+const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 45_000;
 const SANDBOX_CREATING_WAIT_INTERVAL_MS = 250;
 export const SANDBOX_OPERATION_STALE_GRACE_MS = 30 * 1000;
 export const SANDBOX_RELEASE_LEASE_GRACE_MS = 5 * 60 * 1000;

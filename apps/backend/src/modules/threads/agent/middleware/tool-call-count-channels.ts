@@ -37,7 +37,26 @@ export function mergeToolCallCounts(
 }
 
 function countChannel() {
-  return withLangGraph(z.record(z.string(), z.number()), {
+  // The zod-level `.default(() => ({}))` is required in addition to the channel
+  // `default` below. langchain's `initializeMiddlewareStates` (>=1.5) zod-parses
+  // each middleware stateSchema at invoke time to check every public field is
+  // initialisable, and it honours ONLY a zod-level default/optional — not the
+  // `withLangGraph` channel default. Without it the parse rejects
+  // `threadToolCallCount` / `runToolCallCount` as required and the whole turn
+  // fails with "has required state fields that must be initialized". The
+  // injected default only seeds a brand-new thread; on resume the checkpointed
+  // count already occupies the key and is preserved (see ReactAgent
+  // #initializeMiddlewareStates: it merges getState().values first and only
+  // fills keys that are absent).
+  const base = z.record(z.string(), z.number());
+  // `withLangGraph` registers reducer metadata against (and returns) the exact
+  // object it is handed, so the `.default()` wrapper — not the bare record —
+  // must be the value that lands in the state object and later resolves in the
+  // registry. Its interop typing lacks the surface `withLangGraph` expects, so
+  // present it to the compiler as the underlying record; the runtime object is
+  // still the defaulted schema.
+  const withDefault = base.default((): ToolCallCounts => ({}));
+  return withLangGraph(withDefault as unknown as typeof base, {
     reducer: {
       fn: (current: ToolCallCounts, update: ToolCallCounts): ToolCallCounts =>
         mergeToolCallCounts(current, update),

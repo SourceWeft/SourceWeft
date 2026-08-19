@@ -54,6 +54,17 @@ export type DeepAgentTurnEvent =
       toolCall: ToolCallTrace;
     }
   | {
+      // Incremental tool-call arguments streamed while the model is still
+      // generating the call (today: write_file `content`), so the client can
+      // render the code as it's authored. Additive: the authoritative
+      // fully-formed call still arrives later via `tool-call-start` (same id).
+      type: "tool-input-delta";
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      toolCall: ToolCallTrace;
+    }
+  | {
       type: "tool-call-event";
       id: string;
       tool: string;

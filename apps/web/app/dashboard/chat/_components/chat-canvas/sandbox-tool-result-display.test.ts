@@ -643,6 +643,8 @@ test("formats sandbox operation timeline for tool cards", () => {
         detail: "Sandbox ready",
         duration: "120ms",
         timestamp: null,
+        output: null,
+        outputTruncated: false,
       },
       {
         key: "1-execute",
@@ -651,9 +653,99 @@ test("formats sandbox operation timeline for tool cards", () => {
         detail: "Exit code 2 · 42 output chars",
         duration: "1.5s",
         timestamp: null,
+        output: null,
+        outputTruncated: false,
       },
     ],
   );
+});
+
+test("surfaces the command output text in the operation timeline", () => {
+  const items = getSandboxToolOperationTimeline({
+    toolName: "execute",
+    output: {
+      timeline: [
+        {
+          operationType: "execute",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:00.000Z",
+          durationMs: 1_000,
+          result: { exitCode: 0, outputChars: 2, output: "2\n" },
+        },
+      ],
+    },
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.output, "2");
+  assert.equal(items[0]?.outputTruncated, false);
+  assert.equal(items[0]?.detail, "Exit code 0 · 2 output chars");
+});
+
+test("orders 'Created sandbox' before the command that triggered its cold start", () => {
+  // Real-world shape: the execute row is claimed at start (createdAt = T0), but
+  // the sandbox `create` row is written at completion (createdAt = T0 + 13s),
+  // because the execute triggered the cold start. Recovered start ordering must
+  // still put "Created sandbox" first.
+  const labels = getSandboxToolOperationTimeline({
+    toolName: "execute",
+    output: {
+      timeline: [
+        {
+          operationType: "execute",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:00.000Z",
+          durationMs: 20_000,
+          result: { exitCode: 0, outputChars: 2 },
+        },
+        {
+          operationType: "create",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:13.000Z",
+          durationMs: 13_000,
+          summary: "Sandbox ready",
+        },
+      ],
+    },
+  }).map((item) => item.label);
+
+  assert.deepEqual(labels, ["Created sandbox", "Executed command"]);
+});
+
+test("keeps command ops in claim (createdAt) order", () => {
+  const labels = getSandboxToolOperationTimeline({
+    toolName: "execute",
+    output: {
+      timeline: [
+        {
+          operationType: "execute",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:05.000Z",
+          durationMs: 3_000,
+          result: { exitCode: 0, outputChars: 1 },
+        },
+        {
+          operationType: "create",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:14.000Z",
+          durationMs: 14_000,
+        },
+        {
+          operationType: "execute",
+          status: "succeeded",
+          createdAt: "2026-08-19T07:00:01.000Z",
+          durationMs: 2_000,
+          result: { exitCode: 0, outputChars: 1 },
+        },
+      ],
+    },
+  }).map((item) => item.label);
+
+  // create (start ≈ 07:00:00) first, then the two executes by their createdAt.
+  assert.deepEqual(labels, [
+    "Created sandbox",
+    "Executed command",
+    "Executed command",
+  ]);
 });
 
 test("formats sandbox operations array as operation timeline", () => {

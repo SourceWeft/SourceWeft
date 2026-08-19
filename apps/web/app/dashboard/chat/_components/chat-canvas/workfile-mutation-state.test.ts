@@ -3,6 +3,7 @@ import { test } from "vitest";
 import type { ToolCallRecord } from "./types";
 import {
   WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT,
+  getWorkfileMutationToolTitle,
   resolveWorkfileMutationPreview,
 } from "./workfile-mutation-state";
 
@@ -153,6 +154,43 @@ test("resolveWorkfileMutationPreview handles edit_file replacements to empty str
   assert.equal(
     preview?.kind === "edit" ? preview.diffPreview : null,
     ["--- deck.js", "+++ deck.js", "-const title = 'Old';", "+"].join("\n"),
+  );
+});
+
+test("resolveWorkfileMutationPreview also previews sandbox (/workspace) code", () => {
+  const preview = resolveWorkfileMutationPreview(
+    toolCall({
+      input: {
+        content: "print('hi')\n",
+        path: "/workspace/main.py",
+      },
+      tool: "write_file",
+    }),
+  );
+
+  assert.equal(preview?.kind, "write");
+  assert.equal(preview?.path, "/workspace/main.py");
+  assert.equal(preview?.kind === "write" ? preview.language : null, "python");
+});
+
+test("getWorkfileMutationToolTitle labels sandbox writes distinctly", () => {
+  assert.equal(
+    getWorkfileMutationToolTitle(
+      toolCall({
+        input: { content: "x", path: "/workspace/main.py" },
+        tool: "write_file",
+      }),
+    ),
+    "Wrote sandbox file: main.py",
+  );
+  assert.equal(
+    getWorkfileMutationToolTitle(
+      toolCall({
+        input: { content: "x", path: "/workfiles/a.py" },
+        tool: "write_file",
+      }),
+    ),
+    "Wrote Workfile: a.py",
   );
 });
 

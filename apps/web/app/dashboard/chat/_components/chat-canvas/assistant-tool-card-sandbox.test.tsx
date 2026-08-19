@@ -23,6 +23,14 @@ function toolCall(input: Partial<ToolCallRecord>): ToolCallRecord {
   };
 }
 
+function commandInputValue(element: HTMLElement) {
+  // Single-line commands render in a readonly Snippet <input>, whose value is
+  // not part of textContent.
+  return element.querySelector<HTMLInputElement>(
+    'input[aria-label="Sandbox command"]',
+  )?.value;
+}
+
 async function renderToolCard(input: {
   onWorkfileClick?: (path: string) => void;
   toolCall: ToolCallRecord;
@@ -67,7 +75,7 @@ test("AssistantToolCard renders execute command and output together", async () =
   });
 
   assert.match(element.textContent ?? "", /Execute sandbox command/);
-  assert.match(element.textContent ?? "", /pnpm test/);
+  assert.equal(commandInputValue(element), "pnpm test");
   assert.match(element.textContent ?? "", /tests failed/);
   assert.match(element.textContent ?? "", /exit 1/);
   assert.match(element.textContent ?? "", /truncated/);
@@ -82,7 +90,7 @@ test("AssistantToolCard shows the running execute command with pending output", 
   });
 
   assert.match(element.textContent ?? "", /Running/);
-  assert.match(element.textContent ?? "", /pnpm build/);
+  assert.equal(commandInputValue(element), "pnpm build");
   assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
   assert.match(
     element.textContent ?? "",
@@ -119,6 +127,15 @@ test("AssistantToolCard renders persisted sandbox operations", async () => {
   });
 
   assert.match(element.textContent ?? "", /Recorded operations/);
+  // Collapsed by default — the timeline content is behind the toggle.
+  assert.doesNotMatch(element.textContent ?? "", /Created sandbox/);
+  const opsToggle = Array.from(element.querySelectorAll("button")).find(
+    (button) => (button.textContent ?? "").includes("Recorded operations"),
+  );
+  assert.ok(opsToggle, "expected a Recorded operations toggle button");
+  await act(async () => {
+    opsToggle.click();
+  });
   assert.match(element.textContent ?? "", /Created sandbox/);
   assert.match(element.textContent ?? "", /Executed command/);
   assert.match(element.textContent ?? "", /Exit code 0 · 4 output chars/);
@@ -307,6 +324,6 @@ test("AssistantToolCard renders denied execute calls with the command", async ()
   });
 
   assert.match(element.textContent ?? "", /Rejected/);
-  assert.match(element.textContent ?? "", /curl https:\/\/example\.com/);
+  assert.equal(commandInputValue(element), "curl https://example.com");
   assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
 });

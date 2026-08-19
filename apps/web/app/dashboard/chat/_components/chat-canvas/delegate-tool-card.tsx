@@ -7,6 +7,7 @@ import {
   TaskItem,
   TaskTrigger,
 } from "@sourceweft/ui-web/components/ai-elements/task";
+import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import type { ToolCallRecord } from "./types";
 import { parseDelegateToolCall } from "./delegate-tool-card-state";
 
@@ -46,7 +47,9 @@ export function DelegateToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
           <TaskItem>{view.prompt}</TaskItem>
         ) : null}
         {view.report ? (
-          <TaskItem>{view.report}</TaskItem>
+          <TaskItem>
+            <MessageResponse>{view.report}</MessageResponse>
+          </TaskItem>
         ) : view.status === "running" ? (
           <TaskItem>Working…</TaskItem>
         ) : null}
