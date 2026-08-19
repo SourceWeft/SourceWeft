@@ -20,6 +20,13 @@ export type LiteLLMEntry = {
   supports_response_schema?: boolean | null;
   supports_tool_choice?: boolean | null;
   supports_prompt_caching?: boolean | null;
+  supports_reasoning?: boolean | null;
+  supports_minimal_reasoning_effort?: boolean | null;
+  supports_low_reasoning_effort?: boolean | null;
+  supports_high_reasoning_effort?: boolean | null;
+  supports_max_reasoning_effort?: boolean | null;
+  supports_xhigh_reasoning_effort?: boolean | null;
+  supports_none_reasoning_effort?: boolean | null;
   max_input_tokens?: number | null;
   max_output_tokens?: number | null;
   max_completion_tokens?: number | null;
@@ -69,13 +76,10 @@ export type LiteLLMResolvedCapabilities = Pick<
 > & {
   supportedParameters: string[];
   /**
-   * Always absent: the LiteLLM pricing dataset carries no reasoning-effort
-   * information (see LiteLLMEntry — the only reasoning-adjacent field is the
-   * `output_cost_per_reasoning_token` price). Resolving it to `[]` would write
-   * an empty list into configJson and mark it user-protected, permanently
-   * freezing a wrong value; leaving the key absent keeps sync out of it.
-   * Declared optional only so consumers can read it off a merged capability
-   * object without a cast.
+   * Present only for reasoning models: derived from LiteLLM's
+   * `supports_reasoning` + `supports_{minimal,xhigh,max}_reasoning_effort`
+   * flags. Absent (not `[]`) for non-reasoning models so config-sync never
+   * freezes an empty list into the user-protected fields.
    */
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
 };
@@ -453,8 +457,42 @@ export function deriveSupportedParameters(
   if (entry.supports_prompt_caching === true) {
     parameters.push("prompt_cache");
   }
+  if (entry.supports_reasoning === true) {
+    parameters.push("reasoning_effort");
+  }
 
   return dedupeParameters(parameters);
+}
+
+const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh"] as const;
+
+/**
+ * Map LiteLLM's reasoning-effort flags onto our effort vocabulary. A reasoning
+ * model supports low/medium/high by default; the boundary tiers minimal and
+ * xhigh are gated on their explicit LiteLLM flags (`max` folds into `xhigh`).
+ * Returns [] for non-reasoning models so callers can omit the key entirely.
+ */
+export function deriveSupportedEfforts(
+  entry: LiteLLMEntry,
+): NonNullable<LiteLLMResolvedCapabilities["supportedEfforts"]> {
+  if (entry.supports_reasoning !== true) {
+    return [];
+  }
+  const efforts = new Set<(typeof EFFORT_ORDER)[number]>([
+    "low",
+    "medium",
+    "high",
+  ]);
+  if (entry.supports_minimal_reasoning_effort === true) {
+    efforts.add("minimal");
+  }
+  if (
+    entry.supports_xhigh_reasoning_effort === true ||
+    entry.supports_max_reasoning_effort === true
+  ) {
+    efforts.add("xhigh");
+  }
+  return EFFORT_ORDER.filter((effort) => efforts.has(effort));
 }
 
 export function resolveLiteLLMCapabilities(
@@ -484,5 +522,8 @@ export function resolveLiteLLMCapabilities(
     max_output_tokens: normalizeFiniteNumber(entry.max_output_tokens),
     max_completion_tokens: normalizeFiniteNumber(entry.max_completion_tokens),
     supportedParameters: deriveSupportedParameters(entry),
+    ...(entry.supports_reasoning === true
+      ? { supportedEfforts: deriveSupportedEfforts(entry) }
+      : {}),
   };
 }

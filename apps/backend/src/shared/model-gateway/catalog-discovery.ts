@@ -271,10 +271,12 @@ function buildCandidateFromLiteLLM(input: {
     pricing: buildLiteLLMPricingEntry(match.entry),
     providerCatalogSource: input.source,
     providerCatalogGatewaySlug: input.gateway.slug,
-    // No supportedEfforts: the LiteLLM dataset carries no reasoning-effort
-    // information. Leaving it absent keeps it out of configJson and out of
-    // protectedFields, so the sync never freezes a wrong value.
     supportedParameters: capabilities.supportedParameters,
+    // Present only for reasoning models (LiteLLM supports_reasoning); absent
+    // otherwise so sync never freezes an empty effort list.
+    ...(capabilities.supportedEfforts && capabilities.supportedEfforts.length > 0
+      ? { supportedEfforts: capabilities.supportedEfforts }
+      : {}),
     supportsImageInput: capabilities.supportsImageInput,
     maxCompletionTokens: capabilities.max_completion_tokens ?? null,
   } satisfies CatalogModelCandidate;
@@ -369,27 +371,71 @@ async function discoverOpenRouterCatalog(input: {
 // carries the signal (openai/tts-1, gpt-4o-mini-tts, gemini-*-tts, ...).
 const ORCAROUTER_TTS_PATTERN = /(^|[/-])tts(-|$)/;
 
-// OrcaRouter's catalog does not advertise per-model `supported_parameters`, so
-// reasoning support can't be read off the payload the way OpenRouter's can.
-// We stamp `reasoning_effort` only for the documented reasoning families;
-// anything unmatched falls back to the native `-{effort}` model-name suffix.
-const ORCAROUTER_REASONING_PATTERNS: RegExp[] = [
-  /openai\/o[134](\b|-)/, // o1 / o3 / o4-mini families
-  /openai\/gpt-5[\w.]*-pro/, // gpt-5-pro / gpt-5.x-pro family
-  /anthropic\/claude-(opus|sonnet)-4/, // Claude 4.x extended thinking
-  /google\/gemini-(2\.5|3)/, // Gemini 2.5 / 3.x thinking
-  /deepseek.*reasoner/,
-  /grok.*(reasoning|-3-mini)/,
-];
+function bareModelName(id: string) {
+  return id.split("/").at(-1)?.trim().toLowerCase() ?? "";
+}
 
-function isOrcaRouterReasoningModel(modelId: string) {
-  const id = modelId.toLowerCase();
-  return ORCAROUTER_REASONING_PATTERNS.some((pattern) => pattern.test(id));
+/**
+ * Index LiteLLM entries by bare model name (last path segment) — first entry
+ * wins. Lets an OrcaRouter id resolve capabilities even when the aggregator's
+ * provider prefix differs from LiteLLM's key prefix (e.g. `grok/grok-4.6` vs
+ * LiteLLM's `xai/grok-4.6`).
+ */
+function indexLiteLLMByBareName(litellmData: LiteLLMData) {
+  const index = new Map<string, LiteLLMEntry>();
+  for (const [key, entry] of Object.entries(litellmData)) {
+    const bare = bareModelName(key);
+    if (bare && !index.has(bare)) {
+      index.set(bare, entry);
+    }
+  }
+  return index;
+}
+
+// OrcaRouter's `/v1/models` does not carry per-model capability flags (its
+// catalog is not as rich as OpenRouter's supported_parameters). Model
+// capabilities — reasoning, tools, vision — come from LiteLLM instead, matched
+// directly with no per-provider mapping table:
+//   1. the id's `provider/model` prefix as the LiteLLM provider (clean match +
+//      version-stripping when the prefix equals `litellm_provider`);
+//   2. that same key when it is found but flagged `provider_mismatch` (aggregator
+//      names the provider differently, e.g. google vs LiteLLM's `gemini`);
+//   3. an exact bare-name match (covers keys prefixed by a different provider,
+//      e.g. `xai/grok-4.6`).
+// Exact-only throughout — routing slugs like `orcarouter/auto` have no
+// same-named LiteLLM entry, so they resolve to null and take their capabilities
+// from a hand-authored profile instead of fuzzy-matching an unrelated model.
+function resolveOrcaRouterCapabilities(input: {
+  modelId: string;
+  litellmData: LiteLLMData;
+  bareNameIndex: Map<string, LiteLLMEntry>;
+}) {
+  const prefixProvider = input.modelId.split("/")[0]?.trim() ?? "";
+  // OrcaRouter's own routing slugs (orcarouter/auto, /fusion, /free, ...) are
+  // not concrete models — a bare-name match would borrow another router's
+  // capabilities (e.g. LiteLLM's `openrouter/openrouter/auto`). Their
+  // capabilities come from a hand-authored profile instead.
+  if (prefixProvider.toLowerCase() === "orcarouter") {
+    return null;
+  }
+  const match = resolveLiteLLMModelMatch({
+    modelId: input.modelId,
+    provider: prefixProvider,
+    litellmData: input.litellmData,
+  });
+  const entry =
+    match.type === "matched"
+      ? match.entry
+      : match.type === "provider_mismatch"
+        ? (input.litellmData[match.key] ?? null)
+        : (input.bareNameIndex.get(bareModelName(input.modelId)) ?? null);
+  return entry ? resolveLiteLLMCapabilities(entry) : null;
 }
 
 async function discoverOrcaRouterCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
+  litellmData: LiteLLMData;
 }) {
   const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
     headers: {
@@ -404,11 +450,17 @@ async function discoverOrcaRouterCatalog(input: {
   const payload = (await response.json()) as { data?: unknown };
   const data = Array.isArray(payload.data) ? payload.data : [];
   const items: CatalogModelCandidate[] = [];
+  const bareNameIndex = indexLiteLLMByBareName(input.litellmData);
 
   for (const rawModel of data) {
     const model = toObjectRecord(rawModel);
     const modelId = typeof model?.id === "string" ? model.id.trim() : "";
-    if (!modelId) {
+    // OrcaRouter's catalog lists each model twice: a provider-prefixed
+    // canonical id (`openai/gpt-5.6-luna`, carries `name`) and a bare alias
+    // (`gpt-5.6-luna`, no `name`). Keep only prefixed ids so a model surfaces
+    // once — same filter OpenRouter discovery uses. OrcaRouter's own pseudo
+    // models (`orcarouter/auto`, `orcarouter/fusion`) are prefixed and kept.
+    if (!modelId || !modelId.includes("/")) {
       continue;
     }
 
@@ -430,14 +482,27 @@ async function discoverOrcaRouterCatalog(input: {
       endpointTypes.includes("openai-video") ||
       outputModalities.includes("video");
     const isTts = ORCAROUTER_TTS_PATTERN.test(modelId.toLowerCase());
-    const isReasoning =
-      !isEmbedding && !isImage && !isTts && isOrcaRouterReasoningModel(modelId);
+
+    // Capabilities (reasoning / tools / vision) come from LiteLLM, matched by
+    // the id's upstream-provider prefix. Pricing and context stay from
+    // OrcaRouter's own inline catalog — fresher, and present for models LiteLLM
+    // has not indexed yet.
+    const capabilities = resolveOrcaRouterCapabilities({
+      modelId,
+      litellmData: input.litellmData,
+      bareNameIndex,
+    });
+    const supportedParameters = capabilities?.supportedParameters ?? [];
+    const supportedEfforts = capabilities?.supportedEfforts ?? [];
+    // Vision: OrcaRouter's own architecture is authoritative; fall back to
+    // LiteLLM's supports_vision only when the catalog omits modalities.
+    const hasVisionInput =
+      hasImageInput || capabilities?.supportsImageInput === true;
 
     const displayName =
       typeof model?.name === "string" && model.name.trim().length > 0
         ? model.name.trim()
         : modelId;
-    const supportedParameters = isReasoning ? ["reasoning_effort"] : [];
     const common = {
       architecture,
       contextLength:
@@ -453,8 +518,8 @@ async function discoverOrcaRouterCatalog(input: {
       pricing: parseOpenRouterPricing(model?.pricing),
       providerCatalogGatewaySlug: input.gateway.slug,
       providerCatalogSource: "orcarouter-models",
-      supportedEfforts: normalizeSupportedEfforts(supportedParameters),
       supportedParameters,
+      ...(supportedEfforts.length > 0 ? { supportedEfforts } : {}),
     };
 
     const push = (
@@ -486,7 +551,7 @@ async function discoverOrcaRouterCatalog(input: {
       continue;
     }
     if (hasTextOutput) {
-      if (hasImageInput) {
+      if (hasVisionInput) {
         push("vision", { supportsImageInput: true });
       }
       push("chat");
@@ -545,11 +610,16 @@ export async function discoverGatewayCatalog(input: {
     });
   }
 
+  const litellmData = input.litellmData ?? await fetchLiteLLMPricing(config.litellmPricingUrl);
+
   if (input.gateway.catalogFormat === "orcarouter") {
-    return discoverOrcaRouterCatalog({ gateway: input.gateway, kinds });
+    return discoverOrcaRouterCatalog({
+      gateway: input.gateway,
+      kinds,
+      litellmData,
+    });
   }
 
-  const litellmData = input.litellmData ?? await fetchLiteLLMPricing(config.litellmPricingUrl);
   return discoverOpenAICompatibleCatalog({
     gateway: input.gateway,
     kinds,

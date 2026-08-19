@@ -146,6 +146,21 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
       architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
       pricing: { prompt: "0.000015", completion: "0.000075" },
     },
+    // OrcaRouter lists each model twice: bare alias (no name) + prefixed
+    // canonical (has name). Only the prefixed one should survive.
+    {
+      id: "gpt-5.6-luna",
+      supported_endpoint_types: ["openai", "openai-response"],
+      architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+      pricing: { prompt: "0.0000002", completion: "0.0000016" },
+    },
+    {
+      id: "openai/gpt-5.6-luna",
+      name: "OpenAI: GPT-5.6 Luna",
+      supported_endpoint_types: ["openai", "openai-response"],
+      architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+      pricing: { prompt: "0.0000002", completion: "0.0000012" },
+    },
     {
       id: "deepseek/deepseek-v4",
       supported_endpoint_types: ["openai"],
@@ -171,6 +186,15 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
       supported_endpoint_types: ["openai-video"],
       architecture: { input_modalities: ["text"], output_modalities: ["video"] },
     },
+    // Aggregator prefix (grok) differs from LiteLLM's key prefix (xai/...) —
+    // capabilities must still resolve via bare-name match.
+    {
+      id: "grok/grok-4.6",
+      supported_endpoint_types: ["openai"],
+      architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+    },
+    // OrcaRouter's own routing slug — must NOT borrow another router's caps.
+    { id: "orcarouter/auto", supported_endpoint_types: ["openai"] },
   ];
 
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -189,6 +213,41 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
       baseUrl: "https://api.orcarouter.ai/v1",
       apiKey: "sk-orca-test",
       supports: ["chat", "embeddings", "image", "tts", "tool_calling"],
+    },
+    // Capabilities come from LiteLLM, matched by the id's provider prefix.
+    litellmData: {
+      "claude-opus-4.6": {
+        litellm_provider: "anthropic",
+        mode: "chat",
+        supports_reasoning: true,
+      },
+      "gpt-5.6-luna": {
+        litellm_provider: "openai",
+        mode: "chat",
+        supports_reasoning: true,
+        supports_xhigh_reasoning_effort: true,
+        supports_function_calling: true,
+        supports_vision: true,
+      },
+      "gpt-4o-mini": {
+        litellm_provider: "openai",
+        mode: "chat",
+        supports_function_calling: true,
+        supports_vision: true,
+      },
+      // Keyed under a different provider prefix than OrcaRouter's `grok/`.
+      "xai/grok-4.6": {
+        litellm_provider: "xai",
+        mode: "chat",
+        supports_reasoning: true,
+      },
+      // Another router's auto slug — orcarouter/auto must not borrow this.
+      "openrouter/openrouter/auto": {
+        litellm_provider: "openrouter",
+        mode: "chat",
+        supports_reasoning: true,
+        supports_vision: true,
+      },
     },
   });
 
@@ -210,15 +269,37 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
   assert.ok(byId("deepseek/deepseek-v4", "chat"), "text-only chat");
   // Video is dropped entirely.
   assert.equal(candidates.some((c) => c.modelId === "kling/kling-3"), false);
+  // Bare alias id is filtered; only the provider-prefixed twin survives.
+  assert.equal(candidates.some((c) => c.modelId === "gpt-5.6-luna"), false);
+  assert.ok(byId("openai/gpt-5.6-luna", "chat"), "prefixed twin kept");
+  assert.equal(
+    candidates.filter((c) => c.modelId === "openai/gpt-5.6-luna" && c.kind === "chat").length,
+    1,
+    "prefixed model appears once per kind",
+  );
 
-  // Reasoning family gets reasoning_effort; a plain chat model does not.
+  // LiteLLM supports_reasoning → reasoning_effort (thinking badge); a plain
+  // chat model gets tools but no reasoning_effort.
   const opus = byId("anthropic/claude-opus-4.6", "chat");
-  assert.deepEqual(opus?.supportedParameters, ["reasoning_effort"]);
+  assert.ok(opus?.supportedParameters?.includes("reasoning_effort"), "opus reasoning");
   assert.ok((opus?.supportedEfforts?.length ?? 0) > 0);
+  const luna = byId("openai/gpt-5.6-luna", "chat");
+  assert.ok(luna?.supportedParameters?.includes("reasoning_effort"), "luna reasoning");
+  assert.ok(luna?.supportedEfforts?.includes("xhigh"), "luna xhigh from litellm flag");
   const gpt = byId("openai/gpt-4o-mini", "chat");
-  assert.deepEqual(gpt?.supportedParameters, []);
+  assert.ok(gpt?.supportedParameters?.includes("tools"), "gpt tools from litellm");
+  assert.equal(gpt?.supportedParameters?.includes("reasoning_effort"), false, "gpt no reasoning");
 
-  // Inline pricing + context carried straight from the OrcaRouter catalog.
+  // Bare-name fallback: grok/ prefix resolves LiteLLM's xai/grok-4.6.
+  const grok = byId("grok/grok-4.6", "chat");
+  assert.ok(grok?.supportedParameters?.includes("reasoning_effort"), "grok reasoning via bare-name");
+
+  // OrcaRouter routing slug: kept in the catalog but claims no borrowed caps.
+  const auto = byId("orcarouter/auto", "chat");
+  assert.ok(auto, "auto slug still surfaces as a chat model");
+  assert.deepEqual(auto?.supportedParameters, [], "auto borrows no capabilities");
+
+  // Inline pricing + context stay from OrcaRouter's own catalog (not LiteLLM).
   assert.equal(gpt?.pricing?.inputCostPerToken, 0.00000015);
   assert.equal(gpt?.contextLength, 128000);
   assert.equal(gpt?.providerCatalogSource, "orcarouter-models");
