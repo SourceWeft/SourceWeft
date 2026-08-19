@@ -457,7 +457,7 @@ export interface ThreadAgentAssembly {
   runConfig: AgentRunnableConfig;
   runAgentStream: (
     messages: Array<{ role: "user"; content: unknown }>,
-  ) => Promise<AsyncGenerator<unknown>>;
+  ) => Promise<unknown>;
 }
 
 export interface ThreadAgentAssemblyInput {
@@ -479,7 +479,7 @@ export interface ThreadAgentAssembly {
   runConfig: AgentRunnableConfig;
   runAgentStream: (
     messages: Array<{ role: "user"; content: unknown }>,
-  ) => Promise<AsyncGenerator<unknown>>;
+  ) => Promise<unknown>;
 }
 
 /**
@@ -819,16 +819,14 @@ export async function buildThreadAgentAssembly(
       skill_ids: prepared.enabledSkills.map((skill) => skill.workspaceSkillId),
       selected_skill_count: prepared.enabledSkills.length,
     },
-    streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
-    // `subgraphs: true` surfaces a `task` delegate's tool events (namespaced
-    // `["tools:<parentCallId>",…]`) so the UI can group each sub-agent's tool
-    // calls under its own card. Under it every chunk becomes
-    // `[namespace, mode, payload]`; the runner reshapes both forms and — the
-    // load-bearing guard — drops every sub-agent event EXCEPT `tools`, so a
-    // delegate's model text/reasoning/checkpoints/HITL updates can never pollute
-    // the main answer or the parent's bookkeeping (the concern that first kept
-    // this off).
-    subgraphs: true,
+    // Consumed via `agent.streamEvents(…, { version: "v3" })` (see
+    // `runAgentStream`). v3 is built on `graph.stream({ subgraphs: true })`, so a
+    // `task` delegate's tool events still arrive namespaced
+    // `["tools:<branchId>", …]` and the runner reuses subagent-namespace.ts to
+    // group each sub-agent's tool calls under its own card — the same
+    // load-bearing guard drops every sub-agent event EXCEPT `tools`. `streamMode`
+    // is no longer set: v3 exposes messages/tools/custom/updates/checkpoints on
+    // one normalized ProtocolEvent stream.
     // Cancels the LLM stream and stops scheduling further steps when the run is
     // aborted; LangGraph propagates it to tools via config.signal.
     ...(abortSignal ? { signal: abortSignal } : {}),
@@ -868,10 +866,10 @@ export async function buildThreadAgentAssembly(
           },
         } as AgentRunnableConfig;
       }
-      return agent.stream(
+      return agent.streamEvents(
         { messages: messages as never },
-        effectiveRunConfig,
-      ) as Promise<AsyncGenerator<unknown>>;
+        { ...effectiveRunConfig, version: "v3" } as never,
+      ) as Promise<unknown>;
     };
     return stream();
   };

@@ -1743,7 +1743,7 @@ test("HITL stream handler returns replace-stream for auto-approved connector res
   const { events, result } = await collectHitlStreamResult({
     agent: {
       getState: vi.fn().mockResolvedValue(null),
-      stream: streamMock,
+      streamEvents: streamMock,
     } as never,
     autoApprovedHitlResumeCount: 0,
     beforeAssistantCheckpoint: null,
@@ -1851,7 +1851,7 @@ test("HITL stream handler returns replace-stream for auto-approved sandbox resum
         },
         next: ["tools"],
       }),
-      stream: streamMock,
+      streamEvents: streamMock,
     } as never,
     autoApprovedHitlResumeCount: 0,
     beforeAssistantCheckpoint: null,
@@ -2057,7 +2057,7 @@ test("HITL stream handler auto-approves repeated sandbox action from persisted b
   const { events, result } = await collectHitlStreamResult({
     agent: {
       getState: vi.fn().mockResolvedValue(null),
-      stream: streamMock,
+      streamEvents: streamMock,
     } as never,
     autoApprovedHitlResumeCount: 0,
     beforeAssistantCheckpoint: null,

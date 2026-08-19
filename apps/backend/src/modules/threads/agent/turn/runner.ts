@@ -17,9 +17,7 @@ import {
   createMessageRenderBlockBuilder,
   finalizeMessageRenderBlocks,
 } from "../../turn/render-blocks";
-import { toObjectRecord } from "./content";
 import {
-  checkpointHasPendingTasks,
   checkpointRefFromConfig,
   getAgentStateOrNull,
   resolveAgentBaseConfig,
@@ -47,6 +45,13 @@ import {
   recordToolCallNamespace,
   resolveToolProducer,
 } from "./subagent-namespace";
+import {
+  adaptMessagesEvent,
+  adaptToolsEvent,
+  interruptsToLegacyUpdatesPayload,
+  unwrapCustomEvent,
+  type V3RunStream,
+} from "./v3-protocol";
 import {
   handleToolEventStreamChunk,
   handleToolEndStreamChunk,
@@ -186,8 +191,6 @@ export async function* invokeDeepAgentTurn(input: {
     observedToolCallsById,
     reasoningSegments,
     resolveToolCallSequence,
-    collectToolCalls,
-    setThinkingStep,
   } = runtime;
 
   // Maps each streamed tool event's subgraph namespace to its tool call id, so a
@@ -288,17 +291,17 @@ export async function* invokeDeepAgentTurn(input: {
 
     const suppressModelReasoning = input.llm?.thinking?.mode === "off";
 
-    let stream =
+    let stream: V3RunStream =
       input.prepared.agentMode === "replay"
         ? input.prepared.toolApprovalResume
-          ? await agent.stream(
+          ? ((await agent.streamEvents(
               new Command({
                 resume: commandResumeFromToolApprovalResume(
                   input.prepared.toolApprovalResume,
                 ),
               }),
-              runConfig as AgentRunnableConfig,
-            )
+              { ...(runConfig as object), version: "v3" } as never,
+            )) as unknown as V3RunStream)
           : (() => {
               throw new ContentError(
                 400,
@@ -306,7 +309,10 @@ export async function* invokeDeepAgentTurn(input: {
                 "DeepAgents HITL replay requires a resume decision payload.",
               );
             })()
-        : await runAgentStream(agentMessages);
+        : ((await runAgentStream(agentMessages)) as V3RunStream);
+    // v3 `tool-finished`/`tool-error` events omit the tool name; the adapter
+    // recovers it from this map, populated on each `tool-started`.
+    const toolNameByCallId = new Map<string, string>();
     let autoApprovedHitlResumeCount = 0;
     const maxAutoApprovedHitlResumes = Math.max(
       1,
@@ -317,124 +323,64 @@ export async function* invokeDeepAgentTurn(input: {
         : 0,
     );
     streamLoop: while (true) {
-      for await (const streamChunk of stream as AsyncGenerator<unknown>) {
-        if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
+      for await (const protocolEvent of stream) {
+        const method = protocolEvent?.method;
+        if (typeof method !== "string") {
           continue;
         }
-
-        // Under LangGraph `subgraphs: true` each chunk is
-        // `[namespace, mode, payload]`; a bare graph yields `[mode, payload]`.
-        // Detecting the namespace by shape tolerates both, so the loop does not
-        // depend on how the stream was configured.
-        const hasNamespace = Array.isArray(streamChunk[0]);
-        if (hasNamespace && streamChunk.length < 3) {
-          continue;
-        }
-        const namespace = hasNamespace ? (streamChunk[0] as unknown[]) : [];
-        const mode = hasNamespace ? streamChunk[1] : streamChunk[0];
-        const payload = hasNamespace ? streamChunk[2] : streamChunk[1];
+        // v3 ProtocolEvent: `{ method, params: { namespace, node, data } }`.
+        // `namespace` keeps the old `subgraphs: true` scheme
+        // (`["tools:<branchId>", …]`), so sub-agent grouping is unchanged.
+        const namespace = Array.isArray(protocolEvent.params?.namespace)
+          ? (protocolEvent.params?.namespace as unknown[])
+          : [];
+        const data = protocolEvent.params?.data;
 
         // A `task` delegate's events reach the client only to group its tool
         // cards. Every other sub-agent event (model text, reasoning, checkpoints,
-        // HITL updates) is dropped here so a delegate can never pollute the main
-        // answer or the parent's checkpoint/interrupt bookkeeping. Main-agent
-        // events (namespace without a `tools:` segment) always pass through.
+        // interrupts) is dropped here so a delegate can never pollute the main
+        // answer or the parent's bookkeeping. Main-agent events (depth < 2) always
+        // pass through.
         const subagentEvent = isSubagentNamespace(namespace);
-        if (subagentEvent && mode !== "tools") {
+        if (subagentEvent && method !== "tools") {
           continue;
         }
 
-        if (mode === "checkpoints") {
-          const checkpoint = checkpointRefFromConfig(
-            (toObjectRecord(payload) ?? {}).config,
-          );
-          if (checkpoint) {
-            if (
-              !beforeAssistantCheckpoint &&
-              checkpointHasPendingTasks(payload)
-            ) {
-              beforeAssistantCheckpoint = checkpoint;
-            }
-            finalCheckpoint = checkpoint;
-          }
-          continue;
-        }
-
-        if (mode === "messages") {
-          yield* handleMessagesStreamChunk({
-            payload,
-            commandSuccessCriteria: input.prepared.commandSuccessCriteria,
-            runtime,
-            suppressModelReasoning,
-            prepared: input.prepared,
-            billing: input.billing,
-            llm: input.llm,
-            operation: input.operation ?? "chat.stream",
-          });
-          continue;
-        }
-
-        if (mode === "updates") {
-          // A question interrupt (askUser calling `interrupt()`) has no
-          // actionRequests/reviewConfigs, so the approval handler would treat it
-          // as "continue" and strand the checkpoint. Route it first.
-          if (payloadHasAskUserInterrupt(payload)) {
-            const askUserResult = yield* handleAskUserStreamChunk({
-              agent,
-              beforeInputCheckpoint,
-              finalCheckpoint,
+        if (method === "messages") {
+          for (const payload of adaptMessagesEvent(data)) {
+            yield* handleMessagesStreamChunk({
               payload,
-              runConfig,
+              commandSuccessCriteria: input.prepared.commandSuccessCriteria,
               runtime,
-              threadId: input.prepared.thread.id,
-              userId: input.prepared.userId,
-              workspaceId: input.prepared.workspace.id,
+              suppressModelReasoning,
+              prepared: input.prepared,
+              billing: input.billing,
+              llm: input.llm,
+              operation: input.operation ?? "chat.stream",
             });
-            if (askUserResult.kind === "done") {
-              return;
-            }
-            continue;
           }
-          const result: HitlStreamHandlerResult = yield* handleHitlStreamChunk({
-            agent,
-            autoApprovedHitlResumeCount,
-            beforeAssistantCheckpoint,
-            beforeInputCheckpoint,
-            billing: input.billing,
-            connectorToolContext,
-            finalCheckpoint,
-            llm: input.llm,
-            maxAutoApprovedHitlResumes,
-            prepared: input.prepared,
-            payload,
-            runConfig,
+          continue;
+        }
+
+        if (method === "custom") {
+          yield* handleCustomStreamChunk({
+            payload: unwrapCustomEvent(data),
             runtime,
-            threadId: input.prepared.thread.id,
-            userId: input.prepared.userId,
-            workspaceId: input.prepared.workspace.id,
           });
-          if (result.kind === "replace-stream") {
-            stream = result.stream;
-            finalCheckpoint = result.finalCheckpoint;
-            beforeAssistantCheckpoint = result.beforeAssistantCheckpoint;
-            autoApprovedHitlResumeCount = result.autoApprovedHitlResumeCount;
-            continue streamLoop;
-          }
-          if (result.kind === "done") {
-            return;
-          }
           continue;
         }
 
-        if (mode === "custom") {
-          yield* handleCustomStreamChunk({ payload, runtime });
+        if (method !== "tools") {
+          // `updates` and `checkpoints` carry no client-facing events under v3:
+          // interrupts are read from `run.interrupts` after the stream drains,
+          // and the final checkpoint is resolved authoritatively via `getState`.
           continue;
         }
 
-        if (mode !== "tools") {
+        const legacyToolPayload = adaptToolsEvent(data, toolNameByCallId);
+        if (!legacyToolPayload) {
           continue;
         }
-
         const producer = subagentEvent
           ? resolveToolProducer(namespace, {
               toolCallsById,
@@ -443,7 +389,7 @@ export async function* invokeDeepAgentTurn(input: {
           : undefined;
         const toolCallSnapshot = resolveToolsStreamToolCall({
           pendingToolStreamsByRunId: runtime.pendingToolStreamsByRunId,
-          payload,
+          payload: legacyToolPayload,
           ...(producer ? { producer } : {}),
           resolveToolCallSequence,
           toolCallOrder,
@@ -510,14 +456,73 @@ export async function* invokeDeepAgentTurn(input: {
           });
         }
       }
-      if (
-        input.prepared.agentMode === "replay" ||
-        isCommandSuccessSatisfied({
-          criteria: input.prepared.commandSuccessCriteria,
-          toolCalls: collectToolCalls(),
-        })
-      ) {
-        break;
+
+      // The stream drained. v3 surfaces interrupts as terminal state rather than
+      // a mid-stream `updates` chunk, so handle HITL/askUser here. The final
+      // checkpoint is read from `getState` (v3 `checkpoints` events don't carry
+      // thread_id/checkpoint_ns).
+      finalCheckpoint =
+        checkpointRefFromConfig(
+          (
+            (await getAgentStateOrNull(
+              agent,
+              runConfig as AgentRunnableConfig,
+            )) as { config?: unknown } | null
+          )?.config,
+        ) ?? finalCheckpoint;
+
+      if (stream.interrupted && stream.interrupts.length > 0) {
+        const interruptPayload = interruptsToLegacyUpdatesPayload(
+          stream.interrupts,
+        );
+        // A question interrupt (askUser calling `interrupt()`) has no
+        // actionRequests/reviewConfigs, so the approval handler would treat it as
+        // "continue" and strand the checkpoint. Route it first.
+        if (payloadHasAskUserInterrupt(interruptPayload)) {
+          const askUserResult = yield* handleAskUserStreamChunk({
+            agent,
+            beforeInputCheckpoint,
+            finalCheckpoint,
+            payload: interruptPayload,
+            runConfig,
+            runtime,
+            threadId: input.prepared.thread.id,
+            userId: input.prepared.userId,
+            workspaceId: input.prepared.workspace.id,
+          });
+          if (askUserResult.kind === "done") {
+            return;
+          }
+        } else {
+          const result: HitlStreamHandlerResult = yield* handleHitlStreamChunk({
+            agent,
+            autoApprovedHitlResumeCount,
+            beforeAssistantCheckpoint,
+            beforeInputCheckpoint,
+            billing: input.billing,
+            connectorToolContext,
+            finalCheckpoint,
+            llm: input.llm,
+            maxAutoApprovedHitlResumes,
+            prepared: input.prepared,
+            payload: interruptPayload,
+            runConfig,
+            runtime,
+            threadId: input.prepared.thread.id,
+            userId: input.prepared.userId,
+            workspaceId: input.prepared.workspace.id,
+          });
+          if (result.kind === "replace-stream") {
+            stream = result.stream;
+            finalCheckpoint = result.finalCheckpoint;
+            beforeAssistantCheckpoint = result.beforeAssistantCheckpoint;
+            autoApprovedHitlResumeCount = result.autoApprovedHitlResumeCount;
+            continue streamLoop;
+          }
+          if (result.kind === "done") {
+            return;
+          }
+        }
       }
       break;
     }

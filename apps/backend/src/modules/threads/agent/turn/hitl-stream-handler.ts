@@ -36,6 +36,7 @@ import {
   rememberObservedToolCalls,
 } from "./tool-tracker";
 import type { TurnRuntime } from "./turn-runtime";
+import type { V3RunStream } from "./v3-protocol";
 
 type Agent = Awaited<ReturnType<typeof createThreadAgent>>;
 
@@ -59,7 +60,7 @@ export type HitlStreamHandlerResult =
       autoApprovedHitlResumeCount: number;
       beforeAssistantCheckpoint: AgentCheckpointRef;
       finalCheckpoint: AgentCheckpointRef;
-      stream: AsyncGenerator<unknown>;
+      stream: V3RunStream;
     }
   | { kind: "done" };
 
@@ -157,7 +158,7 @@ export async function* handleHitlStreamChunk(input: {
         autoApprovedHitlResumeCount,
       },
     );
-    const stream = (await input.agent.stream(
+    const stream = (await input.agent.streamEvents(
       new Command({
         resume: commandResumeFromHitlDecisions({
           decisions: autoApprovedHitlResume.decisions,
@@ -165,8 +166,8 @@ export async function* handleHitlStreamChunk(input: {
             hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
         }),
       }),
-      input.runConfig,
-    )) as AsyncGenerator<unknown>;
+      { ...(input.runConfig as object), version: "v3" } as never,
+    )) as unknown as V3RunStream;
     return {
       kind: "replace-stream",
       stream,
@@ -210,7 +211,7 @@ export async function* handleHitlStreamChunk(input: {
           autoApprovedHitlResumeCount,
         },
       );
-      const stream = (await input.agent.stream(
+      const stream = (await input.agent.streamEvents(
         new Command({
           resume: commandResumeFromHitlDecisions({
             decisions: trustedApproval.decisions,
@@ -218,8 +219,8 @@ export async function* handleHitlStreamChunk(input: {
               hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
           }),
         }),
-        input.runConfig,
-      )) as AsyncGenerator<unknown>;
+        { ...(input.runConfig as object), version: "v3" } as never,
+      )) as unknown as V3RunStream;
       return {
         kind: "replace-stream",
         stream,
