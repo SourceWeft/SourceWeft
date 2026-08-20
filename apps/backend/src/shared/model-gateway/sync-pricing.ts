@@ -26,7 +26,15 @@ function toRouteKey(kind: string, alias: string) {
  * target keeps the alias priced or explicitly unmatched — never accidentally
  * free.
  */
-async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, string>> {
+/** The primary route's target model + its serving provider, per kind+alias. */
+interface PrimaryRouteTarget {
+  targetModel: string;
+  targetProviderName: string;
+}
+
+async function loadPrimaryRouteTargetByKindAndAlias(): Promise<
+  Map<string, PrimaryRouteTarget>
+> {
   const [activeVersion] = await db
     .select({ id: modelGatewayConfigVersions.id })
     .from(modelGatewayConfigVersions)
@@ -42,6 +50,7 @@ async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, strin
       routeKind: modelGatewayRoutes.routeKind,
       alias: modelGatewayRoutes.alias,
       targetModel: modelGatewayRoutes.targetModel,
+      targetProviderName: modelGatewayRoutes.targetProviderName,
       priority: modelGatewayRoutes.priority,
     })
     .from(modelGatewayRoutes)
@@ -52,7 +61,10 @@ async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, strin
       ),
     );
 
-  const primaryByRoute = new Map<string, { targetModel: string; priority: number }>();
+  const primaryByRoute = new Map<
+    string,
+    PrimaryRouteTarget & { priority: number }
+  >();
   for (const row of routeRows) {
     const routeKind = row.routeKind.trim();
     const alias = row.alias.trim();
@@ -68,14 +80,21 @@ async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, strin
       row.priority < current.priority ||
       (row.priority === current.priority && targetModel < current.targetModel)
     ) {
-      primaryByRoute.set(routeKey, { targetModel, priority: row.priority });
+      primaryByRoute.set(routeKey, {
+        targetModel,
+        targetProviderName: row.targetProviderName.trim(),
+        priority: row.priority,
+      });
     }
   }
 
   return new Map(
     Array.from(primaryByRoute.entries()).map(([routeKey, primary]) => [
       routeKey,
-      primary.targetModel,
+      {
+        targetModel: primary.targetModel,
+        targetProviderName: primary.targetProviderName,
+      },
     ]),
   );
 }
@@ -159,6 +178,7 @@ function shouldSkipLiteLLMAutoMatch(
 
 const PRICING_SYNC_CONFIG_KEYS = new Set<string>([
   ...PRICING_VALUE_KEYS,
+  "image_pricing_tiers",
   "price_source",
   "litellm_key",
   "price_updated_at",
@@ -266,12 +286,17 @@ function pricingConfigFromInfo(
     output_cost_per_reasoning_token: normalizePriceNumber(
       p?.reasoningOutputPerToken,
     ),
-    input_cost_per_image_token: null,
-    output_cost_per_image_token: null,
+    input_cost_per_image_token: normalizePriceNumber(p?.inputImageTokenPerToken),
+    output_cost_per_image_token: normalizePriceNumber(
+      p?.outputImageTokenPerToken,
+    ),
     input_cost_per_audio_token: normalizePriceNumber(p?.audioInputPerToken),
     output_cost_per_audio_token: normalizePriceNumber(p?.audioOutputPerToken),
     input_cost_per_image: normalizePriceNumber(p?.inputPerImage),
     output_cost_per_image: normalizePriceNumber(p?.outputPerImage),
+    ...(p?.imageTiers && p.imageTiers.length > 0
+      ? { image_pricing_tiers: p.imageTiers }
+      : {}),
     price_source: "registry",
     litellm_key: null,
     price_updated_at: now.toISOString(),
@@ -354,8 +379,12 @@ export async function syncModelPricing(): Promise<void> {
 
     // Resolve capabilities + pricing from the normalized catalog by the alias's
     // primary target (or the alias itself). One source, models.dev-primary.
-    const target = primaryRouteTarget ?? profile.modelAlias;
-    const info = modelCatalog.resolve(target);
+    const target = primaryRouteTarget?.targetModel ?? profile.modelAlias;
+    const info = modelCatalog.resolve(target, {
+      // Serving provider from the primary route, so a shared model id is priced
+      // from that provider's bucket, not an arbitrary same-id entry.
+      provider: primaryRouteTarget?.targetProviderName,
+    });
 
     if (info) {
       matched++;

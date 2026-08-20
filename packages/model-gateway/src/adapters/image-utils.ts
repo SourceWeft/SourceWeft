@@ -285,6 +285,9 @@ export function buildImageGenerateResult(input: {
   target: ResolvedRequestTarget;
   images: GeneratedImage[];
   usage?: UsageInfo;
+  /** Resolved provider request size (`WxH`) + quality, for per-image pricing. */
+  imageSize?: string;
+  imageQuality?: string;
   traceId?: string;
 }): ImageGenerateResult {
   const usage = input.usage ?? normalizeProviderUsage(input.raw);
@@ -293,6 +296,8 @@ export function buildImageGenerateResult(input: {
       ? {
           ...usage,
           outputImageCount: usage?.outputImageCount ?? input.images.length,
+          ...(input.imageSize ? { imageSize: input.imageSize } : {}),
+          ...(input.imageQuality ? { imageQuality: input.imageQuality } : {}),
         }
       : usage;
 

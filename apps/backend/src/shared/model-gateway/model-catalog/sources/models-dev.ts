@@ -2,6 +2,7 @@ import { config } from "../../../config";
 import { logger } from "../../../logger";
 import {
   canonicalModelId,
+  canonicalProviderKey,
   type ModelModality,
   type ModelPricingInfo,
   type NormalizedModelInfo,
@@ -93,6 +94,7 @@ function toFinite(value: number | undefined): number | null {
 function normalizeModel(
   modelId: string,
   model: ModelsDevModel,
+  providerKey?: string,
 ): NormalizedModelInfo {
   const reasoning = model.reasoning === true;
   const input = lowerStrings(model.modalities?.input);
@@ -100,6 +102,7 @@ function normalizeModel(
     typeof model.id === "string" && model.id.trim() ? model.id : modelId;
   return {
     id: canonicalModelId(rawId),
+    provider: canonicalProviderKey(providerKey),
     modality: toModality(model),
     reasoning,
     reasoningEfforts: reasoning ? toEfforts(model) : [],
@@ -129,13 +132,13 @@ export async function loadModelsDevModels(): Promise<NormalizedModelInfo[]> {
     }
     const payload = (await response.json()) as ModelsDevApi;
     const out: NormalizedModelInfo[] = [];
-    for (const provider of Object.values(payload)) {
+    for (const [providerKey, provider] of Object.entries(payload)) {
       if (!provider || typeof provider !== "object") continue;
       for (const [modelId, model] of Object.entries(provider.models ?? {})) {
         // One malformed entry must not drop the whole (6000+ model) source.
         if (!model || typeof model !== "object") continue;
         try {
-          out.push(normalizeModel(modelId, model));
+          out.push(normalizeModel(modelId, model, providerKey));
         } catch {
           // skip a bad entry
         }

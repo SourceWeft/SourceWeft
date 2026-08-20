@@ -61,6 +61,8 @@ export class OpenAICompatibleImageGenerationTransport
       raw,
       target: input.target,
       images,
+      imageSize: mapAspectRatioToOpenAIImageSize(input.payload.aspectRatio),
+      imageQuality: mapQualityToOpenAIQuality(input.payload.quality),
       traceId: input.options?.traceId,
     });
   }

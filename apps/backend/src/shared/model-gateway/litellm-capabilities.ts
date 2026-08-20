@@ -12,6 +12,8 @@ export type LiteLLMEntry = {
   output_cost_per_audio_token?: number | null;
   input_cost_per_image?: number | null;
   output_cost_per_image?: number | null;
+  input_cost_per_pixel?: number | null;
+  output_cost_per_pixel?: number | null;
   litellm_provider?: string | null;
   mode?: string | null;
   supports_vision?: boolean | null;

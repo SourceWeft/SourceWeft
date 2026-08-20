@@ -1,3 +1,10 @@
+export interface ImagePricingTier {
+  quality?: string;
+  size?: string;
+  perImage?: number | null;
+  perPixel?: number | null;
+}
+
 export interface ModelPricing {
   input_cost_per_token: number | null;
   output_cost_per_token: number | null;
@@ -10,6 +17,14 @@ export interface ModelPricing {
   output_cost_per_audio_token?: number | null;
   input_cost_per_image?: number | null;
   output_cost_per_image?: number | null;
+  input_cost_per_pixel?: number | null;
+  output_cost_per_pixel?: number | null;
+  /**
+   * Per-image pricing tiered by request quality + size (LiteLLM's
+   * `{quality}/{WxH}/{model}` price book). Used for DALL·E-style per-image
+   * models; gpt-image bills by tokens and ignores this.
+   */
+  image_pricing_tiers?: ImagePricingTier[] | null;
   price_source:
     | "litellm"
     | "models.dev"

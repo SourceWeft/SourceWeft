@@ -116,6 +116,13 @@ export interface UsageInfo {
   outputImageTokens?: number;
   inputImageCount?: number;
   outputImageCount?: number;
+  /**
+   * Resolved output image request attributes (provider `WxH` size and quality),
+   * used to price DALL·E-style per-image/per-pixel models by their quality+size
+   * tier. gpt-image bills by image tokens and ignores these.
+   */
+  imageSize?: string;
+  imageQuality?: string;
   inputAudioTokens?: number;
   outputAudioTokens?: number;
   providerCostUsd?: number;

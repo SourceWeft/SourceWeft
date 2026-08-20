@@ -5,6 +5,7 @@ import {
   db,
   modelGatewayConfigs,
   modelGatewayProfiles,
+  type ImagePricingTier,
   type ModelPricing,
 } from "@sourceweft/db";
 import type { LlmExecutionConfig } from "./model-gateway-audit";
@@ -123,9 +124,81 @@ function buildPricingSnapshot(pricing: ModelPricing): PricingSnapshot {
     output_cost_per_audio_token: pricing.output_cost_per_audio_token ?? null,
     input_cost_per_image: pricing.input_cost_per_image ?? null,
     output_cost_per_image: pricing.output_cost_per_image ?? null,
+    input_cost_per_pixel: pricing.input_cost_per_pixel ?? null,
+    output_cost_per_pixel: pricing.output_cost_per_pixel ?? null,
+    image_pricing_tiers: pricing.image_pricing_tiers ?? null,
     price_source: pricing.price_source,
     price_updated_at: pricing.price_updated_at ?? null,
   };
+}
+
+/** Pixel count of a `WxH` size string, or null if unparseable. */
+function parseSizePixels(size: string | undefined): number | null {
+  if (!size) {
+    return null;
+  }
+  const match = /^(\d+)\s*x\s*(\d+)$/i.exec(size.trim());
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? width * height : null;
+}
+
+/**
+ * Pick the per-image price tier for a request's quality + size, mirroring
+ * LiteLLM's `{quality}/{WxH}/{model}` price-book lookup. A tier with `quality`
+ * or `size` omitted is a wildcard that still matches; the most specific
+ * matching tier wins (exact quality+size > size-only > quality-only > wildcard).
+ * Returns null when no tier is compatible with the request.
+ */
+function selectImageTier(
+  tiers: ImagePricingTier[],
+  quality: string | undefined,
+  size: string | undefined,
+): ImagePricingTier | null {
+  const q = quality?.trim().toLowerCase();
+  const s = size?.trim().toLowerCase();
+  const norm = (value?: string) => value?.trim().toLowerCase();
+  let best: ImagePricingTier | null = null;
+  let bestScore = -1;
+  for (const tier of tiers) {
+    const tierQ = norm(tier.quality);
+    const tierS = norm(tier.size);
+    // A defined dimension that disagrees with the request disqualifies the tier.
+    if (tierQ !== undefined && tierQ !== q) {
+      continue;
+    }
+    if (tierS !== undefined && tierS !== s) {
+      continue;
+    }
+    const score = (tierQ !== undefined ? 2 : 0) + (tierS !== undefined ? 1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = tier;
+    }
+  }
+  return best;
+}
+
+/** Cost of `count` images at a tier: per-image, else per-pixel × area. */
+function imageTierCost(
+  tier: ImagePricingTier,
+  size: string | undefined,
+  count: number,
+): number | null {
+  if (typeof tier.perImage === "number" && Number.isFinite(tier.perImage)) {
+    return tier.perImage * count;
+  }
+  if (typeof tier.perPixel === "number" && Number.isFinite(tier.perPixel)) {
+    const pixels = parseSizePixels(tier.size ?? size);
+    if (pixels === null) {
+      return null;
+    }
+    return tier.perPixel * pixels * count;
+  }
+  return null;
 }
 
 function clampCount(value: number | undefined, max?: number) {
@@ -271,9 +344,23 @@ export function computeProviderCostFromPricing(input: {
   );
   const pricedInputImageCount = inputImageTokens > 0 ? 0 : inputImageCount;
   const pricedOutputImageCount = outputImageTokens > 0 ? 0 : outputImageCount;
+  // DALL·E-style per-image/per-pixel models price the output by request
+  // quality + size (LiteLLM's `{quality}/{WxH}` tiers). Resolve the tier once;
+  // gpt-image bills by tokens above and leaves outputImageCount at 0 here.
+  const imageTiers = Array.isArray(input.pricing.image_pricing_tiers)
+    ? input.pricing.image_pricing_tiers
+    : [];
+  const outputTier =
+    pricedOutputImageCount > 0 && imageTiers.length > 0
+      ? selectImageTier(imageTiers, usage.imageQuality, usage.imageSize)
+      : null;
+  const outputTierCost = outputTier
+    ? imageTierCost(outputTier, usage.imageSize, pricedOutputImageCount)
+    : null;
   const hasOutputImageCountPrice =
     pricedOutputImageCount > 0 &&
-    priceValue(input.pricing, "output_cost_per_image") !== null;
+    (outputTierCost !== null ||
+      priceValue(input.pricing, "output_cost_per_image") !== null);
   const textInputTokens =
     hasOutputImageCountPrice && inputImageTokens === 0
       ? 0
@@ -350,13 +437,17 @@ export function computeProviderCostFromPricing(input: {
     component: "output_image_tokens",
     missing,
   });
-  providerCostUsd += addComponent({
-    amount: pricedOutputImageCount,
-    pricing: input.pricing,
-    key: "output_cost_per_image",
-    component: "output_images",
-    missing,
-  });
+  if (outputTierCost !== null) {
+    providerCostUsd += outputTierCost;
+  } else {
+    providerCostUsd += addComponent({
+      amount: pricedOutputImageCount,
+      pricing: input.pricing,
+      key: "output_cost_per_image",
+      component: "output_images",
+      missing,
+    });
+  }
   providerCostUsd += addComponent({
     amount: outputAudioTokens,
     pricing: input.pricing,

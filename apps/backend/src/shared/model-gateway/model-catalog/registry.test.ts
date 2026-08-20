@@ -61,6 +61,91 @@ test("models.dev wins over litellm; both contribute fields", async () => {
   assert.ok(r?.sources.includes("models.dev"));
 });
 
+test("exact provider-prefixed id inherits image pricing from the bare-name union", async () => {
+  // models.dev lists the image model under `openai/…` with no price; LiteLLM
+  // carries the token price + per-image tiers under the bare / `azure/…` ids.
+  // The two never share a byId key, so resolve must fold in the bare union.
+  const registry = await build({
+    litellm: [
+      info({
+        id: "azure/gpt-image-1",
+        modality: "image",
+        sources: ["litellm"],
+        pricing: {
+          inputImageTokenPerToken: 0.00001,
+          outputImageTokenPerToken: 0.00004,
+        },
+      }),
+      info({
+        id: "gpt-image-1",
+        modality: "image",
+        sources: ["litellm"],
+        pricing: {
+          imageTiers: [{ quality: "high", size: "1024x1024", perImage: 0.167 }],
+        },
+      }),
+    ],
+    modelsDev: [
+      info({ id: "openai/gpt-image-1", modality: "image", sources: ["models.dev"] }),
+    ],
+  });
+  const r = registry.resolve("openai/gpt-image-1");
+  assert.equal(r?.pricing?.outputImageTokenPerToken, 0.00004);
+  assert.equal(r?.pricing?.imageTiers?.length, 1);
+  assert.equal(r?.pricing?.imageTiers?.[0]?.perImage, 0.167);
+});
+
+test("resolve prices a shared model id from the serving provider's bucket", async () => {
+  // The same model id is offered by three providers at different prices; the
+  // global union alone would pick an arbitrary one.
+  const priced = (provider: string, input: number) =>
+    info({
+      id: "deepseek/deepseek-v4-pro",
+      provider,
+      sources: ["models.dev"],
+      pricing: { inputPerToken: input },
+    });
+  const registry = await build({
+    modelsDev: [
+      priced("deepseek", 0.435e-6),
+      priced("orcarouter", 0.56e-6),
+      priced("openrouter", 1.6e-6),
+    ],
+  });
+  // provider hint selects that provider's price
+  assert.equal(
+    registry.resolve("deepseek/deepseek-v4-pro", { provider: "orcarouter" })
+      ?.pricing?.inputPerToken,
+    0.56e-6,
+  );
+  assert.equal(
+    registry.resolve("deepseek/deepseek-v4-pro", { provider: "openrouter" })
+      ?.pricing?.inputPerToken,
+    1.6e-6,
+  );
+  // no hint: the id's own prefix ("deepseek/…") picks the deepseek bucket
+  assert.equal(
+    registry.resolve("deepseek/deepseek-v4-pro")?.pricing?.inputPerToken,
+    0.435e-6,
+  );
+  // provider alias is normalized (together → togetherai)
+  const aliased = await build({
+    modelsDev: [
+      info({
+        id: "meta/llama-3",
+        provider: "togetherai",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 9e-7 },
+      }),
+    ],
+  });
+  assert.equal(
+    aliased.resolve("meta/llama-3", { provider: "together" })?.pricing
+      ?.inputPerToken,
+    9e-7,
+  );
+});
+
 test("startAutoRefresh is a no-op when disabled and idempotent otherwise", () => {
   const registry = new ModelCatalogRegistry({
     litellm: async () => [],

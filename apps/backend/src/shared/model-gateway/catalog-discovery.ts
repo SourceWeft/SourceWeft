@@ -222,7 +222,9 @@ function buildCandidateFromRegistry(input: {
   source: string;
   resolve: CapabilityResolver;
 }): CatalogModelCandidate | null {
-  const info = input.resolve(input.modelId);
+  const info = input.resolve(input.modelId, {
+    provider: input.gateway.providerName,
+  });
   if (!info) {
     logger.warn("Skipped catalog model with no capability match", {
       provider: input.gateway.providerName,
@@ -345,6 +347,7 @@ const ORCAROUTER_TTS_PATTERN = /(^|[/-])tts(-|$)/;
  */
 export type CapabilityResolver = (
   modelId: string,
+  opts?: { provider?: string },
 ) => NormalizedModelInfo | null;
 
 function candidateCapabilityFields(info: NormalizedModelInfo | null) {
@@ -414,7 +417,9 @@ async function discoverOrcaRouterCatalog(input: {
     // and present for models the catalog hasn't indexed yet. Routing slugs
     // (orcarouter/auto) and under-described media models are defined in
     // model-overrides.json by exact id.
-    const info = input.resolve(modelId);
+    const info = input.resolve(modelId, {
+      provider: input.gateway.providerName,
+    });
     const { supportedParameters, supportedEfforts, vision, modality } =
       candidateCapabilityFields(info);
     // Vision: OrcaRouter's own architecture is authoritative; fall back to the
@@ -561,7 +566,9 @@ export async function discoverGatewayCatalog(input: {
   // parses rich inline pricing/modality; a plain openai-compatible provider is
   // just bare ids. Both take capabilities from the registry.
   const resolve =
-    input.resolveCapabilities ?? ((id: string) => modelCatalog.resolve(id));
+    input.resolveCapabilities ??
+    ((id: string, opts?: { provider?: string }) =>
+      modelCatalog.resolve(id, opts));
 
   if (input.gateway.catalogFormat === "orcarouter") {
     return discoverOrcaRouterCatalog({ gateway: input.gateway, kinds, resolve });
