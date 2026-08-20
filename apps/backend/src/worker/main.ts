@@ -4,6 +4,7 @@ import { buildAuditInputFromJob, recordJobAudit } from "../shared/jobs-audit";
 import { logger } from "../shared/logger";
 import {
   ensureModelConfigAvailable,
+  modelCatalog,
   syncGlobalModelGatewayConfig,
 } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
@@ -32,6 +33,7 @@ import { startAsyncRunsWorker } from "./async-runs-worker";
 import { ASYNC_RUNS_QUEUE } from "../modules/threads/agent/async-runs/run-queue";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
+modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();
 // Connectors are contributed by capabilities, so registering them reads
 // manifests. Await it before serving so the registry is never consulted empty.

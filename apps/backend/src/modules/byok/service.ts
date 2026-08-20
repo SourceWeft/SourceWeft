@@ -57,9 +57,8 @@ async function resolveCapabilitySnapshot(modelName: string) {
     reasoning: supportedParameters.includes("reasoning"),
     reasoningEffort: supportedParameters.includes("reasoning_effort"),
     includeReasoning: supportedParameters.includes("include_reasoning"),
-    supportSources: ["litellm"],
+    supportSources: ["model-catalog"],
     maxCompletionTokens: capabilities.max_completion_tokens ?? null,
-    litellmKey: capabilities.litellmKey,
   } satisfies CapabilitySnapshot;
 }
 

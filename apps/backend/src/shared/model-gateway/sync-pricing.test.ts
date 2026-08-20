@@ -35,7 +35,7 @@ test("externally managed pricing with finite price skips LiteLLM auto match", ()
   };
 
   assert.equal(
-    syncPricing.testExports.isLiteLLMManagedPriceSource("openrouter"),
+    syncPricing.testExports.isAutoManagedPriceSource("openrouter"),
     false,
   );
   assert.equal(syncPricing.testExports.hasAnyFinitePriceValue(pricing), true);
@@ -57,17 +57,17 @@ test("zero price is a valid external price value", () => {
 
 test("unknown and litellm price sources remain LiteLLM managed", () => {
   assert.equal(
-    syncPricing.testExports.isLiteLLMManagedPriceSource(undefined),
+    syncPricing.testExports.isAutoManagedPriceSource(undefined),
     true,
   );
-  assert.equal(syncPricing.testExports.isLiteLLMManagedPriceSource(null), true);
-  assert.equal(syncPricing.testExports.isLiteLLMManagedPriceSource(""), true);
+  assert.equal(syncPricing.testExports.isAutoManagedPriceSource(null), true);
+  assert.equal(syncPricing.testExports.isAutoManagedPriceSource(""), true);
   assert.equal(
-    syncPricing.testExports.isLiteLLMManagedPriceSource("unknown"),
+    syncPricing.testExports.isAutoManagedPriceSource("unknown"),
     true,
   );
   assert.equal(
-    syncPricing.testExports.isLiteLLMManagedPriceSource("litellm"),
+    syncPricing.testExports.isAutoManagedPriceSource("litellm"),
     true,
   );
 
@@ -101,16 +101,20 @@ test("externally managed pricing with explicit LiteLLM key can sync capabilities
     false,
   );
 
-  const updates = syncPricing.testExports.buildLiteLLMSyncUpdates({
-    litellmEntry: {
-      input_cost_per_token: 9,
-      output_cost_per_token: 10,
-      litellm_provider: "provider",
-      mode: "chat",
-      supports_function_calling: true,
+  const updates = syncPricing.testExports.buildSyncUpdatesFromInfo({
+    info: {
+      id: "provider/model",
+      modality: "chat",
+      reasoning: false,
+      reasoningEfforts: [],
+      toolCall: true,
+      structuredOutput: false,
+      vision: false,
+      pricing: { inputPerToken: 9, outputPerToken: 10 },
+      sources: ["models.dev"],
     },
-    litellmKey: "provider/model",
     now: new Date(0),
+    // externally-managed pricing → only capabilities refresh, price untouched.
     pricingLocked: true,
   });
 

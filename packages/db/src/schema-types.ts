@@ -10,7 +10,13 @@ export interface ModelPricing {
   output_cost_per_audio_token?: number | null;
   input_cost_per_image?: number | null;
   output_cost_per_image?: number | null;
-  price_source: "litellm" | "manual" | "openrouter" | "unknown";
+  price_source:
+    | "litellm"
+    | "models.dev"
+    | "registry"
+    | "manual"
+    | "openrouter"
+    | "unknown";
   litellm_key: string | null;
   price_updated_at: string | null;
   litellm_provider?: string | null;

@@ -2,15 +2,11 @@ import { logger } from "../logger";
 import { config } from "../config";
 import { OPENROUTER_APP_TITLE } from "./attribution";
 import type { ModelGatewayProfileKind } from "./types";
-import {
-  fetchLiteLLMPricing,
-  hasLiteLLMPricing,
-  resolveLiteLLMCapabilities,
-  resolveLiteLLMModelMatch,
-  resolveLiteLLMProviderForGateway,
-  type LiteLLMData,
-  type LiteLLMEntry,
-} from "./litellm-capabilities";
+import { modelCatalog } from "./model-catalog/registry";
+import type {
+  ModelModality,
+  NormalizedModelInfo,
+} from "./model-catalog/types";
 import type { GlobalProfilePricingEntry } from "./global-config";
 
 export type CatalogModelKind = ModelGatewayProfileKind;
@@ -18,7 +14,6 @@ export type CatalogModelKind = ModelGatewayProfileKind;
 export type CatalogModelCandidate = {
   displayName?: string;
   kind: CatalogModelKind;
-  litellmEntry?: LiteLLMEntry;
   litellmKey?: string;
   modelId: string;
   pricing?: GlobalProfilePricingEntry | null;
@@ -188,104 +183,76 @@ export function providerSupportsKind(
   return required.some((item) => supports.has(item));
 }
 
-export function buildLiteLLMPricingEntry(
-  entry: LiteLLMEntry,
-): GlobalProfilePricingEntry {
-  return {
-    source: "litellm",
-    inputCostPerToken: entry.input_cost_per_token ?? null,
-    outputCostPerToken: entry.output_cost_per_token ?? null,
-    cacheReadInputTokenCost: entry.cache_read_input_token_cost ?? null,
-    cacheCreationInputTokenCost: entry.cache_creation_input_token_cost ?? null,
-    outputCostPerReasoningToken:
-      entry.output_cost_per_reasoning_token ?? null,
-    inputCostPerImageToken: entry.input_cost_per_image_token ?? null,
-    outputCostPerImageToken: entry.output_cost_per_image_token ?? null,
-    inputCostPerAudioToken: entry.input_cost_per_audio_token ?? null,
-    outputCostPerAudioToken: entry.output_cost_per_audio_token ?? null,
-    inputCostPerImage: entry.input_cost_per_image ?? null,
-    outputCostPerImage: entry.output_cost_per_image ?? null,
+const MODALITY_TO_KIND: Record<ModelModality, CatalogModelKind> = {
+  chat: "chat",
+  vision: "vision",
+  image: "image",
+  embedding: "embedding",
+  tts: "tts",
+  video: "video",
+};
+
+function registryPricing(
+  info: NormalizedModelInfo,
+): GlobalProfilePricingEntry | null {
+  const p = info.pricing;
+  if (!p) {
+    return null;
+  }
+  const entry: GlobalProfilePricingEntry = {
+    inputCostPerToken: p.inputPerToken ?? null,
+    outputCostPerToken: p.outputPerToken ?? null,
+    cacheReadInputTokenCost: p.cacheReadPerToken ?? null,
+    cacheCreationInputTokenCost: p.cacheWritePerToken ?? null,
+    outputCostPerReasoningToken: p.reasoningOutputPerToken ?? null,
+    inputCostPerAudioToken: p.audioInputPerToken ?? null,
+    outputCostPerAudioToken: p.audioOutputPerToken ?? null,
+    inputCostPerImage: p.inputPerImage ?? null,
+    outputCostPerImage: p.outputPerImage ?? null,
   };
+  return Object.values(entry).some((v) => typeof v === "number") ? entry : null;
 }
 
-function buildCandidateFromLiteLLM(input: {
+// A plain openai-compatible provider whose `/models` gives only ids: resolve
+// its kind, capabilities, and pricing from the normalized catalog. Same
+// registry path as OrcaRouter, just without any provider-inline metadata.
+function buildCandidateFromRegistry(input: {
   gateway: CatalogDiscoveryGateway;
-  litellmData: LiteLLMData;
   modelId: string;
   source: string;
-}) {
-  const provider = resolveLiteLLMProviderForGateway({
-    providerKind: input.gateway.providerKind,
-    providerName: input.gateway.providerName,
-    baseUrl: input.gateway.baseUrl,
-  });
-  const match = resolveLiteLLMModelMatch({
-    modelId: input.modelId,
-    provider,
-    litellmData: input.litellmData,
-  });
-
-  if (match.type !== "matched" || !match.kind) {
-    logger.warn("Skipped catalog model without LiteLLM match", {
+  resolve: CapabilityResolver;
+}): CatalogModelCandidate | null {
+  const info = input.resolve(input.modelId);
+  if (!info) {
+    logger.warn("Skipped catalog model with no capability match", {
       provider: input.gateway.providerName,
       modelId: input.modelId,
-      reason: match.type,
     });
     return null;
   }
-
-  if (!hasLiteLLMPricing(match.entry)) {
-    logger.warn("Skipped catalog model without LiteLLM pricing", {
-      provider: input.gateway.providerName,
-      modelId: input.modelId,
-      litellmKey: match.key,
-    });
+  const kind = info.modality ? MODALITY_TO_KIND[info.modality] : "chat";
+  if (!providerSupportsKind(input.gateway, kind)) {
     return null;
   }
-
-  if ((match.kind === "chat" || match.kind === "vision") &&
-      match.entry.supports_function_calling !== true) {
-    logger.warn("Skipped catalog chat model without tool support", {
-      provider: input.gateway.providerName,
-      modelId: input.modelId,
-      litellmKey: match.key,
-    });
-    return null;
-  }
-
-  if (!providerSupportsKind(input.gateway, match.kind)) {
-    logger.warn("Skipped catalog model for unsupported gateway kind", {
-      provider: input.gateway.providerName,
-      modelId: input.modelId,
-      kind: match.kind,
-    });
-    return null;
-  }
-
-  const capabilities = resolveLiteLLMCapabilities(match.entry);
+  const { supportedParameters, supportedEfforts, vision } =
+    candidateCapabilityFields(info);
   return {
-    kind: match.kind,
-    litellmEntry: match.entry,
-    litellmKey: match.key,
+    kind,
     modelId: input.modelId,
-    pricing: buildLiteLLMPricingEntry(match.entry),
+    pricing: registryPricing(info),
     providerCatalogSource: input.source,
     providerCatalogGatewaySlug: input.gateway.slug,
-    supportedParameters: capabilities.supportedParameters,
-    // Present only for reasoning models (LiteLLM supports_reasoning); absent
-    // otherwise so sync never freezes an empty effort list.
-    ...(capabilities.supportedEfforts && capabilities.supportedEfforts.length > 0
-      ? { supportedEfforts: capabilities.supportedEfforts }
-      : {}),
-    supportsImageInput: capabilities.supportsImageInput,
-    maxCompletionTokens: capabilities.max_completion_tokens ?? null,
+    supportedParameters,
+    ...(supportedEfforts.length > 0 ? { supportedEfforts } : {}),
+    supportsImageInput: vision,
+    contextLength: info.contextTokens ?? null,
+    maxCompletionTokens: info.maxOutputTokens ?? null,
   } satisfies CatalogModelCandidate;
 }
 
 async function discoverOpenRouterCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
-  litellmData?: LiteLLMData;
 }) {
   const response = await fetch(config.openrouterModelsApiUrl, {
     headers: {
@@ -371,71 +338,38 @@ async function discoverOpenRouterCatalog(input: {
 // carries the signal (openai/tts-1, gpt-4o-mini-tts, gemini-*-tts, ...).
 const ORCAROUTER_TTS_PATTERN = /(^|[/-])tts(-|$)/;
 
-function bareModelName(id: string) {
-  return id.split("/").at(-1)?.trim().toLowerCase() ?? "";
-}
-
 /**
- * Index LiteLLM entries by bare model name (last path segment) — first entry
- * wins. Lets an OrcaRouter id resolve capabilities even when the aggregator's
- * provider prefix differs from LiteLLM's key prefix (e.g. `grok/grok-4.6` vs
- * LiteLLM's `xai/grok-4.6`).
+ * Model capabilities for an aggregator come from the normalized model catalog
+ * (models.dev + LiteLLM + overrides), not the provider's own thin `/v1/models`.
+ * Map the neutral shape onto the catalog-candidate fields.
  */
-function indexLiteLLMByBareName(litellmData: LiteLLMData) {
-  const index = new Map<string, LiteLLMEntry>();
-  for (const [key, entry] of Object.entries(litellmData)) {
-    const bare = bareModelName(key);
-    if (bare && !index.has(bare)) {
-      index.set(bare, entry);
-    }
-  }
-  return index;
-}
+export type CapabilityResolver = (
+  modelId: string,
+) => NormalizedModelInfo | null;
 
-// OrcaRouter's `/v1/models` does not carry per-model capability flags (its
-// catalog is not as rich as OpenRouter's supported_parameters). Model
-// capabilities — reasoning, tools, vision — come from LiteLLM instead, matched
-// directly with no per-provider mapping table:
-//   1. the id's `provider/model` prefix as the LiteLLM provider (clean match +
-//      version-stripping when the prefix equals `litellm_provider`);
-//   2. that same key when it is found but flagged `provider_mismatch` (aggregator
-//      names the provider differently, e.g. google vs LiteLLM's `gemini`);
-//   3. an exact bare-name match (covers keys prefixed by a different provider,
-//      e.g. `xai/grok-4.6`).
-// Exact-only throughout — routing slugs like `orcarouter/auto` have no
-// same-named LiteLLM entry, so they resolve to null and take their capabilities
-// from a hand-authored profile instead of fuzzy-matching an unrelated model.
-function resolveOrcaRouterCapabilities(input: {
-  modelId: string;
-  litellmData: LiteLLMData;
-  bareNameIndex: Map<string, LiteLLMEntry>;
-}) {
-  const prefixProvider = input.modelId.split("/")[0]?.trim() ?? "";
-  // OrcaRouter's own routing slugs (orcarouter/auto, /fusion, /free, ...) are
-  // not concrete models — a bare-name match would borrow another router's
-  // capabilities (e.g. LiteLLM's `openrouter/openrouter/auto`). Their
-  // capabilities come from a hand-authored profile instead.
-  if (prefixProvider.toLowerCase() === "orcarouter") {
-    return null;
+function candidateCapabilityFields(info: NormalizedModelInfo | null) {
+  const supportedParameters: string[] = [];
+  if (info?.toolCall) {
+    supportedParameters.push("tools", "tool_choice");
   }
-  const match = resolveLiteLLMModelMatch({
-    modelId: input.modelId,
-    provider: prefixProvider,
-    litellmData: input.litellmData,
-  });
-  const entry =
-    match.type === "matched"
-      ? match.entry
-      : match.type === "provider_mismatch"
-        ? (input.litellmData[match.key] ?? null)
-        : (input.bareNameIndex.get(bareModelName(input.modelId)) ?? null);
-  return entry ? resolveLiteLLMCapabilities(entry) : null;
+  if (info?.structuredOutput) {
+    supportedParameters.push("response_format");
+  }
+  if (info?.reasoning) {
+    supportedParameters.push("reasoning_effort");
+  }
+  return {
+    supportedParameters,
+    supportedEfforts: info?.reasoningEfforts ?? [],
+    vision: info?.vision === true,
+    modality: info?.modality,
+  };
 }
 
 async function discoverOrcaRouterCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
-  litellmData: LiteLLMData;
+  resolve: CapabilityResolver;
 }) {
   const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
     headers: {
@@ -450,7 +384,6 @@ async function discoverOrcaRouterCatalog(input: {
   const payload = (await response.json()) as { data?: unknown };
   const data = Array.isArray(payload.data) ? payload.data : [];
   const items: CatalogModelCandidate[] = [];
-  const bareNameIndex = indexLiteLLMByBareName(input.litellmData);
 
   for (const rawModel of data) {
     const model = toObjectRecord(rawModel);
@@ -474,30 +407,35 @@ async function discoverOrcaRouterCatalog(input: {
     // in this catalog; treat "unset" as text so they are not silently dropped.
     const hasTextOutput =
       outputModalities.length === 0 || outputModalities.includes("text");
-    const isEmbedding = endpointTypes.includes("embeddings");
+
+    // Capabilities (reasoning / tools / vision) and modality come from the
+    // normalized catalog (models.dev + LiteLLM + overrides), matched by id.
+    // Pricing and context stay from OrcaRouter's own inline catalog — fresher,
+    // and present for models the catalog hasn't indexed yet. Routing slugs
+    // (orcarouter/auto) and under-described media models are defined in
+    // model-overrides.json by exact id.
+    const info = input.resolve(modelId);
+    const { supportedParameters, supportedEfforts, vision, modality } =
+      candidateCapabilityFields(info);
+    // Vision: OrcaRouter's own architecture is authoritative; fall back to the
+    // catalog's vision flag only when the OrcaRouter catalog omits modalities.
+    const hasVisionInput = hasImageInput || vision;
+
+    // Modality: OrcaRouter's catalog signals, plus the catalog `modality` as one
+    // more source for models OrcaRouter under-describes (e.g.
+    // grok/grok-imagine-image, served over a chat endpoint with no
+    // output_modalities but defined modality:"image" in overrides).
+    const isEmbedding =
+      endpointTypes.includes("embeddings") || modality === "embedding";
     const isImage =
       endpointTypes.includes("image-generation") ||
-      outputModalities.includes("image");
+      outputModalities.includes("image") ||
+      modality === "image";
     const isVideo =
       endpointTypes.includes("openai-video") ||
-      outputModalities.includes("video");
+      outputModalities.includes("video") ||
+      modality === "video";
     const isTts = ORCAROUTER_TTS_PATTERN.test(modelId.toLowerCase());
-
-    // Capabilities (reasoning / tools / vision) come from LiteLLM, matched by
-    // the id's upstream-provider prefix. Pricing and context stay from
-    // OrcaRouter's own inline catalog — fresher, and present for models LiteLLM
-    // has not indexed yet.
-    const capabilities = resolveOrcaRouterCapabilities({
-      modelId,
-      litellmData: input.litellmData,
-      bareNameIndex,
-    });
-    const supportedParameters = capabilities?.supportedParameters ?? [];
-    const supportedEfforts = capabilities?.supportedEfforts ?? [];
-    // Vision: OrcaRouter's own architecture is authoritative; fall back to
-    // LiteLLM's supports_vision only when the catalog omits modalities.
-    const hasVisionInput =
-      hasImageInput || capabilities?.supportsImageInput === true;
 
     const displayName =
       typeof model?.name === "string" && model.name.trim().length > 0
@@ -561,10 +499,21 @@ async function discoverOrcaRouterCatalog(input: {
   return items;
 }
 
+/**
+ * Bare openai-compatible discovery: the provider's `/models` gives only ids, so
+ * capabilities AND pricing come from the normalized catalog. This is for
+ * providers whose `/models` carries no inline pricing.
+ *
+ * If a provider's `/models` DOES return its own pricing, do NOT route it here —
+ * its price is authoritative for that route and would be silently replaced by
+ * the registry's (often a different provider's) number. Give it a dedicated
+ * `catalogFormat` + `discoverXCatalog` that parses the inline price and prefers
+ * it (registry only as fallback), the way `discoverOrcaRouterCatalog` does.
+ */
 async function discoverOpenAICompatibleCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
-  litellmData: LiteLLMData;
+  resolve: CapabilityResolver;
 }) {
   const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
     headers: {
@@ -579,11 +528,11 @@ async function discoverOpenAICompatibleCatalog(input: {
   const ids = parseOpenAIModelIds(await response.json());
   const items: CatalogModelCandidate[] = [];
   for (const modelId of ids) {
-    const item = buildCandidateFromLiteLLM({
+    const item = buildCandidateFromRegistry({
       gateway: input.gateway,
-      litellmData: input.litellmData,
       modelId,
       source: `${input.gateway.providerKind}-models`,
+      resolve: input.resolve,
     });
     if (!item || !kindAllowed(item.kind, input.kinds)) {
       continue;
@@ -596,34 +545,32 @@ async function discoverOpenAICompatibleCatalog(input: {
 export async function discoverGatewayCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: CatalogModelKind[];
-  litellmData?: LiteLLMData;
+  /** Override the capability resolver (tests inject a fixture registry). */
+  resolveCapabilities?: CapabilityResolver;
 }) {
   const kinds = input.kinds && input.kinds.length > 0
     ? new Set(input.kinds)
     : undefined;
 
+  // OpenRouter is the one provider-self path: its /models carries capabilities.
   if (input.gateway.providerKind === "openrouter") {
-    return discoverOpenRouterCatalog({
-      gateway: input.gateway,
-      kinds,
-      litellmData: input.litellmData,
-    });
+    return discoverOpenRouterCatalog({ gateway: input.gateway, kinds });
   }
 
-  const litellmData = input.litellmData ?? await fetchLiteLLMPricing(config.litellmPricingUrl);
+  // Everything else resolves capabilities from the normalized catalog. OrcaRouter
+  // parses rich inline pricing/modality; a plain openai-compatible provider is
+  // just bare ids. Both take capabilities from the registry.
+  const resolve =
+    input.resolveCapabilities ?? ((id: string) => modelCatalog.resolve(id));
 
   if (input.gateway.catalogFormat === "orcarouter") {
-    return discoverOrcaRouterCatalog({
-      gateway: input.gateway,
-      kinds,
-      litellmData,
-    });
+    return discoverOrcaRouterCatalog({ gateway: input.gateway, kinds, resolve });
   }
 
   return discoverOpenAICompatibleCatalog({
     gateway: input.gateway,
     kinds,
-    litellmData,
+    resolve,
   });
 }
 

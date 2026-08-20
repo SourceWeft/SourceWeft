@@ -1,0 +1,8 @@
+{
+  "orcarouter/auto": { "modality": "chat", "reasoning": true, "toolCall": true, "vision": true },
+  "orcarouter/fusion": { "modality": "chat", "reasoning": true, "toolCall": true, "vision": true, "contextTokens": 1000000 },
+  "orcarouter/fusion-flash": { "modality": "chat", "reasoning": true, "toolCall": true, "vision": true, "contextTokens": 200000 },
+  "orcarouter/fusion-mini": { "modality": "chat", "reasoning": true, "toolCall": true, "vision": true, "contextTokens": 1000000 },
+  "orcarouter/free": { "modality": "chat", "reasoning": true, "toolCall": true, "vision": true },
+  "grok/grok-imagine-image": { "modality": "image" }
+}

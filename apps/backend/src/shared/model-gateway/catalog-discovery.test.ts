@@ -5,6 +5,7 @@ import {
   hasLiteLLMPricing,
   resolveLiteLLMModelMatch,
 } from "./litellm-capabilities";
+import type { NormalizedModelInfo } from "./model-catalog/types";
 
 test("LiteLLM matcher prefers provider-qualified keys and enforces provider compatibility", () => {
   const match = resolveLiteLLMModelMatch({
@@ -195,6 +196,9 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
     },
     // OrcaRouter's own routing slug — must NOT borrow another router's caps.
     { id: "orcarouter/auto", supported_endpoint_types: ["openai"] },
+    // Media model with insufficient catalog signal (chat-ish endpoint, no
+    // output_modalities) — an override `mode` must refile it as image, not chat.
+    { id: "grok/grok-imagine-image", supported_endpoint_types: ["gemini"] },
   ];
 
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -203,6 +207,27 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
       status: 200,
     }),
   );
+
+  // Capabilities come from the normalized model catalog, injected here as a
+  // fixture resolver (the registry is source-agnostic; discovery just calls it).
+  const info = (o: Partial<NormalizedModelInfo>): NormalizedModelInfo => ({
+    id: "",
+    reasoning: false,
+    reasoningEfforts: [],
+    toolCall: false,
+    structuredOutput: false,
+    vision: false,
+    sources: ["test"],
+    ...o,
+  });
+  const caps = new Map<string, NormalizedModelInfo>([
+    ["anthropic/claude-opus-4.6", info({ reasoning: true, reasoningEfforts: ["low", "medium", "high"], vision: true })],
+    ["openai/gpt-5.6-luna", info({ reasoning: true, reasoningEfforts: ["low", "medium", "high", "xhigh"], toolCall: true, vision: true })],
+    ["openai/gpt-4o-mini", info({ toolCall: true, vision: true })],
+    ["grok/grok-4.6", info({ reasoning: true, reasoningEfforts: ["low", "medium", "high"] })],
+    ["orcarouter/auto", info({ reasoning: true, toolCall: true, vision: true, modality: "chat" })],
+    ["grok/grok-imagine-image", info({ modality: "image" })],
+  ]);
 
   const candidates = await discoverGatewayCatalog({
     gateway: {
@@ -214,41 +239,7 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
       apiKey: "sk-orca-test",
       supports: ["chat", "embeddings", "image", "tts", "tool_calling"],
     },
-    // Capabilities come from LiteLLM, matched by the id's provider prefix.
-    litellmData: {
-      "claude-opus-4.6": {
-        litellm_provider: "anthropic",
-        mode: "chat",
-        supports_reasoning: true,
-      },
-      "gpt-5.6-luna": {
-        litellm_provider: "openai",
-        mode: "chat",
-        supports_reasoning: true,
-        supports_xhigh_reasoning_effort: true,
-        supports_function_calling: true,
-        supports_vision: true,
-      },
-      "gpt-4o-mini": {
-        litellm_provider: "openai",
-        mode: "chat",
-        supports_function_calling: true,
-        supports_vision: true,
-      },
-      // Keyed under a different provider prefix than OrcaRouter's `grok/`.
-      "xai/grok-4.6": {
-        litellm_provider: "xai",
-        mode: "chat",
-        supports_reasoning: true,
-      },
-      // Another router's auto slug — orcarouter/auto must not borrow this.
-      "openrouter/openrouter/auto": {
-        litellm_provider: "openrouter",
-        mode: "chat",
-        supports_reasoning: true,
-        supports_vision: true,
-      },
-    },
+    resolveCapabilities: (id) => caps.get(id) ?? null,
   });
 
   // Hits the gateway's own /models with bearer auth (not the OpenRouter URL).
@@ -290,14 +281,24 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
   assert.ok(gpt?.supportedParameters?.includes("tools"), "gpt tools from litellm");
   assert.equal(gpt?.supportedParameters?.includes("reasoning_effort"), false, "gpt no reasoning");
 
-  // Bare-name fallback: grok/ prefix resolves LiteLLM's xai/grok-4.6.
+  // The injected resolver supplies capabilities regardless of provider prefix.
   const grok = byId("grok/grok-4.6", "chat");
-  assert.ok(grok?.supportedParameters?.includes("reasoning_effort"), "grok reasoning via bare-name");
+  assert.ok(grok?.supportedParameters?.includes("reasoning_effort"), "grok reasoning");
 
-  // OrcaRouter routing slug: kept in the catalog but claims no borrowed caps.
+  // OrcaRouter routing slug: capabilities come from the normalized catalog
+  // (model-overrides.json defines it), surfacing as a chat model.
   const auto = byId("orcarouter/auto", "chat");
-  assert.ok(auto, "auto slug still surfaces as a chat model");
-  assert.deepEqual(auto?.supportedParameters, [], "auto borrows no capabilities");
+  assert.ok(auto, "auto slug surfaces as a chat model");
+  assert.ok(auto?.supportedParameters?.includes("reasoning_effort"), "auto defined via override");
+
+  // A media model under-described by the catalog is refiled by its override
+  // modality — image, not chat.
+  assert.ok(byId("grok/grok-imagine-image", "image"), "media model filed as image via mode");
+  assert.equal(
+    Boolean(byId("grok/grok-imagine-image", "chat")),
+    false,
+    "not misfiled as chat",
+  );
 
   // Inline pricing + context stay from OrcaRouter's own catalog (not LiteLLM).
   assert.equal(gpt?.pricing?.inputCostPerToken, 0.00000015);
@@ -324,7 +325,9 @@ test("OpenAI-compatible catalog discovery supports custom API key headers", asyn
       apiKeyHeaderPrefix: "Bearer ",
       supports: ["chat", "tool_calling"],
     },
-    litellmData: {},
+    // Generic openai-compatible discovery resolves capabilities from the
+    // catalog; inject an empty resolver so the test stays offline.
+    resolveCapabilities: () => null,
   });
 
   assert.equal(fetchMock.mock.calls.length, 1);

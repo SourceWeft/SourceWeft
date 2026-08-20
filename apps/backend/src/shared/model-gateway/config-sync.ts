@@ -31,7 +31,7 @@ import {
   discoverGatewayCatalog,
   type CatalogModelCandidate,
 } from "./catalog-discovery";
-import { fetchLiteLLMPricing, type LiteLLMData } from "./litellm-capabilities";
+import { modelCatalog } from "./model-catalog/registry";
 import {
   stripFormerlyProtectedProfileConfigFields,
   withProtectedProfileConfigFields,
@@ -525,9 +525,11 @@ async function deactivateCatalogProfilesForGateway(input: {
 
 async function loadDynamicCatalogProfiles(input: {
   gateways: GlobalGatewayEntry[];
-  litellmData: LiteLLMData | null;
 }) {
-  let litellmData = input.litellmData;
+  // Preload the normalized model catalog (models.dev + LiteLLM + overrides) so
+  // discovery resolves capabilities from memory — no per-model fetch. OpenRouter
+  // is the only provider-self path; every other gateway reads the catalog.
+  await modelCatalog.refresh();
   const entries: ReturnType<typeof toDynamicProfileEntry>[] = [];
   const successfulCatalogs: Array<{
     gatewaySlug: string;
@@ -552,15 +554,10 @@ async function loadDynamicCatalogProfiles(input: {
       continue;
     }
 
-    if (gateway.providerKind !== "openrouter" && !litellmData) {
-      litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
-    }
-
     try {
       const candidates = await discoverGatewayCatalog({
         gateway: { ...gateway, catalogFormat: catalog.format },
         kinds: catalog.kinds,
-        litellmData: litellmData ?? undefined,
       });
       const profiles = candidates.map((candidate) =>
         toDynamicProfileEntry({ gateway, candidate }),
@@ -694,7 +691,6 @@ async function syncGlobalModelGatewayConfigFromFile(
 
   const dynamicCatalog = await loadDynamicCatalogProfiles({
     gateways: loaded.gateways.filter((gateway) => gateway.isActive),
-    litellmData: null,
   });
   const dynamicByKind = groupDynamicProfilesByKind({
     entries: dynamicCatalog.entries,

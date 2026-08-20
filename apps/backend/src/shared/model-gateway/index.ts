@@ -25,6 +25,7 @@ export type {
   BilledModelGateway,
   BilledRequestOptions,
 } from "./billed-client";
+export { modelCatalog } from "./model-catalog/registry";
 export { createAgentToolModelGatewayService } from "./agent-tool-client";
 export type {
   AgentToolBilledGatewaySurface,

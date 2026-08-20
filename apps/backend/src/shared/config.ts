@@ -793,6 +793,13 @@ export const config = {
     process.env.MODEL_PRICING_SYNC_INTERVAL_MS,
     60 * 60 * 1000,
   ),
+  // Periodic in-process refresh of the normalized model catalog (models.dev +
+  // LiteLLM + overrides) so long-running servers pick up capability/pricing
+  // updates without a restart. 0 disables (rely on startup preheat only).
+  modelCatalogRefreshIntervalMs: parsePositiveNumber(
+    process.env.MODEL_CATALOG_REFRESH_INTERVAL_MS,
+    6 * 60 * 60 * 1000,
+  ),
   modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
   openrouterModelsApiUrl:
     process.env.OPENROUTER_MODELS_API_URL ||
@@ -801,6 +808,8 @@ export const config = {
   litellmPricingUrl:
     process.env.LITELLM_PRICING_URL ||
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+  modelsDevApiUrl:
+    process.env.MODELS_DEV_API_URL || "https://models.dev/api.json",
   byokDefaultProviderKind:
     process.env.BYOK_DEFAULT_PROVIDER_KIND?.trim() || "openai-compatible",
   auth: {

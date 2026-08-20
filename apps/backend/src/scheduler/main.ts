@@ -1,6 +1,9 @@
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
+import {
+  modelCatalog,
+  syncGlobalModelGatewayConfig,
+} from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { durableChatRunService } from "../modules/threads";
@@ -12,6 +15,7 @@ import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-s
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 
 await syncGlobalModelGatewayConfig();
+modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 
 let tickInFlight = false;
 

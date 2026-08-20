@@ -7,15 +7,8 @@ import {
   modelGatewayRoutes,
 } from "@sourceweft/db";
 import { logger } from "../logger";
-import { config } from "../config";
-import {
-  autoMatchModelAlias,
-  fetchLiteLLMPricing,
-  resolveLiteLLMCapabilities,
-  type LiteLLMEntry,
-  type LiteLLMData,
-  type ModelAliasMatch,
-} from "./litellm-capabilities";
+import { modelCatalog } from "./model-catalog/registry";
+import type { NormalizedModelInfo } from "./model-catalog/types";
 import { mergeOwnedProfileConfig } from "./profile-config-priority";
 
 function toRouteKey(kind: string, alias: string) {
@@ -87,37 +80,6 @@ async function loadPrimaryRouteTargetByKindAndAlias(): Promise<Map<string, strin
   );
 }
 
-function resolveMatchFromCandidates(
-  candidates: string[],
-  litellmKeys: string[],
-): ModelAliasMatch {
-  const matches: string[] = [];
-  for (const candidate of candidates) {
-    const result = autoMatchModelAlias(candidate, litellmKeys);
-    if (result.type === "matched") {
-      matches.push(result.key);
-      continue;
-    }
-    if (result.type === "ambiguous") {
-      return result;
-    }
-  }
-
-  const uniqueMatches = Array.from(new Set(matches));
-  if (uniqueMatches.length === 1) {
-    const key = uniqueMatches[0];
-    if (key) {
-      return { type: "matched", key };
-    }
-  }
-
-  if (uniqueMatches.length > 1) {
-    return { type: "ambiguous", candidates: uniqueMatches };
-  }
-
-  return { type: "unmatched" };
-}
-
 function normalizePriceNumber(value: number | null | undefined): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -146,15 +108,21 @@ type ModelPricingConfig = Partial<Omit<ModelPricing, "price_source">> & {
   price_source?: string | null;
 };
 
-function isLiteLLMManagedPriceSource(source: unknown): boolean {
-  if (source === undefined || source === null) {
-    return true;
-  }
-  if (typeof source !== "string") {
+// "Auto-managed" price sources are the ones this sync owns and may overwrite:
+// the model catalog (registry / models.dev / litellm), plus empty/unknown.
+// Anything else (e.g. "manual") is an operator override we must preserve.
+function isAutoManagedPriceSource(source: unknown): boolean {
+  if (source === undefined || source === null || typeof source !== "string") {
     return true;
   }
   const normalized = source.trim().toLowerCase();
-  return normalized === "" || normalized === "unknown" || normalized === "litellm";
+  return (
+    normalized === "" ||
+    normalized === "unknown" ||
+    normalized === "litellm" ||
+    normalized === "models.dev" ||
+    normalized === "registry"
+  );
 }
 
 function hasAnyFinitePriceValue(
@@ -178,7 +146,7 @@ function isExternallyManagedPricing(
     return false;
   }
   return (
-    !isLiteLLMManagedPriceSource(pricing.price_source) &&
+    !isAutoManagedPriceSource(pricing.price_source) &&
     hasAnyFinitePriceValue(pricing)
   );
 }
@@ -255,65 +223,81 @@ export function mergeModelPricingSyncConfig(input: {
   });
 }
 
-function buildLiteLLMSyncUpdates(input: {
-  litellmEntry: LiteLLMEntry;
-  litellmKey: string;
+// Neutral capabilities → the metadata config fields the sync owns.
+function capabilityConfigFromInfo(
+  info: NormalizedModelInfo,
+): Record<string, unknown> {
+  const supportedParameters: string[] = [];
+  if (info.toolCall) {
+    supportedParameters.push("tools", "tool_choice");
+  }
+  if (info.structuredOutput) {
+    supportedParameters.push("response_format");
+  }
+  if (info.reasoning) {
+    supportedParameters.push("reasoning_effort");
+  }
+  return {
+    litellm_mode: info.modality ?? null,
+    supportsImageInput: info.vision,
+    supports_function_calling: info.toolCall,
+    supports_response_schema: info.structuredOutput,
+    max_input_tokens: info.contextTokens ?? null,
+    max_output_tokens: info.maxOutputTokens ?? null,
+    max_completion_tokens: info.maxOutputTokens ?? null,
+    supportedParameters,
+    ...(info.reasoningEfforts.length > 0
+      ? { supportedEfforts: info.reasoningEfforts }
+      : {}),
+  };
+}
+
+// Neutral pricing → the price-book config fields (per-token USD).
+function pricingConfigFromInfo(
+  info: NormalizedModelInfo,
+  now: Date,
+): Record<string, unknown> {
+  const p = info.pricing;
+  const pricingUpdates: ModelPricing = {
+    input_cost_per_token: normalizePriceNumber(p?.inputPerToken),
+    output_cost_per_token: normalizePriceNumber(p?.outputPerToken),
+    cache_read_input_token_cost: normalizePriceNumber(p?.cacheReadPerToken),
+    cache_creation_input_token_cost: normalizePriceNumber(p?.cacheWritePerToken),
+    output_cost_per_reasoning_token: normalizePriceNumber(
+      p?.reasoningOutputPerToken,
+    ),
+    input_cost_per_image_token: null,
+    output_cost_per_image_token: null,
+    input_cost_per_audio_token: normalizePriceNumber(p?.audioInputPerToken),
+    output_cost_per_audio_token: normalizePriceNumber(p?.audioOutputPerToken),
+    input_cost_per_image: normalizePriceNumber(p?.inputPerImage),
+    output_cost_per_image: normalizePriceNumber(p?.outputPerImage),
+    price_source: "registry",
+    litellm_key: null,
+    price_updated_at: now.toISOString(),
+  };
+  return pricingUpdates as unknown as Record<string, unknown>;
+}
+
+// A profile's config update from the normalized catalog. When pricing is
+// externally managed (operator override) only capabilities are refreshed.
+function buildSyncUpdatesFromInfo(input: {
+  info: NormalizedModelInfo;
   now: Date;
   pricingLocked: boolean;
 }) {
-  const capabilityUpdates = resolveLiteLLMCapabilities(input.litellmEntry);
+  const capabilityUpdates = capabilityConfigFromInfo(input.info);
   if (input.pricingLocked) {
-    return capabilityUpdates as unknown as Record<string, unknown>;
+    return capabilityUpdates;
   }
-
-  const pricingUpdates: ModelPricing = {
-    input_cost_per_token: normalizePriceNumber(
-      input.litellmEntry.input_cost_per_token,
-    ),
-    output_cost_per_token: normalizePriceNumber(
-      input.litellmEntry.output_cost_per_token,
-    ),
-    cache_read_input_token_cost: normalizePriceNumber(
-      input.litellmEntry.cache_read_input_token_cost,
-    ),
-    cache_creation_input_token_cost: normalizePriceNumber(
-      input.litellmEntry.cache_creation_input_token_cost,
-    ),
-    output_cost_per_reasoning_token: normalizePriceNumber(
-      input.litellmEntry.output_cost_per_reasoning_token,
-    ),
-    input_cost_per_image_token: normalizePriceNumber(
-      input.litellmEntry.input_cost_per_image_token,
-    ),
-    output_cost_per_image_token: normalizePriceNumber(
-      input.litellmEntry.output_cost_per_image_token,
-    ),
-    input_cost_per_audio_token: normalizePriceNumber(
-      input.litellmEntry.input_cost_per_audio_token,
-    ),
-    output_cost_per_audio_token: normalizePriceNumber(
-      input.litellmEntry.output_cost_per_audio_token,
-    ),
-    input_cost_per_image: normalizePriceNumber(
-      input.litellmEntry.input_cost_per_image,
-    ),
-    output_cost_per_image: normalizePriceNumber(
-      input.litellmEntry.output_cost_per_image,
-    ),
-    price_source: "litellm",
-    litellm_key: input.litellmKey,
-    price_updated_at: input.now.toISOString(),
-  };
-
   return {
-    ...(pricingUpdates as unknown as Record<string, unknown>),
-    ...(capabilityUpdates as unknown as Record<string, unknown>),
+    ...pricingConfigFromInfo(input.info, input.now),
+    ...capabilityUpdates,
   };
 }
 
 export async function syncModelPricing(): Promise<void> {
-  const litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
-  const litellmKeys = Object.keys(litellmData);
+  await modelCatalog.ensureReady();
   const primaryRouteTargetByKindAndAlias =
     await loadPrimaryRouteTargetByKindAndAlias();
 
@@ -332,9 +316,6 @@ export async function syncModelPricing(): Promise<void> {
   let matched = 0;
   let unmatched = 0;
   let preservedExternalPricing = 0;
-  let presetKeyUsed = 0;
-  let autoMatched = 0;
-  let invalidPresetKey = 0;
 
   for (const profile of profiles) {
     const primaryRouteTarget = primaryRouteTargetByKindAndAlias.get(
@@ -371,98 +352,37 @@ export async function syncModelPricing(): Promise<void> {
       });
     }
 
-    let match: ModelAliasMatch;
-    if (existingPricing?.litellm_key) {
-      presetKeyUsed++;
-      if (litellmKeys.includes(existingPricing.litellm_key)) {
-        match = { type: "matched", key: existingPricing.litellm_key };
-      } else {
-        invalidPresetKey++;
-        match = { type: "unmatched" };
-        logger.warn(
-          pricingLocked
-            ? "Preset LiteLLM key is invalid, preserved externally managed pricing"
-            : "Preset LiteLLM key is invalid, marked as unknown",
-          {
-            kind: profile.kind,
-            profileAlias: profile.profileAlias,
-            modelAlias: profile.modelAlias,
-            litellmKey: existingPricing.litellm_key,
-          },
-        );
-      }
-    } else {
-      match = resolveMatchFromCandidates(
-        primaryRouteTarget
-          ? [profile.modelAlias, primaryRouteTarget]
-          : [profile.modelAlias],
-        litellmKeys,
-      );
-      if (match.type === "matched") {
-        autoMatched++;
-      }
-    }
+    // Resolve capabilities + pricing from the normalized catalog by the alias's
+    // primary target (or the alias itself). One source, models.dev-primary.
+    const target = primaryRouteTarget ?? profile.modelAlias;
+    const info = modelCatalog.resolve(target);
 
-    if (match.type === "matched") {
-      const litellmEntry = litellmData[match.key];
-      if (!litellmEntry) {
-        unmatched++;
-        logger.warn("LiteLLM price key matched but entry missing", {
-          kind: profile.kind,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          litellmKey: match.key,
-        });
-        continue;
-      }
+    if (info) {
       matched++;
-
       const now = new Date();
       const nextConfigJson = mergeModelPricingSyncConfig({
         existingConfigJson,
         pricingLocked,
-        updates: buildLiteLLMSyncUpdates({
-          litellmEntry,
-          litellmKey: match.key,
-          now,
-          pricingLocked,
-        }),
+        updates: buildSyncUpdatesFromInfo({ info, now, pricingLocked }),
       });
 
       if (!configJsonEqual(existingConfigJson, nextConfigJson)) {
         await db
           .update(modelGatewayProfiles)
-          .set({
-            configJson: nextConfigJson,
-            updatedAt: now,
-          })
+          .set({ configJson: nextConfigJson, updatedAt: now })
           .where(eq(modelGatewayProfiles.id, profile.id));
         updated++;
         logger.info("Updated model pricing", {
           kind: profile.kind,
           profileAlias: profile.profileAlias,
           modelAlias: profile.modelAlias,
-          litellmKey: match.key,
+          target,
           inputCost: nextConfigJson.input_cost_per_token,
           outputCost: nextConfigJson.output_cost_per_token,
         });
       }
     } else {
       unmatched++;
-      if (match.type === "ambiguous") {
-        logger.warn(
-          pricingLocked
-            ? "LiteLLM price match is ambiguous, preserved externally managed pricing"
-            : "LiteLLM price match is ambiguous, marked as unknown",
-          {
-            kind: profile.kind,
-            profileAlias: profile.profileAlias,
-            modelAlias: profile.modelAlias,
-            primaryRouteTarget,
-            candidates: match.candidates,
-          },
-        );
-      }
       if (!pricingLocked && existingPricing?.price_source !== "unknown") {
         const now = new Date();
         const unknownPricing: ModelPricing = {
@@ -487,16 +407,13 @@ export async function syncModelPricing(): Promise<void> {
         });
         await db
           .update(modelGatewayProfiles)
-          .set({
-            configJson: nextConfigJson,
-            updatedAt: now,
-          })
+          .set({ configJson: nextConfigJson, updatedAt: now })
           .where(eq(modelGatewayProfiles.id, profile.id));
-        logger.warn("No LiteLLM price match found, marked as unknown", {
+        logger.warn("No catalog price match found, marked as unknown", {
           kind: profile.kind,
           profileAlias: profile.profileAlias,
           modelAlias: profile.modelAlias,
-          primaryRouteTarget,
+          target,
         });
       }
     }
@@ -508,35 +425,44 @@ export async function syncModelPricing(): Promise<void> {
     unmatched,
     updated,
     preservedExternalPricing,
-    presetKeyUsed,
-    autoMatched,
-    invalidPresetKey,
   });
 }
 
+/**
+ * Capability snapshot for a model id, resolved from the normalized catalog
+ * (models.dev-primary). Kept litellm-shaped field names for existing consumers
+ * (BYOK), but the data now comes from the single registry, not a direct fetch.
+ */
 export async function resolveModelCapabilitiesFromLitellm(modelName: string) {
-  const litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
-  const litellmKeys = Object.keys(litellmData);
-  const match = autoMatchModelAlias(modelName, litellmKeys);
-  if (match.type !== "matched") {
+  await modelCatalog.ensureReady();
+  const info = modelCatalog.resolve(modelName);
+  if (!info) {
     return null;
   }
-
-  const entry = litellmData[match.key];
-  if (!entry) {
-    return null;
+  const supportedParameters: string[] = [];
+  if (info.toolCall) {
+    supportedParameters.push("tools", "tool_choice");
   }
-
+  if (info.structuredOutput) {
+    supportedParameters.push("response_format");
+  }
+  if (info.reasoning) {
+    supportedParameters.push("reasoning_effort");
+  }
   return {
-    litellmKey: match.key,
-    ...resolveLiteLLMCapabilities(entry),
+    supportsImageInput: info.vision,
+    supportedParameters,
+    supportedEfforts: info.reasoningEfforts,
+    max_completion_tokens: info.maxOutputTokens ?? null,
   };
 }
 
 export const testExports = {
-  buildLiteLLMSyncUpdates,
+  buildSyncUpdatesFromInfo,
+  capabilityConfigFromInfo,
+  pricingConfigFromInfo,
   hasAnyFinitePriceValue,
   isExternallyManagedPricing,
-  isLiteLLMManagedPriceSource,
+  isAutoManagedPriceSource,
   shouldSkipLiteLLMAutoMatch,
 };

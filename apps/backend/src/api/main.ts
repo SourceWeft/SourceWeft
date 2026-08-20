@@ -4,6 +4,7 @@ import { closeDatabase } from "@sourceweft/db";
 import { logger } from "../shared/logger";
 import {
   ensureModelConfigAvailable,
+  modelCatalog,
   syncGlobalModelGatewayConfig,
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
@@ -16,6 +17,7 @@ import { connectorAdaptersReady } from "../modules/connectors";
 import { ensureAsyncRunsSchema } from "./routes/async-runs-endpoint";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
+modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();
 await contentSkillsService.syncBuiltinCatalog();
 // Connectors are contributed by capabilities, so registering them reads
