@@ -146,6 +146,139 @@ test("resolve prices a shared model id from the serving provider's bucket", asyn
   );
 });
 
+test("resolve chains provider signals: hint, then the id's vendor prefix", async () => {
+  const registry = await build({
+    modelsDev: [
+      info({
+        id: "openai/gpt-4o",
+        provider: "openai",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 2.5e-6 },
+      }),
+      // a reseller gateway carrying the same id at its own price
+      info({
+        id: "openai/gpt-4o",
+        provider: "cloudflare-ai-gateway",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 9e-6 },
+      }),
+    ],
+  });
+  // explicit hint wins when its bucket has the model
+  assert.equal(
+    registry.resolve("openai/gpt-4o", { provider: "cloudflare-ai-gateway" })
+      ?.pricing?.inputPerToken,
+    9e-6,
+  );
+  // hint bucket misses → fall through to the id's vendor prefix (openai)
+  assert.equal(
+    registry.resolve("openai/gpt-4o", { provider: "no-such-provider" })
+      ?.pricing?.inputPerToken,
+    2.5e-6,
+  );
+});
+
+test("resolve with no provider falls back to LiteLLM's reference price", async () => {
+  const registry = await build({
+    litellm: [
+      info({
+        id: "gpt-4o",
+        provider: "openai",
+        sources: ["litellm"],
+        pricing: { inputPerToken: 2.5e-6 },
+      }),
+    ],
+    // a reseller listing the same bare id at a marked-up price
+    modelsDev: [
+      info({
+        id: "gpt-4o",
+        provider: "abacus",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 9e-6 },
+      }),
+    ],
+  });
+  // bare id, no provider hint, no prefix → LiteLLM's official price, not the
+  // reseller price the global union would otherwise surface.
+  assert.equal(
+    registry.resolve("gpt-4o")?.pricing?.inputPerToken,
+    2.5e-6,
+  );
+});
+
+test("models.dev price wins over LiteLLM even when they use different id forms", async () => {
+  // Real divergence: models.dev's `deepseek` block lists the bare id at its
+  // official price; LiteLLM lists the vendor-prefixed id at a different price.
+  // Querying the prefixed id must not let LiteLLM's exact-id match override the
+  // primary source — the two only reconcile in the bare-name union.
+  const registry = await build({
+    litellm: [
+      info({
+        id: "deepseek/deepseek-v4-pro",
+        provider: "deepseek",
+        sources: ["litellm"],
+        pricing: { inputPerToken: 1.32e-6, outputPerToken: 3.96e-6 },
+      }),
+    ],
+    modelsDev: [
+      info({
+        id: "deepseek-v4-pro",
+        provider: "deepseek",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 0.435e-6, outputPerToken: 0.87e-6 },
+      }),
+    ],
+  });
+  const p = registry.resolve("deepseek/deepseek-v4-pro", {
+    provider: "deepseek",
+  })?.pricing;
+  assert.equal(p?.inputPerToken, 0.435e-6);
+  assert.equal(p?.outputPerToken, 0.87e-6);
+});
+
+test("within a provider bucket, LiteLLM fills fields models.dev left null", async () => {
+  const registry = await build({
+    litellm: [
+      info({
+        id: "openai/gpt-x",
+        provider: "openai",
+        sources: ["litellm"],
+        pricing: { inputPerToken: 1e-6, outputPerToken: 2e-6 },
+      }),
+    ],
+    // models.dev (primary) has the model but hasn't filled the output price yet
+    modelsDev: [
+      info({
+        id: "openai/gpt-x",
+        provider: "openai",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 1.5e-6, outputPerToken: null },
+      }),
+    ],
+  });
+  const p = registry.resolve("openai/gpt-x", { provider: "openai" })?.pricing;
+  // models.dev wins where it has a value; its null output falls back to LiteLLM
+  assert.equal(p?.inputPerToken, 1.5e-6);
+  assert.equal(p?.outputPerToken, 2e-6);
+});
+
+test("resolve with no provider and no LiteLLM entry uses the global union", async () => {
+  const registry = await build({
+    modelsDev: [
+      info({
+        id: "newmodel",
+        provider: "abacus",
+        sources: ["models.dev"],
+        pricing: { inputPerToken: 9e-6 },
+      }),
+    ],
+  });
+  assert.equal(
+    registry.resolve("newmodel")?.pricing?.inputPerToken,
+    9e-6,
+  );
+});
+
 test("startAutoRefresh is a no-op when disabled and idempotent otherwise", () => {
   const registry = new ModelCatalogRegistry({
     litellm: async () => [],

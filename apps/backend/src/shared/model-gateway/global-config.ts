@@ -44,7 +44,7 @@ export type GlobalGatewayEntry = {
 };
 
 export type GlobalProfilePricingEntry = {
-  source?: "manual" | "openrouter" | "litellm";
+  source?: "manual" | "openrouter" | "orcarouter" | "litellm";
   litellmKey?: string | null;
   inputCostPerToken?: number | null;
   outputCostPerToken?: number | null;

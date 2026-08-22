@@ -62,6 +62,10 @@ export class ModelCatalogRegistry {
   // Per-provider unions, so a model's price is read from its serving provider's
   // bucket instead of an arbitrary same-id entry from another provider.
   private byProvider = new Map<string, ModelIndex>();
+  // LiteLLM-only — the community's curated one-price-per-model book. Used as the
+  // official reference price when no serving provider is known (no hint, no id
+  // prefix), instead of an arbitrary reseller price from the global union.
+  private litellm: ModelIndex = emptyIndex();
   private overrides = new Map<string, ModelInfoOverride>();
   private ready = false;
   private inflight: Promise<void> | null = null;
@@ -117,7 +121,11 @@ export class ModelCatalogRegistry {
       this.sources.modelsDev(),
     ]);
     const global = emptyIndex();
+    const litellmIndex = emptyIndex();
     const byProvider = new Map<string, ModelIndex>();
+    for (const info of litellm) {
+      indexEntry(litellmIndex, info);
+    }
     for (const info of [...litellm, ...modelsDev]) {
       indexEntry(global, info);
       const provider = canonicalProviderKey(info.provider);
@@ -131,6 +139,7 @@ export class ModelCatalogRegistry {
       }
     }
     this.global = global;
+    this.litellm = litellmIndex;
     this.byProvider = byProvider;
     this.overrides = this.sources.overrides();
     this.ready = true;
@@ -160,13 +169,16 @@ export class ModelCatalogRegistry {
     if (!byBare || byBare === exact) {
       return exact;
     }
-    // A provider-prefixed id (models.dev `openai/gpt-image-1`) and the bare id
-    // its sibling sources use (LiteLLM `gpt-image-1`, `azure/gpt-image-1`, its
-    // `{quality}/{WxH}` tiers) never share a `byId` key, so they only meet in
-    // the bare-name union. Merge that union underneath the exact entry: the
-    // provider-specific entry still wins per scalar field, while gaps it lacks
-    // (image-token price, per-image tiers) are filled from the union.
-    return mergeModelInfo(byBare, exact);
+    // The same model reaches `byId` under different id forms across sources
+    // (models.dev `deepseek-v4-pro` vs LiteLLM `deepseek/deepseek-v4-pro`;
+    // models.dev `openai/gpt-image-1` vs LiteLLM `gpt-image-1` + its
+    // `{quality}/{WxH}` tiers), so they only reconcile in the bare-name union.
+    // That union already merges every id form with source precedence (models.dev
+    // over LiteLLM), and is a superset of the exact-id entry — so it wins.
+    // Merging the exact entry underneath only backfills a field the union lacks;
+    // it must not let an exact match on a lower-precedence source's id form
+    // override the primary source's price.
+    return mergeModelInfo(exact, byBare);
   }
 
   private lookupBase(
@@ -174,30 +186,50 @@ export class ModelCatalogRegistry {
     provider?: string,
   ): NormalizedModelInfo | null {
     const globalBase = this.lookupInIndex(this.global, modelId);
-    // Provider comes from the caller's serving-provider hint, else the id's own
-    // prefix. Its bucket's data (crucially, its price) wins over the global
-    // union, which mixes every provider's price for a shared model id.
-    const providerKey =
-      canonicalProviderKey(provider) ?? providerFromId(modelId);
-    const bucket = providerKey ? this.byProvider.get(providerKey) : undefined;
-    const providerBase = bucket ? this.lookupInIndex(bucket, modelId) : null;
-    if (!providerBase) {
-      return globalBase;
+    // Two explicit serving-provider signals, most authoritative first: the
+    // caller's hint (its gateway route), then the id's own `vendor/` prefix
+    // (models.dev's reseller ids name the origin vendor). The first provider
+    // bucket that matches supplies the price; a shared model id is thus never
+    // priced from an arbitrary other provider's entry.
+    const providerKeys: string[] = [];
+    for (const key of [canonicalProviderKey(provider), providerFromId(modelId)]) {
+      if (key && !providerKeys.includes(key)) {
+        providerKeys.push(key);
+      }
     }
-    // Global as capability gap-filler underneath the provider-authoritative
-    // entry (provider wins every scalar field, including price).
-    return globalBase ? mergeModelInfo(globalBase, providerBase) : providerBase;
+    for (const key of providerKeys) {
+      const bucket = this.byProvider.get(key);
+      const providerBase = bucket
+        ? this.lookupInIndex(bucket, modelId)
+        : null;
+      if (providerBase) {
+        // Global as capability gap-filler underneath the provider-authoritative
+        // entry (provider wins every scalar field, including price).
+        return globalBase
+          ? mergeModelInfo(globalBase, providerBase)
+          : providerBase;
+      }
+    }
+    // No provider known — fall back to LiteLLM's official one-price-per-model
+    // reference for the price (capabilities still enriched from the union),
+    // rather than the union's arbitrary reseller price. LiteLLM silent → union.
+    const litellmBase = this.lookupInIndex(this.litellm, modelId);
+    if (litellmBase) {
+      return globalBase ? mergeModelInfo(globalBase, litellmBase) : litellmBase;
+    }
+    return globalBase;
   }
 
   /**
    * Resolve a model id to its normalized capabilities. Synchronous, in-memory:
    * exact id → bare name → snapshot-stripped bare name, then a hand-authored
-   * override applied on top. Pass `opts.provider` (the serving gateway's
-   * provider) so pricing is read from that provider's bucket rather than an
-   * arbitrary same-id entry; absent a hint the id prefix is used, else the
-   * global union. An override with no discovered base (e.g. an aggregator
-   * routing slug) still resolves. Returns null when nothing matches, so callers
-   * can default-allow rather than block an unknown model.
+   * override applied on top. Pricing follows the serving provider: pass
+   * `opts.provider` (the gateway route's provider) and/or rely on the id's
+   * `vendor/` prefix; the first matching provider bucket wins. With no provider
+   * signal at all, price falls back to LiteLLM's official one-price-per-model
+   * reference, then the global union. An override with no discovered base (e.g.
+   * an aggregator routing slug) still resolves. Returns null when nothing
+   * matches, so callers can default-allow rather than block an unknown model.
    */
   resolve(
     modelId: string,

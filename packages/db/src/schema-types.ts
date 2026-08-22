@@ -31,6 +31,7 @@ export interface ModelPricing {
     | "registry"
     | "manual"
     | "openrouter"
+    | "orcarouter"
     | "unknown";
   litellm_key: string | null;
   price_updated_at: string | null;

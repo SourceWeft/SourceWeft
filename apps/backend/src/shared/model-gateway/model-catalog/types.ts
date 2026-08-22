@@ -157,7 +157,11 @@ function tierKey(tier: ImagePricingTier): string {
 }
 
 /**
- * Field-level pricing merge, `next` winning per scalar field; `imageTiers`
+ * Field-level pricing merge, `next` winning per scalar field — but only where
+ * `next` actually carries a value. A `null`/`undefined` field in `next` means
+ * "unknown", so it leaves `base` intact rather than wiping it: when models.dev
+ * (primary) lists a model with a stale/partial price, LiteLLM's value fills the
+ * gap, and once models.dev catches up its real value wins again. `imageTiers`
  * arrays are unioned (next's tier wins on the same quality+size key).
  */
 function mergePricing(
@@ -167,7 +171,13 @@ function mergePricing(
   if (!base && !next) {
     return undefined;
   }
-  const merged: ModelPricingInfo = { ...base, ...next };
+  const merged: ModelPricingInfo = { ...base };
+  for (const [key, value] of Object.entries(next ?? {})) {
+    if (key === "imageTiers" || value === null || value === undefined) {
+      continue;
+    }
+    (merged as Record<string, unknown>)[key] = value;
+  }
   const baseTiers = base?.imageTiers ?? [];
   const nextTiers = next?.imageTiers ?? [];
   if (baseTiers.length > 0 || nextTiers.length > 0) {

@@ -114,14 +114,21 @@ function toPriceNumber(value: unknown): number | null {
   return Number(parsed.toPrecision(15));
 }
 
-function parseOpenRouterPricing(value: unknown): GlobalProfilePricingEntry | null {
+// OrcaRouter and OpenRouter both expose inline pricing under the same
+// `prompt`/`completion` keys, so they share this parser — but `source` must name
+// the actual serving gateway (provenance), not the shape, so an operator can
+// tell whose price a profile carries.
+function parseOpenRouterPricing(
+  value: unknown,
+  source: "openrouter" | "orcarouter",
+): GlobalProfilePricingEntry | null {
   const pricing = toObjectRecord(value);
   if (!pricing) {
     return null;
   }
 
   const parsed: GlobalProfilePricingEntry = {
-    source: "openrouter",
+    source,
     inputCostPerToken: toPriceNumber(pricing.prompt),
     outputCostPerToken: toPriceNumber(pricing.completion),
     cacheReadInputTokenCost: toPriceNumber(pricing.input_cache_read),
@@ -291,7 +298,7 @@ async function discoverOpenRouterCatalog(input: {
       typeof model?.name === "string" && model.name.trim().length > 0
         ? model.name.trim()
         : modelId;
-    const pricing = parseOpenRouterPricing(model?.pricing);
+    const pricing = parseOpenRouterPricing(model?.pricing, "openrouter");
     const common = {
       architecture,
       contextLength: toFiniteNumber(model?.context_length),
@@ -457,8 +464,9 @@ async function discoverOrcaRouterCatalog(input: {
         toFiniteNumber(topProvider?.max_completion_tokens),
       modelId,
       // OrcaRouter's inline pricing uses the same prompt/completion keys as
-      // OpenRouter; static price is a fallback — runtime usage.cost is primary.
-      pricing: parseOpenRouterPricing(model?.pricing),
+      // OpenRouter. OrcaRouter does not return a per-request `usage.cost`, so
+      // billing is always this inline price × tokens (its own flat rate).
+      pricing: parseOpenRouterPricing(model?.pricing, "orcarouter"),
       providerCatalogGatewaySlug: input.gateway.slug,
       providerCatalogSource: "orcarouter-models",
       supportedParameters,
