@@ -37,11 +37,18 @@ const emptyResult = {
   events: [],
 };
 
-function makeStubClient() {
+const listArtifactSummariesMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+);
+
+function makeStubClient(overrides: Record<string, unknown> = {}) {
   return new Proxy(
-    {},
+    overrides,
     {
-      get: () => vi.fn().mockResolvedValue(emptyResult),
+      get: (target, property) =>
+        Reflect.has(target, property)
+          ? Reflect.get(target, property)
+          : vi.fn().mockResolvedValue(emptyResult),
     },
   );
 }
@@ -49,7 +56,9 @@ function makeStubClient() {
 vi.mock("../../../../../lib/sdk", () => ({
   apiBaseUrl: "http://localhost",
   connectorsClient: makeStubClient(),
-  contentClient: makeStubClient(),
+  contentClient: makeStubClient({
+    listArtifactSummaries: listArtifactSummariesMock,
+  }),
 }));
 
 import { SourcesHub } from "./index";
@@ -103,6 +112,8 @@ afterEach(async () => {
   container?.remove();
   root = null;
   container = null;
+  window.sessionStorage.clear();
+  vi.clearAllMocks();
 });
 
 test("mounts in new mode and renders the hub tab strip", async () => {
@@ -147,4 +158,20 @@ test("mounts with initial sources provided", async () => {
 test("mounts without a workspace id", async () => {
   const el = await renderHub({ workspaceId: null });
   expect(el.textContent).not.toBe("");
+});
+
+test("does not load artifacts until the Artifacts tab becomes active", async () => {
+  const el = await renderHub({ artifactsRefreshKey: 1 });
+  expect(listArtifactSummariesMock).not.toHaveBeenCalled();
+
+  const artifactsButton = Array.from(el.querySelectorAll("button")).find(
+    (button) => button.textContent?.trim().startsWith("Artifacts"),
+  );
+  expect(artifactsButton).toBeDefined();
+  await act(async () => {
+    artifactsButton!.click();
+  });
+
+  expect(listArtifactSummariesMock).toHaveBeenCalledTimes(1);
+  expect(listArtifactSummariesMock).toHaveBeenCalledWith("ws1", { limit: 100 });
 });

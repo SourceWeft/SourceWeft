@@ -1368,6 +1368,9 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -17901,7 +17904,7 @@ snapshots:
       jsonwebtoken: 9.0.3
       load-esm: 1.0.3
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.19.0)
+      retry-axios: 2.6.0(axios@1.19.0(debug@4.4.3))
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -20263,7 +20266,7 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
-  retry-axios@2.6.0(axios@1.19.0):
+  retry-axios@2.6.0(axios@1.19.0(debug@4.4.3)):
     dependencies:
       axios: 1.19.0(debug@4.4.3)
 

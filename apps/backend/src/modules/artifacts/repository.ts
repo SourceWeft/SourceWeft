@@ -655,3 +655,82 @@ export async function listArtifactRecords(input: {
       : null,
   };
 }
+
+/**
+ * Gallery read model. Keep this projection deliberately independent of
+ * `mapArtifact`: that mapper includes payload_json, while collection size must
+ * remain bounded by row count rather than generated artifact content.
+ */
+export async function listArtifactSummaryRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  cursor?: { createdAt: Date; id: string } | null;
+  limit?: number;
+  viewerUserId?: string;
+}) {
+  const conditions = [
+    eq(artifacts.teamId, input.teamId),
+    eq(artifacts.workspaceId, input.workspaceId),
+    ne(artifacts.status, "failed"),
+    input.viewerUserId
+      ? visibleContentWhere(
+          { userId: input.viewerUserId },
+          { visibility: artifacts.visibility, createdBy: artifacts.createdBy },
+        )
+      : undefined,
+    input.cursor
+      ? or(
+          lt(artifacts.createdAt, input.cursor.createdAt),
+          and(
+            eq(artifacts.createdAt, input.cursor.createdAt),
+            lt(artifacts.id, input.cursor.id),
+          ),
+        )
+      : undefined,
+  ].filter((condition): condition is NonNullable<typeof condition> =>
+    Boolean(condition),
+  );
+
+  const rows = await db
+    .select({
+      id: artifacts.id,
+      workspaceId: artifacts.workspaceId,
+      threadId: artifacts.threadId,
+      artifactType: artifacts.artifactType,
+      status: artifacts.status,
+      title: artifacts.title,
+      promptExcerpt: sql<string | null>`nullif(left(${artifacts.promptText}, 300), '')`,
+      visibility: artifacts.visibility,
+      createdAt: artifacts.createdAt,
+      completedAt: artifacts.completedAt,
+      updatedAt: artifacts.updatedAt,
+      hasPrimaryFile: sql<boolean>`${artifacts.status} = 'ready' and ${artifacts.storageKey} is not null`,
+      hasPreviewImage: sql<boolean>`${artifacts.status} = 'ready' and ${artifacts.previewStorageKey} is not null`,
+      previewAltText: sql<string | null>`nullif(left(${artifacts.previewMetadataJson} ->> 'altText', 300), '')`,
+    })
+    .from(artifacts)
+    .where(and(...conditions))
+    .orderBy(desc(artifacts.createdAt), desc(artifacts.id))
+    .limit((input.limit ?? 100) + 1);
+
+  const limit = input.limit ?? 100;
+  const visibleRows = rows.slice(0, limit);
+  const nextRow = rows[limit] ?? null;
+  return {
+    items: visibleRows.map((row) => ({
+      ...row,
+      completedAt: row.completedAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    })),
+    nextCursor: nextRow
+      ? Buffer.from(
+          JSON.stringify({
+            createdAt: nextRow.createdAt.toISOString(),
+            id: nextRow.id,
+          }),
+          "utf8",
+        ).toString("base64url")
+      : null,
+  };
+}

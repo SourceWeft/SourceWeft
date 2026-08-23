@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  artifactMatchesQuery,
   artifactPreviewImageMetadata,
   resolveArtifactDownloadUrl,
   resolveArtifactPageUrl,
   resolveArtifactPreviewImageProxyUrl,
   resolveArtifactProxyFileUrl,
 } from "./artifacts";
-import type { ArtifactListItem } from "./types";
+import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 
 function artifact(overrides: Partial<ArtifactListItem> = {}) {
   return {
@@ -31,6 +32,40 @@ function artifact(overrides: Partial<ArtifactListItem> = {}) {
     ...overrides,
   } as ArtifactListItem;
 }
+
+function artifactSummary(
+  overrides: Partial<ArtifactSummaryItem> = {},
+): ArtifactSummaryItem {
+  return {
+    id: "artifact-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    artifactType: "image",
+    status: "ready",
+    title: "Generated image",
+    promptExcerpt: "A cat in a sunbeam",
+    visibility: "private",
+    isPublic: false,
+    createdAt: "2026-06-01T00:00:00.000Z",
+    completedAt: "2026-06-01T00:00:01.000Z",
+    updatedAt: "2026-06-01T00:00:01.000Z",
+    hasPrimaryFile: true,
+    primaryFileUrl:
+      "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
+    previewImage: null,
+    ...overrides,
+  };
+}
+
+test("artifact summary search uses the bounded prompt excerpt", () => {
+  assert.equal(artifactMatchesQuery(artifactSummary(), "sunbeam"), true);
+  assert.equal(artifactMatchesQuery(artifactSummary(), "missing"), false);
+  assert.equal(
+    "promptText" in artifactSummary(),
+    false,
+    "gallery summaries must not regain the full prompt",
+  );
+});
 
 test("resolveArtifactPageUrl returns the artifact preview page for open buttons", () => {
   assert.equal(

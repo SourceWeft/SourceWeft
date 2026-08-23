@@ -173,8 +173,43 @@ export const artifactSchema = z.object({
   capabilities: artifactCapabilitiesSchema,
 });
 
+/**
+ * Bounded collection projection for artifact galleries.
+ *
+ * Opaque payloads, storage coordinates, error internals, and handler-resolved
+ * capabilities belong to the single-artifact detail response. Keeping them out
+ * of this schema makes list size independent of the generated artifact body.
+ */
+export const artifactSummarySchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  threadId: z.string().nullable(),
+  artifactType: artifactTypeSchema,
+  status: artifactStatusSchema,
+  title: z.string().nullable(),
+  promptExcerpt: z.string().max(300).nullable(),
+  visibility: z.enum(["private", "workspace"]),
+  isPublic: z.boolean(),
+  createdAt: z.string(),
+  completedAt: z.string().nullable(),
+  updatedAt: z.string(),
+  hasPrimaryFile: z.boolean(),
+  primaryFileUrl: z.string().nullable(),
+  previewImage: z
+    .object({
+      url: z.string(),
+      altText: z.string().nullable(),
+    })
+    .nullable(),
+});
+
 export const listArtifactsResponseSchema = z.object({
   items: z.array(artifactSchema),
+  nextCursor: z.string().nullable().optional(),
+});
+
+export const listArtifactSummariesResponseSchema = z.object({
+  items: z.array(artifactSummarySchema),
   nextCursor: z.string().nullable().optional(),
 });
 
@@ -188,8 +223,12 @@ export const deleteArtifactResponseSchema = z.object({
 });
 
 export type Artifact = z.infer<typeof artifactSchema>;
+export type ArtifactSummary = z.infer<typeof artifactSummarySchema>;
 export type GetArtifactResponse = z.infer<typeof getArtifactResponseSchema>;
 export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>;
+export type ListArtifactSummariesResponse = z.infer<
+  typeof listArtifactSummariesResponseSchema
+>;
 export type DeleteArtifactResponse = z.infer<
   typeof deleteArtifactResponseSchema
 >;

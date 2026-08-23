@@ -73,6 +73,7 @@ import {
   type HubSkillItem,
 } from "./skills/use-skills";
 import { ArtifactsTab } from "./artifacts/tab";
+import { loadArtifactDetail } from "./artifacts/artifact-detail-loader";
 import { useArtifacts } from "./artifacts/use-artifacts";
 import { McpTab } from "./mcp/tab";
 import { useMcp } from "./mcp/use-mcp";
@@ -97,12 +98,12 @@ import {
 } from "./workfiles/dialogs";
 import { WorkfilesTab } from "./workfiles/tab";
 import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
-import type { ArtifactListItem } from "./types";
+import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 import { useConnectorSyncRuns } from "./use-connector-sync-runs";
 import { getErrorMessage } from "./lib/errors";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
-export type { ArtifactListItem } from "./types";
+export type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 export type { ThreadCitationRecord } from "./citations/use-citations";
 export type { HubSkillItem } from "./skills/use-skills";
 
@@ -255,6 +256,10 @@ export function SourcesHub({
   >(null);
   const [isSkillsGalleryOpen, setIsSkillsGalleryOpen] = useState(false);
   const [isMcpMarketOpen, setIsMcpMarketOpen] = useState(false);
+  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(
+    null,
+  );
+  const artifactOpenGenerationRef = useRef(0);
   const {
     workfiles,
     isLoadingWorkfiles,
@@ -286,6 +291,7 @@ export function SourcesHub({
     workspaceId,
     artifactsRefreshKey,
     currentWorkspaceIdRef,
+    enabled: activeTab === "Artifacts",
   });
   const { mcpInstalls, isLoadingMcp, mcpLoadingError, refreshMcpInstalls } =
     useMcp({
@@ -580,6 +586,8 @@ export function SourcesHub({
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
+    artifactOpenGenerationRef.current += 1;
+    setOpeningArtifactId(null);
   }, [workspaceId]);
 
   const { trackConnectorSyncRun } = useConnectorSyncRuns({
@@ -602,10 +610,36 @@ export function SourcesHub({
   };
 
   const handlePreviewArtifact = useCallback(
-    (artifact: ArtifactListItem) => {
-      onArtifactOpen?.(artifact);
+    async (artifact: ArtifactSummaryItem) => {
+      if (!workspaceId || !onArtifactOpen) {
+        return;
+      }
+      const activeWorkspaceId = workspaceId;
+      const generation = artifactOpenGenerationRef.current + 1;
+      artifactOpenGenerationRef.current = generation;
+      setOpeningArtifactId(artifact.id);
+      try {
+        const detail = await loadArtifactDetail({
+          workspaceId: activeWorkspaceId,
+          summary: artifact,
+        });
+        if (
+          artifactOpenGenerationRef.current === generation &&
+          currentWorkspaceIdRef.current === activeWorkspaceId
+        ) {
+          onArtifactOpen(detail);
+        }
+      } catch (error) {
+        if (artifactOpenGenerationRef.current === generation) {
+          toast.error(getErrorMessage(error, "Could not load the artifact."));
+        }
+      } finally {
+        if (artifactOpenGenerationRef.current === generation) {
+          setOpeningArtifactId(null);
+        }
+      }
     },
-    [onArtifactOpen],
+    [onArtifactOpen, workspaceId],
   );
 
   return (
@@ -955,6 +989,7 @@ export function SourcesHub({
                 loadingError={artifactsLoadingError}
                 onLoadMore={() => void loadMoreArtifacts()}
                 onPreview={handlePreviewArtifact}
+                openingArtifactId={openingArtifactId}
                 onRefresh={() => void refreshArtifacts()}
                 searchQuery={deferredSearchQuery}
                 workspaceId={workspaceId}

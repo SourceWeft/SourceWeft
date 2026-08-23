@@ -5,16 +5,17 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { RawImage } from "../../../../../_components/raw-image";
 import {
   artifactMatchesQuery,
-  artifactPreviewImageMetadata,
   artifactTitle,
   artifactTypeLabel,
-  resolveArtifactPreviewImageProxyUrl,
-  resolveArtifactProxyFileUrl,
 } from "../artifacts";
+import {
+  resolveArtifactPreviewImageUrl,
+  resolveArtifactProxyFileUrl,
+} from "../../artifact-urls";
 import { HubEmptyState } from "../components/hub-empty-state";
 import { memoComponent } from "../memo-component";
 import { TypeBadge } from "../type-badge";
-import type { ArtifactListItem } from "../types";
+import type { ArtifactSummaryItem } from "../types";
 
 export const ArtifactsTab = memoComponent(function ArtifactsTab({
   artifacts,
@@ -24,17 +25,19 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
   loadingError,
   onLoadMore,
   onPreview,
+  openingArtifactId = null,
   onRefresh,
   searchQuery,
   workspaceId,
 }: {
-  artifacts: ArtifactListItem[];
+  artifacts: ArtifactSummaryItem[];
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
   loadingError: string | null;
   onLoadMore: () => void;
-  onPreview: (artifact: ArtifactListItem) => void;
+  onPreview: (artifact: ArtifactSummaryItem) => void;
+  openingArtifactId?: string | null;
   onRefresh: () => void;
   searchQuery: string;
   workspaceId?: string | null;
@@ -113,20 +116,27 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
   return (
     <div className="space-y-2">
       {filtered.map((artifact) => {
-        const proxyFileUrl = resolveArtifactProxyFileUrl({
-          artifact,
-          workspaceId,
-        });
-        const previewImage = artifactPreviewImageMetadata(artifact);
-        const previewImageUrl = resolveArtifactPreviewImageProxyUrl({
-          artifact,
-          workspaceId,
-        });
+        const proxyFileUrl =
+          artifact.hasPrimaryFile && workspaceId
+            ? resolveArtifactProxyFileUrl({
+                artifactId: artifact.id,
+                workspaceId,
+              })
+            : null;
+        const previewImageUrl =
+          artifact.previewImage && workspaceId
+            ? resolveArtifactPreviewImageUrl({
+                artifactId: artifact.id,
+                workspaceId,
+              })
+            : null;
+        const isOpening = openingArtifactId === artifact.id;
 
         return (
           <button
             className="group relative isolate flex w-full items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 text-left shadow-xs outline-none transition-[background-color,border-color,box-shadow] hover:border-foreground/25 hover:bg-accent/35 hover:shadow-sm hover:shadow-foreground/5 focus-visible:border-primary/45 focus-visible:bg-accent/30 focus-visible:shadow-[0_8px_24px_-18px_hsl(var(--foreground)/0.45),0_0_0_1px_hsl(var(--primary)/0.18)] focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_2px_hsl(var(--ring)/0.55)] focus-visible:after:content-['']"
             key={artifact.id}
+            disabled={isOpening}
             onClick={() => onPreview(artifact)}
             title={`Preview ${artifactTitle(artifact)}`}
             type="button"
@@ -134,7 +144,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
             {previewImageUrl ? (
               <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
                 <RawImage
-                  alt={previewImage?.altText ?? artifactTitle(artifact)}
+                  alt={artifact.previewImage?.altText ?? artifactTitle(artifact)}
                   className="h-full w-full object-cover"
                   loading="lazy"
                   src={previewImageUrl}
@@ -163,6 +173,9 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 <span className="truncate text-xs font-medium text-foreground underline-offset-2 group-hover:underline">
                   {artifactTitle(artifact)}
                 </span>
+                {isOpening ? (
+                  <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+                ) : null}
               </div>
               <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span>{new Date(artifact.createdAt).toLocaleString()}</span>
@@ -179,9 +192,9 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                   <TypeBadge label="Public" tone="public" />
                 ) : null}
               </div>
-              {artifact.promptText ? (
+              {artifact.promptExcerpt ? (
                 <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-                  {artifact.promptText}
+                  {artifact.promptExcerpt}
                 </p>
               ) : null}
             </div>

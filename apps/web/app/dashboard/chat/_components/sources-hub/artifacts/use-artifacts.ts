@@ -1,25 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { contentClient } from "../../../../../../lib/sdk";
 import { cloneItems } from "../cache";
 import { getErrorMessage } from "../lib/errors";
-import type { ArtifactListItem } from "../types";
+import type { ArtifactSummaryItem } from "../types";
 import {
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../workspace-hub-cache";
 import { subscribeArtifactDeleted } from "./artifact-delete-events";
+import { invalidateArtifactDetail } from "./artifact-detail-loader";
 
-const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
+const workspaceArtifactsCache = new Map<string, ArtifactSummaryItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
-const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifacts";
+const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifact-summaries-v1";
 
 type WorkspaceArtifactsCacheValue = {
-  items: ArtifactListItem[];
+  items: ArtifactSummaryItem[];
   nextCursor: string | null;
 };
 
-function cloneArtifactItems(items: ArtifactListItem[]) {
+function cloneArtifactItems(items: ArtifactSummaryItem[]) {
   return cloneItems(items);
 }
 
@@ -27,10 +28,16 @@ export function useArtifacts(input: {
   workspaceId: string | null | undefined;
   artifactsRefreshKey: number;
   currentWorkspaceIdRef: { current: string | null | undefined };
+  enabled: boolean;
 }) {
-  const { workspaceId, artifactsRefreshKey, currentWorkspaceIdRef } = input;
+  const {
+    workspaceId,
+    artifactsRefreshKey,
+    currentWorkspaceIdRef,
+    enabled,
+  } = input;
 
-  const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactSummaryItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [isLoadingMoreArtifacts, setIsLoadingMoreArtifacts] = useState(false);
   const [artifactsLoadingError, setArtifactsLoadingError] = useState<
@@ -41,7 +48,7 @@ export function useArtifacts(input: {
   );
 
   const refreshArtifacts = useCallback(async () => {
-    if (!workspaceId) {
+    if (!workspaceId || !enabled) {
       setArtifacts([]);
       setArtifactsLoadingError(null);
       setArtifactsNextCursor(null);
@@ -52,7 +59,7 @@ export function useArtifacts(input: {
     setIsLoadingArtifacts(true);
     setArtifactsLoadingError(null);
     try {
-      const result = await contentClient.listArtifacts(activeWorkspaceId, {
+      const result = await contentClient.listArtifactSummaries(activeWorkspaceId, {
         limit: 100,
       });
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
@@ -86,10 +93,15 @@ export function useArtifacts(input: {
         setIsLoadingArtifacts(false);
       }
     }
-  }, [currentWorkspaceIdRef, workspaceId]);
+  }, [currentWorkspaceIdRef, enabled, workspaceId]);
 
   const loadMoreArtifacts = useCallback(async () => {
-    if (!workspaceId || !artifactsNextCursor || isLoadingMoreArtifacts) {
+    if (
+      !workspaceId ||
+      !enabled ||
+      !artifactsNextCursor ||
+      isLoadingMoreArtifacts
+    ) {
       return;
     }
 
@@ -97,7 +109,7 @@ export function useArtifacts(input: {
     setIsLoadingMoreArtifacts(true);
     setArtifactsLoadingError(null);
     try {
-      const result = await contentClient.listArtifacts(activeWorkspaceId, {
+      const result = await contentClient.listArtifactSummaries(activeWorkspaceId, {
         cursor: artifactsNextCursor,
         limit: 100,
       });
@@ -144,6 +156,7 @@ export function useArtifacts(input: {
   }, [
     artifactsNextCursor,
     currentWorkspaceIdRef,
+    enabled,
     isLoadingMoreArtifacts,
     workspaceId,
   ]);
@@ -180,25 +193,33 @@ export function useArtifacts(input: {
       setArtifactsLoadingError(null);
       setIsLoadingArtifacts(false);
       setIsLoadingMoreArtifacts(false);
-      void refreshArtifacts();
+      if (enabled) {
+        void refreshArtifacts();
+      }
       return;
     }
 
-    void refreshArtifacts();
-  }, [refreshArtifacts, workspaceId]);
-
-  useEffect(() => {
-    if (artifactsRefreshKey > 0) {
+    if (enabled) {
       void refreshArtifacts();
     }
-  }, [artifactsRefreshKey, refreshArtifacts]);
+  }, [enabled, refreshArtifacts, workspaceId]);
+
+  const lastRefreshKeyRef = useRef(artifactsRefreshKey);
+  useEffect(() => {
+    const changed = lastRefreshKeyRef.current !== artifactsRefreshKey;
+    lastRefreshKeyRef.current = artifactsRefreshKey;
+    if (changed && enabled) {
+      void refreshArtifacts();
+    }
+  }, [artifactsRefreshKey, enabled, refreshArtifacts]);
 
   // Evict a deleted artifact from the list and both cache layers the moment
   // the preview panel deletes it, without waiting for the next full refresh.
   useEffect(() => {
     return subscribeArtifactDeleted(
       ({ workspaceId: deletedIn, artifactId }) => {
-        const removeDeleted = (items: ArtifactListItem[]) =>
+        invalidateArtifactDetail(deletedIn, artifactId);
+        const removeDeleted = (items: ArtifactSummaryItem[]) =>
           items.filter((artifact) => artifact.id !== artifactId);
 
         const cachedItems = workspaceArtifactsCache.get(deletedIn);

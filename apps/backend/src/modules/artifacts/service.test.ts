@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import { testExports } from "./service";
+import { contentArtifactsService, testExports } from "./service";
 import { createArtifactViewHandlerRegistry } from "./view-handlers";
 import {
   createSyntheticFileArtifactViewHandler,
@@ -9,6 +9,13 @@ import {
   SYNTHETIC_FILE_EXTENSION,
   SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
 } from "../../test/synthetic-capability";
+
+const mocks = vi.hoisted(() => ({
+  findPubliclySharedArtifactIds: vi.fn(),
+  listArtifactSummaryRecords: vi.fn(),
+  loadArtifactViewHandlerRegistry: vi.fn(),
+  requireContentWorkspace: vi.fn(),
+}));
 
 /**
  * Driven by a synthetic capability, not a real one. Every assertion below is
@@ -26,7 +33,7 @@ function handlerFor(artifactType: string) {
 }
 
 vi.mock("../workspace/guards", () => ({
-  requireContentWorkspace: vi.fn(),
+  requireContentWorkspace: mocks.requireContentWorkspace,
 }));
 
 vi.mock("../sources/storage", () => ({
@@ -36,7 +43,66 @@ vi.mock("../sources/storage", () => ({
 vi.mock("./repository", () => ({
   findArtifactRecord: vi.fn(),
   listArtifactRecords: vi.fn(),
+  listArtifactSummaryRecords: mocks.listArtifactSummaryRecords,
 }));
+
+vi.mock("../sharing/store", () => ({
+  findPubliclySharedArtifactIds: mocks.findPubliclySharedArtifactIds,
+  revokeShareLink: vi.fn(),
+}));
+
+vi.mock("./view-handlers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./view-handlers")>()),
+  loadArtifactViewHandlerRegistry: mocks.loadArtifactViewHandlerRegistry,
+}));
+
+test("artifact summaries are bounded and never load type handlers", async () => {
+  vi.clearAllMocks();
+  mocks.requireContentWorkspace.mockResolvedValue({
+    id: "workspace-1",
+    organizationId: "team-1",
+  });
+  const items = Array.from({ length: 100 }, (_, index) => ({
+    id: `artifact-${index}`,
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    artifactType: "video_presentation" as const,
+    status: "ready" as const,
+    title: `Artifact ${index}`,
+    promptExcerpt: "p".repeat(300),
+    visibility: "private" as const,
+    createdAt: "2026-08-23T01:00:00.000Z",
+    completedAt: "2026-08-23T01:01:00.000Z",
+    updatedAt: "2026-08-23T01:01:00.000Z",
+    hasPrimaryFile: false,
+    hasPreviewImage: true,
+    previewAltText: `Preview ${index}`,
+  }));
+  mocks.listArtifactSummaryRecords.mockResolvedValue({
+    items,
+    nextCursor: null,
+  });
+  mocks.findPubliclySharedArtifactIds.mockResolvedValue(
+    new Set(["artifact-0"]),
+  );
+
+  const result = await contentArtifactsService.listArtifactSummaries({
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    limit: 100,
+  });
+  const serialized = JSON.stringify(result);
+
+  assert.ok(Buffer.byteLength(serialized) < 150 * 1024);
+  assert.equal(serialized.includes("payloadJson"), false);
+  assert.equal(serialized.includes("storageKey"), false);
+  assert.equal(result.items[0]?.isPublic, true);
+  assert.equal(
+    result.items[0]?.previewImage?.url,
+    "/v1/workspaces/workspace-1/artifacts/artifact-0/preview-image",
+  );
+  assert.equal(mocks.loadArtifactViewHandlerRegistry.mock.calls.length, 0);
+});
 
 test("a handler's download name wins over the payload file name", () => {
   const artifact = {

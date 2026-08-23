@@ -48,8 +48,10 @@ import type {
   InstallMarketMcpRequest,
   InstallMarketMcpResponse,
   ListCapabilityCatalogResponse,
+  ListArtifactSummariesResponse,
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
+  ListThreadModelSelectorCatalogResponse,
   ListByokProvidersResponse,
   ListByokModelCandidatesResponse,
   ListByokCredentialsResponse,
@@ -181,6 +183,23 @@ export class ContentClient {
 
     return this.http.get<ListArtifactsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts${suffix}`,
+    );
+  }
+
+  listArtifactSummaries(
+    workspaceId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ) {
+    const params = new URLSearchParams({ view: "summary" });
+    if (input.limit) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+
+    return this.http.get<ListArtifactSummariesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts?${params.toString()}`,
     );
   }
 
@@ -535,6 +554,12 @@ export class ContentClient {
   listThreadModelCatalog(workspaceId: string) {
     return this.http.get<ListThreadModelCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/models`,
+    );
+  }
+
+  listThreadModelSelectorCatalog(workspaceId: string) {
+    return this.http.get<ListThreadModelSelectorCatalogResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/models?view=selector`,
     );
   }
 

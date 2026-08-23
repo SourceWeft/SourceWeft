@@ -36,6 +36,10 @@ export async function performanceLoggingMiddleware(c: Context, next: Next) {
   }
 
   const pathname = new URL(c.req.url).pathname;
+  const thresholdsExceeded = [
+    ...(isSlow ? (["slow_request"] as const) : []),
+    ...(isLargeResponse ? (["large_response"] as const) : []),
+  ];
   const meta = {
     durationMs,
     largeResponseThresholdBytes:
@@ -46,6 +50,7 @@ export async function performanceLoggingMiddleware(c: Context, next: Next) {
     slowRequestThresholdMs: config.apiPerformance.slowRequestThresholdMs,
     status: c.res.status,
     teamId: requestParam(c, "teamId"),
+    thresholdsExceeded,
     workspaceId: requestParam(c, "workspaceId"),
   };
 

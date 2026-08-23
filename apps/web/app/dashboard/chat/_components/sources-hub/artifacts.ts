@@ -4,9 +4,11 @@ import {
   resolveArtifactPreviewImageUrlFromArtifact,
   resolveArtifactProxyFileUrlFromArtifact,
 } from "../artifact-urls";
-import type { ArtifactListItem } from "./types";
+import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 
-export function artifactTypeLabel(type: ArtifactListItem["artifactType"]) {
+type ArtifactIdentity = Pick<ArtifactListItem, "artifactType" | "title">;
+
+export function artifactTypeLabel(type: ArtifactIdentity["artifactType"]) {
   if (type === "audio_overview") return "Audio";
   if (type === "video_overview") return "Video";
   if (type === "video_presentation") return "Video presentation";
@@ -15,7 +17,7 @@ export function artifactTypeLabel(type: ArtifactListItem["artifactType"]) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-export function artifactTitle(artifact: ArtifactListItem) {
+export function artifactTitle(artifact: ArtifactIdentity) {
   return artifact.title?.trim() || artifactTypeLabel(artifact.artifactType);
 }
 
@@ -105,13 +107,13 @@ export function resolveArtifactDownloadUrl(input: {
 }
 
 export function artifactMatchesQuery(
-  artifact: ArtifactListItem,
+  artifact: ArtifactSummaryItem,
   query: string,
 ) {
   return (
     artifactTitle(artifact).toLowerCase().includes(query) ||
     artifact.artifactType.toLowerCase().includes(query) ||
     artifact.status.toLowerCase().includes(query) ||
-    (artifact.promptText ?? "").toLowerCase().includes(query)
+    (artifact.promptExcerpt ?? "").toLowerCase().includes(query)
   );
 }

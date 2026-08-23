@@ -5,7 +5,10 @@ import {
   normalizeMimeType,
   sniffAudioMimeType,
 } from "@sourceweft/contracts/artifact-files";
-import { buildArtifactPreviewUrl as buildArtifactPreviewPageUrl } from "@sourceweft/contracts/artifact-urls";
+import {
+  buildArtifactPreviewUrl as buildArtifactPreviewPageUrl,
+  buildArtifactRestUrl,
+} from "@sourceweft/contracts/artifact-urls";
 import type {
   ArtifactCapabilities,
   ArtifactViewHandler,
@@ -28,6 +31,7 @@ import {
   deleteArtifactRecord,
   findArtifactRecord,
   listArtifactRecords,
+  listArtifactSummaryRecords,
 } from "./repository";
 import { loadArtifactViewHandlerRegistry } from "./view-handlers";
 
@@ -404,6 +408,63 @@ export class ContentArtifactsService {
           isPublic: publicArtifactIds.has(artifact.id),
         }),
       ),
+      nextCursor: artifacts.nextCursor,
+    };
+  }
+
+  async listArtifactSummaries(input: {
+    cursor?: string;
+    workspaceId: string;
+    userId: string;
+    limit?: number;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const artifacts = await listArtifactSummaryRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      cursor: decodeArtifactCursor(input.cursor),
+      limit: input.limit,
+      viewerUserId: input.userId,
+    });
+    const publicArtifactIds = await findPubliclySharedArtifactIds(
+      artifacts.items.map((artifact) => artifact.id),
+    );
+
+    return {
+      items: artifacts.items.map((artifact) => ({
+        id: artifact.id,
+        workspaceId: artifact.workspaceId,
+        threadId: artifact.threadId,
+        artifactType: artifact.artifactType,
+        status: artifact.status,
+        title: artifact.title,
+        promptExcerpt: artifact.promptExcerpt,
+        visibility: artifact.visibility,
+        isPublic: publicArtifactIds.has(artifact.id),
+        createdAt: artifact.createdAt,
+        completedAt: artifact.completedAt,
+        updatedAt: artifact.updatedAt,
+        hasPrimaryFile: artifact.hasPrimaryFile,
+        primaryFileUrl: artifact.hasPrimaryFile
+          ? buildArtifactRestUrl({
+              workspaceId: workspace.id,
+              artifactId: artifact.id,
+            })
+          : null,
+        previewImage: artifact.hasPreviewImage
+          ? {
+              url: buildArtifactRestUrl({
+                workspaceId: workspace.id,
+                artifactId: artifact.id,
+                resource: { kind: "previewImage" },
+              })!,
+              altText: artifact.previewAltText,
+            }
+          : null,
+      })),
       nextCursor: artifacts.nextCursor,
     };
   }

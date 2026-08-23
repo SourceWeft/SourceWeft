@@ -23,6 +23,10 @@ type FakeDbState = {
   latestVersionRows: Array<{ versionNo: number }>;
   /** Order of operations observed inside the transaction. */
   ops: string[];
+  /** Named projections observed by select(). */
+  selectedShapes: Array<Record<string, unknown> | undefined>;
+  /** Rows returned by the bounded gallery query. */
+  summaryRows: Array<Record<string, unknown>>;
 };
 
 const state: FakeDbState = {
@@ -31,6 +35,8 @@ const state: FakeDbState = {
   updateReturning: [{ id: "artifact-1" }],
   latestVersionRows: [],
   ops: [],
+  selectedShapes: [],
+  summaryRows: [],
 };
 
 function tableNameOf(table: unknown) {
@@ -87,9 +93,21 @@ function makeClient(staged: Write[]) {
     },
     select(shape?: Record<string, unknown>) {
       const isVersionSelect = Boolean(shape && "versionNo" in shape);
-      state.ops.push(isVersionSelect ? "select:versionNo" : "select:artifact");
+      const isSummarySelect = Boolean(shape && "promptExcerpt" in shape);
+      state.selectedShapes.push(shape);
+      state.ops.push(
+        isVersionSelect
+          ? "select:versionNo"
+          : isSummarySelect
+            ? "select:artifactSummary"
+            : "select:artifact",
+      );
       return thenableSelect(
-        isVersionSelect ? state.latestVersionRows : [{ storageKey: "key" }],
+        isVersionSelect
+          ? state.latestVersionRows
+          : isSummarySelect
+            ? state.summaryRows
+            : [{ storageKey: "key" }],
       );
     },
   };
@@ -113,9 +131,11 @@ vi.mock("@sourceweft/db", async () => {
   };
 });
 
-const { createReadyArtifactRecord, markArtifactReady } = await import(
-  "./repository"
-);
+const {
+  createReadyArtifactRecord,
+  listArtifactSummaryRecords,
+  markArtifactReady,
+} = await import("./repository");
 
 const READY_INPUT = {
   artifactId: "artifact-1",
@@ -145,6 +165,8 @@ beforeEach(() => {
   state.updateReturning = [{ id: "artifact-1" }];
   state.latestVersionRows = [];
   state.ops = [];
+  state.selectedShapes = [];
+  state.summaryRows = [];
 });
 
 test("createReadyArtifactRecord commits the artifact and its first version together", async () => {
@@ -249,4 +271,94 @@ test("createReadyArtifactRecord's pointer agrees with its first version", async 
   );
   assert.equal(artifactWrite?.values.currentVersionNo, 1);
   assert.equal(versionWrite?.values.versionNo, 1);
+});
+
+test("artifact summary query selects bounded fields without payload or raw storage", async () => {
+  state.summaryRows = [
+    {
+      id: "artifact-1",
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      artifactType: "image",
+      status: "ready",
+      title: "Image",
+      promptExcerpt: "Prompt",
+      visibility: "private",
+      createdAt: new Date("2026-08-23T01:00:00.000Z"),
+      completedAt: new Date("2026-08-23T01:01:00.000Z"),
+      updatedAt: new Date("2026-08-23T01:01:00.000Z"),
+      hasPrimaryFile: true,
+      hasPreviewImage: false,
+      previewAltText: null,
+    },
+  ];
+
+  const result = await listArtifactSummaryRecords({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    viewerUserId: "user-1",
+    limit: 100,
+  });
+
+  const shape = state.selectedShapes.find(
+    (candidate) => candidate && "promptExcerpt" in candidate,
+  );
+  assert.ok(shape);
+  assert.equal("payloadJson" in shape, false);
+  assert.equal("promptText" in shape, false);
+  assert.equal("storageKey" in shape, false);
+  assert.equal("previewStorageKey" in shape, false);
+  assert.equal("previewMetadataJson" in shape, false);
+  assert.equal(result.items[0]?.createdAt, "2026-08-23T01:00:00.000Z");
+  assert.equal(result.nextCursor, null);
+});
+
+test("artifact summary query keeps limit-plus-one cursor pagination", async () => {
+  state.summaryRows = [
+    {
+      id: "newer",
+      workspaceId: "workspace-1",
+      threadId: null,
+      artifactType: "file",
+      status: "ready",
+      title: "Newer",
+      promptExcerpt: null,
+      visibility: "workspace",
+      createdAt: new Date("2026-08-23T02:00:00.000Z"),
+      completedAt: null,
+      updatedAt: new Date("2026-08-23T02:00:00.000Z"),
+      hasPrimaryFile: true,
+      hasPreviewImage: false,
+      previewAltText: null,
+    },
+    {
+      id: "older",
+      workspaceId: "workspace-1",
+      threadId: null,
+      artifactType: "file",
+      status: "ready",
+      title: "Older",
+      promptExcerpt: null,
+      visibility: "workspace",
+      createdAt: new Date("2026-08-23T01:00:00.000Z"),
+      completedAt: null,
+      updatedAt: new Date("2026-08-23T01:00:00.000Z"),
+      hasPrimaryFile: true,
+      hasPreviewImage: false,
+      previewAltText: null,
+    },
+  ];
+
+  const result = await listArtifactSummaryRecords({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    limit: 1,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ["newer"]);
+  assert.ok(result.nextCursor);
+  assert.deepEqual(
+    JSON.parse(Buffer.from(result.nextCursor, "base64url").toString("utf8")),
+    { createdAt: "2026-08-23T01:00:00.000Z", id: "older" },
+  );
 });

@@ -40,7 +40,10 @@ import {
   validateThreadModelSettings,
 } from "./model-settings";
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
-import { listThreadModelCatalog } from "./thread/model-catalog";
+import {
+  listThreadModelCatalog,
+  listThreadModelSelectorCatalog,
+} from "./thread/model-catalog";
 import { downloadChatImageObject } from "../sources/storage";
 import { durableChatRunService } from "./durable/service";
 import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
@@ -461,6 +464,13 @@ class ContentThreadService {
 
   async listThreadModelCatalog(input: { workspaceId: string; userId: string }) {
     return listThreadModelCatalog(input);
+  }
+
+  async listThreadModelSelectorCatalog(input: {
+    workspaceId: string;
+    userId: string;
+  }) {
+    return listThreadModelSelectorCatalog(input);
   }
 
   async createThread(input: {

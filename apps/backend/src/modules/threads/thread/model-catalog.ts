@@ -50,6 +50,7 @@ type ThreadModelCapabilities = NonNullable<ThreadModelCatalogEntry["capabilities
 
 type CatalogPricing = NonNullable<ThreadModelCatalogEntry["pricing"]>;
 type CatalogModelProfileKind = "chat" | "image" | "vision";
+type CatalogView = "full" | "selector";
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -125,9 +126,10 @@ function resolveCatalogPricing(configJson: Record<string, unknown>): CatalogPric
   };
 }
 
-export async function listThreadModelCatalog(input: {
+async function listThreadModelCatalogForView(input: {
   workspaceId: string;
   userId: string;
+  view: CatalogView;
 }) {
   await requireContentWorkspace({
     workspaceId: input.workspaceId,
@@ -279,7 +281,10 @@ export async function listThreadModelCatalog(input: {
             typeof badge === "string" && badge.trim().length > 0,
         )
       : [];
-    const pricing = resolveCatalogPricing(configJson);
+    // Pricing is a server/billing concern. The compatibility view still exposes
+    // it, but the chat selector must not pay to derive and serialize it.
+    const pricing =
+      input.view === "full" ? resolveCatalogPricing(configJson) : null;
     const directCapabilities: ThreadModelCapabilities = resolveReasoningCapabilities({
       configJson,
       profileKind,
@@ -332,8 +337,51 @@ export async function listThreadModelCatalog(input: {
   kinds.image.sort(sorter);
   kinds.vision.sort(sorter);
 
-  return {
+  const catalog = {
     defaults,
     kinds,
   };
+
+  return input.view === "selector"
+    ? projectThreadModelSelectorCatalog(catalog)
+    : catalog;
+}
+
+export function projectThreadModelSelectorCatalog(input: {
+  defaults: ReturnType<typeof normalizeThreadModelSettings>;
+  kinds: Record<"llm" | "image" | "vision", ThreadModelCatalogEntry[]>;
+}) {
+  const project = (entry: ThreadModelCatalogEntry) => {
+    const {
+      kind: _kind,
+      isDefault: _isDefault,
+      isActive: _isActive,
+      pricing: _pricing,
+      ...selectorEntry
+    } = entry;
+    return selectorEntry;
+  };
+
+  return {
+    defaults: input.defaults,
+    kinds: {
+      llm: input.kinds.llm.map(project),
+      image: input.kinds.image.map(project),
+      vision: input.kinds.vision.map(project),
+    },
+  };
+}
+
+export async function listThreadModelCatalog(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  return listThreadModelCatalogForView({ ...input, view: "full" });
+}
+
+export async function listThreadModelSelectorCatalog(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  return listThreadModelCatalogForView({ ...input, view: "selector" });
 }

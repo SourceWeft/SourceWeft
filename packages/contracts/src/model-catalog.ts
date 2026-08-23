@@ -4,6 +4,20 @@ import { threadSchema } from "./threads";
 
 export const modelCatalogKindSchema = z.enum(["llm", "image", "vision"]);
 
+export const modelCatalogCapabilitiesSchema = z
+  .object({
+    supportsThinking: z.boolean(),
+    supportsImageInput: z.boolean().optional(),
+    supportedParameters: z.array(z.string()),
+    supportedEfforts: z.array(reasoningEffortSchema),
+    reasoning: z.boolean(),
+    reasoningEffort: z.boolean(),
+    includeReasoning: z.boolean(),
+    supportSources: z.array(z.string()),
+    imageGeneration: imageModelCapabilitiesSchema.optional(),
+  })
+  .optional();
+
 export const modelCatalogItemSchema = z.object({
   kind: modelCatalogKindSchema,
   profileAlias: z.string(),
@@ -19,19 +33,15 @@ export const modelCatalogItemSchema = z.object({
   subtitle: z.string(),
   badges: z.array(z.string()),
   pricing: z.record(z.string(), z.unknown()).nullable(),
-  capabilities: z
-    .object({
-      supportsThinking: z.boolean(),
-      supportsImageInput: z.boolean().optional(),
-      supportedParameters: z.array(z.string()),
-      supportedEfforts: z.array(reasoningEffortSchema),
-      reasoning: z.boolean(),
-      reasoningEffort: z.boolean(),
-      includeReasoning: z.boolean(),
-      supportSources: z.array(z.string()),
-      imageGeneration: imageModelCapabilitiesSchema.optional(),
-    })
-    .optional(),
+  capabilities: modelCatalogCapabilitiesSchema,
+});
+
+/** Compact model row consumed by the chat selector and composer. */
+export const modelSelectorCatalogItemSchema = modelCatalogItemSchema.omit({
+  kind: true,
+  isDefault: true,
+  isActive: true,
+  pricing: true,
 });
 
 export const listThreadModelCatalogResponseSchema = z.object({
@@ -43,7 +53,22 @@ export const listThreadModelCatalogResponseSchema = z.object({
   }),
 });
 
+export const listThreadModelSelectorCatalogResponseSchema = z.object({
+  defaults: threadSchema.shape.modelSettings,
+  kinds: z.object({
+    llm: z.array(modelSelectorCatalogItemSchema),
+    image: z.array(modelSelectorCatalogItemSchema),
+    vision: z.array(modelSelectorCatalogItemSchema),
+  }),
+});
+
 export type ModelCatalogItem = z.infer<typeof modelCatalogItemSchema>;
+export type ModelSelectorCatalogItem = z.infer<
+  typeof modelSelectorCatalogItemSchema
+>;
 export type ListThreadModelCatalogResponse = z.infer<
   typeof listThreadModelCatalogResponseSchema
+>;
+export type ListThreadModelSelectorCatalogResponse = z.infer<
+  typeof listThreadModelSelectorCatalogResponseSchema
 >;

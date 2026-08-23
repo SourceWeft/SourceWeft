@@ -37,6 +37,7 @@ import {
 } from "../../_components/chat-canvas";
 import { contentClient } from "../../../../../lib/sdk";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import { loadThreadModelSelectorCatalog } from "../../_components/model-catalog-loader";
 import {
   DEFAULT_THINKING_SETTINGS,
   EMPTY_MODEL_KIND_FLAGS,
@@ -285,7 +286,7 @@ export function useThreadModels({
         credentialResult,
         modelResult,
       ] = await Promise.all([
-        contentClient.listThreadModelCatalog(workspaceId),
+        loadThreadModelSelectorCatalog(workspaceId),
         contentClient.getThread(workspaceId, threadId),
         contentClient.listByokProviders(workspaceId).catch(() => []),
         contentClient.listByokCredentials(workspaceId).catch(() => ({

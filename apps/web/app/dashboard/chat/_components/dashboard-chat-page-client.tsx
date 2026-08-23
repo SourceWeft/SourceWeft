@@ -68,6 +68,7 @@ import type {
 } from "./chat-canvas/types";
 import type {
   ListThreadModelCatalogResponse,
+  ListThreadModelSelectorCatalogResponse,
   ThreadChatPreferences,
 } from "@sourceweft/contracts";
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
@@ -80,6 +81,7 @@ import {
   type PendingThreadTurn,
 } from "./pending-thread-turn";
 import { hasCachedWorkspaceSources } from "./source-library-cache";
+import { loadThreadModelSelectorCatalog } from "./model-catalog-loader";
 import {
   desktopBridge,
   handleDesktopAuthDeepLink,
@@ -490,7 +492,11 @@ export function DashboardChatPageClient() {
     let cancelled = false;
     setModelCatalogStatus("loading");
 
-    function applyModelCatalog(catalog: ListThreadModelCatalogResponse) {
+    function applyModelCatalog(
+      catalog:
+        | ListThreadModelCatalogResponse
+        | ListThreadModelSelectorCatalogResponse,
+    ) {
       const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
       const kindEnabled = {
         llm: catalogModels.llm.length > 0,
@@ -526,8 +532,8 @@ export function DashboardChatPageClient() {
         const [catalogResult, providerResult, credentialResult, modelResult] =
           await Promise.all([
             initialCatalog
-              ? Promise.resolve<ListThreadModelCatalogResponse | null>(null)
-              : contentClient.listThreadModelCatalog(activeWorkspaceId),
+              ? Promise.resolve<null>(null)
+              : loadThreadModelSelectorCatalog(activeWorkspaceId),
             contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
             contentClient.listByokCredentials(activeWorkspaceId).catch(() => ({
               items: [],

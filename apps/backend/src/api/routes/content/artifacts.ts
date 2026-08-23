@@ -38,12 +38,23 @@ export function registerArtifactRoutes(app: Hono) {
       ? Math.min(Math.max(Number.parseInt(limitParam, 10) || 100, 1), 200)
       : undefined;
 
-    const result = await contentArtifactsService.listArtifacts({
+    const view = c.req.query("view");
+    if (view !== undefined && view !== "summary") {
+      throw ApiError.validation({
+        view: ["Expected 'summary' when the view parameter is provided."],
+      });
+    }
+
+    const input = {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       limit,
       cursor: c.req.query("cursor"),
-    });
+    };
+    const result =
+      view === "summary"
+        ? await contentArtifactsService.listArtifactSummaries(input)
+        : await contentArtifactsService.listArtifacts(input);
 
     return ApiResponse.success(c, result);
   });
