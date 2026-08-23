@@ -987,6 +987,7 @@ async function enqueueAutomaticThreadTitleJob(input: {
     providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     expectedTitle: input.prepared.initialTitle,
+    thinking: input.prepared.llm?.thinking,
     ...(input.prepared.llm?.executionMode === "BYOK" &&
     input.prepared.llm.byokModelId
       ? {
@@ -1314,7 +1315,10 @@ class ContentThreadStreamService {
         while (true) {
           const raceNext = () =>
             Promise.race([
-              nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
+              nextAgentEvent.then((value) => ({
+                type: "agent" as const,
+                value,
+              })),
               ...(nextTitleEvent
                 ? [
                     nextTitleEvent.then((value) => ({
@@ -1345,7 +1349,10 @@ class ContentThreadStreamService {
           }
 
           if (result.type === "title") {
-            await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
+            await throwIfClientCancelled(
+              options.shouldCancel,
+              options.abortSignal,
+            );
             nextTitleEvent = null;
             const update = titleCompletionToUpdate(result.value);
             if (update) {
@@ -1362,7 +1369,10 @@ class ContentThreadStreamService {
           }
 
           nextAgentEvent = agentEvents.next();
-          await throwIfClientCancelled(options.shouldCancel, options.abortSignal);
+          await throwIfClientCancelled(
+            options.shouldCancel,
+            options.abortSignal,
+          );
           if (event.type === "done") {
             outcome = {
               ...event.outcome,
@@ -1991,11 +2001,12 @@ class ContentThreadStreamService {
           }),
       });
 
-      const titleJob = shouldGenerateAutomaticThreadTitle(prepared)
-        ? await this.enqueueTitleJob({ prepared })
-        : null;
-      if (titleJob) {
-        await waitForThreadTitleJob({ job: titleJob, prepared });
+      // Enqueue the title job but don't block the response on it: the worker
+      // generates the title and persists it, and clients pick it up on their
+      // next thread-list refresh. Blocking here used to hold the whole response
+      // open for a second full model round-trip.
+      if (shouldGenerateAutomaticThreadTitle(prepared)) {
+        await this.enqueueTitleJob({ prepared });
       }
 
       if (!traceEnded) {

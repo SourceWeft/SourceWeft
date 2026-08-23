@@ -18,6 +18,10 @@ export const threadSchema = z.object({
   createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  // Conversation activity time (last message append); null until the first
+  // message. The sidebar sorts and shows "Xs ago" from this, not updatedAt, so
+  // metadata writes (title/model/prefs) don't reshuffle the list.
+  lastMessageAt: z.string().nullable(),
 });
 
 const threadThinkingEffortSchema = z.enum([

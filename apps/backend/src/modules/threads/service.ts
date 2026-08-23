@@ -195,7 +195,9 @@ class ContentThreadService {
       hasMore && lastVisible
         ? encodeThreadsCursor({
             id: lastVisible.id,
-            updatedAt: lastVisible.updatedAt,
+            // Must mirror the list's sort key (coalesce(last_message_at,
+            // created_at)) so the keyset picks up exactly where this page ended.
+            activityAt: lastVisible.lastMessageAt ?? lastVisible.createdAt,
           })
         : null;
 

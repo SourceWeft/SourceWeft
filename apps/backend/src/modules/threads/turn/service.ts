@@ -57,6 +57,7 @@ class ContentThreadTurnService {
         providerModel: input.prepared.providerModel,
         gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
         llm: input.llm,
+        thinking: input.prepared.llm?.thinking,
         parentSpanId: input.prepared.traceContext?.parentSpanId,
         billing: this.billing,
       });

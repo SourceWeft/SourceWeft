@@ -130,12 +130,19 @@ function mapThreadToChatItem(item: {
   title: string;
   sourceCount?: number | null;
   updatedAt?: string | null;
+  createdAt?: string | null;
+  lastMessageAt?: string | null;
   visibility?: ChatItem["visibility"] | null;
 }): ChatItem {
   return {
     id: item.id,
     title: item.title,
-    updatedAt: normalizeUpdatedAt(item.updatedAt),
+    // Sort/display timestamp is conversation activity — last message, falling
+    // back to creation. NOT updatedAt, which metadata writes (title/model/
+    // prefs) bump, which used to make the list reshuffle on every title.
+    updatedAt: normalizeUpdatedAt(
+      item.lastMessageAt ?? item.createdAt ?? item.updatedAt,
+    ),
     sourceCount: item.sourceCount ?? 0,
     // A thread persisted before visibility existed reads as private, matching
     // the column's own default and keeping it out of the shared bucket.
@@ -723,10 +730,11 @@ export function DashboardChatStateProvider({
       const safeTitle = title.trim();
       if (!safeTitle) return;
 
+      // Title is metadata, not conversation activity — keep updatedAt (the
+      // sort/"Xs ago" key) untouched so a title landing doesn't jump the chat
+      // to the top or reset its relative time.
       const updateItem = (item: ChatItem) =>
-        item.id === id
-          ? { ...item, title: safeTitle, updatedAt: new Date().toISOString() }
-          : item;
+        item.id === id ? { ...item, title: safeTitle } : item;
 
       setPrivateChats((value) => value.map(updateItem));
       setSharedChats((value) => value.map(updateItem));

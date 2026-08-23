@@ -5,7 +5,10 @@ import {
   enqueueWithAudit,
   jobsQueue,
 } from "../../shared/queue";
-import type { LlmExecutionConfig } from "./model-gateway-audit";
+import type {
+  LlmExecutionConfig,
+  LlmThinkingConfig,
+} from "./model-gateway-audit";
 
 export const SOURCE_PARSE_JOB = "source-parse";
 export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
@@ -60,6 +63,12 @@ export type ThreadTitleGenerateJobPayload = {
     providerModel?: string;
     modelAlias?: string;
   };
+  /**
+   * Thinking config of the originating chat turn, carried so the worker can
+   * force reasoning OFF for the title while keeping the model's
+   * `supportedParameters`. See `generateThreadTitle`.
+   */
+  thinking?: LlmThinkingConfig;
 };
 
 export type ThreadTitleGenerateJobResult =
@@ -167,7 +176,9 @@ export async function enqueueThreadTitleGenerateJob(
   try {
     return await jobsQueue.add(THREAD_TITLE_GENERATE_JOB, payload, {
       jobId,
-      attempts: 5,
+      // A title is best-effort with a first-message fallback, so cap retries
+      // low: without this a slow/erroring model turned into ~30s of backoff.
+      attempts: 2,
       backoff: { type: "exponential", delay: 2000 },
       removeOnComplete: 100,
       removeOnFail: 100,

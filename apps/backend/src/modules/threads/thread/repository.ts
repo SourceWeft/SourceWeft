@@ -26,6 +26,7 @@ type RawThreadRow = {
   created_by: string | null;
   created_at: Date;
   updated_at: Date;
+  last_message_at: Date | null;
 };
 
 const THREAD_RETURNING_SQL = `
@@ -38,8 +39,18 @@ const THREAD_RETURNING_SQL = `
   visibility,
   created_by,
   created_at,
-  updated_at
+  updated_at,
+  last_message_at
 `;
+
+/**
+ * Conversation activity time used to order and timestamp the sidebar list. It
+ * moves only when a message is appended (see `createMessageRecord`), so
+ * metadata-only writes (title/model/preferences, which bump `updated_at`) no
+ * longer reshuffle the list. `last_message_at` is NULL until the first message,
+ * so brand-new threads fall back to `created_at`.
+ */
+const THREAD_ACTIVITY_SQL = "coalesce(last_message_at, created_at)";
 
 /**
  * Raw-SQL predicate hiding other members' private threads. `public_link` is an
@@ -67,6 +78,9 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    lastMessageAt: row.last_message_at
+      ? row.last_message_at.toISOString()
+      : null,
   };
 }
 
@@ -162,10 +176,10 @@ export async function listThreadRecordsByWorkspace(input: {
   limit: number;
   cursor?: {
     id: string;
-    updatedAt: string;
+    activityAt: string;
   };
 }) {
-  const cursorDate = input.cursor ? new Date(input.cursor.updatedAt) : null;
+  const cursorDate = input.cursor ? new Date(input.cursor.activityAt) : null;
   const hasValidCursor =
     Boolean(input.cursor) &&
     Boolean(cursorDate) &&
@@ -183,7 +197,7 @@ export async function listThreadRecordsByWorkspace(input: {
   let cursorSql = "";
   if (hasValidCursor) {
     params.push(cursorDate?.toISOString(), input.cursor?.id);
-    cursorSql = `and (updated_at < $${params.length - 1}::timestamptz or (updated_at = $${params.length - 1}::timestamptz and id < $${params.length}))`;
+    cursorSql = `and (${THREAD_ACTIVITY_SQL} < $${params.length - 1}::timestamptz or (${THREAD_ACTIVITY_SQL} = $${params.length - 1}::timestamptz and id < $${params.length}))`;
   }
 
   params.push(input.limit);
@@ -198,7 +212,7 @@ export async function listThreadRecordsByWorkspace(input: {
         and archived = false
         and ${visibility}
         ${cursorSql}
-      order by updated_at desc, id desc
+      order by ${THREAD_ACTIVITY_SQL} desc, id desc
       limit $${limitParam}
     `,
     params,

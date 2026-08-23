@@ -1,7 +1,10 @@
 import { withBilledModelGateway } from "../../../shared/model-gateway/index";
 import { logger } from "../../../shared/logger";
 import { buildChatTitlePrompt } from "../agent/prompts";
-import { type LlmExecutionConfig } from "../../content/model-gateway-audit";
+import {
+  type LlmExecutionConfig,
+  type LlmThinkingConfig,
+} from "../../content/model-gateway-audit";
 import type { ContentBillingPort } from "../../content/billing-port";
 import { updateThreadTitleIfMatches } from "./repository";
 import {
@@ -23,6 +26,14 @@ export type GenerateThreadTitleInput = {
   providerModel?: string;
   gatewayConfigId: string;
   llm?: LlmExecutionConfig;
+  /**
+   * Thinking config of the originating chat turn. Used only to force reasoning
+   * OFF for the title (a 5-word summary needs none) while keeping the chat
+   * model's `supportedParameters` — without them the openai-reasoning adapter
+   * can't emit the disable and the provider default (thinking ON for DeepSeek
+   * V4) makes every title pay for a hidden reasoning block.
+   */
+  thinking?: LlmThinkingConfig;
   parentSpanId?: string | null;
   /**
    * Required: this used to be optional, and the worker path never passed it, so
@@ -51,8 +62,22 @@ export function buildFallbackThreadTitle(messageContent: string) {
   return normalizeChatTitle(normalized, "New conversation");
 }
 
+// A generated title is a handful of words; cap the output so a chatty model
+// can't run long. Reasoning is disabled below, so nothing hidden eats this
+// budget before the visible title (which would otherwise yield an empty title).
+const TITLE_MAX_OUTPUT_TOKENS = 32;
+
 export async function generateThreadTitle(input: GenerateThreadTitleInput) {
   const isByok = input.llm?.executionMode === "BYOK";
+
+  // Force reasoning OFF while carrying the chat model's supportedParameters so
+  // the adapter actually emits the disable for reasoning-by-default models.
+  const sourceThinking = input.thinking ?? input.llm?.thinking;
+  const titleThinking: LlmThinkingConfig = {
+    ...(sourceThinking ?? {}),
+    mode: "off",
+    enabled: false,
+  };
 
   const completion = await withBilledModelGateway(
     {
@@ -74,8 +99,10 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
       gateway.chat.complete(
         {
           model: isByok
-            ? input.llm?.providerModel ?? input.providerModel ?? input.modelAlias
-            : input.providerModel ?? input.modelAlias,
+            ? (input.llm?.providerModel ??
+              input.providerModel ??
+              input.modelAlias)
+            : (input.providerModel ?? input.modelAlias),
           profileAlias: isByok ? undefined : input.profileAlias,
           messages: [
             {
@@ -83,6 +110,8 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
               content: buildChatTitlePrompt(input.messageContent),
             },
           ],
+          thinking: titleThinking,
+          maxTokens: TITLE_MAX_OUTPUT_TOKENS,
           executionMode: input.llm?.executionMode,
           providerHint: input.llm?.providerHint,
           byokModelId: input.llm?.byokModelId,

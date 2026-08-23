@@ -516,6 +516,7 @@ const prepared: PreparedThreadTurn = {
     createdBy: "user-1",
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
+    lastMessageAt: null,
   },
   messageContent: "What is in this invoice?",
   messageContentJson: {
@@ -864,12 +865,10 @@ test("streamThreadEvents includes finish reason in finish events", async () => {
   assert.equal(finish?.parentMessageId, null);
   assert.deepEqual(finish?.agentCheckpoint, outcome.agentCheckpoint);
   const liveConfirmations = finish?.liveConfirmations as
-    | Record<string, unknown>[]
-    | undefined;
+    Record<string, unknown>[] | undefined;
   assert.equal(liveConfirmations?.length, 1);
   const liveConfirmation = liveConfirmations?.[0] as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   assert.equal(
     (liveConfirmation?.confirmation as Record<string, unknown> | undefined)?.id,
     "confirmation-1",
@@ -1558,8 +1557,7 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   assert.deepEqual(
     (
       events[citationIndex]?.citations as
-        | Array<Record<string, unknown>>
-        | undefined
+        Array<Record<string, unknown>> | undefined
     )?.map((item) => item.sourceTitle),
     ["invoice.pdf"],
   );
@@ -1849,8 +1847,7 @@ test("streamThreadEvents sends available citations when final text uses none", a
   assert.deepEqual(
     (
       citationEvent.availableCitations as
-        | Array<Record<string, unknown>>
-        | undefined
+        Array<Record<string, unknown>> | undefined
     )?.map((item) => item.sourceTitle),
     ["invoice.pdf"],
   );
@@ -2083,7 +2080,7 @@ test("streamThreadEvents preserves metered LLM calls on persisted errors", async
     turnService as unknown as ConstructorParameters<
       typeof ContentThreadStreamService
     >[0],
-    (async function* (input) {
+    async function* (input) {
       // Production hands the scope over as soon as the turn opens it, before
       // any model call can fail — so a crash still leaves the already-metered
       // calls reachable.
@@ -2091,7 +2088,7 @@ test("streamThreadEvents preserves metered LLM calls on persisted errors", async
         meteredCalls: () => [meteredLlmCall],
       } as never);
       throw new Error("tool exploded after model usage");
-    }) as ConstructorParameters<typeof ContentThreadStreamService>[1],
+    } as ConstructorParameters<typeof ContentThreadStreamService>[1],
     async () => null,
     async (input) => {
       errorMeteredCalls = input.partialState?.meteredLlmCalls;

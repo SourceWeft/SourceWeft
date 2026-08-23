@@ -115,12 +115,7 @@ export type SourceRecord = {
   teamId: string;
   workspaceId: string;
   ingestKind:
-    | "connector"
-    | "manual_upload"
-    | "web_url"
-    | "youtube"
-    | "note"
-    | "artifact";
+    "connector" | "manual_upload" | "web_url" | "youtube" | "note" | "artifact";
   sourceType: SourceType;
   connectorId: string | null;
   syncRunId: string | null;
@@ -210,6 +205,8 @@ export type ThreadRecord = {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Last message append time; NULL until the thread's first message. */
+  lastMessageAt: string | null;
 };
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
@@ -231,10 +228,7 @@ export type MessageRecord = {
 };
 
 export type WorkingFilePurpose =
-  | "scratch"
-  | "draft"
-  | "note"
-  | "output_candidate";
+  "scratch" | "draft" | "note" | "output_candidate";
 
 export type WorkingFileRecord = {
   id: string;
