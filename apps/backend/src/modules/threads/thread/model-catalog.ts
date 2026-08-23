@@ -359,7 +359,18 @@ export function projectThreadModelSelectorCatalog(input: {
       pricing: _pricing,
       ...selectorEntry
     } = entry;
-    return selectorEntry;
+    if (!selectorEntry.capabilities) {
+      return selectorEntry;
+    }
+    const {
+      supportedParameters: _supportedParameters,
+      supportSources: _supportSources,
+      includeReasoning: _includeReasoning,
+      reasoningEffort: _reasoningEffort,
+      reasoning: _reasoning,
+      ...selectorCapabilities
+    } = selectorEntry.capabilities;
+    return { ...selectorEntry, capabilities: selectorCapabilities };
   };
 
   return {

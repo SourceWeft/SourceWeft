@@ -13,6 +13,10 @@ import { invalidateArtifactDetail } from "./artifact-detail-loader";
 
 const workspaceArtifactsCache = new Map<string, ArtifactSummaryItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
+const workspaceArtifactsRefreshInFlight = new Map<
+  string,
+  ReturnType<typeof contentClient.listArtifactSummaries>
+>();
 const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifact-summaries-v1";
 
 type WorkspaceArtifactsCacheValue = {
@@ -59,9 +63,21 @@ export function useArtifacts(input: {
     setIsLoadingArtifacts(true);
     setArtifactsLoadingError(null);
     try {
-      const result = await contentClient.listArtifactSummaries(activeWorkspaceId, {
-        limit: 100,
-      });
+      let request = workspaceArtifactsRefreshInFlight.get(activeWorkspaceId);
+      if (!request) {
+        request = contentClient
+          .listArtifactSummaries(activeWorkspaceId, { limit: 100 })
+          .finally(() => {
+            if (
+              workspaceArtifactsRefreshInFlight.get(activeWorkspaceId) ===
+              request
+            ) {
+              workspaceArtifactsRefreshInFlight.delete(activeWorkspaceId);
+            }
+          });
+        workspaceArtifactsRefreshInFlight.set(activeWorkspaceId, request);
+      }
+      const result = await request;
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
       }

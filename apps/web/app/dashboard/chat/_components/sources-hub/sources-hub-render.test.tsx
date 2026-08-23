@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -76,7 +76,10 @@ type SourcesHubProps = Parameters<typeof SourcesHub>[0];
 const EMPTY: never[] = [];
 const noop = () => {};
 
-async function renderHub(props: Partial<SourcesHubProps> = {}) {
+async function renderHub(
+  props: Partial<SourcesHubProps> = {},
+  options: { strict?: boolean } = {},
+) {
   container = document.createElement("div");
   document.body.append(container);
   const created = createRoot(container);
@@ -100,7 +103,10 @@ async function renderHub(props: Partial<SourcesHubProps> = {}) {
     ...props,
   };
   await act(async () => {
-    created.render(createElement(SourcesHub, merged));
+    const hub = createElement(SourcesHub, merged);
+    created.render(
+      options.strict ? createElement(StrictMode, null, hub) : hub,
+    );
   });
   return container;
 }
@@ -161,7 +167,7 @@ test("mounts without a workspace id", async () => {
 });
 
 test("does not load artifacts until the Artifacts tab becomes active", async () => {
-  const el = await renderHub({ artifactsRefreshKey: 1 });
+  const el = await renderHub({ artifactsRefreshKey: 1 }, { strict: true });
   expect(listArtifactSummariesMock).not.toHaveBeenCalled();
 
   const artifactsButton = Array.from(el.querySelectorAll("button")).find(

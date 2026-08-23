@@ -40,6 +40,7 @@ function fullEntry(index: number) {
       reasoningEffort: true,
       includeReasoning: false,
       supportSources: ["model-catalog"],
+      capabilityOwned: { values: ["kept"] },
     },
   };
 }
@@ -60,6 +61,13 @@ test("selector projection keeps UI capabilities and removes billing fields", () 
   assert.equal("kind" in row, false);
   assert.equal("isActive" in row, false);
   assert.equal("isDefault" in row, false);
+  const capabilities = row.capabilities as Record<string, unknown>;
+  assert.equal("supportedParameters" in capabilities, false);
+  assert.equal("supportSources" in capabilities, false);
+  assert.equal("includeReasoning" in capabilities, false);
+  assert.equal("reasoningEffort" in capabilities, false);
+  assert.equal("reasoning" in capabilities, false);
+  assert.deepEqual(capabilities.capabilityOwned, { values: ["kept"] });
 });
 
 test("representative selector catalog remains below the response threshold", () => {

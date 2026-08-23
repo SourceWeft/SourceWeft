@@ -19,12 +19,7 @@ const selectorItem = {
   capabilities: {
     supportsThinking: true,
     supportsImageInput: true,
-    supportedParameters: ["reasoning_effort"],
     supportedEfforts: ["low", "medium", "high"],
-    reasoning: true,
-    reasoningEffort: true,
-    includeReasoning: true,
-    supportSources: ["model-catalog"],
   },
 };
 
@@ -39,12 +34,28 @@ test("model selector row strips pricing and repeated catalog flags", () => {
     isDefault: true,
     isActive: true,
     pricing: { giant: "x".repeat(10_000) },
+    capabilities: {
+      ...selectorItem.capabilities,
+      supportedParameters: ["reasoning_effort"],
+      supportSources: ["model-catalog"],
+      includeReasoning: true,
+      reasoningEffort: true,
+      reasoning: true,
+      capabilityOwned: { values: ["kept"] },
+    },
   }) as Record<string, unknown>;
 
   assert.equal("kind" in parsed, false);
   assert.equal("isDefault" in parsed, false);
   assert.equal("isActive" in parsed, false);
   assert.equal("pricing" in parsed, false);
+  const capabilities = parsed.capabilities as Record<string, unknown>;
+  assert.equal("supportedParameters" in capabilities, false);
+  assert.equal("supportSources" in capabilities, false);
+  assert.equal("includeReasoning" in capabilities, false);
+  assert.equal("reasoningEffort" in capabilities, false);
+  assert.equal("reasoning" in capabilities, false);
+  assert.deepEqual(capabilities.capabilityOwned, { values: ["kept"] });
 });
 
 test("model selector catalog preserves defaults and kind buckets", () => {

@@ -4,17 +4,45 @@ import { threadSchema } from "./threads";
 
 export const modelCatalogKindSchema = z.enum(["llm", "image", "vision"]);
 
+const modelCatalogCapabilityFields = {
+  supportsThinking: z.boolean(),
+  supportsImageInput: z.boolean().optional(),
+  supportedParameters: z.array(z.string()),
+  supportedEfforts: z.array(reasoningEffortSchema),
+  reasoning: z.boolean(),
+  reasoningEffort: z.boolean(),
+  includeReasoning: z.boolean(),
+  supportSources: z.array(z.string()),
+  imageGeneration: imageModelCapabilitiesSchema.optional(),
+};
+
 export const modelCatalogCapabilitiesSchema = z
+  .object(modelCatalogCapabilityFields)
+  .catchall(z.unknown())
+  .optional();
+
+/**
+ * Capabilities the browser actually consumes. Capability-owned annotations
+ * remain open-ended; raw provider-parameter provenance stays server-side.
+ */
+export const modelSelectorCapabilitiesSchema = z
   .object({
-    supportsThinking: z.boolean(),
-    supportsImageInput: z.boolean().optional(),
-    supportedParameters: z.array(z.string()),
-    supportedEfforts: z.array(reasoningEffortSchema),
-    reasoning: z.boolean(),
-    reasoningEffort: z.boolean(),
-    includeReasoning: z.boolean(),
-    supportSources: z.array(z.string()),
-    imageGeneration: imageModelCapabilitiesSchema.optional(),
+    supportsThinking: modelCatalogCapabilityFields.supportsThinking,
+    supportsImageInput: modelCatalogCapabilityFields.supportsImageInput,
+    supportedEfforts: modelCatalogCapabilityFields.supportedEfforts,
+    imageGeneration: modelCatalogCapabilityFields.imageGeneration,
+  })
+  .catchall(z.unknown())
+  .transform((value) => {
+    const {
+      supportedParameters: _supportedParameters,
+      supportSources: _supportSources,
+      includeReasoning: _includeReasoning,
+      reasoningEffort: _reasoningEffort,
+      reasoning: _reasoning,
+      ...selectorCapabilities
+    } = value;
+    return selectorCapabilities;
   })
   .optional();
 
@@ -37,12 +65,15 @@ export const modelCatalogItemSchema = z.object({
 });
 
 /** Compact model row consumed by the chat selector and composer. */
-export const modelSelectorCatalogItemSchema = modelCatalogItemSchema.omit({
-  kind: true,
-  isDefault: true,
-  isActive: true,
-  pricing: true,
-});
+export const modelSelectorCatalogItemSchema = modelCatalogItemSchema
+  .omit({
+    kind: true,
+    isDefault: true,
+    isActive: true,
+    pricing: true,
+    capabilities: true,
+  })
+  .extend({ capabilities: modelSelectorCapabilitiesSchema });
 
 export const listThreadModelCatalogResponseSchema = z.object({
   defaults: threadSchema.shape.modelSettings,
