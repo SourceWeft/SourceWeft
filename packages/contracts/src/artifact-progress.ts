@@ -244,14 +244,38 @@ export interface ArtifactProgressInput {
   } | null;
 }
 
+/**
+ * The generation record to trust right now — decided once, consumed by both
+ * the status and the step-view readers so they cannot disagree.
+ *
+ * While the tool call is live, its streamed output IS the live channel: SSE
+ * progress events keep rewriting it, while the artifact snapshot is a one-shot
+ * REST fetch frozen at whatever stage the pipeline had reached when it loaded.
+ * So a live call reads the output first and uses the snapshot only until the
+ * first progress event lands. Once the call completes its persisted output is
+ * forever stale, and the snapshot becomes the sole authority; before that
+ * snapshot arrives the output still bridges the gap.
+ */
+function resolveCurrentGeneration(
+  input: ArtifactProgressInput,
+): ArtifactPipelineGeneration | null {
+  const fromSnapshot = readArtifactGeneration(
+    input.artifactSnapshot?.payloadJson,
+  );
+  const mayUseToolOutput =
+    !isToolCallComplete(input.toolCallStatus) || !input.artifactSnapshot;
+  const fromOutput = mayUseToolOutput
+    ? readArtifactGeneration(input.toolCallOutput)
+    : null;
+  return fromOutput ?? fromSnapshot;
+}
+
 export function resolveArtifactGenerationStatus(
   input: ArtifactProgressInput,
 ): ArtifactPipelineGenerationStatus | null {
-  const fromPayload = readArtifactGeneration(
-    input.artifactSnapshot?.payloadJson,
-  );
-  if (fromPayload) {
-    return fromPayload.status;
+  const generation = resolveCurrentGeneration(input);
+  if (generation) {
+    return generation.status;
   }
 
   const rowStatus = artifactPipelineGenerationStatusSchema.safeParse(
@@ -290,17 +314,7 @@ export function resolveArtifactProgressView(
   input: ArtifactProgressInput & { descriptor: ArtifactProgressDescriptor },
 ): ArtifactProgressView {
   const status = resolveArtifactGenerationStatus(input) ?? "pending";
-  const fromSnapshot = readArtifactGeneration(
-    input.artifactSnapshot?.payloadJson,
-  );
-  // Completed tool rows keep a forever-stale payload; only consult tool output
-  // while the call is live or no snapshot has arrived yet.
-  const mayUseToolOutput =
-    !isToolCallComplete(input.toolCallStatus) || !input.artifactSnapshot;
-  const fromOutput = mayUseToolOutput
-    ? readArtifactGeneration(input.toolCallOutput)
-    : null;
-  const generation = fromSnapshot ?? fromOutput;
+  const generation = resolveCurrentGeneration(input);
 
   let steps =
     generation?.pipelineSteps && generation.pipelineSteps.length > 0

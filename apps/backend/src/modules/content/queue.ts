@@ -138,6 +138,15 @@ export type ThreadChatRunJobResult =
       assistantMessageId: string | null;
       errorCode?: string | null;
       errorMessage?: string | null;
+    }
+  | {
+      /**
+       * A redelivered job (BullMQ stall redelivery) found the run already
+       * claimed by a live execution and did nothing.
+       */
+      status: "skipped";
+      runId: string;
+      assistantMessageId: string | null;
     };
 
 export async function enqueueSourceParseJob(payload: SourceParseJobPayload) {

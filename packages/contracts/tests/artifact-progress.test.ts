@@ -56,6 +56,116 @@ test("snapshot generation wins over a stale fire-and-forget tool row", () => {
   assert.equal(status, "ready");
 });
 
+test("a live call's streamed output outranks the frozen one-shot snapshot", () => {
+  // The snapshot is fetched once when the artifact first appears and never
+  // refreshed while the run streams; SSE progress events keep rewriting the
+  // tool output. Rendering the snapshot first froze the card at fetch time
+  // until a page refresh — the live output must win while the call is live.
+  const view = protocol.resolveProgressView({
+    toolCallStatus: "running",
+    toolCallOutput: {
+      type: "fake_processing_result",
+      artifact_id: "artifact-1",
+      generation: {
+        status: "running",
+        progress: 66,
+        pipelineSteps: [
+          { id: "plan", label: "Plan", status: "completed" },
+          { id: "build", label: "Build", status: "completed" },
+          { id: "publish", label: "Publish", status: "running" },
+        ],
+      },
+    },
+    artifactSnapshot: {
+      status: "running",
+      payloadJson: {
+        generation: {
+          status: "pending",
+          progress: 0,
+          pipelineSteps: [
+            { id: "plan", label: "Plan", status: "running" },
+            { id: "build", label: "Build", status: "pending" },
+            { id: "publish", label: "Publish", status: "pending" },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(view.status, "running");
+  assert.equal(view.completedStepCount, 2);
+  assert.equal(view.activeStepId, "publish");
+});
+
+test("before the first progress event the snapshot fills in", () => {
+  // The tool's first outputs carry no generation record; the one-shot snapshot
+  // (whose initial payload always has one) covers that gap.
+  const view = protocol.resolveProgressView({
+    toolCallStatus: "running",
+    toolCallOutput: {
+      type: "fake_processing_result",
+      artifact_id: "artifact-1",
+      status: "running",
+    },
+    artifactSnapshot: {
+      status: "running",
+      payloadJson: {
+        generation: {
+          status: "running",
+          progress: 10,
+          pipelineSteps: [
+            { id: "plan", label: "Plan", status: "running" },
+            { id: "build", label: "Build", status: "pending" },
+            { id: "publish", label: "Publish", status: "pending" },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(view.completedStepCount, 0);
+  assert.equal(view.activeStepId, "plan");
+});
+
+test("a completed call's persisted output never overrides the snapshot", () => {
+  // Once the call completes its persisted output is forever stale; the
+  // snapshot is the sole authority, even when the output carries a generation
+  // record of its own.
+  const view = protocol.resolveProgressView({
+    toolCallStatus: "completed",
+    toolCallOutput: {
+      type: "fake_processing_result",
+      artifact_id: "artifact-1",
+      generation: {
+        status: "running",
+        progress: 50,
+        pipelineSteps: [
+          { id: "plan", label: "Plan", status: "completed" },
+          { id: "build", label: "Build", status: "running" },
+          { id: "publish", label: "Publish", status: "pending" },
+        ],
+      },
+    },
+    artifactSnapshot: {
+      status: "ready",
+      payloadJson: {
+        generation: {
+          status: "ready",
+          progress: 100,
+          pipelineSteps: [
+            { id: "plan", label: "Plan", status: "completed" },
+            { id: "build", label: "Build", status: "completed" },
+            { id: "publish", label: "Publish", status: "completed" },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(view.status, "ready");
+  assert.equal(view.completedStepCount, 3);
+});
+
 test("progress view reports step counts and the active step", () => {
   const view = protocol.resolveProgressView({
     artifactSnapshot: {

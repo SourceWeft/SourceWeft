@@ -3,6 +3,7 @@ import { requireContentWorkspace } from "../../workspace/guards";
 import {
   enqueueThreadChatRunJob,
   type ThreadChatRunJobPayload,
+  type ThreadChatRunJobResult,
 } from "../../content/queue";
 import type {
   EditThreadInput,
@@ -44,6 +45,7 @@ import {
   STOP_RESULT_WAIT_TIMEOUT_MS,
 } from "./run-constants";
 import {
+  isStaleActiveRun,
   isTerminalRunStatus,
   isUniqueConstraintError,
   parseSsePayload,
@@ -99,6 +101,56 @@ export {
   toTerminalJobStatus,
   toTerminalRunError,
 } from "./run-state";
+
+/**
+ * A redelivered job found the run already claimed by an earlier delivery.
+ * With `attempts: 1` the only way here is BullMQ stall redelivery, and a
+ * "stalled" job's original execution can still be alive — stall detection
+ * fires on a starved event loop, not just a dead worker. Never re-execute
+ * the turn (a second execution runs the whole turn concurrently: duplicate
+ * tool calls, artifacts, billing). Fresh heartbeat → the original still owns
+ * the run, report a skip; stale heartbeat → run the same stale-run recovery
+ * the read path uses and report the terminal state it lands on.
+ */
+async function resolveRedeliveredActiveRun(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    failStaleRun?: (run: ChatThreadRunRecord) => Promise<ChatThreadRunRecord>;
+  } = {},
+): Promise<ThreadChatRunJobResult> {
+  if (run.status === "waiting_for_approval") {
+    return {
+      status: "waiting_for_approval",
+      runId: run.id,
+      assistantMessageId: run.assistantMessageId,
+    };
+  }
+  if (!isStaleActiveRun(run)) {
+    return {
+      status: "skipped",
+      runId: run.id,
+      assistantMessageId: run.assistantMessageId,
+    };
+  }
+  const failStaleRun = dependencies.failStaleRun ?? failRunIfStale;
+  const recovered = (await failStaleRun(run)) ?? run;
+  if (!isTerminalRunStatus(recovered.status)) {
+    // Recovery saw the run advance under us (e.g. a heartbeat landed between
+    // our reads) — whoever wrote that still owns the run.
+    return {
+      status: "skipped",
+      runId: recovered.id,
+      assistantMessageId: recovered.assistantMessageId,
+    };
+  }
+  return {
+    status: toTerminalJobStatus(recovered.status),
+    runId: recovered.id,
+    assistantMessageId: recovered.assistantMessageId,
+    ...(recovered.errorCode ? { errorCode: recovered.errorCode } : {}),
+    ...(recovered.errorMessage ? { errorMessage: recovered.errorMessage } : {}),
+  };
+}
 
 export class DurableChatRunService {
   async findRun(input: {
@@ -488,7 +540,7 @@ export class DurableChatRunService {
       };
     }
     if (run.status === "running") {
-      return run;
+      return resolveRedeliveredActiveRun(run);
     }
 
     const running = await markChatThreadRunRunning({
@@ -513,7 +565,9 @@ export class DurableChatRunService {
         };
       }
       if (latest.status !== "cancel_requested") {
-        return latest;
+        // Lost the queued→running CAS to a concurrent delivery: same fencing
+        // as the `running` branch above — only the CAS winner executes.
+        return resolveRedeliveredActiveRun(latest);
       }
       const cancelledRun = (await cancelRunBeforeMessages(latest)) ?? latest;
       return {
@@ -629,6 +683,7 @@ export const testExports = {
   finishRunIfSnapshotIsTerminalWithDependencies,
   forceCancelStoppedRun,
   resolveAssistantMessageProjection,
+  resolveRedeliveredActiveRun,
   resolveTerminalStatusFromFinishedSnapshot,
   resolveAttachRunState,
   shouldCompleteApprovalRunWithoutPendingConfirmations,

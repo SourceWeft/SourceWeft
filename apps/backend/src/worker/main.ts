@@ -80,12 +80,22 @@ installWorkerProcessErrorGuards({
     failThreadRunAtProcessorBoundary({ payload, error }),
 });
 
+// How long a job's Redis lock stays valid without renewal before BullMQ
+// declares it stalled and redelivers it. Both workers share this process, so
+// heavy deliverable work (video render pipelines) can starve the event loop
+// past the 30s default and get live jobs mass-redelivered as "stalled". Must
+// stay below STALE_ACTIVE_RUN_TIMEOUT_MS (10min) so redelivery happens while
+// the run-level heartbeat check can still tell a live execution from a dead
+// one.
+const WORKER_LOCK_DURATION_MS = 5 * 60_000;
+
 const primaryWorker = new Worker<JobPayload>(
   config.queueName,
   async (job: Job<JobPayload>) => runIsolatedJob(job, primaryProcessors),
   {
     connection: connectionOptions,
     concurrency: config.workerConcurrency,
+    lockDuration: WORKER_LOCK_DURATION_MS,
   },
 );
 
@@ -95,6 +105,7 @@ const deliverablesWorker = new Worker<JobPayload>(
   {
     connection: connectionOptions,
     concurrency: config.deliverablesWorkerConcurrency,
+    lockDuration: WORKER_LOCK_DURATION_MS,
   },
 );
 

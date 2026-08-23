@@ -987,3 +987,74 @@ test("result wait turns stale active run terminal before timeout", async () => {
 
   assert.equal(failCalls, 1);
 });
+
+test("redelivered running run with a fresh heartbeat is skipped, not re-executed", async () => {
+  const result = await testExports.resolveRedeliveredActiveRun(
+    createRun({ heartbeatAt: new Date().toISOString() }),
+    {
+      failStaleRun: () => {
+        throw new Error("must not run stale recovery for a live run");
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    status: "skipped",
+    runId: "run-1",
+    assistantMessageId: "assistant-message-1",
+  });
+});
+
+test("redelivered running run with a stale heartbeat reports stale recovery's failure", async () => {
+  // createRun() puts heartbeatAt at epoch 0, far past the stale timeout.
+  const result = await testExports.resolveRedeliveredActiveRun(createRun(), {
+    failStaleRun: async (run) => ({
+      ...run,
+      status: "failed",
+      errorCode: "CHAT_RUN_STALE",
+      errorMessage: null,
+    }),
+  });
+
+  assert.deepEqual(result, {
+    status: "failed",
+    runId: "run-1",
+    assistantMessageId: "assistant-message-1",
+    errorCode: "CHAT_RUN_STALE",
+  });
+});
+
+test("redelivered stale run whose zombie already wrote a terminal snapshot completes", async () => {
+  const result = await testExports.resolveRedeliveredActiveRun(createRun(), {
+    failStaleRun: async (run) => ({ ...run, status: "completed" }),
+  });
+
+  assert.deepEqual(result, {
+    status: "completed",
+    runId: "run-1",
+    assistantMessageId: "assistant-message-1",
+  });
+});
+
+test("redelivered run whose stale recovery observes it advance is skipped", async () => {
+  const result = await testExports.resolveRedeliveredActiveRun(createRun(), {
+    failStaleRun: async (run) => ({
+      ...run,
+      heartbeatAt: new Date().toISOString(),
+    }),
+  });
+
+  assert.equal(result.status, "skipped");
+});
+
+test("redelivered waiting_for_approval run reports approval state without executing", async () => {
+  const result = await testExports.resolveRedeliveredActiveRun(
+    createRun({ status: "waiting_for_approval" }),
+  );
+
+  assert.deepEqual(result, {
+    status: "waiting_for_approval",
+    runId: "run-1",
+    assistantMessageId: "assistant-message-1",
+  });
+});
