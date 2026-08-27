@@ -26,6 +26,14 @@ export type GlobalGatewayEntry = {
   maxRetries?: number;
   isDefault: boolean;
   isActive: boolean;
+  /**
+   * Optional env var that flips a dormant gateway active. When set and the env
+   * var holds a value, the gateway is treated as active even if `isActive` is
+   * false. Used for pre-wired-but-dormant providers (e.g. OrcaRouter ships in
+   * the default config inactive) so a deployment activates them by setting the
+   * API key env var — no config-file edit needed.
+   */
+  isActiveEnv?: string;
   isBYOK: boolean;
   modelCatalog?: {
     enabled: boolean;
@@ -145,6 +153,7 @@ type RawGlobalGatewayEntry = {
   maxRetries?: unknown;
   isDefault?: unknown;
   isActive?: unknown;
+  isActiveEnv?: unknown;
   isBYOK?: unknown;
   modelCatalog?: unknown;
 };
@@ -696,6 +705,13 @@ function parseGatewayEntry(
       : undefined;
   const baseUrlOverride = baseUrlEnv ? process.env[baseUrlEnv]?.trim() : "";
   const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : "";
+  const isActiveEnv =
+    typeof entry.isActiveEnv === "string" && entry.isActiveEnv.trim().length > 0
+      ? entry.isActiveEnv.trim()
+      : undefined;
+  const isActive = isActiveEnv
+    ? asBoolean(entry.isActive, true) || Boolean(process.env[isActiveEnv]?.trim())
+    : asBoolean(entry.isActive, true);
 
   const slug = asNonEmptyString(entry.slug, `gateways[${index}].slug`);
   const baseUrl = baseUrlOverride
@@ -757,7 +773,8 @@ function parseGatewayEntry(
       `gateways[${index}].maxRetries`,
     ),
     isDefault: asBoolean(entry.isDefault, false),
-    isActive: asBoolean(entry.isActive, true),
+    isActive,
+    isActiveEnv,
     isBYOK: asBoolean(entry.isBYOK, false),
     ...(modelCatalog ? { modelCatalog } : {}),
   };
@@ -1114,9 +1131,13 @@ function createVersionHash(input: {
   rawContent: string;
   gateways: readonly GlobalGatewayEntry[];
 }): string {
+  // Resolved activation is part of the fingerprint: a dormant gateway flipped
+  // active by `isActiveEnv` is a different effective config than the same file
+  // with the env var unset, so it must produce a different version.
   const resolvedBaseUrls = input.gateways.map((gateway) => ({
     baseUrl: gateway.baseUrl,
     baseUrlEnv: gateway.baseUrlEnv ?? null,
+    isActive: gateway.isActive,
     slug: gateway.slug,
   }));
 
@@ -1299,6 +1320,7 @@ function parseGlobalModelGatewayConfig(
       _resolvedGatewayBaseUrls: gateways.map((gateway) => ({
         baseUrl: gateway.baseUrl,
         baseUrlEnv: gateway.baseUrlEnv ?? null,
+        isActive: gateway.isActive,
         slug: gateway.slug,
       })),
     },

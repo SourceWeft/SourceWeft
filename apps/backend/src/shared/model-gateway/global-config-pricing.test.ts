@@ -251,6 +251,105 @@ test("loadGlobalModelGatewayConfig preserves custom API key header config", asyn
   assert.equal(loaded?.gateways[0]?.apiKeyHeaderPrefix, "Bearer ");
 });
 
+test("isActiveEnv activates a dormant gateway when the env var is set", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "secondary",
+    baseUrl: "https://secondary.test/v1",
+    providerName: "Secondary",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: false,
+    isActiveEnv: "SOURCEWEFT_TEST_ACTIVE_ENV",
+  });
+  process.env.SOURCEWEFT_TEST_ACTIVE_ENV = "sk-test";
+  try {
+    const loaded = await loadConfig(config);
+    const secondary = loaded?.gateways.find((entry) => entry.slug === "secondary");
+    assert.equal(secondary?.isActive, true);
+    assert.equal(secondary?.isActiveEnv, "SOURCEWEFT_TEST_ACTIVE_ENV");
+  } finally {
+    delete process.env.SOURCEWEFT_TEST_ACTIVE_ENV;
+  }
+});
+
+test("isActiveEnv leaves a dormant gateway inactive when the env var is unset", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "secondary",
+    baseUrl: "https://secondary.test/v1",
+    providerName: "Secondary",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: false,
+    isActiveEnv: "SOURCEWEFT_TEST_ACTIVE_ENV_UNSET",
+  });
+  delete process.env.SOURCEWEFT_TEST_ACTIVE_ENV_UNSET;
+
+  const loaded = await loadConfig(config);
+  const secondary = loaded?.gateways.find((entry) => entry.slug === "secondary");
+
+  assert.equal(secondary?.isActive, false);
+  assert.equal(secondary?.isActiveEnv, "SOURCEWEFT_TEST_ACTIVE_ENV_UNSET");
+});
+
+test("explicit isActive:true wins even when isActiveEnv is set but unpopulated", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "secondary",
+    baseUrl: "https://secondary.test/v1",
+    providerName: "Secondary",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: true,
+    isActiveEnv: "SOURCEWEFT_TEST_ACTIVE_ENV_EMPTY",
+  });
+  process.env.SOURCEWEFT_TEST_ACTIVE_ENV_EMPTY = "";
+  try {
+    const loaded = await loadConfig(config);
+    const secondary = loaded?.gateways.find((entry) => entry.slug === "secondary");
+    assert.equal(secondary?.isActive, true);
+  } finally {
+    delete process.env.SOURCEWEFT_TEST_ACTIVE_ENV_EMPTY;
+  }
+});
+
+test("isActiveEnv activation changes the config version hash", async () => {
+  const config = baseConfig();
+  config.gateways.push({
+    slug: "secondary",
+    baseUrl: "https://secondary.test/v1",
+    providerName: "Secondary",
+    providerKind: "openai-compatible",
+    supports: ["chat"],
+    isDefault: false,
+    isActive: false,
+    isActiveEnv: "SOURCEWEFT_TEST_ACTIVE_HASH_ENV",
+  });
+
+  delete process.env.SOURCEWEFT_TEST_ACTIVE_HASH_ENV;
+  const dormant = await loadConfig(config);
+
+  process.env.SOURCEWEFT_TEST_ACTIVE_HASH_ENV = "sk-test";
+  try {
+    const active = await loadConfig(config);
+    const dormantSecondary = dormant?.gateways.find(
+      (entry) => entry.slug === "secondary",
+    );
+    const activeSecondary = active?.gateways.find(
+      (entry) => entry.slug === "secondary",
+    );
+    assert.notEqual(dormant?.versionHash, active?.versionHash);
+    assert.equal(dormantSecondary?.isActive, false);
+    assert.equal(activeSecondary?.isActive, true);
+  } finally {
+    delete process.env.SOURCEWEFT_TEST_ACTIVE_HASH_ENV;
+  }
+});
+
 test("loadGlobalModelGatewayConfig preserves explicit null pricing", async () => {
   const config = baseConfig();
   config.chatProfiles[0] = {
@@ -439,6 +538,7 @@ test("loadGlobalModelGatewayConfig resolves provider base URL env override", asy
         {
           baseUrl: "https://proxy.example.com/deepinfra",
           baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+          isActive: true,
           slug: "test",
         },
       ],
@@ -560,10 +660,15 @@ test("default global config routes through OpenRouter with a dormant OrcaRouter 
     loaded?.gateways.map((entry) => entry.slug),
     ["openrouter-default", "orcarouter-default"],
   );
-  // OrcaRouter ships alongside OpenRouter but dormant: it is an openai-compatible
-  // provider with the richer catalog format, inactive until a deployment sets
-  // ORCAROUTER_API_KEY and flips isActive.
-  assert.equal(orcaRouterGateway?.isActive, false);
+  // OrcaRouter ships alongside OpenRouter but dormant by default: it is an
+  // openai-compatible provider with the richer catalog format. Setting
+  // ORCAROUTER_API_KEY activates it via isActiveEnv (no config-file edit), so
+  // the shipped default is active only when the key is present.
+  assert.equal(orcaRouterGateway?.isActiveEnv, "ORCAROUTER_API_KEY");
+  assert.equal(
+    orcaRouterGateway?.isActive,
+    Boolean(process.env.ORCAROUTER_API_KEY?.trim()),
+  );
   assert.equal(orcaRouterGateway?.isDefault, false);
   assert.equal(orcaRouterGateway?.providerKind, "openai-compatible");
   assert.equal(orcaRouterGateway?.providerName, "orcarouter");
