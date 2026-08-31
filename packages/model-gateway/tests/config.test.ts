@@ -421,6 +421,40 @@ test("resolveRequestTarget prefers inline BYOK credential endpoint over system p
   });
 });
 
+test("a Provider disabled for GLOBAL routing can remain available to BYOK", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "global-key-must-not-be-used",
+        enabled: false,
+        byokEnabled: true,
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4.1-mini", priority: 1 }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => resolveRequestTarget(resolved, { model: "chat-default" }),
+    /No globally ready route target/,
+  );
+
+  const target = await resolveRequestTarget(resolved, {
+    executionMode: "BYOK",
+    model: "gpt-4.1-mini",
+    byok: { provider: "openai", apiKey: "workspace-key" },
+  });
+  assert.equal(target.apiKey, "workspace-key");
+  assert.equal(target.baseUrl, "https://api.openai.com/v1");
+});
+
 test("resolveRequestTarget uses provider-qualified BYOK routeDecision alias", async () => {
   const resolved = resolveModelGatewayConfig({
     fetch: fetchStub,

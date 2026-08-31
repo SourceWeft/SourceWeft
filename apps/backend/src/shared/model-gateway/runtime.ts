@@ -182,7 +182,8 @@ export async function resolveByokProviderRuntime(input: {
     providerName: input.provider,
     providerKind: systemProvider.kind,
     baseUrl: systemProvider.baseUrl,
-    apiKey: systemProvider.apiKey ?? null,
+    // BYOK may reuse the system Provider definition, never its deployment key.
+    apiKey: null,
     defaultHeaders: systemProvider.defaultHeaders,
     hasUserScopedKey: false,
   };
@@ -207,12 +208,7 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
   const providerRows = await db
     .select()
     .from(modelGatewayProviderConfigs)
-    .where(
-      and(
-        eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id),
-        eq(modelGatewayProviderConfigs.isActive, true),
-      ),
-    );
+    .where(eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id));
 
   const routeRows = await db
     .select()
@@ -238,7 +234,7 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
 
   const gatewayRows = gatewayIds.length
     ? (await db.select().from(modelGatewayConfigs)).filter((row) =>
-        row.isActive && gatewayIds.includes(row.id),
+        gatewayIds.includes(row.id),
       )
     : [];
   const gatewayRowById = new Map(gatewayRows.map((row) => [row.id, row]));
@@ -255,6 +251,18 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
       row.configJson && typeof row.configJson === "object"
         ? (row.configJson as Record<string, unknown>)
         : {};
+    const gatewayConfigJson =
+      gatewayRow?.configJson && typeof gatewayRow.configJson === "object"
+        ? (gatewayRow.configJson as Record<string, unknown>)
+        : {};
+    const hasGlobalApiKey =
+      typeof gatewayRow?.apiKeyEncrypted === "string" &&
+      gatewayRow.apiKeyEncrypted.length > 0;
+    const requiresGlobalApiKey =
+      gatewayConfigJson.requiresGlobalApiKey === true ||
+      typeof row.apiKeySource === "string";
+    const enabled = Boolean(row.isActive && gatewayRow?.isActive);
+    const configured = !requiresGlobalApiKey || hasGlobalApiKey;
 
     providers[row.providerName] = {
       gatewayConfigId: row.gatewayConfigId,
@@ -274,9 +282,11 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
         ? providerConfigJson.apiKeyHeaderPrefix
         : undefined,
       isBYOK: gatewayRow?.isBYOK ?? false,
-      hasGlobalApiKey:
-        typeof gatewayRow?.apiKeyEncrypted === "string" &&
-        gatewayRow.apiKeyEncrypted.length > 0,
+      enabled,
+      configured,
+      globalReady: enabled && configured,
+      requiresGlobalApiKey,
+      hasGlobalApiKey,
       defaultHeaders: withOpenRouterAttributionHeaders({
         providerKind: row.providerKind,
         defaultHeaders: normalizeDefaultHeaders(
@@ -428,6 +438,8 @@ export function buildRoutedModelGatewayConfig(
           apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
           defaultHeaders: provider.defaultHeaders,
           supports: provider.supports,
+          enabled: provider.globalReady,
+          byokEnabled: true,
           // Carried per provider so one slow gateway cannot widen every other
           // provider's timeout (previously hoisted via Math.max).
           timeoutMs: provider.timeoutMs,

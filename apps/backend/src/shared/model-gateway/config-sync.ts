@@ -583,12 +583,12 @@ async function loadDynamicCatalogProfiles(input: {
         });
       }
     } catch (error) {
-      logger.warn("Failed to discover gateway model catalog", {
-        providerName: gateway.providerName,
-        providerKind: gateway.providerKind,
-        gatewaySlug: gateway.slug,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      throw new Error(
+        `Failed to discover model catalog for globally ready gateway '${gateway.slug}' (${gateway.providerName}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
     }
   }
 
@@ -689,8 +689,22 @@ async function syncGlobalModelGatewayConfigFromFile(
     return;
   }
 
+  for (const gateway of loaded.gateways) {
+    if (gateway.activation.enabled && !gateway.activation.configured) {
+      logger.warn("Global model gateway is enabled but not configured", {
+        gatewaySlug: gateway.slug,
+        providerName: gateway.providerName,
+        activationEnv: gateway.activation.env,
+        activationSource: gateway.activation.source,
+        missingCredentialEnv: gateway.apiKeyEnv ?? null,
+      });
+    }
+  }
+
   const dynamicCatalog = await loadDynamicCatalogProfiles({
-    gateways: loaded.gateways.filter((gateway) => gateway.isActive),
+    gateways: loaded.gateways.filter(
+      (gateway) => gateway.activation.globalReady,
+    ),
   });
   const dynamicByKind = groupDynamicProfilesByKind({
     entries: dynamicCatalog.entries,
@@ -829,6 +843,8 @@ async function syncGlobalModelGatewayConfigFromFile(
         apiKeyHeaderName: entry.apiKeyHeaderName ?? null,
         apiKeyHeaderPrefix: entry.apiKeyHeaderPrefix ?? null,
         defaultHeaders: entry.defaultHeaders,
+        activation: entry.activation,
+        requiresGlobalApiKey: Boolean(entry.apiKeyEnv),
         ...(entry.modelCatalog ? { modelCatalog: entry.modelCatalog } : {}),
       } satisfies Record<string, unknown>;
 
@@ -843,7 +859,7 @@ async function syncGlobalModelGatewayConfigFromFile(
             timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
             maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
             isDefault: entry.isDefault,
-            isActive: entry.isActive,
+            isActive: entry.activation.enabled,
             isBYOK: entry.isBYOK,
             configJson: gatewayConfigJson,
             updatedAt: now,
@@ -859,7 +875,7 @@ async function syncGlobalModelGatewayConfigFromFile(
           timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
           maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
           isDefault: entry.isDefault,
-          isActive: entry.isActive,
+          isActive: entry.activation.enabled,
           isBYOK: entry.isBYOK,
           configJson: gatewayConfigJson,
           createdAt: now,
@@ -889,12 +905,14 @@ async function syncGlobalModelGatewayConfigFromFile(
           gatewayConfigId,
           baseUrl: entry.baseUrl,
           apiKeySource: entry.apiKeyEnv ?? null,
-          isActive: entry.isActive,
+          isActive: entry.activation.enabled,
           capabilitiesJson: providerConfig.supports,
           configJson: {
             timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
             maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
             isBYOK: entry.isBYOK,
+            activation: entry.activation,
+            requiresGlobalApiKey: Boolean(entry.apiKeyEnv),
             defaultHeaders: withOpenRouterAttributionHeaders({
               providerKind: providerConfig.providerKind,
               defaultHeaders: entry.defaultHeaders,

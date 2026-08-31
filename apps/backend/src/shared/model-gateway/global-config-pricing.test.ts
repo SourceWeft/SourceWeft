@@ -20,7 +20,10 @@ function baseConfig(): Record<string, unknown> & {
         providerKind: "openai-compatible",
         supports: ["chat", "rerank", "embedding"],
         isDefault: true,
-        isActive: true,
+        activation: {
+          env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
+          default: true,
+        },
       },
     ],
     chatProfiles: [
@@ -127,7 +130,10 @@ test("loadGlobalModelGatewayConfig accepts multiple targets and orders them by p
     providerKind: "openai-compatible",
     supports: ["chat"],
     isDefault: false,
-    isActive: true,
+    activation: {
+      env: "SOURCEWEFT_TEST_BACKUP_ENABLED",
+      default: true,
+    },
   });
   config.chatProfiles[0] = {
     profileAlias: "chat",
@@ -181,7 +187,10 @@ test("loadGlobalModelGatewayConfig rejects multiple targets without explicit pri
     providerKind: "openai-compatible",
     supports: ["chat"],
     isDefault: false,
-    isActive: true,
+    activation: {
+      env: "SOURCEWEFT_TEST_BACKUP_ENABLED",
+      default: true,
+    },
   });
   config.chatProfiles[0] = {
     profileAlias: "chat",
@@ -382,6 +391,13 @@ test("loadGlobalModelGatewayConfig allows missing provider API key env", async (
     const loaded = await loadConfig(config);
 
     assert.equal(loaded?.gateways[0]?.apiKey, undefined);
+    assert.deepEqual(loaded?.gateways[0]?.activation, {
+      env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
+      source: "default",
+      enabled: true,
+      configured: false,
+      globalReady: false,
+    });
     assert.equal(
       loaded?.gateways[0]?.apiKeyEnv,
       "SOURCEWEFT_TEST_MISSING_PROVIDER_KEY",
@@ -393,6 +409,82 @@ test("loadGlobalModelGatewayConfig allows missing provider API key env", async (
       process.env.SOURCEWEFT_TEST_MISSING_PROVIDER_KEY = original;
     }
   }
+});
+
+test("gateway activation env strictly overrides its default without consulting the API key", async () => {
+  const envName = "SOURCEWEFT_TEST_ACTIVATION_OVERRIDE";
+  const original = process.env[envName];
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    activation: { env: envName, default: false },
+    apiKeyEnv: "SOURCEWEFT_TEST_ACTIVATION_KEY",
+  };
+  process.env[envName] = "  TrUe  ";
+  delete process.env.SOURCEWEFT_TEST_ACTIVATION_KEY;
+  try {
+    const loaded = await loadConfig(config);
+    assert.deepEqual(loaded?.gateways[0]?.activation, {
+      env: envName,
+      source: "env",
+      enabled: true,
+      configured: false,
+      globalReady: false,
+    });
+  } finally {
+    if (original === undefined) delete process.env[envName];
+    else process.env[envName] = original;
+  }
+});
+
+test("gateway API key does not activate a disabled gateway", async () => {
+  const keyName = "SOURCEWEFT_TEST_DISABLED_GATEWAY_KEY";
+  const original = process.env[keyName];
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    activation: {
+      env: "SOURCEWEFT_TEST_DISABLED_GATEWAY_ENABLED",
+      default: false,
+    },
+    apiKeyEnv: keyName,
+  };
+  process.env[keyName] = "secret-not-hashed";
+  try {
+    const loaded = await loadConfig(config);
+    assert.equal(loaded?.gateways[0]?.activation.enabled, false);
+    assert.equal(loaded?.gateways[0]?.activation.configured, true);
+    assert.equal(loaded?.gateways[0]?.activation.globalReady, false);
+  } finally {
+    if (original === undefined) delete process.env[keyName];
+    else process.env[keyName] = original;
+  }
+});
+
+test("gateway activation rejects invalid boolean env values", async () => {
+  const envName = "SOURCEWEFT_TEST_INVALID_ACTIVATION";
+  const original = process.env[envName];
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    activation: { env: envName, default: true },
+  };
+  process.env[envName] = "yes";
+  try {
+    await assert.rejects(() => loadConfig(config), new RegExp(envName));
+  } finally {
+    if (original === undefined) delete process.env[envName];
+    else process.env[envName] = original;
+  }
+});
+
+test("gateway activation rejects the obsolete raw isActive field", async () => {
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    isActive: true,
+  };
+  await assert.rejects(() => loadConfig(config), /isActive; use activation/);
 });
 
 test("loadGlobalModelGatewayConfig resolves provider base URL env override", async () => {
@@ -434,11 +526,18 @@ test("loadGlobalModelGatewayConfig resolves provider base URL env override", asy
       "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
     );
     assert.deepEqual(
-      loaded?.sourceJson._resolvedGatewayBaseUrls,
+      loaded?.sourceJson._resolvedGateways,
       [
         {
           baseUrl: "https://proxy.example.com/deepinfra",
           baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+          activation: {
+            configured: true,
+            enabled: true,
+            env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
+            globalReady: true,
+            source: "default",
+          },
           slug: "test",
         },
       ],
@@ -527,6 +626,53 @@ test("loadGlobalModelGatewayConfig version hash changes with base URL env overri
   }
 });
 
+test("gateway activation and credential presence change the safe config hash", async () => {
+  const enabledEnv = "SOURCEWEFT_TEST_HASH_ENABLED";
+  const keyEnv = "SOURCEWEFT_TEST_HASH_KEY";
+  const originalEnabled = process.env[enabledEnv];
+  const originalKey = process.env[keyEnv];
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    activation: { env: enabledEnv, default: false },
+    apiKeyEnv: keyEnv,
+  };
+
+  try {
+    process.env[enabledEnv] = "false";
+    delete process.env[keyEnv];
+    const disabled = await loadConfig(config);
+
+    process.env[enabledEnv] = "true";
+    const enabledWithoutKey = await loadConfig(config);
+
+    process.env[keyEnv] = "first-secret";
+    const readyWithFirstKey = await loadConfig(config);
+
+    process.env[keyEnv] = "rotated-secret";
+    const readyWithRotatedKey = await loadConfig(config);
+
+    assert.notEqual(disabled?.versionHash, enabledWithoutKey?.versionHash);
+    assert.notEqual(
+      enabledWithoutKey?.versionHash,
+      readyWithFirstKey?.versionHash,
+    );
+    assert.equal(
+      readyWithFirstKey?.versionHash,
+      readyWithRotatedKey?.versionHash,
+    );
+    assert.equal(
+      JSON.stringify(readyWithFirstKey?.sourceJson).includes("first-secret"),
+      false,
+    );
+  } finally {
+    if (originalEnabled === undefined) delete process.env[enabledEnv];
+    else process.env[enabledEnv] = originalEnabled;
+    if (originalKey === undefined) delete process.env[keyEnv];
+    else process.env[keyEnv] = originalKey;
+  }
+});
+
 test("loadGlobalModelGatewayConfig allows omitted rerank profiles", async () => {
   const config = baseConfig();
   delete config.rerankProfiles;
@@ -537,9 +683,26 @@ test("loadGlobalModelGatewayConfig allows omitted rerank profiles", async () => 
 });
 
 test("default global config routes through OpenRouter with a dormant OrcaRouter gateway", async () => {
-  const loaded = await loadGlobalModelGatewayConfig(
-    resolve("config/model-gateway.global.json"),
-  );
+  const names = [
+    "OPENROUTER_ENABLED",
+    "OPENROUTER_API_KEY",
+    "ORCAROUTER_ENABLED",
+    "ORCAROUTER_API_KEY",
+  ] as const;
+  const original = new Map(names.map((name) => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  let loaded: Awaited<ReturnType<typeof loadGlobalModelGatewayConfig>>;
+  try {
+    loaded = await loadGlobalModelGatewayConfig(
+      resolve("config/model-gateway.global.json"),
+    );
+  } finally {
+    for (const name of names) {
+      const value = original.get(name);
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
   const openRouterGateway = loaded?.gateways.find(
     (entry) => entry.slug === "openrouter-default",
   );
@@ -560,10 +723,10 @@ test("default global config routes through OpenRouter with a dormant OrcaRouter 
     loaded?.gateways.map((entry) => entry.slug),
     ["openrouter-default", "orcarouter-default"],
   );
-  // OrcaRouter ships alongside OpenRouter but dormant: it is an openai-compatible
-  // provider with the richer catalog format, inactive until a deployment sets
-  // ORCAROUTER_API_KEY and flips isActive.
-  assert.equal(orcaRouterGateway?.isActive, false);
+  // OrcaRouter ships disabled and its credential never changes activation.
+  assert.equal(orcaRouterGateway?.activation.enabled, false);
+  assert.equal(orcaRouterGateway?.activation.globalReady, false);
+  assert.equal(orcaRouterGateway?.activation.env, "ORCAROUTER_ENABLED");
   assert.equal(orcaRouterGateway?.isDefault, false);
   assert.equal(orcaRouterGateway?.providerKind, "openai-compatible");
   assert.equal(orcaRouterGateway?.providerName, "orcarouter");
@@ -580,6 +743,10 @@ test("default global config routes through OpenRouter with a dormant OrcaRouter 
     "X-Title": "SourceWeft",
     "HTTP-Referer": "https://sourceweft.com",
   });
+  assert.equal(openRouterGateway?.activation.enabled, true);
+  assert.equal(openRouterGateway?.activation.configured, false);
+  assert.equal(openRouterGateway?.activation.globalReady, false);
+  assert.equal(openRouterGateway?.activation.env, "OPENROUTER_ENABLED");
   assert.equal(openRouterGateway?.baseUrlEnv, "OPENROUTER_API_BASE");
   assert.deepEqual(openRouterGateway?.supports, [
     "chat",
@@ -618,4 +785,27 @@ test("default global config routes through OpenRouter with a dormant OrcaRouter 
   assert.equal(embeddingDefault?.targets[0]?.gatewaySlug, "openrouter-default");
   assert.equal(embeddingDefault?.targets[0]?.providerName, "openrouter");
   assert.equal(embeddingDefault?.requestedDimensions, 1024);
+});
+
+test("the shipped OrcaRouter key does not activate the Provider", async () => {
+  const originalEnabled = process.env.ORCAROUTER_ENABLED;
+  const originalKey = process.env.ORCAROUTER_API_KEY;
+  delete process.env.ORCAROUTER_ENABLED;
+  process.env.ORCAROUTER_API_KEY = "configured-but-disabled";
+  try {
+    const loaded = await loadGlobalModelGatewayConfig(
+      resolve("config/model-gateway.global.json"),
+    );
+    const gateway = loaded?.gateways.find(
+      (entry) => entry.slug === "orcarouter-default",
+    );
+    assert.equal(gateway?.activation.enabled, false);
+    assert.equal(gateway?.activation.configured, true);
+    assert.equal(gateway?.activation.globalReady, false);
+  } finally {
+    if (originalEnabled === undefined) delete process.env.ORCAROUTER_ENABLED;
+    else process.env.ORCAROUTER_ENABLED = originalEnabled;
+    if (originalKey === undefined) delete process.env.ORCAROUTER_API_KEY;
+    else process.env.ORCAROUTER_API_KEY = originalKey;
+  }
 });

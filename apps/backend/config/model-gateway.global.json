@@ -1,5 +1,5 @@
 {
-  "_comment": "OSS defaults route through OpenRouter. An OrcaRouter gateway ships alongside it but dormant (isActive:false) — set ORCAROUTER_API_KEY and flip isActive:true (SaaS/self-hosted deployments do this in the config that MODEL_GATEWAY_GLOBAL_CONFIG_PATH points at). Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
+  "_comment": "OSS defaults route through OpenRouter. Provider activation and credentials are separate: *_ENABLED controls deployment intent and *_API_KEY supplies credentials. OrcaRouter ships disabled by default. Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
   "gateways": [
     {
       "slug": "openrouter-default",
@@ -24,16 +24,15 @@
       ],
       "modelCatalog": {
         "enabled": true,
-        "kinds": [
-          "chat",
-          "vision",
-          "image"
-        ]
+        "kinds": ["chat", "vision", "image"]
       },
       "timeoutMs": 30000,
       "maxRetries": 2,
       "isDefault": true,
-      "isActive": true,
+      "activation": {
+        "env": "OPENROUTER_ENABLED",
+        "default": true
+      },
       "isBYOK": false
     },
     {
@@ -54,18 +53,15 @@
       "modelCatalog": {
         "enabled": true,
         "format": "orcarouter",
-        "kinds": [
-          "chat",
-          "vision",
-          "embedding",
-          "image",
-          "tts"
-        ]
+        "kinds": ["chat", "vision", "embedding", "image", "tts"]
       },
       "timeoutMs": 30000,
       "maxRetries": 2,
       "isDefault": false,
-      "isActive": false,
+      "activation": {
+        "env": "ORCAROUTER_ENABLED",
+        "default": false
+      },
       "isBYOK": false
     }
   ],
@@ -81,14 +77,8 @@
       "weight": 100,
       "isDefault": true,
       "isActive": true,
-      "supportedParameters": [
-        "reasoning",
-        "include_reasoning"
-      ],
-      "supportedEfforts": [
-        "high",
-        "xhigh"
-      ]
+      "supportedParameters": ["reasoning", "include_reasoning"],
+      "supportedEfforts": ["high", "xhigh"]
     }
   ],
   "imageProfiles": [
@@ -125,22 +115,10 @@
             ]
           },
           "quality": {
-            "values": [
-              "auto",
-              "low",
-              "standard",
-              "higher",
-              "highest"
-            ]
+            "values": ["auto", "low", "standard", "higher", "highest"]
           },
           "style": {
-            "values": [
-              "auto",
-              "ghibli",
-              "pixar",
-              "cartoon",
-              "pixel"
-            ]
+            "values": ["auto", "ghibli", "pixar", "cartoon", "pixel"]
           }
         }
       }

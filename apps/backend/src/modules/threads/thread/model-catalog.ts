@@ -166,7 +166,7 @@ async function listThreadModelCatalogForView(input: {
       providerName: string;
       providerKind: string;
       targetModel: string;
-      hasGlobalApiKey: boolean;
+      globalReady: boolean;
     }
   >();
 
@@ -193,6 +193,9 @@ async function listThreadModelCatalogForView(input: {
         .select({
           providerName: modelGatewayProviderConfigs.providerName,
           providerKind: modelGatewayProviderConfigs.providerKind,
+          providerActive: modelGatewayProviderConfigs.isActive,
+          apiKeySource: modelGatewayProviderConfigs.apiKeySource,
+          gatewayActive: modelGatewayConfigs.isActive,
           isBYOK: modelGatewayConfigs.isBYOK,
           apiKeyEncrypted: modelGatewayConfigs.apiKeyEncrypted,
         })
@@ -201,21 +204,19 @@ async function listThreadModelCatalogForView(input: {
           modelGatewayConfigs,
           eq(modelGatewayConfigs.id, modelGatewayProviderConfigs.gatewayConfigId),
         )
-        .where(
-          and(
-            eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id),
-            eq(modelGatewayProviderConfigs.isActive, true),
-          ),
-        ),
+        .where(eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id)),
     ]);
 
     const providerKindByName = new Map(
       providerRows.map((row) => [row.providerName, row.providerKind]),
     );
-    const providerHasGlobalApiKeyByName = new Map(
+    const providerGlobalReadyByName = new Map(
       providerRows.map((row) => [
         row.providerName,
-        typeof row.apiKeyEncrypted === "string" && row.apiKeyEncrypted.length > 0,
+        Boolean(row.providerActive && row.gatewayActive) &&
+          (row.apiKeySource === null ||
+            (typeof row.apiKeyEncrypted === "string" &&
+              row.apiKeyEncrypted.length > 0)),
       ]),
     );
 
@@ -237,8 +238,8 @@ async function listThreadModelCatalogForView(input: {
           providerKind:
             providerKindByName.get(route.targetProviderName) ?? "unknown",
           targetModel: route.targetModel,
-          hasGlobalApiKey:
-            providerHasGlobalApiKeyByName.get(route.targetProviderName) ?? false,
+          globalReady:
+            providerGlobalReadyByName.get(route.targetProviderName) ?? false,
         });
       });
   }
@@ -309,7 +310,7 @@ async function listThreadModelCatalogForView(input: {
       providerName: route?.providerName ?? null,
       providerKind: route?.providerKind ?? null,
       targetModel: route?.targetModel ?? null,
-      availableViaGlobal: route?.hasGlobalApiKey ?? false,
+      availableViaGlobal: route?.globalReady ?? false,
       availableViaByokProviders,
       displayName,
       subtitle,

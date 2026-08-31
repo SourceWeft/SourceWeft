@@ -306,6 +306,8 @@ export interface GatewayProviderConfig {
   defaultHeaders?: Record<string, string>;
   supports?: readonly string[];
   enabled?: boolean;
+  /** Provider definition may be used with a request-scoped BYOK credential. */
+  byokEnabled?: boolean;
   /** Falls back to the gateway-wide value when unset. */
   timeoutMs?: number;
   /** Falls back to the gateway-wide value when unset. */
@@ -826,6 +828,8 @@ export interface ResolvedGatewayProviderConfig {
   defaultHeaders: Record<string, string>;
   supports: readonly string[];
   enabled: boolean;
+  /** Provider definition may be used with a request-scoped BYOK credential. */
+  byokEnabled: boolean;
   /** Falls back to the gateway-wide value when unset. */
   timeoutMs?: number;
   /** Falls back to the gateway-wide value when unset. */
@@ -841,6 +845,7 @@ export interface CustomByokProviderConfig {
   defaultHeaders?: Record<string, string>;
   supports?: readonly string[];
   enabled?: boolean;
+  byokEnabled?: boolean;
 }
 
 export interface ResolvedModelRouteTarget {

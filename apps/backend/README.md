@@ -54,6 +54,35 @@ collect bridge semantics, audit states, and current idempotency limitations.
 Model gateway catalog sync:
 
 - Global provider keys remain optional environment variables.
+- Global Provider activation is separate from credentials. Each gateway declares
+  `activation.env` plus a boolean default; the named `*_ENABLED` variable controls
+  deployment intent while `apiKeyEnv` supplies only credentials. A gateway is
+  globally ready only when it is enabled and its declared credential is present.
+- The shipped config references `OPENROUTER_ENABLED` (default `true`) and
+  `ORCAROUTER_ENABLED` (default `false`). Setting either API key never changes the
+  corresponding activation state.
+- DeepInfra, DeepSeek, SiliconFlow, and other custom Providers require a custom
+  gateway entry. Their environment variables have no effect until that entry
+  references them. Example:
+
+  ```json
+  {
+    "slug": "deepinfra-default",
+    "providerName": "deepinfra",
+    "providerKind": "deepinfra",
+    "baseUrl": "https://api.deepinfra.com/v1",
+    "baseUrlEnv": "DEEPINFRA_API_BASE",
+    "apiKeyEnv": "DEEPINFRA_API_KEY",
+    "activation": {
+      "env": "DEEPINFRA_ENABLED",
+      "default": false
+    }
+  }
+  ```
+
+- For Docker, bind-mount the complete custom JSON into the container and set
+  `MODEL_GATEWAY_GLOBAL_CONFIG_PATH` to that container path. Changing the path
+  variable alone does not mount a host file.
 - Dynamic provider model discovery is configured per gateway in
   `apps/backend/config/model-gateway.global.json` with
   `modelCatalog.enabled`; the removed `MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG`

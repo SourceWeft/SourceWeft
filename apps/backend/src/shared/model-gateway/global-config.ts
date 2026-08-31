@@ -25,7 +25,13 @@ export type GlobalGatewayEntry = {
   timeoutMs?: number;
   maxRetries?: number;
   isDefault: boolean;
-  isActive: boolean;
+  activation: {
+    env: string;
+    source: "env" | "default";
+    enabled: boolean;
+    configured: boolean;
+    globalReady: boolean;
+  };
   isBYOK: boolean;
   modelCatalog?: {
     enabled: boolean;
@@ -144,6 +150,7 @@ type RawGlobalGatewayEntry = {
   timeoutMs?: unknown;
   maxRetries?: unknown;
   isDefault?: unknown;
+  activation?: unknown;
   isActive?: unknown;
   isBYOK?: unknown;
   modelCatalog?: unknown;
@@ -288,6 +295,80 @@ function asOptionalEnvName(value: unknown, fieldName: string): string | undefine
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+const ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+function asEnvName(value: unknown, fieldName: string): string {
+  const name = asNonEmptyString(value, fieldName);
+  if (!ENV_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+  return name;
+}
+
+function parseStrictBooleanEnv(input: {
+  envName: string;
+  fallback: boolean;
+  fieldName: string;
+}) {
+  const rawValue = process.env[input.envName];
+  if (rawValue === undefined) {
+    return { enabled: input.fallback, source: "default" as const };
+  }
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return { enabled: true, source: "env" as const };
+  }
+  if (normalized === "false" || normalized === "0") {
+    return { enabled: false, source: "env" as const };
+  }
+  throw new Error(
+    `Invalid global model gateway activation env ${input.envName} for ${input.fieldName}: expected true, false, 1, or 0`,
+  );
+}
+
+function parseGatewayActivation(
+  entry: RawGlobalGatewayEntry,
+  index: number,
+  configured: boolean,
+): GlobalGatewayEntry["activation"] {
+  if (entry.isActive !== undefined) {
+    throw new Error(
+      `Invalid global model gateway config field: gateways[${index}].isActive; use activation`,
+    );
+  }
+  if (
+    !entry.activation ||
+    typeof entry.activation !== "object" ||
+    Array.isArray(entry.activation)
+  ) {
+    throw new Error(
+      `Invalid global model gateway config field: gateways[${index}].activation`,
+    );
+  }
+  const activation = entry.activation as Record<string, unknown>;
+  const env = asEnvName(
+    activation.env,
+    `gateways[${index}].activation.env`,
+  );
+  if (typeof activation.default !== "boolean") {
+    throw new Error(
+      `Invalid global model gateway config field: gateways[${index}].activation.default`,
+    );
+  }
+  const resolved = parseStrictBooleanEnv({
+    envName: env,
+    fallback: activation.default,
+    fieldName: `gateways[${index}].activation`,
+  });
+  return {
+    env,
+    source: resolved.source,
+    enabled: resolved.enabled,
+    configured,
+    globalReady: resolved.enabled && configured,
+  };
 }
 
 function normalizeConfigBaseUrl(value: string, fieldName: string) {
@@ -696,6 +777,11 @@ function parseGatewayEntry(
       : undefined;
   const baseUrlOverride = baseUrlEnv ? process.env[baseUrlEnv]?.trim() : "";
   const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : "";
+  const activation = parseGatewayActivation(
+    entry,
+    index,
+    apiKeyEnv ? Boolean(apiKey) : true,
+  );
 
   const slug = asNonEmptyString(entry.slug, `gateways[${index}].slug`);
   const baseUrl = baseUrlOverride
@@ -757,7 +843,7 @@ function parseGatewayEntry(
       `gateways[${index}].maxRetries`,
     ),
     isDefault: asBoolean(entry.isDefault, false),
-    isActive: asBoolean(entry.isActive, true),
+    activation,
     isBYOK: asBoolean(entry.isBYOK, false),
     ...(modelCatalog ? { modelCatalog } : {}),
   };
@@ -1110,20 +1196,33 @@ function assertSingleDefault<T extends { isDefault: boolean; isActive: boolean }
   }
 }
 
+function assertSingleGatewayDefault(
+  gateways: GlobalGatewayEntry[],
+  field: string,
+) {
+  const defaultCount = gateways.filter((gateway) => gateway.isDefault).length;
+  if (defaultCount !== 1) {
+    throw new Error(
+      `Global model gateway config requires exactly one default in '${field}', got ${defaultCount}`,
+    );
+  }
+}
+
 function createVersionHash(input: {
   rawContent: string;
   gateways: readonly GlobalGatewayEntry[];
 }): string {
-  const resolvedBaseUrls = input.gateways.map((gateway) => ({
+  const resolvedGateways = input.gateways.map((gateway) => ({
     baseUrl: gateway.baseUrl,
     baseUrlEnv: gateway.baseUrlEnv ?? null,
+    activation: gateway.activation,
     slug: gateway.slug,
   }));
 
   return createHash("sha256")
     .update(input.rawContent)
     .update("\n")
-    .update(JSON.stringify({ resolvedBaseUrls }))
+    .update(JSON.stringify({ resolvedGateways }))
     .digest("hex");
 }
 
@@ -1269,7 +1368,7 @@ function parseGlobalModelGatewayConfig(
     }
   }
 
-  assertSingleDefault(gateways, "gateways");
+  assertSingleGatewayDefault(gateways, "gateways");
   assertSingleDefault(chatProfiles, "chatProfiles");
   if (imageProfiles.length > 0) {
     assertSingleDefault(imageProfiles, "imageProfiles");
@@ -1296,9 +1395,10 @@ function parseGlobalModelGatewayConfig(
     versionHash: createVersionHash({ rawContent, gateways }),
     sourceJson: {
       ...(raw as Record<string, unknown>),
-      _resolvedGatewayBaseUrls: gateways.map((gateway) => ({
+      _resolvedGateways: gateways.map((gateway) => ({
         baseUrl: gateway.baseUrl,
         baseUrlEnv: gateway.baseUrlEnv ?? null,
+        activation: gateway.activation,
         slug: gateway.slug,
       })),
     },

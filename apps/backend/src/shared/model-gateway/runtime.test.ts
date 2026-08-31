@@ -21,6 +21,10 @@ function routedConfigFixture(versionId: string): RoutedGatewayConfig {
         kind: "openai-compatible",
         baseUrl: "https://example.invalid/v1",
         isBYOK: false,
+        enabled: true,
+        configured: true,
+        globalReady: true,
+        requiresGlobalApiKey: true,
         hasGlobalApiKey: true,
         apiKey: "test-key",
         defaultHeaders: {},
@@ -96,6 +100,10 @@ test("buildRoutedModelGatewayConfig keeps provider limits per provider", () => {
         kind: "openai-compatible",
         baseUrl: "https://fast.invalid/v1",
         isBYOK: false,
+        enabled: true,
+        configured: true,
+        globalReady: true,
+        requiresGlobalApiKey: true,
         hasGlobalApiKey: true,
         defaultHeaders: {},
         supports: ["chat"],
@@ -107,6 +115,10 @@ test("buildRoutedModelGatewayConfig keeps provider limits per provider", () => {
         kind: "openai-compatible",
         baseUrl: "https://slow.invalid/v1",
         isBYOK: false,
+        enabled: true,
+        configured: true,
+        globalReady: true,
+        requiresGlobalApiKey: true,
         hasGlobalApiKey: true,
         defaultHeaders: {},
         supports: ["video"],
@@ -134,6 +146,10 @@ test("per-provider limits survive resolution into the request config", async () 
         kind: "openai-compatible",
         baseUrl: "https://slow.invalid/v1",
         isBYOK: false,
+        enabled: true,
+        configured: true,
+        globalReady: true,
+        requiresGlobalApiKey: true,
         hasGlobalApiKey: true,
         apiKey: "test-key",
         defaultHeaders: {},
@@ -155,6 +171,49 @@ test("per-provider limits survive resolution into the request config", async () 
   // Guards the full chain: input config -> normalize -> resolved target. A drop
   // anywhere in between silently reverts to the gateway default.
   assert.equal(target.timeoutMs, 120_000);
+});
+
+test("global readiness blocks GLOBAL routing without disabling BYOK definition reuse", async () => {
+  const built = buildRoutedModelGatewayConfig({
+    versionId: "version-not-ready",
+    providers: {
+      primary: {
+        gatewayConfigId: null,
+        kind: "openai-compatible",
+        baseUrl: "https://provider.invalid/v1",
+        isBYOK: false,
+        enabled: true,
+        configured: false,
+        globalReady: false,
+        requiresGlobalApiKey: true,
+        hasGlobalApiKey: false,
+        defaultHeaders: {},
+        supports: ["chat"],
+        timeoutMs: 30_000,
+        maxRetries: 2,
+      },
+    },
+    modelRoutes: {
+      "test-alias": {
+        strategy: "priority",
+        targets: [{ provider: "primary", model: "test-model", priority: 1 }],
+      },
+    },
+  });
+  const resolved = resolveModelGatewayConfig(built);
+
+  await assert.rejects(
+    () => resolveRequestTarget(resolved, { model: "test-alias" }),
+    /No globally ready route target/,
+  );
+
+  const byokTarget = await resolveRequestTarget(resolved, {
+    model: "test-model",
+    executionMode: "BYOK",
+    byok: { provider: "primary", apiKey: "workspace-key" },
+  });
+  assert.equal(byokTarget.provider, "primary");
+  assert.equal(byokTarget.apiKey, "workspace-key");
 });
 
 test("getOrCreateRoutedGatewayClient reuses the client for an unchanged config version", () => {

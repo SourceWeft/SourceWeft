@@ -46,6 +46,10 @@ export type RoutedGatewayConfig = {
       apiKeyHeaderName?: string;
       apiKeyHeaderPrefix?: string;
       isBYOK: boolean;
+      enabled: boolean;
+      configured: boolean;
+      globalReady: boolean;
+      requiresGlobalApiKey: boolean;
       hasGlobalApiKey: boolean;
       defaultHeaders: Record<string, string>;
       supports: string[];

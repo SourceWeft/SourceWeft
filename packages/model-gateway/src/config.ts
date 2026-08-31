@@ -102,6 +102,7 @@ function normalizeProviderConfigs(
         defaultHeaders: provider.defaultHeaders ?? {},
         supports: provider.supports ?? [],
         enabled: provider.enabled ?? true,
+        byokEnabled: provider.byokEnabled ?? provider.enabled ?? true,
         ...(provider.timeoutMs !== undefined
           ? { timeoutMs: provider.timeoutMs }
           : {}),
@@ -366,6 +367,7 @@ function resolveInlineByokProvider(input: {
       defaultHeaders: input.execution.byok?.defaultHeaders,
       supports: input.configuredProvider?.supports,
       enabled: input.configuredProvider?.enabled ?? true,
+      byokEnabled: input.configuredProvider?.byokEnabled ?? true,
     },
     input.config.allowedBaseUrls,
   );
@@ -389,6 +391,7 @@ function normalizeCustomByokProvider(
     defaultHeaders: provider.defaultHeaders ?? {},
     supports: provider.supports ?? [],
     enabled: provider.enabled ?? true,
+    byokEnabled: provider.byokEnabled ?? provider.enabled ?? true,
   };
 }
 
@@ -517,7 +520,7 @@ export async function resolveRequestCandidates(
       );
     const provider = inlineProvider ?? configuredProvider ?? customProvider;
 
-    if (!provider || !provider.enabled) {
+    if (!provider || !provider.byokEnabled) {
       throw new ModelGatewayError({
         code: "BAD_REQUEST",
         message: `Unknown or disabled provider '${providerName}'`,
@@ -616,9 +619,19 @@ export async function resolveRequestCandidates(
 
   if (candidates.length === 0) {
     throw new ModelGatewayError({
-      code: "UPSTREAM",
-      message: `No active route target available for alias '${routeKey}'`,
-      retryable: true,
+      code: "AUTH",
+      message: `No globally ready route target is configured for alias '${routeKey}'`,
+      retryable: false,
+      metadata: {
+        excludedTargets: route.targets.map((target) => ({
+          provider: target.provider,
+          reason: !target.enabled
+            ? "route_disabled"
+            : config.providers[target.provider]?.enabled
+              ? "provider_hint_mismatch"
+              : "provider_not_ready",
+        })),
+      },
     });
   }
 
@@ -672,4 +685,3 @@ export async function resolveRequestCandidates(
   // and the request still has its full failover chain.
   return orderByTargetHealth(targets, config.targetHealth);
 }
-
