@@ -15,9 +15,9 @@
   },
   "dependencies": {
     "@anycrawl/js-sdk": "^0.0.5",
-    "@langchain/core": "^1.2.7",
+    "@langchain/core": "^1.2.9",
     "@sourceweft/contracts": "workspace:*",
-    "langchain": "^1.5.8",
+    "langchain": "^1.5.10",
     "zod": "^4.4.3"
   },
   "devDependencies": {

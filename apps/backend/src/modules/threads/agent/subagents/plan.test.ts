@@ -43,7 +43,7 @@ test("plan is selectable and describes itself as read-only planning", () => {
   assert.equal(sub.name, "plan");
   assert.match(sub.description, /plan/i);
   assert.match(sub.description, /cannot write|read-only/i);
-  assert.ok(sub.systemPrompt.length > 0);
+  assert.ok(typeof sub.systemPrompt === "string" && sub.systemPrompt.length > 0);
 });
 
 test("plan carries no inline responseFormat but exports a plan schema (steps, risks, open questions)", () => {

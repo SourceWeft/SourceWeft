@@ -44,7 +44,7 @@ test("explore is selectable and read-only-described", () => {
   assert.equal(sub.name, EXPLORE_SUBAGENT_NAME);
   assert.equal(sub.name, "explore");
   assert.match(sub.description, /read-only/i);
-  assert.ok(sub.systemPrompt.length > 0);
+  assert.ok(typeof sub.systemPrompt === "string" && sub.systemPrompt.length > 0);
 });
 
 test("explore carries no inline responseFormat (structured report is a dedicated call)", () => {

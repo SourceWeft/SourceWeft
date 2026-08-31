@@ -13,7 +13,7 @@
   "dependencies": {
     "@langchain/daytona": "0.2.2",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
-    "deepagents": "1.12.4",
+    "deepagents": "1.13.1",
     "langsmith": "^0.7.17"
   },
   "devDependencies": {
