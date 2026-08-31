@@ -7,8 +7,10 @@ export function registerAuthMetaRoutes(app: Hono) {
     return ApiResponse.success(c, {
       oneTapEnabled: Boolean(config.auth.googleOneTapClientId),
       extension: {
+        enabled: config.auth.extensionEnabled,
         clientId: config.auth.extensionClientId,
         redirectUri: config.auth.extensionRedirectUri,
+        resource: config.auth.baseUrl,
       },
     });
   });

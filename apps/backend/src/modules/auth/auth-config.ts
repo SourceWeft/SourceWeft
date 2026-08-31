@@ -723,9 +723,14 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         consentPage: "/auth/consent",
         allowDynamicClientRegistration: false,
         allowUnauthenticatedClientRegistration: false,
-        validAudiences: [config.auth.baseUrl],
+        resources: [config.auth.baseUrl],
+        cachedResources: new Set([config.auth.baseUrl]),
+        enforcePerClientResources: true,
+        clientRegistrationDefaultResources: [config.auth.baseUrl],
         scopes: ["openid", "profile", "email", "offline_access"],
-        cachedTrustedClients: new Set([config.auth.extensionClientId]),
+        cachedTrustedClients: new Set(
+          config.auth.extensionEnabled ? [config.auth.extensionClientId] : [],
+        ),
       }),
     ],
     ...(isRuntimeMode

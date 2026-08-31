@@ -834,6 +834,7 @@ export const config = {
     },
     extensionClientId:
       process.env.AUTH_EXTENSION_CLIENT_ID || "sourceweft-extension",
+    extensionEnabled: Boolean(resolveExtensionId()),
     extensionRedirectUri: resolveExtensionRedirectUri(),
   },
   mail: {
