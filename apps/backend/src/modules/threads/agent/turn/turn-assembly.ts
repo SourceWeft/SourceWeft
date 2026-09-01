@@ -490,15 +490,13 @@ export interface ThreadAgentAssembly {
 
 /**
  * Skill-bundle staging request for the turn
- * (docs/architecture/sandbox-skill-staging.md). Null when the flag is off or
- * no enabled skill has a stageable bundle — the runtime then behaves exactly
- * as before staging existed. Plans are prebuilt (KB-scale, content-cached) so
+ * (docs/architecture/sandbox-skill-staging.md). Null when no enabled skill
+ * has a stageable bundle — the runtime then behaves exactly as before
+ * staging existed; on images without a pre-created /skills the runtime
+ * degrades safely per plan. Plans are prebuilt (KB-scale, content-cached) so
  * the callback the manager invokes at sandbox acquisition is trivially cheap.
  */
 function skillAssetsForPreparedTurn(prepared: PreparedThreadTurn) {
-  if (!config.sandbox.skillStagingEnabled) {
-    return null;
-  }
   const plans = buildSkillSandboxAssetPlans(prepared.enabledSkills);
   if (plans.length === 0) {
     return null;
