@@ -157,3 +157,26 @@ export const testExports = {
   messageToolCalls,
   sanitizeMessagesForHistory,
 };
+
+/**
+ * Cross-subdomain surface toward the sibling subdomains `durable/` and
+ * `stream/` (T2.3): the members they actually reference, re-exported so
+ * those imports can come through this index instead of deep paths. The
+ * boundary is enforced by `../architecture.test.ts`; the deep imports that
+ * predate it are frozen in that test's ALLOWED_CROSS_IMPORTS table and
+ * should migrate here. Only members a sibling references belong in this
+ * block — it is not a barrel for the whole directory.
+ */
+export type { AgentCitation } from "./citation-registry";
+export { agentSandboxService } from "./sandbox-service/service";
+// Type-only on purpose: a value re-export of turn/runner here would close a
+// runtime cycle (agent/index → turn/runner → turn/checkpoint → agent/index).
+// Callers of invokeDeepAgentTurn keep the deep import, recorded with this
+// reason in ../architecture.test.ts's exemption table.
+export type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./turn/runner";
+export { DEEPAGENTS_WRITE_TODOS_TOOL_NAME } from "./turn/tool-tracker";
+export {
+  AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
+  AgentToolTerminationUnknownError,
+  findAgentToolTerminationUnknownReason,
+} from "./middleware/tool-execution-timeout";
