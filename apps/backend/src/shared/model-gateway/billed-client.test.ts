@@ -21,7 +21,10 @@ const { withBilledModelGateway } = await import("./billed-client");
 
 const USAGE = { inputTokens: 10, outputTokens: 4 };
 
-function createBilling(billingMode = "enforced", available = 500): ContentBillingPort {
+function createBilling(
+  billingMode = "enforced",
+  available = 500,
+): ContentBillingPort {
   return {
     getSummary: vi.fn(
       async (teamId: string) =>
@@ -80,12 +83,30 @@ function fakeGateway(overrides: Record<string, unknown> = {}) {
       stream: vi.fn(),
     },
     embeddings: {
-      embed: vi.fn(async () => ({ model: "m", embedding: [1], usage: USAGE, raw: {} })),
+      embed: vi.fn(async () => ({
+        model: "m",
+        embedding: [1],
+        usage: USAGE,
+        raw: {},
+      })),
       embedBatch: vi.fn(),
     },
-    rerank: { rank: vi.fn(async () => ({ model: "m", results: [], usage: USAGE, raw: {} })) },
+    rerank: {
+      rank: vi.fn(async () => ({
+        model: "m",
+        results: [],
+        usage: USAGE,
+        raw: {},
+      })),
+    },
     asr: { transcribe: vi.fn() },
-    tts: { speech: vi.fn(async () => ({ model: "m", audio: new Blob([]), usage: USAGE })) },
+    tts: {
+      speech: vi.fn(async () => ({
+        model: "m",
+        audio: new Blob([]),
+        usage: USAGE,
+      })),
+    },
     images: { generate: vi.fn() },
     ...overrides,
   };
@@ -118,7 +139,10 @@ test("a non-streaming call settles exactly once with the returned usage", async 
   const traces = await withBilledModelGateway(
     { billing: createBilling(), context, meterUsage: meterUsage as never },
     async (gw, scope) => {
-      await gw.chat.complete({ model: "m", messages: [] } as never, chatOptions);
+      await gw.chat.complete(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      );
       return scope.meteredCalls();
     },
   );
@@ -133,9 +157,16 @@ test("the caller cannot override the billing identity in request metadata", asyn
   rawMocks.getRawModelGatewayClient.mockResolvedValue(gateway);
 
   await withBilledModelGateway(
-    { billing: createBilling(), context, meterUsage: meterUsageStub() as never },
+    {
+      billing: createBilling(),
+      context,
+      meterUsage: meterUsageStub() as never,
+    },
     async (gw) => {
-      await gw.chat.complete({ model: "m", messages: [] } as never, chatOptions);
+      await gw.chat.complete(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      );
     },
   );
 
@@ -158,7 +189,11 @@ test("the billed door fills thinking support before the raw call", async () => {
   thinkingMocks.resolveChatThinkingWithDefaults.mockResolvedValueOnce(enriched);
 
   await withBilledModelGateway(
-    { billing: createBilling(), context, meterUsage: meterUsageStub() as never },
+    {
+      billing: createBilling(),
+      context,
+      meterUsage: meterUsageStub() as never,
+    },
     async (gw) => {
       await gw.chat.complete(
         { model: "m", messages: [], thinking: { enabled: false } } as never,
@@ -176,6 +211,7 @@ test("the billed door fills thinking support before the raw call", async () => {
       thinking: { enabled: false },
       profileAlias: "default-chat",
       modelAlias: "m",
+      gatewayConfigId: "gw_1",
     },
   );
   // The raw gateway receives the enriched thinking, not the caller's bare one.
@@ -204,7 +240,10 @@ test("a fully drained stream settles once with last-wins usage", async () => {
   const traces = await withBilledModelGateway(
     { billing: createBilling(), context, meterUsage: meterUsage as never },
     async (gw, scope) => {
-      for await (const _event of gw.chat.stream({ model: "m", messages: [] } as never, chatOptions)) {
+      for await (const _event of gw.chat.stream(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      )) {
         // drain
       }
       return scope.meteredCalls();
@@ -236,7 +275,10 @@ test("a stream abandoned early still settles once", async () => {
   const traces = await withBilledModelGateway(
     { billing: createBilling(), context, meterUsage: meterUsage as never },
     async (gw, scope) => {
-      for await (const _event of gw.chat.stream({ model: "m", messages: [] } as never, chatOptions)) {
+      for await (const _event of gw.chat.stream(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      )) {
         break;
       }
       return scope.meteredCalls();
@@ -266,7 +308,10 @@ test("a stream that throws mid-flight still settles once and propagates the orig
     { billing: createBilling(), context, meterUsage: meterUsage as never },
     async (gw, scope) => {
       try {
-        for await (const _event of gw.chat.stream({ model: "m", messages: [] } as never, chatOptions)) {
+        for await (const _event of gw.chat.stream(
+          { model: "m", messages: [] } as never,
+          chatOptions,
+        )) {
           // consume until it throws
         }
       } catch (error) {
@@ -289,7 +334,10 @@ test("admission denial throws before any model call is made", async () => {
   const error = await withBilledModelGateway(
     { billing: createBilling("enforced", 0), context },
     async (gw) => {
-      await gw.chat.complete({ model: "m", messages: [] } as never, chatOptions);
+      await gw.chat.complete(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      );
     },
   )
     .then(() => null)
@@ -304,7 +352,11 @@ test("each scope gets a freshly wrapped gateway rather than a shared cached one"
   rawMocks.getRawModelGatewayClient.mockResolvedValue(fakeGateway());
 
   const first = await withBilledModelGateway(
-    { billing: createBilling(), context, meterUsage: meterUsageStub() as never },
+    {
+      billing: createBilling(),
+      context,
+      meterUsage: meterUsageStub() as never,
+    },
     async (gw) => gw,
   );
   const second = await withBilledModelGateway(
@@ -337,7 +389,10 @@ test("a covered scope is admitted even at zero credits", async () => {
       meterUsage: meterUsageStub() as never,
     },
     async (gw, scope) => {
-      await gw.chat.complete({ model: "m", messages: [] } as never, chatOptions);
+      await gw.chat.complete(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      );
       return scope.meteredCalls();
     },
   );
@@ -354,7 +409,10 @@ test("a billed scope is still refused at zero credits", async () => {
   const error = await withBilledModelGateway(
     { billing: createBilling("enforced", 0), context },
     async (gw) => {
-      await gw.chat.complete({ model: "m", messages: [] } as never, chatOptions);
+      await gw.chat.complete(
+        { model: "m", messages: [] } as never,
+        chatOptions,
+      );
     },
   )
     .then(() => null)

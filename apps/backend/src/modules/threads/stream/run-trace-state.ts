@@ -112,21 +112,10 @@ export function getThinkingStepStreamKey(step: ThinkingStepTrace) {
   return `${step.id}:${step.status}:${step.title}`;
 }
 
-export function appendReasoningChunk(
-  current: string | undefined,
-  next: string,
-) {
-  if (!current) {
-    return next;
-  }
-  if (next === current) {
-    return current;
-  }
-  if (next.startsWith(current)) {
-    return next;
-  }
-  return `${current}${next}`;
-}
+// The agent turn runtime owns the reasoning delta-vs-snapshot reconciliation;
+// re-exported (through the agent subdomain's index door) instead of keeping a
+// second copy that could drift from the one the message stream applies.
+export { appendReasoningChunk } from "../agent";
 
 function isSameReasoningSegment(
   existing: ModelReasoningSegmentTrace | undefined,

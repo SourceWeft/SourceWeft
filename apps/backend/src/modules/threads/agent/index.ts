@@ -175,6 +175,9 @@ export { agentSandboxService } from "./sandbox-service/service";
 // reason in ../architecture.test.ts's exemption table.
 export type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./turn/runner";
 export { DEEPAGENTS_WRITE_TODOS_TOOL_NAME } from "./turn/tool-tracker";
+// Safe as a value re-export: turn/thinking's only turn-external import is
+// type-only, so unlike turn/runner this closes no runtime cycle.
+export { appendReasoningChunk } from "./turn/thinking";
 export {
   AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
   AgentToolTerminationUnknownError,

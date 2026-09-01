@@ -153,8 +153,14 @@ class ContentThreadStreamService {
     this.billing = billing;
   }
 
-  async refreshThread(input: RefreshThreadInput) {
-    return this.streamThread(await resolveRefreshThreadStreamInput(input));
+  async refreshThread(
+    input: RefreshThreadInput,
+    options?: ThreadStreamRunOptions,
+  ) {
+    return this.streamThread(
+      await resolveRefreshThreadStreamInput(input),
+      options,
+    );
   }
 
   async *refreshThreadEvents(
@@ -167,8 +173,14 @@ class ContentThreadStreamService {
     );
   }
 
-  async resumeThread(input: ResumeThreadInput) {
-    return this.streamThread(await resolveResumeThreadStreamInput(input));
+  async resumeThread(
+    input: ResumeThreadInput,
+    options?: ThreadStreamRunOptions,
+  ) {
+    return this.streamThread(
+      await resolveResumeThreadStreamInput(input),
+      options,
+    );
   }
 
   async *resumeThreadEvents(
@@ -181,8 +193,11 @@ class ContentThreadStreamService {
     );
   }
 
-  async editThread(input: EditThreadInput) {
-    return this.streamThread(await resolveEditThreadStreamInput(input));
+  async editThread(input: EditThreadInput, options?: ThreadStreamRunOptions) {
+    return this.streamThread(
+      await resolveEditThreadStreamInput(input),
+      options,
+    );
   }
 
   async *editThreadEvents(
@@ -311,6 +326,20 @@ class ContentThreadStreamService {
     let responseFinished = false;
     let persistedErrorMessage = false;
     let finalizedAssistantMessage: MessageRecord | null = null;
+    // Set when the catch path handled a client cancel: the finally must still
+    // release the sandbox lease even though the trace was already ended there.
+    let clientCancelledTeardown = false;
+    // Held for the finally so an unwind can close the agent iterator even
+    // though it is created inside the inner try.
+    let activeAgentEvents: ReturnType<typeof invokeDeepAgentTurn> | null = null;
+    // One predicate for "did this turn stream anything worth keeping" — the
+    // cancel paths (catch and abandoned-stream finally) must agree on it.
+    const hasSubstantivePartialTurn = () =>
+      assistantContent.trimEnd().length > 0 ||
+      toolCallsById.size > 0 ||
+      thinkingStepsById.size > 0 ||
+      reasoningSegmentsById.size > 0 ||
+      citations.length > 0;
     try {
       const preparedThreadRun =
         assistantMetadata &&
@@ -398,6 +427,7 @@ class ContentThreadStreamService {
             signal: options.abortSignal,
           }),
         });
+        activeAgentEvents = agentEvents;
         await threadStreamObservability.startSpan({
           ...prepared.traceContext,
           spanId: "agent_run",
@@ -418,7 +448,18 @@ class ContentThreadStreamService {
           },
         });
         agentSpanStarted = true;
-        let nextAgentEvent = agentEvents.next();
+        // A pull issued here can still be pending when this generator unwinds —
+        // a cancel-checkpoint throw, an event-processing error, or the SSE
+        // consumer tearing down mid-yield. Observe every pull the moment it is
+        // issued so the aborted agent stream's rejection can never surface as
+        // an unhandled rejection and kill the process; raceNext stays the real
+        // consumer and still sees the rejection.
+        const pullAgentEvent = () => {
+          const pull = agentEvents.next();
+          pull.catch(() => {});
+          return pull;
+        };
+        let nextAgentEvent = pullAgentEvent();
         let titleSettled = false;
         let titleResolvedCompletion: ThreadTitleJobCompletion | null = null;
         const titleCompletion: Promise<ThreadTitleJobCompletion> | null =
@@ -433,6 +474,9 @@ class ContentThreadStreamService {
             : null;
         let nextTitleEvent: Promise<ThreadTitleJobCompletion> | null =
           titleCompletion;
+        // Same unhandled-rejection guard for a title job that fails after the
+        // loop stopped racing it.
+        titleCompletion?.catch(() => {});
 
         while (true) {
           const raceNext = () =>
@@ -490,7 +534,7 @@ class ContentThreadStreamService {
             break;
           }
 
-          nextAgentEvent = agentEvents.next();
+          nextAgentEvent = pullAgentEvent();
           await throwIfClientCancelled(
             options.shouldCancel,
             options.abortSignal,
@@ -665,6 +709,9 @@ class ContentThreadStreamService {
       } catch (error) {
         const contentError = toObservationError(error);
         const isClientCancelled = isClientCancelledError(contentError);
+        if (isClientCancelled) {
+          clientCancelledTeardown = true;
+        }
 
         if (!isClientCancelled) {
           await recordThreadStreamFailure({
@@ -676,29 +723,40 @@ class ContentThreadStreamService {
         }
         const createErrorMessage =
           options.createErrorMessage ?? this.createErrorMessage;
-        const errorMessage = await createErrorMessage({
-          prepared,
-          contentError,
-          partialAssistantContent: assistantContent,
-          partialState: buildPartialErrorState({
-            ...(isClientCancelled
-              ? { errorMessage: contentError.message }
-              : {}),
-            preflightThinkingSteps: prepared.preflightThinkingSteps,
-            reasoning,
-            reasoningSegmentsById,
-            traceParts,
-            toolCallsById,
-            thinkingStepsById,
-            renderBlocks: outcome?.renderBlocks,
-            citations,
-            availableCitations,
-            meteredLlmCalls: meteredLlmCallsOnFailure(),
-          }),
-        });
+        // A cancel with nothing substantive streamed persists no turn — the
+        // same gate the abandoned-stream finally applies — so a disconnect or
+        // Stop does not leave an empty "cancelled" assistant message behind.
+        // Real errors keep persisting unconditionally.
+        const errorMessage =
+          !isClientCancelled || hasSubstantivePartialTurn()
+            ? await createErrorMessage({
+                prepared,
+                contentError,
+                partialAssistantContent: assistantContent,
+                partialState: buildPartialErrorState({
+                  ...(isClientCancelled
+                    ? { errorMessage: contentError.message }
+                    : {}),
+                  preflightThinkingSteps: prepared.preflightThinkingSteps,
+                  reasoning,
+                  reasoningSegmentsById,
+                  traceParts,
+                  toolCallsById,
+                  thinkingStepsById,
+                  renderBlocks: outcome?.renderBlocks,
+                  citations,
+                  availableCitations,
+                  meteredLlmCalls: meteredLlmCallsOnFailure(),
+                }),
+              })
+            : null;
         persistedErrorMessage = Boolean(errorMessage);
         if (
           !errorMessage &&
+          // A cancel never unwinds the user's own message: they sent it and
+          // then stopped the answer — matching the abandoned-stream path,
+          // which has never rolled back on disconnect.
+          !isClientCancelled &&
           prepared.failurePersistence === "persist-error-turn"
         ) {
           await rollbackCreatedUserMessage({ prepared });
@@ -781,7 +839,13 @@ class ContentThreadStreamService {
       });
       responseFinished = true;
     } finally {
-      if (!traceEnded) {
+      // Close the agent iterator so its own finally (MCP teardown, sandbox
+      // operation cleanup) runs even when this generator unwinds first.
+      // Fire-and-forget: teardown must not block on a stuck inner await, and
+      // every pending pull is already rejection-observed.
+      void activeAgentEvents?.return(undefined).catch(() => {});
+      const streamAbandoned = !traceEnded;
+      if (streamAbandoned) {
         const contentError = new ContentError(
           499,
           "CLIENT_CANCELLED",
@@ -790,11 +854,7 @@ class ContentThreadStreamService {
         if (
           !persistedErrorMessage &&
           !responseFinished &&
-          (assistantContent.trimEnd().length > 0 ||
-            toolCallsById.size > 0 ||
-            thinkingStepsById.size > 0 ||
-            reasoningSegmentsById.size > 0 ||
-            citations.length > 0)
+          hasSubstantivePartialTurn()
         ) {
           const createErrorMessage =
             options.createErrorMessage ?? this.createErrorMessage;
@@ -848,6 +908,12 @@ class ContentThreadStreamService {
               finishReason: "cancelled",
             },
           })) || traceEnded;
+      }
+      // Released for BOTH cancel shapes: the abandoned stream (finally is the
+      // only unwind) and the catch-handled client cancel (which already ended
+      // the trace, so the block above is skipped). Before this, a cancel that
+      // took the catch path held its sandbox for the full TTL.
+      if (streamAbandoned || clientCancelledTeardown) {
         await agentSandboxService
           .releaseThreadSandboxLease({
             context: {
@@ -858,7 +924,7 @@ class ContentThreadStreamService {
               messageId: prepared.userMessage.id,
               runId: prepared.runTraceId,
             },
-            reason: "stream_abandoned",
+            reason: streamAbandoned ? "stream_abandoned" : "client_cancelled",
           })
           .catch((error: unknown) => {
             logger.warn(
@@ -875,7 +941,10 @@ class ContentThreadStreamService {
     }
   }
 
-  async streamThread(input: StreamThreadEventInput) {
+  async streamThread(
+    input: StreamThreadEventInput,
+    options: ThreadStreamRunOptions = {},
+  ) {
     const prepareStartedAt = new Date();
     const prepared = await this.turnService
       .prepareThreadTurn(input)
@@ -973,7 +1042,19 @@ class ContentThreadStreamService {
             parentSpanId: "agent_run",
           },
           operation: "chat.complete",
+          abortSignal: options.abortSignal,
+          runCancellation: createRunCancellationGate({
+            shouldCancel: options.shouldCancel,
+            signal: options.abortSignal,
+          }),
         })) {
+          // The non-streaming door gets the same cancel checkpoints as the SSE
+          // one: without them a client disconnect or Stop ran the whole turn
+          // to completion and billed it.
+          await throwIfClientCancelled(
+            options.shouldCancel,
+            options.abortSignal,
+          );
           if (event.type === "reasoning") {
             traceParts = upsertTracePart(
               traceParts,
@@ -1018,22 +1099,30 @@ class ContentThreadStreamService {
         return doneOutcome;
       })().catch(async (error: unknown) => {
         const contentError = toObservationError(error);
-        await recordThreadStreamFailure({
-          prepared,
-          contentError,
-          operation: "chat.complete",
-          llm: prepared.llm,
-        });
-        const errorMessage = await this.createErrorMessage({
-          prepared,
-          contentError,
-          partialState: {
-            thinkingSteps: prepared.preflightThinkingSteps,
-            meteredLlmCalls: meteredLlmCallsOnFailure(),
-          },
-        });
+        // Cancel mirrors the SSE door: no failure record, no persisted turn,
+        // no user-message rollback — the trace just ends as cancelled.
+        const isClientCancelled = isClientCancelledError(contentError);
+        if (!isClientCancelled) {
+          await recordThreadStreamFailure({
+            prepared,
+            contentError,
+            operation: "chat.complete",
+            llm: prepared.llm,
+          });
+        }
+        const errorMessage = isClientCancelled
+          ? null
+          : await this.createErrorMessage({
+              prepared,
+              contentError,
+              partialState: {
+                thinkingSteps: prepared.preflightThinkingSteps,
+                meteredLlmCalls: meteredLlmCallsOnFailure(),
+              },
+            });
         if (
           !errorMessage &&
+          !isClientCancelled &&
           prepared.failurePersistence === "persist-error-turn"
         ) {
           await rollbackCreatedUserMessage({ prepared });
@@ -1042,7 +1131,7 @@ class ContentThreadStreamService {
           prepared,
           started: true,
           completed: agentSpanCompleted,
-          status: "error",
+          status: isClientCancelled ? "cancelled" : "error",
           latencyMs: Date.now() - chatStartedAt,
           errorCode: contentError.code,
           errorMessage: contentError.message,
@@ -1053,7 +1142,7 @@ class ContentThreadStreamService {
             prepared,
             ended: traceEnded,
             operation: "chat.complete",
-            status: "error",
+            status: isClientCancelled ? "cancelled" : "error",
             latencyMs: Date.now() - chatStartedAt,
             errorCode: contentError.code,
             errorMessage: contentError.message,

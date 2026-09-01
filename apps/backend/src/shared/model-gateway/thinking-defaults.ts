@@ -1,6 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { db, modelGatewayProfiles } from "@sourceweft/db";
-import type { ReasoningEffort, ThinkingConfig } from "@sourceweft/model-gateway";
+import type {
+  ReasoningEffort,
+  ThinkingConfig,
+} from "@sourceweft/model-gateway";
 
 /**
  * Server-side thinking-capability defaults for chat calls.
@@ -33,46 +36,53 @@ const REASONING_EFFORTS: ReadonlySet<string> = new Set([
   "xhigh",
 ]);
 
-/** Lenient read of the profile configJson's synced thinking-support fields. */
+/**
+ * Lenient read of the profile configJson's synced thinking-support fields.
+ * A field that is PRESENT as an array counts as facts even when empty — a
+ * synced `supportedParameters: []` legitimately means "this model advertises
+ * no reasoning parameters", and treating it as no-facts would send the lookup
+ * on to another alias whose facts belong to a different model.
+ */
 export function readProfileThinkingSupport(
   configJson: unknown,
 ): ProfileThinkingSupport | null {
-  if (!configJson || typeof configJson !== "object" || Array.isArray(configJson)) {
+  if (
+    !configJson ||
+    typeof configJson !== "object" ||
+    Array.isArray(configJson)
+  ) {
     return null;
   }
   const record = configJson as Record<string, unknown>;
   const support: ProfileThinkingSupport = {};
+  let present = false;
   if (Array.isArray(record.supportedParameters)) {
-    const parameters = record.supportedParameters.filter(
+    present = true;
+    support.supportedParameters = record.supportedParameters.filter(
       (value): value is string =>
         typeof value === "string" && value.trim().length > 0,
     );
-    if (parameters.length > 0) {
-      support.supportedParameters = parameters;
-    }
   }
   if (Array.isArray(record.supportedEfforts)) {
-    const efforts = record.supportedEfforts.filter(
+    present = true;
+    support.supportedEfforts = record.supportedEfforts.filter(
       (value): value is ReasoningEffort =>
         typeof value === "string" && REASONING_EFFORTS.has(value),
     );
-    if (efforts.length > 0) {
-      support.supportedEfforts = efforts;
-    }
   }
-  return support.supportedParameters || support.supportedEfforts
-    ? support
-    : null;
+  return present ? support : null;
 }
 
 export type ChatProfileThinkingSupportFinder = (input: {
   profileAlias?: string;
   modelAlias?: string;
+  gatewayConfigId?: string;
 }) => Promise<ProfileThinkingSupport | null>;
 
 async function findRowConfigJson(
   column: "profileAlias" | "modelAlias",
   value: string,
+  gatewayConfigId: string | undefined,
 ): Promise<unknown | null> {
   const [row] = await db
     .select({ configJson: modelGatewayProfiles.configJson })
@@ -82,6 +92,12 @@ async function findRowConfigJson(
         eq(modelGatewayProfiles.kind, "chat"),
         eq(modelGatewayProfiles[column], value),
         eq(modelGatewayProfiles.isActive, true),
+        // modelAlias is not unique across gateway configs; without this
+        // filter a lookup could graft another gateway's reasoning facts onto
+        // the call.
+        ...(gatewayConfigId
+          ? [eq(modelGatewayProfiles.gatewayConfigId, gatewayConfigId)]
+          : []),
       ),
     )
     .limit(1);
@@ -89,15 +105,17 @@ async function findRowConfigJson(
 }
 
 /**
- * Looks the support facts up on the active chat profile, trying the request's
- * identifiers the way the rest of the stack resolves them: profile alias
- * first, then model alias. The payload's `model` string may be either, so a
- * caller passes it as both and the first hit wins.
+ * Looks the support facts up on the active chat profile, scoped to the
+ * request's gateway config when known, trying the request's identifiers the
+ * way the rest of the stack resolves them: profile alias first, then model
+ * alias. The payload's `model` string may be either, so a caller passes it as
+ * both and the first hit wins.
  */
 export const findChatProfileThinkingSupport: ChatProfileThinkingSupportFinder =
   async (input) => {
     const profileAlias = input.profileAlias?.trim();
     const modelAlias = input.modelAlias?.trim();
+    const gatewayConfigId = input.gatewayConfigId?.trim() || undefined;
     const attempts: Array<["profileAlias" | "modelAlias", string]> = [];
     if (profileAlias) {
       attempts.push(["profileAlias", profileAlias]);
@@ -109,8 +127,14 @@ export const findChatProfileThinkingSupport: ChatProfileThinkingSupportFinder =
       }
     }
     for (const [column, value] of attempts) {
-      const configJson = await findRowConfigJson(column, value);
-      const support = configJson ? readProfileThinkingSupport(configJson) : null;
+      const configJson = await findRowConfigJson(
+        column,
+        value,
+        gatewayConfigId,
+      );
+      const support = configJson
+        ? readProfileThinkingSupport(configJson)
+        : null;
       if (support) {
         return support;
       }
@@ -156,6 +180,7 @@ export async function resolveChatThinkingWithDefaults(input: {
   byokModelId?: string;
   profileAlias?: string;
   modelAlias?: string;
+  gatewayConfigId?: string;
   finder?: ChatProfileThinkingSupportFinder;
 }): Promise<ThinkingConfig | undefined> {
   const { thinking } = input;
@@ -175,6 +200,9 @@ export async function resolveChatThinkingWithDefaults(input: {
   const support = await finder({
     ...(input.profileAlias ? { profileAlias: input.profileAlias } : {}),
     ...(input.modelAlias ? { modelAlias: input.modelAlias } : {}),
+    ...(input.gatewayConfigId
+      ? { gatewayConfigId: input.gatewayConfigId }
+      : {}),
   });
   return applyThinkingSupportDefaults(thinking, support);
 }

@@ -705,6 +705,7 @@ export function registerThreadRoutes(app: Hono) {
                 image: parsed.data.image,
                 vision: parsed.data.vision,
                 ...legacyStreamModelSettings(parsed.data),
+                mcpInstallIds: parsed.data.mcpInstallIds,
               }
             : mode === "edit"
               ? {
@@ -727,6 +728,7 @@ export function registerThreadRoutes(app: Hono) {
                   image: parsed.data.image,
                   vision: parsed.data.vision,
                   ...legacyStreamModelSettings(parsed.data),
+                  mcpInstallIds: parsed.data.mcpInstallIds,
                 }
               : {
                   workspaceId,
@@ -745,6 +747,7 @@ export function registerThreadRoutes(app: Hono) {
                   image: parsed.data.image,
                   vision: parsed.data.vision,
                   ...legacyStreamModelSettings(parsed.data),
+                  mcpInstallIds: parsed.data.mcpInstallIds,
                 };
       await durableChatRunService.getOrCreateRun({
         workspaceId,
@@ -778,6 +781,12 @@ export function registerThreadRoutes(app: Hono) {
       return c.body(createSseResponse(stream, { cancel: "detach" }));
     }
 
+    // Direct (non-durable) runs execute in this request, so the client hanging
+    // up is the cancel: thread the request's own abort signal into the turn —
+    // both the SSE door and the stream:false door below. The durable path gets
+    // the same via Redis pub/sub → worker AbortController.
+    const directRunOptions = { abortSignal: c.req.raw.signal };
+
     if (parsed.data.stream === false) {
       const result =
         mode === "resume"
@@ -788,34 +797,14 @@ export function registerThreadRoutes(app: Hono) {
                 userId,
                 data: parsed.data,
               }),
+              directRunOptions,
             )
           : mode === "refresh"
-            ? await contentThreadStreamService.refreshThread({
-                workspaceId,
-                threadId,
-                userId,
-                mentionedSourceIds: parsed.data.mentionedSourceIds,
-                sourceIds: parsed.data.sourceIds,
-                tools: parsed.data.tools,
-                command: parsed.data.command,
-                invocation: parsed.data.invocation,
-                timezone: parsed.data.timezone,
-                userMessageId: parsed.data.userMessageId,
-                assistantMessageId: parsed.data.assistantMessageId,
-                idempotencyKey: parsed.data.idempotencyKey,
-                llm: parsed.data.llm,
-                image: parsed.data.image,
-                vision: parsed.data.vision,
-                ...legacyStreamModelSettings(parsed.data),
-              } satisfies RefreshThreadInput)
-            : mode === "edit"
-              ? await contentThreadStreamService.editThread({
+            ? await contentThreadStreamService.refreshThread(
+                {
                   workspaceId,
                   threadId,
                   userId,
-                  content: parsed.data.content ?? "",
-                  imagesProvided,
-                  images,
                   mentionedSourceIds: parsed.data.mentionedSourceIds,
                   sourceIds: parsed.data.sourceIds,
                   tools: parsed.data.tools,
@@ -830,34 +819,60 @@ export function registerThreadRoutes(app: Hono) {
                   vision: parsed.data.vision,
                   ...legacyStreamModelSettings(parsed.data),
                   mcpInstallIds: parsed.data.mcpInstallIds,
-                } satisfies EditThreadInput)
-              : await contentThreadStreamService.streamThread({
-                  workspaceId,
-                  threadId,
-                  userId,
-                  content: parsed.data.content ?? "",
-                  images,
-                  mentionedSourceIds: parsed.data.mentionedSourceIds,
-                  sourceIds: parsed.data.sourceIds,
-                  tools: parsed.data.tools,
-                  command: parsed.data.command,
-                  invocation: parsed.data.invocation,
-                  timezone: parsed.data.timezone,
-                  idempotencyKey: parsed.data.idempotencyKey,
-                  llm: parsed.data.llm,
-                  image: parsed.data.image,
-                  vision: parsed.data.vision,
-                  ...legacyStreamModelSettings(parsed.data),
-                  mcpInstallIds: parsed.data.mcpInstallIds,
-                });
+                } satisfies RefreshThreadInput,
+                directRunOptions,
+              )
+            : mode === "edit"
+              ? await contentThreadStreamService.editThread(
+                  {
+                    workspaceId,
+                    threadId,
+                    userId,
+                    content: parsed.data.content ?? "",
+                    imagesProvided,
+                    images,
+                    mentionedSourceIds: parsed.data.mentionedSourceIds,
+                    sourceIds: parsed.data.sourceIds,
+                    tools: parsed.data.tools,
+                    command: parsed.data.command,
+                    invocation: parsed.data.invocation,
+                    timezone: parsed.data.timezone,
+                    userMessageId: parsed.data.userMessageId,
+                    assistantMessageId: parsed.data.assistantMessageId,
+                    idempotencyKey: parsed.data.idempotencyKey,
+                    llm: parsed.data.llm,
+                    image: parsed.data.image,
+                    vision: parsed.data.vision,
+                    ...legacyStreamModelSettings(parsed.data),
+                    mcpInstallIds: parsed.data.mcpInstallIds,
+                  } satisfies EditThreadInput,
+                  directRunOptions,
+                )
+              : await contentThreadStreamService.streamThread(
+                  {
+                    workspaceId,
+                    threadId,
+                    userId,
+                    content: parsed.data.content ?? "",
+                    images,
+                    mentionedSourceIds: parsed.data.mentionedSourceIds,
+                    sourceIds: parsed.data.sourceIds,
+                    tools: parsed.data.tools,
+                    command: parsed.data.command,
+                    invocation: parsed.data.invocation,
+                    timezone: parsed.data.timezone,
+                    idempotencyKey: parsed.data.idempotencyKey,
+                    llm: parsed.data.llm,
+                    image: parsed.data.image,
+                    vision: parsed.data.vision,
+                    ...legacyStreamModelSettings(parsed.data),
+                    mcpInstallIds: parsed.data.mcpInstallIds,
+                  },
+                  directRunOptions,
+                );
 
       return ApiResponse.success(c, result);
     }
-
-    // Direct (non-durable) SSE runs in this request, so the client hanging up
-    // is the cancel: thread the request's own abort signal into the turn. The
-    // durable path gets the same via Redis pub/sub → worker AbortController.
-    const directRunOptions = { abortSignal: c.req.raw.signal };
     const stream =
       mode === "resume"
         ? contentThreadStreamService.resumeThreadEvents(

@@ -31,8 +31,18 @@ test("readProfileThinkingSupport reads the synced fields leniently", () => {
   );
 
   // Efforts alone are still worth surfacing.
-  assert.deepEqual(readProfileThinkingSupport({ supportedEfforts: ["medium"] }), {
-    supportedEfforts: ["medium"],
+  assert.deepEqual(
+    readProfileThinkingSupport({ supportedEfforts: ["medium"] }),
+    {
+      supportedEfforts: ["medium"],
+    },
+  );
+
+  // A PRESENT empty array is a fact ("this model advertises no reasoning
+  // parameters"), not an absence — it must not send the lookup on to another
+  // alias whose facts belong to a different model.
+  assert.deepEqual(readProfileThinkingSupport({ supportedParameters: [] }), {
+    supportedParameters: [],
   });
 });
 
@@ -73,7 +83,9 @@ test("applyThinkingSupportDefaults fills absent fields only", () => {
   assert.equal(applyThinkingSupportDefaults(thinking, null), thinking);
 });
 
-function finderStub(result: Awaited<ReturnType<ChatProfileThinkingSupportFinder>>) {
+function finderStub(
+  result: Awaited<ReturnType<ChatProfileThinkingSupportFinder>>,
+) {
   const calls: Array<{ profileAlias?: string; modelAlias?: string }> = [];
   const finder: ChatProfileThinkingSupportFinder = async (input) => {
     calls.push(input);
@@ -135,6 +147,7 @@ test("resolveChatThinkingWithDefaults fills from the profile finder", async () =
     thinking: { enabled: false },
     profileAlias: "chat-default",
     modelAlias: "deepseek-v4-pro",
+    gatewayConfigId: "gw_1",
     finder,
   });
   assert.deepEqual(resolved, {
@@ -143,7 +156,11 @@ test("resolveChatThinkingWithDefaults fills from the profile finder", async () =
     supportedEfforts: ["high", "medium"],
   });
   assert.deepEqual(calls, [
-    { profileAlias: "chat-default", modelAlias: "deepseek-v4-pro" },
+    {
+      profileAlias: "chat-default",
+      modelAlias: "deepseek-v4-pro",
+      gatewayConfigId: "gw_1",
+    },
   ]);
 });
 

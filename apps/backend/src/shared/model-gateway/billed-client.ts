@@ -37,6 +37,8 @@ import type { MeterUsageFn } from "./billing/settle";
 import { createBilledAgentChatModel } from "./billing/langchain-proxy";
 import { getRawModelGatewayClient } from "./internal/raw";
 import { enqueueProviderCostReconciliation } from "./provider-cost-reconciliation";
+import type { ThinkingConfig } from "@sourceweft/model-gateway";
+import { logger } from "../logger";
 import { resolveChatThinkingWithDefaults } from "./thinking-defaults";
 
 /**
@@ -134,6 +136,46 @@ function splitOptions(options: BilledRequestOptions) {
 }
 
 /**
+ * The one best-effort wrapper around the thinking-support resolver, shared by
+ * the chat inputs and agentChatModel so the swallow policy and identifier
+ * precedence live in exactly one place. A lookup failure never breaks the
+ * model call it decorates — the caller's own thinking rides unchanged — but
+ * it is logged: silently losing the fill fleet-wide during a DB outage was
+ * how the last thinking incident stayed invisible.
+ */
+async function resolveThinkingBestEffort(input: {
+  thinking: ThinkingConfig | undefined;
+  executionMode?: string;
+  byokModelId?: string;
+  profileAlias?: string;
+  modelAlias: string;
+  gatewayConfigId?: string | null;
+}): Promise<ThinkingConfig | undefined> {
+  try {
+    return await resolveChatThinkingWithDefaults({
+      thinking: input.thinking,
+      ...(input.executionMode ? { executionMode: input.executionMode } : {}),
+      ...(input.byokModelId ? { byokModelId: input.byokModelId } : {}),
+      ...(input.profileAlias ? { profileAlias: input.profileAlias } : {}),
+      modelAlias: input.modelAlias,
+      ...(input.gatewayConfigId
+        ? { gatewayConfigId: input.gatewayConfigId }
+        : {}),
+    });
+  } catch (error) {
+    logger.warn(
+      "Thinking-support fill failed; the caller's thinking rides unchanged",
+      {
+        modelAlias: input.modelAlias,
+        profileAlias: input.profileAlias,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+    return input.thinking;
+  }
+}
+
+/**
  * Fills the server-known thinking-support facts (synced onto the chat profile
  * by provider discovery) into a chat input whose caller expressed thinking
  * intent without them — see thinking-defaults.ts. Resolution happens here, at
@@ -144,25 +186,20 @@ async function enrichChatThinking<T extends ChatCompleteInput>(
   chatInput: T,
   options: BilledRequestOptions,
 ): Promise<T> {
-  try {
-    const executionMode = chatInput.executionMode ?? options.llm?.executionMode;
-    const profileAlias = chatInput.profileAlias ?? options.profileAlias;
-    const byokModelId = chatInput.byokModelId ?? options.llm?.byokModelId;
-    const thinking = await resolveChatThinkingWithDefaults({
-      thinking: chatInput.thinking,
-      ...(executionMode ? { executionMode } : {}),
-      ...(byokModelId ? { byokModelId } : {}),
-      ...(profileAlias ? { profileAlias } : {}),
-      modelAlias: options.modelAlias ?? chatInput.model,
-    });
-    return thinking === chatInput.thinking
-      ? chatInput
-      : { ...chatInput, thinking };
-  } catch {
-    // Defaults are best-effort: a profile lookup failure must never break the
-    // model call it decorates — the caller's own thinking rides unchanged.
-    return chatInput;
-  }
+  const executionMode = chatInput.executionMode ?? options.llm?.executionMode;
+  const profileAlias = chatInput.profileAlias ?? options.profileAlias;
+  const byokModelId = chatInput.byokModelId ?? options.llm?.byokModelId;
+  const thinking = await resolveThinkingBestEffort({
+    thinking: chatInput.thinking,
+    ...(executionMode ? { executionMode } : {}),
+    ...(byokModelId ? { byokModelId } : {}),
+    ...(profileAlias ? { profileAlias } : {}),
+    modelAlias: options.modelAlias ?? chatInput.model,
+    gatewayConfigId: options.gatewayConfigId,
+  });
+  return thinking === chatInput.thinking
+    ? chatInput
+    : { ...chatInput, thinking };
 }
 
 /**
@@ -323,9 +360,7 @@ async function openBilledGateway(
     },
     agentChatModel: async (agentInput) => {
       const execution = agentInput.execution;
-      // Same best-effort contract as enrichChatThinking: a lookup failure
-      // leaves the caller's thinking unchanged rather than failing the model.
-      const thinking = await resolveChatThinkingWithDefaults({
+      const thinking = await resolveThinkingBestEffort({
         thinking: execution?.thinking,
         ...(execution?.executionMode
           ? { executionMode: execution.executionMode }
@@ -337,7 +372,8 @@ async function openBilledGateway(
           ? { profileAlias: execution.profileAlias }
           : {}),
         modelAlias: agentInput.modelAlias,
-      }).catch(() => execution?.thinking);
+        gatewayConfigId: input.gatewayConfigId,
+      });
       return createBilledAgentChatModel({
         modelAlias: agentInput.modelAlias,
         execution:
