@@ -59,10 +59,14 @@ import type {
 } from "./sandbox-tools";
 import type { SandboxRuntimePromptCapabilities } from "./runtime-prompt";
 import type { SandboxRuntimeForTurn } from "./runtime/runtime";
+import type { TrustedSandboxHostAdapter } from "./runtime/trusted-host-adapter";
 import type { SandboxRootPolicy } from "./runtime/paths";
 import type {
   ExistingSandboxOperation,
   SandboxBridgeOperationType,
+  SandboxCancelExecutionInput,
+  SandboxCancellationReason,
+  SandboxCancellationResult,
   SandboxCollectedOutput,
   SandboxExecuteResult,
   SandboxOperationStatus,
@@ -132,9 +136,13 @@ export type {
   PrepareSandboxWorkspaceInput,
   SandboxRuntimePromptCapabilities,
   SandboxRuntimeForTurn,
+  TrustedSandboxHostAdapter,
   SandboxRootPolicy,
   ExistingSandboxOperation,
   SandboxBridgeOperationType,
+  SandboxCancelExecutionInput,
+  SandboxCancellationReason,
+  SandboxCancellationResult,
   SandboxCollectedOutput,
   SandboxExecuteResult,
   SandboxOperationStatus,
@@ -190,3 +198,7 @@ export type {
   RuntimeAssetResolution,
   RuntimeAssetSessionLike,
 } from "./runtime/runtime-assets";
+export type {
+  SandboxRuntimeAssetStaging,
+  SandboxSkillStaging,
+} from "./runtime/sandbox-manager";

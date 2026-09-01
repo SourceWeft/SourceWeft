@@ -80,6 +80,65 @@ export const capabilityIdSchema = z
 
 export const contributionIdSchema = z.string().regex(/^[a-z][a-z0-9_:-]*$/u);
 
+export const CAPABILITY_COMMAND_TOOL_POLICY_MAX_IDS = 256;
+
+const uniqueContributionIdsSchema = z
+  .array(contributionIdSchema)
+  .max(CAPABILITY_COMMAND_TOOL_POLICY_MAX_IDS)
+  .superRefine((values, context) => {
+    const seen = new Set<string>();
+    values.forEach((value, index) => {
+      if (seen.has(value)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate tool id '${value}'`,
+          path: [index],
+        });
+      }
+      seen.add(value);
+    });
+  });
+
+/**
+ * How the first model call enters a command. Omitted is deliberately distinct
+ * from `auto`: compatibility consumers may retain their legacy forced-tool
+ * behavior until a manifest opts into automatic tool looping.
+ */
+export const capabilityInitialToolPolicySchema = z.union([
+  z.literal("auto"),
+  z
+    .object({
+      kind: z.literal("force"),
+      toolName: contributionIdSchema,
+    })
+    .strict(),
+]);
+
+/**
+ * Capability-declared command tool surface. `allow` omitted means no allowlist;
+ * an explicitly empty `allow` means allow none. Deny always wins, and overlap
+ * is rejected at manifest load rather than left to backend precedence rules.
+ */
+export const capabilityCommandToolPolicySchema = z
+  .object({
+    allow: uniqueContributionIdsSchema.optional(),
+    deny: uniqueContributionIdsSchema.default([]),
+  })
+  .strict()
+  .superRefine((policy, context) => {
+    if (!policy.allow) return;
+    const denied = new Set(policy.deny);
+    policy.allow.forEach((toolName, index) => {
+      if (denied.has(toolName)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Tool '${toolName}' cannot be both allowed and denied`,
+          path: ["allow", index],
+        });
+      }
+    });
+  });
+
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 const optionValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 const unsafeTargetPathSegments = new Set([
@@ -130,22 +189,46 @@ export const capabilityRuntimeOutputSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-export const capabilityCommandWorkflowSchema = z.object({
-  execution: z.literal("agent"),
-  promptIntro: z.string().min(1).optional(),
-  defaultTools: z.array(contributionIdSchema).default([]),
-  permissionOverrides: z
-    .record(z.string(), capabilityToolPermissionSchema)
-    .default({}),
-  successCriteria: capabilityCommandSuccessCriteriaSchema,
-  requiredArguments: z
-    .object({
-      description: z.string().min(1),
-      clarificationPrompt: z.string().min(1),
-    })
-    .optional(),
-  additionalPromptLines: z.array(z.string().min(1)).default([]),
-});
+export const capabilityCommandWorkflowSchema = z
+  .object({
+    execution: z.literal("agent"),
+    initialToolPolicy: capabilityInitialToolPolicySchema.optional(),
+    toolPolicy: capabilityCommandToolPolicySchema.optional(),
+    promptIntro: z.string().min(1).optional(),
+    defaultTools: z.array(contributionIdSchema).default([]),
+    permissionOverrides: z
+      .record(z.string(), capabilityToolPermissionSchema)
+      .default({}),
+    successCriteria: capabilityCommandSuccessCriteriaSchema,
+    requiredArguments: z
+      .object({
+        description: z.string().min(1),
+        clarificationPrompt: z.string().min(1),
+      })
+      .optional(),
+    additionalPromptLines: z.array(z.string().min(1)).default([]),
+  })
+  .superRefine((workflow, context) => {
+    const initial = workflow.initialToolPolicy;
+    if (!initial || initial === "auto" || !workflow.toolPolicy) return;
+    if (workflow.toolPolicy.deny.includes(initial.toolName)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Forced initial tool '${initial.toolName}' is denied by toolPolicy`,
+        path: ["initialToolPolicy", "toolName"],
+      });
+    }
+    if (
+      workflow.toolPolicy.allow &&
+      !workflow.toolPolicy.allow.includes(initial.toolName)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Forced initial tool '${initial.toolName}' is absent from toolPolicy.allow`,
+        path: ["initialToolPolicy", "toolName"],
+      });
+    }
+  });
 
 export const capabilityCommandSchema = z.object({
   title: z.string().min(1).optional(),
@@ -208,28 +291,52 @@ export const capabilitySkillOptionSchema = capabilityOptionSchema.extend({
   }),
 });
 
-export const capabilityRuntimeSchema = z.object({
-  execution: z.literal("agent").default("agent"),
-  promptIntro: z.string().min(1).optional(),
-  tools: z.array(contributionIdSchema).default([]),
-  permissionOverrides: z
-    .record(z.string(), capabilityToolPermissionSchema)
-    .default({}),
-  output: capabilityRuntimeOutputSchema.optional(),
-  /**
-   * Declares that this tool produces its artifact via a background worker
-   * pipeline. The worker host registers the job name and loads the package's
-   * createDeliverablePipelines factory.
-   */
-  pipeline: capabilityPipelineSchema.optional(),
-  requiredArguments: z
-    .object({
-      description: z.string().min(1),
-      clarificationPrompt: z.string().min(1),
-    })
-    .optional(),
-  additionalPromptLines: z.array(z.string().min(1)).default([]),
-});
+export const capabilityRuntimeSchema = z
+  .object({
+    execution: z.literal("agent").default("agent"),
+    initialToolPolicy: capabilityInitialToolPolicySchema.optional(),
+    toolPolicy: capabilityCommandToolPolicySchema.optional(),
+    promptIntro: z.string().min(1).optional(),
+    tools: z.array(contributionIdSchema).default([]),
+    permissionOverrides: z
+      .record(z.string(), capabilityToolPermissionSchema)
+      .default({}),
+    output: capabilityRuntimeOutputSchema.optional(),
+    /**
+     * Declares that this tool produces its artifact via a background worker
+     * pipeline. The worker host registers the job name and loads the package's
+     * createDeliverablePipelines factory.
+     */
+    pipeline: capabilityPipelineSchema.optional(),
+    requiredArguments: z
+      .object({
+        description: z.string().min(1),
+        clarificationPrompt: z.string().min(1),
+      })
+      .optional(),
+    additionalPromptLines: z.array(z.string().min(1)).default([]),
+  })
+  .superRefine((runtime, context) => {
+    const initial = runtime.initialToolPolicy;
+    if (!initial || initial === "auto" || !runtime.toolPolicy) return;
+    if (runtime.toolPolicy.deny.includes(initial.toolName)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Forced initial tool '${initial.toolName}' is denied by toolPolicy`,
+        path: ["initialToolPolicy", "toolName"],
+      });
+    }
+    if (
+      runtime.toolPolicy.allow &&
+      !runtime.toolPolicy.allow.includes(initial.toolName)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Forced initial tool '${initial.toolName}' is absent from toolPolicy.allow`,
+        path: ["initialToolPolicy", "toolName"],
+      });
+    }
+  });
 
 export const toolContributionSchema = z.object({
   id: contributionIdSchema,
@@ -248,6 +355,8 @@ export const skillContributionSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   visibility: z.enum(["public", "restricted"]).optional(),
+  // Turn selection only. Visibility remains a catalog/access concern.
+  defaultEnabled: z.boolean().optional(),
   // Market surfacing (orthogonal to `visibility`, which stays a scope/gate concept):
   // `listing` decides whether the skill appears in the market at all; `managed`
   // decides whether it is installable/uninstallable per workspace (false = always-on).
@@ -429,6 +538,12 @@ export type CapabilityDiagnosticCode = z.infer<
 >;
 export type CapabilityCommandWorkflow = z.infer<
   typeof capabilityCommandWorkflowSchema
+>;
+export type CapabilityInitialToolPolicy = z.infer<
+  typeof capabilityInitialToolPolicySchema
+>;
+export type CapabilityCommandToolPolicy = z.infer<
+  typeof capabilityCommandToolPolicySchema
 >;
 export type CapabilityCommandSuccessCriteria = z.infer<
   typeof capabilityCommandSuccessCriteriaSchema

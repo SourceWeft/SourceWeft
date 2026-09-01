@@ -1,6 +1,7 @@
 export const WORKSPACE_HUB_CACHE_VERSION = "v1";
 export const WORKSPACE_HUB_CACHE_KEY_PREFIX = "sourceweft:workspace-hub";
-export const WORKSPACE_HUB_CACHE_TIMESTAMP_PREFIX = "sourceweft:workspace-hub-ts";
+export const WORKSPACE_HUB_CACHE_TIMESTAMP_PREFIX =
+  "sourceweft:workspace-hub-ts";
 export const WORKSPACE_HUB_CACHE_TTL_MS = 30 * 60 * 1000;
 
 type StoredCachePayload<T> = {
@@ -65,7 +66,10 @@ function writeStorageEntry<T>(bucket: string, workspaceId: string, value: T) {
 
   try {
     storage.setItem(getDataKey(bucket, workspaceId), JSON.stringify(payload));
-    storage.setItem(getTimestampKey(bucket, workspaceId), JSON.stringify(Date.now()));
+    storage.setItem(
+      getTimestampKey(bucket, workspaceId),
+      JSON.stringify(Date.now()),
+    );
   } catch {
     return;
   }

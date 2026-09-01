@@ -1,4 +1,6 @@
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import { committedArtifactToolResultSchema } from "@sourceweft/contracts/agent-tools";
+import { getAgentToolDefinition } from "@sourceweft/agent-tool-registry";
 import {
   findActionRunRecordById,
   updateActionRunRecord,
@@ -17,6 +19,7 @@ import {
   finalizeTerminalSnapshotTrace,
   getSnapshotRecord,
   resolveTerminalStatusFromFinishedSnapshot,
+  getObjectRecord,
 } from "./snapshot";
 import {
   getRunApprovalPauseState,
@@ -86,6 +89,7 @@ export async function failRunBeforeMessages(
     teamId: run.teamId,
     workspaceId: run.workspaceId,
     status: "failed",
+    snapshotMode: "terminal_patch",
     assistantMessageId: null,
     snapshotJson: {
       ...(run.snapshotJson as ChatRunSnapshot),
@@ -121,6 +125,7 @@ export async function cancelRunBeforeMessages(run: ChatThreadRunRecord) {
     teamId: run.teamId,
     workspaceId: run.workspaceId,
     status: "cancelled",
+    snapshotMode: "terminal_patch",
     assistantMessageId: run.assistantMessageId,
     snapshotJson: {
       ...(run.snapshotJson as ChatRunSnapshot),
@@ -208,6 +213,7 @@ export async function forceCancelStoppedRun(
       teamId: activeRun.teamId,
       workspaceId: activeRun.workspaceId,
       status: "cancelled",
+      snapshotMode: "terminal_patch",
       assistantMessageId: activeRun.assistantMessageId,
       snapshotJson: snapshot,
       errorCode: CLIENT_CANCELLED_CODE,
@@ -276,6 +282,8 @@ export async function failStaleActiveRunWithDependencies(
     teamId: run.teamId,
     workspaceId: run.workspaceId,
     status: "failed",
+    snapshotMode: "terminal_patch",
+    protectedOperationTerminalReason: "RUN_OWNER_DIED",
     assistantMessageId: run.assistantMessageId,
     snapshotJson: terminalSnapshot,
     errorCode: STALE_CHAT_RUN_CODE,
@@ -391,6 +399,7 @@ export async function expireApprovalWaitingRun(run: ChatThreadRunRecord) {
       teamId: run.teamId,
       workspaceId: run.workspaceId,
       status: "cancelled",
+      snapshotMode: "terminal_patch",
       assistantMessageId: run.assistantMessageId,
       snapshotJson: snapshot,
       errorCode: TOOL_APPROVAL_EXPIRED_CODE,
@@ -439,6 +448,7 @@ export async function completeApprovalRunIfNoPendingConfirmations(
       teamId: run.teamId,
       workspaceId: run.workspaceId,
       status: "completed",
+      snapshotMode: "terminal_patch",
       assistantMessageId: run.assistantMessageId,
       snapshotJson: withAssistantThreadRunMetadata(snapshot, completedRun),
     })) ?? completedRun;
@@ -473,7 +483,9 @@ export async function finishRunIfSnapshotIsTerminalWithDependencies(
     return run;
   }
   const snapshot = getSnapshotRecord(run);
-  const terminalStatus = resolveTerminalStatusFromFinishedSnapshot(snapshot);
+  const terminalStatus =
+    resolveTerminalStatusFromFinishedSnapshot(snapshot) ??
+    (hasCommittedArtifactPublication(snapshot, run.id) ? "completed" : null);
   if (!terminalStatus) {
     return run;
   }
@@ -503,6 +515,7 @@ export async function finishRunIfSnapshotIsTerminalWithDependencies(
       teamId: run.teamId,
       workspaceId: run.workspaceId,
       status: terminalStatus,
+      snapshotMode: "terminal_patch",
       assistantMessageId: run.assistantMessageId,
       snapshotJson: withAssistantThreadRunMetadata(
         finalizeTerminalSnapshotTrace(snapshot),
@@ -538,6 +551,59 @@ export async function finishRunIfSnapshotIsTerminalWithDependencies(
       teamId: run.teamId,
       workspaceId: run.workspaceId,
     })) ?? finished
+  );
+}
+
+export function hasCommittedArtifactPublication(
+  snapshot: ChatRunSnapshot,
+  runId: string,
+) {
+  const blocks = new Map(
+    (Array.isArray(snapshot.renderBlocks) ? snapshot.renderBlocks : []).flatMap(
+      (value) => {
+        const record = getObjectRecord(value);
+        return record?.type === "artifact_output" &&
+          typeof record.id === "string"
+          ? [[record.id, record] as const]
+          : [];
+      },
+    ),
+  );
+  return (Array.isArray(snapshot.toolCalls) ? snapshot.toolCalls : []).some(
+    (value) => {
+      const call = getObjectRecord(value);
+      const parsed = committedArtifactToolResultSchema.safeParse(call?.output);
+      if (
+        !call ||
+        typeof call.id !== "string" ||
+        typeof call.tool !== "string" ||
+        call.status !== "completed" ||
+        call.error ||
+        !parsed.success
+      ) {
+        return false;
+      }
+      const definition = getAgentToolDefinition(call.tool);
+      if (
+        definition?.terminalResult?.kind !== "committed_artifact" ||
+        definition.terminalResult.artifactType !== parsed.data.artifactType
+      ) {
+        return false;
+      }
+      const block = blocks.get(parsed.data.artifactOutputBlockId);
+      const callProducer = getObjectRecord(call.producer);
+      const blockProducer = getObjectRecord(block?.producer);
+      return Boolean(
+        block &&
+        block.artifactId === parsed.data.artifactId &&
+        block.artifactVersionId === parsed.data.artifactVersionId &&
+        block.threadRunId === runId &&
+        block.sourceToolCallId === call.id &&
+        block.placement === "terminal" &&
+        blockProducer?.kind === (callProducer?.kind ?? "main") &&
+        blockProducer?.subagentType === callProducer?.subagentType,
+      );
+    },
   );
 }
 

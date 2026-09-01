@@ -54,7 +54,7 @@ function modelValue(generation: Record<string, unknown>) {
 }
 
 function providerModelValue(generation: Record<string, unknown>) {
-  return generation.modelAlias ? null : generation.providerModel ?? null;
+  return generation.modelAlias ? null : (generation.providerModel ?? null);
 }
 
 /**
@@ -66,11 +66,11 @@ function providerModelValue(generation: Record<string, unknown>) {
  * routing. Only un-aliased calls (BYOK/direct) show their provider.
  */
 function providerValue(generation: Record<string, unknown>) {
-  return generation.modelAlias ? null : generation.provider ?? null;
+  return generation.modelAlias ? null : (generation.provider ?? null);
 }
 
 function routeDecisionValue(generation: Record<string, unknown>) {
-  return generation.modelAlias ? null : generation.routeDecisionJson ?? null;
+  return generation.modelAlias ? null : (generation.routeDecisionJson ?? null);
 }
 
 const ROUTING_IDENTITY_KEYS = ["provider", "providerModel", "routeDecision"];
@@ -97,19 +97,24 @@ function stripRoutingIdentity(
     return value;
   }
   return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !ROUTING_IDENTITY_KEYS.includes(key)),
+    Object.entries(record).filter(
+      ([key]) => !ROUTING_IDENTITY_KEYS.includes(key),
+    ),
   );
 }
 
 function generationOperation(generation: Record<string, unknown>) {
-  return metadataString(generation, ["observationOperation", "operation"])
-    ?? generation.operation;
+  return (
+    metadataString(generation, ["observationOperation", "operation"]) ??
+    generation.operation
+  );
 }
 
 function metadataString(record: Record<string, unknown>, keys: string[]) {
-  const metadata = record.metadataJson && typeof record.metadataJson === "object"
-    ? record.metadataJson as Record<string, unknown>
-    : {};
+  const metadata =
+    record.metadataJson && typeof record.metadataJson === "object"
+      ? (record.metadataJson as Record<string, unknown>)
+      : {};
   for (const key of keys) {
     const value = metadata[key];
     if (typeof value === "string" && value.trim().length > 0) {
@@ -135,8 +140,10 @@ function parsePolicyPayload(value: unknown) {
 }
 
 function generationName(generation: Record<string, unknown>) {
-  return metadataString(generation, ["observationName", "generationName", "name"])
-    ?? generation.operation;
+  return (
+    metadataString(generation, ["observationName", "generationName", "name"]) ??
+    generation.operation
+  );
 }
 
 function environmentValue(record: Record<string, unknown>) {
@@ -144,11 +151,13 @@ function environmentValue(record: Record<string, unknown>) {
 }
 
 function usageDetails(generation: Record<string, unknown>) {
-  const usage = generation.usageJson && typeof generation.usageJson === "object"
-    ? generation.usageJson as Record<string, unknown>
-    : {};
+  const usage =
+    generation.usageJson && typeof generation.usageJson === "object"
+      ? (generation.usageJson as Record<string, unknown>)
+      : {};
   const promptTokens = generation.inputTokens ?? usage.inputTokens ?? null;
-  const completionTokens = generation.outputTokens ?? usage.outputTokens ?? null;
+  const completionTokens =
+    generation.outputTokens ?? usage.outputTokens ?? null;
   const totalTokens = generation.totalTokens ?? usage.totalTokens ?? null;
   return {
     ...usage,
@@ -201,12 +210,16 @@ function fullPayloadRetentionExpired(
   if (!startedAt) {
     return false;
   }
-  const startedAtDate = startedAt instanceof Date ? startedAt : new Date(startedAt);
+  const startedAtDate =
+    startedAt instanceof Date ? startedAt : new Date(startedAt);
   if (Number.isNaN(startedAtDate.getTime())) {
     return false;
   }
   const fullPayloadRetentionDays = 30;
-  if (Date.now() - startedAtDate.getTime() <= fullPayloadRetentionDays * 24 * 60 * 60 * 1000) {
+  if (
+    Date.now() - startedAtDate.getTime() <=
+    fullPayloadRetentionDays * 24 * 60 * 60 * 1000
+  ) {
     return false;
   }
   const parsed = parsePolicyPayload(value);
@@ -320,7 +333,9 @@ export function presentGeneration(
 ) {
   const startedAt = generation.startedAt as Date | string | number | null;
   const startTime = dateValue(startedAt);
-  const endTime = dateValue(generation.endedAt as Date | string | number | null);
+  const endTime = dateValue(
+    generation.endedAt as Date | string | number | null,
+  );
   const usage = usageDetails(generation);
   return {
     id: generation.id,
@@ -340,6 +355,10 @@ export function presentGeneration(
     modelAlias: generation.modelAlias,
     provider: providerValue(generation),
     providerModel: providerModelValue(generation),
+    requestedProviderModel: generation.providerModel ?? null,
+    resolvedProviderModel: generation.resolvedProviderModel ?? null,
+    profileAlias: generation.profileAlias ?? null,
+    gatewayConfigId: generation.gatewayConfigId ?? null,
     executionMode: generation.executionMode,
     keySource: generation.keySource,
     routeStrategy: generation.routeStrategy,
@@ -352,8 +371,18 @@ export function presentGeneration(
     ),
     outputText: payload(generation.outputText, access, startedAt, options),
     finishReason: generation.finishReason,
-    reasoningText: payload(generation.reasoningText, access, startedAt, options),
-    providerFields: payload(generation.providerFieldsJson, access, startedAt, options),
+    reasoningText: payload(
+      generation.reasoningText,
+      access,
+      startedAt,
+      options,
+    ),
+    providerFields: payload(
+      generation.providerFieldsJson,
+      access,
+      startedAt,
+      options,
+    ),
     usage: generation.usageJson,
     usageDetails: usage,
     promptTokens: usage.promptTokens,
@@ -361,11 +390,46 @@ export function presentGeneration(
     inputTokens: generation.inputTokens,
     outputTokens: generation.outputTokens,
     totalTokens: generation.totalTokens,
+    reasoningTokens: generation.reasoningTokens ?? null,
+    cacheReadTokens: generation.cacheReadTokens ?? null,
+    cacheWriteTokens: generation.cacheWriteTokens ?? null,
+    cost: {
+      inlineUsd: generation.providerCostInlineUsd ?? null,
+      settledUsd: generation.providerCostSettledUsd ?? null,
+      effectiveUsd: generation.providerCostUsd ?? null,
+      source: generation.providerCostSource ?? null,
+      status: generation.providerCostStatus ?? null,
+      currency: generation.costCurrency ?? null,
+      reconciledAt: dateValue(
+        generation.costReconciledAt as Date | string | number | null,
+      ),
+    },
+    normalization: generation.normalizationJson ?? null,
     rawCaptureMode: generation.rawCaptureMode,
-    providerRequest: payload(generation.providerRequestJson, access, startedAt, options),
-    providerResponse: payload(generation.providerResponseJson, access, startedAt, options),
-    providerRequestHeaders: payload(generation.providerRequestHeadersJson, access, startedAt, options),
-    providerResponseHeaders: payload(generation.providerResponseHeadersJson, access, startedAt, options),
+    providerRequest: payload(
+      generation.providerRequestJson,
+      access,
+      startedAt,
+      options,
+    ),
+    providerResponse: payload(
+      generation.providerResponseJson,
+      access,
+      startedAt,
+      options,
+    ),
+    providerRequestHeaders: payload(
+      generation.providerRequestHeadersJson,
+      access,
+      startedAt,
+      options,
+    ),
+    providerResponseHeaders: payload(
+      generation.providerResponseHeadersJson,
+      access,
+      startedAt,
+      options,
+    ),
     providerStatusCode: generation.providerStatusCode,
     providerRequestId: generation.providerRequestId,
     rawCaptureError: generation.rawCaptureError,
@@ -385,8 +449,12 @@ export function presentGeneration(
 }
 
 export function presentGenerationSummary(generation: Record<string, unknown>) {
-  const startTime = dateValue(generation.startedAt as Date | string | number | null);
-  const endTime = dateValue(generation.endedAt as Date | string | number | null);
+  const startTime = dateValue(
+    generation.startedAt as Date | string | number | null,
+  );
+  const endTime = dateValue(
+    generation.endedAt as Date | string | number | null,
+  );
   const usage = usageDetails(generation);
   return {
     id: generation.id,

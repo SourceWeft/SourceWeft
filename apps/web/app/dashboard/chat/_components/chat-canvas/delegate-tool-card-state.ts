@@ -64,8 +64,7 @@ export function getDelegateChipTitle(prompt: string): string | null {
     return null;
   }
   const sentenceEnd = firstLine.search(/[。.!?！？]/u);
-  let title =
-    sentenceEnd > 0 ? firstLine.slice(0, sentenceEnd + 1) : firstLine;
+  let title = sentenceEnd > 0 ? firstLine.slice(0, sentenceEnd + 1) : firstLine;
   const MAX_CHARS = 48;
   if (title.length > MAX_CHARS) {
     title = `${title.slice(0, MAX_CHARS).trimEnd()}…`;

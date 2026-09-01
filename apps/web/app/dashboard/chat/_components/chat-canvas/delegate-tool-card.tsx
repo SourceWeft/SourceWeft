@@ -43,9 +43,7 @@ export function DelegateToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
         </div>
       </TaskTrigger>
       <TaskContent>
-        {view.prompt.length > 0 ? (
-          <TaskItem>{view.prompt}</TaskItem>
-        ) : null}
+        {view.prompt.length > 0 ? <TaskItem>{view.prompt}</TaskItem> : null}
         {view.report ? (
           <TaskItem>
             <MessageResponse>{view.report}</MessageResponse>

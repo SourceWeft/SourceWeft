@@ -50,5 +50,7 @@ export const videoFilePreviewRenderer: ArtifactPreviewRenderer = {
     Boolean(proxyFileUrl) &&
     isVideoFileArtifact({ artifactType: artifact.artifactType, payload }),
   render: ({ proxyFileUrl, title }) =>
-    proxyFileUrl ? <VideoFilePreview fileUrl={proxyFileUrl} title={title} /> : null,
+    proxyFileUrl ? (
+      <VideoFilePreview fileUrl={proxyFileUrl} title={title} />
+    ) : null,
 };

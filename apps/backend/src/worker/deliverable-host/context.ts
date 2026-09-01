@@ -39,9 +39,8 @@ import {
  * Assembles the narrow DeliverableHostContext a capability pipeline runs
  * against: model-gateway chat/tts/vision adapters (with BYOK profile
  * resolution), storage, audio probing, sandbox sessions and a logger.
- * Generalized from the video-presentation worker's createDefaultDeps —
- * operation strings stay `${feature}.${metadata.stage}` so audit records and
- * billing idempotency keys are unchanged for video.
+ * Operation strings stay `${feature}.${metadata.stage}` so audit records and
+ * billing idempotency keys remain stable across worker restarts.
  *
  * Usage is settled by the billed gateway wrapper, not by this file: every model
  * call goes through `openBilledModelGateway`, which charges it against the job's
@@ -115,6 +114,11 @@ export type DeliverableArtifactsAdapter = {
     expectedStatuses?: Array<"pending" | "running" | "ready" | "failed">;
     /** Optimistic lock on the artifact's published version (edit runs). */
     expectedVersionNo?: number;
+    publishRunFence?: {
+      runId: string;
+      teamId: string;
+      workspaceId: string;
+    };
   }): Promise<{ artifactId: string; versionId: string } | null>;
   markRunning(input: {
     artifactId: string;
@@ -178,6 +182,13 @@ function extractTextContent(value: unknown): string {
  */
 function isMissingStructuredOutputError(error: unknown): boolean {
   if (
+    error &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "STRUCTURED_OUTPUT"
+  ) {
+    return true;
+  }
+  if (
     error instanceof Error &&
     error.message.includes("no parsed structured output")
   ) {
@@ -186,6 +197,16 @@ function isMissingStructuredOutputError(error: unknown): boolean {
   const metadata = (error as { metadata?: Record<string, unknown> } | null)
     ?.metadata;
   return Boolean(metadata && "structuredOutputDiagnostics" in metadata);
+}
+
+function missingStructuredOutputError() {
+  return Object.assign(
+    new Error("Deliverable pipeline LLM returned no parsed structured output"),
+    {
+      code: "STRUCTURED_OUTPUT" as const,
+      retryable: true,
+    },
+  );
 }
 
 export function resolveWorkerThinking(input: {
@@ -503,9 +524,7 @@ export function createDefaultDeliverableRuntimeResolver(input: {
             );
             const result = await chatGateway.chat.complete(request, options);
             if (!result.structuredOutput) {
-              throw new Error(
-                "Deliverable pipeline LLM returned no parsed structured output",
-              );
+              throw missingStructuredOutputError();
             }
             return result.structuredOutput;
           };
@@ -653,15 +672,13 @@ export function createDefaultDeliverableRuntimeResolver(input: {
               teamId: job.teamId,
               workspaceId: job.workspaceId,
             });
-            const recordShape = record as
-              | {
-                  artifactType?: string;
-                  status?: string;
-                  storageKey?: string | null;
-                  storageBucket?: string | null;
-                  payloadJson?: unknown;
-                }
-              | null;
+            const recordShape = record as {
+              artifactType?: string;
+              status?: string;
+              storageKey?: string | null;
+              storageBucket?: string | null;
+              payloadJson?: unknown;
+            } | null;
             if (
               !recordShape ||
               recordShape.artifactType !== "image" ||
@@ -675,8 +692,7 @@ export function createDefaultDeliverableRuntimeResolver(input: {
               key: recordShape.storageKey,
             });
             const payload = recordShape.payloadJson as
-              | { mimeType?: string }
-              | undefined;
+              { mimeType?: string } | undefined;
             const mimeType =
               typeof payload?.mimeType === "string"
                 ? payload.mimeType
@@ -789,7 +805,8 @@ export function createDefaultDeliverableRuntimeResolver(input: {
           }
           return {
             ...artifact,
-            latestVersionId: await repository.findLatestArtifactVersionId(input),
+            latestVersionId:
+              await repository.findLatestArtifactVersionId(input),
           };
         },
         // Failure closes the same two-phase write `completeArtifact` closes, so
@@ -847,6 +864,9 @@ export function createDefaultDeliverableRuntimeResolver(input: {
               ...(input.expectedVersionNo === undefined
                 ? {}
                 : { expectedVersionNo: input.expectedVersionNo }),
+              ...(input.publishRunFence
+                ? { publishRunFence: input.publishRunFence }
+                : {}),
             });
             return {
               artifactId: result.artifactId,

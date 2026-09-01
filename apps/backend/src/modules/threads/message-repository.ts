@@ -4,6 +4,10 @@ import { db, messages, threads } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
 import { publishThreadEvent } from "../../shared/notify-hub";
 import type { MessageRecord, MessageRole } from "../content/types";
+import {
+  mergeCommittedArtifactRenderBlocks,
+  mergeCommittedArtifactToolCalls,
+} from "./render-block-projection";
 
 type MessageRow = typeof messages.$inferSelect;
 type MessageInclude = {
@@ -58,7 +62,7 @@ function mapMessage(
     createdBy: row.createdBy,
     model: row.model,
     creditsConsumed: row.creditsConsumed,
-    contentJson: include.contentJson ? row.contentJson ?? {} : {},
+    contentJson: include.contentJson ? (row.contentJson ?? {}) : {},
     metadata: trimMetadata(row.metadata ?? {}, include),
     createdAt: row.createdAt.toISOString(),
   };
@@ -232,9 +236,7 @@ export async function listMessageRecordPageByThread(input: {
   // row at index `limit`: the strict gt/lt predicate would skip the probe row on
   // the next page and it would be lost at every boundary. Capture it before the
   // in-place reverse below mutates pageRows.
-  const boundaryRow = hasMore
-    ? (pageRows[pageRows.length - 1] ?? null)
-    : null;
+  const boundaryRow = hasMore ? (pageRows[pageRows.length - 1] ?? null) : null;
 
   // Both directions return items in ascending (chronological) order; backward
   // mode fetched descending, so it reverses.
@@ -273,18 +275,61 @@ export async function updateMessageMetadataRecord(input: {
   messageId: string;
   metadata: Record<string, unknown>;
 }) {
-  const [row] = await db
-    .update(messages)
-    .set({ metadata: input.metadata })
-    .where(
-      and(
-        eq(messages.id, input.messageId),
-        eq(messages.teamId, input.teamId),
-        eq(messages.workspaceId, input.workspaceId),
-        eq(messages.threadId, input.threadId),
-      ),
-    )
-    .returning();
+  const row = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.id, input.messageId),
+          eq(messages.teamId, input.teamId),
+          eq(messages.workspaceId, input.workspaceId),
+          eq(messages.threadId, input.threadId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!current) {
+      return null;
+    }
+    const renderBlocks = mergeCommittedArtifactRenderBlocks({
+      incoming: Array.isArray(input.metadata.renderBlocks)
+        ? input.metadata.renderBlocks
+        : undefined,
+      authoritative: [
+        Array.isArray(current.metadata?.renderBlocks)
+          ? current.metadata.renderBlocks
+          : undefined,
+      ],
+    });
+    const toolCalls = mergeCommittedArtifactToolCalls({
+      incoming: Array.isArray(input.metadata.toolCalls)
+        ? input.metadata.toolCalls
+        : undefined,
+      authoritative: [
+        {
+          toolCalls: Array.isArray(current.metadata?.toolCalls)
+            ? current.metadata.toolCalls
+            : undefined,
+          renderBlocks: Array.isArray(current.metadata?.renderBlocks)
+            ? current.metadata.renderBlocks
+            : undefined,
+        },
+      ],
+    });
+    const [updated] = await tx
+      .update(messages)
+      .set({
+        metadata: {
+          ...input.metadata,
+          ...(renderBlocks ? { renderBlocks } : {}),
+          ...(toolCalls ? { toolCalls } : {}),
+        },
+      })
+      .where(eq(messages.id, current.id))
+      .returning();
+    return updated ?? null;
+  });
 
   return row ? mapMessage(row) : null;
 }
@@ -325,18 +370,78 @@ export async function updateMessageRecord(input: {
     });
   }
 
-  const [row] = await db
-    .update(messages)
-    .set(set)
-    .where(
-      and(
-        eq(messages.id, input.messageId),
-        eq(messages.teamId, input.teamId),
-        eq(messages.workspaceId, input.workspaceId),
-        eq(messages.threadId, input.threadId),
-      ),
-    )
-    .returning();
+  const row =
+    input.metadata === undefined
+      ? (
+          await db
+            .update(messages)
+            .set(set)
+            .where(
+              and(
+                eq(messages.id, input.messageId),
+                eq(messages.teamId, input.teamId),
+                eq(messages.workspaceId, input.workspaceId),
+                eq(messages.threadId, input.threadId),
+              ),
+            )
+            .returning()
+        )[0]
+      : await db.transaction(async (tx) => {
+          const [current] = await tx
+            .select()
+            .from(messages)
+            .where(
+              and(
+                eq(messages.id, input.messageId),
+                eq(messages.teamId, input.teamId),
+                eq(messages.workspaceId, input.workspaceId),
+                eq(messages.threadId, input.threadId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!current) {
+            return null;
+          }
+          const renderBlocks = mergeCommittedArtifactRenderBlocks({
+            incoming: Array.isArray(input.metadata?.renderBlocks)
+              ? input.metadata.renderBlocks
+              : undefined,
+            authoritative: [
+              Array.isArray(current.metadata?.renderBlocks)
+                ? current.metadata.renderBlocks
+                : undefined,
+            ],
+          });
+          const toolCalls = mergeCommittedArtifactToolCalls({
+            incoming: Array.isArray(input.metadata?.toolCalls)
+              ? input.metadata.toolCalls
+              : undefined,
+            authoritative: [
+              {
+                toolCalls: Array.isArray(current.metadata?.toolCalls)
+                  ? current.metadata.toolCalls
+                  : undefined,
+                renderBlocks: Array.isArray(current.metadata?.renderBlocks)
+                  ? current.metadata.renderBlocks
+                  : undefined,
+              },
+            ],
+          });
+          const [updated] = await tx
+            .update(messages)
+            .set({
+              ...set,
+              metadata: {
+                ...input.metadata,
+                ...(renderBlocks ? { renderBlocks } : {}),
+                ...(toolCalls ? { toolCalls } : {}),
+              },
+            })
+            .where(eq(messages.id, current.id))
+            .returning();
+          return updated ?? null;
+        });
 
   return row ? mapMessage(row) : null;
 }
@@ -358,4 +463,3 @@ export async function deleteMessageRecord(input: {
       ),
     );
 }
-

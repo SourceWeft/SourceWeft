@@ -66,12 +66,7 @@ import type {
 } from "./types";
 
 export type ConnectorSettingsTab =
-  | "overview"
-  | "configuration"
-  | "sync"
-  | "actions"
-  | "webhooks"
-  | "danger";
+  "overview" | "configuration" | "sync" | "actions" | "webhooks" | "danger";
 
 function getConnectorFrequencyFormState(connector: SourceConnector) {
   if (!connector.periodicIndexingEnabled) {

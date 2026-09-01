@@ -508,8 +508,8 @@ function buildVersionedMessageGroups(
             contentJson: version.contentJson,
             command:
               group.role === "user"
-                ? ((toObjectRecord(version.metadata.command) ??
-                    undefined) as ChatSendInput["command"] | undefined)
+                ? ((toObjectRecord(version.metadata.command) ?? undefined) as
+                    ChatSendInput["command"] | undefined)
                 : undefined,
             citations: citationMetadata?.citations,
             availableCitations: citationMetadata?.availableCitations,
@@ -525,8 +525,7 @@ function buildVersionedMessageGroups(
             errorCode: toNullableString(version.metadata.errorCode),
             finishReason:
               group.role === "assistant"
-                ? (toNullableString(version.metadata.finishReason) ??
-                  undefined)
+                ? (toNullableString(version.metadata.finishReason) ?? undefined)
                 : undefined,
             threadRun:
               group.role === "assistant" && threadRun

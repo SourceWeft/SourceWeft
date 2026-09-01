@@ -1,13 +1,18 @@
+import { randomUUID } from "node:crypto";
 import type {
   AgentToolReusableArtifactQuery,
   AgentToolWebProvider,
+  AgentToolWorkBlobServices,
 } from "@sourceweft/contracts/agent-tools";
+import { AGENT_TOOL_HOST_LIMITS } from "@sourceweft/contracts/agent-tools";
 import {
   createPendingArtifactRecord,
   createReadyArtifactRecord,
   findArtifactRecord,
   findReusableArtifactRecord,
 } from "../../../artifacts/repository";
+import { readAuthorizedCurrentArtifactVersion } from "../../../artifacts/authorized-version-service";
+import { currentRunArtifactPublicationService } from "../../../artifacts/current-run-publication";
 import {
   completeArtifact,
   openArtifact,
@@ -17,17 +22,29 @@ import {
   enqueueDeliverableJob,
   type DeliverableJobPayload,
 } from "../../../content/queue";
+import {
+  deliverablesQueue,
+  getDeliverablesQueueEvents,
+} from "../../../../shared/queue";
 import { artifactStorage } from "../../../sources/storage";
+import { deleteArtifactObjectsByPrefix } from "../../../sources/storage";
 import { guardCancellableWrite } from "../../run-cancellation";
 import { logger } from "../../../../shared/logger";
+import { probeAudioDurationSeconds } from "../../../../shared/audio-duration";
 import { createAgentToolModelGatewayService } from "../../../../shared/model-gateway";
 import { runToolRetrieval } from "../turn/retrieval-runner";
 import type { TurnRuntime } from "../turn/turn-runtime";
 import { currentSourceWeftToolCallContext } from "../middleware/tool-call-context";
+import { requestChatThreadRunCancel } from "../../durable/repository";
 import type {
   CapabilityAgentToolHostServices,
   CapabilityAgentToolsForTurnInput,
 } from "./types";
+import {
+  createProtectedRunOperationCacheServices,
+  createProtectedRunReceiptServices,
+} from "../../durable/protected-agent-tool-state-repository";
+import { createRunScopedWorkBlobService } from "./work-blob-service";
 
 type ReadyArtifactRecordInput = Parameters<typeof createReadyArtifactRecord>[0];
 type PendingArtifactRecordInput = Parameters<
@@ -51,6 +68,22 @@ export function recordPublishedArtifactOutput(input: {
     artifactVersionId: input.result.versionId,
     ...input.origin,
   });
+}
+
+/** Publish first, then expose a card only for the committed result. */
+export async function publishArtifactAndRecordOutput(input: {
+  origin: Parameters<typeof recordPublishedArtifactOutput>[0]["origin"];
+  publish: typeof publishArtifact;
+  publishInput: Parameters<typeof publishArtifact>[0];
+  runtime: Pick<TurnRuntime, "renderBlocks">;
+}) {
+  const result = await input.publish(input.publishInput);
+  recordPublishedArtifactOutput({
+    origin: input.origin,
+    result,
+    runtime: input.runtime,
+  });
+  return result;
 }
 
 /**
@@ -112,6 +145,132 @@ export function createCapabilityAgentToolHostServices(
     });
   }
 
+  const protectedRunServices = prepared.threadRunId
+    ? (() => {
+        const scope = {
+          runId: prepared.threadRunId,
+          teamId: prepared.workspace.organizationId,
+          workspaceId: prepared.workspace.id,
+        };
+        const assertRootToolCall = (assertInput: {
+          toolName?: string;
+          toolCallId?: string;
+        }) => {
+          const call = currentSourceWeftToolCallContext();
+          if (
+            !call ||
+            call.producer.kind !== "main" ||
+            !call.toolCallId ||
+            (assertInput.toolName !== undefined &&
+              call.toolName !== assertInput.toolName) ||
+            (assertInput.toolCallId !== undefined &&
+              call.toolCallId !== assertInput.toolCallId)
+          ) {
+            throw new Error(
+              "PROTECTED_AGENT_TOOL_CONTEXT_MISMATCH: root tool identity is required",
+            );
+          }
+        };
+        const scopedWorkBlobs = createRunScopedWorkBlobService(scope);
+        const requireRootWorkBlobCall = async <T>(
+          operation: () => Promise<T>,
+        ) => {
+          assertRootToolCall({});
+          return operation();
+        };
+        const workBlobs: AgentToolWorkBlobServices = {
+          putIfAbsent: (workBlobInput) =>
+            requireRootWorkBlobCall(() =>
+              scopedWorkBlobs.putIfAbsent(workBlobInput),
+            ),
+          getVerified: (workBlobInput) =>
+            requireRootWorkBlobCall(() =>
+              scopedWorkBlobs.getVerified(workBlobInput),
+            ),
+          getBySemanticKey: (workBlobInput) =>
+            requireRootWorkBlobCall(() =>
+              scopedWorkBlobs.getBySemanticKey(workBlobInput),
+            ),
+          deleteScope: () =>
+            requireRootWorkBlobCall(() => scopedWorkBlobs.deleteScope()),
+        };
+        const allocatedArtifactIds = new Set<string>();
+        const currentRunArtifacts = {
+          allocateArtifactId: () => {
+            const artifactId = randomUUID();
+            allocatedArtifactIds.add(artifactId);
+            return artifactId;
+          },
+          cleanupPreallocatedArtifact: async (artifactId: string) => {
+            assertRootToolCall({});
+            if (!allocatedArtifactIds.has(artifactId)) {
+              throw new Error("ARTIFACT_PREALLOCATION_NOT_OWNED");
+            }
+            await deleteArtifactObjectsByPrefix({
+              prefix: `workspaces/${prepared.workspace.id}/artifacts/${artifactId}/`,
+            });
+            allocatedArtifactIds.delete(artifactId);
+          },
+          publishCommitted: async (
+            publicationInput: Parameters<
+              typeof currentRunArtifactPublicationService.publish
+            >[0]["artifact"],
+          ) => {
+            const call = currentSourceWeftToolCallContext();
+            assertRootToolCall({});
+            if (
+              publicationInput.mode.kind === "create" &&
+              (!publicationInput.mode.artifactId ||
+                !allocatedArtifactIds.has(publicationInput.mode.artifactId))
+            ) {
+              throw new Error("ARTIFACT_PREALLOCATION_NOT_OWNED");
+            }
+            const committed =
+              await currentRunArtifactPublicationService.publish({
+                context: {
+                  actorUserId: prepared.userId,
+                  producer: call!.producer,
+                  runId: prepared.threadRunId!,
+                  sourceToolCallId: call!.toolCallId!,
+                  sourceToolName: call!.toolName,
+                  teamId: prepared.workspace.organizationId,
+                  workspaceId: prepared.workspace.id,
+                },
+                artifact: publicationInput,
+              });
+            if (
+              committed.ok &&
+              publicationInput.mode.kind === "create" &&
+              committed.result.artifactId === publicationInput.mode.artifactId
+            ) {
+              allocatedArtifactIds.delete(publicationInput.mode.artifactId);
+            }
+            return committed.ok
+              ? {
+                  ok: true as const,
+                  result: committed.result,
+                  reused: committed.reused,
+                  versionNo: committed.versionNo,
+                }
+              : committed;
+          },
+        };
+        return {
+          currentRunArtifacts,
+          operationCache: createProtectedRunOperationCacheServices({
+            scope,
+            maxOperations: AGENT_TOOL_HOST_LIMITS.operationClaimMaxKeys,
+            assertRootToolCall,
+          }),
+          receipts: createProtectedRunReceiptServices({
+            scope,
+            assertRootToolCall,
+          }),
+          workBlobs,
+        };
+      })()
+    : null;
+
   return {
     artifacts: {
       /**
@@ -125,9 +284,12 @@ export function createCapabilityAgentToolHostServices(
       publishArtifact: async (publishInput) => {
         const origin = requireArtifactOutputOrigin();
         await runCancellation?.throwIfCancelled("publishing the artifact");
-        const result = await publishArtifact(publishInput);
-        recordArtifactOutput(origin, result);
-        return result;
+        return publishArtifactAndRecordOutput({
+          origin,
+          publish: publishArtifact,
+          publishInput,
+          runtime,
+        });
       },
       /**
        * The two-phase half of the same door, for a capability whose artifact
@@ -148,6 +310,7 @@ export function createCapabilityAgentToolHostServices(
         artifactId: string;
         spec: Parameters<typeof completeArtifact>[0]["spec"];
         expectedVersionNo?: number;
+        signal?: AbortSignal;
       }) => {
         const origin = requireArtifactOutputOrigin();
         await runCancellation?.throwIfCancelled("republishing the artifact");
@@ -159,6 +322,7 @@ export function createCapabilityAgentToolHostServices(
           ...(republishInput.expectedVersionNo !== undefined
             ? { expectedVersionNo: republishInput.expectedVersionNo }
             : {}),
+          ...(republishInput.signal ? { signal: republishInput.signal } : {}),
         });
         recordArtifactOutput(origin, result);
         return result;
@@ -205,6 +369,15 @@ export function createCapabilityAgentToolHostServices(
       findReusableArtifact: (query: AgentToolReusableArtifactQuery) =>
         findReusableArtifactRecord(query as ReusableArtifactRecordQuery),
     },
+    artifactVersions: {
+      readAuthorizedCurrentVersion: (versionInput) =>
+        readAuthorizedCurrentArtifactVersion({
+          workspaceId: prepared.workspace.id,
+          userId: prepared.userId,
+          artifactId: versionInput.artifactId,
+          expectedArtifactType: versionInput.expectedArtifactType,
+        }),
+    },
     citationRegistry: runtime.citationRegistry,
     filesystem: filesystemBackend
       ? {
@@ -215,6 +388,13 @@ export function createCapabilityAgentToolHostServices(
         }
       : undefined,
     logger,
+    media: {
+      probeAudioDurationSeconds: (mediaInput) =>
+        probeAudioDurationSeconds({
+          buffer: Buffer.from(mediaInput.bytes),
+          mimeType: mediaInput.mimeType,
+        }),
+    },
     llm,
     modelGateway: createAgentToolModelGatewayService({
       billing,
@@ -229,6 +409,14 @@ export function createCapabilityAgentToolHostServices(
         messageId: prepared.userMessage.id,
       },
     }),
+    ...(protectedRunServices
+      ? {
+          operationCache: protectedRunServices.operationCache,
+          receipts: protectedRunServices.receipts,
+          workBlobs: protectedRunServices.workBlobs,
+          currentRunArtifacts: protectedRunServices.currentRunArtifacts,
+        }
+      : {}),
     queue: {
       /**
        * Dispatch counterpart of the worker's pipeline registry: the capability
@@ -247,7 +435,7 @@ export function createCapabilityAgentToolHostServices(
         // deliverables queue, which would outlive the cancelled turn.
         await runCancellation?.throwIfCancelled("enqueueing the deliverable");
         const origin = requireArtifactOutputOrigin();
-        return enqueueDeliverableJob({
+        const queued = await enqueueDeliverableJob({
           jobName: job.jobName,
           jobId: job.jobId,
           payload: {
@@ -255,6 +443,63 @@ export function createCapabilityAgentToolHostServices(
             artifactOutputOrigin: origin,
           } as DeliverableJobPayload,
         });
+        const cancel = async () => {
+          await requestChatThreadRunCancel({
+            runId: origin.threadRunId,
+            teamId: prepared.workspace.organizationId,
+            workspaceId: prepared.workspace.id,
+          });
+          const state = await queued.getState().catch(() => "unknown");
+          if (
+            state === "waiting" ||
+            state === "delayed" ||
+            state === "paused"
+          ) {
+            await queued.remove().catch(() => undefined);
+          }
+        };
+        return {
+          cancel,
+          id: String(queued.id ?? job.jobId),
+          waitUntilFinished: async (waitInput?: { timeoutMs?: number }) => {
+            try {
+              return await queued.waitUntilFinished(
+                getDeliverablesQueueEvents(),
+                waitInput?.timeoutMs,
+              );
+            } catch (error) {
+              let deliverableJobState = await queued
+                .getState()
+                .catch(() => "unknown");
+              const readCompletedResult = async () => {
+                const completed = await deliverablesQueue.getJob(job.jobId);
+                return completed
+                  ? { found: true as const, value: completed.returnvalue }
+                  : { found: false as const };
+              };
+              if (deliverableJobState === "completed") {
+                const completed = await readCompletedResult();
+                if (completed.found) return completed.value;
+              }
+              if (deliverableJobState !== "failed") {
+                await cancel();
+                deliverableJobState = await queued
+                  .getState()
+                  .catch(() => "unknown");
+                if (deliverableJobState === "completed") {
+                  const completed = await readCompletedResult();
+                  if (completed.found) return completed.value;
+                }
+              }
+              throw Object.assign(
+                error instanceof Error
+                  ? error
+                  : new Error(String(error || "Deliverable job wait failed")),
+                { deliverableJobState },
+              );
+            }
+          },
+        };
       },
     },
     retrieval: {
@@ -292,9 +537,19 @@ export function createCapabilityAgentToolHostServices(
     },
     sandbox: sandboxRuntime
       ? {
-          allowedReadRoots: sandboxRuntime.pathPolicy.readWriteRoots,
-          downloadCurrentFile: (downloadInput: { sandboxPath: string }) =>
-            sandboxRuntime.downloadFile(downloadInput),
+          allowedReadRoots: sandboxRuntime.trustedHost.allowedReadRoots,
+          ensureCurrentSession: () =>
+            sandboxRuntime.trustedHost.ensureCurrentSession(),
+          uploadCurrentFiles: (files, options) =>
+            sandboxRuntime.trustedHost.uploadCurrentFiles(files, options),
+          listCurrentFiles: (listInput) =>
+            sandboxRuntime.trustedHost.listCurrentFiles(listInput),
+          downloadCurrentFile: (downloadInput) =>
+            sandboxRuntime.trustedHost.downloadCurrentFile(downloadInput),
+          executeCurrent: (executeInput) =>
+            sandboxRuntime.trustedHost.executeCurrent(executeInput),
+          captureCurrentTree: (captureInput) =>
+            sandboxRuntime.trustedHost.captureCurrentTree(captureInput),
         }
       : undefined,
     storage: artifactStorage,

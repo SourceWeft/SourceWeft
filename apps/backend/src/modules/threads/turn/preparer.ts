@@ -130,7 +130,7 @@ import {
   resolveCapabilitySkillRuntimeWorkflow,
 } from "./capability-command-workflows";
 import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
-import { normalizeInvokedSkillIds } from "./invoked-skills";
+import { resolveActiveSkillPromptIds } from "./invoked-skills";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -1448,9 +1448,10 @@ export async function prepareThreadTurn(
   });
   const invokedSkillIds = Array.from(
     new Set([
-      ...normalizeInvokedSkillIds({
+      ...resolveActiveSkillPromptIds({
         enabledSkills,
-        requestedSkillIds: input.tools?.invokedSkillIds,
+        invokedSkillIds: input.tools?.invokedSkillIds,
+        selectedSkillIds,
       }),
       ...(commandSkillId ? [commandSkillId] : []),
       ...(invocationSkillId ? [invocationSkillId] : []),
@@ -1615,7 +1616,9 @@ export async function prepareThreadTurn(
     toolPermissions,
     tools: effectiveTools,
   });
-  const commandSuccessCriteria = resolvedCommand?.workflow?.successCriteria;
+  const commandSuccessCriteria =
+    resolvedCommand?.workflow?.successCriteria ??
+    selectedSkillRuntime.successCriteria;
   const mcpTools = {};
   const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
@@ -1894,6 +1897,9 @@ export async function prepareThreadTurn(
     command: resolvedCommand,
     invocation: resolvedInvocation,
     commandSuccessCriteria: commandSuccessCriteria ?? { kind: "none" },
+    ...(selectedSkillRuntime.toolPolicy
+      ? { activeToolPolicy: selectedSkillRuntime.toolPolicy }
+      : {}),
     toolPermissions,
     effectiveTools,
     runtimeTools,

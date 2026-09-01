@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, lt, ne, or, sql } from "drizzle-orm";
-import { artifacts, artifactVersions, db } from "@sourceweft/db";
+import { and, desc, eq, gt, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+import {
+  artifacts,
+  artifactVersions,
+  chatThreadRuns,
+  db,
+} from "@sourceweft/db";
 import { visibleContentWhere } from "../workspace/content-visibility";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
@@ -206,9 +211,9 @@ export async function findReusableArtifactRecord(input: {
         const payload = candidate.payloadJson;
         return Boolean(
           payload &&
-            typeof payload === "object" &&
-            !Array.isArray(payload) &&
-            input.matchesPayload!(payload as Record<string, unknown>),
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          input.matchesPayload!(payload as Record<string, unknown>),
         );
       })
     : rows[0];
@@ -299,6 +304,16 @@ export async function markArtifactReady(input: {
    * loaded the payload, and the CAS fails if anything published since.
    */
   expectedVersionNo?: number;
+  /**
+   * Optional durable-run fence for a deliverable owned by a chat turn. The run
+   * row is locked in this same transaction so cancellation and publication
+   * have one serialization point.
+   */
+  publishRunFence?: {
+    runId: string;
+    teamId: string;
+    workspaceId: string;
+  };
 }) {
   const versionId = randomUUID();
 
@@ -307,6 +322,29 @@ export async function markArtifactReady(input: {
   // version as the newest row — the payload and the version history disagree
   // forever.
   return db.transaction(async (tx) => {
+    if (input.publishRunFence) {
+      const [run] = await tx
+        .select({ status: chatThreadRuns.status })
+        .from(chatThreadRuns)
+        .where(
+          and(
+            eq(chatThreadRuns.id, input.publishRunFence.runId),
+            eq(chatThreadRuns.teamId, input.publishRunFence.teamId),
+            eq(chatThreadRuns.workspaceId, input.publishRunFence.workspaceId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (
+        !run ||
+        (run.status !== "queued" &&
+          run.status !== "running" &&
+          run.status !== "waiting_for_approval")
+      ) {
+        return null;
+      }
+    }
+
     const [current] = await tx
       .select({
         storageBucket: artifacts.storageBucket,
@@ -517,6 +555,146 @@ export async function findArtifactRecord(input: {
   return row ? mapArtifact(row) : null;
 }
 
+/**
+ * Read the immutable version currently published by one ready artifact.
+ *
+ * The join on `currentVersionNo` is the important part of this query. Looking
+ * up the maximum version independently can race publication and can also pick
+ * an orphan/history row that the artifact has never made current. Tenant,
+ * workspace, status, and type predicates stay in the same statement so callers
+ * never receive a version before all host-owned structural checks have passed.
+ * Row visibility is actor-specific and remains in the application service.
+ */
+export async function findCurrentReadyArtifactVersionRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+  expectedArtifactType: string;
+}) {
+  const [row] = await db
+    .select({
+      artifactId: artifacts.id,
+      artifactType: artifacts.artifactType,
+      currentVersionNo: artifacts.currentVersionNo,
+      visibility: artifacts.visibility,
+      createdBy: artifacts.createdBy,
+      storageBucket: artifacts.storageBucket,
+      previewStorageKey: artifacts.previewStorageKey,
+      versionId: artifactVersions.id,
+      versionNo: artifactVersions.versionNo,
+      contentJson: artifactVersions.contentJson,
+    })
+    .from(artifacts)
+    .innerJoin(
+      artifactVersions,
+      and(
+        eq(artifactVersions.artifactId, artifacts.id),
+        eq(artifactVersions.teamId, artifacts.teamId),
+        eq(artifactVersions.workspaceId, artifacts.workspaceId),
+        eq(artifactVersions.versionNo, artifacts.currentVersionNo),
+      ),
+    )
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.artifactType, input.expectedArtifactType as ArtifactType),
+        eq(artifacts.status, "ready"),
+        gt(artifacts.currentVersionNo, 0),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+export async function listCurrentReadyArtifactVersionRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactIds: readonly string[];
+}) {
+  if (input.artifactIds.length === 0) return [];
+  return db
+    .select({
+      artifactId: artifacts.id,
+      artifactType: artifacts.artifactType,
+      currentVersionNo: artifacts.currentVersionNo,
+      visibility: artifacts.visibility,
+      createdBy: artifacts.createdBy,
+      storageBucket: artifacts.storageBucket,
+      previewStorageKey: artifacts.previewStorageKey,
+      versionId: artifactVersions.id,
+      versionNo: artifactVersions.versionNo,
+      contentJson: artifactVersions.contentJson,
+    })
+    .from(artifacts)
+    .innerJoin(
+      artifactVersions,
+      and(
+        eq(artifactVersions.artifactId, artifacts.id),
+        eq(artifactVersions.teamId, artifacts.teamId),
+        eq(artifactVersions.workspaceId, artifacts.workspaceId),
+        eq(artifactVersions.versionNo, artifacts.currentVersionNo),
+      ),
+    )
+    .where(
+      and(
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        inArray(artifacts.id, [...input.artifactIds]),
+        eq(artifacts.status, "ready"),
+        gt(artifacts.currentVersionNo, 0),
+      ),
+    );
+}
+
+/** Read one immutable published version without falling forward to current. */
+export async function findReadyArtifactVersionRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+  artifactVersionId: string;
+}) {
+  const [row] = await db
+    .select({
+      artifact: artifacts,
+      versionId: artifactVersions.id,
+      versionNo: artifactVersions.versionNo,
+      contentJson: artifactVersions.contentJson,
+    })
+    .from(artifacts)
+    .innerJoin(
+      artifactVersions,
+      and(
+        eq(artifactVersions.id, input.artifactVersionId),
+        eq(artifactVersions.artifactId, artifacts.id),
+        eq(artifactVersions.teamId, artifacts.teamId),
+        eq(artifactVersions.workspaceId, artifacts.workspaceId),
+      ),
+    )
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.status, "ready"),
+        gt(artifacts.currentVersionNo, 0),
+        lte(artifactVersions.versionNo, artifacts.currentVersionNo),
+      ),
+    )
+    .limit(1);
+
+  return row
+    ? {
+        ...mapArtifact(row.artifact),
+        versionId: row.versionId,
+        versionNo: row.versionNo,
+        contentJson: row.contentJson,
+      }
+    : null;
+}
+
 export async function findLatestArtifactVersionId(input: {
   teamId: string;
   workspaceId: string;
@@ -543,6 +721,26 @@ export async function findLatestArtifactVersionId(input: {
     .orderBy(desc(artifactVersions.versionNo))
     .limit(1);
   return latestVersion?.id ?? null;
+}
+
+export async function listArtifactVersionContentRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+}) {
+  return db
+    .select({
+      versionId: artifactVersions.id,
+      contentJson: artifactVersions.contentJson,
+    })
+    .from(artifactVersions)
+    .where(
+      and(
+        eq(artifactVersions.teamId, input.teamId),
+        eq(artifactVersions.workspaceId, input.workspaceId),
+        eq(artifactVersions.artifactId, input.artifactId),
+      ),
+    );
 }
 
 /**
@@ -699,14 +897,18 @@ export async function listArtifactSummaryRecords(input: {
       artifactType: artifacts.artifactType,
       status: artifacts.status,
       title: artifacts.title,
-      promptExcerpt: sql<string | null>`nullif(left(${artifacts.promptText}, 300), '')`,
+      promptExcerpt: sql<
+        string | null
+      >`nullif(left(${artifacts.promptText}, 300), '')`,
       visibility: artifacts.visibility,
       createdAt: artifacts.createdAt,
       completedAt: artifacts.completedAt,
       updatedAt: artifacts.updatedAt,
       hasPrimaryFile: sql<boolean>`${artifacts.status} = 'ready' and ${artifacts.storageKey} is not null`,
       hasPreviewImage: sql<boolean>`${artifacts.status} = 'ready' and ${artifacts.previewStorageKey} is not null`,
-      previewAltText: sql<string | null>`nullif(left(${artifacts.previewMetadataJson} ->> 'altText', 300), '')`,
+      previewAltText: sql<
+        string | null
+      >`nullif(left(${artifacts.previewMetadataJson} ->> 'altText', 300), '')`,
     })
     .from(artifacts)
     .where(and(...conditions))

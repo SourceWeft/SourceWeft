@@ -1,39 +1,26 @@
-import { VIDEO_LAYOUT_PRIMITIVES_TSX } from "@sourceweft/video-presentation-runtime/layout-source";
-import type { VideoPresentationProjectPayload } from "@sourceweft/contracts/video-presentation";
+import { VIDEO_LAYOUT_PRIMITIVES_TSX } from "./layout-source";
+import type { VideoPresentationRenderableProject } from "@sourceweft/contracts/video-presentation";
 import { VIDEO_SCENE_COMPONENT_NAME } from "./config";
-import { REMOTION_BROWSER_ENV_VAR } from "./renderer-version";
-import { normalizeSceneProjectCode } from "./scene-gen";
+import {
+  REMOTION_BROWSER_ENV_VAR,
+  REMOTION_RENDERER_VERSION,
+} from "./renderer-version";
+import { normalizeSceneProjectCode } from "./scene-source";
+import { VIDEO_PRESENTATION_PNPM_LOCK } from "./project-pnpm-lock";
 
 /**
  * Browser resolution prelude shared by every render script.
  *
- * A platform-staged Chrome Headless Shell arrives as an absolute path in
- * `SOURCEWEFT_REMOTION_BROWSER` (set per command by `runProjectInSession`);
- * Remotion then never touches the network. Without it the scripts fall back
- * to Remotion's own download — the runtime-asset ladder's native rung — with
- * retries, because a single ECONNRESET from the CDN used to sink stills,
- * visual QA and the artifact cover in one silent chain
- * (docs/architecture/sandbox-runtime-assets.md).
+ * The trusted sandbox image provides Chrome Headless Shell as an absolute path
+ * in `SOURCEWEFT_REMOTION_BROWSER`. Rendering fails fast when that pinned
+ * dependency is absent; it never downloads a different browser at runtime.
  */
 const PROJECT_BROWSER_PRELUDE_LINES = [
   `const browserExecutable = process.env.${REMOTION_BROWSER_ENV_VAR} || null;`,
-  "const browserOptions = browserExecutable ? { browserExecutable } : {};",
-  "async function ensureBrowserWithRetry() {",
-  "  if (browserExecutable) {",
-  "    await ensureBrowser({ browserExecutable });",
-  "    return;",
-  "  }",
-  "  let lastError;",
-  "  for (let attempt = 1; attempt <= 4; attempt += 1) {",
-  "    try {",
-  "      await ensureBrowser();",
-  "      return;",
-  "    } catch (error) {",
-  "      lastError = error;",
-  "      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));",
-  "    }",
-  "  }",
-  "  throw lastError;",
+  'if (!browserExecutable) throw new Error("SOURCEWEFT_REMOTION_BROWSER is required by the trusted render policy");',
+  "const browserOptions = { browserExecutable };",
+  "async function ensureTrustedBrowser() {",
+  "  await ensureBrowser({ browserExecutable });",
   "}",
 ];
 
@@ -92,7 +79,7 @@ export const PROJECT_NARRATION_AUDIO_PATH = "out/audio.aac";
 export const PROJECT_BUNDLE_DIR = "out/bundle";
 
 export function buildProjectCodePayload(
-  payload: VideoPresentationProjectPayload,
+  payload: VideoPresentationRenderableProject,
   options?: {
     /**
      * Omit for the default (silent) project — the output is then byte-identical
@@ -235,8 +222,19 @@ export function buildProjectCodePayload(
         ].join("\n"),
       },
       {
+        path: "src/security.ts",
+        content: [
+          "const policy = \"default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\";",
+          'const meta = document.createElement("meta");',
+          'meta.httpEquiv = "Content-Security-Policy";',
+          "meta.content = policy;",
+          "document.head.prepend(meta);",
+        ].join("\n"),
+      },
+      {
         path: "src/index.ts",
         content: [
+          'import "./security";',
           'import { registerRoot } from "remotion";',
           'import RemotionRoot from "./Root";',
           "",
@@ -248,26 +246,20 @@ export function buildProjectCodePayload(
         content: JSON.stringify(
           {
             private: true,
+            packageManager: "pnpm@10.19.0",
             scripts: {
               build: "tsc -p tsconfig.json --noEmit",
               "render-smoke": "node scripts/render-smoke.mjs",
-              "render-stills": "node scripts/render-stills.mjs",
-              // The mp4 is produced by N+2 commands, never one: one per scene,
-              // one for the narration mix, one to join them. See the scripts
-              // themselves for why it is split that way.
-              "render-scene": "node scripts/render-scene.mjs",
-              "render-audio": "node scripts/render-audio.mjs",
-              "concat-video": "node scripts/concat-video.mjs",
             },
             dependencies: {
-              remotion: "^4.0.0",
-              react: "^18.3.1",
-              "react-dom": "^18.3.1",
+              remotion: REMOTION_RENDERER_VERSION,
+              react: "18.3.1",
+              "react-dom": "18.3.1",
             },
             devDependencies: {
-              "@types/react": "^18.3.18",
-              "@types/react-dom": "^18.3.5",
-              typescript: "^5.9.2",
+              "@types/react": "18.3.18",
+              "@types/react-dom": "18.3.5",
+              typescript: "5.9.2",
             },
           },
           null,
@@ -355,8 +347,7 @@ export function buildProjectCodePayload(
         // while `durationInFrames` was derived from the measurement taken back
         // at TTS time (see the manifest above). Failing it fails the run —
         // correctly, because a scene shorter than its narration clips that
-        // slide's speech in the browser preview as well as in the mp4, so
-        // there is no degraded-but-honest output left to fall back to.
+        // slide's speech in the rendered MP4, so validation must reject it.
         path: "scripts/render-smoke.mjs",
         content: [
           'import { existsSync, readFileSync, statSync } from "node:fs";',
@@ -391,143 +382,178 @@ export function buildProjectCodePayload(
           'console.log(JSON.stringify({ ok: true, stage: "render-smoke", slideCount: manifest.scenes.length, durationInFrames: manifest.durationInFrames }));',
         ].join("\n"),
       },
+    ],
+  };
+}
+
+export type VideoValidationSampleDescriptor = {
+  slideNumber: number;
+  sampleId: "begin" | "middle" | "end";
+  frame: number;
+  relativePath: string;
+};
+
+/** Trusted validation builder with required begin/middle/end runtime samples. */
+export function buildValidationProjectCodePayload(
+  payload: VideoPresentationRenderableProject,
+  options?: { narrationFiles?: ReadonlyArray<ProjectNarrationFile> },
+) {
+  const base = buildProjectCodePayload(payload, options);
+  let frameCursor = 0;
+  const validationSamples: VideoValidationSampleDescriptor[] = [];
+  for (const scene of payload.sceneModules) {
+    const positions = [
+      ["begin", 0],
+      ["middle", Math.floor(scene.durationInFrames / 2)],
+      ["end", Math.max(0, scene.durationInFrames - 1)],
+    ] as const;
+    for (const [sampleId, localFrame] of positions) {
+      validationSamples.push({
+        slideNumber: scene.slideNumber,
+        sampleId,
+        frame: frameCursor + localFrame,
+        relativePath: `out/slide-${scene.slideNumber}-${sampleId}.jpeg`,
+      });
+    }
+    frameCursor += scene.durationInFrames;
+  }
+  const packageFile = base.files.find((file) => file.path === "package.json");
+  if (!packageFile) {
+    throw new Error("VIDEO_VALIDATION_BUILDER_PACKAGE_MISSING");
+  }
+  const packageJson = JSON.parse(packageFile.content) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
+  };
+  const validationScripts = { ...(packageJson.scripts ?? {}) };
+  const files = base.files
+    .filter((file) => file.path !== "package.json")
+    .concat([
       {
-        // Renders one mid-narration frame per slide for the visual QA stage.
-        // Infra failures (no chromium in the sandbox image, bundle errors)
-        // exit non-zero; the worker treats that as "skip visual QA", never as
-        // a pipeline failure.
-        path: "scripts/render-stills.mjs",
+        path: "package.json",
+        content: JSON.stringify(
+          {
+            ...packageJson,
+            dependencies: {
+              ...(packageJson.dependencies ?? {}),
+              "@remotion/bundler": REMOTION_RENDERER_VERSION,
+              "@remotion/renderer": REMOTION_RENDERER_VERSION,
+              remotion: REMOTION_RENDERER_VERSION,
+              react: "18.3.1",
+              "react-dom": "18.3.1",
+            },
+            devDependencies: {
+              ...(packageJson.devDependencies ?? {}),
+              "@types/react": "18.3.18",
+              "@types/react-dom": "18.3.5",
+              typescript: "5.9.2",
+            },
+            scripts: {
+              ...validationScripts,
+              "prepare-render": "node scripts/prepare-render.mjs",
+              "render-validation-samples":
+                "node scripts/render-validation-samples.mjs",
+              "render-scene": "node scripts/render-scene.mjs",
+              "render-audio": "node scripts/render-audio.mjs",
+              "concat-video": "node scripts/concat-video.mjs",
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "pnpm-lock.yaml",
+        content: VIDEO_PRESENTATION_PNPM_LOCK,
+      },
+      {
+        path: "scripts/prepare-render.mjs",
         content: [
-          'import { mkdirSync, readFileSync } from "node:fs";',
+          'import { mkdirSync, readFileSync, rmSync } from "node:fs";',
           'import { bundle } from "@remotion/bundler";',
+          'import { ensureBrowser, selectComposition } from "@remotion/renderer";',
+          "",
+          ...PROJECT_BROWSER_PRELUDE_LINES,
+          "",
+          'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
+          'const outputDir = new URL("../out", import.meta.url).pathname;',
+          'const publicDir = new URL("../public", import.meta.url).pathname;',
+          `const bundleDir = new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname;`,
+          "rmSync(outputDir, { recursive: true, force: true });",
+          "mkdirSync(outputDir, { recursive: true });",
+          "mkdirSync(publicDir, { recursive: true });",
+          "await ensureTrustedBrowser();",
+          'const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: bundleDir });',
+          'const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
+          "if (composition.durationInFrames !== manifest.durationInFrames || composition.fps !== manifest.fps || composition.width !== manifest.width || composition.height !== manifest.height) {",
+          '  throw new Error("prepared composition metadata does not match manifest");',
+          "}",
+          'console.log(JSON.stringify({ ok: true, stage: "prepare-render", bundle: "out/bundle", durationInFrames: composition.durationInFrames, fps: composition.fps, width: composition.width, height: composition.height }));',
+        ].join("\n"),
+      },
+      {
+        path: "scripts/render-validation-samples.mjs",
+        content: [
+          'import { mkdirSync } from "node:fs";',
           'import { ensureBrowser, renderStill, selectComposition } from "@remotion/renderer";',
           "",
           ...PROJECT_BROWSER_PRELUDE_LINES,
           "",
-          'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
-          "await ensureBrowserWithRetry();",
-          'const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname });',
+          `const samples = ${JSON.stringify(validationSamples)};`,
+          `const serveUrl = new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname;`,
+          "await ensureTrustedBrowser();",
           'const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
           'mkdirSync(new URL("../out", import.meta.url), { recursive: true });',
-          "let frameCursor = 0;",
-          "const rendered = [];",
-          "for (const scene of manifest.scenes) {",
-          "  const frame = Math.min(composition.durationInFrames - 1, frameCursor + Math.floor(scene.durationInFrames / 2));",
-          "  const output = new URL(`../out/slide-${scene.slideNumber}.jpeg`, import.meta.url).pathname;",
+          "for (const sample of samples) {",
+          "  const frame = Math.min(composition.durationInFrames - 1, sample.frame);",
+          "  const output = new URL(`../${sample.relativePath}`, import.meta.url).pathname;",
           '  await renderStill({ composition, serveUrl, frame, output, imageFormat: "jpeg", jpegQuality: 80, ...browserOptions });',
-          "  rendered.push({ slideNumber: scene.slideNumber, frame, file: `out/slide-${scene.slideNumber}.jpeg` });",
-          "  frameCursor += scene.durationInFrames;",
           "}",
-          'console.log(JSON.stringify({ ok: true, stage: "render-stills", rendered, browserSource: browserExecutable ? "staged" : "downloaded" }));',
+          'console.log(JSON.stringify({ ok: true, stage: "render-validation-samples", rendered: samples }));',
         ].join("\n"),
       },
       {
-        // Renders ONE scene to a video chunk with @remotion/renderer — the same
-        // server-side renderer the stills path already proves works in the
-        // sandbox. This is the execution site the browser `new Function` scene
-        // compiler is meant to be replaced by: model-authored scene code only
-        // ever runs here, behind the sandbox boundary.
-        //
-        // Why one scene per invocation and not the whole composition: every
-        // sandbox command is killed at `SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS`
-        // (120s) and that limit is deliberately not being raised. A whole-deck
-        // render blows through it; a single scene is the largest unit that
-        // plausibly fits. The split is not an optimisation, it is the only
-        // thing that keeps each command inside the budget.
-        //
-        // Chunks are rendered muted: narration is mixed once by `render-audio`
-        // (see PROJECT_NARRATION_AUDIO_PATH for why per-scene audio chunks
-        // would be stitched at the wrong offsets).
-        //
-        // Dormant until something invokes `pnpm run render-scene`; the pipeline
-        // stages as they stand never do.
         path: "scripts/render-scene.mjs",
         content: [
           'import { createHash } from "node:crypto";',
-          'import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";',
-          'import { bundle } from "@remotion/bundler";',
+          'import { mkdirSync, readFileSync, statSync } from "node:fs";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
           ...PROJECT_BROWSER_PRELUDE_LINES,
           "",
-          '// pnpm 10 forwards a literal "--" from `pnpm run x -- 1`; skip it.',
           'const positional = process.argv.slice(2).filter((arg) => arg !== "--");',
           "const slideNumber = Number(positional[0]);",
-          "if (!Number.isInteger(slideNumber)) {",
-          "  throw new Error(`render-scene expects a slide number, got ${JSON.stringify(positional[0])}`);",
-          "}",
+          "if (!Number.isInteger(slideNumber)) throw new Error(`render-scene expects a slide number, got ${JSON.stringify(positional[0])}`);",
+          "const videoBitrate = process.env.SOURCEWEFT_VIDEO_BITRATE;",
+          "const concurrency = Number(process.env.SOURCEWEFT_VIDEO_CONCURRENCY);",
+          'if (!videoBitrate || !/^\\d+k$/u.test(videoBitrate) || !Number.isInteger(concurrency) || concurrency <= 0) throw new Error("trusted render policy environment is invalid");',
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
-          "// The scene's frame range inside the single composition: scenes are laid",
-          "// out back to back by VideoScene, so the offset is the sum of every",
-          "// earlier scene's duration. Rendering a frameRange of the real",
-          "// composition (rather than a per-scene composition) is what keeps every",
-          "// chunk encoded with identical parameters, which is what makes the",
-          "// concat a stream copy instead of a re-encode.",
           "let from = 0;",
           "let scene = null;",
           "for (const entry of manifest.scenes) {",
-          "  if (entry.slideNumber === slideNumber) {",
-          "    scene = entry;",
-          "    break;",
-          "  }",
+          "  if (entry.slideNumber === slideNumber) { scene = entry; break; }",
           "  from += entry.durationInFrames;",
           "}",
-          "if (!scene) {",
-          "  throw new Error(`no scene for slide ${slideNumber}`);",
-          "}",
-          "// Remotion's frameRange end is inclusive.",
+          "if (!scene) throw new Error(`no scene for slide ${slideNumber}`);",
           "const to = from + scene.durationInFrames - 1;",
           `const chunkDir = new URL("../${PROJECT_SCENE_CHUNK_DIR}/", import.meta.url).pathname;`,
           "mkdirSync(chunkDir, { recursive: true });",
           "const chunkFile = `${chunkDir}scene-${slideNumber}.ts`;",
-          "const sidecarFile = `${chunkDir}scene-${slideNumber}.json`;",
-          "// Resumability: chunks survive on the sandbox filesystem between",
-          "// commands, so a rerun after a mid-deck failure re-renders only what is",
-          "// missing. The sidecar records the exact scene source and frame range a",
-          "// chunk was produced from, so an edited scene is never silently reused.",
-          'const digest = createHash("sha256").update(readFileSync(new URL(`../${scene.file}`, import.meta.url))).digest("hex");',
-          "const sidecar = JSON.stringify({ digest, from, to });",
-          "const reused =",
-          "  existsSync(chunkFile) &&",
-          "  existsSync(sidecarFile) &&",
-          "  statSync(chunkFile).size > 0 &&",
-          '  readFileSync(sidecarFile, "utf8") === sidecar;',
-          "if (!reused) {",
-          "  // Bundling resolves staticFile() against publicDir; create it even when",
-          "  // there is no narration so the bundler never trips over a missing path.",
-          '  const publicDir = new URL("../public", import.meta.url).pathname;',
-          "  mkdirSync(publicDir, { recursive: true });",
-          "  await ensureBrowserWithRetry();",
-          `  const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
-          '  const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
-          "  // Concurrency is left at the renderer's default (derived from the",
-          "  // sandbox's own CPU count) rather than pinned here: the sandbox owns its",
-          "  // resource budget and this script must not widen it.",
-          "  await renderMedia({",
-          '    codec: "h264-ts",',
-          "    composition,",
-          "    frameRange: [from, to],",
-          "    muted: true,",
-          "    outputLocation: chunkFile,",
-          "    serveUrl,",
-          "    ...browserOptions,",
-          "  });",
-          "  writeFileSync(sidecarFile, sidecar);",
-          "}",
-          `console.log(JSON.stringify({ ok: true, stage: "render-scene", slideNumber, file: \`${PROJECT_SCENE_CHUNK_DIR}/scene-\${slideNumber}.ts\`, byteLength: statSync(chunkFile).size, from, to, reused }));`,
+          `const serveUrl = new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname;`,
+          "await ensureTrustedBrowser();",
+          'const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
+          'await renderMedia({ codec: "h264-ts", composition, concurrency, frameRange: [from, to], muted: true, outputLocation: chunkFile, serveUrl, videoBitrate, ...browserOptions });',
+          "const bytes = readFileSync(chunkFile);",
+          'const contentDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;',
+          `console.log(JSON.stringify({ ok: true, stage: "render-scene", slideNumber, file: \`${PROJECT_SCENE_CHUNK_DIR}/scene-\${slideNumber}.ts\`, byteLength: statSync(chunkFile).size, contentDigest, from, to, reused: false }));`,
         ].join("\n"),
       },
       {
-        // Renders the narration for the WHOLE composition in one pass, to a
-        // single aac file. This is the one remaining whole-deck command, and it
-        // is affordable because an audio-only render rasterises no frames — the
-        // browser only has to evaluate the timeline to collect audio assets.
-        //
-        // It is skipped entirely when the deck has no narration.
         path: "scripts/render-audio.mjs",
         content: [
-          'import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";',
-          'import { bundle } from "@remotion/bundler";',
+          'import { createHash } from "node:crypto";',
+          'import { mkdirSync, readFileSync, statSync } from "node:fs";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
           ...PROJECT_BROWSER_PRELUDE_LINES,
@@ -536,88 +562,54 @@ export function buildProjectCodePayload(
           "const hasNarration = manifest.scenes.some((scene) => Boolean(scene.narrationFile));",
           `const output = new URL("../${PROJECT_NARRATION_AUDIO_PATH}", import.meta.url).pathname;`,
           "if (!hasNarration) {",
-          `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: null, byteLength: 0, reused: false }));`,
+          '  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: null, byteLength: 0, contentDigest: null }));',
           "} else {",
-          "  // Same resume rule as the scene chunks: an audio mix already on disk is",
-          "  // reused, so a retry after a failed scene does not re-render it.",
-          "  const reused = existsSync(output) && statSync(output).size > 0;",
-          "  if (!reused) {",
-          '    const publicDir = new URL("../public", import.meta.url).pathname;',
-          "    mkdirSync(publicDir, { recursive: true });",
-          '    mkdirSync(new URL("../out", import.meta.url).pathname, { recursive: true });',
-          "    await ensureBrowserWithRetry();",
-          `    const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
-          '    const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
-          "    await renderMedia({",
-          '      codec: "aac",',
-          "      composition,",
-          "      outputLocation: output,",
-          "      serveUrl,",
-          "      ...browserOptions,",
-          "    });",
-          "  }",
-          `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: ${JSON.stringify(PROJECT_NARRATION_AUDIO_PATH)}, byteLength: statSync(output).size, reused }));`,
+          "  const audioBitrate = process.env.SOURCEWEFT_AUDIO_BITRATE;",
+          '  if (!audioBitrate || !/^\\d+k$/u.test(audioBitrate)) throw new Error("trusted audio bitrate is invalid");',
+          '  mkdirSync(new URL("../out", import.meta.url).pathname, { recursive: true });',
+          `  const serveUrl = new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname;`,
+          "  await ensureTrustedBrowser();",
+          '  const composition = await selectComposition({ serveUrl, id: "video-presentation", ...browserOptions });',
+          '  await renderMedia({ audioBitrate, codec: "aac", composition, outputLocation: output, serveUrl, ...browserOptions });',
+          "  const bytes = readFileSync(output);",
+          '  const contentDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;',
+          `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: ${JSON.stringify(PROJECT_NARRATION_AUDIO_PATH)}, byteLength: statSync(output).size, contentDigest }));`,
           "}",
         ].join("\n"),
       },
       {
-        // Joins the per-scene chunks (and the narration mix, if any) into the
-        // deliverable mp4 with @remotion/renderer's `combineChunks` — the same
-        // primitive Remotion Lambda uses to stitch its distributed chunks.
-        //
-        // For an h264 output `combineChunks` concatenates video with ffmpeg's
-        // `concat:` protocol and `-c:v copy`: a stream copy, no re-encode, which
-        // is only sound because every chunk came from one frameRange of one
-        // composition and so shares codec, resolution, fps and encoder settings.
-        // That also makes this command cheap — it is I/O, not encoding — so it
-        // is not a realistic threat to the 120s command budget even for long decks.
-        //
-        // `framesPerChunk` describes the *audio* chunking, not the video: audio
-        // arrives as one file covering the whole composition, so the chunk
-        // length is the composition length. Passing the per-scene lengths here
-        // is impossible (the option is a single number) and would be wrong.
-        //
-        // Refuses to emit anything if a chunk is missing: a short video that
-        // looks complete is worse than no video.
         path: "scripts/concat-video.mjs",
         content: [
-          'import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";',
+          'import { spawnSync } from "node:child_process";',
+          'import { createHash } from "node:crypto";',
+          'import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";',
           'import { combineChunks } from "@remotion/renderer";',
           "",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
           `mkdirSync(new URL("../${PROJECT_SCENE_CHUNK_DIR}/", import.meta.url).pathname, { recursive: true });`,
           "const videoFiles = manifest.scenes.map((scene) => {",
           `  const file = new URL(\`../${PROJECT_SCENE_CHUNK_DIR}/scene-\${scene.slideNumber}.ts\`, import.meta.url).pathname;`,
-          "  if (!existsSync(file) || statSync(file).size === 0) {",
-          "    throw new Error(`missing chunk for slide ${scene.slideNumber}: ${file}`);",
-          "  }",
+          "  if (!existsSync(file) || statSync(file).size === 0) throw new Error(`missing chunk for slide ${scene.slideNumber}: ${file}`);",
           "  return file;",
           "});",
-          "if (videoFiles.length === 0) {",
-          '  throw new Error("no scene chunks to concatenate");',
-          "}",
+          'if (videoFiles.length === 0) throw new Error("no scene chunks to concatenate");',
           `const audioFile = new URL("../${PROJECT_NARRATION_AUDIO_PATH}", import.meta.url).pathname;`,
           "const hasNarration = manifest.scenes.some((scene) => Boolean(scene.narrationFile));",
-          "if (hasNarration && !(existsSync(audioFile) && statSync(audioFile).size > 0)) {",
-          '  throw new Error("narrated deck is missing its rendered audio mix");',
-          "}",
+          'if (hasNarration && !(existsSync(audioFile) && statSync(audioFile).size > 0)) throw new Error("narrated deck is missing its rendered audio mix");',
           "const audioFiles = hasNarration ? [audioFile] : [];",
+          'const temporary = new URL("../out/video.muxed.mp4", import.meta.url).pathname;',
           `const output = new URL("../${PROJECT_RENDERED_VIDEO_PATH}", import.meta.url).pathname;`,
-          "await combineChunks({",
-          '  audioCodec: "aac",',
-          "  audioFiles,",
-          '  codec: "h264",',
-          "  compositionDurationInFrames: manifest.durationInFrames,",
-          "  fps: manifest.fps,",
-          "  framesPerChunk: manifest.durationInFrames,",
-          "  outputLocation: output,",
-          "  preferLossless: false,",
-          "  videoFiles,",
-          "});",
-          "const stats = statSync(output);",
-          `console.log(JSON.stringify({ ok: true, stage: "render-video", file: ${JSON.stringify(PROJECT_RENDERED_VIDEO_PATH)}, byteLength: stats.size, durationInFrames: manifest.durationInFrames, fps: manifest.fps, width: manifest.width, height: manifest.height, hasAudio: hasNarration, sceneCount: videoFiles.length }));`,
+          "rmSync(temporary, { force: true });",
+          "rmSync(output, { force: true });",
+          'await combineChunks({ audioCodec: "aac", audioFiles, codec: "h264", compositionDurationInFrames: manifest.durationInFrames, fps: manifest.fps, framesPerChunk: manifest.durationInFrames, outputLocation: temporary, preferLossless: false, videoFiles });',
+          'const finalized = spawnSync("ffmpeg", ["-y", "-v", "error", "-i", temporary, "-c", "copy", "-movflags", "+faststart", output], { encoding: "utf8", maxBuffer: 1024 * 1024 });',
+          'if (finalized.status !== 0) throw new Error(`ffmpeg faststart failed: ${(finalized.stderr || finalized.stdout || "unknown error").slice(0, 1000)}`);',
+          "rmSync(temporary, { force: true });",
+          "const bytes = readFileSync(output);",
+          'const contentDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;',
+          `console.log(JSON.stringify({ ok: true, stage: "render-video", file: ${JSON.stringify(PROJECT_RENDERED_VIDEO_PATH)}, byteLength: bytes.byteLength, contentDigest, durationInFrames: manifest.durationInFrames, fps: manifest.fps, width: manifest.width, height: manifest.height, hasAudio: hasNarration, sceneCount: videoFiles.length }));`,
         ].join("\n"),
       },
-    ],
-  };
+    ]);
+  return { ...base, files, validationSamples };
 }

@@ -1,10 +1,9 @@
 import { z } from "zod";
 
 /**
- * Visual QA for rendered slide stills: the worker renders one frame per slide
- * in the sandbox, sends batches to the default vision model, and repairs
- * slides with severe findings. This module owns the judge prompt and the
- * verdict wire shape so they stay testable outside the worker.
+ * Visual QA for trusted sandbox scene samples. The validator sends bounded
+ * batches to the configured vision model and returns defects as evidence for
+ * the root Agent. This module owns only the judge prompt and verdict shape.
  */
 
 export const VISUAL_QA_ISSUE_TYPES = [
@@ -32,6 +31,18 @@ export const visualQaVerdictsSchema = z.object({
 
 export type VisualQaSlideVerdict = z.infer<typeof visualQaSlideVerdictSchema>;
 
+export type VideoStillForReview = {
+  slideNumber: number;
+  data: Uint8Array;
+  mimeType?: string;
+};
+
+export type StillReviewResult = {
+  verdicts: VisualQaSlideVerdict[];
+  /** Slide-number batches whose provider response was not a valid verdict. */
+  unparseableBatches: number[][];
+};
+
 export function buildVisualQaJudgePrompt(input: {
   slideNumbers: number[];
   canvas: { width: number; height: number };
@@ -53,7 +64,9 @@ export function buildVisualQaJudgePrompt(input: {
   ].join("\n");
 }
 
-export function parseVisualQaVerdicts(raw: string): VisualQaSlideVerdict[] | null {
+export function parseVisualQaVerdicts(
+  raw: string,
+): VisualQaSlideVerdict[] | null {
   const trimmed = raw
     .trim()
     .replace(/^```(?:json)?\s*/u, "")
@@ -64,4 +77,59 @@ export function parseVisualQaVerdicts(raw: string): VisualQaSlideVerdict[] | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * Run only the visual-review batching/judging step.
+ *
+ * This seam intentionally does not repair scene code or decide whether an
+ * unavailable or partial review is acceptable. The current validation flow
+ * applies that policy around these review facts.
+ */
+export async function reviewStills(input: {
+  stills: readonly VideoStillForReview[];
+  canvas: { width: number; height: number };
+  batchSize: number;
+  metadata: Record<string, unknown>;
+  completeVision: (input: {
+    images: Array<{ data: Uint8Array; mimeType: string }>;
+    metadata: Record<string, unknown>;
+    prompt: string;
+  }) => Promise<string>;
+  onUnparseableBatch?: (slideNumbers: readonly number[]) => void;
+}): Promise<StillReviewResult> {
+  if (!Number.isInteger(input.batchSize) || input.batchSize <= 0) {
+    throw new RangeError("Still review batchSize must be a positive integer");
+  }
+
+  const verdicts: VisualQaSlideVerdict[] = [];
+  const unparseableBatches: number[][] = [];
+  for (
+    let offset = 0;
+    offset < input.stills.length;
+    offset += input.batchSize
+  ) {
+    const batch = input.stills.slice(offset, offset + input.batchSize);
+    const slideNumbers = batch.map((still) => still.slideNumber);
+    const raw = await input.completeVision({
+      images: batch.map((still) => ({
+        data: still.data,
+        mimeType: still.mimeType ?? "image/jpeg",
+      })),
+      metadata: { ...input.metadata },
+      prompt: buildVisualQaJudgePrompt({
+        slideNumbers,
+        canvas: input.canvas,
+      }),
+    });
+    const parsed = parseVisualQaVerdicts(raw);
+    if (!parsed) {
+      unparseableBatches.push(slideNumbers);
+      input.onUnparseableBatch?.(slideNumbers);
+      continue;
+    }
+    verdicts.push(...parsed);
+  }
+
+  return { verdicts, unparseableBatches };
 }

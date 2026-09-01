@@ -65,7 +65,11 @@ export function isArtifactSnapshotTerminal(
 }
 
 function readGenerationRecord(payloadJson: unknown) {
-  if (!payloadJson || typeof payloadJson !== "object" || Array.isArray(payloadJson)) {
+  if (
+    !payloadJson ||
+    typeof payloadJson !== "object" ||
+    Array.isArray(payloadJson)
+  ) {
     return null;
   }
   const generation = (payloadJson as Record<string, unknown>).generation;
@@ -255,9 +259,7 @@ export function resolveToolCallArtifactId(output: unknown) {
 export function isToolOutputClaimingInProgress(output: unknown) {
   const status = getToolOutputField(output, "status");
   return (
-    status === "pending" ||
-    status === "running" ||
-    status === "processing"
+    status === "pending" || status === "running" || status === "processing"
   );
 }
 

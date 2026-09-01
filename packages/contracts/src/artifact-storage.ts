@@ -36,6 +36,8 @@ export type ArtifactStorageUploadInput = {
   readonly key: string;
   readonly body: Uint8Array;
   readonly contentType: string;
+  /** Host-owned cancellation only; never accepted from model arguments. */
+  readonly signal?: AbortSignal;
 };
 
 /**
@@ -80,11 +82,18 @@ export type ArtifactStorageDownloadResult = {
   readonly contentType: string;
 };
 
+export type ArtifactStorageDeleteInput = {
+  readonly key: string;
+  readonly bucket?: string | null;
+};
+
 /** The artifact object-storage port capability tools are handed. */
 export interface ArtifactStorage {
   buildArtifactStorageKey(input: ArtifactStorageKeyInput): string;
   getBucketName(): string;
   upload(input: ArtifactStorageUploadInput): Promise<void>;
+  /** Idempotent cleanup for an upload that cannot be committed. */
+  delete(input: ArtifactStorageDeleteInput): Promise<void>;
   /**
    * Read back an object this port wrote.
    *

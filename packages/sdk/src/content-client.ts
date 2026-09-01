@@ -40,6 +40,7 @@ import type {
   GetSourceDocumentResponse,
   GetSourceResponse,
   GetArtifactResponse,
+  GetArtifactVersionMediaResponse,
   GetSkillCatalogDetailResponse,
   IndexSourceRequest,
   IndexSourceResponse,
@@ -243,6 +244,16 @@ export class ContentClient {
     );
   }
 
+  getArtifactVersionMedia(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.get<GetArtifactVersionMediaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/versions/${encode(artifactVersionId)}/media`,
+    );
+  }
+
   deleteArtifact(workspaceId: string, artifactId: string) {
     return this.http.delete<DeleteArtifactResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,
@@ -429,10 +440,7 @@ export class ContentClient {
         id: string;
         idempotencyKey: string;
         status:
-          | "queued"
-          | "running"
-          | "cancel_requested"
-          | "waiting_for_approval";
+          "queued" | "running" | "cancel_requested" | "waiting_for_approval";
         mode: "send" | "refresh" | "edit" | "resume";
         userId: string;
         userMessageId: string | null;
@@ -593,10 +601,7 @@ export class ContentClient {
     );
   }
 
-  submitRegistrySkill(
-    workspaceId: string,
-    input: SubmitRegistrySkillRequest,
-  ) {
+  submitRegistrySkill(workspaceId: string, input: SubmitRegistrySkillRequest) {
     return this.http.post<SubmitRegistrySkillResponse>(
       `/v1/workspaces/${encode(workspaceId)}/skills/registry/submit`,
       input,

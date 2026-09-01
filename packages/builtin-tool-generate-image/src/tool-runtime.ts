@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { tool, type ToolRuntime } from "langchain";
-import type { ImageGenerateInput, ImageGenerateResult } from "@sourceweft/model-gateway";
+import type {
+  ImageGenerateInput,
+  ImageGenerateResult,
+} from "@sourceweft/model-gateway";
 import { GENERATE_IMAGE_TOOL_NAME } from "./agent-tool-defs";
 import { readGenerateImageTurnState } from "./turn-preflight";
 import {
@@ -18,7 +21,10 @@ import {
   isArtifactImageMimeType,
 } from "@sourceweft/contracts/artifact-files";
 import { ArtifactError } from "@sourceweft/contracts/artifact-errors";
-import type { AgentToolModelCallOptions } from "@sourceweft/contracts/agent-tools";
+import {
+  resolveAgentToolHostInvocationSignal,
+  type AgentToolModelCallOptions,
+} from "@sourceweft/contracts/agent-tools";
 import type {
   ArtifactPublisher,
   ArtifactPublishSpec,
@@ -154,6 +160,14 @@ function resolveToolRuntimeCallId(runtime: ToolRuntime) {
     : undefined;
 }
 
+function throwImageToolAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("The image tool invocation was aborted.", "AbortError")
+  );
+}
+
 function buildImageGatewayMetadata(input: {
   traceId?: string;
   parentSpanId?: string;
@@ -197,11 +211,15 @@ function buildImageGatewayMetadata(input: {
   };
 }
 
-async function decodeGeneratedImage(image: {
-  b64Json?: string;
-  url?: string;
-  mimeType?: string;
-}) {
+async function decodeGeneratedImage(
+  image: {
+    b64Json?: string;
+    url?: string;
+    mimeType?: string;
+  },
+  signal?: AbortSignal,
+) {
+  throwImageToolAbortReason(signal);
   if (image.b64Json) {
     return {
       body: Buffer.from(image.b64Json, "base64"),
@@ -213,7 +231,8 @@ async function decodeGeneratedImage(image: {
     throw new Error("The image provider did not return image bytes.");
   }
 
-  const response = await fetch(image.url);
+  const response = await fetch(image.url, signal ? { signal } : undefined);
+  throwImageToolAbortReason(signal);
   if (!response.ok) {
     throw new Error(`Failed to download generated image: ${response.status}`);
   }
@@ -221,8 +240,10 @@ async function decodeGeneratedImage(image: {
     .get("content-type")
     ?.split(";")[0]
     ?.trim();
+  const body = Buffer.from(await response.arrayBuffer());
+  throwImageToolAbortReason(signal);
   return {
-    body: Buffer.from(await response.arrayBuffer()),
+    body,
     mimeType:
       image.mimeType ??
       (contentType && contentType.startsWith("image/")
@@ -286,6 +307,8 @@ export function createGenerateImageTool(
       },
       runtime: ToolRuntime,
     ) => {
+      const signal = resolveAgentToolHostInvocationSignal(runtime);
+      throwImageToolAbortReason(signal);
       const prompt = args.prompt.trim();
       const title = (
         args.title?.trim() || compactArtifactText(prompt, 80)
@@ -369,6 +392,7 @@ export function createGenerateImageTool(
             : ctx.profile.modelAlias,
         referenceId: `artifact:${artifactId}`,
         idempotencyKey: `artifact-image:${artifactId}`,
+        ...(signal ? { signal } : {}),
         llm: ctx.execution,
         billingMetadata: {
           traceId: ctx.traceId,
@@ -381,6 +405,7 @@ export function createGenerateImageTool(
           style: ctx.config.style,
         },
       });
+      throwImageToolAbortReason(signal);
       const image = result.images[0];
       if (!image) {
         throw new Error("Image generation did not return an image.");
@@ -390,7 +415,7 @@ export function createGenerateImageTool(
         provider: result.provider,
         providerModel: result.providerModel,
       });
-      const decoded = await decodeGeneratedImage(image);
+      const decoded = await decodeGeneratedImage(image, signal);
       const fileName = `${sanitizeImageArtifactFileBase(title)}${imageFileExtensionForMimeType(decoded.mimeType)}`;
       assertPublishableImage({
         bytes: decoded.body,
@@ -454,8 +479,12 @@ export function createGenerateImageTool(
         ],
       };
 
+      // The provider call is the long phase. Never enter the persistent writer
+      // after the invocation deadline or user Stop won that race.
+      throwImageToolAbortReason(signal);
       const published = await deps.artifacts.publishArtifact({
         artifactId,
+        ...(signal ? { signal } : {}),
         context: {
           teamId: ctx.teamId,
           workspaceId: ctx.workspaceId,

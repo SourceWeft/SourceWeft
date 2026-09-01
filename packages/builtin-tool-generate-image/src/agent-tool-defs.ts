@@ -27,6 +27,7 @@ export const generateImageAgentTool = defineAgentTool({
     configKeys: ["aspectRatio", "quality", "style"],
   },
   defaultPermission: "allow",
+  executionTimeoutMs: 5 * 60_000,
   riskLevel: "low",
   turnSelection: {
     normalize: (raw) => normalizeGenerateImageToolSelection(raw),

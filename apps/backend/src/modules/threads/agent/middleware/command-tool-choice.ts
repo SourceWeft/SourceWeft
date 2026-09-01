@@ -1,8 +1,11 @@
 import { createMiddleware } from "langchain";
-import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "@sourceweft/contracts";
 
 export type CommandExecutionPolicy = {
-  targetToolName: string;
+  initialToolPolicy: "auto" | { kind: "force"; toolName: string };
+  toolPolicy?: {
+    allow?: readonly string[];
+    deny: readonly string[];
+  };
 };
 
 type LangChainToolChoice =
@@ -62,35 +65,65 @@ export function forcedToolChoice(toolName: string): LangChainToolChoice {
   };
 }
 
+function commandModelToolName(tool: unknown) {
+  return tool &&
+    typeof tool === "object" &&
+    !Array.isArray(tool) &&
+    "name" in tool &&
+    typeof tool.name === "string"
+    ? tool.name
+    : null;
+}
+
+export function filterCommandModelTools<Tool>(
+  tools: readonly Tool[],
+  policy: CommandExecutionPolicy["toolPolicy"],
+) {
+  if (!policy) {
+    return [...tools];
+  }
+  const allowed = policy.allow ? new Set(policy.allow) : null;
+  const denied = new Set(policy.deny);
+  return tools.filter((tool) => {
+    const name = commandModelToolName(tool);
+    return name
+      ? !denied.has(name) && (!allowed || allowed.has(name))
+      : allowed === null;
+  });
+}
+
 export function createCommandToolChoiceMiddleware(
   policy: CommandExecutionPolicy,
 ) {
   return createMiddleware({
     name: "SourceWeftCommandToolChoice",
     wrapModelCall: async (request, handler) => {
-      const targetTool = request.tools.find(
-        (tool) => tool.name === policy.targetToolName,
+      const tools = filterCommandModelTools(request.tools, policy.toolPolicy);
+      if (policy.initialToolPolicy === "auto") {
+        return handler({ ...request, tools });
+      }
+      const targetToolName = policy.initialToolPolicy.toolName;
+      const targetTool = tools.find(
+        (tool) => commandModelToolName(tool) === targetToolName,
       );
       if (!targetTool) {
         throw new Error(
-          `Command target tool '${policy.targetToolName}' is not bound to the model request.`,
+          `Command initial tool '${targetToolName}' is not available under the command tool policy.`,
         );
       }
 
       const priorTargetCalled = hasToolCallNamed(
         request.state.messages,
-        policy.targetToolName,
+        targetToolName,
       );
-      const commandRequest =
-        policy.targetToolName === GENERATE_VIDEO_PRESENTATION_TOOL_NAME
-          ? {
-              ...request,
-              modelSettings: {
-                ...request.modelSettings,
-                parallel_tool_calls: false,
-              },
-            }
-          : request;
+      const commandRequest = {
+        ...request,
+        tools,
+        modelSettings: {
+          ...request.modelSettings,
+          parallel_tool_calls: false,
+        },
+      };
       if (priorTargetCalled) {
         return handler(commandRequest);
       }
@@ -98,7 +131,7 @@ export function createCommandToolChoiceMiddleware(
       const response = await handler({
         ...commandRequest,
         tools: [targetTool],
-        toolChoice: forcedToolChoice(policy.targetToolName),
+        toolChoice: forcedToolChoice(targetToolName),
       });
       const responseCalls = messageToolCalls(response);
       if (responseCalls.length > 0) {
@@ -108,7 +141,7 @@ export function createCommandToolChoiceMiddleware(
       return handler({
         ...commandRequest,
         tools: [targetTool],
-        toolChoice: forcedToolChoice(policy.targetToolName),
+        toolChoice: forcedToolChoice(targetToolName),
       });
     },
   });

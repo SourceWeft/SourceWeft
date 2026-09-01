@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ToolMessage } from "@langchain/core/messages";
 import { test } from "vitest";
 import {
   adaptMessagesEvent,
@@ -118,6 +119,37 @@ test("adaptToolsEvent parses JSON content of an artifact-less ToolMessage", () =
   );
   assert.deepEqual(legacy?.output, { ok: true });
 });
+
+for (const error of [
+  "[AGENT_TOOL_EXECUTION_TIMEOUT] Tool 'render_video' timed out after 120000ms.",
+  "[AGENT_TOOL_TERMINATION_UNKNOWN] Tool 'render_video' could not confirm remote termination.",
+]) {
+  test(`adaptToolsEvent preserves an error ToolMessage as tool-error: ${error.split("]")[0]}]`, () => {
+    const names = new Map<string, string>([["call_error", "render_video"]]);
+    const message = new ToolMessage({
+      content: error,
+      name: "render_video",
+      status: "error",
+      tool_call_id: "call_error",
+    });
+
+    const legacy = adaptToolsEvent(
+      {
+        event: "tool-finished",
+        tool_call_id: "call_error",
+        output: message.toJSON(),
+      },
+      names,
+    );
+
+    assert.deepEqual(legacy, {
+      event: "on_tool_error",
+      name: "render_video",
+      toolCallId: "call_error",
+      error,
+    });
+  });
+}
 
 test("adaptToolsEvent maps tool-error to on_tool_error", () => {
   const legacy = adaptToolsEvent(

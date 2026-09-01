@@ -1,12 +1,10 @@
 import { ModelGatewayError } from "../errors";
-import { normalizeProviderUsage } from "../normalize/usage";
 import type {
   AsrResponseFormat,
   AsrSegment,
   AsrTimestampGranularity,
   AsrTranscribeInput,
   AsrWord,
-  UsageInfo,
 } from "../types";
 
 export const OPENAI_COMPATIBLE_ASR_AUDIO_FORMATS = [
@@ -89,7 +87,9 @@ function isExplicitMimeConflict(input: {
     return !allowedExtensions.includes(input.extension);
   }
 
-  return !normalizedMime.startsWith("audio/") && !normalizedMime.startsWith("video/");
+  return (
+    !normalizedMime.startsWith("audio/") && !normalizedMime.startsWith("video/")
+  );
 }
 
 export function resolveAsrAudioFormat(input: {
@@ -99,7 +99,9 @@ export function resolveAsrAudioFormat(input: {
   provider: string;
   model: string;
 }) {
-  const supported = new Set(input.supportedAudioFormats.map((item) => item.toLowerCase()));
+  const supported = new Set(
+    input.supportedAudioFormats.map((item) => item.toLowerCase()),
+  );
   const extension = extensionFromFileName(input.fileName);
 
   if (extension && supported.has(extension)) {
@@ -181,7 +183,9 @@ function toRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function normalizeTimedTextItem(value: unknown): { start: number; end: number; text: string } | null {
+function normalizeTimedTextItem(
+  value: unknown,
+): { start: number; end: number; text: string } | null {
   const record = toRecord(value);
   if (!record) {
     return null;
@@ -208,10 +212,12 @@ export function normalizeAsrSegments(raw: unknown): AsrSegment[] | undefined {
       return [];
     }
     const record = toRecord(item);
-    return [{
-      ...normalized,
-      ...(typeof record?.id === "number" ? { id: record.id } : {}),
-    }];
+    return [
+      {
+        ...normalized,
+        ...(typeof record?.id === "number" ? { id: record.id } : {}),
+      },
+    ];
   });
 
   return segments.length > 0 ? segments : undefined;
@@ -224,8 +230,4 @@ export function normalizeAsrWords(raw: unknown): AsrWord[] | undefined {
 
   const words = raw.flatMap((item) => normalizeTimedTextItem(item) ?? []);
   return words.length > 0 ? words : undefined;
-}
-
-export function normalizeAsrUsage(raw: Record<string, unknown>): UsageInfo | undefined {
-  return normalizeProviderUsage(raw);
 }

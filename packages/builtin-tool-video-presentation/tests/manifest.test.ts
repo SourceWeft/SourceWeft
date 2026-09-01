@@ -5,7 +5,18 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
 import { getCapabilityContributions } from "@sourceweft/capability-runtime";
-import { builtinGenerateVideoPresentationCapabilityManifest } from "../src";
+import {
+  AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
+  resolveAgentToolTimeoutMs,
+} from "@sourceweft/contracts/agent-tools";
+import { builtinVideoPresentationCapabilityManifest } from "../src";
+import { validateVideoPresentationAgentTool } from "../src/agent-tool-defs";
+import {
+  generateVideoAssetsAgentTool,
+  generateVideoNarrationAgentTool,
+  loadVideoPresentationAgentTool,
+  publishVideoPresentationAgentTool,
+} from "../src/agent-tool-defs";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -17,16 +28,63 @@ test("sourceweft.capability.json matches the package manifest export", async () 
 
   assert.deepEqual(
     JSON.parse(rawManifest),
-    builtinGenerateVideoPresentationCapabilityManifest,
+    builtinVideoPresentationCapabilityManifest,
   );
 });
 
-test("video-presentation manifest exposes executor-only tool contributions", () => {
+test("video-presentation manifest exposes only the five current typed tools", () => {
   const manifest = capabilityManifestSchema.parse(
-    builtinGenerateVideoPresentationCapabilityManifest,
+    builtinVideoPresentationCapabilityManifest,
   );
-  const tool = getCapabilityContributions(manifest).tools[0];
+  const tools = getCapabilityContributions(manifest).tools;
 
-  assert.equal(tool?.id, "generate_video_presentation");
-  assert.equal(tool?.command, undefined);
+  assert.deepEqual(
+    tools.map((tool) => tool.id),
+    [
+      "load_video_presentation",
+      "generate_video_assets",
+      "generate_video_narration",
+      "validate_video_presentation",
+      "publish_video_presentation",
+    ],
+  );
+  assert.equal(
+    tools.every((tool) => tool.command === undefined),
+    true,
+  );
+});
+
+test("trusted validation declares its host-managed browser dependency", () => {
+  assert.deepEqual(validateVideoPresentationAgentTool.sandboxRuntimeAssets, [
+    "chrome-headless-shell",
+  ]);
+});
+
+test("long-running video tools declare wall-clock budgets; ordinary tools use the host default", () => {
+  assert.equal(
+    resolveAgentToolTimeoutMs({
+      definition: loadVideoPresentationAgentTool,
+      hostMaxMs: 10 * 60_000,
+    }),
+    AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
+  );
+  assert.equal(
+    generateVideoAssetsAgentTool.executionTimeoutMs,
+    5 * 60_000,
+  );
+  assert.equal(
+    generateVideoNarrationAgentTool.executionTimeoutMs,
+    5 * 60_000,
+  );
+  assert.equal(
+    validateVideoPresentationAgentTool.executionTimeoutMs,
+    10 * 60_000,
+  );
+  assert.equal(
+    resolveAgentToolTimeoutMs({
+      definition: publishVideoPresentationAgentTool,
+      hostMaxMs: 10 * 60_000,
+    }),
+    AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
+  );
 });

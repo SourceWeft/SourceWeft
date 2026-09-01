@@ -70,7 +70,9 @@ async function flushMicrotasks() {
   }
 }
 
-function fakeConnector(overrides: Partial<SourceConnector> = {}): SourceConnector {
+function fakeConnector(
+  overrides: Partial<SourceConnector> = {},
+): SourceConnector {
   return {
     id: "c1",
     teamId: "t1",
@@ -101,7 +103,10 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let latest: HookApi | null = null;
 
-function baseInput(workspaceId: string, overrides: Partial<HookInput> = {}): HookInput {
+function baseInput(
+  workspaceId: string,
+  overrides: Partial<HookInput> = {},
+): HookInput {
   return {
     workspaceId,
     currentWorkspaceIdRef: { current: workspaceId },
@@ -176,7 +181,9 @@ test("initial load populates connectors and accounts and clears loading", async 
   const onConnectorsChange = vi.fn();
   list.mockResolvedValue({ items: [fakeConnector()] });
   listAccounts.mockResolvedValue({
-    items: [{ id: "acc1", status: "active", createdAt: "2024-01-01T00:00:00.000Z" }],
+    items: [
+      { id: "acc1", status: "active", createdAt: "2024-01-01T00:00:00.000Z" },
+    ],
   });
 
   await mountHook(baseInput("ws-load", { onConnectorsChange }));
@@ -211,7 +218,13 @@ test("handleSyncConnector marks connector busy, syncs, tracks run, then clears b
   const trackConnectorSyncRun = vi.fn();
   list.mockResolvedValue({ items: [fakeConnector()] });
   sync.mockResolvedValue({
-    run: { id: "run1", connectorId: "c1", discoveredCount: 0, indexedCount: 0, failedCount: 0 },
+    run: {
+      id: "run1",
+      connectorId: "c1",
+      discoveredCount: 0,
+      indexedCount: 0,
+      failedCount: 0,
+    },
     skipped: false,
     alreadyRunning: false,
   });
@@ -270,7 +283,9 @@ test("openConnectorSettings resolves connectorSettingsConnector; unknown id toas
     api().handleOpenConnectorSettingsById("does-not-exist");
     await flushMicrotasks();
   });
-  expect(toastError).toHaveBeenCalledWith("Connector settings are not available yet.");
+  expect(toastError).toHaveBeenCalledWith(
+    "Connector settings are not available yet.",
+  );
   expect(api().connectorSettingsConnector?.id).toBe("c1");
 });
 
@@ -307,7 +322,9 @@ test("handleConfirmDisconnectConnector deletes (soft) and clears pending state",
   });
 
   // disconnectConnectorHardDelete defaults to false -> disable: true.
-  expect(deleteConnector).toHaveBeenCalledWith("ws-disconnect", "c1", { disable: true });
+  expect(deleteConnector).toHaveBeenCalledWith("ws-disconnect", "c1", {
+    disable: true,
+  });
   expect(api().pendingDisconnectConnector).toBeNull();
   // Soft delete (not hardDeleted) must NOT trigger a sources refresh.
   expect(refreshSources).not.toHaveBeenCalled();

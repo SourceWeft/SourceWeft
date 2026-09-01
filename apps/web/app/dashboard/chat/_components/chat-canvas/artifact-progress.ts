@@ -1,8 +1,10 @@
 import { getArtifactProgressProtocol } from "@sourceweft/agent-tool-registry";
 import type {
+  ArtifactProgressProtocol,
   ArtifactProgressInput,
   ArtifactProgressView,
 } from "@sourceweft/contracts/artifact-progress";
+import { readArtifactOutputField } from "@sourceweft/contracts/artifact-progress";
 import type { ArtifactPipelineGenerationStatus } from "@sourceweft/contracts/artifact-pipeline";
 import type { ArtifactStatusSnapshot, ToolCallRecord } from "./types";
 
@@ -25,7 +27,52 @@ export type DeliverableProgressInput = {
   artifactSnapshot?: ArtifactStatusSnapshot;
 };
 
-function toProtocolInput(input: DeliverableProgressInput): ArtifactProgressInput {
+function isPersistedTerminalFailure(
+  input: DeliverableProgressInput,
+  protocol: ArtifactProgressProtocol,
+) {
+  if (
+    input.toolCallStatus !== "completed" &&
+    input.toolCallStatus !== "error"
+  ) {
+    return false;
+  }
+  const outputType = readArtifactOutputField(input.toolCallOutput, "type");
+  const outputStatus = readArtifactOutputField(input.toolCallOutput, "status");
+  return (
+    outputType !== null &&
+    protocol.outputTypeRoles[outputType] === "terminal" &&
+    (outputStatus === "failed" ||
+      outputStatus === "cancelled" ||
+      outputStatus === "stalled")
+  );
+}
+
+function toProtocolInput(
+  input: DeliverableProgressInput,
+  protocol: ArtifactProgressProtocol,
+): ArtifactProgressInput {
+  if (isPersistedTerminalFailure(input, protocol)) {
+    return {
+      toolCallOutput: input.toolCallOutput,
+      toolCallStatus: input.toolCallStatus,
+      // A completed tool result is immutable history. Use a synthetic failed
+      // snapshot so a later mutable artifact row cannot rewrite that call to
+      // ready/running, while the protocol can still read any persisted
+      // generation steps from the tool output itself.
+      artifactSnapshot: {
+        status: "failed",
+        payloadJson: input.toolCallOutput,
+        errorCode:
+          readArtifactOutputField(input.toolCallOutput, "error_code") ??
+          readArtifactOutputField(input.toolCallOutput, "errorCode"),
+        errorMessage:
+          readArtifactOutputField(input.toolCallOutput, "error") ??
+          readArtifactOutputField(input.toolCallOutput, "error_message") ??
+          readArtifactOutputField(input.toolCallOutput, "errorMessage"),
+      },
+    };
+  }
   return {
     toolCallOutput: input.toolCallOutput,
     toolCallStatus: input.toolCallStatus,
@@ -43,7 +90,7 @@ export function resolveDeliverableStatus(
 ): DeliverableGenerationStatus | null {
   const protocol = getArtifactProgressProtocol(input.toolName);
   return protocol
-    ? protocol.resolveProgressView(toProtocolInput(input)).status
+    ? protocol.resolveProgressView(toProtocolInput(input, protocol)).status
     : null;
 }
 
@@ -55,22 +102,22 @@ export function isDeliverableGenerationActive(input: DeliverableProgressInput) {
 export function resolveDeliverableProgress(
   input: DeliverableProgressInput,
 ): DeliverableProgressView | null {
+  const protocol = getArtifactProgressProtocol(input.toolName);
   return (
-    getArtifactProgressProtocol(input.toolName)?.resolveProgressView(
-      toProtocolInput(input),
-    ) ?? null
+    protocol?.resolveProgressView(toProtocolInput(input, protocol)) ?? null
   );
 }
 
 export function resolveDeliverableElapsedMs(
   input: DeliverableProgressInput & { nowMs?: number },
 ) {
-  return (
-    getArtifactProgressProtocol(input.toolName)?.resolveElapsedMs({
-      ...toProtocolInput(input),
-      ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
-    }) ?? null
-  );
+  const protocol = getArtifactProgressProtocol(input.toolName);
+  return protocol
+    ? protocol.resolveElapsedMs({
+        ...toProtocolInput(input, protocol),
+        ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
+      })
+    : null;
 }
 
 /** Display name of what the capability produces, for progress headings. */

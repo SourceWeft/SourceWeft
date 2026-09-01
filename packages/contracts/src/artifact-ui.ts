@@ -38,11 +38,7 @@ export type ToolCallView = {
 };
 
 export type ArtifactLifecycleStatus =
-  | "pending"
-  | "running"
-  | "ready"
-  | "failed"
-  | "archived";
+  "pending" | "running" | "ready" | "failed" | "archived";
 
 export type ArtifactFileCapabilities = {
   canOpenFile: boolean;
@@ -60,6 +56,7 @@ export type ArtifactFileCapabilities = {
  */
 export type ArtifactPreviewRecord = {
   id: string;
+  artifactVersionId?: string | null;
   teamId: string;
   workspaceId: string;
   threadId: string | null;
@@ -92,6 +89,7 @@ export type ArtifactStatusSnapshot = {
   errorCode: string | null;
   errorMessage: string | null;
   id: string;
+  artifactVersionId?: string | null;
   payloadJson: Record<string, unknown>;
   previewUrl: string | null;
   promptText: string | null;
@@ -147,6 +145,7 @@ export type ArtifactPreviewContext = {
   readonly pageUrl: string | null;
   readonly payload: Record<string, unknown>;
   readonly proxyFileUrl: string | null;
+  readonly previewImageUrl?: string | null;
   /**
    * Where the preview is shown. "app" (default) is the authenticated in-app
    * panel/page. "share" is the public, anonymous share page, which wants a

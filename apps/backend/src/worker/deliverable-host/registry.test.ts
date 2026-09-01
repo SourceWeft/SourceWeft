@@ -147,31 +147,3 @@ test("falls back to builtin modules when discovery throws or finds nothing", asy
   assert.deepEqual(Object.keys(afterEmpty.processors), ["fake-generate"]);
   assert.deepEqual(afterEmpty.failureCodes, { "fake-generate": "FAKE_FAILED" });
 });
-
-test("registers the real video-presentation pipeline from its builtin module", async () => {
-  const definitions = await discoverDeliverablePipelines({
-    recordsProvider: async () => [
-      {
-        packageName: "@sourceweft/builtin-tool-video-presentation",
-        rootDir: "/unused",
-        manifest: {
-          id: "sourceweft/video-presentation-tool",
-          contributes: {
-            tools: [
-              {
-                id: "generate_video_presentation",
-                runtime: {
-                  pipeline: { jobName: "video-presentation-generate" },
-                },
-              },
-            ],
-          },
-        },
-      },
-    ],
-  });
-  assert.equal(definitions.length, 1);
-  assert.equal(definitions[0]?.jobName, "video-presentation-generate");
-  assert.equal(definitions[0]?.artifactType, "video_presentation");
-  assert.equal(definitions[0]?.stages.length, 11);
-});

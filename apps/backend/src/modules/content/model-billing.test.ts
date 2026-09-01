@@ -79,7 +79,10 @@ test("skips billing when BYOK is signalled by the request execution mode", async
   assert.equal(result.billedBy, "skipped");
   assert.equal(result.skipReason, "byok");
   assert.equal(result.billing.consumedCredits, 0);
-  assert.equal((billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+  assert.equal(
+    (billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length,
+    0,
+  );
 });
 
 // Regression: computeProviderCost also classifies BYOK from the
@@ -94,7 +97,10 @@ test("skips billing when BYOK comes from the gateway config flag alone", async (
   assert.equal(result.billedBy, "skipped");
   assert.equal(result.skipReason, "byok");
   assert.equal(result.billing.consumedCredits, 0);
-  assert.equal((billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+  assert.equal(
+    (billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length,
+    0,
+  );
 });
 
 test("still applies the minimum credit floor when the price is merely missing", async () => {
@@ -114,6 +120,34 @@ test("still applies the minimum credit floor when the price is merely missing", 
   const meterConsume = billing.meterConsume as ReturnType<typeof vi.fn>;
   assert.equal(meterConsume.mock.calls.length, 1);
   assert.equal(meterConsume.mock.calls[0]?.[1]?.credits, 1);
+});
+
+test("provider policy can forbid price-book fallback while retaining explicit minimum billing", async () => {
+  providerCostMocks.computeProviderCost.mockResolvedValue({
+    providerCostUsd: null,
+    pricingSnapshot: null,
+    costSource: "missing_provider_actual",
+    missingPriceComponents: [],
+  } satisfies ProviderCostResult);
+  const billing = createBilling();
+
+  await meterBillableModelUsage({
+    ...baseInput(billing),
+    allowPriceBookFallback: false,
+  });
+
+  assert.equal(
+    providerCostMocks.computeProviderCost.mock.calls[0]?.[0]
+      ?.allowPriceBookFallback,
+    false,
+  );
+  const request = (billing.meterConsume as ReturnType<typeof vi.fn>).mock
+    .calls[0]?.[1];
+  assert.equal(request?.credits, 1);
+  assert.equal(
+    request?.metadata?.minimumCreditReason,
+    "missing_provider_actual",
+  );
 });
 
 test("bills real provider cost when one is available", async () => {
@@ -145,5 +179,8 @@ test("skips embedding and rerank kinds without computing cost", async () => {
   assert.equal(result.billedBy, "skipped");
   assert.equal(result.skipReason, "model_kind_not_user_billed");
   assert.equal(providerCostMocks.computeProviderCost.mock.calls.length, 0);
-  assert.equal((billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+  assert.equal(
+    (billing.meterConsume as ReturnType<typeof vi.fn>).mock.calls.length,
+    0,
+  );
 });

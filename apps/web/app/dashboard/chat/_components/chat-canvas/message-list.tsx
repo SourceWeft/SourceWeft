@@ -1,5 +1,12 @@
 import { memo, useMemo, useState } from "react";
-import { Bot, ChevronDown, Copy, Loader2, Pencil, RotateCcw } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  Copy,
+  Loader2,
+  Pencil,
+  RotateCcw,
+} from "lucide-react";
 import {
   Task,
   TaskContent,
@@ -488,7 +495,9 @@ function AssistantMessageBody({
   });
   const renderBlocks = renderState.bodyBlocks;
   const cancelledNotice =
-    renderState.status === "cancelled" ? "Generation stopped by the user." : null;
+    renderState.status === "cancelled"
+      ? "Generation stopped by the user."
+      : null;
   const isWorkflowRunning = renderState.status === "running";
   const segments = buildAssistantRenderSegments(renderBlocks);
   let lastWorkflowSegmentId: string | null = null;
@@ -744,7 +753,9 @@ function AssistantMessageBody({
                   const isRunning = view?.status === "running";
                   const chipTitle =
                     (view ? getDelegateChipTitle(view.prompt) : null) ??
-                    subagentDisplayName(view?.subagentType ?? item.subagentType);
+                    subagentDisplayName(
+                      view?.subagentType ?? item.subagentType,
+                    );
                   const duration =
                     toolCall?.latencyMs != null &&
                     Number.isFinite(toolCall.latencyMs)
@@ -825,7 +836,9 @@ function AssistantMessageBody({
                                 Result
                               </span>
                               <div className="pl-1 text-sm">
-                                <CitationAwareMessageResponse citations={undefined}>
+                                <CitationAwareMessageResponse
+                                  citations={undefined}
+                                >
                                   {view.report}
                                 </CitationAwareMessageResponse>
                               </div>

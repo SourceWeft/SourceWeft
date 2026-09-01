@@ -96,7 +96,9 @@ export function applySkillModelPresetState(input: {
 
     if (input.selectionSources[type] === "skill") {
       const model =
-        input.baseSelectedModels[type] ?? input.availableModels[type][0] ?? null;
+        input.baseSelectedModels[type] ??
+        input.availableModels[type][0] ??
+        null;
       if (!sameModel(input.selectedModels[type], model)) {
         nextModels[type] = model;
         modelsChanged = true;

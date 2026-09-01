@@ -13,7 +13,7 @@ test("renders a committed sub-agent artifact without generation motion", async (
   document.body.append(container);
   const root = createRoot(container);
   const snapshot: ArtifactStatusSnapshot = {
-    artifactType: "video_presentation",
+    artifactType: "slides",
     capabilities: {
       canDownloadFile: false,
       canOpenFile: true,
@@ -36,14 +36,11 @@ test("renders a committed sub-agent artifact without generation motion", async (
     status: "ready",
     teamId: "team-1",
     threadId: "thread-1",
-    title: "Demo video",
+    title: "Demo deck",
     updatedAt: new Date().toISOString(),
     workspaceId: "workspace-1",
   };
-  const block: Extract<
-    MessageRenderBlock,
-    { type: "artifact_output" }
-  > = {
+  const block: Extract<MessageRenderBlock, { type: "artifact_output" }> = {
     artifactId: snapshot.id,
     artifactVersionId: "version-1",
     id: "artifact-output:run-1:artifact-1:version-1",
@@ -65,7 +62,7 @@ test("renders a committed sub-agent artifact without generation motion", async (
     );
   });
 
-  assert.match(container.textContent ?? "", /Demo video/);
+  assert.match(container.textContent ?? "", /Demo deck/);
   assert.match(container.textContent ?? "", /general-purpose/);
   assert.equal(container.querySelectorAll(".animate-spin").length, 0);
 

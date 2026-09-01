@@ -494,8 +494,7 @@ export function DashboardChatPageClient() {
 
     function applyModelCatalog(
       catalog:
-        | ListThreadModelCatalogResponse
-        | ListThreadModelSelectorCatalogResponse,
+        ListThreadModelCatalogResponse | ListThreadModelSelectorCatalogResponse,
     ) {
       const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
       const kindEnabled = {

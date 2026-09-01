@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { extractReport, getDelegateChipTitle } from "./delegate-tool-card-state";
+import {
+  extractReport,
+  getDelegateChipTitle,
+} from "./delegate-tool-card-state";
 
 describe("getDelegateChipTitle", () => {
   it("takes the first sentence of the brief (Chinese)", () => {
-    expect(
-      getDelegateChipTitle("验证等式 1+1=2。请用直接计算验证。"),
-    ).toBe("验证等式 1+1=2。");
+    expect(getDelegateChipTitle("验证等式 1+1=2。请用直接计算验证。")).toBe(
+      "验证等式 1+1=2。",
+    );
   });
 
   it("takes the first sentence of the brief (English)", () => {
-    expect(
-      getDelegateChipTitle("Verify 1+2=3. Use any available tools."),
-    ).toBe("Verify 1+2=3.");
+    expect(getDelegateChipTitle("Verify 1+2=3. Use any available tools.")).toBe(
+      "Verify 1+2=3.",
+    );
   });
 
   it("uses the first non-empty line when there is no sentence break", () => {
@@ -36,8 +39,7 @@ describe("extractReport", () => {
   it("unwraps the clean markdown report from a serialized LangGraph Command", () => {
     // Shape deepagents' `task` tool produces: a Command whose single overriding
     // ToolMessage carries the report prose under kwargs.content.
-    const content =
-      "## 验证报告：等式 1 + 1 = 2\n\n**结论**：✅ **成立**";
+    const content = "## 验证报告：等式 1 + 1 = 2\n\n**结论**：✅ **成立**";
     const output = {
       goto: [],
       update: {

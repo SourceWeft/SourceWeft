@@ -1,4 +1,7 @@
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import type {
+  ModelCallObservation,
+  UsageInfo,
+} from "@sourceweft/model-gateway";
 import type { LlmExecutionConfig } from "../../../modules/content/model-gateway-audit";
 import type { ModelProfileKind } from "../../../modules/content/types";
 
@@ -70,6 +73,7 @@ export type MeteredModelCallTrace = {
   profileAlias: string | null;
   gatewayConfigId: string;
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   billingStatus: "metered" | "skipped" | "covered" | "meter_failed";
   consumedCredits: number;
   billedBy?: "provider_cost" | "minimum_credit" | "skipped";

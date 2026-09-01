@@ -56,7 +56,16 @@ import {
   executeStructuredOutput,
   type StructuredOutputMethod,
 } from "./structured-output";
-import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
+import { decorateProviderChatRequest } from "../observation/provider";
+import {
+  mergeModelCallObservations,
+  normalizeModelCallObservation,
+} from "../observation/normalize";
+import {
+  createProviderResponseCapture,
+  runWithProviderResponseCapture,
+  type ProviderResponseCapture,
+} from "../observation/response-capture";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
@@ -125,35 +134,40 @@ export function createChatModel(input: {
   payload: ChatCompleteInput;
   options?: RequestOptions;
 }): LangChainChatModelLike {
-  const injected = input.config.langchainFactories?.createChatModel?.({
+  const decorated = decorateProviderChatRequest({
     target: input.target,
     payload: input.payload,
+  });
+  const injected = input.config.langchainFactories?.createChatModel?.({
+    target: decorated.target,
+    payload: decorated.payload,
     options: input.options,
     config: input.config,
   });
   const model =
     injected ??
     getChatAdapter(input.target.providerKind).createModel(
-      input.target,
-      input.payload,
+      decorated.target,
+      decorated.payload,
       input.options,
     );
 
-  const boundModel = !input.payload.tools?.length || !model.bindTools
-    ? model
-    : model.bindTools(
-        input.payload.tools,
-        // Strip the model's disabled params (langchain-python disabled_params):
-        // DeepSeek disables `tool_choice`, so a forced choice it can't take is
-        // dropped → API default `auto` (an available tool).
-        filterDisabledParams(
-          resolveBindToolsKwargs({
-            toolBindingOptions: input.payload.toolBindingOptions,
-            toolChoice: input.payload.toolChoice,
-          }),
-          requestDisabledParams(input),
-        ),
-      ) as LangChainChatModelLike;
+  const boundModel =
+    !input.payload.tools?.length || !model.bindTools
+      ? model
+      : (model.bindTools(
+          input.payload.tools,
+          // Strip the model's disabled params (langchain-python disabled_params):
+          // DeepSeek disables `tool_choice`, so a forced choice it can't take is
+          // dropped → API default `auto` (an available tool).
+          filterDisabledParams(
+            resolveBindToolsKwargs({
+              toolBindingOptions: input.payload.toolBindingOptions,
+              toolChoice: input.payload.toolChoice,
+            }),
+            requestDisabledParams(input),
+          ),
+        ) as LangChainChatModelLike);
 
   const disabledParams = requestDisabledParams(input);
   const modelWithDefaultToolBindingOptions =
@@ -275,7 +289,9 @@ function fromLangChainStructuredOutputMethod(
  * to the gateway {@link RequestOptions} the executor understands (only the abort
  * signal travels through).
  */
-function structuredRequestOptions(options: unknown): RequestOptions | undefined {
+function structuredRequestOptions(
+  options: unknown,
+): RequestOptions | undefined {
   const record =
     options && typeof options === "object"
       ? (options as Record<string, unknown>)
@@ -291,7 +307,10 @@ function createObservedLangChainChatModel(input: {
   options?: RequestOptions;
   model: LangChainChatModelLike;
 }): LangChainChatModelLike {
-  if (!input.config.observeSink || input.options?.suppressLangChainObservation) {
+  if (
+    !input.config.observeSink ||
+    input.options?.suppressLangChainObservation
+  ) {
     return input.model;
   }
 
@@ -315,7 +334,10 @@ function createObservedLangChainChatModel(input: {
         ...input.payload,
         tools: normalizeBoundToolsForObservation(tools),
         ...(resolvedKwargs && "tool_choice" in resolvedKwargs
-          ? { toolChoice: resolvedKwargs.tool_choice as ChatCompleteInput["toolChoice"] }
+          ? {
+              toolChoice:
+                resolvedKwargs.tool_choice as ChatCompleteInput["toolChoice"],
+            }
           : {}),
       },
       model: input.model.bindTools
@@ -397,74 +419,121 @@ function createObservedLangChainChatModel(input: {
     run: () => Promise<unknown>,
     messages: unknown,
   ): Promise<unknown> {
-      const generation = createGenerationObservation({
-        operation: "chat.complete",
-        payload: { ...input.payload, messages: normalizeObservedMessages(messages) },
-        options: input.options,
-        target: input.target,
+    const generation = createGenerationObservation({
+      operation: "chat.complete",
+      payload: {
+        ...input.payload,
+        messages: normalizeObservedMessages(messages),
+      },
+      options: input.options,
+      target: input.target,
+    });
+    await emitGenerationStart(input.config, generation.start);
+    try {
+      const responseCapture = createProviderResponseCapture();
+      const result = await runWithProviderResponseCapture(responseCapture, run);
+      const responseMetadata = extractResponseMetadata(
+        result as { response_metadata?: unknown },
+      );
+      const reasoning = extractReasoning(
+        result as Parameters<typeof extractReasoning>[0],
+      );
+      const observation = normalizeModelCallObservation({
+        modelAlias: input.payload.model,
+        context: {
+          target: input.target,
+          modality: "chat",
+          rawResponse: result,
+          sdkUsage:
+            (result as { usage_metadata?: unknown }).usage_metadata ??
+            extractUsage({
+              raw: result,
+              usageMetadata: (result as { usage_metadata?: unknown })
+                .usage_metadata,
+              responseMetadata,
+            }),
+          responseMetadata,
+          responseHeaders: responseCapture.headers,
+        },
       });
-      await emitGenerationStart(input.config, generation.start);
-      try {
-        const result = await run();
-        const responseMetadata = extractResponseMetadata(result as { response_metadata?: unknown });
-        const reasoning = extractReasoning(result as Parameters<typeof extractReasoning>[0]);
-        await emitGenerationEnd(input.config, {
-          traceId: generation.start.traceId,
-          spanId: generation.spanId,
-          endedAt: new Date().toISOString(),
-          latencyMs: Date.now() - generation.startedAtMs,
-          output: {
-            finishReason: extractFinishReason(responseMetadata),
-            reasoning,
-            routeDecision: input.target.routeDecision,
-          },
-          outputText: typeof (result as { content?: unknown }).content === "string"
+      observation.traceId = generation.start.traceId;
+      observation.spanId = generation.spanId;
+      await emitGenerationEnd(input.config, {
+        traceId: generation.start.traceId,
+        spanId: generation.spanId,
+        endedAt: new Date().toISOString(),
+        latencyMs: Date.now() - generation.startedAtMs,
+        output: {
+          finishReason: extractFinishReason(responseMetadata),
+          reasoning,
+          routeDecision: input.target.routeDecision,
+        },
+        outputText:
+          typeof (result as { content?: unknown }).content === "string"
             ? (result as { content: string }).content
             : undefined,
-          finishReason: extractFinishReason(responseMetadata),
-          reasoningText: reasoning,
-          providerFields: cloneRecord(responseMetadata),
-          usage:
-            normalizeProviderUsage(result) ??
-            normalizeUsage(extractUsage({
-              raw: result,
-              usageMetadata: (result as { usage_metadata?: unknown }).usage_metadata,
-              responseMetadata,
-            })),
-          rawCaptureMode: "sdk_metadata",
-          providerResponse: toProviderResponse(responseMetadata),
-          attributes: generation.start.attributes,
-        });
-        return result;
-      } catch (error) {
-        await emitGenerationError(input.config, buildGenerationErrorEvent({
+        finishReason: extractFinishReason(responseMetadata),
+        reasoningText: reasoning,
+        providerFields: cloneRecord(responseMetadata),
+        observation,
+        usage: observation.usage,
+        rawCaptureMode: "sdk_metadata",
+        providerResponse: toProviderResponse(responseMetadata),
+        attributes: generation.start.attributes,
+      });
+      return result;
+    } catch (error) {
+      await emitGenerationError(
+        input.config,
+        buildGenerationErrorEvent({
           traceId: generation.start.traceId,
           spanId: generation.spanId,
           startedAtMs: generation.startedAtMs,
           error,
           attributes: generation.start.attributes,
-        }));
-        throw error;
-      }
+        }),
+      );
+      throw error;
+    }
   }
 
-  const invoke: LangChainChatModelLike["invoke"] = async (messages, callOptions) =>
-    observeInvocation(() => input.model.invoke(messages, callOptions), messages);
+  const invoke: LangChainChatModelLike["invoke"] = async (
+    messages,
+    callOptions,
+  ) =>
+    observeInvocation(
+      () => input.model.invoke(messages, callOptions),
+      messages,
+    );
 
-  const stream: LangChainChatModelLike["stream"] = async (messages, callOptions) => {
+  const stream: LangChainChatModelLike["stream"] = async (
+    messages,
+    callOptions,
+  ) => {
     const generation = createGenerationObservation({
       operation: "chat.stream",
-      payload: { ...input.payload, messages: normalizeObservedMessages(messages), stream: true },
+      payload: {
+        ...input.payload,
+        messages: normalizeObservedMessages(messages),
+        stream: true,
+      },
       options: input.options,
       target: input.target,
     });
     await emitGenerationStart(input.config, generation.start);
-    const underlying = await input.model.stream(messages, callOptions);
+    const responseCapture = createProviderResponseCapture();
+    const underlying = await runWithProviderResponseCapture(
+      responseCapture,
+      () => input.model.stream(messages, callOptions),
+    );
     return observeStream({
       config: input.config,
       generation,
       routeDecision: input.target.routeDecision,
       stream: underlying,
+      responseCapture,
+      target: input.target,
+      modelAlias: input.payload.model,
     });
   };
 
@@ -517,25 +586,52 @@ async function* observeStream(input: {
   generation: ReturnType<typeof createGenerationObservation>;
   routeDecision: unknown;
   stream: AsyncIterable<unknown>;
+  responseCapture: ProviderResponseCapture;
+  target: ResolvedRequestTarget;
+  modelAlias: string;
 }) {
   let completed = false;
   let usage = undefined;
+  let observation = undefined;
   let finishReason: string | undefined;
   let reasoning: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
   let outputText = "";
 
   try {
-    for await (const chunk of input.stream) {
-      const responseMetadata = extractResponseMetadata(chunk as { response_metadata?: unknown });
-      usage =
-        normalizeProviderUsage(chunk) ??
-        normalizeUsage(extractUsage({
-          raw: chunk,
-          usageMetadata: (chunk as { usage_metadata?: unknown }).usage_metadata,
+    const iterator = input.stream[Symbol.asyncIterator]();
+    while (true) {
+      const next = await runWithProviderResponseCapture(
+        input.responseCapture,
+        () => iterator.next(),
+      );
+      if (next.done) {
+        break;
+      }
+      const chunk = next.value;
+      const responseMetadata = extractResponseMetadata(
+        chunk as { response_metadata?: unknown },
+      );
+      const nextObservation = normalizeModelCallObservation({
+        modelAlias: input.modelAlias,
+        context: {
+          target: input.target,
+          modality: "chat",
+          rawResponse: chunk,
+          sdkUsage:
+            (chunk as { usage_metadata?: unknown }).usage_metadata ??
+            extractUsage({
+              raw: chunk,
+              usageMetadata: (chunk as { usage_metadata?: unknown })
+                .usage_metadata,
+              responseMetadata,
+            }),
           responseMetadata,
-        })) ??
-        usage;
+          responseHeaders: input.responseCapture.headers,
+        },
+      });
+      observation = mergeModelCallObservations(observation, nextObservation);
+      usage = observation.usage ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
       const nextReasoning = extractReasoning(
         chunk as Parameters<typeof extractReasoning>[0],
@@ -547,6 +643,10 @@ async function* observeStream(input: {
       yield chunk;
     }
     completed = true;
+    if (observation) {
+      observation.traceId = input.generation.start.traceId;
+      observation.spanId = input.generation.spanId;
+    }
     await emitGenerationEnd(input.config, {
       traceId: input.generation.start.traceId,
       spanId: input.generation.spanId,
@@ -561,6 +661,7 @@ async function* observeStream(input: {
       finishReason,
       reasoningText: reasoning,
       providerFields,
+      observation,
       usage,
       rawCaptureMode: "sdk_metadata",
       providerResponse: toProviderResponse(providerFields),
@@ -568,13 +669,16 @@ async function* observeStream(input: {
     });
   } catch (error) {
     if (!completed) {
-      await emitGenerationError(input.config, buildGenerationErrorEvent({
-        traceId: input.generation.start.traceId,
-        spanId: input.generation.spanId,
-        startedAtMs: input.generation.startedAtMs,
-        error,
-        attributes: input.generation.start.attributes,
-      }));
+      await emitGenerationError(
+        input.config,
+        buildGenerationErrorEvent({
+          traceId: input.generation.start.traceId,
+          spanId: input.generation.spanId,
+          startedAtMs: input.generation.startedAtMs,
+          error,
+          attributes: input.generation.start.attributes,
+        }),
+      );
     }
     throw error;
   }
@@ -585,9 +689,17 @@ function normalizeObservedMessages(value: unknown): GatewayMessage[] {
     return [];
   }
   return value.map((message) => {
-    const record = message && typeof message === "object" ? message as Record<string, unknown> : {};
+    const record =
+      message && typeof message === "object"
+        ? (message as Record<string, unknown>)
+        : {};
     const kwargs = toRecord(record.kwargs) ?? toRecord(record.lc_kwargs);
-    const type = typeof record.type === "string" ? record.type : typeof record._getType === "string" ? record._getType : undefined;
+    const type =
+      typeof record.type === "string"
+        ? record.type
+        : typeof record._getType === "string"
+          ? record._getType
+          : undefined;
     const role = type?.includes("system")
       ? "system"
       : type?.includes("ai") || type?.includes("assistant")
@@ -600,7 +712,12 @@ function normalizeObservedMessages(value: unknown): GatewayMessage[] {
     return compactGatewayMessage({
       role,
       content,
-      toolCallId: typeof record.tool_call_id === "string" ? record.tool_call_id : typeof record.toolCallId === "string" ? record.toolCallId : undefined,
+      toolCallId:
+        typeof record.tool_call_id === "string"
+          ? record.tool_call_id
+          : typeof record.toolCallId === "string"
+            ? record.toolCallId
+            : undefined,
       toolCalls,
     });
   });
@@ -619,13 +736,15 @@ function appendText(current: string | undefined, next: string | undefined) {
   return current ? `${current}${next}` : next;
 }
 
-function cloneRecord<T extends Record<string, unknown> | undefined>(value: T): T {
+function cloneRecord<T extends Record<string, unknown> | undefined>(
+  value: T,
+): T {
   return value ? ({ ...value } as T) : value;
 }
 
 function toRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
@@ -652,7 +771,9 @@ function readString(...values: unknown[]) {
   return undefined;
 }
 
-function normalizeToolCallArgs(raw: unknown): Pick<ToolCall, "args" | "argsJson"> {
+function normalizeToolCallArgs(
+  raw: unknown,
+): Pick<ToolCall, "args" | "argsJson"> {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     return { args: raw as Record<string, unknown> };
   }
@@ -667,8 +788,7 @@ function normalizeObservedToolCalls(
   kwargs: Record<string, unknown> | null,
 ): ToolCall[] | undefined {
   const additionalKwargs =
-    toRecord(record.additional_kwargs) ??
-    toRecord(kwargs?.additional_kwargs);
+    toRecord(record.additional_kwargs) ?? toRecord(kwargs?.additional_kwargs);
   const rawToolCalls = firstArray(
     record.tool_calls,
     record.toolCalls,
@@ -691,11 +811,13 @@ function normalizeObservedToolCalls(
     if (!name) {
       return [];
     }
-    return [{
-      id: readString(toolCall.id, toolCall.tool_call_id),
-      name,
-      ...normalizeToolCallArgs(toolCall.args ?? fn?.arguments),
-    }];
+    return [
+      {
+        id: readString(toolCall.id, toolCall.tool_call_id),
+        name,
+        ...normalizeToolCallArgs(toolCall.args ?? fn?.arguments),
+      },
+    ];
   });
 
   return toolCalls.length > 0 ? toolCalls : undefined;
@@ -704,10 +826,16 @@ function normalizeObservedToolCalls(
 function normalizeObservedContent(value: unknown) {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value.map((item) => {
-      const record = toRecord(item);
-      return typeof record?.text === "string" ? record.text : typeof item === "string" ? item : JSON.stringify(item);
-    }).join("\n");
+    return value
+      .map((item) => {
+        const record = toRecord(item);
+        return typeof record?.text === "string"
+          ? record.text
+          : typeof item === "string"
+            ? item
+            : JSON.stringify(item);
+      })
+      .join("\n");
   }
   if (value === null || value === undefined) return "";
   return JSON.stringify(value);
@@ -737,6 +865,7 @@ export function createEmbeddingsModel(input: {
 export type LangChainModelExecutionConfig = Pick<
   ChatCompleteInput,
   | "executionMode"
+  | "fallbackPolicy"
   | "profileAlias"
   | "providerHint"
   | "byokModelId"
@@ -765,6 +894,7 @@ export async function createLangChainChatModel(input: {
     messages: [],
     stream: true,
     executionMode: input.execution?.executionMode,
+    fallbackPolicy: input.execution?.fallbackPolicy,
     profileAlias: input.execution?.profileAlias,
     providerHint: input.execution?.providerHint,
     byokModelId: input.execution?.byokModelId,
@@ -776,7 +906,14 @@ export async function createLangChainChatModel(input: {
     toolBindingOptions: input.execution?.toolBindingOptions,
   };
 
-  const candidates = await resolveRequestCandidates(resolvedConfig, payload);
+  const resolvedCandidates = await resolveRequestCandidates(
+    resolvedConfig,
+    payload,
+  );
+  const candidates =
+    payload.fallbackPolicy === "none"
+      ? resolvedCandidates.slice(0, 1)
+      : resolvedCandidates;
   if (candidates.length === 1) {
     const model = createChatModel({
       config: resolvedConfig,
@@ -815,9 +952,7 @@ function createFailoverLangChainChatModel(input: {
     (models[index] ??= input.buildModel(input.candidates[index]!));
 
   const callerAborted = (options?: Record<string, unknown>) =>
-    Boolean(
-      (options as { signal?: AbortSignal } | undefined)?.signal?.aborted,
-    );
+    Boolean((options as { signal?: AbortSignal } | undefined)?.signal?.aborted);
 
   const logFailover = (
     operation: string,
@@ -1009,8 +1144,7 @@ function createFailoverLangChainChatModel(input: {
           if (typeof model.withStructuredOutput !== "function") {
             throw new ModelGatewayError({
               code: "BAD_REQUEST",
-              message:
-                `Model for provider '${model.getName?.() ?? "unknown"}' does not support structured output`,
+              message: `Model for provider '${model.getName?.() ?? "unknown"}' does not support structured output`,
               retryable: false,
             });
           }

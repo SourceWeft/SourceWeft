@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import {
-  collectPendingArtifactIds,
-  preferArtifactSnapshot,
-} from "./artifact-work-state";
+import { preferArtifactSnapshot } from "./artifact-work-state";
 
 test("preferArtifactSnapshot never downgrades terminal to running", () => {
   const ready = {
@@ -21,7 +18,7 @@ test("preferArtifactSnapshot never downgrades terminal to running", () => {
     payloadJson: {
       generation: {
         status: "running",
-        stage: "planning_storyboard",
+        stage: "planning",
         progress: 0,
       },
     },
@@ -46,15 +43,15 @@ test("preferArtifactSnapshot keeps richer step display when SSE is budgeted", ()
     payloadJson: {
       generation: {
         status: "running",
-        stage: "planning_storyboard",
+        stage: "planning",
         progress: 12,
         pipelineSteps: [
           {
-            id: "planning_storyboard",
-            label: "Planning storyboard",
+            id: "planning",
+            label: "Planning report",
             status: "completed",
-            summary: "Planned 2 slides",
-            display: "# Storyboard\n\n1. **Agenda** — full plan text",
+            summary: "Planned 2 sections",
+            display: "# Plan\n\n1. **Agenda** — full plan text",
           },
         ],
       },
@@ -67,15 +64,15 @@ test("preferArtifactSnapshot keeps richer step display when SSE is budgeted", ()
     payloadJson: {
       generation: {
         status: "running",
-        stage: "planning_storyboard",
+        stage: "planning",
         progress: 12,
         pipelineSteps: [
           {
-            id: "planning_storyboard",
-            label: "Planning storyboard",
+            id: "planning",
+            label: "Planning report",
             status: "completed",
-            summary: "Planned 2 slides",
-            display: "# Storyboard",
+            summary: "Planned 2 sections",
+            display: "# Plan",
           },
         ],
       },
@@ -99,7 +96,7 @@ test("preferArtifactSnapshot accepts newer terminal over older running", () => {
     status: "running",
     updatedAt: "2026-07-18T00:01:00.000Z",
     payloadJson: {
-      generation: { status: "running", stage: "planning_storyboard" },
+      generation: { status: "running", stage: "planning" },
     },
   } as never;
   const ready = {
@@ -112,47 +109,4 @@ test("preferArtifactSnapshot accepts newer terminal over older running", () => {
   } as never;
 
   assert.equal(preferArtifactSnapshot(running, ready)?.status, "ready");
-});
-
-test("collectPendingArtifactIds skips known terminal snapshots", () => {
-  const messages = [
-    {
-      toolCalls: [
-        {
-          id: "tool-1",
-          tool: "generate_video_presentation",
-          input: {},
-          output: {
-            type: "video_presentation_processing_result",
-            artifact_id: "artifact-1",
-            status: "running",
-            stage: "planning_storyboard",
-          },
-          status: "completed" as const,
-          latencyMs: 200,
-          error: null,
-        },
-      ],
-    },
-  ];
-
-  assert.deepEqual(collectPendingArtifactIds(messages), ["artifact-1"]);
-  assert.deepEqual(
-    collectPendingArtifactIds(
-      messages,
-      new Map([
-        [
-          "artifact-1",
-          {
-            id: "artifact-1",
-            status: "ready",
-            payloadJson: {
-              generation: { status: "ready", stage: "ready", progress: 100 },
-            },
-          } as never,
-        ],
-      ]),
-    ),
-    [],
-  );
 });

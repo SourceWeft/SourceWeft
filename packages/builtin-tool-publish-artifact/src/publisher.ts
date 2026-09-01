@@ -89,6 +89,7 @@ export type PublishArtifactOperationInput = {
   readonly sourceAdapters?: readonly ArtifactSourceAdapter[];
   readonly typeHandlers?: readonly ArtifactTypeHandler[];
   readonly toolCallId?: string;
+  readonly signal?: AbortSignal;
 };
 
 export type PublishPreparedArtifactOperationInput = {
@@ -117,6 +118,7 @@ export type PublishPreparedArtifactOperationInput = {
    * derive, because only the caller knows what "the same request" means.
    */
   readonly requestKey?: string;
+  readonly signal?: AbortSignal;
 };
 
 export type PublishPreparedArtifactResult = {
@@ -124,6 +126,14 @@ export type PublishPreparedArtifactResult = {
   readonly output: PublishArtifactSuccessOutput;
   readonly record: PublishedArtifactRecord;
 };
+
+function throwArtifactPublicationAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("Artifact publication was aborted.", "AbortError")
+  );
+}
 
 /**
  * The extension a preview image path must carry to be believed. Narrower than
@@ -213,6 +223,7 @@ async function readPreviewImage(input: {
   readonly publishInput: PublishArtifactInput;
   readonly services: PublishArtifactServices;
   readonly sourceAdapters?: readonly ArtifactSourceAdapter[];
+  readonly signal?: AbortSignal;
 }) {
   const adapter = adapterForSource(
     input.previewImage.source,
@@ -232,6 +243,7 @@ async function readPreviewImage(input: {
       source: input.previewImage.source,
     },
     services: input.services,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   return preparePreviewImage({
@@ -243,6 +255,7 @@ async function readPreviewImage(input: {
 export async function publishArtifact(
   input: PublishArtifactOperationInput,
 ): Promise<PublishArtifactSuccessOutput> {
+  throwArtifactPublicationAbortReason(input.signal);
   const parsed = PublishArtifactInputSchema.parse(input.input);
   const handler = handlerForArtifactType(
     parsed.artifactType,
@@ -269,15 +282,19 @@ export async function publishArtifact(
   const source = await adapter.read({
     publishInput: parsed,
     services: input.services,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
+  throwArtifactPublicationAbortReason(input.signal);
   const previewImage = parsed.previewImage
     ? (await readPreviewImage({
         previewImage: parsed.previewImage,
         publishInput: parsed,
         services: input.services,
         sourceAdapters: input.sourceAdapters,
+        ...(input.signal ? { signal: input.signal } : {}),
       })) ?? undefined
     : undefined;
+  throwArtifactPublicationAbortReason(input.signal);
 
   return (
     await publishPreparedArtifact({
@@ -289,6 +306,7 @@ export async function publishArtifact(
       services: input.services,
       typeHandlers: handler ? [handler] : input.typeHandlers,
       toolCallId: input.toolCallId,
+      ...(input.signal ? { signal: input.signal } : {}),
     })
   ).output;
 }
@@ -296,6 +314,7 @@ export async function publishArtifact(
 export async function publishPreparedArtifact(
   input: PublishPreparedArtifactOperationInput,
 ): Promise<PublishPreparedArtifactResult> {
+  throwArtifactPublicationAbortReason(input.signal);
   const handler = handlerForArtifactType(
     input.descriptor.artifactType,
     input.typeHandlers ?? artifactTypeHandlers,
@@ -384,8 +403,9 @@ export async function publishPreparedArtifact(
   // extension, the MIME type, the size and — for a deck — that the PPTX package
   // really unpacks. What is left is the write itself, which is the host's, so
   // the bytes go across as attachments rather than being uploaded here.
-  const publishRecord = (spec: Parameters<typeof publish>[0]["spec"]) =>
-    republishArtifactId
+  const publishRecord = (spec: Parameters<typeof publish>[0]["spec"]) => {
+    throwArtifactPublicationAbortReason(input.signal);
+    return republishArtifactId
       ? input.services.artifacts!.republishArtifact!({
           context: input.context,
           artifactId: republishArtifactId,
@@ -393,12 +413,15 @@ export async function publishPreparedArtifact(
           ...(republishExpectedVersionNo !== undefined
             ? { expectedVersionNo: republishExpectedVersionNo }
             : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
         })
       : publish({
           context: input.context,
           ...(input.artifactId ? { artifactId: input.artifactId } : {}),
           spec,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
+  };
   const record = await publishRecord({
       artifactType: preparedArtifact.artifactType,
       title: input.descriptor.title,
@@ -466,4 +489,3 @@ export async function publishPreparedArtifact(
     record,
   };
 }
-

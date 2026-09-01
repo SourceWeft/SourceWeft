@@ -1,5 +1,8 @@
 import { normalizeGatewayError } from "../errors";
-import { runBridgeEmbedding, runBridgeEmbeddingBatch } from "../bridge/embeddings";
+import {
+  runBridgeEmbedding,
+  runBridgeEmbeddingBatch,
+} from "../bridge/embeddings";
 import { runWithTargetFailover } from "./failover";
 import {
   buildGenerationErrorEvent,
@@ -68,6 +71,7 @@ export class ModelGatewayEmbeddingsEndpoint {
           routeDecision: result.routeDecision,
         },
         usage: result.usage,
+        observation: result.observation,
         rawCaptureMode: "sdk_metadata",
         providerResponse: toProviderResponse(result.raw),
         attributes: generation.start.attributes,
@@ -134,6 +138,7 @@ export class ModelGatewayEmbeddingsEndpoint {
           routeDecision: result.routeDecision,
         },
         usage: result.usage,
+        observation: result.observation,
         rawCaptureMode: "sdk_metadata",
         providerResponse: toProviderResponse(result.raw),
         attributes: generation.start.attributes,

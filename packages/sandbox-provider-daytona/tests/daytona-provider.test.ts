@@ -26,6 +26,7 @@ function createMockDaytonaSandboxClient(input?: {
     content: Uint8Array | null;
     error: string | null;
   }>;
+  closeError?: Error;
 }) {
   const calls = {
     create: [] as unknown[],
@@ -84,6 +85,9 @@ function createMockDaytonaSandboxClient(input?: {
     },
     close: async () => {
       calls.close += 1;
+      if (input?.closeError) {
+        throw input.closeError;
+      }
     },
   };
   const client: DaytonaSandboxClient = {
@@ -515,6 +519,47 @@ describe("DaytonaSandboxProvider", () => {
 
     await provider.deleteSandbox("sandbox_123");
     assert.equal(calls.close, 1);
+  });
+
+  test("confirms execution cancellation by closing the sandbox", async () => {
+    const { calls, client } = createMockDaytonaSandboxClient();
+    const provider = new DaytonaSandboxProvider({
+      apiKey: "test-key",
+      snapshot: "sourceweft-sandbox",
+      maxOutputChars: 100,
+      daytonaSandbox: client,
+    });
+
+    assert.deepEqual(
+      await provider.cancelExecution({
+        providerSandboxId: "sandbox_123",
+        executionId: "execution-1",
+        reason: "timed_out",
+      }),
+      { confirmed: true, mode: "sandbox" },
+    );
+    assert.equal(calls.close, 1);
+  });
+
+  test("treats an already absent sandbox as confirmed cancellation", async () => {
+    const { client } = createMockDaytonaSandboxClient({
+      closeError: new Error("sandbox not found"),
+    });
+    const provider = new DaytonaSandboxProvider({
+      apiKey: "test-key",
+      snapshot: "sourceweft-sandbox",
+      maxOutputChars: 100,
+      daytonaSandbox: client,
+    });
+
+    assert.deepEqual(
+      await provider.cancelExecution({
+        providerSandboxId: "sandbox_123",
+        executionId: "execution-1",
+        reason: "timed_out",
+      }),
+      { confirmed: true, mode: "sandbox" },
+    );
   });
 
   test("maps official upload wrapper file errors", async () => {

@@ -65,6 +65,7 @@ import {
   resolveClientTimezone,
 } from "./thread-utils";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
+import { mergeCommittedArtifactOutputsIntoMessage } from "./artifact-output-reconcile";
 
 export type ThreadStreamActionInput = {
   mode: "send" | "refresh" | "edit" | "resume";
@@ -503,6 +504,16 @@ export function useThreadStreamAction({
         streamingAssistantMessageIds.add(streamingAssistantMessageId);
         streamingAssistantMessageIds.add(committedMessage.id);
         setMessages((previous) => {
+          let committedWithArtifactOutputs = committedMessage;
+          for (const message of previous) {
+            if (streamingAssistantMessageIds.has(message.id)) {
+              committedWithArtifactOutputs =
+                mergeCommittedArtifactOutputsIntoMessage({
+                  authoritative: message,
+                  current: committedWithArtifactOutputs,
+                });
+            }
+          }
           let found = false;
           let inserted = false;
           const next: ChatMessageItem[] = [];
@@ -513,11 +524,11 @@ export function useThreadStreamAction({
             }
             found = true;
             if (!inserted) {
-              next.push(committedMessage);
+              next.push(committedWithArtifactOutputs);
               inserted = true;
             }
           }
-          return found ? next : [...next, committedMessage];
+          return found ? next : [...next, committedWithArtifactOutputs];
         });
         setStreamingAssistantSnapshot(null);
       };

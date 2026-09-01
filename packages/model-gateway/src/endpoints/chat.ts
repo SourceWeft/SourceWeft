@@ -106,6 +106,10 @@ export class ModelGatewayChatEndpoint {
               suppressLangChainObservation: true,
             },
           });
+          if (result.observation) {
+            result.observation.traceId = generation.start.traceId;
+            result.observation.spanId = generation.spanId;
+          }
           await emitGenerationEnd(this.config, {
             traceId: generation.start.traceId,
             spanId: generation.spanId,
@@ -120,10 +124,13 @@ export class ModelGatewayChatEndpoint {
               routeDecision: result.routeDecision,
             },
             outputText:
-              typeof result.raw.content === "string" ? result.raw.content : undefined,
+              typeof result.raw.content === "string"
+                ? result.raw.content
+                : undefined,
             finishReason: result.finishReason,
             reasoningText: result.reasoning,
             providerFields: result.providerFields,
+            observation: result.observation,
             usage: result.usage,
             rawCaptureMode: "sdk_metadata",
             providerResponse: toProviderResponse(result.providerFields),
@@ -151,7 +158,14 @@ export class ModelGatewayChatEndpoint {
     input: ChatStreamInput,
     options?: RequestOptions,
   ): AsyncGenerator<ChatStreamEvent> {
-    const candidates = await resolveRequestCandidates(this.config, input);
+    const resolvedCandidates = await resolveRequestCandidates(
+      this.config,
+      input,
+    );
+    const candidates =
+      input.fallbackPolicy === "none"
+        ? resolvedCandidates.slice(0, 1)
+        : resolvedCandidates;
     const failedAttempts: FailedStreamAttempt[] = [];
 
     for (const [index, target] of candidates.entries()) {
@@ -206,7 +220,10 @@ export class ModelGatewayChatEndpoint {
     target: ResolvedRequestTarget,
     hasNext: boolean,
     previousAttempts: readonly FailedStreamAttempt[],
-  ): AsyncGenerator<ChatStreamEvent, "done" | { failedWith: GatewayErrorData }> {
+  ): AsyncGenerator<
+    ChatStreamEvent,
+    "done" | { failedWith: GatewayErrorData }
+  > {
     const requestOptions = this.resolveRequestOptions(options);
     const generation = createGenerationObservation({
       operation: "chat.stream",
@@ -229,6 +246,10 @@ export class ModelGatewayChatEndpoint {
         },
       })) {
         if (event.type === "metadata") {
+          if (event.metadata.observation) {
+            event.metadata.observation.traceId = generation.start.traceId;
+            event.metadata.observation.spanId = generation.spanId;
+          }
           completed = true;
           this.config.targetHealth.markSuccess(target);
           await emitGenerationEnd(this.config, {
@@ -244,6 +265,7 @@ export class ModelGatewayChatEndpoint {
             finishReason: event.metadata.finishReason,
             reasoningText: event.metadata.reasoning,
             providerFields: event.metadata.providerFields,
+            observation: event.metadata.observation,
             usage: event.metadata.usage,
             rawCaptureMode: "sdk_metadata",
             providerResponse: toProviderResponse(event.metadata.providerFields),

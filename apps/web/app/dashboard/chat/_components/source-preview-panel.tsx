@@ -69,7 +69,9 @@ function isTextSourceMimeType(mimeType: string | null | undefined) {
     return false;
   }
 
-  return mimeType.startsWith("text/") || SOURCE_FILE_TEXT_MIME_TYPES.has(mimeType);
+  return (
+    mimeType.startsWith("text/") || SOURCE_FILE_TEXT_MIME_TYPES.has(mimeType)
+  );
 }
 
 function formatEnumLabel(value: string | null | undefined) {
@@ -122,13 +124,7 @@ function formatTimestamp(value: string | null | undefined) {
   return sourceDateFormatter.format(parsed);
 }
 
-function SourceMetaRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function SourceMetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border bg-muted/20 px-3.5 py-3">
       <div className="text-xs font-medium text-muted-foreground">{label}</div>
@@ -163,14 +159,21 @@ export function SourcePreviewPanel({
 
   useEffect(() => {
     if (open) {
-      const isChunkCitation = Boolean(citation?.chunkId && !citation.externalUri);
+      const isChunkCitation = Boolean(
+        citation?.chunkId && !citation.externalUri,
+      );
       setPreviewMode(isChunkCitation ? "chunks" : "preview");
       setRawChunkIds(new Set());
     }
   }, [citation?.chunkId, citation?.externalUri, open, source?.id]);
 
   useEffect(() => {
-    if (!open || citation?.externalUri || !workspaceId || (!citation && !source)) {
+    if (
+      !open ||
+      citation?.externalUri ||
+      !workspaceId ||
+      (!citation && !source)
+    ) {
       return;
     }
 
@@ -181,26 +184,27 @@ export function SourcePreviewPanel({
     setIsDeletedCitation(false);
     setIsHistoricalCitation(false);
 
-    const request = citation && citation.sourceId && citation.documentId
-      ? Promise.all([
-          contentClient.getSourceDocument(
-            workspaceId,
-            citation.sourceId,
-            citation.documentId,
-          ),
-          contentClient.getSource(workspaceId, citation.sourceId),
-        ]).then(([detailResult, currentResult]) => ({
-          detail: detailResult,
-          isHistorical:
-            currentResult.documents[0]?.id !== undefined &&
-            currentResult.documents[0]?.id !== citation.documentId,
-        }))
-      : contentClient
-          .getSource(workspaceId, source!.id)
-          .then((detailResult) => ({
+    const request =
+      citation && citation.sourceId && citation.documentId
+        ? Promise.all([
+            contentClient.getSourceDocument(
+              workspaceId,
+              citation.sourceId,
+              citation.documentId,
+            ),
+            contentClient.getSource(workspaceId, citation.sourceId),
+          ]).then(([detailResult, currentResult]) => ({
             detail: detailResult,
-            isHistorical: false,
-          }));
+            isHistorical:
+              currentResult.documents[0]?.id !== undefined &&
+              currentResult.documents[0]?.id !== citation.documentId,
+          }))
+        : contentClient
+            .getSource(workspaceId, source!.id)
+            .then((detailResult) => ({
+              detail: detailResult,
+              isHistorical: false,
+            }));
 
     request
       .then((result) => {
@@ -290,7 +294,8 @@ export function SourcePreviewPanel({
   const sourceSize = formatBytes(detail?.source.sizeBytes);
   const sourceUpdatedAt = formatTimestamp(detail?.source.updatedAt);
   const sourceTypeLabel =
-    formatEnumLabel(detail?.source.sourceType ?? source?.sourceType) ?? "Source";
+    formatEnumLabel(detail?.source.sourceType ?? source?.sourceType) ??
+    "Source";
   const title =
     detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
   const isExternalCitation = Boolean(citation?.externalUri);
@@ -371,7 +376,9 @@ export function SourcePreviewPanel({
               {detail ? (
                 <Tabs
                   className="w-auto gap-0"
-                  onValueChange={(value) => setPreviewMode(value as PreviewMode)}
+                  onValueChange={(value) =>
+                    setPreviewMode(value as PreviewMode)
+                  }
                   value={previewMode}
                 >
                   <TabsList className="h-8 rounded-xl bg-muted/60 p-1">
@@ -434,7 +441,13 @@ export function SourcePreviewPanel({
                   </div>
                   <Button
                     className="shrink-0 gap-1.5"
-                    onClick={() => window.open(citation.externalUri, "_blank", "noopener,noreferrer")}
+                    onClick={() =>
+                      window.open(
+                        citation.externalUri,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
                     size="xs"
                     type="button"
                     variant="outline"
@@ -445,7 +458,9 @@ export function SourcePreviewPanel({
                 </div>
                 <div className="px-4 py-4 lg:px-5">
                   <MessageResponse className="text-sm leading-7 text-foreground">
-                    {citation.content || citation.excerpt || "No citation content was saved."}
+                    {citation.content ||
+                      citation.excerpt ||
+                      "No citation content was saved."}
                   </MessageResponse>
                 </div>
               </article>
@@ -530,7 +545,8 @@ export function SourcePreviewPanel({
 
                     <div className="relative">
                       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.10),transparent_42%)]" />
-                      {sourceMimeType?.startsWith("image/") && sourcePreviewUrl ? (
+                      {sourceMimeType?.startsWith("image/") &&
+                      sourcePreviewUrl ? (
                         <div className="relative flex min-h-[520px] items-center justify-center overflow-hidden bg-[linear-gradient(180deg,hsl(var(--muted)/0.10),transparent_18%),radial-gradient(circle_at_center,hsl(var(--background)),hsl(var(--muted)/0.32))] p-5 sm:p-8">
                           <div className="absolute inset-0 bg-[linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28)),linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28))] bg-[position:0_0,14px_14px] bg-[size:28px_28px] opacity-[0.18]" />
                           <div className="relative max-h-[72vh] w-full overflow-hidden rounded-[24px] border border-white/60 bg-white/88 p-4 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)] backdrop-blur dark:border-white/10 dark:bg-black/20">
@@ -542,7 +558,8 @@ export function SourcePreviewPanel({
                             />
                           </div>
                         </div>
-                      ) : sourceMimeType === "application/pdf" && sourcePreviewUrl ? (
+                      ) : sourceMimeType === "application/pdf" &&
+                        sourcePreviewUrl ? (
                         <div className="bg-muted/8 p-4 sm:p-5">
                           <div className="overflow-hidden rounded-[22px] border border-border/70 bg-background shadow-[0_20px_60px_-36px_hsl(var(--foreground)/0.4)]">
                             <iframe
@@ -552,7 +569,8 @@ export function SourcePreviewPanel({
                             />
                           </div>
                         </div>
-                      ) : isTextSourceMimeType(sourceMimeType) && sourceFileContent ? (
+                      ) : isTextSourceMimeType(sourceMimeType) &&
+                        sourceFileContent ? (
                         <div className="bg-muted/8 p-4 sm:p-5">
                           <div className="overflow-hidden rounded-[22px] border border-border/70 bg-background shadow-[0_20px_60px_-36px_hsl(var(--foreground)/0.35)]">
                             <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-xs leading-6 text-foreground">
@@ -606,12 +624,18 @@ export function SourcePreviewPanel({
                       <div className="space-y-3 px-4 py-4">
                         <SourceMetaRow label="Name" value={title} />
                         <SourceMetaRow label="Type" value={sourceTypeLabel} />
-                        <SourceMetaRow label="Format" value={sourceMimeType ?? "Unknown"} />
+                        <SourceMetaRow
+                          label="Format"
+                          value={sourceMimeType ?? "Unknown"}
+                        />
                         {sourceSize ? (
                           <SourceMetaRow label="Size" value={sourceSize} />
                         ) : null}
                         {sourceUpdatedAt ? (
-                          <SourceMetaRow label="Updated" value={sourceUpdatedAt} />
+                          <SourceMetaRow
+                            label="Updated"
+                            value={sourceUpdatedAt}
+                          />
                         ) : null}
                         <SourceMetaRow
                           label="Indexed chunks"

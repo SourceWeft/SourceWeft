@@ -3,7 +3,10 @@ import {
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
-import { formatCompactDuration, formatThoughtDuration } from "./duration-format";
+import {
+  formatCompactDuration,
+  formatThoughtDuration,
+} from "./duration-format";
 import { isSandboxToolResultFailure } from "./sandbox-tool-result-display";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
@@ -342,8 +345,8 @@ export function isToolConfirmationResolved(input: {
 }) {
   return Boolean(
     input.confirmation &&
-      (input.confirmationResolution ||
-        !isPendingToolConfirmation(input.confirmation)),
+    (input.confirmationResolution ||
+      !isPendingToolConfirmation(input.confirmation)),
   );
 }
 
@@ -430,7 +433,10 @@ export function getToolCallDetailParts(
       (typeof toolStep?.metadata?.latencyMs === "number"
         ? toolStep.metadata.latencyMs
         : null));
-  const imageStage = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
+  const imageStage = hasAgentToolCapability(
+    toolCall.tool,
+    "generated_image_artifact",
+  )
     ? getGeneratedImageStage(toolCall)
     : null;
   const confirmation = getToolConfirmationOutput(toolCall.output);
@@ -558,12 +564,14 @@ export type ReasoningTraceTimelineItem =
       toolStep?: ThinkingStepRecord;
     };
 
-const TIMELINE_KIND_PRIORITY: Record<ReasoningTraceTimelineItem["kind"], number> =
-  {
-    "model-reasoning": 0,
-    step: 1,
-    tool: 2,
-  };
+const TIMELINE_KIND_PRIORITY: Record<
+  ReasoningTraceTimelineItem["kind"],
+  number
+> = {
+  "model-reasoning": 0,
+  step: 1,
+  tool: 2,
+};
 
 export function compareReasoningTraceTimelineItems(
   left: ReasoningTraceTimelineItem,

@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
 import { buildOpenAIReasoningModelKwargs } from "./openai-reasoning";
+import { captureProviderResponseFetch } from "../observation/response-capture";
 import type { ChatAdapter } from "./types";
 
 export class OpenAICompatibleChatAdapter implements ChatAdapter {
@@ -21,6 +22,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
       configuration: {
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
+        fetch: captureProviderResponseFetch(),
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

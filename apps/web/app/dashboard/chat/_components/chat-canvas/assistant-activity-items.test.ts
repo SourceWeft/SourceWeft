@@ -111,10 +111,7 @@ test("buildAssistantActivityItems keeps generated image artifact tool invocation
     item?.type === "tool" ? item.toolCall.tool : null,
     "test_generated_image_artifact",
   );
-  assert.equal(
-    item?.type === "tool" ? item.toolCall.id : null,
-    "image-tool-1",
-  );
+  assert.equal(item?.type === "tool" ? item.toolCall.id : null, "image-tool-1");
 });
 
 test("buildAssistantActivityItems prefers trace part status over duplicate tool calls", () => {
@@ -155,7 +152,10 @@ test("buildAssistantActivityItems prefers trace part status over duplicate tool 
   const [item] = buildAssistantActivityItems({ toolCalls, traceParts });
 
   assert.equal(item?.type, "tool");
-  assert.equal(item?.type === "tool" ? item.toolCall.status : null, "completed");
+  assert.equal(
+    item?.type === "tool" ? item.toolCall.status : null,
+    "completed",
+  );
   assert.deepEqual(item?.type === "tool" ? item.toolCall.output : null, {
     resultCount: 1,
   });
@@ -211,7 +211,8 @@ test("buildAssistantActivityItems excludes reasoning that duplicates final answe
 
   assert.deepEqual(
     buildAssistantActivityItems({
-      assistantText: "Here is the final answer that belongs in the message body.",
+      assistantText:
+        "Here is the final answer that belongs in the message body.",
       traceParts,
     }).map((item) => item.id),
     ["step-1"],

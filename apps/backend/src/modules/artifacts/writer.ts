@@ -110,7 +110,17 @@ type PreparedWrite = {
   readonly storageKey: string | null;
   readonly previewStorageKey: string | null;
   readonly previewMetadata: Record<string, unknown> | null;
+  /** Every unique key attempted before the repository commit boundary. */
+  readonly attemptedStorageKeys: readonly string[];
 };
+
+function throwArtifactWriteAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("The artifact publication was aborted.", "AbortError")
+  );
+}
 
 function previewFileName(preview: ArtifactPreviewImage) {
   const provided = preview.fileName?.trim();
@@ -178,13 +188,29 @@ export class ArtifactWriter {
         statuses: input.statuses,
       });
     } catch (error) {
-      throw toArtifactError(error, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
+      throw toArtifactError(
+        error,
+        ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
+      );
     }
   }
 
   private requestKeyOf(spec: ArtifactPublishSpec): string | null {
     const requestKey = spec.idempotency?.requestKey?.trim();
     return requestKey && requestKey.length > 0 ? requestKey : null;
+  }
+
+  private async cleanupStorageKeys(keys: readonly string[]) {
+    const results = await Promise.allSettled(
+      [...new Set(keys)].map((key) => this.deps.storage.delete({ key })),
+    );
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length > 0) {
+      throw new ArtifactError({
+        code: ARTIFACT_WRITE_ERROR_CODES.storageUnavailable,
+        message: `failed to clean up ${failed.length} uncommitted artifact object(s)`,
+      });
+    }
   }
 
   /**
@@ -199,8 +225,10 @@ export class ArtifactWriter {
     readonly artifactId: string;
     readonly context: ArtifactWriteContext;
     readonly spec: ArtifactPublishSpec;
+    readonly signal?: AbortSignal;
   }): Promise<PreparedWrite> {
     const { artifactId, context, spec } = input;
+    throwArtifactWriteAbortReason(input.signal);
 
     const issueError = artifactErrorFromIssues(
       validateArtifactPublishSpec(spec),
@@ -217,19 +245,24 @@ export class ArtifactWriter {
     let storageKey: string | null = null;
     let previewStorageKey: string | null = null;
     let previewMetadata: Record<string, unknown> | null = null;
+    const attemptedStorageKeys: string[] = [];
 
     try {
       for (const attachment of spec.attachments ?? []) {
+        throwArtifactWriteAbortReason(input.signal);
         const key = this.deps.storage.buildArtifactStorageKey({
           workspaceId: context.workspaceId,
           artifactId,
           fileName: attachment.fileName,
         });
+        attemptedStorageKeys.push(key);
         await this.deps.storage.upload({
           key,
           body: attachment.bytes,
           contentType: attachment.contentType,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
+        throwArtifactWriteAbortReason(input.signal);
         if (attachment === primary) {
           storageBucket = this.deps.storage.getBucketName();
           storageKey = key;
@@ -245,17 +278,21 @@ export class ArtifactWriter {
         preview.bytes.byteLength > 0 &&
         preview.bytes.byteLength <= ARTIFACT_LIMITS.previewImageBytes
       ) {
+        throwArtifactWriteAbortReason(input.signal);
         const fileName = previewFileName(preview);
         const key = this.deps.storage.buildArtifactStorageKey({
           workspaceId: context.workspaceId,
           artifactId,
           fileName,
         });
+        attemptedStorageKeys.push(key);
         await this.deps.storage.upload({
           key,
           body: preview.bytes,
           contentType: preview.contentType,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
+        throwArtifactWriteAbortReason(input.signal);
         previewStorageKey = key;
         previewMetadata = {
           altText: preview.altText ?? null,
@@ -265,6 +302,8 @@ export class ArtifactWriter {
         };
       }
     } catch (error) {
+      await this.cleanupStorageKeys(attemptedStorageKeys);
+      throwArtifactWriteAbortReason(input.signal);
       throw toArtifactError(
         error,
         ARTIFACT_WRITE_ERROR_CODES.storageUnavailable,
@@ -277,6 +316,7 @@ export class ArtifactWriter {
       storageKey,
       previewStorageKey,
       previewMetadata,
+      attemptedStorageKeys,
     };
   }
 
@@ -286,13 +326,16 @@ export class ArtifactWriter {
     readonly spec: ArtifactPublishSpec;
     /** Pre-allocated when the id had to exist before the work (billing keys). */
     readonly artifactId?: string;
+    readonly signal?: AbortSignal;
   }): Promise<PublishArtifactResult> {
+    throwArtifactWriteAbortReason(input.signal);
     // Before prepareArtifactWrite, never after: the uploads live in there.
     const existing = await this.findReusable({
       context: input.context,
       spec: input.spec,
       statuses: REUSE_STATUSES.publish,
     });
+    throwArtifactWriteAbortReason(input.signal);
     if (existing?.latestVersionId) {
       return {
         artifactId: existing.id,
@@ -306,7 +349,19 @@ export class ArtifactWriter {
       artifactId,
       context: input.context,
       spec: input.spec,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
+
+    // This is the publication linearization point. Before it, cancellation
+    // deletes every attempted object and creates no row. Once this check passes,
+    // the atomic repository commit owns the outcome and is never rolled back by
+    // a later signal.
+    try {
+      throwArtifactWriteAbortReason(input.signal);
+    } catch (error) {
+      await this.cleanupStorageKeys(prepared.attemptedStorageKeys);
+      throw error;
+    }
 
     try {
       const record = await this.deps.repository.createReady({
@@ -327,7 +382,10 @@ export class ArtifactWriter {
       });
       return { artifactId, versionId: record.versionId, reused: false };
     } catch (error) {
-      throw toArtifactError(error, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
+      throw toArtifactError(
+        error,
+        ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
+      );
     }
   }
 
@@ -379,7 +437,10 @@ export class ArtifactWriter {
         payload: input.spec.payload,
       });
     } catch (error) {
-      throw toArtifactError(error, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
+      throw toArtifactError(
+        error,
+        ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
+      );
     }
     return { artifactId, reused: false };
   }
@@ -425,11 +486,19 @@ export class ArtifactWriter {
      * cannot separate two concurrent republishes of the same artifact.
      */
     readonly expectedVersionNo?: number;
+    /** Atomic durable-run activity fence for queued deliverable publication. */
+    readonly publishRunFence?: Parameters<
+      typeof markArtifactReady
+    >[0]["publishRunFence"];
+    /** Host invocation cancellation; never sourced from artifact input. */
+    readonly signal?: AbortSignal;
   }): Promise<PublishArtifactResult> {
+    throwArtifactWriteAbortReason(input.signal);
     const prepared = await this.prepareArtifactWrite({
       artifactId: input.artifactId,
       context: input.context,
       spec: input.spec,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
 
     // One preview reaches the row: uploaded bytes if the spec carried them,
@@ -442,6 +511,16 @@ export class ArtifactWriter {
       prepared.previewStorageKey !== null
         ? prepared.previewMetadata
         : (input.storedPreview?.metadata ?? null);
+
+    // This is the republish linearization boundary. Before it, cancellation
+    // owns the outcome and every object attempted by this call is removed.
+    // Once the atomic repository commit starts, that commit owns the outcome.
+    try {
+      throwArtifactWriteAbortReason(input.signal);
+    } catch (error) {
+      await this.cleanupStorageKeys(prepared.attemptedStorageKeys);
+      throw error;
+    }
 
     let record: Awaited<ReturnType<typeof markArtifactReady>>;
     try {
@@ -465,9 +544,15 @@ export class ArtifactWriter {
         ...(input.expectedVersionNo === undefined
           ? {}
           : { expectedVersionNo: input.expectedVersionNo }),
+        ...(input.publishRunFence
+          ? { publishRunFence: input.publishRunFence }
+          : {}),
       });
     } catch (error) {
-      throw toArtifactError(error, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
+      throw toArtifactError(
+        error,
+        ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
+      );
     }
 
     if (!record) {

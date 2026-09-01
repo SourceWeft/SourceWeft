@@ -14,6 +14,26 @@ import type {
   DurableRunRequestSnapshot,
 } from "./types";
 import type { MessageRenderBlock } from "../turn/types";
+import {
+  committedArtifactBlockIdentityMatches,
+  hasPairedCommittedArtifactPublication,
+} from "../render-block-projection";
+import {
+  getObjectRecord,
+  finalizeTerminalSnapshotTrace,
+  hasPendingConfirmations,
+  mergeChatRunSnapshot,
+  mergeCommittedArtifactRenderBlocks,
+  parseStringArray,
+  replaceConfirmationInToolCalls,
+  updateExistingTracePartsFromToolCalls,
+} from "./snapshot";
+import {
+  buildAssistantMessageConfirmationMetadata,
+  buildThreadRunMetadata,
+  withAssistantThreadRunMetadata,
+} from "./assistant-message-metadata";
+import { fenceProtectedOperationsForTerminal } from "./protected-agent-tool-state";
 
 const ACTIVE_RUN_STATUSES: ChatThreadRunStatus[] = [
   "queued",
@@ -21,8 +41,163 @@ const ACTIVE_RUN_STATUSES: ChatThreadRunStatus[] = [
   "cancel_requested",
   "waiting_for_approval",
 ];
+const RUNNER_PROGRESS_STATUSES: ChatThreadRunStatus[] = ["queued", "running"];
 
 type ChatThreadRunRow = typeof chatThreadRuns.$inferSelect;
+type ChatRunTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type LockedRunSnapshotContext = {
+  runRow: ChatThreadRunRow;
+  assistantMessageId: string | null;
+  messageMetadata: Record<string, unknown> | null;
+};
+
+async function lockRunSnapshotContext(
+  tx: ChatRunTransaction,
+  input: {
+    runId: string;
+    teamId: string;
+    workspaceId: string;
+    assistantMessageId?: string | null;
+  },
+): Promise<LockedRunSnapshotContext | null> {
+  const [runRow] = await tx
+    .select()
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.id, input.runId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!runRow) {
+    return null;
+  }
+
+  const assistantMessageId =
+    input.assistantMessageId !== undefined
+      ? input.assistantMessageId
+      : runRow.assistantMessageId;
+  const [messageRow] = assistantMessageId
+    ? await tx
+        .select({ metadata: messages.metadata })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.id, assistantMessageId),
+            eq(messages.teamId, input.teamId),
+            eq(messages.workspaceId, input.workspaceId),
+          ),
+        )
+        .for("update")
+        .limit(1)
+    : [];
+
+  return {
+    runRow,
+    assistantMessageId,
+    messageMetadata: getObjectRecord(messageRow?.metadata),
+  };
+}
+
+function hasCommittedArtifactBlock(blocks: unknown[] | undefined) {
+  return (blocks ?? []).some((value) => {
+    const record = getObjectRecord(value);
+    return record?.type === "artifact_output" && typeof record.id === "string";
+  });
+}
+
+async function syncCommittedArtifactBlocksToMessage(
+  tx: ChatRunTransaction,
+  input: {
+    assistantMessageId: string | null;
+    messageMetadata: Record<string, unknown> | null;
+    snapshot: ChatRunSnapshot;
+  },
+) {
+  if (!input.assistantMessageId || !input.messageMetadata) {
+    return;
+  }
+  const snapshotBlocks = Array.isArray(input.snapshot.renderBlocks)
+    ? input.snapshot.renderBlocks
+    : undefined;
+  if (!hasCommittedArtifactBlock(snapshotBlocks)) {
+    return;
+  }
+  const currentBlocks = Array.isArray(input.messageMetadata.renderBlocks)
+    ? input.messageMetadata.renderBlocks
+    : undefined;
+  const renderBlocks = mergeCommittedArtifactRenderBlocks({
+    incoming: currentBlocks,
+    authoritative: [snapshotBlocks],
+  });
+  await tx
+    .update(messages)
+    .set({
+      metadata: {
+        ...input.messageMetadata,
+        ...(renderBlocks ? { renderBlocks } : {}),
+      },
+    })
+    .where(eq(messages.id, input.assistantMessageId));
+}
+
+function mergeLockedRunSnapshot(input: {
+  context: LockedRunSnapshotContext;
+  incoming?: ChatRunSnapshot;
+}) {
+  return mergeChatRunSnapshot({
+    current: (input.context.runRow.snapshotJson ?? {}) as ChatRunSnapshot,
+    incoming: input.incoming,
+    assistantMessageMetadata: input.context.messageMetadata,
+  });
+}
+
+function mergeLockedTerminalSnapshot(input: {
+  context: LockedRunSnapshotContext;
+  incoming?: ChatRunSnapshot;
+  projectedRun: ChatThreadRunRecord;
+}) {
+  const current = mergeLockedRunSnapshot({ context: input.context });
+  const incoming = input.incoming ?? {};
+  const currentAssistant = current.assistantMessage;
+  const incomingAssistant = incoming.assistantMessage;
+  const currentMetadata = getObjectRecord(currentAssistant?.metadata) ?? {};
+  const incomingMetadata = getObjectRecord(incomingAssistant?.metadata) ?? {};
+  const terminalMetadata = Object.fromEntries(
+    ["error", "errorCode", "finishReason", "isCancelled", "isError"]
+      .filter((key) => incomingMetadata[key] !== undefined)
+      .map((key) => [key, incomingMetadata[key]]),
+  );
+  const terminalFields = Object.fromEntries(
+    ["errorCode", "errorMessage", "finishReason", "lastEventType"]
+      .filter((key) => incoming[key as keyof ChatRunSnapshot] !== undefined)
+      .map((key) => [key, incoming[key as keyof ChatRunSnapshot]]),
+  );
+  const terminalSnapshot = {
+    ...current,
+    ...terminalFields,
+    ...(currentAssistant || incomingAssistant
+      ? {
+          assistantMessage: {
+            ...(currentAssistant ?? incomingAssistant!),
+            metadata: {
+              ...currentMetadata,
+              ...terminalMetadata,
+            },
+          },
+        }
+      : {}),
+  };
+  const snapshot =
+    input.projectedRun.status === "completed"
+      ? terminalSnapshot
+      : finalizeTerminalSnapshotTrace(terminalSnapshot);
+  return withAssistantThreadRunMetadata(snapshot, input.projectedRun);
+}
 
 function mapRun(row: ChatThreadRunRow): ChatThreadRunRecord {
   return {
@@ -279,34 +454,63 @@ export async function updateChatThreadRunProgress(input: {
   eventOffset?: number;
   snapshotJson?: ChatRunSnapshot;
 }) {
-  const set: Partial<typeof chatThreadRuns.$inferInsert> = {
-    heartbeatAt: new Date(),
-    updatedAt: new Date(),
-  };
-  if (input.userMessageId !== undefined) {
-    set.userMessageId = input.userMessageId;
-  }
-  if (input.assistantMessageId !== undefined) {
-    set.assistantMessageId = input.assistantMessageId;
-  }
-  if (input.eventOffset !== undefined) {
-    set.eventOffset = input.eventOffset;
-  }
-  if (input.snapshotJson !== undefined) {
-    set.snapshotJson = input.snapshotJson as unknown as Record<string, unknown>;
-  }
-
-  const [row] = await db
-    .update(chatThreadRuns)
-    .set(set)
-    .where(
-      and(
-        eq(chatThreadRuns.id, input.runId),
-        eq(chatThreadRuns.teamId, input.teamId),
-        eq(chatThreadRuns.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning();
+  const row = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (!context || !RUNNER_PROGRESS_STATUSES.includes(context.runRow.status)) {
+      return null;
+    }
+    const snapshot =
+      input.snapshotJson === undefined
+        ? undefined
+        : mergeLockedRunSnapshot({
+            context,
+            incoming: input.snapshotJson,
+          });
+    const set: Partial<typeof chatThreadRuns.$inferInsert> = {
+      heartbeatAt: new Date(),
+      updatedAt: new Date(),
+      ...(input.userMessageId !== undefined
+        ? { userMessageId: input.userMessageId }
+        : {}),
+      ...(input.assistantMessageId !== undefined
+        ? { assistantMessageId: input.assistantMessageId }
+        : {}),
+      ...(input.eventOffset !== undefined
+        ? {
+            eventOffset: Math.max(
+              context.runRow.eventOffset,
+              input.eventOffset,
+            ),
+          }
+        : {}),
+      ...(snapshot
+        ? {
+            snapshotJson: snapshot as unknown as Record<string, unknown>,
+          }
+        : {}),
+    };
+    const [updated] = await tx
+      .update(chatThreadRuns)
+      .set(set)
+      .where(
+        and(
+          eq(chatThreadRuns.id, context.runRow.id),
+          eq(chatThreadRuns.status, context.runRow.status),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      return null;
+    }
+    if (snapshot) {
+      await syncCommittedArtifactBlocksToMessage(tx, {
+        assistantMessageId: context.assistantMessageId,
+        messageMetadata: context.messageMetadata,
+        snapshot,
+      });
+    }
+    return updated;
+  });
 
   return row ? mapRun(row) : null;
 }
@@ -348,6 +552,13 @@ export async function appendArtifactOutputToChatRun(input: {
         `ARTIFACT_OUTPUT_RUN_NOT_FOUND: chat run ${input.runId} was not found`,
       );
     }
+    if (
+      runRow.status !== "queued" &&
+      runRow.status !== "running" &&
+      runRow.status !== "waiting_for_approval"
+    ) {
+      return { block: null, run: mapRun(runRow) };
+    }
 
     const id = `artifact-output:${input.runId}:${input.artifactId}:${input.artifactVersionId}`;
     const snapshot = (runRow.snapshotJson ?? {}) as Record<string, unknown>;
@@ -371,27 +582,11 @@ export async function appendArtifactOutputToChatRun(input: {
     const messageBlocks = Array.isArray(messageRow?.metadata?.renderBlocks)
       ? messageRow.metadata.renderBlocks
       : [];
-    const currentBlocks = [...snapshotBlocks];
-    const knownIds = new Set(
-      snapshotBlocks.flatMap((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-          return [];
-        }
-        const blockId = (value as { id?: unknown }).id;
-        return typeof blockId === "string" ? [blockId] : [];
-      }),
-    );
-    for (const value of messageBlocks) {
-      const blockId =
-        value && typeof value === "object" && !Array.isArray(value)
-          ? (value as { id?: unknown }).id
-          : undefined;
-      if (typeof blockId !== "string" || knownIds.has(blockId)) {
-        continue;
-      }
-      knownIds.add(blockId);
-      currentBlocks.push(value);
-    }
+    const currentBlocks =
+      mergeCommittedArtifactRenderBlocks({
+        incoming: snapshotBlocks,
+        authoritative: [messageBlocks],
+      }) ?? [];
     const existing = currentBlocks.find(
       (value) =>
         value &&
@@ -399,8 +594,26 @@ export async function appendArtifactOutputToChatRun(input: {
         !Array.isArray(value) &&
         (value as { id?: unknown }).id === id,
     );
+    if (existing) {
+      if (
+        !committedArtifactBlockIdentityMatches(existing, {
+          artifactId: input.artifactId,
+          artifactVersionId: input.artifactVersionId,
+          id,
+          placement: "terminal",
+          producer: input.producer,
+          sourceToolCallId: input.sourceToolCallId,
+          threadRunId: input.runId,
+          type: "artifact_output",
+        })
+      ) {
+        throw new Error(
+          `ARTIFACT_OUTPUT_ID_CONFLICT: committed block ${id} has different identity`,
+        );
+      }
+    }
     const sequence =
-      currentBlocks.reduce((highest, value) => {
+      currentBlocks.reduce<number>((highest, value) => {
         if (!value || typeof value !== "object" || Array.isArray(value)) {
           return highest;
         }
@@ -440,12 +653,18 @@ export async function appendArtifactOutputToChatRun(input: {
 
     if (runRow.assistantMessageId) {
       if (messageRow) {
+        const messageRenderBlocks = mergeCommittedArtifactRenderBlocks({
+          incoming: messageBlocks,
+          authoritative: [renderBlocks],
+        });
         await tx
           .update(messages)
           .set({
             metadata: {
               ...(messageRow.metadata ?? {}),
-              renderBlocks,
+              ...(messageRenderBlocks
+                ? { renderBlocks: messageRenderBlocks }
+                : {}),
             },
           })
           .where(eq(messages.id, runRow.assistantMessageId));
@@ -454,6 +673,10 @@ export async function appendArtifactOutputToChatRun(input: {
 
     return { block, run: mapRun(updatedRun) };
   });
+
+  if (!result.block) {
+    return null;
+  }
 
   void publishThreadEvent({
     threadId: result.run.threadId,
@@ -476,73 +699,234 @@ export async function appendArtifactOutputToChatRun(input: {
   return result.block;
 }
 
+/**
+ * Repair only the committed artifact projection from the authoritative run and
+ * assistant-message records. This is the sole snapshot mutation allowed after
+ * a run is terminal; runner-owned fields and status remain untouched.
+ */
+export async function repairChatThreadRunArtifactOutputProjection(input: {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+}) {
+  const row = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (!context) {
+      return null;
+    }
+    if (
+      context.runRow.status !== "completed" &&
+      context.runRow.status !== "failed" &&
+      context.runRow.status !== "cancelled"
+    ) {
+      return null;
+    }
+    const snapshot = mergeLockedRunSnapshot({ context });
+    const [updated] = await tx
+      .update(chatThreadRuns)
+      .set({
+        snapshotJson: snapshot as unknown as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(chatThreadRuns.id, context.runRow.id))
+      .returning();
+    if (!updated) {
+      return null;
+    }
+    await syncCommittedArtifactBlocksToMessage(tx, {
+      assistantMessageId: context.assistantMessageId,
+      messageMetadata: context.messageMetadata,
+      snapshot,
+    });
+    return updated;
+  });
+  return row ? mapRun(row) : null;
+}
+
 export async function requestChatThreadRunCancel(input: {
   runId: string;
   teamId: string;
   workspaceId: string;
 }) {
-  const [row] = await db
-    .update(chatThreadRuns)
-    .set({
-      status: "cancel_requested",
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(chatThreadRuns.id, input.runId),
-        eq(chatThreadRuns.teamId, input.teamId),
-        eq(chatThreadRuns.workspaceId, input.workspaceId),
-        inArray(chatThreadRuns.status, [
-          "queued",
-          "running",
-          "waiting_for_approval",
-        ]),
-      ),
-    )
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (
+      !context ||
+      (context.runRow.status !== "queued" &&
+        context.runRow.status !== "running" &&
+        context.runRow.status !== "waiting_for_approval")
+    ) {
+      return null;
+    }
+    const snapshot = mergeLockedRunSnapshot({ context });
+    const committed = hasPairedCommittedArtifactPublication({
+      toolCalls: snapshot.toolCalls,
+      renderBlocks: snapshot.renderBlocks,
+      runId: context.runRow.id,
+    });
+    const now = new Date();
+    if (committed) {
+      const projectedRun: ChatThreadRunRecord = {
+        ...mapRun(context.runRow),
+        status: "completed",
+        finishedAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      const completedSnapshot = withAssistantThreadRunMetadata(
+        fenceProtectedOperationsForTerminal({
+          snapshot,
+          scope: {
+            runId: context.runRow.id,
+            teamId: context.runRow.teamId,
+            workspaceId: context.runRow.workspaceId,
+          },
+          reason: "RUN_COMPLETED_BEFORE_CANCEL",
+          markedAt: now.toISOString(),
+        }),
+        projectedRun,
+      );
+      const [row] = await tx
+        .update(chatThreadRuns)
+        .set({
+          status: "completed",
+          snapshotJson: completedSnapshot as unknown as Record<string, unknown>,
+          finishedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(chatThreadRuns.id, context.runRow.id),
+            eq(chatThreadRuns.status, context.runRow.status),
+          ),
+        )
+        .returning();
+      if (row && context.assistantMessageId && context.messageMetadata) {
+        await tx
+          .update(messages)
+          .set({
+            metadata: {
+              ...context.messageMetadata,
+              ...buildThreadRunMetadata(mapRun(row)),
+            },
+          })
+          .where(eq(messages.id, context.assistantMessageId));
+      }
+      return row ? { row, event: "run_finished" as const } : null;
+    }
+    const [row] = await tx
+      .update(chatThreadRuns)
+      .set({ status: "cancel_requested", updatedAt: now })
+      .where(
+        and(
+          eq(chatThreadRuns.id, context.runRow.id),
+          eq(chatThreadRuns.status, context.runRow.status),
+        ),
+      )
+      .returning();
+    return row ? { row, event: "run_cancel_requested" as const } : null;
+  });
 
-  const run = row ? mapRun(row) : null;
-  emitRunEvent(run, "run_cancel_requested");
+  const run = result ? mapRun(result.row) : null;
+  emitRunEvent(run, result?.event ?? "run_cancel_requested");
   return run;
 }
 
-export async function updateChatThreadRunStatus(input: {
+export async function recordChatThreadRunConfirmationResponse(input: {
   runId: string;
   teamId: string;
   workspaceId: string;
-  status: ChatThreadRunStatus;
-  snapshotJson?: ChatRunSnapshot;
-  errorCode?: string | null;
-  errorMessage?: string | null;
+  confirmationId: string;
+  confirmation: unknown;
 }) {
-  const [row] = await db
-    .update(chatThreadRuns)
-    .set({
-      status: input.status,
-      ...(input.snapshotJson !== undefined
-        ? {
-            snapshotJson: input.snapshotJson as unknown as Record<
-              string,
-              unknown
-            >,
-          }
+  const result = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (!context) {
+      return null;
+    }
+    if (context.runRow.status !== "waiting_for_approval") {
+      return { runRow: context.runRow, completed: false };
+    }
+    const currentSnapshot = mergeLockedRunSnapshot({ context });
+    const replaced = replaceConfirmationInToolCalls(
+      currentSnapshot.toolCalls,
+      input.confirmationId,
+      input.confirmation,
+    );
+    if (!replaced.changed) {
+      return { runRow: context.runRow, completed: false };
+    }
+    const traceParts = updateExistingTracePartsFromToolCalls(
+      currentSnapshot.traceParts,
+      replaced.toolCalls,
+    );
+    const completed = !hasPendingConfirmations(replaced.toolCalls);
+    const status = completed ? "completed" : "waiting_for_approval";
+    const now = new Date();
+    const projectedRun: ChatThreadRunRecord = {
+      ...mapRun(context.runRow),
+      status,
+      ...(completed
+        ? { finishedAt: now.toISOString(), updatedAt: now.toISOString() }
         : {}),
-      ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
-      ...(input.errorMessage !== undefined
-        ? { errorMessage: input.errorMessage }
-        : {}),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(chatThreadRuns.id, input.runId),
-        eq(chatThreadRuns.teamId, input.teamId),
-        eq(chatThreadRuns.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning();
+    };
+    const snapshot = withAssistantThreadRunMetadata(
+      {
+        ...currentSnapshot,
+        toolCalls: replaced.toolCalls,
+        ...(traceParts !== undefined ? { traceParts } : {}),
+        pendingConfirmationIds: completed
+          ? []
+          : parseStringArray(currentSnapshot.pendingConfirmationIds).filter(
+              (id) => id !== input.confirmationId,
+            ),
+      },
+      projectedRun,
+    );
+    const [updated] = await tx
+      .update(chatThreadRuns)
+      .set({
+        status,
+        snapshotJson: snapshot as unknown as Record<string, unknown>,
+        ...(completed
+          ? {
+              errorCode: null,
+              errorMessage: null,
+              finishedAt: now,
+            }
+          : {}),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(chatThreadRuns.id, context.runRow.id),
+          eq(chatThreadRuns.status, "waiting_for_approval"),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      return null;
+    }
+    const run = mapRun(updated);
+    if (context.assistantMessageId && context.messageMetadata) {
+      await tx
+        .update(messages)
+        .set({
+          metadata: buildAssistantMessageConfirmationMetadata({
+            currentMetadata: context.messageMetadata,
+            run,
+            snapshot,
+          }),
+        })
+        .where(eq(messages.id, context.assistantMessageId));
+    }
+    return { runRow: updated, completed };
+  });
 
-  return row ? mapRun(row) : null;
+  const run = result ? mapRun(result.runRow) : null;
+  if (result?.completed) {
+    emitRunEvent(run, "run_finished");
+  }
+  return run;
 }
 
 export async function markChatThreadRunWaitingForApproval(input: {
@@ -552,25 +936,42 @@ export async function markChatThreadRunWaitingForApproval(input: {
   workspaceId: string;
   snapshotJson: ChatRunSnapshot;
 }) {
-  const [row] = await db
-    .update(chatThreadRuns)
-    .set({
-      status: "waiting_for_approval",
-      ...(input.assistantMessageId !== undefined
-        ? { assistantMessageId: input.assistantMessageId }
-        : {}),
-      snapshotJson: input.snapshotJson as unknown as Record<string, unknown>,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(chatThreadRuns.id, input.runId),
-        eq(chatThreadRuns.teamId, input.teamId),
-        eq(chatThreadRuns.workspaceId, input.workspaceId),
-        eq(chatThreadRuns.status, "running"),
-      ),
-    )
-    .returning();
+  const row = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (!context || context.runRow.status !== "running") {
+      return null;
+    }
+    const snapshot = mergeLockedRunSnapshot({
+      context,
+      incoming: input.snapshotJson,
+    });
+    const [updated] = await tx
+      .update(chatThreadRuns)
+      .set({
+        status: "waiting_for_approval",
+        ...(input.assistantMessageId !== undefined
+          ? { assistantMessageId: input.assistantMessageId }
+          : {}),
+        snapshotJson: snapshot as unknown as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chatThreadRuns.id, context.runRow.id),
+          eq(chatThreadRuns.status, "running"),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      return null;
+    }
+    await syncCommittedArtifactBlocksToMessage(tx, {
+      assistantMessageId: context.assistantMessageId,
+      messageMetadata: context.messageMetadata,
+      snapshot,
+    });
+    return updated;
+  });
 
   const run = row ? mapRun(row) : null;
   emitRunEvent(run, "run_waiting_approval");
@@ -585,6 +986,8 @@ export async function finishChatThreadRun(input: {
   userMessageId?: string | null;
   assistantMessageId?: string | null;
   snapshotJson?: ChatRunSnapshot;
+  snapshotMode?: "runner_full" | "terminal_patch";
+  protectedOperationTerminalReason?: string;
   errorCode?: string | null;
   errorMessage?: string | null;
 }) {
@@ -592,34 +995,84 @@ export async function finishChatThreadRun(input: {
     input.status === "completed"
       ? ["running", "waiting_for_approval"]
       : ACTIVE_RUN_STATUSES;
-  const [row] = await db
-    .update(chatThreadRuns)
-    .set({
+  const row = await db.transaction(async (tx) => {
+    const context = await lockRunSnapshotContext(tx, input);
+    if (!context || !allowedSourceStatuses.includes(context.runRow.status)) {
+      return null;
+    }
+    const now = new Date();
+    const projectedRun: ChatThreadRunRecord = {
+      ...mapRun(context.runRow),
       status: input.status,
-      ...(input.userMessageId !== undefined
-        ? { userMessageId: input.userMessageId }
-        : {}),
-      ...(input.assistantMessageId !== undefined
-        ? { assistantMessageId: input.assistantMessageId }
-        : {}),
-      snapshotJson: (input.snapshotJson ?? {}) as unknown as Record<
-        string,
-        unknown
-      >,
+      userMessageId:
+        input.userMessageId !== undefined
+          ? input.userMessageId
+          : context.runRow.userMessageId,
+      assistantMessageId:
+        input.assistantMessageId !== undefined
+          ? input.assistantMessageId
+          : context.runRow.assistantMessageId,
       errorCode: input.errorCode ?? null,
       errorMessage: input.errorMessage ?? null,
-      finishedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(chatThreadRuns.id, input.runId),
-        eq(chatThreadRuns.teamId, input.teamId),
-        eq(chatThreadRuns.workspaceId, input.workspaceId),
-        inArray(chatThreadRuns.status, allowedSourceStatuses),
-      ),
-    )
-    .returning();
+      finishedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    const mergedSnapshot =
+      input.snapshotMode === "terminal_patch"
+        ? mergeLockedTerminalSnapshot({
+            context,
+            incoming: input.snapshotJson,
+            projectedRun,
+          })
+        : mergeLockedRunSnapshot({
+            context,
+            incoming: input.snapshotJson,
+          });
+    const snapshot = fenceProtectedOperationsForTerminal({
+      snapshot: mergedSnapshot,
+      scope: {
+        runId: context.runRow.id,
+        teamId: context.runRow.teamId,
+        workspaceId: context.runRow.workspaceId,
+      },
+      reason:
+        input.protectedOperationTerminalReason ??
+        `RUN_TERMINATED_${input.status.toUpperCase()}`,
+      markedAt: now.toISOString(),
+    });
+    const [updated] = await tx
+      .update(chatThreadRuns)
+      .set({
+        status: input.status,
+        ...(input.userMessageId !== undefined
+          ? { userMessageId: input.userMessageId }
+          : {}),
+        ...(input.assistantMessageId !== undefined
+          ? { assistantMessageId: input.assistantMessageId }
+          : {}),
+        snapshotJson: snapshot as unknown as Record<string, unknown>,
+        errorCode: input.errorCode ?? null,
+        errorMessage: input.errorMessage ?? null,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(chatThreadRuns.id, context.runRow.id),
+          eq(chatThreadRuns.status, context.runRow.status),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      return null;
+    }
+    await syncCommittedArtifactBlocksToMessage(tx, {
+      assistantMessageId: context.assistantMessageId,
+      messageMetadata: context.messageMetadata,
+      snapshot,
+    });
+    return updated;
+  });
 
   const run = row ? mapRun(row) : null;
   // Doubles as "assistant message finalized": the payload carries the message

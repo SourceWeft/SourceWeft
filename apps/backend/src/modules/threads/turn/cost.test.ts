@@ -28,7 +28,8 @@ test("computeProviderCostFromPricing prefers provider actual cost", () => {
       outputTokens: 1120,
       outputImageTokens: 1120,
       providerCostUsd: 0.0673,
-      providerCostSource: "usage.cost",
+      providerCostSource: "provider_inline",
+      providerCostSourcePath: "provider:openrouter.usage.cost",
     },
   });
 
@@ -143,8 +144,18 @@ test("computeProviderCostFromPricing prices a per-pixel image tier by quality + 
       ...basePricing,
       output_cost_per_image: 0.04,
       image_pricing_tiers: [
-        { quality: "hd", size: "1024x1024", perImage: null, perPixel: 7.629e-8 },
-        { quality: "standard", size: "1024x1024", perImage: 0.04, perPixel: null },
+        {
+          quality: "hd",
+          size: "1024x1024",
+          perImage: null,
+          perPixel: 7.629e-8,
+        },
+        {
+          quality: "standard",
+          size: "1024x1024",
+          perImage: 0.04,
+          perPixel: null,
+        },
       ],
     },
     usage: {
@@ -184,7 +195,12 @@ test("computeProviderCostFromPricing falls back to the flat image price when no 
       ...basePricing,
       output_cost_per_image: 0.04,
       image_pricing_tiers: [
-        { quality: "hd", size: "1024x1024", perImage: null, perPixel: 7.629e-8 },
+        {
+          quality: "hd",
+          size: "1024x1024",
+          perImage: null,
+          perPixel: 7.629e-8,
+        },
       ],
     },
     usage: {

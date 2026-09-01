@@ -69,8 +69,16 @@ test("concurrent opens of one artifact version share a detail request", async ()
 test("matching updatedAt reuses detail and a new version refetches", async () => {
   const load = vi.fn(async () => detail());
 
-  await loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load });
-  await loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load });
+  await loadArtifactDetail({
+    workspaceId: "workspace-1",
+    summary: summary(),
+    load,
+  });
+  await loadArtifactDetail({
+    workspaceId: "workspace-1",
+    summary: summary(),
+    load,
+  });
   await loadArtifactDetail({
     workspaceId: "workspace-1",
     summary: summary("2026-08-23T02:00:00.000Z"),
@@ -82,12 +90,18 @@ test("matching updatedAt reuses detail and a new version refetches", async () =>
 
 test("failed details are evicted so retry performs a real request", async () => {
   const load = vi
-    .fn<(workspaceId: string, artifactId: string) => Promise<ArtifactListItem>>()
+    .fn<
+      (workspaceId: string, artifactId: string) => Promise<ArtifactListItem>
+    >()
     .mockRejectedValueOnce(new Error("temporary"))
     .mockResolvedValueOnce(detail());
 
   await assert.rejects(
-    loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load }),
+    loadArtifactDetail({
+      workspaceId: "workspace-1",
+      summary: summary(),
+      load,
+    }),
     /temporary/,
   );
   const retried = await loadArtifactDetail({
@@ -102,10 +116,18 @@ test("failed details are evicted so retry performs a real request", async () => 
 
 test("deletion invalidation removes the matching cached detail", async () => {
   const load = vi.fn(async () => detail());
-  await loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load });
+  await loadArtifactDetail({
+    workspaceId: "workspace-1",
+    summary: summary(),
+    load,
+  });
 
   invalidateArtifactDetail("workspace-1", "artifact-1");
-  await loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load });
+  await loadArtifactDetail({
+    workspaceId: "workspace-1",
+    summary: summary(),
+    load,
+  });
 
   assert.equal(load.mock.calls.length, 2);
 });
@@ -116,8 +138,16 @@ test("detail caches are isolated by workspace", async () => {
     workspaceId,
   }));
 
-  await loadArtifactDetail({ workspaceId: "workspace-1", summary: summary(), load });
-  await loadArtifactDetail({ workspaceId: "workspace-2", summary: summary(), load });
+  await loadArtifactDetail({
+    workspaceId: "workspace-1",
+    summary: summary(),
+    load,
+  });
+  await loadArtifactDetail({
+    workspaceId: "workspace-2",
+    summary: summary(),
+    load,
+  });
 
   assert.equal(load.mock.calls.length, 2);
 });

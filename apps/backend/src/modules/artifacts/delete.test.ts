@@ -5,8 +5,15 @@ import { ContentError } from "../content/errors";
 import { workspaceService } from "../workspace";
 import { revokeShareLink } from "../sharing/store";
 import { teamAuditService } from "../team-audit";
-import { deleteArtifactObject } from "../sources/storage";
-import { deleteArtifactRecord, findArtifactRecord } from "./repository";
+import {
+  deleteArtifactObject,
+  deleteArtifactObjectsByPrefix,
+} from "../sources/storage";
+import {
+  deleteArtifactRecord,
+  findArtifactRecord,
+  listArtifactVersionContentRecords,
+} from "./repository";
 
 vi.mock("../workspace/guards", () => ({
   requireContentWorkspace: vi.fn(),
@@ -21,7 +28,10 @@ vi.mock("../workspace", () => ({
 
 vi.mock("../sources/storage", () => ({
   downloadArtifactObject: vi.fn(),
+  downloadArtifactObjectRange: vi.fn(),
+  downloadArtifactObjectWithMetadata: vi.fn(),
   deleteArtifactObject: vi.fn(),
+  deleteArtifactObjectsByPrefix: vi.fn(),
 }));
 
 vi.mock("../sharing/store", () => ({
@@ -35,17 +45,18 @@ vi.mock("../team-audit", () => ({
 vi.mock("./repository", () => ({
   deleteArtifactRecord: vi.fn(),
   findArtifactRecord: vi.fn(),
+  listArtifactVersionContentRecords: vi.fn(),
   listArtifactRecords: vi.fn(),
 }));
 
 const resolveAccess = vi.mocked(workspaceService.resolveAccess);
-const canAdministerContent = vi.mocked(
-  workspaceService.canAdministerContent,
-);
+const canAdministerContent = vi.mocked(workspaceService.canAdministerContent);
 const mockedFindArtifact = vi.mocked(findArtifactRecord);
 const mockedDeleteRecord = vi.mocked(deleteArtifactRecord);
+const mockedListVersions = vi.mocked(listArtifactVersionContentRecords);
 const mockedRevokeShare = vi.mocked(revokeShareLink);
 const mockedDeleteObject = vi.mocked(deleteArtifactObject);
+const mockedDeletePrefix = vi.mocked(deleteArtifactObjectsByPrefix);
 const mockedAudit = vi.mocked(teamAuditService.record);
 
 const WORKSPACE_ID = "ws-1";
@@ -81,7 +92,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockedRevokeShare.mockResolvedValue(true);
   mockedDeleteRecord.mockResolvedValue(true);
+  mockedListVersions.mockResolvedValue([]);
   mockedDeleteObject.mockResolvedValue(undefined);
+  mockedDeletePrefix.mockResolvedValue(undefined);
   mockedAudit.mockResolvedValue(undefined as never);
 });
 
@@ -119,6 +132,9 @@ test("creator delete revokes the share, deletes the row, then the stored bytes",
       "workspaces/ws-1/artifacts/artifact-1/preview.jpg",
     ],
   );
+  assert.deepEqual(mockedDeletePrefix.mock.calls[0]?.[0], {
+    prefix: "workspaces/ws-1/artifacts/artifact-1/",
+  });
   assert.equal(mockedAudit.mock.calls[0]?.[0]?.action, "artifact.deleted");
 });
 

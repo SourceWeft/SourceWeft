@@ -18,6 +18,10 @@ import {
   createSourceWeftToolErrorMiddleware,
   formatSourceWeftToolError,
 } from "./tool-error";
+import {
+  AgentToolExecutionTimeoutError,
+  AgentToolTerminationUnknownError,
+} from "./tool-execution-timeout";
 
 function request(input?: { aborted?: boolean; toolName?: string }) {
   const controller = new AbortController();
@@ -63,9 +67,68 @@ test("MCP tool errors redact secrets and bound the model-facing message", () => 
 
 test("run cancellation propagates instead of becoming a tool result", () => {
   assert.equal(
+    formatSourceWeftToolError(new Error("aborted"), request({ aborted: true })),
+    undefined,
+  );
+});
+
+test("tool timeout errors use a stable code-prefixed model-facing message", () => {
+  const timeout = new AgentToolExecutionTimeoutError({
+    timeoutMs: 120_000,
+    toolName: "render_video",
+  });
+  const wrapped = new Error("middleware wrapper", { cause: timeout });
+
+  assert.equal(
+    formatSourceWeftToolError(wrapped, request({ toolName: "render_video" })),
+    "[AGENT_TOOL_EXECUTION_TIMEOUT] Tool 'render_video' timed out after 120000ms. The call did not produce a successful result.",
+  );
+});
+
+test("timeout termination uncertainty is distinct from a confirmed timeout", () => {
+  const timeout = new AgentToolExecutionTimeoutError({
+    timeoutMs: 120_000,
+    toolName: "render_video",
+  });
+  const unknown = new AgentToolTerminationUnknownError({
+    cause: timeout,
+    terminationGraceMs: 30_000,
+    toolName: "render_video",
+  });
+
+  assert.equal(
+    formatSourceWeftToolError(unknown, request({ toolName: "render_video" })),
+    "[AGENT_TOOL_TERMINATION_UNKNOWN] Tool 'render_video' did not confirm termination within 30000ms. Do not treat this call as successful or reuse its execution environment.",
+  );
+});
+
+test("sandbox termination uncertainty is preserved before the outer tool deadline", () => {
+  const sandboxUnknown = Object.assign(
+    new Error("provider cancellation returned without confirmation"),
+    { code: "SANDBOX_TERMINATION_UNKNOWN" },
+  );
+
+  assert.equal(
     formatSourceWeftToolError(
-      new Error("aborted"),
-      request({ aborted: true }),
+      new Error("middleware wrapper", { cause: sandboxUnknown }),
+      request({ toolName: "render_video" }),
+    ),
+    "[AGENT_TOOL_TERMINATION_UNKNOWN] Tool 'render_video' could not confirm remote termination. Do not treat this call as successful or reuse its execution environment.",
+  );
+});
+
+test("termination uncertainty caused by run cancellation remains control flow", () => {
+  const cancelled = new DOMException("user stopped", "AbortError");
+  const unknown = new AgentToolTerminationUnknownError({
+    cause: cancelled,
+    terminationGraceMs: 30_000,
+    toolName: "render_video",
+  });
+
+  assert.equal(
+    formatSourceWeftToolError(
+      unknown,
+      request({ aborted: true, toolName: "render_video" }),
     ),
     undefined,
   );

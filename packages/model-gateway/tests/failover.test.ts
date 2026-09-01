@@ -111,6 +111,38 @@ test("chat.complete fails over to the next target on quota exhaustion", async ()
   assert.equal(result.providerModel, "backup-model");
 });
 
+test("chat.complete fallbackPolicy none executes exactly one configured target", async () => {
+  const calls: string[] = [];
+  const gateway = createModelGateway(
+    twoTargetConfig({
+      primary: () =>
+        stubModel({
+          invoke: async () => {
+            calls.push("primary");
+            throw httpError(402, "Insufficient credits");
+          },
+        }),
+      backup: () =>
+        stubModel({
+          invoke: async () => {
+            calls.push("backup");
+            return { content: "must not run" };
+          },
+        }),
+    }),
+  );
+
+  await assert.rejects(
+    gateway.chat.complete({
+      model: "chat-default",
+      messages: [{ role: "user", content: "hi" }],
+      fallbackPolicy: "none",
+    }),
+    (error: { code?: string }) => error.code === "QUOTA",
+  );
+  assert.deepEqual(calls, ["primary"]);
+});
+
 test("chat.complete does not fail over on a bad request", async () => {
   const calls: string[] = [];
   const gateway = createModelGateway(
@@ -183,6 +215,42 @@ test("chat.stream fails over when the primary dies before the first chunk", asyn
   const chunks = events.filter((event) => event.type === "chunk");
   assert.equal(chunks.length, 2);
   assert.equal(events.at(-1)?.type, "metadata");
+});
+
+test("chat.stream fallbackPolicy none surfaces the first target error", async () => {
+  const calls: string[] = [];
+  const gateway = createModelGateway(
+    twoTargetConfig({
+      primary: () =>
+        stubModel({
+          stream: async () => {
+            calls.push("primary");
+            throw httpError(402, "Insufficient credits");
+          },
+        }),
+      backup: () =>
+        stubModel({
+          stream: async () => {
+            calls.push("backup");
+            return (async function* () {
+              yield { content: "must not run" };
+            })();
+          },
+        }),
+    }),
+  );
+
+  const events: ChatStreamEvent[] = [];
+  for await (const event of gateway.chat.stream({
+    model: "chat-default",
+    messages: [{ role: "user", content: "hi" }],
+    fallbackPolicy: "none",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(calls, ["primary"]);
+  assert.equal(events.at(-1)?.type, "error");
 });
 
 test("chat.stream does not fail over after output reached the consumer", async () => {
@@ -265,6 +333,36 @@ test("LangChain chat model facade fails over invoke and keeps bound tools", asyn
   // The fallback model must carry the same tools as the model it replaced.
   assert.equal(boundTools.primary?.length, 1);
   assert.equal(boundTools.backup?.length, 1);
+});
+
+test("LangChain chat model fallbackPolicy none binds only the selected target", async () => {
+  const calls: string[] = [];
+  const model = await createLangChainChatModel({
+    modelAlias: "chat-default",
+    config: twoTargetConfig({
+      primary: () =>
+        stubModel({
+          invoke: async () => {
+            calls.push("primary");
+            throw httpError(402, "Insufficient credits");
+          },
+        }),
+      backup: () =>
+        stubModel({
+          invoke: async () => {
+            calls.push("backup");
+            return { content: "must not run" };
+          },
+        }),
+    }),
+    execution: { fallbackPolicy: "none" },
+  });
+
+  await assert.rejects(
+    model.invoke([{ role: "user", content: "hi" }]),
+    (error: Error) => error.message === "Insufficient credits",
+  );
+  assert.deepEqual(calls, ["primary"]);
 });
 
 test("resolveRequestCandidates orders priority targets and keeps zero-weight targets as failover tail", async () => {

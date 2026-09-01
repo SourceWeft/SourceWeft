@@ -473,6 +473,120 @@ test("getOrCreateThreadSandbox checks newly created sandbox health before markin
   assert.deepEqual(ready, ["sandbox-1"]);
 });
 
+test("a persisted generation fence rejects late results across manager instances", async () => {
+  const context: SandboxRuntimeContext = {
+    teamId: "team-persistent-fence",
+    workspaceId: "workspace-persistent-fence",
+    threadId: "thread-persistent-fence",
+    userId: "user-persistent-fence",
+    messageId: "message-persistent-fence",
+    runId: "run-persistent-fence",
+  };
+  const sandbox = {
+    id: "sandbox-generation-persistent",
+    provider: "fake",
+    providerSandboxId: "provider-sandbox-persistent",
+  };
+  let active = true;
+  const sandboxStore: SandboxStore = {
+    ...createTestSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      return active
+        ? {
+            ...sandbox,
+            ...context,
+            status: "ready" as const,
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 60_000),
+          }
+        : null;
+    },
+    async markSandboxExpired() {
+      active = false;
+    },
+  };
+  const operationStore = createMessageScopedOperationStore();
+  let dispositionDuringProviderCancellation: string | null = null;
+  let firstManager!: SandboxManager;
+  const provider: SandboxProvider = {
+    ...createTestProvider(),
+    cancellationScope: "sandbox",
+    async cancelExecution() {
+      dispositionDuringProviderCancellation =
+        await firstManager.resolveExecutionResultDisposition(sandbox, context);
+      return { confirmed: true, mode: "sandbox" };
+    },
+  };
+  firstManager = new SandboxManager({
+    provider,
+    sandboxStore,
+    operationStore,
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1,
+  });
+  const secondManager = new SandboxManager({
+    provider,
+    sandboxStore,
+    operationStore,
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1,
+  });
+
+  await secondManager.cancelExecution({
+    sandbox,
+    executionId: "execution-from-second-manager",
+    reason: "user_cancelled",
+  });
+
+  assert.equal(dispositionDuringProviderCancellation, "termination_unknown");
+  assert.equal(
+    await firstManager.resolveExecutionResultDisposition(sandbox, context),
+    "termination_unknown",
+  );
+});
+
+test("a persisted generation replacement rejects a result from the old sandbox", async () => {
+  const context: SandboxRuntimeContext = {
+    teamId: "team-generation-replaced",
+    workspaceId: "workspace-generation-replaced",
+    threadId: "thread-generation-replaced",
+    userId: "user-generation-replaced",
+    messageId: "message-generation-replaced",
+    runId: "run-generation-replaced",
+  };
+  const oldSandbox = {
+    id: "sandbox-generation-old",
+    provider: "fake",
+    providerSandboxId: "provider-sandbox-old",
+  };
+  const sandboxStore: SandboxStore = {
+    ...createTestSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      return {
+        id: "sandbox-generation-new",
+        provider: "fake",
+        providerSandboxId: "provider-sandbox-new",
+        ...context,
+        status: "ready",
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      };
+    },
+  };
+  const manager = new SandboxManager({
+    provider: createTestProvider(),
+    sandboxStore,
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1,
+  });
+
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(oldSandbox, context),
+    "termination_unknown",
+  );
+});
+
 test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fresh one", async () => {
   const expired: string[] = [];
   const created: string[] = [];
@@ -632,4 +746,46 @@ test("beginToolOperation replays succeeded operations only within the same messa
     request: { command: "npm test" },
   });
   assert.equal(nextMessage.kind, "claimed");
+});
+
+test("cancelExecution is idempotent for one provider execution", async () => {
+  let cancellationCalls = 0;
+  const provider: SandboxProvider = {
+    ...createTestProvider(),
+    cancellationScope: "command",
+    async cancelExecution() {
+      cancellationCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return { confirmed: true, mode: "command" };
+    },
+  };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createTestSandboxStore(),
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1,
+  });
+  const sandbox = {
+    id: "sandbox-row-1",
+    provider: "fake",
+    providerSandboxId: "sandbox-provider-1",
+  };
+
+  const [first, second] = await Promise.all([
+    manager.cancelExecution({
+      sandbox,
+      executionId: "execution-1",
+      reason: "user_cancelled",
+    }),
+    manager.cancelExecution({
+      sandbox,
+      executionId: "execution-1",
+      reason: "user_cancelled",
+    }),
+  ]);
+
+  assert.deepEqual(first, { confirmed: true, mode: "command" });
+  assert.deepEqual(second, first);
+  assert.equal(cancellationCalls, 1);
 });

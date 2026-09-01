@@ -573,7 +573,9 @@ export function Composer({
   );
   const activeSlashSkills = useMemo(
     () =>
-      availableSkills.filter((skill) => effectiveSelectedSkillIdSet.has(skill.id)),
+      availableSkills.filter((skill) =>
+        effectiveSelectedSkillIdSet.has(skill.id),
+      ),
     [availableSkills, effectiveSelectedSkillIdSet],
   );
   const capabilityCatalogTools = useMemo(
@@ -1065,9 +1067,7 @@ export function Composer({
    * or what the option means, so a new capability with model-constrained
    * options needs no edit in this file.
    */
-  function getComposerOptionValues(
-    option: CapabilityToolOption | SkillOption,
-  ) {
+  function getComposerOptionValues(option: CapabilityToolOption | SkillOption) {
     return composerOptionValues(option, modelCapabilities);
   }
 
@@ -1608,8 +1608,7 @@ export function Composer({
               }}
               onSlashCommandSelect={(option: PromptInputSlashCommand) => {
                 const meta = option.meta as
-                  | ComposerSlashCommandMeta
-                  | undefined;
+                  ComposerSlashCommandMeta | undefined;
                 if (!meta) {
                   return;
                 }

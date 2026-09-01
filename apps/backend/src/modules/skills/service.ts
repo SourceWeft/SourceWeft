@@ -62,15 +62,6 @@ function displayNameFromName(name: string) {
     .join(" ");
 }
 
-function isBuiltinSkillDefaultEnabled(skill: {
-  slug: string;
-  visibility: string;
-}) {
-  // `restricted` builtin skills are internal capabilities (e.g. ppt-deck) that
-  // stay enabled by default without appearing in the public gallery.
-  return skill.visibility === "restricted";
-}
-
 // Registry catalog visibility (skill-registry-index.md §5.5): a `registry_github`
 // entry is teamId/workspaceId-NULL, so `public` is universal while `restricted`
 // (still under review) is visible ONLY to the user who submitted it. A
@@ -175,6 +166,7 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     enabledWorkspaceSkillId: row.enabled?.id ?? null,
     enabled: row.enabled?.enabled ?? false,
     installable: true,
+    defaultEnabled: manifest.defaultEnabled,
     hasReadme: false,
     capabilities: manifest.capabilities,
     models: manifest.models,
@@ -280,7 +272,7 @@ export class ContentSkillsService {
         enabledWorkspaceSkillId: null,
         enabled: true,
         installable: false,
-        defaultEnabled: isBuiltinSkillDefaultEnabled(skill) ? true : undefined,
+        defaultEnabled: skill.manifestJson.defaultEnabled,
         hasReadme: false,
         capabilities: skill.manifestJson.capabilities,
         models: skill.manifestJson.models,
@@ -679,7 +671,6 @@ export class ContentSkillsService {
 export const contentSkillsService = new ContentSkillsService();
 
 export const testExports = {
-  isBuiltinSkillDefaultEnabled,
   isRegistryRowVisibleToViewer,
   registryCatalogFields,
   skillSearchRelevanceRank,

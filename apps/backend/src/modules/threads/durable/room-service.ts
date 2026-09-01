@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   publishThreadEvent,
   type RoomReservation,
+  type ThreadEventPayload,
 } from "../../../shared/notify-hub";
 import { metrics } from "../../../shared/metrics";
 import { dropPresence, readPresence, touchPresence } from "./presence-store";
@@ -31,12 +32,32 @@ type RoomFrame =
   | { type: "ready" }
   | { type: "resync" }
   | { type: "message"; messageId?: string; role?: string }
-  | { type: "run"; kind: string; runId?: string; status?: string }
+  | {
+      type: "run";
+      kind: string;
+      runId?: string;
+      status?: string;
+      assistantMessageId?: string;
+    }
   | { type: "presence"; here: string[] }
   | { type: "typing"; userId?: string };
 
 function toSseFrame(frame: RoomFrame): string {
   return `data: ${JSON.stringify(frame)}\n\n`;
+}
+
+export function toRunRoomFrame(
+  payload: ThreadEventPayload,
+): Extract<RoomFrame, { type: "run" }> {
+  return {
+    type: "run",
+    kind: payload.kind,
+    ...(payload.runId ? { runId: payload.runId } : {}),
+    ...(payload.status ? { status: payload.status } : {}),
+    ...(payload.assistantMessageId
+      ? { assistantMessageId: payload.assistantMessageId }
+      : {}),
+  };
 }
 
 export async function* streamThreadRoom(input: {
@@ -145,12 +166,7 @@ export async function* streamThreadRoom(input: {
         });
         return;
       }
-      push({
-        type: "run",
-        kind: payload.kind,
-        runId: payload.runId,
-        status: payload.status,
-      });
+      push(toRunRoomFrame(payload));
     },
   });
 

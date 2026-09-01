@@ -227,6 +227,9 @@ function buildBuiltinManifestFromCapability(input: {
     categories,
     slash,
   };
+  if (input.skill.defaultEnabled !== undefined) {
+    manifestJson.defaultEnabled = input.skill.defaultEnabled;
+  }
   if (input.skill.models) {
     manifestJson.models = input.skill.models;
   }

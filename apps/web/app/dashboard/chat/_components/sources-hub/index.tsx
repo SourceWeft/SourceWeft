@@ -47,9 +47,7 @@ import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
 import { type SourceItem } from "../source-types";
-import {
-  artifactMatchesQuery,
-} from "./artifacts";
+import { artifactMatchesQuery } from "./artifacts";
 import { ManageConnectorsDialog } from "./connectors/manage-dialog";
 import { ConnectorSettingsDialog } from "./connectors/settings-dialog";
 import { ConnectorsTab } from "./connectors/tab";
@@ -78,9 +76,7 @@ import { useArtifacts } from "./artifacts/use-artifacts";
 import { McpTab } from "./mcp/tab";
 import { useMcp } from "./mcp/use-mcp";
 import { McpMarket } from "../../../mcp/_components/mcp-market";
-import {
-  sourceMatchesQuery,
-} from "./sources/components";
+import { sourceMatchesQuery } from "./sources/components";
 import {
   AddSourceDialog,
   CreateDirectoryDialog,
@@ -492,11 +488,17 @@ export function SourcesHub({
     }
 
     try {
-      await contentClient.updateWorkspaceSkill(workspaceId, skill.workspaceSkillId, {
-        enabled,
-      });
+      await contentClient.updateWorkspaceSkill(
+        workspaceId,
+        skill.workspaceSkillId,
+        {
+          enabled,
+        },
+      );
       if (!enabled && selectedSkillIds.includes(skill.id)) {
-        onSkillSelectionChange(selectedSkillIds.filter((id) => id !== skill.id));
+        onSkillSelectionChange(
+          selectedSkillIds.filter((id) => id !== skill.id),
+        );
       }
       await onSkillsCatalogChange?.();
     } catch (error) {
@@ -582,7 +584,6 @@ export function SourcesHub({
       window.removeEventListener("resize", updateTabScrollState);
     };
   }, [updateTabScrollState]);
-
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
@@ -1325,7 +1326,7 @@ export function SourcesHub({
         hardDelete={disconnectConnectorHardDelete}
         isBusy={Boolean(
           pendingDisconnectConnector &&
-            connectorBusyById[pendingDisconnectConnector.id],
+          connectorBusyById[pendingDisconnectConnector.id],
         )}
         onConfirm={() => void handleConfirmDisconnectConnector()}
         onHardDeleteChange={setDisconnectConnectorHardDelete}

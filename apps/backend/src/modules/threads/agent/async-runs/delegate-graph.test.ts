@@ -24,6 +24,7 @@ import {
   DELEGATE_GRAPH_IDS,
   isDelegateGraphId,
 } from "./delegate-graph";
+import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 
 class CaptureModel extends BaseChatModel {
   boundToolNames: string[] = [];
@@ -83,7 +84,10 @@ for (const graphId of DELEGATE_GRAPH_IDS) {
         }
       ).invoke(
         { messages: [new HumanMessage("go")] },
-        { configurable: { thread_id: `delegate_${graphId}` }, recursionLimit: 4 },
+        {
+          configurable: { thread_id: `delegate_${graphId}` },
+          recursionLimit: 4,
+        },
       );
     } catch {
       // A responseFormat delegate may reject the capture model's plain reply;
@@ -105,3 +109,31 @@ for (const graphId of DELEGATE_GRAPH_IDS) {
   });
 }
 
+test("standalone async delegates receive the same SourceWeft governance as inline subagents", () => {
+  const model = new CaptureModel();
+  const backend = new DeepAgentsStateBackend({ state: { files: {} } } as never);
+  const expectedNames = createSourceWeftSubagentMiddlewareStack({
+    backend,
+    model: model as never,
+  }).map((middleware) => middleware.name);
+  const agent = createDelegateGraph({
+    graphId: "explore",
+    model: model as never,
+    backend,
+    availableTools: readTools,
+  });
+  const actualNames =
+    (
+      agent as never as {
+        options?: { middleware?: readonly { name?: string }[] };
+      }
+    ).options?.middleware?.map((middleware) => middleware.name) ?? [];
+
+  for (const name of expectedNames) {
+    assert.ok(
+      actualNames.includes(name),
+      `expected standalone delegate middleware '${name}'; got: ${actualNames.join(", ")}`,
+    );
+  }
+  assert.ok(expectedNames.includes("SourceWeftToolExecutionTimeout"));
+});

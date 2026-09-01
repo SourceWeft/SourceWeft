@@ -323,6 +323,20 @@ export class DurableChatRunService {
   }) {
     const run = await resolveOwnedRun(input);
     if (!isTerminalRunStatus(run.status)) {
+      // Persist the cancellation fence before waking the worker. Deliverable
+      // publication locks this same row, so Stop and publish now have a single
+      // database ordering instead of a signal-before-state race.
+      const updated = await requestChatThreadRunCancel({
+        runId: run.id,
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+      });
+      if (!updated) {
+        return resolveOwnedRun(input);
+      }
+      if (isTerminalRunStatus(updated.status)) {
+        return updated;
+      }
       await chatRunStreamManager.appendStop(run.streamKey);
       // Wake the worker running the turn now, rather than at its next status
       // poll: this is what lets an in-flight turn abort promptly instead of
@@ -333,14 +347,8 @@ export class DurableChatRunService {
           code: CLIENT_CANCELLED_CODE,
           message: CLIENT_CANCELLED_MESSAGE,
         });
-        return forceCancelStoppedRun(run);
+        return forceCancelStoppedRun(updated);
       }
-      const updated =
-        (await requestChatThreadRunCancel({
-          runId: run.id,
-          teamId: run.teamId,
-          workspaceId: run.workspaceId,
-        })) ?? run;
       return forceCancelStoppedRun(updated);
     }
     return run;

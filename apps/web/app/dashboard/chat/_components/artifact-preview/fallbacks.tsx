@@ -18,7 +18,11 @@ export function PendingArtifactPreview({
   );
 }
 
-export function FailedArtifactPreview({ message }: { message?: string | null }) {
+export function FailedArtifactPreview({
+  message,
+}: {
+  message?: string | null;
+}) {
   return (
     <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-center">
       <p className="text-sm font-medium text-destructive">

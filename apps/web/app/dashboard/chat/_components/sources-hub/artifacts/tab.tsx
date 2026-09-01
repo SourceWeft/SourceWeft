@@ -144,7 +144,9 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
             {previewImageUrl ? (
               <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
                 <RawImage
-                  alt={artifact.previewImage?.altText ?? artifactTitle(artifact)}
+                  alt={
+                    artifact.previewImage?.altText ?? artifactTitle(artifact)
+                  }
                   className="h-full w-full object-cover"
                   loading="lazy"
                   src={previewImageUrl}

@@ -18,7 +18,19 @@ import type { DeliverableHostContext } from "@sourceweft/capability-contracts";
 const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
 
 vi.mock("@aws-sdk/client-s3", () => {
+  class DeleteObjectCommand {
+    constructor(readonly input: Record<string, unknown>) {}
+  }
+  class DeleteObjectsCommand {
+    constructor(readonly input: Record<string, unknown>) {}
+  }
   class GetObjectCommand {
+    constructor(readonly input: Record<string, unknown>) {}
+  }
+  class HeadObjectCommand {
+    constructor(readonly input: Record<string, unknown>) {}
+  }
+  class ListObjectsV2Command {
     constructor(readonly input: Record<string, unknown>) {}
   }
   class PutObjectCommand {
@@ -27,7 +39,15 @@ vi.mock("@aws-sdk/client-s3", () => {
   class S3Client {
     send = sendMock;
   }
-  return { GetObjectCommand, PutObjectCommand, S3Client };
+  return {
+    DeleteObjectCommand,
+    DeleteObjectsCommand,
+    GetObjectCommand,
+    HeadObjectCommand,
+    ListObjectsV2Command,
+    PutObjectCommand,
+    S3Client,
+  };
 });
 
 type StorageModule = typeof import("./storage");
@@ -178,6 +198,161 @@ describe("downloadArtifactObjectForPort", () => {
     await expect(
       storage.downloadArtifactObjectForPort({ key: "k" }),
     ).rejects.toThrow("connection reset");
+  });
+});
+
+describe("conditional object writes", () => {
+  test("uses the real S3 If-None-Match precondition", async () => {
+    sendMock.mockResolvedValue({});
+
+    await expect(
+      storage.putArtifactObjectIfAbsent({
+        key: "agent-wip/v1/scope/semantic",
+        body: new Uint8Array([1, 2, 3]),
+        contentType: "audio/mpeg",
+        metadata: { "sourceweft-sha256": "abc" },
+      }),
+    ).resolves.toBe("created");
+
+    const command = sendMock.mock.calls[0]?.[0] as {
+      constructor: { name: string };
+      input: Record<string, unknown>;
+    };
+    expect(command.constructor.name).toBe("PutObjectCommand");
+    expect(command.input).toMatchObject({
+      Bucket: storage.getContentStorageBucketName(),
+      Key: "agent-wip/v1/scope/semantic",
+      IfNoneMatch: "*",
+      ContentType: "audio/mpeg",
+      Metadata: { "sourceweft-sha256": "abc" },
+    });
+  });
+
+  test("maps a 412 precondition failure to an existing object", async () => {
+    sendMock.mockRejectedValue(
+      Object.assign(new Error("precondition failed"), {
+        name: "PreconditionFailed",
+        $metadata: { httpStatusCode: 412 },
+      }),
+    );
+
+    await expect(
+      storage.putArtifactObjectIfAbsent({
+        key: "agent-wip/v1/scope/semantic",
+        body: new Uint8Array([1]),
+        contentType: "application/octet-stream",
+      }),
+    ).resolves.toBe("exists");
+  });
+
+  test("retries a concurrent 409 without falling back to an unconditional put", async () => {
+    sendMock
+      .mockRejectedValueOnce(
+        Object.assign(new Error("conditional request conflict"), {
+          name: "ConditionalRequestConflict",
+          $metadata: { httpStatusCode: 409 },
+        }),
+      )
+      .mockResolvedValueOnce({});
+
+    await expect(
+      storage.putArtifactObjectIfAbsent({
+        key: "agent-wip/v1/scope/semantic",
+        body: new Uint8Array([1]),
+        contentType: "application/octet-stream",
+      }),
+    ).resolves.toBe("created");
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    for (const [command] of sendMock.mock.calls) {
+      expect(
+        (command as { input: Record<string, unknown> }).input.IfNoneMatch,
+      ).toBe("*");
+    }
+  });
+});
+
+describe("scoped object metadata and cleanup", () => {
+  test("returns user metadata with the bounded object bytes", async () => {
+    sendMock.mockResolvedValue({
+      ...getObjectReply({
+        body: new Uint8Array([4, 5]),
+        contentType: "image/png",
+      }),
+      Metadata: {
+        "sourceweft-sha256": "sha256:abc",
+        "sourceweft-expires-at": "2026-08-29T00:00:00.000Z",
+      },
+    });
+
+    await expect(
+      storage.downloadArtifactObjectWithMetadata({
+        key: "agent-wip/v1/scope/semantic",
+        maxBytes: 10,
+      }),
+    ).resolves.toEqual({
+      body: new Uint8Array([4, 5]),
+      contentType: "image/png",
+      metadata: {
+        "sourceweft-sha256": "sha256:abc",
+        "sourceweft-expires-at": "2026-08-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  test("lists the exact prefix before deleting its objects in batches", async () => {
+    sendMock
+      .mockResolvedValueOnce({
+        Contents: [{ Key: "agent-wip/v1/scope/a" }],
+        IsTruncated: true,
+        NextContinuationToken: "next-page",
+      })
+      .mockResolvedValueOnce({
+        Contents: [{ Key: "agent-wip/v1/scope/b" }],
+        IsTruncated: false,
+      })
+      .mockResolvedValueOnce({});
+
+    await storage.deleteArtifactObjectsByPrefix({
+      prefix: "agent-wip/v1/scope/",
+    });
+
+    expect(sendMock).toHaveBeenCalledTimes(3);
+    expect(
+      (sendMock.mock.calls[0]?.[0] as { input: Record<string, unknown> }).input,
+    ).toMatchObject({
+      Prefix: "agent-wip/v1/scope/",
+      MaxKeys: 1000,
+    });
+    expect(
+      (sendMock.mock.calls[1]?.[0] as { input: Record<string, unknown> }).input,
+    ).toMatchObject({
+      Prefix: "agent-wip/v1/scope/",
+      ContinuationToken: "next-page",
+    });
+    expect(
+      (sendMock.mock.calls[2]?.[0] as { input: Record<string, unknown> }).input,
+    ).toMatchObject({
+      Delete: {
+        Quiet: true,
+        Objects: [
+          { Key: "agent-wip/v1/scope/a" },
+          { Key: "agent-wip/v1/scope/b" },
+        ],
+      },
+    });
+  });
+
+  test("refuses an empty or over-broad prefix before calling S3", async () => {
+    await expect(
+      storage.deleteArtifactObjectsByPrefix({ prefix: "" }),
+    ).rejects.toThrow(/prefix/i);
+    await expect(
+      storage.deleteArtifactObjectsByPrefix({
+        prefix: "agent-wip/v1/scope/",
+        maxObjects: 0,
+      }),
+    ).rejects.toThrow(/maxObjects/i);
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });
 

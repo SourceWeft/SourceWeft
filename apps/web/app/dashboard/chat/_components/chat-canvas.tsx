@@ -1,7 +1,5 @@
 export { ChatCanvas } from "./chat-canvas/chat-canvas-root";
-export {
-  buildChatToolsRequest,
-} from "./chat-canvas/tool-selection";
+export { buildChatToolsRequest } from "./chat-canvas/tool-selection";
 export {
   EMPTY_COMPOSER_OPTIONS,
   normalizeComposerOptionsState,

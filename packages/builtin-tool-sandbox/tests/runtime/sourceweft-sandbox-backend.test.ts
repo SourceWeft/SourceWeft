@@ -16,6 +16,16 @@ import type {
 } from "../../src/runtime/types";
 import type { RuntimeAssetPlan } from "../../src/runtime/runtime-assets";
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   workspaceRoot: "/workspace",
   defaultCwd: "/workspace",
@@ -181,8 +191,7 @@ function createReplayOperationStore(): SandboxOperationStore & {
     context: SandboxRuntimeContext;
     operationType: string;
     toolCallId: string;
-  }) =>
-    `${input.context.messageId}:${input.operationType}:${input.toolCallId}`;
+  }) => `${input.context.messageId}:${input.operationType}:${input.toolCallId}`;
   const inserts: Array<{
     operationId: string;
     operationType: string;
@@ -269,8 +278,10 @@ function createProvider() {
   const executeInputs: Array<{
     command: string;
     cwd?: string;
+    executionId?: string;
     maxOutputChars: number;
     providerSandboxId: string;
+    signal?: AbortSignal;
     timeoutMs: number;
   }> = [];
   const systemExecuteInputs: Array<{
@@ -426,6 +437,186 @@ test("SourceWeftSandboxBackend reads and writes sandbox files without user execu
   );
 });
 
+test("SourceWeftSandboxBackend aborts a blocked write, waits for sandbox deletion, and discards the late upload", async () => {
+  const { provider } = createProvider();
+  const uploadStarted = deferred<void>();
+  const lateUpload = deferred<void>();
+  const deletionStarted = deferred<void>();
+  const deletionConfirmed = deferred<void>();
+  let uploadedAfterAbort = false;
+  provider.uploadFile = async () => {
+    uploadStarted.resolve();
+    await lateUpload.promise;
+    uploadedAfterAbort = true;
+  };
+  provider.deleteSandbox = async () => {
+    deletionStarted.resolve();
+    await deletionConfirmed.promise;
+  };
+  const { backend } = createBackendWithProvider(provider);
+  const controller = new AbortController();
+  const invocation = backend.write("/workspace/late.txt", "late", {
+    signal: controller.signal,
+  });
+  void invocation.catch(() => undefined);
+
+  await uploadStarted.promise;
+  controller.abort(new DOMException("user stopped", "AbortError"));
+  await deletionStarted.promise;
+  lateUpload.resolve();
+  await Promise.resolve();
+  let settled = false;
+  void invocation.finally(() => {
+    settled = true;
+  }).catch(() => undefined);
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  deletionConfirmed.resolve();
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "SANDBOX_OPERATION_CANCELLED");
+    return true;
+  });
+  assert.equal(uploadedAfterAbort, true);
+});
+
+test("SourceWeftSandboxBackend aborts a blocked read command and never returns late bytes", async () => {
+  const { provider } = createProvider();
+  const readStarted = deferred<void>();
+  const lateRead = deferred<{
+    output: string;
+    exitCode: number;
+    truncated: boolean;
+  }>();
+  let deleteCalls = 0;
+  provider.executeSystem = async (input) => {
+    provider.systemExecuteInputs.push(input);
+    readStarted.resolve();
+    return lateRead.promise;
+  };
+  provider.deleteSandbox = async () => {
+    deleteCalls += 1;
+  };
+  const { backend } = createBackendWithProvider(provider);
+  const controller = new AbortController();
+  const invocation = backend.read("/workspace/late.txt", 0, 20, {
+    signal: controller.signal,
+  });
+  void invocation.catch(() => undefined);
+
+  await readStarted.promise;
+  controller.abort(
+    Object.assign(new Error("tool deadline elapsed"), {
+      code: "AGENT_TOOL_EXECUTION_TIMEOUT",
+      name: "TimeoutError",
+    }),
+  );
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "SANDBOX_OPERATION_TIMED_OUT");
+    return true;
+  });
+  assert.equal(deleteCalls, 1);
+
+  lateRead.resolve({ output: "late bytes", exitCode: 0, truncated: false });
+  await Promise.resolve();
+});
+
+test("SourceWeftSandboxBackend physically cancels blocked uploadFiles and downloadFiles", async () => {
+  for (const operation of ["upload", "download"] as const) {
+    const { provider } = createProvider();
+    const started = deferred<void>();
+    const late = deferred<void>();
+    let deleteCalls = 0;
+    provider.deleteSandbox = async () => {
+      deleteCalls += 1;
+    };
+    if (operation === "upload") {
+      provider.uploadFile = async () => {
+        started.resolve();
+        await late.promise;
+      };
+    } else {
+      provider.downloadFile = async () => {
+        started.resolve();
+        await late.promise;
+        return Buffer.from("late");
+      };
+    }
+    const { backend } = createBackendWithProvider(provider);
+    const controller = new AbortController();
+    const invocation =
+      operation === "upload"
+        ? backend.uploadFiles(
+            [["/workspace/late.txt", new TextEncoder().encode("late")]],
+            { signal: controller.signal },
+          )
+        : backend.downloadFiles(["/workspace/late.txt"], {
+            signal: controller.signal,
+          });
+    void invocation.catch(() => undefined);
+
+    await started.promise;
+    controller.abort(new DOMException("user stopped", "AbortError"));
+    await assert.rejects(invocation, (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown }).code,
+        "SANDBOX_OPERATION_CANCELLED",
+      );
+      return true;
+    });
+    assert.equal(deleteCalls, 1, operation);
+    late.resolve();
+    await Promise.resolve();
+  }
+});
+
+test("SourceWeftSandboxBackend rejects a file result from a replaced sandbox generation", async () => {
+  const { provider } = createProvider();
+  let activeProviderSandboxId = "provider-sandbox-1";
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      return {
+        id:
+          activeProviderSandboxId === "provider-sandbox-1"
+            ? "sandbox-record-1"
+            : "sandbox-record-2",
+        provider: "fake",
+        providerSandboxId: activeProviderSandboxId,
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        threadId: context.threadId,
+        userId: context.userId,
+        status: "ready" as const,
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 3600_000),
+      };
+    },
+  } satisfies SandboxStore;
+  const readStarted = deferred<void>();
+  const lateRead = deferred<{
+    output: string;
+    exitCode: number;
+    truncated: boolean;
+  }>();
+  provider.executeSystem = async () => {
+    readStarted.resolve();
+    return lateRead.promise;
+  };
+  const { backend } = createBackendWithProvider(provider, sandboxStore);
+  const invocation = backend.read("/workspace/replaced.txt");
+  void invocation.catch(() => undefined);
+
+  await readStarted.promise;
+  activeProviderSandboxId = "provider-sandbox-2";
+  lateRead.resolve({ output: "stale", exitCode: 0, truncated: false });
+
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "SANDBOX_TERMINATION_UNKNOWN");
+    return true;
+  });
+});
+
 test("SourceWeftSandboxBackend rejects read_file on binary image files", async () => {
   const { backend, files, provider } = createBackend();
   files.set(
@@ -534,15 +725,21 @@ test("SourceWeftSandboxBackend passes raw execute commands with backend-controll
     truncated: false,
   });
 
-  assert.deepEqual(provider.executeInputs, [
+  assert.equal(provider.executeInputs.length, 1);
+  assert.deepEqual(
+    {
+      ...provider.executeInputs[0],
+      executionId: typeof provider.executeInputs[0]?.executionId,
+    },
     {
       providerSandboxId: "provider-sandbox-1",
+      executionId: "string",
       command,
       cwd: "/workspace",
       timeoutMs: limits.commandBudgetsMs.interactive,
       maxOutputChars: limits.maxOutputChars,
     },
-  ]);
+  );
 });
 
 test("SourceWeftSandboxBackend passes multiline execute commands through unchanged", async () => {
@@ -555,15 +752,21 @@ test("SourceWeftSandboxBackend passes multiline execute commands through unchang
     truncated: false,
   });
 
-  assert.deepEqual(provider.executeInputs, [
+  assert.equal(provider.executeInputs.length, 1);
+  assert.deepEqual(
+    {
+      ...provider.executeInputs[0],
+      executionId: typeof provider.executeInputs[0]?.executionId,
+    },
     {
       providerSandboxId: "provider-sandbox-1",
+      executionId: "string",
       command,
       cwd: "/workspace",
       timeoutMs: limits.commandBudgetsMs.interactive,
       maxOutputChars: limits.maxOutputChars,
     },
-  ]);
+  );
 });
 
 test("SourceWeftSandboxBackend returns recoverable failure for execute commands with control characters", async () => {
@@ -588,9 +791,10 @@ test("SourceWeftSandboxBackend returns recoverable failure for execute commands 
   );
   assert.deepEqual(provider.executed, []);
   assert.deepEqual(sandboxStore.releaseReasons, []);
-  assert.deepEqual(operationStore.completed.map((entry) => entry.status), [
-    "succeeded",
-  ]);
+  assert.deepEqual(
+    operationStore.completed.map((entry) => entry.status),
+    ["succeeded"],
+  );
   assert.equal(operationStore.inserted[0]?.command, "node good\\u0000bad");
   assert.equal(
     operationStore.inserted[0]?.commandContainsControlCharacters,
@@ -778,10 +982,13 @@ test("SourceWeftSandboxBackend rejects execute without approved stable tool call
 
 test("SourceWeftSandboxBackend executes with current tool call id when sandbox approval is disabled", async () => {
   const operationStore = createReplayOperationStore();
-  const { backend, provider } = createBackendWithOperationStore(operationStore, {
-    runtimeContext: contextWithoutExecuteToolCallId,
-    toolApprovalEnabled: false,
-  });
+  const { backend, provider } = createBackendWithOperationStore(
+    operationStore,
+    {
+      runtimeContext: contextWithoutExecuteToolCallId,
+      toolApprovalEnabled: false,
+    },
+  );
 
   assert.deepEqual(
     await backend.execute("node /workspace/ppt-deck/a.js", {
@@ -881,6 +1088,146 @@ test("SourceWeftSandboxBackend throws and records failed operation when execute 
   ]);
 });
 
+test("SourceWeftSandboxBackend Stop waits for physical cancellation and discards a late execute success", async () => {
+  const { provider } = createProvider();
+  const executionStarted = deferred<void>();
+  const lateExecution = deferred<{
+    output: string;
+    exitCode: number;
+    truncated: boolean;
+  }>();
+  const deletionStarted = deferred<void>();
+  const deletionConfirmed = deferred<void>();
+  provider.execute = async (input) => {
+    provider.executeInputs.push(input);
+    executionStarted.resolve();
+    return lateExecution.promise;
+  };
+  provider.deleteSandbox = async () => {
+    deletionStarted.resolve();
+    await deletionConfirmed.promise;
+  };
+  const operationStore = createOperationStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    createSandboxStore(),
+    operationStore,
+  );
+  const stop = new AbortController();
+  const invocation = backend.execute("node /workspace/ppt-deck/a.js", {
+    signal: stop.signal,
+  });
+  void invocation.catch(() => undefined);
+
+  await executionStarted.promise;
+  stop.abort(new DOMException("user stopped", "AbortError"));
+  await deletionStarted.promise;
+
+  let settled = false;
+  void invocation.finally(() => {
+    settled = true;
+  }).catch(() => undefined);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  assert.equal(provider.executeInputs[0]?.signal, stop.signal);
+  assert.equal(typeof provider.executeInputs[0]?.executionId, "string");
+
+  deletionConfirmed.resolve();
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal((error as { name?: unknown }).name, "AbortError");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_OPERATION_CANCELLED",
+    );
+    assert.equal(
+      (error as { physicalCancellationConfirmed?: unknown })
+        .physicalCancellationConfirmed,
+      true,
+    );
+    return true;
+  });
+
+  lateExecution.resolve({
+    output: "must-not-succeed",
+    exitCode: 0,
+    truncated: false,
+  });
+  await Promise.resolve();
+  assert.equal(operationStore.completed.at(-1)?.status, "failed");
+  assert.equal(
+    operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_OPERATION_CANCELLED",
+  );
+  assert.equal(
+    operationStore.completed.some(
+      (operation) => operation.result?.output === "must-not-succeed",
+    ),
+    false,
+  );
+});
+
+test("SourceWeftSandboxBackend host timeout waits for physical cancellation and never returns provider success", async () => {
+  const { provider } = createProvider();
+  const executionStarted = deferred<void>();
+  const lateExecution = deferred<{
+    output: string;
+    exitCode: number;
+    truncated: boolean;
+  }>();
+  let deleteCalls = 0;
+  provider.execute = async (input) => {
+    provider.executeInputs.push(input);
+    executionStarted.resolve();
+    return lateExecution.promise;
+  };
+  provider.deleteSandbox = async () => {
+    deleteCalls += 1;
+  };
+  const operationStore = createOperationStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    createSandboxStore(),
+    operationStore,
+  );
+  const deadline = new AbortController();
+  const invocation = backend.execute("node /workspace/ppt-deck/a.js", {
+    signal: deadline.signal,
+  });
+  void invocation.catch(() => undefined);
+
+  await executionStarted.promise;
+  deadline.abort(
+    Object.assign(new Error("tool deadline elapsed"), {
+      code: "AGENT_TOOL_EXECUTION_TIMEOUT",
+      name: "TimeoutError",
+    }),
+  );
+
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal((error as { name?: unknown }).name, "TimeoutError");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_OPERATION_TIMED_OUT",
+    );
+    return true;
+  });
+  assert.equal(deleteCalls, 1);
+
+  lateExecution.resolve({
+    output: "late-timeout-success",
+    exitCode: 0,
+    truncated: false,
+  });
+  await Promise.resolve();
+  assert.equal(operationStore.completed.at(-1)?.status, "failed");
+  assert.equal(
+    operationStore.completed.some(
+      (operation) => operation.result?.output === "late-timeout-success",
+    ),
+    false,
+  );
+});
+
 test("SourceWeftSandboxBackend redacts execute metadata without rewriting provider command", async () => {
   const operationStore = createOperationStore();
   const { provider } = createProvider();
@@ -971,7 +1318,10 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
 test("SourceWeftSandboxBackend returns recoverable error for absolute glob patterns outside sandbox roots", async () => {
   const { backend } = createBackend();
 
-  const result = await backend.glob("/workfiles/**/*.md", "/workspace/ppt-deck");
+  const result = await backend.glob(
+    "/workfiles/**/*.md",
+    "/workspace/ppt-deck",
+  );
 
   assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
 });
@@ -1074,9 +1424,7 @@ test("failed skill staging degrades /skills execute commands to a recoverable fa
   assert.match(result.output, /file tools/u);
   assert.equal(manager.skillScriptsStaged(), false);
   // The model command never reached the provider.
-  assert.ok(
-    !provider.executed.some((command) => command.includes("/skills")),
-  );
+  assert.ok(!provider.executed.some((command) => command.includes("/skills")));
 });
 
 test("skill staging leaves non-/skills commands and unconfigured runtimes untouched", async () => {
@@ -1098,4 +1446,67 @@ test("skill staging leaves non-/skills commands and unconfigured runtimes untouc
   });
   assert.equal(workfiles.exitCode, 1);
   assert.match(workfiles.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+});
+
+test("a missing required runtime asset fails acquisition instead of degrading", async () => {
+  const { provider } = createProvider();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    requiredAssetStaging: {
+      plans: async () => [
+        {
+          name: "chrome-headless-shell",
+          version: "149.0.7790.0",
+          platform: "linux-x64",
+          sha256: "a".repeat(64),
+          archive: "zip",
+          entrypoint: "chrome-headless-shell",
+          loadContent: async () => null,
+        },
+      ],
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+
+  await assert.rejects(
+    () => manager.getOrCreateThreadSandbox(context),
+    /SANDBOX_REQUIRED_RUNTIME_ASSET_UNAVAILABLE: chrome-headless-shell@149\.0\.7790\.0/u,
+  );
+});
+
+test("required runtime asset staging exposes its resolved executable path", async () => {
+  const { provider } = createProvider();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    requiredAssetStaging: {
+      plans: async () => [
+        {
+          name: "chrome-headless-shell",
+          version: "149.0.7790.0",
+          platform: "linux-x64",
+          sha256: "a".repeat(64),
+          archive: "zip",
+          entrypoint: "chrome-headless-shell",
+          loadContent: async () => new Uint8Array([1, 2, 3]),
+        },
+      ],
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+
+  await manager.getOrCreateThreadSandbox(context);
+  assert.equal(
+    manager.requiredAssetResolutions()?.[0]?.entrypointPath,
+    "/workspace/.sourceweft-assets/chrome-headless-shell/149.0.7790.0/chrome-headless-shell",
+  );
 });

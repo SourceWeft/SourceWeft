@@ -4,6 +4,7 @@ import type { BillingSummaryResponse } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import type { ModelUsageContext } from "./context";
 import { deriveIdempotencyKey, openBillingScope } from "./scope";
+import type { ScheduleProviderCostReconciliationFn } from "./settle";
 
 function createBilling(billingMode = "enforced"): ContentBillingPort {
   return {
@@ -26,7 +27,9 @@ function createBilling(billingMode = "enforced"): ContentBillingPort {
   } as unknown as ContentBillingPort;
 }
 
-function billedContext(overrides: Partial<ModelUsageContext> = {}): ModelUsageContext {
+function billedContext(
+  overrides: Partial<ModelUsageContext> = {},
+): ModelUsageContext {
   return {
     teamId: "team_1",
     workspaceId: "ws_1",
@@ -131,6 +134,55 @@ test("settling a billed call records a metered trace and spends scope budget", a
   assert.equal(trace?.consumedCredits, 3);
   assert.equal(scope.meteredCalls().length, 1);
   assert.equal(scope.remainingCredits(), 497);
+});
+
+test("a provider receipt observation schedules reconciliation with the billing key", async () => {
+  const scheduleReconciliation = vi.fn<ScheduleProviderCostReconciliationFn>(
+    async () => null,
+  );
+  const scope = openBillingScope({
+    context: billedContext(),
+    billing: createBilling(),
+    billingMode: "enforced",
+    availableCredits: 500,
+    meterUsage: meterUsageStub(3) as never,
+    scheduleReconciliation,
+  });
+  const observation = {
+    traceId: "trace_1",
+    spanId: "span_1",
+    identity: {
+      modelAlias: "chat-default",
+      provider: "orcarouter",
+      requestedProviderModel: "orcarouter/auto",
+      providerRequestId: "orca-request-1",
+    },
+    usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+    cost: {
+      currency: "USD" as const,
+      inlineUsd: 0.01,
+      effectiveUsd: 0.01,
+      source: "provider_inline" as const,
+      status: "inline" as const,
+    },
+    provenance: {},
+  };
+
+  await scope.settle({
+    options: chatOptions,
+    usage: observation.usage,
+    observation,
+  });
+
+  assert.equal(scheduleReconciliation.mock.calls.length, 1);
+  assert.equal(
+    scheduleReconciliation.mock.calls[0]?.[0]?.originalBillingIdempotencyKey,
+    "trace_1:chat.complete:0:1",
+  );
+  assert.equal(
+    scheduleReconciliation.mock.calls[0]?.[0]?.observation,
+    observation,
+  );
 });
 
 test("empty usage settles to nothing and never reaches the meter", async () => {

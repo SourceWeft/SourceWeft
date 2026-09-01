@@ -48,6 +48,7 @@ export class DeepInfraTtsTransport implements TtsTransport {
         responseFormat,
       }),
       target: input.target,
+      responseHeaders: response.headers,
       traceId: input.options?.traceId,
     });
   }

@@ -81,7 +81,9 @@ class FakeBroadcastChannel {
   postedOfType(type: string) {
     return this.posted.filter(
       (m): m is { type: string } =>
-        typeof m === "object" && m !== null && (m as { type: string }).type === type,
+        typeof m === "object" &&
+        m !== null &&
+        (m as { type: string }).type === type,
     );
   }
 }
@@ -184,7 +186,11 @@ test("polls active runs and merges incrementally mapped sources", async () => {
   expect(mergeIncrementalSources).toHaveBeenCalledTimes(1);
   const merged = mergeIncrementalSources.mock.calls[0]![0];
   expect(merged).toHaveLength(1);
-  expect(merged[0]).toMatchObject({ id: "s1", type: "TEXT", status: "Indexed" });
+  expect(merged[0]).toMatchObject({
+    id: "s1",
+    type: "TEXT",
+    status: "Indexed",
+  });
 });
 
 test("final-refreshes and refreshes connectors when a tracked run completes", async () => {

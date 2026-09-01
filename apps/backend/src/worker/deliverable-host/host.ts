@@ -7,7 +7,10 @@ import {
 } from "@sourceweft/capability-contracts";
 import type { ArtifactPipelineStep } from "@sourceweft/contracts/artifact-pipeline";
 import { ContentError } from "../../modules/content/errors";
-import { appendArtifactOutputToChatRun } from "../../modules/threads/durable/repository";
+import {
+  appendArtifactOutputToChatRun,
+  findChatThreadRunById,
+} from "../../modules/threads/durable/repository";
 import { logger } from "../../shared/logger";
 import {
   createDeliverableStageRunner,
@@ -69,9 +72,48 @@ function stripCodePrefix(message: string, code: string) {
   return message.startsWith(prefix) ? message.slice(prefix.length) : message;
 }
 
-export function createDeliverableProcessor<
-  TState extends DeliverableStateLike,
->(
+async function assertArtifactOutputRunCanPublish(
+  envelope: DeliverableHostJobPayload,
+) {
+  const origin = envelope.artifactOutputOrigin;
+  if (!origin) {
+    return;
+  }
+  const run = await findChatThreadRunById({
+    runId: origin.threadRunId,
+    teamId: envelope.teamId,
+    workspaceId: envelope.workspaceId,
+  });
+  if (!run) {
+    throw new ContentError(
+      409,
+      "ARTIFACT_OUTPUT_RUN_NOT_FOUND",
+      "The chat run no longer exists, so the deliverable cannot publish.",
+      { recoverable: false },
+    );
+  }
+  if (
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.status === "waiting_for_approval"
+  ) {
+    return;
+  }
+  throw new ContentError(
+    run.status === "cancel_requested" || run.status === "cancelled" ? 499 : 409,
+    run.status === "cancel_requested" || run.status === "cancelled"
+      ? "CLIENT_CANCELLED"
+      : "ARTIFACT_OUTPUT_RUN_INACTIVE",
+    run.status === "failed"
+      ? "The chat run failed before the deliverable could publish."
+      : run.status === "completed"
+        ? "The chat run completed before the deliverable could publish."
+        : "The chat run was cancelled before the deliverable could publish.",
+    { recoverable: false },
+  );
+}
+
+export function createDeliverableProcessor<TState extends DeliverableStateLike>(
   definition: DeliverablePipelineDefinition<TState>,
   resolveRuntime: DeliverableRuntimeResolver,
 ) {
@@ -200,6 +242,7 @@ export function createDeliverableProcessor<
 
     try {
       for (const stage of definition.stages) {
+        await assertArtifactOutputRunCanPublish(envelope);
         if (
           runner.shouldSkipStage({
             checkpointStage: state.generation.checkpointStage,
@@ -288,6 +331,7 @@ export function createDeliverableProcessor<
         await advanceStage(stage.id, "complete", { applyStageView: true });
       }
 
+      await assertArtifactOutputRunCanPublish(envelope);
       state = runner.markReady(state);
 
       const readyPayload = definition.finalize({ state, job: envelope });
@@ -332,6 +376,15 @@ export function createDeliverableProcessor<
             : (["pending", "running"] as const),
         ...(runMode === "edit" && baseVersionNo !== undefined
           ? { expectedVersionNo: baseVersionNo }
+          : {}),
+        ...(envelope.artifactOutputOrigin
+          ? {
+              publishRunFence: {
+                runId: envelope.artifactOutputOrigin.threadRunId,
+                teamId: envelope.teamId,
+                workspaceId: envelope.workspaceId,
+              },
+            }
           : {}),
       });
 
@@ -404,6 +457,7 @@ export function createDeliverableProcessor<
         versionId: result.versionId,
       };
     } catch (error) {
+      const errorRecord = toObjectRecordOrUndefined(error);
       const errorMessage =
         error instanceof Error
           ? error.message
@@ -432,6 +486,9 @@ export function createDeliverableProcessor<
         stageId: failedStageId,
         errorCode,
         errorMessage: safeErrorMessage,
+        ...(errorRecord?.gatewayDiagnostics
+          ? { gatewayDiagnostics: errorRecord.gatewayDiagnostics }
+          : {}),
         runMode,
       });
       if (runMode !== "edit") {
@@ -452,9 +509,15 @@ export function createDeliverableProcessor<
         pipeline: definition.id,
         artifactId: envelope.artifactId,
         error: safeErrorMessage,
+        ...(errorRecord?.gatewayDiagnostics
+          ? { gatewayDiagnostics: errorRecord.gatewayDiagnostics }
+          : {}),
         jobId: envelope.jobId,
       });
-      if (!(error instanceof ContentError) && isDeliverablePipelineErrorLike(error)) {
+      if (
+        !(error instanceof ContentError) &&
+        isDeliverablePipelineErrorLike(error)
+      ) {
         // Preserve worker retry semantics: pipeline errors classify like the
         // ContentError instances the pre-host worker threw.
         throw new ContentError(

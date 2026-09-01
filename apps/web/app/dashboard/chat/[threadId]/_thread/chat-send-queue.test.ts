@@ -22,14 +22,15 @@ function queued(id: string, attempts = 0): QueuedSend {
 }
 
 test("an idle thread sends immediately (no queue)", () => {
-  assert.equal(
-    shouldQueueSend({ chatExecutionState: "idle" }),
-    false,
-  );
+  assert.equal(shouldQueueSend({ chatExecutionState: "idle" }), false);
 });
 
 test("a streaming run queues the send — own or another member's", () => {
-  for (const state of ["executing", "waiting_for_approval", "stopping"] as const) {
+  for (const state of [
+    "executing",
+    "waiting_for_approval",
+    "stopping",
+  ] as const) {
     assert.equal(
       shouldQueueSend({ chatExecutionState: state }),
       true,
@@ -89,5 +90,8 @@ test("preview prefers text, then image count, then a fallback", () => {
     queuedSendPreview(sendInput({ content: "", images: [{}, {}] as never })),
     "2 images",
   );
-  assert.equal(queuedSendPreview(sendInput({ content: "   " })), "Queued message");
+  assert.equal(
+    queuedSendPreview(sendInput({ content: "   " })),
+    "Queued message",
+  );
 });

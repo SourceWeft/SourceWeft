@@ -19,6 +19,7 @@ test("sourceweft.capability.json parses as a valid ppt-deck skill manifest", asy
   assert.equal(manifest.id, "sourceweft/ppt-deck");
   assert.equal(skill?.id, "ppt-deck");
   assert.equal(skill?.visibility, "restricted");
+  assert.equal(skill?.defaultEnabled, true);
   assert.deepEqual(skill?.options?.[0]?.target, {
     path: "config.stylePreset",
   });

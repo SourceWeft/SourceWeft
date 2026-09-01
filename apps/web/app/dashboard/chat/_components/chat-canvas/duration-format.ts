@@ -12,10 +12,7 @@ export function formatCompactDuration(durationMs: number) {
 }
 
 export function formatThoughtDuration(durationMs: number | null | undefined) {
-  if (
-    typeof durationMs !== "number" ||
-    !Number.isFinite(durationMs)
-  ) {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs)) {
     return "Thought for a few seconds";
   }
 

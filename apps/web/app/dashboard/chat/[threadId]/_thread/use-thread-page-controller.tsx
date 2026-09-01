@@ -69,12 +69,8 @@ import {
 // backoff so it never becomes a tight loop, and drops after a bounded retry.
 const QUEUED_SEND_RETRY_BACKOFF_MS = 500;
 const QUEUED_SEND_MAX_ATTEMPTS = 8;
-import {
-  collectPendingArtifacts,
-} from "../../_components/chat-canvas/artifact-progress-tracker";
-import {
-  isArtifactSnapshotTerminal,
-} from "../../_components/chat-canvas/artifact-work-state";
+import { collectPendingArtifacts } from "../../_components/chat-canvas/artifact-progress-tracker";
+import { isArtifactSnapshotTerminal } from "../../_components/chat-canvas/artifact-work-state";
 import { mapArtifactStatusSnapshot } from "../../_components/chat-canvas/map-artifact-status-snapshot";
 import { hasActivelyRunningToolWork } from "../../_components/chat-canvas/tool-confirmation-state";
 import {
@@ -301,6 +297,7 @@ export function useThreadPageController({
     mergeStreamingAssistantIntoMessages,
     messages,
     olderMessagesCursor,
+    reconcileCommittedArtifactOutputs,
     setMessages,
     setStreamingAssistantSnapshot,
   } = useThreadMessages({
@@ -520,13 +517,8 @@ export function useThreadPageController({
     activeThreadRun.userId !== currentUserId;
 
   // Presence + typing state, fed by the room SSE below (opens no stream itself).
-  const {
-    presentViewers,
-    typingViewers,
-    onPresence,
-    onTyping,
-    notifyTyping,
-  } = useThreadPresence({ workspaceId, threadId, currentUserId });
+  const { presentViewers, typingViewers, onPresence, onTyping, notifyTyping } =
+    useThreadPresence({ workspaceId, threadId, currentUserId });
 
   // Live collaboration: subscribe to the thread room so another member's run
   // (or a new message) is reflected without a refresh — which also lets the
@@ -540,6 +532,7 @@ export function useThreadPageController({
     setActiveThreadRun,
     clearRunIfCurrent,
     appendNewerMessages: appendNewerThreadMessages,
+    reconcileCommittedArtifactOutputs,
     onPresence,
     onTyping,
   });
@@ -720,8 +713,8 @@ export function useThreadPageController({
   ]);
   const isThreadSwitching = Boolean(
     targetThreadMessagesKey &&
-      loadedThreadMessagesKey &&
-      loadedThreadMessagesKey !== targetThreadMessagesKey,
+    loadedThreadMessagesKey &&
+    loadedThreadMessagesKey !== targetThreadMessagesKey,
   );
   const resolvedModelCatalogStatus =
     threadStatus === "error" ||
@@ -767,12 +760,7 @@ export function useThreadPageController({
     ],
   );
 
-  // Artifact progress streams through the single chat SSE: the
-  // generate_video_presentation tool blocks until the render pipeline reaches
-  // a terminal state, emitting tool-call-event progress along the way. On page
-  // reload the durable-run attach flow resumes that same stream, and
-  // refreshArtifactStatuses runs once (below) to reconcile any snapshot the
-  // page missed while closed.
+  // Reconcile any active artifact snapshot missed while this page was closed.
   useEffect(() => {
     if (!workspaceId || pendingArtifactIds.length === 0) {
       return;
@@ -828,10 +816,7 @@ export function useThreadPageController({
           : undefined;
       const text = input.content.trim();
       const images = input.images ?? [];
-      if (
-        (!text && images.length === 0) ||
-        hasActivelyRunningToolWorkState
-      ) {
+      if ((!text && images.length === 0) || hasActivelyRunningToolWorkState) {
         return;
       }
       // A run is streaming (ours or another member's) — queue instead of
@@ -1068,8 +1053,9 @@ export function useThreadPageController({
       });
       const refreshUserMessageId = messageGroups
         .flatMap((group) => group.versions)
-        .find((version) => version.id === input.assistantMessageId)
-        ?.sourceUserMessageId;
+        .find(
+          (version) => version.id === input.assistantMessageId,
+        )?.sourceUserMessageId;
 
       await streamThreadAction({
         mode: "refresh",

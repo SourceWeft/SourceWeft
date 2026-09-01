@@ -720,47 +720,6 @@ test("pending approval requests are treated as active tool calls", () => {
   );
 });
 
-test("completed tool calls stay active while linked artifact is still running", () => {
-  assert.equal(
-    isToolCallActivelyRunning({
-      toolCall: {
-        tool: "generate_video_presentation",
-        output: {
-          type: "video_presentation_processing_result",
-          artifact_id: "artifact-1",
-          status: "running",
-        },
-        status: "completed",
-      },
-    }),
-    true,
-  );
-
-  assert.equal(
-    isToolCallActivelyRunning({
-      artifactStatuses: new Map([
-        [
-          "artifact-1",
-          {
-            id: "artifact-1",
-            status: "ready",
-          } as never,
-        ],
-      ]),
-      toolCall: {
-        tool: "generate_video_presentation",
-        output: {
-          type: "video_presentation_processing_result",
-          artifact_id: "artifact-1",
-          status: "running",
-        },
-        status: "completed",
-      },
-    }),
-    false,
-  );
-});
-
 test("tool approval resumes combine every decision in confirmation order", () => {
   const resolutions: ToolConfirmationResolution[] = [
     {

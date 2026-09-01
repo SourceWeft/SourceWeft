@@ -4,6 +4,7 @@ import type {
   AgentToolHostServices,
   AgentToolTurnContext,
 } from "@sourceweft/contracts/agent-tools";
+import { resolveAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
 import { publishArtifact, type PublishArtifactServices } from "./publisher";
 import {
@@ -278,6 +279,7 @@ type PublishArtifactFromSourceInput = {
   };
   readonly input: PublishArtifactInput;
   readonly toolCallId?: string;
+  readonly signal?: AbortSignal;
 };
 
 export async function publishArtifactFromSource(
@@ -294,6 +296,7 @@ export async function publishArtifactFromSource(
       storage: input.services.storage,
     },
     toolCallId: input.toolCallId,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 }
 
@@ -366,6 +369,7 @@ export function createCapabilityAgentTools(
         args: PublishArtifactToolInput,
         runtime: ToolRuntime,
       ): Promise<string> => {
+        const signal = resolveAgentToolHostInvocationSignal(runtime);
         const toolCallId = langchainToolCallIdFromRuntime(runtime);
         const normalizedArgs = normalizePublishToolInput(args);
         const parsedResult =
@@ -415,10 +419,17 @@ export function createCapabilityAgentTools(
             },
             input: parsed,
             toolCallId,
+            ...(signal ? { signal } : {}),
           });
 
           return JSON.stringify(output);
         } catch (error) {
+          if (signal?.aborted) {
+            throw (
+              signal.reason ??
+              new DOMException("Artifact publication was aborted.", "AbortError")
+            );
+          }
           if (
             error instanceof PptxOutputError ||
             error instanceof ArtifactPublishError

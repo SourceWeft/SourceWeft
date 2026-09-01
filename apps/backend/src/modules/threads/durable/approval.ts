@@ -3,22 +3,14 @@ import { requireContentWorkspace } from "../../workspace/guards";
 import { config } from "../../../shared/config";
 import {
   findChatThreadRunById,
-  finishChatThreadRun,
   markChatThreadRunWaitingForApproval,
-  updateChatThreadRunStatus,
+  recordChatThreadRunConfirmationResponse,
 } from "./repository";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
-import {
-  getObjectRecord,
-  getSnapshotRecord,
-  hasPendingConfirmations,
-  replaceConfirmationInToolCalls,
-  updateExistingTracePartsFromToolCalls,
-} from "./snapshot";
+import { getObjectRecord } from "./snapshot";
 import { getRunApprovalPauseState } from "./run-state";
 import {
   updateAssistantMessageConfirmationMetadata,
-  updateAssistantMessageThreadRunMetadata,
   withAssistantThreadRunMetadata,
 } from "./assistant-message-metadata";
 import { expireRunIfApprovalExpired } from "./run-recovery";
@@ -170,76 +162,13 @@ export async function recordConfirmationResponse(input: {
   if (input.run.status !== "waiting_for_approval") {
     return input.run;
   }
-  const snapshot = getSnapshotRecord(input.run);
-  const replaced = replaceConfirmationInToolCalls(
-    snapshot.toolCalls,
-    input.confirmationId,
-    input.confirmation,
-  );
-  if (!replaced.changed) {
-    return input.run;
-  }
-  const traceParts = updateExistingTracePartsFromToolCalls(
-    snapshot.traceParts,
-    replaced.toolCalls,
-  );
-  if (!hasPendingConfirmations(replaced.toolCalls)) {
-    const completedRun = {
-      ...input.run,
-      status: "completed" as const,
-    };
-    const completedSnapshot = withAssistantThreadRunMetadata(
-      {
-        ...snapshot,
-        toolCalls: replaced.toolCalls,
-        ...(traceParts !== undefined ? { traceParts } : {}),
-        pendingConfirmationIds: [],
-      },
-      completedRun,
-    );
-    const finished =
-      (await finishChatThreadRun({
-        runId: input.run.id,
-        teamId: input.run.teamId,
-        workspaceId: input.run.workspaceId,
-        status: "completed",
-        assistantMessageId: input.run.assistantMessageId,
-        snapshotJson: completedSnapshot,
-      })) ?? completedRun;
-    await updateAssistantMessageConfirmationMetadata({
-      run: finished,
-      snapshot: completedSnapshot,
-    });
-    await updateAssistantMessageThreadRunMetadata({
-      run: finished,
-    });
-    return (
-      (await findChatThreadRunById({
-        runId: input.run.id,
-        teamId: input.run.teamId,
-        workspaceId: input.run.workspaceId,
-      })) ?? finished
-    );
-  }
-  const nextSnapshot: ChatRunSnapshot = {
-    ...snapshot,
-    toolCalls: replaced.toolCalls,
-    ...(traceParts !== undefined ? { traceParts } : {}),
-    pendingConfirmationIds: getRunApprovalPauseState(
-      input.run,
-    ).confirmationIds.filter((id) => id !== input.confirmationId),
-  };
-  const updated =
-    (await updateChatThreadRunStatus({
+  return (
+    (await recordChatThreadRunConfirmationResponse({
       runId: input.run.id,
       teamId: input.run.teamId,
       workspaceId: input.run.workspaceId,
-      status: "waiting_for_approval",
-      snapshotJson: nextSnapshot,
-    })) ?? input.run;
-  await updateAssistantMessageConfirmationMetadata({
-    run: updated,
-    snapshot: nextSnapshot,
-  });
-  return updated;
+      confirmationId: input.confirmationId,
+      confirmation: input.confirmation,
+    })) ?? input.run
+  );
 }

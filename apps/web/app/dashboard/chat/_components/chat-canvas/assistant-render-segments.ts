@@ -1,6 +1,9 @@
 import type { MessageRenderBlock } from "./types";
 
-export type AssistantAnswerBlock = Extract<MessageRenderBlock, { type: "text" }>;
+export type AssistantAnswerBlock = Extract<
+  MessageRenderBlock,
+  { type: "text" }
+>;
 
 export type AssistantTerminalBlock = MessageRenderBlock;
 

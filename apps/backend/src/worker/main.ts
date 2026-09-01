@@ -20,6 +20,7 @@ import {
   processSourceParsePollJob,
 } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
+import { processProviderCostReconciliationJob } from "./processors/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { handleDeliverableJobFailure } from "./deliverable-host/job-failure-boundary";
 import { buildDeliverableProcessorMap } from "./deliverable-host/registry";
@@ -48,6 +49,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
   "sync-model-pricing": processSyncModelPricingJob,
+  "reconcile-provider-cost": processProviderCostReconciliationJob,
   "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
 };
@@ -82,8 +84,8 @@ installWorkerProcessErrorGuards({
 
 // How long a job's Redis lock stays valid without renewal before BullMQ
 // declares it stalled and redelivers it. Both workers share this process, so
-// heavy deliverable work (video render pipelines) can starve the event loop
-// past the 30s default and get live jobs mass-redelivered as "stalled". Must
+// CPU-heavy deliverable work can starve the event loop past the 30s default
+// and get live jobs mass-redelivered as "stalled". Must
 // stay below STALE_ACTIVE_RUN_TIMEOUT_MS (10min) so redelivery happens while
 // the run-level heartbeat check can still tell a live execution from a dead
 // one.
@@ -193,43 +195,46 @@ if (asyncRunsWorker) {
 // Deliverable jobs that die outside the processor (stalled on worker
 // restart/crash, BullMQ-level failures) never reach the host's catch block —
 // mark their artifacts failed so they don't stay "running" forever.
-deliverablesWorker.on("failed", (job: Job<JobPayload> | undefined, error: Error) => {
-  if (!job) {
-    return;
-  }
-  void (async () => {
-    const [{ failArtifact }, { ArtifactError }] = await Promise.all([
-      import("../modules/artifacts/publish"),
-      import("@sourceweft/contracts/artifact-errors"),
-    ]);
-    await handleDeliverableJobFailure({
-      jobName: job.name,
-      attemptsMade: job.attemptsMade ?? 0,
-      maxAttempts: job.opts?.attempts ?? 1,
-      data: job.data,
-      error,
-      failureCodes: deliverableFailureCodes,
-      // Same door the in-processor failure path uses. Team/workspace come out
-      // of an untyped job payload here and may be absent, which is why the
-      // writer's tenancy scoping is optional.
-      markFailed: (input) =>
-        failArtifact({
-          artifactId: input.artifactId,
-          context: {
-            ...(input.teamId ? { teamId: input.teamId } : {}),
-            ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
-          },
-          error: new ArtifactError({
-            code: input.errorCode,
-            message: input.errorMessage,
+deliverablesWorker.on(
+  "failed",
+  (job: Job<JobPayload> | undefined, error: Error) => {
+    if (!job) {
+      return;
+    }
+    void (async () => {
+      const [{ failArtifact }, { ArtifactError }] = await Promise.all([
+        import("../modules/artifacts/publish"),
+        import("@sourceweft/contracts/artifact-errors"),
+      ]);
+      await handleDeliverableJobFailure({
+        jobName: job.name,
+        attemptsMade: job.attemptsMade ?? 0,
+        maxAttempts: job.opts?.attempts ?? 1,
+        data: job.data,
+        error,
+        failureCodes: deliverableFailureCodes,
+        // Same door the in-processor failure path uses. Team/workspace come out
+        // of an untyped job payload here and may be absent, which is why the
+        // writer's tenancy scoping is optional.
+        markFailed: (input) =>
+          failArtifact({
+            artifactId: input.artifactId,
+            context: {
+              ...(input.teamId ? { teamId: input.teamId } : {}),
+              ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+            },
+            error: new ArtifactError({
+              code: input.errorCode,
+              message: input.errorMessage,
+            }),
+            ...(input.expectedStatuses
+              ? { expectedStatuses: input.expectedStatuses }
+              : {}),
           }),
-          ...(input.expectedStatuses
-            ? { expectedStatuses: input.expectedStatuses }
-            : {}),
-        }),
-    });
-  })();
-});
+      });
+    })();
+  },
+);
 
 logger.info("Primary worker started", {
   queueName: config.queueName,

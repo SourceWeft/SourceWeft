@@ -38,13 +38,7 @@ export const SOURCEWEFT_SANDBOX_STAMP_PATH =
 const WORKSPACE_ROOT_PREFIX = "/workspace/";
 
 export type CloudflareProviderOperation =
-  | "create"
-  | "get"
-  | "delete"
-  | "execute"
-  | "upload"
-  | "download"
-  | "mkdir";
+  "create" | "get" | "delete" | "execute" | "upload" | "download" | "mkdir";
 
 export type CloudflareSandboxProviderOptions = {
   bridgeUrl: string;
@@ -300,6 +294,7 @@ export const EXEC_HEARTBEAT_MARKER = "[sourceweft-heartbeat]";
 export class CloudflareSandboxProvider implements SandboxProvider {
   readonly id = "cloudflare";
   readonly pathPolicy = CLOUDFLARE_SANDBOX_PATH_POLICY;
+  readonly cancellationScope = "sandbox" as const;
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: CloudflareSandboxProviderOptions) {
@@ -363,22 +358,42 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     });
   }
 
+  /** The stock bridge has no command-kill route, so cancellation is sandbox-scoped. */
+  async cancelExecution(input: {
+    providerSandboxId: string;
+    executionId: string;
+    reason: "user_cancelled" | "timed_out";
+  }) {
+    try {
+      await this.deleteSandbox(input.providerSandboxId);
+    } catch (error) {
+      if (!errorMessage(error).includes("SANDBOX_NOT_FOUND_OR_EXPIRED")) {
+        throw error;
+      }
+    }
+    return { confirmed: true, mode: "sandbox" } as const;
+  }
+
   async execute(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }) {
     return this.executeSystem(input);
   }
 
   async executeSystem(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }): Promise<ExecuteResponse> {
     return this.withProviderErrorMapping("execute", async () => {
       const base = input.cwd
@@ -389,6 +404,12 @@ export class CloudflareSandboxProvider implements SandboxProvider {
           ? `( while true; do sleep ${HEARTBEAT_INTERVAL_SECONDS}; printf '%s\\n' ${shellQuote(EXEC_HEARTBEAT_MARKER)} >&2; done ) & __sw_hb=$!; ( ${base} ); __sw_rc=$?; kill "$__sw_hb" 2>/dev/null; exit "$__sw_rc"`
           : base;
       const controller = new AbortController();
+      const forwardAbort = () => controller.abort(input.signal?.reason);
+      if (input.signal?.aborted) {
+        forwardAbort();
+      } else {
+        input.signal?.addEventListener("abort", forwardAbort, { once: true });
+      }
       const abortTimer = setTimeout(
         () => controller.abort(),
         input.timeoutMs + EXECUTE_ABORT_GRACE_MS,
@@ -448,6 +469,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         };
       } finally {
         clearTimeout(abortTimer);
+        input.signal?.removeEventListener("abort", forwardAbort);
       }
     });
   }
@@ -469,13 +491,17 @@ export class CloudflareSandboxProvider implements SandboxProvider {
 
   async downloadFile(input: {
     providerSandboxId: string;
+    executionId?: string;
     sandboxPath: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   }) {
     return this.withProviderErrorMapping("download", async () => {
       const response = await this.request(
         "download",
         "GET",
         this.filePath(input.providerSandboxId, input.sandboxPath),
+        { signal: input.signal },
       );
       return Buffer.from(await response.arrayBuffer());
     });
@@ -574,17 +600,14 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     if (init.contentType) {
       headers["Content-Type"] = init.contentType;
     }
-    const response = await this.fetchImpl(
-      `${this.options.bridgeUrl}${path}`,
-      {
-        method,
-        headers,
-        // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
-        // satisfies BodyInit's BufferSource; the runtime accepts it fine.
-        body: init.body as BodyInit | undefined,
-        signal: init.signal,
-      },
-    );
+    const response = await this.fetchImpl(`${this.options.bridgeUrl}${path}`, {
+      method,
+      headers,
+      // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
+      // satisfies BodyInit's BufferSource; the runtime accepts it fine.
+      body: init.body as BodyInit | undefined,
+      signal: init.signal,
+    });
     if (!response.ok) {
       const detail = await response
         .text()

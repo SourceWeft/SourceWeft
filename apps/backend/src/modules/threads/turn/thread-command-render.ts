@@ -17,6 +17,12 @@ export function buildThreadCommandMetadata(
           workflow: {
             kind: command.workflow.kind,
             execution: command.workflow.execution,
+            ...(command.workflow.initialToolPolicy
+              ? { initialToolPolicy: command.workflow.initialToolPolicy }
+              : {}),
+            ...(command.workflow.toolPolicy
+              ? { toolPolicy: command.workflow.toolPolicy }
+              : {}),
             defaultTools: command.workflow.defaultTools,
             permissionOverrides: command.workflow.permissionOverrides,
             successCriteria: command.workflow.successCriteria,

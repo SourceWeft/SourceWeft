@@ -35,7 +35,7 @@ function toNumeric(value: number | null | undefined) {
   if (value === null || value === undefined) {
     return null;
   }
-  return value.toFixed(6);
+  return value.toFixed(12);
 }
 
 function observabilityWritesDisabled() {
@@ -417,6 +417,8 @@ export async function startGeneration(input: StartGenerationInput) {
         modelAlias: input.modelAlias ?? null,
         provider: input.provider ?? null,
         providerModel: input.providerModel ?? null,
+        profileAlias: input.profileAlias ?? null,
+        gatewayConfigId: input.gatewayConfigId ?? null,
         executionMode: input.executionMode ?? null,
         keySource: input.keySource ?? null,
         routeStrategy: input.routeStrategy ?? null,
@@ -443,7 +445,22 @@ export async function startGeneration(input: StartGenerationInput) {
 
 export async function endGeneration(input: EndGenerationInput) {
   const endedAt = input.endedAt ?? new Date();
-  const usage = serializeUsage(input.usage);
+  const observation = input.observation ?? undefined;
+  const observationUsage = observation?.usage;
+  const observationCost = observation?.cost;
+  const usage = serializeUsage(observationUsage ?? input.usage);
+  const hostCostSource =
+    typeof input.metadata?.costSource === "string"
+      ? input.metadata.costSource
+      : undefined;
+  const fallbackCostClassification =
+    hostCostSource === "price_book"
+      ? { source: "price_book", status: "estimated" }
+      : hostCostSource === "provider_actual"
+        ? { source: "provider_inline", status: "inline" }
+        : hostCostSource?.startsWith("missing")
+          ? { source: "missing", status: "missing" }
+          : undefined;
   await safelyWrite("endGeneration", input.strict, async () => {
     const [startedAt, existingMetadata] = await Promise.all([
       findGenerationStart(input),
@@ -468,19 +485,58 @@ export async function endGeneration(input: EndGenerationInput) {
           input.payloadMode,
         ),
         usageJson: usage,
-        inputTokens: input.inputTokens ?? input.usage?.inputTokens ?? null,
-        outputTokens: input.outputTokens ?? input.usage?.outputTokens ?? null,
-        totalTokens: input.totalTokens ?? input.usage?.totalTokens ?? null,
-        providerCostUsd: toNumeric(input.providerCostUsd),
+        inputTokens:
+          input.inputTokens ??
+          observationUsage?.inputTokens ??
+          input.usage?.inputTokens ??
+          null,
+        outputTokens:
+          input.outputTokens ??
+          observationUsage?.outputTokens ??
+          input.usage?.outputTokens ??
+          null,
+        totalTokens:
+          input.totalTokens ??
+          observationUsage?.totalTokens ??
+          input.usage?.totalTokens ??
+          null,
+        reasoningTokens: observationUsage?.reasoningTokens ?? null,
+        cacheReadTokens: observationUsage?.cacheReadTokens ?? null,
+        cacheWriteTokens: observationUsage?.cacheWriteTokens ?? null,
+        resolvedProviderModel:
+          observation?.identity.resolvedProviderModel ?? null,
+        providerCostUsd: toNumeric(
+          observationCost?.effectiveUsd ?? input.providerCostUsd,
+        ),
+        providerCostInlineUsd: toNumeric(observationCost?.inlineUsd),
+        providerCostSettledUsd: toNumeric(observationCost?.settledUsd),
+        providerCostSource:
+          observationCost?.source ?? fallbackCostClassification?.source ?? null,
+        providerCostStatus:
+          observationCost?.status ?? fallbackCostClassification?.status ?? null,
+        costCurrency:
+          observationCost?.currency ??
+          (input.providerCostUsd !== null && input.providerCostUsd !== undefined
+            ? "USD"
+            : null),
+        normalizationJson: observation
+          ? toJsonRecord({
+              provenance: observation.provenance,
+              diagnostics: observation.diagnostics,
+            })
+          : null,
         providerResponseJson: policyRecord(
           input.providerResponse,
           input.payloadMode,
         ),
         providerResponseHeadersJson: redactHeaders(
-          input.providerResponseHeaders,
+          input.providerResponseHeaders ?? observation?.providerResponseHeaders,
         ),
         providerStatusCode: input.providerStatusCode ?? null,
-        providerRequestId: input.providerRequestId ?? null,
+        providerRequestId:
+          input.providerRequestId ??
+          observation?.identity.providerRequestId ??
+          null,
         rawCaptureError: input.rawCaptureError ?? null,
         metadataJson: mergeMetadata(existingMetadata, input.metadata),
       })

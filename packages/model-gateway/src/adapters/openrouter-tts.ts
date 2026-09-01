@@ -17,15 +17,21 @@ function mergeOpenRouterOpenAIOptions(
   }
 
   const provider =
-    extraBody?.provider && typeof extraBody.provider === "object" && !Array.isArray(extraBody.provider)
+    extraBody?.provider &&
+    typeof extraBody.provider === "object" &&
+    !Array.isArray(extraBody.provider)
       ? (extraBody.provider as Record<string, unknown>)
       : {};
   const options =
-    provider.options && typeof provider.options === "object" && !Array.isArray(provider.options)
+    provider.options &&
+    typeof provider.options === "object" &&
+    !Array.isArray(provider.options)
       ? (provider.options as Record<string, unknown>)
       : {};
   const openai =
-    options.openai && typeof options.openai === "object" && !Array.isArray(options.openai)
+    options.openai &&
+    typeof options.openai === "object" &&
+    !Array.isArray(options.openai)
       ? (options.openai as Record<string, unknown>)
       : {};
 
@@ -90,6 +96,7 @@ export class OpenRouterTtsTransport implements TtsTransport {
         responseFormat,
       }),
       target: input.target,
+      responseHeaders: response.headers,
       traceId: input.options?.traceId,
     });
   }

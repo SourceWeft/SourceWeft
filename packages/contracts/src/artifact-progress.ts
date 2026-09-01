@@ -50,7 +50,9 @@ export interface ArtifactProgressProtocol {
    * The role each of those `type` values plays, so generic callers can ask
    * "is this the final result?" instead of matching capability-specific names.
    */
-  readonly outputTypeRoles: Readonly<Record<string, ArtifactProgressOutputRole>>;
+  readonly outputTypeRoles: Readonly<
+    Record<string, ArtifactProgressOutputRole>
+  >;
 
   /**
    * Whether a structured tool output belongs to this capability. Lets the UI
@@ -68,7 +70,9 @@ export interface ArtifactProgressProtocol {
    * Wall-clock duration of the background job (pipeline start → now or
    * terminal), not the fire-and-forget tool call that launched it.
    */
-  resolveElapsedMs(input: ArtifactProgressInput & { nowMs?: number }): number | null;
+  resolveElapsedMs(
+    input: ArtifactProgressInput & { nowMs?: number },
+  ): number | null;
 }
 
 /**
@@ -121,12 +125,11 @@ export type ArtifactProgressOutputRole = "progress" | "processing" | "terminal";
 
 /** An output `type` together with the role it plays, or just the type. */
 export type ArtifactProgressOutputTypeSpec =
-  | string
-  | { type: string; role: ArtifactProgressOutputRole };
+  string | { type: string; role: ArtifactProgressOutputRole };
 
 /** Capability-specific facts the generic reader cannot infer. */
 export interface ArtifactProgressDescriptor {
-  /** Human-readable name of what is being produced, e.g. "Video presentation". */
+  /** Human-readable name of what is being produced, e.g. "Research report". */
   title: string;
   /**
    * Structured tool-output `type` values this capability emits. A bare string
@@ -292,7 +295,10 @@ export function resolveArtifactGenerationStatus(
     return rowStatus.success ? rowStatus.data : "running";
   }
 
-  if (rowStatus.success && (rowStatus.data === "ready" || rowStatus.data === "failed")) {
+  if (
+    rowStatus.success &&
+    (rowStatus.data === "ready" || rowStatus.data === "failed")
+  ) {
     return rowStatus.data;
   }
 
@@ -348,10 +354,10 @@ export function resolveArtifactProgressView(
       .length,
     totalStepCount: steps.length,
     status,
-    ...(generation?.errorCode ??
+    ...((generation?.errorCode ??
     input.artifactSnapshot?.errorCode ??
     readArtifactOutputField(input.toolCallOutput, "error_code") ??
-    readArtifactOutputField(input.toolCallOutput, "errorCode")
+    readArtifactOutputField(input.toolCallOutput, "errorCode"))
       ? {
           errorCode:
             generation?.errorCode ??
@@ -361,10 +367,10 @@ export function resolveArtifactProgressView(
             undefined,
         }
       : {}),
-    ...(generation?.errorMessage ??
+    ...((generation?.errorMessage ??
     input.artifactSnapshot?.errorMessage ??
     readArtifactOutputField(input.toolCallOutput, "error_message") ??
-    readArtifactOutputField(input.toolCallOutput, "errorMessage")
+    readArtifactOutputField(input.toolCallOutput, "errorMessage"))
       ? {
           errorMessage:
             generation?.errorMessage ??
@@ -386,7 +392,9 @@ export function resolveArtifactProgressView(
 export function resolveArtifactElapsedMs(
   input: ArtifactProgressInput & { nowMs?: number },
 ): number | null {
-  const generation = readArtifactGeneration(input.artifactSnapshot?.payloadJson);
+  const generation = readArtifactGeneration(
+    input.artifactSnapshot?.payloadJson,
+  );
   const now = input.nowMs ?? Date.now();
 
   let startMs: number | null = null;
@@ -396,7 +404,9 @@ export function resolveArtifactElapsedMs(
     if (Number.isFinite(started)) {
       startMs = startMs === null ? started : Math.min(startMs, started);
     }
-    const completed = step.completedAt ? Date.parse(step.completedAt) : Number.NaN;
+    const completed = step.completedAt
+      ? Date.parse(step.completedAt)
+      : Number.NaN;
     if (Number.isFinite(completed)) {
       endMs = endMs === null ? completed : Math.max(endMs, completed);
     }

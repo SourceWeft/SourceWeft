@@ -88,6 +88,10 @@ import {
   isSandboxExecuteToolCallIdRequiredError,
   sandboxExecuteToolCallIdRequiredContentError,
 } from "../turn/sandbox-execute-error";
+import {
+  AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
+  findAgentToolTerminationUnknownReason,
+} from "../agent/middleware/tool-execution-timeout";
 
 type ThreadTitleJob = Job<Record<string, unknown>, unknown, string>;
 
@@ -215,6 +219,14 @@ function buildTraceMetadata(input: {
 function toObservationError(error: unknown) {
   if (error instanceof ContentError) {
     return error;
+  }
+  const terminationUnknown = findAgentToolTerminationUnknownReason(error);
+  if (terminationUnknown) {
+    return new ContentError(
+      500,
+      AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
+      "Tool execution stopped responding before remote termination could be confirmed.",
+    );
   }
   if (isSandboxExecuteToolCallIdRequiredError(error)) {
     return sandboxExecuteToolCallIdRequiredContentError();
@@ -566,6 +578,7 @@ function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
 }
 
 function buildPartialErrorState(input: {
+  errorMessage?: string;
   preflightThinkingSteps?: ThinkingStepTrace[];
   reasoning?: string;
   reasoningSegmentsById: Map<string, ModelReasoningSegmentTrace>;
@@ -578,6 +591,7 @@ function buildPartialErrorState(input: {
   meteredLlmCalls: MeteredLlmCallTrace[];
 }): ThreadStreamPartialErrorState {
   const terminalTraceState = buildTerminalAssistantTraceState({
+    errorMessage: input.errorMessage,
     mode: "error",
     preflightThinkingSteps: input.preflightThinkingSteps ?? [],
     runtimeThinkingSteps: [...input.thinkingStepsById.values()],
@@ -588,7 +602,11 @@ function buildPartialErrorState(input: {
     reasoningSegments: [...input.reasoningSegmentsById.values()],
     traceParts: terminalTraceState.traceParts.filter(isVisibleTracePart),
     toolCalls: [...input.toolCallsById.values()].map((toolCall) =>
-      terminalizeToolCall({ mode: "error", toolCall }),
+      terminalizeToolCall({
+        errorMessage: input.errorMessage,
+        mode: "error",
+        toolCall,
+      }),
     ),
     thinkingSteps: terminalTraceState.thinkingSteps,
     renderBlocks: input.renderBlocks,
@@ -1336,8 +1354,8 @@ class ContentThreadStreamService {
             // `toDurableRunContentError` would otherwise record as a failure.
             // When the abort was a cancel, report it as one.
             if (
-              options.abortSignal?.aborted ||
-              (await options.shouldCancel?.())
+              !findAgentToolTerminationUnknownReason(error) &&
+              (options.abortSignal?.aborted || (await options.shouldCancel?.()))
             ) {
               throw new ContentError(
                 499,
@@ -1559,6 +1577,9 @@ class ContentThreadStreamService {
           contentError,
           partialAssistantContent: assistantContent,
           partialState: buildPartialErrorState({
+            ...(isClientCancelled
+              ? { errorMessage: contentError.message }
+              : {}),
             preflightThinkingSteps: prepared.preflightThinkingSteps,
             reasoning,
             reasoningSegmentsById,
@@ -1678,6 +1699,7 @@ class ContentThreadStreamService {
             contentError,
             partialAssistantContent: assistantContent,
             partialState: buildPartialErrorState({
+              errorMessage: contentError.message,
               preflightThinkingSteps: prepared.preflightThinkingSteps,
               reasoning,
               reasoningSegmentsById,

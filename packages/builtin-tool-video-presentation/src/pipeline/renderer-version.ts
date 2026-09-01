@@ -10,9 +10,9 @@
 export const REMOTION_RENDERER_VERSION = "4.0.468";
 
 /**
- * Environment variable through which a staged browser reaches the generated
- * render scripts. Set per command invocation by `runProjectInSession`; the
- * scripts fall back to Remotion's own download (with retries) when unset.
+ * Environment variable through which the trusted sandbox image exposes its
+ * pinned browser to generated render scripts. Missing is a hard dependency
+ * error; render code never downloads a different browser at runtime.
  */
 export const REMOTION_BROWSER_ENV_VAR = "SOURCEWEFT_REMOTION_BROWSER";
 

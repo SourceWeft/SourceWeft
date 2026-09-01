@@ -1,8 +1,5 @@
 import { isAgentToolDomain } from "@sourceweft/agent-tool-registry";
-import type {
-  MessageVersion,
-  ToolCallRecord,
-} from "./chat-canvas";
+import type { MessageVersion, ToolCallRecord } from "./chat-canvas";
 
 export type WebPageToolResult = {
   url: string;
@@ -91,9 +88,7 @@ export function getWebPageToolResults(
   }));
 }
 
-export function hasWebPageToolResults(
-  toolCalls: ToolCallRecord[] | undefined,
-) {
+export function hasWebPageToolResults(toolCalls: ToolCallRecord[] | undefined) {
   return (toolCalls ?? []).some(
     (toolCall) =>
       isAgentToolDomain(toolCall.tool, "web") &&
@@ -101,9 +96,7 @@ export function hasWebPageToolResults(
   );
 }
 
-export function getWebPageToolCallIds(
-  toolCalls: ToolCallRecord[] | undefined,
-) {
+export function getWebPageToolCallIds(toolCalls: ToolCallRecord[] | undefined) {
   return (toolCalls ?? [])
     .filter(
       (toolCall) =>

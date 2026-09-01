@@ -357,6 +357,40 @@ type WorkspaceAccessRow = {
   membership_source: string | null;
 };
 
+type WorkspaceAccessExecutor = Pick<typeof db, "execute">;
+
+/**
+ * Serialize a content-plane authorization decision with membership/role
+ * revocation. Existing access rows are locked before the caller re-resolves the
+ * effective role inside its publication transaction.
+ */
+export async function lockWorkspaceAccessRowsWithExecutor(
+  executor: WorkspaceAccessExecutor,
+  input: { workspaceId: string; userId: string },
+) {
+  await executor.execute(sql`
+    select w.id
+    from workspaces w
+    where w.id = ${input.workspaceId}
+    for key share
+  `);
+  await executor.execute(sql`
+    select m.id
+    from member m
+    join workspaces w on w.organization_id = m."organizationId"
+    where w.id = ${input.workspaceId}
+      and m."userId" = ${input.userId}
+    for update of m
+  `);
+  await executor.execute(sql`
+    select wm.workspace_id, wm.user_id
+    from workspace_memberships wm
+    where wm.workspace_id = ${input.workspaceId}
+      and wm.user_id = ${input.userId}
+    for update of wm
+  `);
+}
+
 /**
  * The single place where "what may this user do in this workspace" is decided.
  *
@@ -373,11 +407,14 @@ type WorkspaceAccessRow = {
  * Returns null when neither holds — being able to name a workspace id is not
  * access.
  */
-export async function resolveWorkspaceAccessRecord(input: {
-  workspaceId: string;
-  userId: string;
-}): Promise<WorkspaceAccess | null> {
-  const result = await db.execute<WorkspaceAccessRow>(sql`
+export async function resolveWorkspaceAccessRecordWithExecutor(
+  executor: WorkspaceAccessExecutor,
+  input: {
+    workspaceId: string;
+    userId: string;
+  },
+): Promise<WorkspaceAccess | null> {
+  const result = await executor.execute<WorkspaceAccessRow>(sql`
     select
       w.organization_id,
       w.is_default,
@@ -435,6 +472,13 @@ export async function resolveWorkspaceAccessRecord(input: {
     source,
     isContainerAdmin: isOrganizationAdminRole(organizationRole),
   };
+}
+
+export async function resolveWorkspaceAccessRecord(input: {
+  workspaceId: string;
+  userId: string;
+}): Promise<WorkspaceAccess | null> {
+  return resolveWorkspaceAccessRecordWithExecutor(db, input);
 }
 
 export async function findWorkspaceByIdForMember(input: {

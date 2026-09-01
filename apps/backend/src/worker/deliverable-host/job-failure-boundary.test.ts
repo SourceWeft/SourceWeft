@@ -8,7 +8,7 @@ function makeInput(
 ) {
   const calls: Array<Record<string, unknown>> = [];
   const input = {
-    jobName: "video-presentation-generate",
+    jobName: "fake-generate",
     attemptsMade: 1,
     maxAttempts: 1,
     data: {
@@ -18,7 +18,7 @@ function makeInput(
     },
     error: new Error("job stalled more than allowable limit"),
     failureCodes: {
-      "video-presentation-generate": "VIDEO_PRESENTATION_GENERATION_FAILED",
+      "fake-generate": "FAKE_DELIVERABLE_FAILED",
     },
     markFailed: async (markInput: Record<string, unknown>) => {
       calls.push(markInput);
@@ -35,7 +35,7 @@ test("marks the artifact failed on the final attempt", async () => {
   assert.equal(outcome, "marked");
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.artifactId, "artifact-1");
-  assert.equal(calls[0]?.errorCode, "VIDEO_PRESENTATION_GENERATION_FAILED");
+  assert.equal(calls[0]?.errorCode, "FAKE_DELIVERABLE_FAILED");
   assert.equal(calls[0]?.errorMessage, "job stalled more than allowable limit");
   assert.deepEqual(calls[0]?.expectedStatuses, ["pending", "running"]);
 });

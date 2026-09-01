@@ -42,15 +42,12 @@ const listArtifactSummariesMock = vi.hoisted(() =>
 );
 
 function makeStubClient(overrides: Record<string, unknown> = {}) {
-  return new Proxy(
-    overrides,
-    {
-      get: (target, property) =>
-        Reflect.has(target, property)
-          ? Reflect.get(target, property)
-          : vi.fn().mockResolvedValue(emptyResult),
-    },
-  );
+  return new Proxy(overrides, {
+    get: (target, property) =>
+      Reflect.has(target, property)
+        ? Reflect.get(target, property)
+        : vi.fn().mockResolvedValue(emptyResult),
+  });
 }
 
 vi.mock("../../../../../lib/sdk", () => ({
@@ -104,9 +101,7 @@ async function renderHub(
   };
   await act(async () => {
     const hub = createElement(SourcesHub, merged);
-    created.render(
-      options.strict ? createElement(StrictMode, null, hub) : hub,
-    );
+    created.render(options.strict ? createElement(StrictMode, null, hub) : hub);
   });
   return container;
 }

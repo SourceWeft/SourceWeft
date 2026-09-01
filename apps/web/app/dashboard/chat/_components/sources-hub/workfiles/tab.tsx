@@ -1,4 +1,10 @@
-import { FileText, Loader2, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import {
+  FileText,
+  Loader2,
+  MoreHorizontal,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useMemo } from "react";
 
 import { Button } from "@sourceweft/ui-web/components/ui/button";

@@ -112,7 +112,9 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       ...middlewareRuntime,
       modelAlias: "chat-default",
       filesystemMounts: [],
-      commandExecutionPolicy: { targetToolName: "target_tool" },
+      commandExecutionPolicy: {
+        initialToolPolicy: { kind: "force", toolName: "target_tool" },
+      },
       extraMiddleware: [{ name: "ExtraMiddleware" }],
     });
 
@@ -130,6 +132,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftCommandToolChoice",
       "toolErrorMiddleware",
       "SourceWeftToolObservability",
+      "SourceWeftToolExecutionTimeout",
       "toolRetryMiddleware",
       "SummarizationMiddleware",
       "SourceWeftContextCompressionTrace",
@@ -173,6 +176,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
       "SourceWeftRepeatToolCallReminder",
       "toolErrorMiddleware",
       "SourceWeftToolObservability",
+      "SourceWeftToolExecutionTimeout",
       "toolRetryMiddleware",
       "SummarizationMiddleware",
       "modelRetryMiddleware",
@@ -361,9 +365,9 @@ test("filesystem description middleware rewrites mounted filesystem tool descrip
   assert.equal(requestTools[1]?.description, "custom description");
 });
 
-test("command tool choice forces non-video targets without changing parallel tool calls", async () => {
+test("command tool choice forces targets and disables duplicate parallel calls", async () => {
   const middleware = createCommandToolChoiceMiddleware({
-    targetToolName: "target_tool",
+    initialToolPolicy: { kind: "force", toolName: "target_tool" },
   });
   const targetTool = tool(async () => "ok", {
     name: "target_tool",
@@ -404,16 +408,19 @@ test("command tool choice forces non-video targets without changing parallel too
     ["target_tool"],
   );
   assert.deepEqual(requests[0]?.toolChoice, forcedToolChoice("target_tool"));
-  assert.equal(requests[0]?.modelSettings, undefined);
+  assert.equal(requests[0]?.modelSettings?.parallel_tool_calls, false);
 });
 
-test("command tool choice disables parallel calls only for explicit video presentation commands", async () => {
+test("forced command tool choice preserves model settings", async () => {
   const middleware = createCommandToolChoiceMiddleware({
-    targetToolName: "generate_video_presentation",
+    initialToolPolicy: {
+      kind: "force",
+      toolName: "target_tool",
+    },
   });
   const targetTool = tool(async () => "ok", {
-    name: "generate_video_presentation",
-    description: "Generate video presentation",
+    name: "target_tool",
+    description: "Run the target action",
   });
   const requests: Array<Record<string, unknown>> = [];
 
@@ -428,8 +435,8 @@ test("command tool choice disables parallel calls only for explicit video presen
       return {
         tool_calls: [
           {
-            id: "call-video",
-            name: "generate_video_presentation",
+            id: "call-target",
+            name: "target_tool",
             args: {},
           },
         ],
@@ -442,6 +449,38 @@ test("command tool choice disables parallel calls only for explicit video presen
     headers: { "x-test": "preserved" },
     parallel_tool_calls: false,
   });
+});
+
+test("automatic command policy filters tools without forcing the publisher", async () => {
+  const middleware = createCommandToolChoiceMiddleware({
+    initialToolPolicy: "auto",
+    toolPolicy: {
+      allow: ["write_file", "publish_video"],
+      deny: ["task"],
+    },
+  });
+  const requests: Array<{ toolChoice?: unknown; tools: unknown[] }> = [];
+  const tools = ["task", "write_file", "publish_video", "execute"].map((name) =>
+    tool(async () => "ok", {
+      name,
+      description: name,
+    }),
+  );
+
+  await wrapModelCallHook(middleware)(
+    { state: { messages: [] }, tools },
+    async (request) => {
+      requests.push(request as never);
+      return {} as never;
+    },
+  );
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(
+    requests[0]?.tools.map((item) => (item as { name: string }).name),
+    ["write_file", "publish_video"],
+  );
+  assert.equal(requests[0]?.toolChoice, undefined);
 });
 
 test("tool observability logs start and completion", async () => {

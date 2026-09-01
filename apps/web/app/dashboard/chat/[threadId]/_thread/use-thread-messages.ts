@@ -2,9 +2,7 @@
 
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { toast } from "sonner";
-import type {
-  ActiveThreadRun,
-} from "../chat-stream-runner-control";
+import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import {
   useStreamingAssistantTransientState,
   type ChatMessageItem,
@@ -21,12 +19,16 @@ import {
   THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS,
   waitForThreadMessagesRetry,
 } from "./message-normalizers";
+import {
+  findArtifactOutputMessage,
+  mergeCommittedArtifactOutputsIntoMessages,
+  mergeCommittedArtifactOutputsIntoStreamingSnapshot,
+  type ArtifactOutputReconcileTarget,
+} from "./artifact-output-reconcile";
 
 // Caps a reconnect/gap catch-up; a larger gap is finished by the next frame.
 const MAX_INCREMENTAL_DRAIN_PAGES = 10;
-import type {
-  ThreadStreamActionInput,
-} from "./use-thread-stream-action";
+import type { ThreadStreamActionInput } from "./use-thread-stream-action";
 
 type UseThreadMessagesInput = {
   activeThreadRunRef: RefObject<ActiveThreadRun | null>;
@@ -58,10 +60,8 @@ export function useThreadMessages({
   workspaceId,
 }: UseThreadMessagesInput) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
-  const {
-    mergeStreamingAssistantIntoMessages,
-    setStreamingAssistantSnapshot,
-  } = useStreamingAssistantTransientState();
+  const { mergeStreamingAssistantIntoMessages, setStreamingAssistantSnapshot } =
+    useStreamingAssistantTransientState();
   const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(
     null,
   );
@@ -73,6 +73,56 @@ export function useThreadMessages({
   // replacing the whole list. Sourced only from server responses.
   const newestMessageCursorRef = useRef<string | null>(null);
   const isAppendingRef = useRef(false);
+
+  const reconcileCommittedArtifactOutputs = useCallback(
+    async (target: ArtifactOutputReconcileTarget) => {
+      if (!workspaceId || (!target.assistantMessageId && !target.runId)) {
+        return;
+      }
+      const loadGeneration = threadMessagesLoadGenerationRef.current;
+      try {
+        // The forward cursor only discovers newly-created rows. Artifact output
+        // updates an existing assistant message, so fetch the bounded newest
+        // page and merge only its immutable committed blocks into local state.
+        const result = await contentClient.listThreadMessages(
+          workspaceId,
+          threadId,
+          {
+            include: "metadata,contentJson,citations",
+            limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
+          },
+        );
+        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+        const authoritative = findArtifactOutputMessage({
+          messages: mapThreadMessagesToChatMessages(result.items),
+          target,
+        });
+        if (!authoritative) {
+          return;
+        }
+        setMessages((current) =>
+          mergeCommittedArtifactOutputsIntoMessages({
+            authoritative,
+            current,
+            target,
+          }),
+        );
+        setStreamingAssistantSnapshot((current) =>
+          mergeCommittedArtifactOutputsIntoStreamingSnapshot({
+            authoritative,
+            current,
+            target,
+          }),
+        );
+      } catch {
+        // NotifyHub is a wake-up, not the source of truth. The next room
+        // heartbeat/resync/terminal reconcile retries this bounded REST read.
+      }
+    },
+    [setStreamingAssistantSnapshot, threadId, workspaceId],
+  );
 
   const loadThreadMessages = useCallback(async () => {
     const loadGeneration = threadMessagesLoadGenerationRef.current + 1;
@@ -119,10 +169,13 @@ export function useThreadMessages({
           messagesResult.items,
         );
         setOlderMessagesCursor(messagesResult.nextCursor ?? null);
-        const runningRun = activeRun ? normalizeActiveThreadRun(activeRun) : null;
-        let runningAssistant:
-          | { message: ChatMessageItem; run: ActiveThreadRun }
-          | null = findActiveThreadRunMessage(serverMessages, runningRun);
+        const runningRun = activeRun
+          ? normalizeActiveThreadRun(activeRun)
+          : null;
+        let runningAssistant: {
+          message: ChatMessageItem;
+          run: ActiveThreadRun;
+        } | null = findActiveThreadRunMessage(serverMessages, runningRun);
         const matchedRunningAssistant = runningAssistant;
         if (runningRun && !runningAssistant) {
           const latestUserMessage = [...serverMessages]
@@ -319,6 +372,7 @@ export function useThreadMessages({
     mergeStreamingAssistantIntoMessages,
     messages,
     olderMessagesCursor,
+    reconcileCommittedArtifactOutputs,
     setMessages,
     setStreamingAssistantSnapshot,
   };

@@ -42,13 +42,17 @@ import {
   createCapabilityAgentToolsForTurn,
   type AgentTurnTool,
 } from "../capability-agent-tools";
-import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
+import {
+  AGENT_TOOL_NAMES,
+  getAgentToolDefinition,
+} from "@sourceweft/agent-tool-registry";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
 import { findArtifactRecord } from "../../../artifacts/repository";
 import { artifactStorage } from "../../../sources/storage";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
+import { buildRequiredSandboxRuntimeAssetPlans } from "../../../../shared/sandbox-assets/plans";
 import { config } from "../../../../shared/config";
 import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
@@ -65,6 +69,8 @@ import type { TurnRuntime } from "./turn-runtime";
 import { PrefixedBackendAdapter } from "../composite-backend-adapter";
 import {
   filterAllowedTools,
+  filterCommandPolicyTools,
+  filterInheritableAgentTools,
   getToolPermission,
   isToolDenied,
 } from "./tool-utils";
@@ -73,7 +79,10 @@ import {
   type InterpreterReadToolName,
 } from "@sourceweft/agent-interpreter";
 import { createInterpreterMiddlewareForTurn } from "../interpreter";
-import { currentSourceWeftToolCallId } from "../middleware";
+import {
+  currentSourceWeftToolCallId,
+  currentSourceWeftToolInvocationSignal,
+} from "../middleware";
 import { ContentError } from "../../../content/errors";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
@@ -181,7 +190,7 @@ export function buildAgentBackend(input: {
     sandboxRuntime,
   } = input;
   const defaultBackend = sandboxRuntime
-    ? new SandboxExecuteToolCallBackend(
+    ? new TurnScopedSandboxBackend(
         sandboxRuntime.backend,
         executeToolCallId,
       )
@@ -230,7 +239,7 @@ export function buildAgentBackend(input: {
   });
 }
 
-class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
+class TurnScopedSandboxBackend implements SandboxBackendProtocolV2 {
   readonly id: string;
 
   constructor(
@@ -241,15 +250,21 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
   }
 
   ls(path: string) {
-    return this.backend.ls(path);
+    return this.backend.ls(path, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   read(filePath: string, offset?: number, limit?: number) {
-    return this.backend.read(filePath, offset, limit);
+    return this.backend.read(filePath, offset, limit, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   readRaw(filePath: string) {
-    return this.backend.readRaw(filePath);
+    return this.backend.readRaw(filePath, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   grep(
@@ -258,15 +273,21 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
     glob?: string | null,
     maxCount?: number | null,
   ) {
-    return this.backend.grep(pattern, path, glob, maxCount);
+    return this.backend.grep(pattern, path, glob, maxCount, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   glob(pattern: string, path?: string) {
-    return this.backend.glob(pattern, path);
+    return this.backend.glob(pattern, path, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   write(filePath: string, content: string) {
-    return this.backend.write(filePath, content);
+    return this.backend.write(filePath, content, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   edit(
@@ -275,26 +296,33 @@ class SandboxExecuteToolCallBackend implements SandboxBackendProtocolV2 {
     newString: string,
     replaceAll?: boolean,
   ) {
-    return this.backend.edit(filePath, oldString, newString, replaceAll);
+    return this.backend.edit(filePath, oldString, newString, replaceAll, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   uploadFiles(files: Array<[string, Uint8Array]>) {
     if (!this.backend.uploadFiles) {
       throw new Error("Backend does not support uploadFiles");
     }
-    return this.backend.uploadFiles(files);
+    return this.backend.uploadFiles(files, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   downloadFiles(paths: string[]) {
     if (!this.backend.downloadFiles) {
       throw new Error("Backend does not support downloadFiles");
     }
-    return this.backend.downloadFiles(paths);
+    return this.backend.downloadFiles(paths, {
+      signal: currentSourceWeftToolInvocationSignal(),
+    });
   }
 
   execute(command: string) {
     return this.backend.execute(command, {
       toolCallId: currentSourceWeftToolCallId() ?? this.fallbackToolCallId,
+      signal: currentSourceWeftToolInvocationSignal(),
     });
   }
 }
@@ -460,28 +488,6 @@ export interface ThreadAgentAssembly {
   ) => Promise<unknown>;
 }
 
-export interface ThreadAgentAssemblyInput {
-  prepared: PreparedThreadTurn;
-  llm?: LlmExecutionConfig;
-  traceContext?: TraceContext;
-  toolCollection: ToolCollection;
-  filesystemBackend: FilesystemBackend;
-  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
-  runtimePrompt: string;
-  /** Billed chat model for this turn; see CreateThreadAgentParams.model. */
-  model: BaseLanguageModel;
-}
-
-export interface ThreadAgentAssembly {
-  agent: Awaited<ReturnType<typeof createThreadAgent>>;
-  agentMessages: Array<{ role: "user"; content: unknown }>;
-  baseConfig: AgentRunnableConfig;
-  runConfig: AgentRunnableConfig;
-  runAgentStream: (
-    messages: Array<{ role: "user"; content: unknown }>,
-  ) => Promise<unknown>;
-}
-
 /**
  * Skill-bundle staging request for the turn
  * (docs/architecture/sandbox-skill-staging.md). Null when the flag is off or
@@ -514,42 +520,78 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
 }): Promise<AgentSandboxRuntimeForTurn | null> {
   const { prepared, filesystemBackend } = input;
   const skillAssets = skillAssetsForPreparedTurn(prepared);
-  const sandboxRuntime = isToolDenied(prepared, AGENT_TOOL_NAMES.execute)
-    ? null
-    : await agentSandboxService.createRuntimeForTurn({
-        filesystem: filesystemBackend.backend,
-        context: {
-          teamId: prepared.workspace.organizationId,
-          workspaceId: prepared.workspace.id,
-          threadId: prepared.thread.id,
-          userId: prepared.userId,
-          messageId: prepared.userMessage.id,
-          runId: prepared.runTraceId,
-          sandboxExecuteToolCallId: sandboxExecuteToolCallIdFromResume(
-            prepared.toolApprovalResume,
-          ),
-        },
-        artifacts: {
-          // Workspace-scoped on purpose: an artifactId arriving from tool
-          // input can only reach rows this turn's workspace could already see.
-          readPrimaryBytes: async ({ artifactId }) => {
-            const record = await findArtifactRecord({
-              teamId: prepared.workspace.organizationId,
-              workspaceId: prepared.workspace.id,
-              artifactId,
-            });
-            if (!record || record.status !== "ready" || !record.storageKey) {
-              return null;
-            }
-            const download = await artifactStorage.download({
-              key: record.storageKey,
-              bucket: record.storageBucket,
-            });
-            return download ? { bytes: download.body } : null;
+  const sandboxCandidateTools = new Set([
+    ...(prepared.command?.workflow?.defaultTools ?? []),
+    ...Object.values(prepared.runtimeTools)
+      .filter((runtimeTool) => runtimeTool.shouldBind)
+      .map((runtimeTool) => runtimeTool.toolName),
+  ]);
+  const commandNeedsTrustedSandbox = [...sandboxCandidateTools].some(
+    (toolName) => {
+      const definition = getAgentToolDefinition(toolName);
+      return (
+        definition?.executionScope === "root_only" &&
+        definition.capabilities.includes("sandbox_execute")
+      );
+    },
+  );
+  const requiredRuntimeAssetNames = [...sandboxCandidateTools].flatMap(
+    (toolName) => getAgentToolDefinition(toolName)?.sandboxRuntimeAssets ?? [],
+  );
+  const requiredRuntimeAssetPlans = buildRequiredSandboxRuntimeAssetPlans(
+    requiredRuntimeAssetNames,
+  );
+  const runtimeAssets =
+    requiredRuntimeAssetPlans.length > 0
+      ? {
+          plans: async () => requiredRuntimeAssetPlans,
+          logger: {
+            info: (message: string, meta?: Record<string, unknown>) =>
+              logger.info(message, meta),
+            warn: (message: string, meta?: Record<string, unknown>) =>
+              logger.warn(message, meta),
           },
-        },
-        ...(skillAssets ? { skillAssets } : {}),
-      });
+        }
+      : null;
+  const sandboxRuntime =
+    isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
+    !commandNeedsTrustedSandbox
+      ? null
+      : await agentSandboxService.createRuntimeForTurn({
+          filesystem: filesystemBackend.backend,
+          context: {
+            teamId: prepared.workspace.organizationId,
+            workspaceId: prepared.workspace.id,
+            threadId: prepared.thread.id,
+            userId: prepared.userId,
+            messageId: prepared.userMessage.id,
+            runId: prepared.runTraceId,
+            sandboxExecuteToolCallId: sandboxExecuteToolCallIdFromResume(
+              prepared.toolApprovalResume,
+            ),
+          },
+          artifacts: {
+            // Workspace-scoped on purpose: an artifactId arriving from tool
+            // input can only reach rows this turn's workspace could already see.
+            readPrimaryBytes: async ({ artifactId }) => {
+              const record = await findArtifactRecord({
+                teamId: prepared.workspace.organizationId,
+                workspaceId: prepared.workspace.id,
+                artifactId,
+              });
+              if (!record || record.status !== "ready" || !record.storageKey) {
+                return null;
+              }
+              const download = await artifactStorage.download({
+                key: record.storageKey,
+                bucket: record.storageBucket,
+              });
+              return download ? { bytes: download.body } : null;
+            },
+          },
+          ...(skillAssets ? { skillAssets } : {}),
+          ...(runtimeAssets ? { runtimeAssets } : {}),
+        });
 
   if (sandboxRuntime) {
     sandboxRuntime.tools = filterAllowedTools(prepared, sandboxRuntime.tools);
@@ -594,12 +636,13 @@ export async function buildThreadAgentAssembly(
   const filesystemPermissions = filesystemPermissionsForMounts(
     promptFilesystemMounts,
   );
-  const boundTools = [
+  const boundTools = filterCommandPolicyTools(prepared, [
     ...filterAllowedTools(prepared, capabilityTools),
     ...connectorActionTools,
     ...mcpTools,
     ...(sandboxRuntime?.tools ?? []),
-  ];
+  ]);
+  const inheritableTools = filterInheritableAgentTools(boundTools);
   const searchSourcesTool = boundTools.find(
     (candidate) => candidate.name === AGENT_TOOL_NAMES.searchSources,
   ) as StructuredToolInterface | undefined;
@@ -674,18 +717,18 @@ export async function buildThreadAgentAssembly(
   // tool: general-purpose (full) plus the read-only explore and plan delegates.
   const subagents = [
     createGeneralPurposeSubagent({
-      availableTools: boundTools,
+      availableTools: inheritableTools,
       interruptOn,
       middleware: childMiddleware("general-purpose"),
       skills,
     }),
     createExploreSubagent({
-      availableTools: boundTools,
+      availableTools: inheritableTools,
       backend,
       middleware: childMiddleware("explore"),
     }),
     createPlanSubagent({
-      availableTools: boundTools,
+      availableTools: inheritableTools,
       backend,
       middleware: childMiddleware("plan"),
     }),
@@ -828,7 +871,8 @@ export async function buildThreadAgentAssembly(
     // is no longer set: v3 exposes messages/tools/custom/updates/checkpoints on
     // one normalized ProtocolEvent stream.
     // Cancels the LLM stream and stops scheduling further steps when the run is
-    // aborted; LangGraph propagates it to tools via config.signal.
+    // aborted. The tool-timeout middleware merges this signal into its Host
+    // configurable side channel so tool cleanup can settle before invoke ends.
     ...(abortSignal ? { signal: abortSignal } : {}),
   } satisfies AgentRunnableConfig;
 
@@ -866,10 +910,10 @@ export async function buildThreadAgentAssembly(
           },
         } as AgentRunnableConfig;
       }
-      return agent.streamEvents(
-        { messages: messages as never },
-        { ...effectiveRunConfig, version: "v3" } as never,
-      ) as Promise<unknown>;
+      return agent.streamEvents({ messages: messages as never }, {
+        ...effectiveRunConfig,
+        version: "v3",
+      } as never) as Promise<unknown>;
     };
     return stream();
   };

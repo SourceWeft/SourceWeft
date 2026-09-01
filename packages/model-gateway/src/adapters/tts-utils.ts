@@ -1,5 +1,5 @@
 import { createHttpGatewayError, ModelGatewayError } from "../errors";
-import { normalizeUsage } from "../normalize/usage";
+import { normalizeModelCallObservation } from "../observation/normalize";
 import type { ResolvedRequestTarget, TtsSpeechResult } from "../types";
 
 const MIME_TYPE_BY_RESPONSE_FORMAT: Record<string, string> = {
@@ -64,6 +64,7 @@ export function buildTtsSpeechResult(input: {
   audio: ArrayBuffer;
   mimeType?: string;
   raw?: Record<string, unknown>;
+  responseHeaders?: Headers;
   target: ResolvedRequestTarget;
   traceId?: string;
 }): TtsSpeechResult {
@@ -76,12 +77,22 @@ export function buildTtsSpeechResult(input: {
   }
 
   const raw = input.raw ?? {};
+  const observation = normalizeModelCallObservation({
+    modelAlias: input.target.routeDecision.alias,
+    context: {
+      target: input.target,
+      modality: "tts",
+      rawResponse: raw,
+      responseHeaders: input.responseHeaders,
+    },
+  });
   return {
     model:
       typeof raw.model === "string" ? raw.model : input.target.providerModel,
     audio: input.audio,
     mimeType: input.mimeType,
-    usage: normalizeUsage(raw.usage ?? raw),
+    usage: observation.usage,
+    observation,
     provider: input.target.provider,
     providerModel: input.target.providerModel,
     routeDecision: input.target.routeDecision,

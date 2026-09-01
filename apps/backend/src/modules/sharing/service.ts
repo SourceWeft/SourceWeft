@@ -19,8 +19,7 @@ import {
 } from "./store";
 
 export type ShareMutationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: "not_found" | "forbidden" };
+  { ok: true; value: T } | { ok: false; reason: "not_found" | "forbidden" };
 
 /**
  * Absolute, copy-pasteable link a viewer opens. The token is the entire access
@@ -37,6 +36,13 @@ function publicRawUrl(token: string) {
 }
 function publicPreviewUrl(token: string) {
   return `${config.auth.baseUrl}/v1/public/shares/${token}/preview`;
+}
+function publicVersionMediaUrl(
+  token: string,
+  artifactVersionId: string,
+  resource: "video" | "cover",
+) {
+  return `${config.auth.baseUrl}/v1/public/shares/${encodeURIComponent(token)}/versions/${encodeURIComponent(artifactVersionId)}/media/${resource}`;
 }
 /** Token-scoped public URL for a sub-asset (narration, image) of a shared artifact. */
 function publicShareAssetUrl(token: string, fileName: string) {
@@ -290,32 +296,40 @@ export class SharingService {
       return null;
     }
 
-    const hasPreview = Boolean(artifact.previewStorageKey);
-    const inlinePreviewable =
-      await contentArtifactsService.isSharedArtifactInlineRenderable(artifact);
+    const exactMedia =
+      await contentArtifactsService.getSharedCurrentArtifactVersionMedia(
+        artifact,
+      );
+    const hasPreview = exactMedia
+      ? Boolean(exactMedia.media.coverImage)
+      : await contentArtifactsService.sharedArtifactHasPreview(artifact);
+    const inlinePreviewable = exactMedia
+      ? true
+      : await contentArtifactsService.isSharedArtifactInlineRenderable(
+          artifact,
+        );
     // A servable file can be the top-level stored file OR a capability's
     // payload-stored primary file (e.g. a video presentation's rendered mp4),
     // so `fileUrl` is not gated on the top-level `storageKey` alone.
-    const hasServableFile =
-      await contentArtifactsService.sharedArtifactHasServableFile(artifact);
-    // A capability-sanitized payload the share page can client-render (e.g. a
-    // video presentation compiled in the viewer's browser). Asset URLs inside
-    // are rewritten to the token-scoped public asset route; internal fields are
-    // stripped by the capability before they cross the boundary.
-    const publicPayload =
-      await contentArtifactsService.buildSharedArtifactPublicPayload(
-        artifact,
-        (fileName) => publicShareAssetUrl(token, fileName),
-      );
+    const hasServableFile = exactMedia
+      ? true
+      : await contentArtifactsService.sharedArtifactHasServableFile(artifact);
+    // A capability-sanitized payload for artifact types that still need a
+    // client-side renderer. Video Presentation intentionally returns null and
+    // uses the trusted `/raw` media path instead.
+    const publicPayload = exactMedia
+      ? null
+      : await contentArtifactsService.buildSharedArtifactPublicPayload(
+          artifact,
+          (fileName) => publicShareAssetUrl(token, fileName),
+        );
 
     // Content-derived SEO/social description, from the preview image's alt
     // caption only — already-shown, non-sensitive text. Never `promptText` or
     // any payload field. Null when there's no usable caption; the page then
     // falls back to a title + type sentence.
     const previewMeta = artifact.previewMetadataJson as
-      | Record<string, unknown>
-      | null
-      | undefined;
+      Record<string, unknown> | null | undefined;
     const altText =
       previewMeta && typeof previewMeta.altText === "string"
         ? previewMeta.altText.trim()
@@ -333,11 +347,24 @@ export class SharingService {
     return {
       token,
       artifactType: artifact.artifactType,
-      title: artifact.title,
-      fileUrl: hasServableFile ? publicRawUrl(token) : null,
+      title: exactMedia?.media.title ?? artifact.title,
+      fileUrl: exactMedia
+        ? publicVersionMediaUrl(token, exactMedia.versionId, "video")
+        : hasServableFile
+          ? publicRawUrl(token)
+          : null,
+      downloadUrl: exactMedia
+        ? `${publicVersionMediaUrl(token, exactMedia.versionId, "video")}?download=1`
+        : hasServableFile
+          ? `${publicRawUrl(token)}?download=1`
+          : null,
       inlinePreviewable,
       payload: publicPayload,
-      previewImageUrl: hasPreview ? publicPreviewUrl(token) : null,
+      previewImageUrl: exactMedia?.media.coverImage
+        ? publicVersionMediaUrl(token, exactMedia.versionId, "cover")
+        : hasPreview
+          ? publicPreviewUrl(token)
+          : null,
       description,
       viewCount: share.viewCount,
       noindex: share.noindex,

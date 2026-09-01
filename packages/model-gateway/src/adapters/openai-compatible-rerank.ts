@@ -1,14 +1,13 @@
 import { buildProviderAuthHeaders } from "../auth-headers";
 import { createHttpGatewayError } from "../errors";
-import { normalizeProviderUsage } from "../normalize/usage";
+import { normalizeModelCallObservation } from "../observation/normalize";
 import type { RerankTransport } from "./types";
 
 function resolveRelevanceScore(
   row: Record<string, unknown>,
   providerKind: string,
 ) {
-  const value =
-    providerKind === "openrouter" ? row.relevance_score : row.score;
+  const value = providerKind === "openrouter" ? row.relevance_score : row.score;
   return typeof value === "number" ? value : 0;
 }
 
@@ -49,27 +48,41 @@ export class OpenAICompatibleRerankTransport implements RerankTransport {
     }
 
     const raw = (await response.json()) as Record<string, unknown>;
+    const observation = normalizeModelCallObservation({
+      modelAlias: input.target.routeDecision.alias,
+      context: {
+        target: input.target,
+        modality: "rerank",
+        rawResponse: raw,
+        responseHeaders: response.headers,
+      },
+    });
     const rows = Array.isArray(raw.results) ? raw.results : [];
     const results = rows
-      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+      .filter(
+        (item): item is Record<string, unknown> =>
+          !!item && typeof item === "object",
+      )
       .map((row) => ({
         index: typeof row.index === "number" ? row.index : -1,
         relevanceScore: resolveRelevanceScore(row, input.target.providerKind),
         document:
           typeof row.index === "number" && input.payload.returnDocuments
-            ? (typeof input.payload.documents[row.index] === "string"
-                ? (row.document && typeof row.document === "object"
-                    ? (row.document as Record<string, unknown>)
-                    : undefined)
-                : (input.payload.documents[row.index] as Record<string, unknown>))
+            ? typeof input.payload.documents[row.index] === "string"
+              ? row.document && typeof row.document === "object"
+                ? (row.document as Record<string, unknown>)
+                : undefined
+              : (input.payload.documents[row.index] as Record<string, unknown>)
             : undefined,
       }))
       .filter((item) => item.index >= 0);
 
     return {
-      model: typeof raw.model === "string" ? raw.model : input.target.providerModel,
+      model:
+        typeof raw.model === "string" ? raw.model : input.target.providerModel,
       results,
-      usage: normalizeProviderUsage(raw),
+      usage: observation.usage,
+      observation,
       provider: input.target.provider,
       providerModel: input.target.providerModel,
       routeDecision: input.target.routeDecision,

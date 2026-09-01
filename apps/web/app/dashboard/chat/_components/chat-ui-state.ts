@@ -1,10 +1,5 @@
 export type ChatSkeletonPolicy =
-  | "none"
-  | "route"
-  | "canvas"
-  | "sources"
-  | "overlay"
-  | "inline";
+  "none" | "route" | "canvas" | "sources" | "overlay" | "inline";
 
 export type ChatUiRouteKind = "new" | "thread";
 export type ChatLoadStatus = "idle" | "loading" | "ready" | "error";
@@ -26,12 +21,7 @@ export type ChatUiStatus =
   | "fatal-error";
 
 export type ChatUiErrorKind =
-  | "route"
-  | "workspace"
-  | "thread"
-  | "model-catalog"
-  | "sources"
-  | "creation";
+  "route" | "workspace" | "thread" | "model-catalog" | "sources" | "creation";
 
 export type ChatUiStateInput = {
   routeKind: ChatUiRouteKind;
@@ -204,9 +194,9 @@ export function resolveChatUiState(input: ChatUiStateInput): ChatUiState {
   if (isThreadRoute && threadStatus === "loading") {
     const hasConfirmedActiveThreadMessages = Boolean(
       input.hasMessages &&
-        input.requestedThreadId &&
-        input.activeThreadId &&
-        input.requestedThreadId === input.activeThreadId,
+      input.requestedThreadId &&
+      input.activeThreadId &&
+      input.requestedThreadId === input.activeThreadId,
     );
 
     if (hasConfirmedActiveThreadMessages) {

@@ -1,5 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
+import { captureProviderResponseFetch } from "../observation/response-capture";
 
 function resolveOpenAICompatibleBaseUrl(baseUrl: string) {
   return `${baseUrl.replace(/\/+$/, "")}/openai`;
@@ -22,6 +23,7 @@ export class DeepInfraChatAdapter implements ChatAdapter {
       configuration: {
         baseURL: resolveOpenAICompatibleBaseUrl(target.baseUrl),
         defaultHeaders: target.defaultHeaders,
+        fetch: captureProviderResponseFetch(),
       },
       __includeRawResponse: true,
       maxTokens: input.maxTokens,

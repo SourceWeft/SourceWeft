@@ -5,7 +5,7 @@ import { resolveWorkerThinking } from "./context";
 test("pipeline thinking is pinned off — the chat turn's 'auto' must not leak in", () => {
   // "auto" was the incident shape: for a thinking-by-default model it means
   // thinking ON, and a structured stage's whole token budget went to hidden
-  // reasoning (storyboard 402 incident, 2026-08-01).
+  // reasoning.
   const resolved = resolveWorkerThinking({
     llm: {
       executionMode: "GLOBAL",

@@ -59,11 +59,12 @@ export function SharedArtifactViewer({
         status: "ready",
         errorMessage: null,
       },
-      downloadUrl: artifact.fileUrl,
+      downloadUrl: artifact.downloadUrl,
       layout: "page",
       pageUrl: null,
       payload: (artifact.payload as Record<string, unknown> | null) ?? {},
       proxyFileUrl: artifact.fileUrl,
+      previewImageUrl: artifact.previewImageUrl,
       surface: "share",
       title,
       workspaceId: null,
@@ -183,10 +184,10 @@ export function SharedArtifactViewer({
               Fullscreen
             </button>
           ) : null}
-          {artifact.fileUrl && !capabilityOwnsDownload ? (
+          {artifact.downloadUrl && !capabilityOwnsDownload ? (
             <a
               className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              href={artifact.fileUrl}
+              href={artifact.downloadUrl}
               rel="noopener"
               title="Download"
             >

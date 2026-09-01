@@ -63,10 +63,7 @@ function writeStorageEntry(workspaceId: string, sources: SourceItem[]) {
 
   try {
     storage.setItem(getDataKey(workspaceId), JSON.stringify(payload));
-    storage.setItem(
-      getTimestampKey(workspaceId),
-      JSON.stringify(Date.now()),
-    );
+    storage.setItem(getTimestampKey(workspaceId), JSON.stringify(Date.now()));
   } catch {
     return;
   }

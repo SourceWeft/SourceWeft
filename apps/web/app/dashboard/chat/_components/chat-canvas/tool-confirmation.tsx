@@ -178,9 +178,13 @@ function ToolConfirmationPanel({
   }, [confirmation.id]);
 
   const title = confirmationTitle(confirmation);
-  const toolCallInput = item.toolCall.input as Record<string, unknown> | undefined;
+  const toolCallInput = item.toolCall.input as
+    Record<string, unknown> | undefined;
   const requestLines = requestDetailLines(confirmation, toolCallInput);
-  const commandText = sandboxExecuteCommandText({ confirmation, toolCallInput });
+  const commandText = sandboxExecuteCommandText({
+    confirmation,
+    toolCallInput,
+  });
   const threadRunId = item.threadRunId ?? activeThreadRun?.id ?? null;
   // Decisions are whatever the server offered for this confirmation. The card
   // has no list of its own, so a producer that never offers `approve_always`

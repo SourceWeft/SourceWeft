@@ -135,6 +135,20 @@ test("resolveSelectedSkills allows builtin runtime ids without workspace install
   assert.equal(skills[0]?.selectionId, "builtin:ppt-deck");
   assert.equal(skills[0]?.sourceType, "builtin");
   assert.equal(skills[0]?.name, "ppt-deck");
+  assert.equal(skills[0]?.defaultEnabled, true);
+});
+
+test("resolveSelectedSkills preserves an explicitly non-default builtin runtime", async () => {
+  const skills = await resolveSelectedSkills({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    skillIds: [builtinSkillSelectionId("video-presentation")],
+    ...emptyWorkspaceSkillDependencies,
+  });
+
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0]?.name, "video-presentation");
+  assert.equal(skills[0]?.defaultEnabled, false);
 });
 
 test("resolveSelectedSkills allows public builtin runtime ids from chat options", async () => {
@@ -189,6 +203,7 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
           version: "1.0.0",
           description: "Review custom material.",
           visibility: "workspace",
+          defaultEnabled: true,
           categories: [],
         },
         createdBy: "user-1",
@@ -212,6 +227,7 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
   assert.equal(skills[0]?.workspaceSkillId, record.id);
   assert.equal(skills[0]?.sourceType, "workspace_custom");
   assert.equal(skills[0]?.name, "custom-review");
+  assert.equal(skills[0]?.defaultEnabled, true);
 });
 
 test("resolveSelectedSkills ignores disabled workspace skills unless explicitly selected", async () => {

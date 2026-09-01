@@ -224,6 +224,41 @@ test("mapCatalogRow: registry rows carry Community/attribution; others do not", 
   assert.equal(custom.verified, undefined);
 });
 
+test("mapCatalogRow forwards defaultEnabled without inferring it from visibility", () => {
+  const explicit = mapCatalogRow(
+    catalogRow({
+      id: "explicit-default",
+      sourceType: "workspace_custom",
+      visibility: "restricted",
+      ownerUserId: "author",
+      displayName: "Explicit Default",
+      description: "A restricted skill with an explicit selection default.",
+      manifest: {
+        ...registryManifest(undefined),
+        visibility: "restricted",
+        defaultEnabled: false,
+      },
+    }),
+  );
+  const omitted = mapCatalogRow(
+    catalogRow({
+      id: "omitted-default",
+      sourceType: "workspace_custom",
+      visibility: "restricted",
+      ownerUserId: "author",
+      displayName: "Omitted Default",
+      description: "A restricted skill without a selection default.",
+      manifest: {
+        ...registryManifest(undefined),
+        visibility: "restricted",
+      },
+    }),
+  );
+
+  assert.equal(explicit.defaultEnabled, false);
+  assert.equal(omitted.defaultEnabled, undefined);
+});
+
 // --- lexical search relevance ---
 
 test("skillSearchRelevanceRank: name matches outrank description matches", () => {

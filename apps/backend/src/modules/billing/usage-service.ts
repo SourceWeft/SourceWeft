@@ -35,6 +35,7 @@ import {
   getTotalPagesBalance,
   getTotalCreditsBalance,
   normalizeTeamId,
+  refundConsumedCredits,
   spendPages,
   spendCredits,
   toSummary,
@@ -114,11 +115,12 @@ export class BillingUsageService {
             continue;
           }
 
-          if (entry.eventType !== "consume") {
-            continue;
-          }
-
-          if (entry.unitType !== "credit" && entry.unitType !== "page") {
+          const isCreditUsage =
+            entry.unitType === "credit" &&
+            (entry.eventType === "consume" || entry.eventType === "refund");
+          const isPageUsage =
+            entry.unitType === "page" && entry.eventType === "consume";
+          if (!isCreditUsage && !isPageUsage) {
             continue;
           }
 
@@ -129,13 +131,13 @@ export class BillingUsageService {
             events: 0,
           };
 
-          if (entry.unitType === "credit") {
-            const consumedCredits = Math.abs(entry.delta);
-            existing.creditsConsumed += consumedCredits;
-            totalCreditsConsumed += consumedCredits;
+          if (isCreditUsage) {
+            const creditsDelta = -entry.delta;
+            existing.creditsConsumed += creditsDelta;
+            totalCreditsConsumed += creditsDelta;
           }
 
-          if (entry.unitType === "page") {
+          if (isPageUsage) {
             const consumedPages = Math.abs(entry.delta);
             existing.pagesConsumed += consumedPages;
             totalPagesConsumed += consumedPages;
@@ -330,7 +332,7 @@ export class BillingUsageService {
           client,
         });
 
-        spendCredits(account, creditsToConsume);
+        const creditAllocation = spendCredits(account, creditsToConsume);
         account.creditsConsumedThisCycle += creditsToConsume;
         account.updatedAt = new Date().toISOString();
         await this.store.updateAccount(account, client);
@@ -363,6 +365,7 @@ export class BillingUsageService {
             ),
             metadata: {
               creditUnitUsd: this.runtimeConfig.creditUnitUsd,
+              creditAllocation,
               ...(input.modelKind ? { modelKind: input.modelKind } : {}),
               ...(input.operation ? { operation: input.operation } : {}),
               ...(input.providerCostUsd !== undefined
@@ -384,6 +387,154 @@ export class BillingUsageService {
           consumedCredits: creditsToConsume,
           availableCredits: getAvailableCredits(account),
           consumedThisCycle: account.creditsConsumedThisCycle,
+          idempotencyReplayed: false,
+        };
+      },
+    );
+  }
+
+  async reconcileModelProviderCost(input: {
+    teamId: string;
+    actorUserId: string;
+    workspaceId?: string;
+    feature: string;
+    originalIdempotencyKey: string;
+    reconciliationIdempotencyKey: string;
+    generationId: string;
+    provider: string;
+    providerRequestId: string;
+    settledProviderCostUsd: number;
+  }) {
+    return this.accountService.withLockedAccount(
+      input.teamId,
+      input.actorUserId,
+      async ({ account, client }) => {
+        const reconciliationKey = scopeMemberLedgerKey(
+          account.userId,
+          input.reconciliationIdempotencyKey,
+        );
+        const existing = await this.store.getLedgerByIdempotency(
+          account.teamId,
+          reconciliationKey,
+          client,
+        );
+        if (existing) {
+          return {
+            adjustedCredits: existing.delta,
+            idempotencyReplayed: true,
+          };
+        }
+
+        const original = await this.store.getLedgerByIdempotency(
+          account.teamId,
+          scopeMemberLedgerKey(account.userId, input.originalIdempotencyKey),
+          client,
+        );
+        if (
+          !original ||
+          original.unitType !== "credit" ||
+          original.eventType !== "consume"
+        ) {
+          throw new BillingError(
+            "MODEL_COST_LEDGER_NOT_FOUND",
+            409,
+            "Original model usage ledger entry was not found",
+          );
+        }
+        const metadata = original.metadata ?? {};
+        const creditUnitUsd =
+          typeof metadata.creditUnitUsd === "number"
+            ? metadata.creditUnitUsd
+            : this.runtimeConfig.creditUnitUsd;
+        const markupRate =
+          typeof metadata.markupRate === "number"
+            ? metadata.markupRate
+            : this.runtimeConfig.defaultMarkupRate;
+        const platformCostUsd =
+          typeof metadata.platformCostUsd === "number"
+            ? metadata.platformCostUsd
+            : 0;
+        const desiredCredits = computeCreditsFromCost({
+          providerCostUsd: input.settledProviderCostUsd,
+          platformCostUsd,
+          markupRate,
+          creditUnitUsd,
+        });
+        const originalCredits = Math.abs(original.delta);
+        const creditsDifference = desiredCredits - originalCredits;
+        if (creditsDifference === 0) {
+          return { adjustedCredits: 0, idempotencyReplayed: false };
+        }
+
+        let allocation: Record<string, unknown> | undefined;
+        if (creditsDifference > 0) {
+          await this.ensureCreditsCapacity({
+            account,
+            creditsToConsume: creditsDifference,
+            feature: input.feature,
+            actorUserId: input.actorUserId,
+            client,
+          });
+          allocation = spendCredits(account, creditsDifference);
+          account.creditsConsumedThisCycle += creditsDifference;
+        } else {
+          const originalAllocation =
+            metadata.creditAllocation &&
+            typeof metadata.creditAllocation === "object" &&
+            !Array.isArray(metadata.creditAllocation)
+              ? (metadata.creditAllocation as {
+                  monthly?: number;
+                  addOn?: number;
+                })
+              : undefined;
+          allocation = refundConsumedCredits(
+            account,
+            Math.abs(creditsDifference),
+            originalAllocation,
+          );
+          account.creditsConsumedThisCycle = Math.max(
+            0,
+            account.creditsConsumedThisCycle + creditsDifference,
+          );
+        }
+        account.updatedAt = new Date().toISOString();
+        await this.store.updateAccount(account, client);
+
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: creditsDifference > 0 ? "consume" : "refund",
+            unitType: "credit",
+            delta: -creditsDifference,
+            balanceAfter: getTotalCreditsBalance(account),
+            feature: input.feature,
+            actorUserId: input.actorUserId,
+            workspaceId: input.workspaceId,
+            referenceId: input.generationId,
+            idempotencyKey: input.reconciliationIdempotencyKey,
+            operationId: input.reconciliationIdempotencyKey,
+            operationType: "usage",
+            activityVisible: false,
+            metadata: {
+              generationId: input.generationId,
+              provider: input.provider,
+              providerRequestId: input.providerRequestId,
+              originalCredits,
+              desiredCredits,
+              creditsDifference,
+              settledProviderCostUsd: input.settledProviderCostUsd,
+              creditUnitUsd,
+              markupRate,
+              platformCostUsd,
+              creditAllocation: allocation,
+            },
+          },
+        });
+
+        return {
+          adjustedCredits: -creditsDifference,
           idempotencyReplayed: false,
         };
       },

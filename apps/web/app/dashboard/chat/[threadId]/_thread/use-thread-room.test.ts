@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { reconcileRoomRun, shouldClearAdoptedRun } from "./use-thread-room";
+import {
+  artifactOutputTargetFromRoomFrame,
+  reconcileRoomRun,
+  shouldClearAdoptedRun,
+} from "./use-thread-room";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 
 function run(overrides: Partial<ActiveThreadRun> = {}): ActiveThreadRun {
@@ -85,5 +89,18 @@ test("a run this tab drives or attaches is left to the local lifecycle", () => {
   assert.equal(
     shouldClearAdoptedRun({ isLocallyDriven: false, isAttached: true }),
     false,
+  );
+});
+
+test("artifact output room frames retain the exact run and assistant target", () => {
+  assert.deepEqual(
+    artifactOutputTargetFromRoomFrame({
+      type: "run",
+      kind: "artifact_output",
+      runId: "run-1",
+      status: "running",
+      assistantMessageId: "assistant-1",
+    }),
+    { runId: "run-1", assistantMessageId: "assistant-1" },
   );
 });

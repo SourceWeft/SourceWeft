@@ -39,18 +39,10 @@ type SourceIngestKind = (typeof sourceIngestKindSchema.options)[number];
 type SourceType = (typeof sourceTypeSchema.options)[number];
 type ConnectorStatus = "active" | "paused" | "error" | "disabled";
 type ConnectorOAuthAccountStatus =
-  | "active"
-  | "reauth_required"
-  | "revoked"
-  | "disabled";
+  "active" | "reauth_required" | "revoked" | "disabled";
 type SyncRunTriggerType = "manual" | "scheduled" | "webhook" | "backfill";
 type SyncRunStatus =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "canceled"
-  | "skipped";
+  "queued" | "running" | "succeeded" | "failed" | "canceled" | "skipped";
 type ConnectorActionRiskLevel = "low" | "medium" | "high";
 type ConnectorActionRunStatus =
   | "proposed"
@@ -61,22 +53,13 @@ type ConnectorActionRunStatus =
   | "failed"
   | "canceled";
 type ConnectorWebhookEventStatus =
-  | "received"
-  | "queued"
-  | "processed"
-  | "ignored"
-  | "failed";
+  "received" | "queued" | "processed" | "ignored" | "failed";
 type BlogPostStatus = "draft" | "published" | "archived";
 type BlogAssetKind = "cover" | "og_image" | "content_image" | "file";
 type AgentToolTrustRuleStatus = "active" | "revoked";
 type AgentSandboxStatus = "creating" | "ready" | "expired" | "closed" | "error";
 type AgentSandboxOperationType =
-  | "prepare"
-  | "execute"
-  | "collect"
-  | "create"
-  | "close"
-  | "cleanup";
+  "prepare" | "execute" | "collect" | "create" | "close" | "cleanup";
 type AgentSandboxOperationStatus =
   | "proposed"
   | "approved"
@@ -87,18 +70,11 @@ type AgentSandboxOperationStatus =
   | "canceled";
 type McpTransport = "streamable_http" | "http_sse_compat" | "sse" | "stdio";
 type McpAuthType =
-  | "none"
-  | "bearer"
-  | "api_key_header"
-  | "custom_headers"
-  | "oauth";
+  "none" | "bearer" | "api_key_header" | "custom_headers" | "oauth";
 type McpRiskLevel = "read" | "write" | "destructive" | "unknown";
 type WorkspaceMcpInstallStatus = "active" | "disabled" | "error";
 type WorkspaceMcpCredentialStatus =
-  | "not_required"
-  | "required"
-  | "configured"
-  | "invalid";
+  "not_required" | "required" | "configured" | "invalid";
 type McpInstallSource = "market" | "custom" | "local_import";
 type McpActionRunStatus =
   | "proposed"
@@ -187,13 +163,7 @@ type RetrievalStage = "bm25" | "vector" | "rrf" | "rerank";
 type RetrievalHitType = "chunk" | "document";
 type RetrievalVectorStrategy = "ann_hnsw" | "exact_vector" | "bm25_only";
 type LedgerEventType =
-  | "grant"
-  | "reserve"
-  | "consume"
-  | "release"
-  | "refund"
-  | "expire"
-  | "adjust";
+  "grant" | "reserve" | "consume" | "release" | "refund" | "expire" | "adjust";
 type LedgerUnitType = "credit" | "page" | "seat";
 type TopupUnitType = "credit" | "page";
 type BillingOperationType =
@@ -230,11 +200,7 @@ type BillingOrderStatus =
   | "expired"
   | "fulfillment_failed";
 type BillingOrderPaymentStatus =
-  | "unknown"
-  | "unpaid"
-  | "paid"
-  | "failed"
-  | "expired";
+  "unknown" | "unpaid" | "paid" | "failed" | "expired";
 type OpsAlertLevel = "warn" | "error" | "critical";
 type OpsAlertStatus = "open" | "resolved";
 type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
@@ -253,11 +219,7 @@ type LlmSpanKind =
   | "thinking"
   | "http";
 type RawCaptureMode =
-  | "none"
-  | "normalized"
-  | "sdk_metadata"
-  | "reconstructed"
-  | "provider_wire";
+  "none" | "normalized" | "sdk_metadata" | "reconstructed" | "provider_wire";
 type SkillDefinitionSourceType =
   | "builtin"
   | "workspace_custom"
@@ -275,16 +237,15 @@ type SkillVersionStorageType =
   // invariant 2 of skill-registry-index.md).
   | "pointer";
 export type SkillManifestVisibility =
-  | "public"
-  | "restricted"
-  | "workspace"
-  | "team";
+  "public" | "restricted" | "workspace" | "team";
 export type SkillManifestJson = {
   slug: string;
   displayName: string;
   version: string;
   description: string;
   visibility: SkillManifestVisibility;
+  // Selection behavior is explicit and independent from catalog visibility.
+  defaultEnabled?: boolean;
   // Market surfacing, orthogonal to `visibility`. `listing: "hidden"` keeps the
   // skill out of the market entirely; `managed: true` makes it installable/
   // uninstallable per workspace (default false = always-on built-in capability).
@@ -2981,7 +2942,7 @@ export const messages = pgTable(
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
     totalTokens: integer("total_tokens"),
-    providerCostUsd: numeric("provider_cost_usd", { precision: 12, scale: 6 }),
+    providerCostUsd: numeric("provider_cost_usd", { precision: 18, scale: 12 }),
     latencyMs: integer("latency_ms"),
     creditsConsumed: integer("credits_consumed"),
     metadata: jsonb("metadata")
@@ -3875,7 +3836,13 @@ export const llmGenerations = pgTable(
     operation: text("operation").notNull(),
     provider: text("provider"),
     providerModel: text("provider_model"),
+    resolvedProviderModel: text("resolved_provider_model"),
     modelAlias: text("model_alias"),
+    profileAlias: text("profile_alias"),
+    gatewayConfigId: text("gateway_config_id").references(
+      () => modelGatewayConfigs.id,
+      { onDelete: "set null" },
+    ),
     executionMode: text("execution_mode"),
     keySource: text("key_source"),
     routeStrategy: text("route_strategy"),
@@ -3900,10 +3867,36 @@ export const llmGenerations = pgTable(
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
     totalTokens: integer("total_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
     providerCostUsd: numeric("provider_cost_usd", {
-      precision: 12,
-      scale: 6,
+      precision: 18,
+      scale: 12,
     }),
+    providerCostInlineUsd: numeric("provider_cost_inline_usd", {
+      precision: 18,
+      scale: 12,
+    }),
+    providerCostSettledUsd: numeric("provider_cost_settled_usd", {
+      precision: 18,
+      scale: 12,
+    }),
+    providerCostSource: text("provider_cost_source"),
+    providerCostStatus: text("provider_cost_status"),
+    costCurrency: text("cost_currency"),
+    providerReceiptJson: jsonb("provider_receipt_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
+    costReconciledAt: timestamp("cost_reconciled_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    normalizationJson: jsonb("normalization_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
     rawCaptureMode: text("raw_capture_mode")
       .$type<RawCaptureMode>()
       .notNull()
@@ -3980,6 +3973,42 @@ export const llmGenerations = pgTable(
       sql`${table.totalTokens} is null or ${table.totalTokens} >= 0`,
     ),
     check(
+      "llm_generations_reasoning_tokens_check",
+      sql`${table.reasoningTokens} is null or ${table.reasoningTokens} >= 0`,
+    ),
+    check(
+      "llm_generations_cache_read_tokens_check",
+      sql`${table.cacheReadTokens} is null or ${table.cacheReadTokens} >= 0`,
+    ),
+    check(
+      "llm_generations_cache_write_tokens_check",
+      sql`${table.cacheWriteTokens} is null or ${table.cacheWriteTokens} >= 0`,
+    ),
+    check(
+      "llm_generations_provider_cost_check",
+      sql`${table.providerCostUsd} is null or ${table.providerCostUsd} >= 0`,
+    ),
+    check(
+      "llm_generations_provider_cost_inline_check",
+      sql`${table.providerCostInlineUsd} is null or ${table.providerCostInlineUsd} >= 0`,
+    ),
+    check(
+      "llm_generations_provider_cost_settled_check",
+      sql`${table.providerCostSettledUsd} is null or ${table.providerCostSettledUsd} >= 0`,
+    ),
+    check(
+      "llm_generations_provider_cost_source_check",
+      sql`${table.providerCostSource} is null or ${table.providerCostSource} in ('provider_inline', 'provider_receipt', 'provider_estimated', 'price_book', 'temporary_minimum', 'legacy', 'missing')`,
+    ),
+    check(
+      "llm_generations_provider_cost_status_check",
+      sql`${table.providerCostStatus} is null or ${table.providerCostStatus} in ('pending', 'inline', 'settled', 'estimated', 'legacy', 'missing', 'reconcile_failed')`,
+    ),
+    check(
+      "llm_generations_cost_currency_check",
+      sql`${table.costCurrency} is null or ${table.costCurrency} = 'USD'`,
+    ),
+    check(
       "llm_generations_provider_status_check",
       sql`${table.providerStatusCode} is null or ${table.providerStatusCode} between 100 and 599`,
     ),
@@ -4034,6 +4063,19 @@ export const llmGenerations = pgTable(
       table.provider,
       table.providerModel,
       table.startedAt,
+    ),
+    index("llm_generations_provider_resolved_model_started_idx").on(
+      table.provider,
+      table.resolvedProviderModel,
+      table.startedAt,
+    ),
+    index("llm_generations_provider_request_idx").on(
+      table.provider,
+      table.providerRequestId,
+    ),
+    index("llm_generations_cost_status_ended_idx").on(
+      table.providerCostStatus,
+      table.endedAt,
     ),
     index("llm_generations_status_started_idx").on(
       table.status,
@@ -4658,11 +4700,7 @@ export const jobsAudit = pgTable(
 
 type MarketItemKind = "skill" | "mcp";
 type MarketItemStatus =
-  | "draft"
-  | "reviewing"
-  | "published"
-  | "unlisted"
-  | "archived";
+  "draft" | "reviewing" | "published" | "unlisted" | "archived";
 type MarketItemVisibility = "public" | "private" | "internal";
 type MarketItemVersionOrigin = "upstream" | "submitted";
 

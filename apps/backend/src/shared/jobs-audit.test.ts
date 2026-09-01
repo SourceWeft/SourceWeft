@@ -44,7 +44,7 @@ beforeEach(() => {
 
 test("recordJobAudit redacts BYOK credentials from the persisted payload", async () => {
   const input = buildAuditInputFromJob({
-    jobType: "video-presentation-generate",
+    jobType: "fake-deliverable-generate",
     data: {
       teamId: "team-1",
       workspaceId: "workspace-1",
@@ -91,13 +91,13 @@ test("recordJobAudit redacts BYOK credentials from the persisted payload", async
 
 test("recordJobAudit preserves an error summary built from a worker failure", async () => {
   const error = Object.assign(
-    new Error("Theme provider returned invalid JSON\nraw"),
+    new Error("Provider returned invalid JSON\nraw"),
     {
-      code: "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
+      code: "FAKE_DELIVERABLE_FAILED",
     },
   );
   const input = buildAuditInputFromJob({
-    jobType: "video-presentation-generate",
+    jobType: "fake-deliverable-generate",
     data: {
       teamId: "team-1",
       workspaceId: "workspace-1",
@@ -111,8 +111,8 @@ test("recordJobAudit preserves an error summary built from a worker failure", as
 
   const expectedErrorJson = {
     name: "Error",
-    code: "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
-    message: "Theme provider returned invalid JSON",
+    code: "FAKE_DELIVERABLE_FAILED",
+    message: "Provider returned invalid JSON",
   };
   assert.deepEqual(
     mocks.values.mock.calls[0]?.[0]?.errorJson,

@@ -105,7 +105,8 @@ export type ProviderCostResult = {
     | "price_book"
     | "missing_usage"
     | "missing_or_zero_price"
-    | "missing_price_components";
+    | "missing_price_components"
+    | "missing_provider_actual";
   missingPriceComponents: string[];
 };
 
@@ -249,7 +250,10 @@ function roundUsd(value: number) {
 export function computeProviderCostFromPricing(input: {
   usage?: UsageInfo;
   pricing: ModelPricing;
-}): Pick<ProviderCostResult, "providerCostUsd" | "costSource" | "missingPriceComponents"> {
+}): Pick<
+  ProviderCostResult,
+  "providerCostUsd" | "costSource" | "missingPriceComponents"
+> {
   const usage = input.usage;
   if (!usage) {
     return {
@@ -302,10 +306,7 @@ export function computeProviderCostFromPricing(input: {
     usage.cacheWriteTokens,
     inputTokenBound ? inputTokens - cacheReadTokens : undefined,
   );
-  const inputAudioTokens = clampCount(
-    usage.inputAudioTokens,
-    inputTokenBound,
-  );
+  const inputAudioTokens = clampCount(usage.inputAudioTokens, inputTokenBound);
   const inputImageTokens = clampCount(
     usage.inputImageTokens,
     inputTokenBound
@@ -337,10 +338,7 @@ export function computeProviderCostFromPricing(input: {
   );
   const normalOutputTokens = Math.max(
     0,
-    outputTokens -
-      outputAudioTokens -
-      outputImageTokens -
-      reasoningTokens,
+    outputTokens - outputAudioTokens - outputImageTokens - reasoningTokens,
   );
   const pricedInputImageCount = inputImageTokens > 0 ? 0 : inputImageCount;
   const pricedOutputImageCount = outputImageTokens > 0 ? 0 : outputImageCount;
@@ -362,9 +360,7 @@ export function computeProviderCostFromPricing(input: {
     (outputTierCost !== null ||
       priceValue(input.pricing, "output_cost_per_image") !== null);
   const textInputTokens =
-    hasOutputImageCountPrice && inputImageTokens === 0
-      ? 0
-      : normalInputTokens;
+    hasOutputImageCountPrice && inputImageTokens === 0 ? 0 : normalInputTokens;
   const textOutputTokens =
     hasOutputImageCountPrice && outputImageTokens === 0
       ? 0
@@ -479,6 +475,7 @@ export async function computeProviderCost(input: {
   profileAlias: string;
   usage?: UsageInfo;
   llm?: LlmExecutionConfig;
+  allowPriceBookFallback?: boolean;
   /** Defaults to exact, uncached reads. Billing must not override this. */
   lookups?: ProviderCostLookups;
 }): Promise<ProviderCostResult> {
@@ -498,6 +495,22 @@ export async function computeProviderCost(input: {
       providerCostUsd: 0,
       pricingSnapshot: null,
       costSource: "byok",
+      missingPriceComponents: [],
+    };
+  }
+
+  if (
+    input.allowPriceBookFallback === false &&
+    !(
+      input.usage?.providerCostUsd !== undefined &&
+      Number.isFinite(input.usage.providerCostUsd) &&
+      input.usage.providerCostUsd >= 0
+    )
+  ) {
+    return {
+      providerCostUsd: null,
+      pricingSnapshot: null,
+      costSource: "missing_provider_actual",
       missingPriceComponents: [],
     };
   }

@@ -46,11 +46,14 @@ function resolveCitationForPage(
   page: WebPageToolResult,
   citations: CitationRecord[] | undefined,
 ) {
-  return (citations ?? []).find((citation) =>
-    (page.citation && citation.citation === page.citation) ||
-    citation.externalUri === page.url ||
-    citation.chunkId === `external:${page.url}`
-  ) ?? null;
+  return (
+    (citations ?? []).find(
+      (citation) =>
+        (page.citation && citation.citation === page.citation) ||
+        citation.externalUri === page.url ||
+        citation.chunkId === `external:${page.url}`,
+    ) ?? null
+  );
 }
 
 export function WebToolResults({
@@ -70,9 +73,11 @@ export function WebToolResults({
 }) {
   const resolvedToolCalls = toolCall ? [toolCall] : (toolCalls ?? []);
   const webToolCalls = resolvedToolCalls.filter((toolCall) =>
-    isAgentToolDomain(toolCall.tool, "web")
+    isAgentToolDomain(toolCall.tool, "web"),
   );
-  const pages = webToolCalls.flatMap((toolCall) => getWebPageToolResults(toolCall));
+  const pages = webToolCalls.flatMap((toolCall) =>
+    getWebPageToolResults(toolCall),
+  );
   const [isOpen, setIsOpen] = useState(false);
 
   if (pages.length === 0) {
@@ -140,7 +145,11 @@ export function WebToolResults({
         <Files className="size-4" />
         <span>Referenced web pages</span>
         <span className="text-muted-foreground">{pages.length}</span>
-        {isOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        {isOpen ? (
+          <ChevronUp className="size-3.5" />
+        ) : (
+          <ChevronDown className="size-3.5" />
+        )}
       </button>
 
       {isOpen ? (
@@ -191,7 +200,9 @@ function WebPageList({
                   onCitationClick?.(citation);
                   return;
                 }
-                toast.info("No citation content is available for this page yet.");
+                toast.info(
+                  "No citation content is available for this page yet.",
+                );
               }}
               title={`${title}\n${page.url}`}
               type="button"

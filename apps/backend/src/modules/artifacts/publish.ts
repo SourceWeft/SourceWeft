@@ -32,6 +32,7 @@ export function publishArtifact(input: {
   readonly spec: ArtifactPublishSpec;
   /** Pre-allocate when the id must exist before the work (e.g. billing keys). */
   readonly artifactId?: string;
+  readonly signal?: AbortSignal;
 }): Promise<ArtifactPublishResult> {
   return artifactWriter.publishArtifact(input);
 }

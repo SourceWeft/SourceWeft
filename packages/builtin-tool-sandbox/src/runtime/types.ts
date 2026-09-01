@@ -17,10 +17,7 @@ export const SOURCEWEFT_SKILLS_ROOT = "/skills";
 
 export type SandboxBridgeOperationType = "prepare" | "execute" | "collect";
 export type SandboxOperationType =
-  | SandboxBridgeOperationType
-  | "create"
-  | "close"
-  | "cleanup";
+  SandboxBridgeOperationType | "create" | "close" | "cleanup";
 
 export type SandboxOperationStatus =
   | "proposed"
@@ -32,11 +29,7 @@ export type SandboxOperationStatus =
   | "canceled";
 
 export type SandboxStatus =
-  | "creating"
-  | "ready"
-  | "expired"
-  | "closed"
-  | "error";
+  "creating" | "ready" | "expired" | "closed" | "error";
 
 export type SandboxProviderId = string;
 
@@ -55,6 +48,24 @@ export type SandboxRef = {
 };
 
 export type SandboxExecuteResult = ExecuteResponse;
+
+export type SandboxCancellationReason = "user_cancelled" | "timed_out";
+
+/**
+ * Physical provider-termination outcome. `confirmed: false` deliberately has
+ * no best-guess mode: closing a client stream is not proof that either the
+ * command or its sandbox stopped.
+ */
+export type SandboxCancellationResult =
+  | { confirmed: true; mode: "command" | "sandbox" }
+  | { confirmed: false; mode: "unknown" };
+
+export type SandboxCancelExecutionInput = {
+  providerSandboxId: string;
+  /** Host-issued identity; never accepted from model/tool arguments. */
+  executionId: string;
+  reason: SandboxCancellationReason;
+};
 
 export type SandboxPreparedFile = {
   sourcePath: string;
@@ -127,23 +138,40 @@ export type CreateSandboxInput = {
 export type SandboxProvider = {
   id: SandboxProviderId;
   pathPolicy: SandboxProviderPathPolicy;
+  /**
+   * Scope the provider can guarantee when cancellation begins. Omitted is
+   * conservatively sandbox-scoped. A command-scoped provider must declare this
+   * explicitly so the durable generation fence does not quarantine siblings.
+   */
+  cancellationScope?: "command" | "sandbox";
   createSandbox(input: CreateSandboxInput): Promise<{ id: string }>;
   getSandbox(providerSandboxId: string): Promise<unknown>;
   checkSandboxHealth?(providerSandboxId: string): Promise<unknown>;
   deleteSandbox(providerSandboxId: string): Promise<unknown>;
+  /**
+   * Provider-native physical cancellation. Providers without this method are
+   * terminated by deleting their sandbox in `SandboxManager`.
+   */
+  cancelExecution?(
+    input: SandboxCancelExecutionInput,
+  ): Promise<SandboxCancellationResult>;
   execute(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }): Promise<SandboxExecuteResult>;
   executeSystem?(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }): Promise<SandboxExecuteResult>;
   uploadFile(input: {
     providerSandboxId: string;
@@ -152,7 +180,10 @@ export type SandboxProvider = {
   }): Promise<unknown>;
   downloadFile(input: {
     providerSandboxId: string;
+    executionId?: string;
     sandboxPath: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<Buffer>;
   listFiles?(input: {
     providerSandboxId: string;

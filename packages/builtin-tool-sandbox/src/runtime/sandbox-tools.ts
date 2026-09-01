@@ -10,15 +10,16 @@ import {
 import {
   PREPARE_SANDBOX_TOOL_NAME,
   COLLECT_SANDBOX_OUTPUTS_TOOL_NAME,
+  resolveAgentToolHostInvocationSignal,
 } from "@sourceweft/contracts/agent-tools";
 import {
   assertCollectSandboxPath,
   assertPrepareSandboxPath,
   assertSourceWorkPath,
-  dirname,
 } from "./paths";
 import type { SandboxRuntimeContext, SandboxRuntimeLimits } from "./types";
 import { SandboxManager } from "./sandbox-manager";
+import type { TrustedSandboxHostAdapter } from "./trusted-host-adapter";
 
 function byteLength(content: string | string[] | Uint8Array) {
   if (Array.isArray(content)) {
@@ -54,8 +55,45 @@ function compactRecoverableToolError(error: unknown) {
 }
 
 function sandboxErrorCode(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    typeof (error as { code?: unknown }).code === "string"
+  ) {
+    return (error as { code: string }).code;
+  }
   const match = compactError(error).match(/^([A-Z0-9_]+):/u);
   return match?.[1] ?? "SANDBOX_TOOL_FAILED";
+}
+
+const SANDBOX_CANCELLATION_CONTROL_CODES = new Set([
+  "SANDBOX_EXECUTION_RESULT_DISCARDED",
+  "SANDBOX_HOST_OPERATION_CANCELLED",
+  "SANDBOX_HOST_OPERATION_TIMED_OUT",
+  "SANDBOX_TERMINATION_UNKNOWN",
+]);
+
+function cancellationControlError(input: {
+  error: unknown;
+  signal?: AbortSignal;
+}) {
+  const errorCode = sandboxErrorCode(input.error);
+  if (SANDBOX_CANCELLATION_CONTROL_CODES.has(errorCode)) {
+    return input.error;
+  }
+  if (!input.signal?.aborted) return null;
+  return (
+    input.signal.reason ??
+    new DOMException("Sandbox tool invocation was cancelled.", "AbortError")
+  );
+}
+
+function throwIfInvocationAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("Sandbox tool invocation was cancelled.", "AbortError")
+  );
 }
 
 class SandboxCollectUnsupportedOutputError extends Error {
@@ -162,6 +200,10 @@ export function createSandboxTools(input: {
   manager: SandboxManager;
   context: SandboxRuntimeContext;
   limits: SandboxRuntimeLimits;
+  trustedHost: Pick<
+    TrustedSandboxHostAdapter,
+    "downloadCurrentFile" | "uploadCurrentFiles"
+  >;
   artifacts?: SandboxArtifactReader;
 }) {
   const toolDescriptions = buildSandboxToolDescriptions(
@@ -169,6 +211,8 @@ export function createSandboxTools(input: {
   );
   const prepareSandboxWorkspace = tool(
     async (args: PrepareSandboxWorkspaceInput, runtime: ToolRuntime) => {
+      const signal = resolveAgentToolHostInvocationSignal(runtime);
+      throwIfInvocationAborted(signal);
       const startedAt = Date.now();
       const toolCallId = requireSandboxToolCallId({
         operationType: "prepare",
@@ -198,6 +242,7 @@ export function createSandboxTools(input: {
         );
         sandboxId = sandbox.id;
         for (const file of args.files) {
+          throwIfInvocationAborted(signal);
           const sandboxPath = assertPrepareSandboxPath(
             file.sandboxPath,
             input.manager.providerForSandbox().pathPolicy,
@@ -212,6 +257,7 @@ export function createSandboxTools(input: {
               );
             }
             const artifact = await reader({ artifactId: file.artifactId });
+            throwIfInvocationAborted(signal);
             if (!artifact) {
               throw new Error(
                 `SANDBOX_ARTIFACT_NOT_FOUND: ${file.artifactId} is not a ready artifact in this workspace.`,
@@ -222,6 +268,7 @@ export function createSandboxTools(input: {
           } else {
             const sourcePath = assertSourceWorkPath(file.sourcePath ?? "");
             const raw = await input.filesystem.readRaw(sourcePath);
+            throwIfInvocationAborted(signal);
             if (raw.error || !raw.data) {
               throw new Error(
                 raw.error ||
@@ -251,17 +298,14 @@ export function createSandboxTools(input: {
           });
         }
 
-        for (const file of prepared) {
-          await input.manager.providerForSandbox().ensureDirectory({
-            providerSandboxId: sandbox.providerSandboxId,
-            directory: dirname(file.sandboxPath),
-          });
-          await input.manager.providerForSandbox().uploadFile({
-            providerSandboxId: sandbox.providerSandboxId,
-            sandboxPath: file.sandboxPath,
-            content: file.content,
-          });
-        }
+        await input.trustedHost.uploadCurrentFiles(
+          prepared.map((file) => ({
+            path: file.sandboxPath,
+            bytes: file.content,
+          })),
+          { signal },
+        );
+        throwIfInvocationAborted(signal);
         const result = {
           ok: true,
           files: prepared.map(({ content: _content, ...file }) => file),
@@ -276,6 +320,21 @@ export function createSandboxTools(input: {
         });
         return JSON.stringify(result);
       } catch (error) {
+        const controlError = cancellationControlError({ error, signal });
+        if (controlError) {
+          await input.manager.completeToolOperation({
+            operationId: claim.operationId,
+            sandboxId,
+            status: "failed",
+            result: {
+              error: compactRecoverableToolError(controlError),
+              errorCode: sandboxErrorCode(controlError),
+              resultDiscarded: true,
+            },
+            durationMs: Date.now() - startedAt,
+          });
+          throw controlError;
+        }
         const result = toRecoverableSandboxToolErrorOutput({
           error,
           operationType: "prepare",
@@ -310,6 +369,8 @@ export function createSandboxTools(input: {
 
   const collectSandboxOutputs = tool(
     async (args: CollectSandboxOutputsInput, runtime: ToolRuntime) => {
+      const signal = resolveAgentToolHostInvocationSignal(runtime);
+      throwIfInvocationAborted(signal);
       const startedAt = Date.now();
       const toolCallId = requireSandboxToolCallId({
         operationType: "collect",
@@ -339,17 +400,19 @@ export function createSandboxTools(input: {
         );
         sandboxId = sandbox.id;
         for (const output of args.outputs) {
+          throwIfInvocationAborted(signal);
           const sandboxPath = assertCollectSandboxPath(
             output.sandboxPath,
             input.manager.providerForSandbox().pathPolicy,
           );
           const targetPath = assertSourceWorkPath(output.target.path);
-          const content = await input.manager
-            .providerForSandbox()
-            .downloadFile({
-              providerSandboxId: sandbox.providerSandboxId,
+          const content = Buffer.from(
+            await input.trustedHost.downloadCurrentFile({
               sandboxPath,
-            });
+              signal,
+            }),
+          );
+          throwIfInvocationAborted(signal);
           const sizeBytes = content.byteLength;
           if (sizeBytes > input.limits.maxCollectFileBytes) {
             throw new Error(
@@ -363,6 +426,7 @@ export function createSandboxTools(input: {
             );
           }
           const existing = await input.filesystem.readRaw(targetPath);
+          throwIfInvocationAborted(signal);
           if (existing.data && output.target.overwrite !== true) {
             throw new Error(
               `SANDBOX_COLLECT_CONFLICT: ${targetPath} already exists. Set overwrite=true or choose a new path.`,
@@ -379,10 +443,12 @@ export function createSandboxTools(input: {
         }
 
         for (const output of collected) {
+          throwIfInvocationAborted(signal);
           const write = await input.filesystem.write(
             output.targetPath,
             output.textContent,
           );
+          throwIfInvocationAborted(signal);
           if (write.error) {
             throw new Error(write.error);
           }
@@ -403,6 +469,21 @@ export function createSandboxTools(input: {
         });
         return JSON.stringify(result);
       } catch (error) {
+        const controlError = cancellationControlError({ error, signal });
+        if (controlError) {
+          await input.manager.completeToolOperation({
+            operationId: claim.operationId,
+            sandboxId,
+            status: "failed",
+            result: {
+              error: compactRecoverableToolError(controlError),
+              errorCode: sandboxErrorCode(controlError),
+              resultDiscarded: true,
+            },
+            durationMs: Date.now() - startedAt,
+          });
+          throw controlError;
+        }
         if (error instanceof SandboxCollectUnsupportedOutputError) {
           const result = toRecoverableCollectErrorOutput(error);
           await input.manager.completeToolOperation({

@@ -1,67 +1,9 @@
 import { z } from "zod";
-import {
-  videoPresentationPipelineStageIdSchema,
-  videoPresentationPipelineStepSchema,
-} from "./video-presentation-pipeline";
 
-export {
-  VIDEO_PRESENTATION_PIPELINE_STAGE_IDS,
-  VIDEO_PRESENTATION_STAGE_PROGRESS,
-  buildInitialVideoPresentationPipelineSteps,
-  computeVideoPresentationOverallProgress,
-  getVideoPresentationPipelineStepLabel,
-  resolveVideoPresentationPipelineStageProgress,
-  videoPresentationPipelineStageIdSchema,
-  videoPresentationPipelineStepSchema,
-  videoPresentationPipelineStepStatusSchema,
-} from "./video-presentation-pipeline";
-export type {
-  VideoPresentationPipelineStageId,
-  VideoPresentationPipelineStep,
-  VideoPresentationPipelineStepStatus,
-} from "./video-presentation-pipeline";
-
-/**
- * Stable error codes for the video-presentation generation pipeline. The
- * worker throws them, artifact records persist them, and clients branch on
- * them — treat as a wire contract.
- */
-export const VIDEO_PRESENTATION_ERROR_CODES = {
-  sandboxUnavailable: "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE",
-  sandboxExecutionFailed: "VIDEO_PRESENTATION_SANDBOX_EXECUTION_FAILED",
-  storyboardGenerationFailed: "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED",
-  themeAssignmentFailed: "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
-  invalidPayload: "VIDEO_PRESENTATION_INVALID_PAYLOAD",
-  generationFailed: "VIDEO_PRESENTATION_GENERATION_FAILED",
-} as const;
-
-export type VideoPresentationErrorCode =
-  (typeof VIDEO_PRESENTATION_ERROR_CODES)[keyof typeof VIDEO_PRESENTATION_ERROR_CODES];
-
-export const videoPresentationGenerationStatusSchema = z.enum([
-  "pending",
-  "running",
-  "ready",
-  "failed",
-]);
-
-export const videoPresentationGenerationStageSchema = z.enum([
-  "planning",
-  "generating_project_code",
-  "installing_project",
-  "typechecking_project",
-  "rendering_smoke_preview",
-  "planning_storyboard",
-  "materializing_assets",
-  "generating_audio_tracks",
-  "assigning_slide_themes",
-  "generating_scene_modules",
-  "repairing_scene_modules",
-  "verifying_visual_quality",
-  "publishing_video_project",
-  "failed",
-  "ready",
-]);
+export const VIDEO_PRESENTATION_WORKFLOW_VERSION =
+  "video-presentation-agent" as const;
+export const VIDEO_PRESENTATION_BUILDER_VERSION = "remotion-project" as const;
+export const VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS = 0.75;
 
 export const videoPresentationAssetTypeSchema = z.enum([
   "hero",
@@ -71,323 +13,414 @@ export const videoPresentationAssetTypeSchema = z.enum([
   "diagrammatic_visual",
 ]);
 
-export const videoPresentationThemeModeSchema = z.enum(["dark", "light"]);
-
-export const videoPresentationRenderProfileSchema = z.object({
-  stylePreset: z
-    .enum(["cinematic", "editorial", "executive", "technical", "product"])
-    .default("cinematic"),
-  visualDensity: z.enum(["light", "balanced", "dense"]).default("balanced"),
-  durationTarget: z.enum(["short", "medium", "long"]).default("medium"),
-  language: z.string().trim().min(1).max(20).default("auto"),
-});
-
-export const videoPresentationCanvasSchema = z.object({
-  width: z.number().int().min(640).max(3840).optional(),
-  height: z.number().int().min(360).max(2160).optional(),
-  fps: z.number().int().min(12).max(60).optional(),
-});
-
-export const videoPresentationBrandSchema = z.object({
-  colors: z.array(z.string().trim().min(1).max(80)).max(8).optional(),
-  typography: z.string().trim().min(1).max(160).optional(),
-  logoAssetId: z.string().trim().min(1).max(160).optional(),
-});
-
-export const videoPresentationMotionSchema = z.object({
-  pacing: z.enum(["calm", "dynamic", "energetic"]).optional(),
-  transitionStyle: z.string().trim().min(1).max(160).optional(),
-  animationIntensity: z.enum(["subtle", "balanced", "bold"]).optional(),
-});
-
-export const videoPresentationBriefRequestSchema = z
+export const videoPresentationRenderProfileSchema = z
   .object({
-    brief: z.string().trim().max(50_000).optional(),
-    title: z.string().trim().min(1).max(180).optional(),
-    language: z.string().trim().min(1).max(20).optional(),
-    durationTarget:
-      videoPresentationRenderProfileSchema.shape.durationTarget.optional(),
-    stylePreset:
-      videoPresentationRenderProfileSchema.shape.stylePreset.optional(),
-    sourceDigest: z.string().trim().max(50_000).optional(),
-    audience: z.string().trim().max(300).optional(),
-    tone: z.string().trim().max(200).optional(),
-    narrationEnabled: z.boolean().optional(),
+    stylePreset: z.enum([
+      "cinematic",
+      "editorial",
+      "executive",
+      "technical",
+      "product",
+    ]),
+    visualDensity: z.enum(["light", "balanced", "dense"]),
+    durationTarget: z.enum(["short", "medium", "long"]),
+    language: z.string().trim().min(1).max(20),
   })
-  .passthrough();
+  .strict();
 
-export const videoPresentationThemeAssignmentSchema = z.object({
-  slideNumber: z.number().int().min(1).max(80),
-  themeName: z.string().trim().min(1).max(80),
-  mode: videoPresentationThemeModeSchema.default("dark"),
-});
+export const videoPresentationResolvedRenderProfileSchema =
+  videoPresentationRenderProfileSchema;
 
-export const videoPresentationGenerationSchema = z.object({
-  status: videoPresentationGenerationStatusSchema.default("pending"),
-  stage: videoPresentationGenerationStageSchema.default("planning"),
-  progress: z.number().min(0).max(100).default(0),
-  attempt: z.number().int().min(1).optional(),
-  maxAttempts: z.number().int().min(1).optional(),
-  retrying: z.boolean().optional(),
-  errorCode: z.string().trim().min(1).max(120).optional(),
-  errorMessage: z.string().trim().min(1).max(1000).optional(),
-  checkpointStage: z.string().trim().min(1).max(120).optional(),
-  pipelineSteps: z.array(videoPresentationPipelineStepSchema).optional(),
-});
+export const videoPresentationCanvasSchema = z
+  .object({
+    width: z.number().int().min(640).max(3840).optional(),
+    height: z.number().int().min(360).max(2160).optional(),
+    fps: z.number().int().min(12).max(60).optional(),
+  })
+  .strict();
 
-export const videoPresentationProjectSchema = z.object({
-  title: z.string().trim().min(1).max(180),
-  fps: z.number().int().min(12).max(60).default(30),
-  width: z.number().int().min(640).max(3840).default(1920),
-  height: z.number().int().min(360).max(2160).default(1080),
-  durationSeconds: z.number().min(0).default(0),
-  stylePreset: videoPresentationRenderProfileSchema.shape.stylePreset,
-  globalVisualDirection: z.string().trim().min(1).max(1000),
-  // Persisted style directives: without these on the payload, brand/motion
-  // requests die after storyboard planning and never reach scene generation.
-  brand: videoPresentationBrandSchema.optional(),
-  motion: videoPresentationMotionSchema.optional(),
-});
+export const videoPresentationBrandSchema = z
+  .object({
+    colors: z.array(z.string().trim().min(1).max(80)).max(8).optional(),
+    typography: z.string().trim().min(1).max(160).optional(),
+    logoAssetId: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict();
 
-export const videoPresentationAssetRefSchema = z.object({
-  assetId: z.string().trim().min(1).max(160),
-  role: z.string().trim().min(1).max(80),
-});
+export const videoPresentationMotionSchema = z
+  .object({
+    pacing: z.enum(["calm", "dynamic", "energetic"]).optional(),
+    transitionStyle: z.string().trim().min(1).max(160).optional(),
+    animationIntensity: z.enum(["subtle", "balanced", "bold"]).optional(),
+  })
+  .strict();
 
-export const videoPresentationSlideSchema = z.object({
-  slideNumber: z.number().int().min(1).max(80),
-  title: z.string().trim().min(1).max(180),
-  subtitle: z.string().trim().max(260).optional(),
-  contentMarkdown: z.string().trim().max(4000).optional(),
-  speakerTranscript: z.array(z.string().trim().min(1).max(500)).min(1).max(8),
-  backgroundExplanation: z.string().trim().max(1000).optional(),
-  sceneIntent: z.string().trim().min(1).max(2000),
-  assetRefs: z.array(videoPresentationAssetRefSchema).default([]),
-  assetNeeds: z.array(z.string().trim().min(1).max(80)).max(4).default([]),
-});
+export const videoPresentationProjectSchema = z
+  .object({
+    title: z.string().trim().min(1).max(180),
+    fps: z.number().int().min(12).max(60),
+    width: z.number().int().min(640).max(3840),
+    height: z.number().int().min(360).max(2160),
+    durationSeconds: z.number().positive(),
+    stylePreset: videoPresentationRenderProfileSchema.shape.stylePreset,
+    globalVisualDirection: z.string().trim().min(1).max(1000),
+    brand: videoPresentationBrandSchema.optional(),
+    motion: videoPresentationMotionSchema.optional(),
+  })
+  .strict();
 
-/**
- * Extra on-screen time appended after each slide's narration so speech never
- * gets clipped by the scene boundary (also absorbs MP3 encoder priming
- * padding). Shared by the backend worker and the runtime composition.
- */
-export const VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS = 0.75;
+export const videoPresentationAssetRefSchema = z
+  .object({
+    assetId: z.string().trim().min(1).max(160),
+    role: z.string().trim().min(1).max(80),
+  })
+  .strict();
 
-export const videoPresentationAudioTrackSchema = z.object({
-  slideNumber: z.number().int().min(1).max(80),
-  assetUrl: z.string().trim().min(1),
-  storageKey: z.string().trim().min(1),
-  storageBucket: z.string().trim().min(1).optional(),
-  /**
-   * The track's real length, measured from the audio bytes themselves.
-   *
-   * There is no second provenance for this number and no `durationSource`
-   * discriminator any more: `generateAudioTracks` fails the stage when the
-   * probe cannot measure the speech it just generated, so nothing can write a
-   * text-length guess here. That matters because this value is not descriptive
-   * — the scene's frame count is derived from it (`scene-gen.ts`), so a guess
-   * that runs short silently clips the tail of the slide's speech at the
-   * <Sequence> boundary in both the browser preview and the rendered mp4.
-   *
-   * Legacy payloads carry `durationSource`; the schema is not strict, so the
-   * field is simply dropped on parse.
-   */
-  durationSeconds: z.number().min(0),
-  mimeType: z.string().trim().min(1),
-  fileName: z.string().trim().min(1),
-});
+export const videoPresentationSlideSchema = z
+  .object({
+    slideNumber: z.number().int().min(1).max(12),
+    title: z.string().trim().min(1).max(180),
+    subtitle: z.string().trim().max(260).optional(),
+    contentMarkdown: z.string().trim().max(4000).optional(),
+    speakerTranscript: z.array(z.string().trim().min(1).max(500)).min(1).max(8),
+    backgroundExplanation: z.string().trim().max(1000).optional(),
+    sceneIntent: z.string().trim().min(1).max(2000),
+    assetRefs: z.array(videoPresentationAssetRefSchema).default([]),
+    assetNeeds: z.array(z.string().trim().min(1).max(80)).max(4).default([]),
+  })
+  .strict();
 
-/**
- * An mp4 rendered server-side (inside the sandbox) and stored as an artifact
- * asset, served from the same `/artifacts/:id/assets/:fileName` route the
- * narration tracks use.
- *
- * Optional on the payload because it is produced by an opt-in render path: a
- * payload without it is a normal, complete video presentation. It exists so the
- * preview can eventually play a file the platform rendered instead of compiling
- * model-authored scene code in the browser — until that flip happens, nothing
- * writes this field.
- */
-export const videoPresentationRenderedVideoSchema = z.object({
-  assetUrl: z.string().trim().min(1),
-  storageKey: z.string().trim().min(1),
-  storageBucket: z.string().trim().min(1).optional(),
-  fileName: z.string().trim().min(1),
-  mimeType: z.string().trim().min(1),
-  byteLength: z.number().int().min(1),
-  durationInFrames: z.number().int().min(1),
-  fps: z.number().int().min(1),
-  width: z.number().int().min(1),
-  height: z.number().int().min(1),
-  /** True when the render muxed the narration tracks into the mp4. */
-  hasAudio: z.boolean().default(false),
-});
+const contentDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 
-export const videoPresentationSceneModuleSchema = z.object({
-  slideNumber: z.number().int().min(1).max(80),
-  title: z.string().trim().min(1).max(180),
-  code: z.string().trim().min(1),
-  componentName: z.string().trim().min(1).max(120).default("VideoScene"),
-  durationInFrames: z.number().int().min(1),
-  repairAttempts: z.number().int().min(0).max(10).default(0),
-  diagnostics: z.array(z.string().trim().min(1).max(1000)).default([]),
-  layoutWarnings: z.array(z.string().trim().min(1).max(1000)).default([]),
-  compileStatus: z
-    .enum(["pending", "compiled", "repaired", "failed"])
-    .default("pending"),
-});
+export const videoPresentationAudioFileNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(180)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:aac|m4a|mp3|ogg|wav|webm)$/iu,
+    "Audio fileName must be a flat audio basename",
+  );
 
-export const videoPresentationAssetSchema = z.object({
-  assetId: z.string().trim().min(1).max(160),
-  type: videoPresentationAssetTypeSchema,
-  prompt: z.string().trim().min(1).max(4000),
-  storageKey: z.string().trim().min(1),
-  storageBucket: z.string().trim().min(1).optional(),
-  sourceUrl: z.string().trim().min(1).optional(),
-  slideNumbers: z.array(z.number().int().min(1).max(80)).min(1).max(80),
-  source: z.enum(["generated", "provided", "fallback"]).default("generated"),
-});
+export const videoPresentationAudioTrackSchema = z
+  .object({
+    slideNumber: z.number().int().min(1).max(12),
+    assetUrl: z.string().trim().min(1),
+    storageKey: z.string().trim().min(1),
+    storageBucket: z.string().trim().min(1),
+    durationSeconds: z.number().positive(),
+    mimeType: z.string().trim().min(1),
+    contentDigest: contentDigestSchema,
+    contentType: z.string().trim().min(1),
+    fileName: videoPresentationAudioFileNameSchema,
+  })
+  .strict();
 
-export const videoPresentationPreviewSchema = z.object({
-  coverImageUrl: z.string().trim().min(1).optional(),
-  slideCount: z.number().int().min(0).default(0),
-  durationSeconds: z.number().min(0).default(0),
-});
+const committedMediaSchema = z
+  .object({
+    assetUrl: z.string().trim().min(1),
+    storageKey: z.string().trim().min(1),
+    storageBucket: z.string().trim().min(1),
+    fileName: z.string().trim().min(1).max(240),
+    byteLength: z.number().int().positive(),
+    contentDigest: contentDigestSchema,
+  })
+  .strict();
 
-const videoPresentationProjectExecutionResultSchema = z.object({
-  ok: z.boolean().default(false),
-  diagnostics: z.array(z.string().trim().min(1).max(2000)).default([]),
-  stdout: z.string().trim().max(10_000).optional(),
-  stderr: z.string().trim().max(10_000).optional(),
-});
+export const videoPresentationRenderedVideoSchema = committedMediaSchema
+  .extend({
+    mimeType: z.literal("video/mp4"),
+    durationInFrames: z.number().int().positive(),
+    fps: z.number().int().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    hasAudio: z.boolean(),
+  })
+  .strict();
 
-export const videoPresentationAssetPlanItemSchema = z.object({
-  assetId: z.string().trim().min(1).max(160),
-  slideNumber: z.number().int().min(1).max(80),
-  type: videoPresentationAssetTypeSchema,
-  role: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().min(1).max(4000),
-});
+export const videoPresentationCoverImageSchema = committedMediaSchema
+  .extend({
+    mimeType: z.literal("image/jpeg"),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    slideNumber: z.number().int().min(1).max(12),
+    metadata: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 
-export const videoPresentationCreateRequestSchema = z.object({
-  brief: z.string().trim().max(50_000).optional(),
-  title: z.string().trim().min(1).max(180).optional(),
-  sourceDigest: z.string().trim().max(50_000).optional(),
-  audience: z.string().trim().max(300).optional(),
-  tone: z.string().trim().max(200).optional(),
-  language: z.string().trim().min(1).max(20).optional(),
-  durationTarget:
-    videoPresentationRenderProfileSchema.shape.durationTarget.optional(),
-  stylePreset:
-    videoPresentationRenderProfileSchema.shape.stylePreset.optional(),
-  renderProfile: videoPresentationRenderProfileSchema.partial().optional(),
-  slideCount: z.number().int().min(1).max(12).optional(),
-  visualDirection: z.string().trim().min(1).max(1000).optional(),
-  brand: videoPresentationBrandSchema.optional(),
-  motion: videoPresentationMotionSchema.optional(),
-  canvas: videoPresentationCanvasSchema.optional(),
-  narrationEnabled: z.boolean().optional(),
-  narration: z
-    .object({
-      enabled: z.boolean().default(true),
-    })
-    .optional(),
-  assets: z.array(videoPresentationAssetRefSchema).default([]),
-  regeneration: z
-    .object({
-      artifactId: z.string().trim().min(1).max(160).optional(),
-      instruction: z.string().trim().max(4000).optional(),
-      slideNumbers: z.array(z.number().int().min(1).max(80)).max(80).optional(),
-    })
-    .optional(),
-});
+export const videoPresentationSceneModuleSchema = z
+  .object({
+    slideNumber: z.number().int().min(1).max(12),
+    title: z.string().trim().min(1).max(180),
+    code: z.string().trim().min(1),
+    componentName: z.literal("VideoScene").default("VideoScene"),
+    durationInFrames: z.number().int().positive(),
+    diagnostics: z.array(z.string().trim().min(1).max(1000)).default([]),
+    layoutWarnings: z.array(z.string().trim().min(1).max(1000)).default([]),
+    compileStatus: z.enum(["compiled", "repaired"]).default("compiled"),
+  })
+  .strict();
 
-export const videoPresentationProjectPayloadSchema = z.object({
-  schemaVersion: z.literal(2),
-  kind: z.literal("video_presentation"),
-  // Idempotency key of the originating tool call. Must survive every worker
-  // payload rewrite: findReusableVideoPresentationArtifactRecord dedupes
-  // retried tool calls by matching payload.requestKey, so dropping it causes
-  // duplicate generations (and duplicate cost) when an agent retries.
-  requestKey: z.string().trim().min(1).max(300).optional(),
-  generation: videoPresentationGenerationSchema,
+export const videoPresentationAssetSchema = z
+  .object({
+    assetId: z.string().trim().min(1).max(160),
+    type: videoPresentationAssetTypeSchema,
+    prompt: z.string().trim().min(1).max(4000),
+    fileName: z.string().trim().min(1).max(240),
+    storageKey: z.string().trim().min(1),
+    storageBucket: z.string().trim().min(1),
+    sourceUrl: z.string().trim().min(1),
+    contentDigest: contentDigestSchema,
+    contentType: z.string().trim().min(1),
+    slideNumbers: z.array(z.number().int().min(1).max(12)).min(1).max(12),
+    source: z.enum(["generated", "provided"]),
+  })
+  .strict();
+
+export const videoPresentationPreviewSchema = z
+  .object({
+    slideCount: z.number().int().min(1).max(12),
+    durationSeconds: z.number().positive(),
+  })
+  .strict();
+
+export const videoPresentationProjectExecutionResultSchema = z
+  .object({
+    ok: z.boolean(),
+    diagnostics: z.array(z.string().trim().min(1).max(2000)).max(50),
+    stdout: z.string().max(10_000).optional(),
+    stderr: z.string().max(10_000).optional(),
+  })
+  .strict();
+
+export const videoPresentationProjectCodeSchema = z
+  .object({
+    install: videoPresentationProjectExecutionResultSchema,
+    typecheck: videoPresentationProjectExecutionResultSchema,
+    smoke: videoPresentationProjectExecutionResultSchema.extend({
+      checked: z.boolean(),
+    }),
+  })
+  .strict();
+
+export const videoPresentationNarrationPolicySchema = z
+  .object({ enabled: z.boolean() })
+  .strict();
+
+export const videoPresentationDraftResourceRefSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z
+      .object({
+        kind: z.literal("local"),
+        sandboxPath: z.string().trim().min(1).max(1000),
+        blobRef: z.string().trim().min(1).max(500),
+        contentDigest: contentDigestSchema,
+        contentType: z.string().trim().min(1).max(200),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("committed"),
+        resourceHandle: z.string().trim().min(1).max(500),
+        contentDigest: contentDigestSchema,
+        contentType: z.string().trim().min(1).max(200),
+      })
+      .strict(),
+  ],
+);
+
+export const videoPresentationDraftAudioTrackSchema = z
+  .object({
+    slideNumber: z.number().int().min(1).max(12),
+    durationSeconds: z.number().positive(),
+    mimeType: z.string().trim().min(1),
+    fileName: videoPresentationAudioFileNameSchema,
+    resource: videoPresentationDraftResourceRefSchema,
+  })
+  .strict();
+
+export const videoPresentationDraftAssetSchema = z
+  .object({
+    assetId: z.string().trim().min(1).max(160),
+    type: videoPresentationAssetTypeSchema,
+    prompt: z.string().trim().min(1).max(4000),
+    slideNumbers: z.array(z.number().int().min(1).max(12)).min(1).max(12),
+    source: z.enum(["generated", "provided"]),
+    resource: videoPresentationDraftResourceRefSchema,
+  })
+  .strict();
+
+function addNarrationCoverageIssues(
+  value: {
+    narrationPolicy: { enabled: boolean };
+    slides: readonly { slideNumber: number }[];
+    audioTracks: readonly { slideNumber: number }[];
+  },
+  context: z.RefinementCtx,
+) {
+  const slideNumbers = new Set(value.slides.map((slide) => slide.slideNumber));
+  const counts = new Map<number, number>();
+  for (const track of value.audioTracks) {
+    counts.set(track.slideNumber, (counts.get(track.slideNumber) ?? 0) + 1);
+  }
+  if (!value.narrationPolicy.enabled && value.audioTracks.length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: "Narration-disabled payloads must not contain audio tracks",
+      path: ["audioTracks"],
+      input: value,
+    });
+  }
+  if (value.narrationPolicy.enabled) {
+    for (const slideNumber of slideNumbers) {
+      if (counts.get(slideNumber) !== 1) {
+        context.addIssue({
+          code: "custom",
+          message: `Narration requires exactly one track for slide ${slideNumber}`,
+          path: ["audioTracks"],
+          input: value,
+        });
+      }
+    }
+  }
+  value.audioTracks.forEach((track, index) => {
+    if (!slideNumbers.has(track.slideNumber)) {
+      context.addIssue({
+        code: "custom",
+        message: `Audio track references unknown slide ${track.slideNumber}`,
+        path: ["audioTracks", index, "slideNumber"],
+        input: track,
+      });
+    }
+  });
+}
+
+const projectSemanticsSchema = z.object({
+  narrationPolicy: videoPresentationNarrationPolicySchema,
   project: videoPresentationProjectSchema,
-  slides: z.array(videoPresentationSlideSchema).min(1).max(40),
-  audioTracks: z.array(videoPresentationAudioTrackSchema).default([]),
-  sceneModules: z.array(videoPresentationSceneModuleSchema).default([]),
-  assets: z.array(videoPresentationAssetSchema).default([]),
-  preview: videoPresentationPreviewSchema.default({
-    slideCount: 0,
-    durationSeconds: 0,
-  }),
-  // Set only by the sandbox mp4 render path; absent on every payload produced
-  // by the browser-preview era, so every reader must treat it as optional.
-  renderedVideo: videoPresentationRenderedVideoSchema.optional(),
-  renderProfile: videoPresentationRenderProfileSchema,
-  themeAssignments: z.array(videoPresentationThemeAssignmentSchema).default([]),
-  sourceDigest: z.string().trim().min(1).max(50_000),
-  // Only the sandbox run's verdicts are persisted. The generated Remotion
-  // project itself (`files`/`entryFile`) is deliberately NOT stored: it was
-  // tens of KB per row — layout primitives, a second copy of every scene's
-  // source, and the `scripts/*.mjs` templates — and `buildProjectCodePayload`
-  // regenerates all of it from `sceneModules` on every run anyway. This object
-  // is non-strict, so legacy rows still carrying those keys parse fine and
-  // simply drop them.
-  projectCode: z
-    .object({
-      install: videoPresentationProjectExecutionResultSchema.default({
-        ok: false,
-        diagnostics: [],
-      }),
-      typecheck: videoPresentationProjectExecutionResultSchema.default({
-        ok: false,
-        diagnostics: [],
-      }),
-      smoke: z
+  slides: z.array(videoPresentationSlideSchema).min(1).max(12),
+  sceneModules: z.array(videoPresentationSceneModuleSchema).max(12),
+  renderProfile: videoPresentationResolvedRenderProfileSchema,
+  themeAssignments: z
+    .array(
+      z
         .object({
-          checked: z.boolean().default(false),
-          ...videoPresentationProjectExecutionResultSchema.shape,
+          slideNumber: z.number().int().min(1).max(12),
+          themeName: z.string().trim().min(1).max(80),
+          mode: z.enum(["dark", "light"]),
         })
-        .default({ checked: false, ok: false, diagnostics: [] }),
-    })
-    .optional(),
+        .strict(),
+    )
+    .max(12),
+  sourceDigest: z.string().trim().min(1).max(50_000),
 });
 
-export type VideoPresentationGenerationStatus = z.infer<
-  typeof videoPresentationGenerationStatusSchema
->;
-export type VideoPresentationGenerationStage = z.infer<
-  typeof videoPresentationGenerationStageSchema
->;
+export const videoPresentationDraftPayloadSchema = projectSemanticsSchema
+  .extend({
+    schemaVersion: z.literal(1),
+    kind: z.literal("video_presentation_draft"),
+    workflowVersion: z.literal(VIDEO_PRESENTATION_WORKFLOW_VERSION),
+    builderVersion: z.literal(VIDEO_PRESENTATION_BUILDER_VERSION),
+    audioTracks: z.array(videoPresentationDraftAudioTrackSchema).max(12),
+    assets: z.array(videoPresentationDraftAssetSchema).max(48),
+  })
+  .strict()
+  .superRefine(addNarrationCoverageIssues);
+
+export type VideoPresentationDraftValidationMode =
+  | { readonly mode: "create" }
+  | {
+      readonly mode: "edit";
+      readonly authorizedResourceHandles: ReadonlySet<string>;
+    };
+
+export function videoPresentationDraftPayloadSchemaForMode(
+  validation: VideoPresentationDraftValidationMode,
+) {
+  return videoPresentationDraftPayloadSchema.superRefine((draft, context) => {
+    const resources = [
+      ...draft.audioTracks.map((track, index) => ({
+        path: ["audioTracks", index, "resource"] as PropertyKey[],
+        resource: track.resource,
+      })),
+      ...draft.assets.map((asset, index) => ({
+        path: ["assets", index, "resource"] as PropertyKey[],
+        resource: asset.resource,
+      })),
+    ];
+    for (const entry of resources) {
+      if (entry.resource.kind !== "committed") continue;
+      if (validation.mode === "create") {
+        context.addIssue({
+          code: "custom",
+          message: "Create drafts cannot contain committed resource handles",
+          path: entry.path,
+          input: entry.resource,
+        });
+      } else if (
+        !validation.authorizedResourceHandles.has(entry.resource.resourceHandle)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: `Committed resource handle '${entry.resource.resourceHandle}' is not authorized`,
+          path: entry.path,
+          input: entry.resource,
+        });
+      }
+    }
+  });
+}
+
+export function parseVideoPresentationDraftPayload(
+  input: unknown,
+  validation: VideoPresentationDraftValidationMode,
+) {
+  return videoPresentationDraftPayloadSchemaForMode(validation).parse(input);
+}
+
+export const videoPresentationRenderableProjectSchema = projectSemanticsSchema
+  .extend({
+    sceneModules: z.array(videoPresentationSceneModuleSchema).min(1).max(12),
+    audioTracks: z.array(videoPresentationAudioTrackSchema).max(12),
+    assets: z.array(videoPresentationAssetSchema).max(48),
+    preview: videoPresentationPreviewSchema,
+  })
+  .strict()
+  .superRefine(addNarrationCoverageIssues);
+
+export const videoPresentationProjectPayloadSchema = projectSemanticsSchema
+  .extend({
+    schemaVersion: z.literal(1),
+    kind: z.literal("video_presentation"),
+    requestKey: z.string().trim().min(1).max(300),
+    workflowVersion: z.literal(VIDEO_PRESENTATION_WORKFLOW_VERSION),
+    builderVersion: z.literal(VIDEO_PRESENTATION_BUILDER_VERSION),
+    sceneModules: z.array(videoPresentationSceneModuleSchema).min(1).max(12),
+    audioTracks: z.array(videoPresentationAudioTrackSchema).max(12),
+    assets: z.array(videoPresentationAssetSchema).max(48),
+    preview: videoPresentationPreviewSchema,
+    renderedVideo: videoPresentationRenderedVideoSchema,
+    coverImage: videoPresentationCoverImageSchema,
+    projectCode: videoPresentationProjectCodeSchema,
+  })
+  .strict()
+  .superRefine(addNarrationCoverageIssues);
+
+export const videoPresentationCommittedPayloadSchema =
+  videoPresentationProjectPayloadSchema;
+
 export type VideoPresentationAssetType = z.infer<
   typeof videoPresentationAssetTypeSchema
->;
-export type VideoPresentationThemeMode = z.infer<
-  typeof videoPresentationThemeModeSchema
 >;
 export type VideoPresentationRenderProfile = z.infer<
   typeof videoPresentationRenderProfileSchema
 >;
-export type VideoPresentationCanvas = z.infer<
-  typeof videoPresentationCanvasSchema
->;
-export type VideoPresentationBrand = z.infer<
-  typeof videoPresentationBrandSchema
->;
-export type VideoPresentationMotion = z.infer<
-  typeof videoPresentationMotionSchema
->;
-export type VideoPresentationThemeAssignment = z.infer<
-  typeof videoPresentationThemeAssignmentSchema
->;
-export type VideoPresentationGeneration = z.infer<
-  typeof videoPresentationGenerationSchema
+export type VideoPresentationResolvedRenderProfile = z.infer<
+  typeof videoPresentationResolvedRenderProfileSchema
 >;
 export type VideoPresentationProject = z.infer<
   typeof videoPresentationProjectSchema
->;
-export type VideoPresentationAssetRef = z.infer<
-  typeof videoPresentationAssetRefSchema
 >;
 export type VideoPresentationSlide = z.infer<
   typeof videoPresentationSlideSchema
@@ -401,18 +434,34 @@ export type VideoPresentationSceneModule = z.infer<
 export type VideoPresentationRenderedVideo = z.infer<
   typeof videoPresentationRenderedVideoSchema
 >;
+export type VideoPresentationCoverImage = z.infer<
+  typeof videoPresentationCoverImageSchema
+>;
+export type VideoPresentationProjectExecutionResult = z.infer<
+  typeof videoPresentationProjectExecutionResultSchema
+>;
 export type VideoPresentationAsset = z.infer<
   typeof videoPresentationAssetSchema
 >;
 export type VideoPresentationPreview = z.infer<
   typeof videoPresentationPreviewSchema
 >;
-export type VideoPresentationAssetPlanItem = z.infer<
-  typeof videoPresentationAssetPlanItemSchema
+export type VideoPresentationDraftResourceRef = z.infer<
+  typeof videoPresentationDraftResourceRefSchema
 >;
-export type VideoPresentationCreateRequest = z.infer<
-  typeof videoPresentationCreateRequestSchema
+export type VideoPresentationDraftAudioTrack = z.infer<
+  typeof videoPresentationDraftAudioTrackSchema
+>;
+export type VideoPresentationDraftAsset = z.infer<
+  typeof videoPresentationDraftAssetSchema
+>;
+export type VideoPresentationDraftPayload = z.infer<
+  typeof videoPresentationDraftPayloadSchema
+>;
+export type VideoPresentationRenderableProject = z.infer<
+  typeof videoPresentationRenderableProjectSchema
 >;
 export type VideoPresentationProjectPayload = z.infer<
   typeof videoPresentationProjectPayloadSchema
 >;
+export type VideoPresentationCommittedPayload = VideoPresentationProjectPayload;

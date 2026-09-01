@@ -5,11 +5,11 @@ import type {
   ToolCallTrace,
 } from "../..";
 import {
+  getAgentToolDefinition,
   hasAgentToolCapability,
-  isArtifactProgressProcessingOutputType,
   isArtifactProgressResultOutputType,
-  isArtifactProgressTerminalOutputType,
 } from "@sourceweft/agent-tool-registry";
+import { committedArtifactToolResultSchema } from "@sourceweft/contracts/agent-tools";
 import { extractToolOutputField } from "./output-normalizer";
 import {
   looksLikeArtifactUrlLeakText,
@@ -33,24 +33,29 @@ export function isCommandSuccessSatisfied(input: {
         ) {
           return false;
         }
+        const definition = getAgentToolDefinition(criteria.toolName);
+        if (definition?.terminalResult?.kind === "committed_artifact") {
+          const parsed = committedArtifactToolResultSchema.safeParse(
+            call.output,
+          );
+          return (
+            parsed.success &&
+            parsed.data.artifactType === criteria.artifactType &&
+            parsed.data.artifactType === definition.terminalResult.artifactType
+          );
+        }
+        const outputType = extractToolOutputField(call.output, "type");
+        if (definition?.artifactProgress && outputType) {
+          return Boolean(
+            definition.artifactProgress.outputTypeRoles[outputType] ===
+              "terminal" &&
+            extractToolOutputField(call.output, "status") === "ready",
+          );
+        }
         if (criteria.artifactType === "slides") {
           return Boolean(
             extractToolOutputField(call.output, "pptx_url") ||
-              extractToolOutputField(call.output, "artifact_url"),
-          );
-        }
-        if (criteria.artifactType === "video_presentation") {
-          // A background deliverable satisfies the criteria once the job is
-          // running (accepted for processing) or once it finished ready — a
-          // terminal record with any other status is a failure, not a success.
-          const outputType = extractToolOutputField(call.output, "type");
-          return Boolean(
-            extractToolOutputField(call.output, "artifact_id") &&
-              extractToolOutputField(call.output, "artifact_url") &&
-              extractToolOutputField(call.output, "job_id") &&
-              (isArtifactProgressProcessingOutputType(outputType) ||
-                (isArtifactProgressTerminalOutputType(outputType) &&
-                  extractToolOutputField(call.output, "status") === "ready")),
+            extractToolOutputField(call.output, "artifact_url"),
           );
         }
         if (criteria.artifactType !== "image") {
@@ -58,7 +63,7 @@ export function isCommandSuccessSatisfied(input: {
         }
         return Boolean(
           extractToolOutputField(call.output, "artifact_id") &&
-            extractToolOutputField(call.output, "artifact_url"),
+          extractToolOutputField(call.output, "artifact_url"),
         );
       });
     case "tool_call":
@@ -122,18 +127,23 @@ function latestToolFailureMessage(toolCalls: ToolCallTrace[]) {
 export function commandExecutionPolicyFor(
   prepared: PreparedThreadTurn,
 ): CommandExecutionPolicy | undefined {
+  const workflow = prepared.command?.workflow;
+  const toolPolicy = workflow?.toolPolicy ?? prepared.activeToolPolicy;
   const criteria = prepared.commandSuccessCriteria;
-  if (prepared.command?.workflow?.execution !== "agent") {
+  if (workflow && workflow.execution !== "agent") {
     return undefined;
   }
-  if (criteria.kind === "none") {
-    return undefined;
-  }
-  if (prepared.command?.kind !== "tool") {
+  const initialToolPolicy =
+    workflow?.initialToolPolicy ??
+    (prepared.command?.kind === "tool" && criteria.kind !== "none"
+      ? { kind: "force" as const, toolName: criteria.toolName }
+      : "auto");
+  if (initialToolPolicy === "auto" && !toolPolicy) {
     return undefined;
   }
   return {
-    targetToolName: criteria.toolName,
+    initialToolPolicy,
+    ...(toolPolicy ? { toolPolicy } : {}),
   };
 }
 
@@ -182,9 +192,9 @@ export function shouldSuppressLeakedCommandSpecText(input: {
       const parsed = JSON.parse(combined);
       return Boolean(
         parsed &&
-          typeof parsed === "object" &&
-          parsed.ok === true &&
-          parsed.artifactId,
+        typeof parsed === "object" &&
+        parsed.ok === true &&
+        parsed.artifactId,
       );
     } catch {
       return false;

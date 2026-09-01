@@ -1,4 +1,7 @@
-import type { ModelItem, ModelType } from "../../_components/model-catalog-utils";
+import type {
+  ModelItem,
+  ModelType,
+} from "../../_components/model-catalog-utils";
 import type { PromptThinkingSettings } from "../../_components/chat-canvas";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
 

@@ -55,7 +55,6 @@ import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
 export type ModelType = "llm" | "image" | "vision";
 
-
 export type ModelThinkingCapabilities = {
   supportsThinking: boolean;
   supportsImageInput?: boolean;
@@ -191,7 +190,10 @@ function isInternalOpenRouterAlias(alias: string) {
 }
 
 function deriveDisplayNameFromAlias(alias: string) {
-  const modelPart = alias.replace(/^global-openrouter-(chat|image|vision):/, "");
+  const modelPart = alias.replace(
+    /^global-openrouter-(chat|image|vision):/,
+    "",
+  );
   if (!modelPart || modelPart === alias) {
     return alias;
   }
@@ -216,7 +218,8 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
     entry.subtitle.trim() || entry.targetModel?.trim() || entry.modelAlias;
   const name = isGlobalAutoModel
     ? "Auto (Default)"
-    : displayName === entry.modelAlias && isInternalOpenRouterAlias(entry.modelAlias)
+    : displayName === entry.modelAlias &&
+        isInternalOpenRouterAlias(entry.modelAlias)
       ? subtitle !== entry.modelAlias
         ? subtitle
         : deriveDisplayNameFromAlias(entry.modelAlias)
@@ -510,7 +513,8 @@ function createCustomModelItemsFromSavedModels(input: {
     models.push({
       ...createCustomModelItem({
         byokCredentialAlias: credential?.credentialAlias ?? null,
-        capabilities: savedModel.capabilities as ModelThinkingCapabilities | null,
+        capabilities:
+          savedModel.capabilities as ModelThinkingCapabilities | null,
         modelAlias: savedModel.modelName,
         name: savedModel.displayName,
         providerLabel,
@@ -537,10 +541,10 @@ function resolveByokSelectedModelItem(input: {
 
   if (selection.source === "catalog") {
     const catalogModel = findModelItemByAlias({
-        alias: selection.modelAlias,
-        availableModels: input.availableModels,
-        type: input.type,
-      });
+      alias: selection.modelAlias,
+      availableModels: input.availableModels,
+      type: input.type,
+    });
     if (catalogModel) {
       return catalogModel;
     }
@@ -754,7 +758,10 @@ function ByokPanel({
     providerKind?: string;
     providerName?: string;
   }) => void;
-  onSelect: (input: { model: ModelItem; selection: ByokModelSelection }) => void;
+  onSelect: (input: {
+    model: ModelItem;
+    selection: ByokModelSelection;
+  }) => void;
   scrollToSelectedKey?: string | number | null;
   selectedModel: ModelItem | null;
   type: ModelType;
@@ -824,7 +831,8 @@ function ByokPanel({
   const knownModels = Array.from(knownModelMap.values());
   const hasKnownModels = knownModels.length > 0;
   const filteredKnownModels = knownModels.filter((model) => {
-    const haystack = `${model.name} ${model.subtitle} ${model.modelAlias}`.toLowerCase();
+    const haystack =
+      `${model.name} ${model.subtitle} ${model.modelAlias}`.toLowerCase();
     return haystack.includes(query.trim().toLowerCase());
   });
   const selectedProviderHasKey = providerCredentials.length > 0;
@@ -853,9 +861,12 @@ function ByokPanel({
               <ModelSelectorGroup className="p-1" forceMount>
                 {providerOptions.map((item) => {
                   const selected = item.providerName === providerName;
-                  const providerItemLabel = getByokProviderLabel(item.providerName);
+                  const providerItemLabel = getByokProviderLabel(
+                    item.providerName,
+                  );
                   const credentialCount = byokCredentials.filter(
-                    (credential) => credential.providerName === item.providerName,
+                    (credential) =>
+                      credential.providerName === item.providerName,
                   ).length;
                   const status = getByokProviderStatus({
                     customCount: createCustomModelItemsFromSavedModels({
@@ -882,11 +893,17 @@ function ByokPanel({
                         >
                           <ModelSelectorLogo
                             className="size-4"
-                            provider={getByokProviderLogoSlug(item.providerName)}
+                            provider={getByokProviderLogoSlug(
+                              item.providerName,
+                            )}
                           />
                         </ModelSelectorItem>
                       </TooltipTrigger>
-                      <TooltipContent align="center" side="right" sideOffset={8}>
+                      <TooltipContent
+                        align="center"
+                        side="right"
+                        sideOffset={8}
+                      >
                         <div className="text-xs font-medium">
                           {providerItemLabel}
                         </div>
@@ -915,7 +932,10 @@ function ByokPanel({
             <ModelSelectorName className="text-sm font-semibold text-foreground">
               {providerLabel}
             </ModelSelectorName>
-            <Badge className="h-4 rounded-md px-1.5 text-[9px]" variant="outline">
+            <Badge
+              className="h-4 rounded-md px-1.5 text-[9px]"
+              variant="outline"
+            >
               {provider?.system ? "System" : "Custom"}
             </Badge>
             <div className="ml-auto shrink-0 text-xs text-muted-foreground">
@@ -1050,7 +1070,9 @@ function SelectorPanel({
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
   scrollToSelectedKey?: number;
 }) {
-  const [modelModes, setModelModes] = useState<Record<ModelType, "global" | "byok">>({
+  const [modelModes, setModelModes] = useState<
+    Record<ModelType, "global" | "byok">
+  >({
     image: byokSelections?.image?.mode === "byok" ? "byok" : "global",
     llm: byokSelections?.llm?.mode === "byok" ? "byok" : "global",
     vision: byokSelections?.vision?.mode === "byok" ? "byok" : "global",
@@ -1385,7 +1407,10 @@ export function HeaderModelSelector({
         )}
       </TooltipProvider>
 
-      <ModelSelectorContent className="max-w-[92vw] sm:max-w-[520px]" title="Select model">
+      <ModelSelectorContent
+        className="max-w-[92vw] sm:max-w-[520px]"
+        title="Select model"
+      >
         <SelectorPanel
           activeTab={activeTab}
           availableModels={availableModels}

@@ -164,7 +164,10 @@ test("artifact file proxy does not treat missing content type as HTML", async ()
     ),
   );
 
-  assert.equal(response.headers.get("content-type"), "application/octet-stream");
+  assert.equal(
+    response.headers.get("content-type"),
+    "application/octet-stream",
+  );
   assert.equal(response.headers.get("content-security-policy"), null);
   assert.equal(await response.text(), "raw-bytes");
 });
@@ -179,4 +182,72 @@ test("artifact file proxy rejects nested artifact asset names", async () => {
 
   assert.equal(response.status, 400);
   assert.match(await response.text(), /flat artifact asset file name/);
+});
+
+test("artifact file proxy preserves exact-version video range responses", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL, init?: RequestInit) => {
+      assert.match(
+        url.toString(),
+        /\/artifacts\/artifact-1\/versions\/version-1\/media\/video$/,
+      );
+      assert.equal(new Headers(init?.headers).get("range"), "bytes=4-7");
+      return new Response(new Uint8Array([4, 5, 6, 7]), {
+        headers: {
+          "accept-ranges": "bytes",
+          "content-length": "4",
+          "content-range": "bytes 4-7/10",
+          "content-type": "video/mp4",
+          etag: '"sha256-video"',
+        },
+        status: 206,
+      });
+    }),
+  );
+
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost:3000/api/artifact-file?workspaceId=workspace-1&artifactId=artifact-1&artifactVersionId=version-1&versionMedia=video",
+      { headers: { Range: "bytes=4-7" } },
+    ),
+  );
+
+  assert.equal(response.status, 206);
+  assert.equal(response.headers.get("accept-ranges"), "bytes");
+  assert.equal(response.headers.get("content-range"), "bytes 4-7/10");
+  assert.equal(response.headers.get("content-length"), "4");
+  assert.equal(response.headers.get("etag"), '"sha256-video"');
+  assert.equal(
+    response.headers.get("cache-control"),
+    "private, no-cache, max-age=0, must-revalidate",
+  );
+});
+
+test("artifact file proxy preserves exact-version media 304 responses", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: URL, init?: RequestInit) => {
+      assert.equal(
+        new Headers(init?.headers).get("if-none-match"),
+        '"sha256-video"',
+      );
+      return new Response(null, {
+        headers: { etag: '"sha256-video"' },
+        status: 304,
+      });
+    }),
+  );
+
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost:3000/api/artifact-file?workspaceId=workspace-1&artifactId=artifact-1&artifactVersionId=version-1&versionMedia=video",
+      { headers: { "If-None-Match": '"sha256-video"' } },
+    ),
+  );
+
+  assert.equal(response.status, 304);
+  assert.equal(response.headers.get("etag"), '"sha256-video"');
 });

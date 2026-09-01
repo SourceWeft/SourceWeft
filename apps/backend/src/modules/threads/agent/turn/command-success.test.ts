@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import {
   commandSuccessFailureText,
   isCommandSuccessSatisfied,
 } from "./command-success";
+
+const committedPublisher = defineAgentTool({
+  id: "testCommittedPublisher",
+  name: "test_committed_publisher",
+  domain: "artifact",
+  capabilities: ["artifact"],
+  activation: {
+    default: "off",
+    userControl: "none",
+    skill: { declarable: false, activates: false },
+  },
+  terminalResult: {
+    kind: "committed_artifact",
+    artifactType: "test_artifact",
+  },
+});
+registerAgentTools([committedPublisher]);
 
 test("command failure uses presentation publisher recoverable error message", () => {
   assert.equal(
@@ -37,73 +56,13 @@ test("command failure uses presentation publisher recoverable error message", ()
   );
 });
 
-test("video presentation command succeeds only after artifact is ready", () => {
-  assert.equal(
-    isCommandSuccessSatisfied({
-      criteria: {
-        kind: "artifact",
-        artifactType: "video_presentation",
-        toolName: "generate_video_presentation",
-      },
-      toolCalls: [
-        {
-          id: "tool-1",
-          input: {},
-          output: {
-            artifact_id: "artifact-1",
-            artifact_url: "/artifact-preview?artifactId=artifact-1",
-            job_id: "video-presentation-render_artifact-1",
-            status: "ready",
-            type: "video_presentation_artifact_result",
-          },
-          status: "completed",
-          tool: "generate_video_presentation",
-          latencyMs: 10,
-          error: null,
-          sequence: 1,
-        },
-      ],
-    }),
-    true,
-  );
-
-  assert.equal(
-    isCommandSuccessSatisfied({
-      criteria: {
-        kind: "artifact",
-        artifactType: "video_presentation",
-        toolName: "generate_video_presentation",
-      },
-      toolCalls: [
-        {
-          id: "tool-1",
-          input: {},
-          output: {
-            artifact_id: "artifact-1",
-            artifact_url: "/artifact-preview?artifactId=artifact-1",
-            job_id: "video-presentation-render_artifact-1",
-            status: "running",
-            type: "video_presentation_artifact_result",
-          },
-          status: "completed",
-          tool: "generate_video_presentation",
-          latencyMs: 10,
-          error: null,
-          sequence: 1,
-        },
-      ],
-    }),
-    false,
-  );
-});
-
-test("video presentation command failure uses the artifact error", () => {
+test("generic artifact command failure uses the publisher error", () => {
   assert.equal(
     commandSuccessFailureText(
       {
         kind: "artifact",
-        artifactType: "video_presentation",
-        toolName: "generate_video_presentation",
+        artifactType: "custom_report",
+        toolName: "publish_report",
       },
       [
         {
@@ -112,72 +71,86 @@ test("video presentation command failure uses the artifact error", () => {
           output: {
             artifact_id: "artifact-1",
             artifact_url: "/artifact-preview?artifactId=artifact-1",
-            error: "Theme provider returned invalid JSON content.",
-            job_id: "video-presentation-render_artifact-1",
+            error: "Provider returned invalid JSON content.",
+            job_id: "report-generate_artifact-1",
             status: "failed",
-            type: "video_presentation_artifact_result",
+            type: "custom_artifact_result",
           },
           status: "completed",
-          tool: "generate_video_presentation",
+          tool: "publish_report",
           latencyMs: 10,
           error: null,
           sequence: 1,
         },
       ],
     ),
-    "Command failed because generate_video_presentation reported: Theme provider returned invalid JSON content.",
+    "Command failed because publish_report reported: Provider returned invalid JSON content.",
   );
 });
 
-test("a ready regeneration satisfies the command after an earlier failure", () => {
-  const toolCall = (input: {
-    id: string;
-    output: Record<string, unknown>;
-    sequence: number;
-  }) => ({
-    id: input.id,
+test("registered committed-artifact result satisfies capability-owned success", () => {
+  const criteria = {
+    kind: "artifact" as const,
+    artifactType: "test_artifact",
+    toolName: committedPublisher.name,
+  };
+  const call = {
+    id: "committed-call",
     input: {},
-    output: input.output,
+    output: {
+      status: "ready",
+      type: "committed_artifact_result",
+      artifactType: "test_artifact",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      artifactOutputBlockId: "artifact-output:run-1:artifact-1:version-1",
+      workflowVersion: "test-workflow",
+    },
     status: "completed" as const,
-    tool: "generate_video_presentation",
+    tool: committedPublisher.name,
     latencyMs: 10,
     error: null,
-    sequence: input.sequence,
-  });
+    sequence: 1,
+  };
 
   assert.equal(
+    isCommandSuccessSatisfied({ criteria, toolCalls: [call] }),
+    true,
+  );
+  assert.equal(
     isCommandSuccessSatisfied({
-      criteria: {
-        kind: "artifact",
-        artifactType: "video_presentation",
-        toolName: "generate_video_presentation",
-      },
+      criteria,
       toolCalls: [
-        toolCall({
-          id: "tool-failed",
-          sequence: 1,
-          output: {
-            artifact_id: "artifact-1",
-            artifact_url: "/artifact-preview?artifactId=artifact-1",
-            error: "Theme provider returned invalid structured content.",
-            job_id: "video-presentation-render-artifact-1",
-            status: "failed",
-            type: "video_presentation_artifact_result",
-          },
-        }),
-        toolCall({
-          id: "tool-ready",
-          sequence: 2,
-          output: {
-            artifact_id: "artifact-1",
-            artifact_url: "/artifact-preview?artifactId=artifact-1",
-            job_id: "video-presentation-render-artifact-1-edit-2",
-            status: "ready",
-            type: "video_presentation_artifact_result",
-          },
-        }),
+        {
+          ...call,
+          output: { status: "ready", artifactId: "artifact-1" },
+        },
       ],
     }),
-    true,
+    false,
+  );
+  assert.equal(
+    isCommandSuccessSatisfied({
+      criteria,
+      toolCalls: [
+        {
+          ...call,
+          output: { ...call.output, artifactType: "wrong_artifact" },
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    isCommandSuccessSatisfied({
+      criteria,
+      toolCalls: [
+        {
+          ...call,
+          output: { ...call.output, artifactOutputBlockId: "" },
+        },
+      ],
+    }),
+    false,
   );
 });

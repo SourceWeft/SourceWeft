@@ -1,5 +1,9 @@
 import type { BillingMode } from "@sourceweft/contracts";
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import {
+  getProviderResponseAdapter,
+  type ModelCallObservation,
+  type UsageInfo,
+} from "@sourceweft/model-gateway";
 import { logger } from "../../logger";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import { meterBillableModelUsage } from "../../../modules/content/model-billing";
@@ -11,6 +15,16 @@ import type {
 } from "./context";
 
 export type MeterUsageFn = typeof meterBillableModelUsage;
+
+export type ScheduleProviderCostReconciliationFn = (input: {
+  observation?: ModelCallObservation;
+  teamId: string;
+  workspaceId?: string;
+  actorUserId?: string;
+  feature: string;
+  gatewayConfigId: string;
+  originalBillingIdempotencyKey?: string;
+}) => Promise<unknown>;
 
 /**
  * Usage that is entirely empty means the provider told us nothing — there is
@@ -45,10 +59,12 @@ export type SettleModelCallInput = {
   billing: ContentBillingPort;
   options: ModelCallBillingOptions;
   usage: UsageInfo | undefined;
+  observation?: ModelCallObservation;
   idempotencyKey: string;
   referenceId: string;
   /** Injected for tests; production uses the real metering funnel. */
   meterUsage?: MeterUsageFn;
+  scheduleReconciliation?: ScheduleProviderCostReconciliationFn;
 };
 
 /**
@@ -66,6 +82,33 @@ export async function settleModelCall(
   }
 
   const { context, options } = input;
+  const scheduleReconciliation = async (
+    originalBillingIdempotencyKey?: string,
+  ) => {
+    if (!input.scheduleReconciliation || !input.observation) {
+      return;
+    }
+    try {
+      await input.scheduleReconciliation({
+        observation: input.observation,
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        actorUserId: context.actorUserId,
+        feature: context.feature,
+        gatewayConfigId: options.gatewayConfigId,
+        originalBillingIdempotencyKey,
+      });
+    } catch (error) {
+      logger.warn("Failed to schedule provider cost reconciliation", {
+        teamId: context.teamId,
+        provider: input.observation.identity.provider,
+        providerRequestId: input.observation.identity.providerRequestId,
+        traceId: input.observation.traceId,
+        spanId: input.observation.spanId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
   const observedIdentity = resolveGatewayObservedIdentity({
     llm: options.llm,
     modelAlias: options.modelAlias,
@@ -80,6 +123,7 @@ export async function settleModelCall(
     profileAlias: observedIdentity.profileAlias,
     gatewayConfigId: options.gatewayConfigId,
     usage: input.usage,
+    observation: input.observation,
     idempotencyKey: input.idempotencyKey,
     referenceId: input.referenceId,
   } satisfies Partial<MeteredModelCallTrace>;
@@ -106,6 +150,7 @@ export async function settleModelCall(
   // captured, but by the observability sink against the generation row, so no
   // ledger entry is written and no pricing lookup is repeated here.
   if (context.intent.mode === "covered") {
+    await scheduleReconciliation();
     return {
       ...baseTrace,
       billingStatus: "covered",
@@ -125,6 +170,9 @@ export async function settleModelCall(
     billingMode = resolveBillingMode(summary);
 
     const meterUsage = input.meterUsage ?? meterBillableModelUsage;
+    const providerAdapter = input.observation
+      ? getProviderResponseAdapter(input.observation.identity.provider)
+      : undefined;
     const metered = await meterUsage({
       billing: input.billing,
       teamId: context.teamId,
@@ -140,8 +188,14 @@ export async function settleModelCall(
       idempotencyKey: input.idempotencyKey,
       usage: input.usage,
       llm: options.llm,
+      allowPriceBookFallback:
+        providerAdapter?.costCapabilities?.allowPriceBookFallback,
       metadata,
     });
+
+    await scheduleReconciliation(
+      metered.billedBy === "skipped" ? undefined : input.idempotencyKey,
+    );
 
     return {
       ...baseTrace,

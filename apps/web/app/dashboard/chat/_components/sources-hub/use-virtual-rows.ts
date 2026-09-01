@@ -32,10 +32,7 @@ export function useVirtualRows(input: {
   }, [input.enabled]);
 
   const startIndex = input.enabled
-    ? Math.max(
-        0,
-        Math.floor(scrollTop / input.rowHeight) - input.overscanRows,
-      )
+    ? Math.max(0, Math.floor(scrollTop / input.rowHeight) - input.overscanRows)
     : 0;
   const visibleCount = input.enabled
     ? Math.ceil(viewportHeight / input.rowHeight) + input.overscanRows * 2

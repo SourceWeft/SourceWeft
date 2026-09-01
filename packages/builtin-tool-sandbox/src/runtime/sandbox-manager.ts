@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type {
   ExistingSandboxOperation,
   SandboxBridgeOperationType,
+  SandboxCancellationReason,
+  SandboxCancellationResult,
   SandboxOperationStatus,
   SandboxOperationStore,
   SandboxOperationType,
@@ -31,7 +33,7 @@ import {
  * usable and merely keeps /skills denied in execute (the two-phase check in
  * SourceWeftSandboxBackend), which is exactly today's behavior.
  */
-export type SandboxSkillStaging = {
+export type SandboxRuntimeAssetStaging = {
   plans: () => Promise<RuntimeAssetPlan[]>;
   commandTimeoutMs: number;
   maxOutputChars: number;
@@ -40,6 +42,8 @@ export type SandboxSkillStaging = {
     warn?(message: string, meta?: Record<string, unknown>): void;
   };
 };
+
+export type SandboxSkillStaging = SandboxRuntimeAssetStaging;
 
 const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
 // How long a sibling execute waits for another call's in-flight cold start
@@ -60,6 +64,9 @@ type BeginToolOperationResult =
   | { kind: "claimed"; operationId: string }
   | { kind: "replay"; result: Record<string, unknown> };
 
+export type SandboxExecutionResultDisposition =
+  "accepted" | "sandbox_terminated" | "termination_unknown";
+
 export function stableSandboxRequestJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableSandboxRequestJson(item)).join(",")}]`;
@@ -67,7 +74,10 @@ export function stableSandboxRequestJson(value: unknown): string {
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableSandboxRequestJson(item)}`)
+      .map(
+        ([key, item]) =>
+          `${JSON.stringify(key)}:${stableSandboxRequestJson(item)}`,
+      )
       .join(",")}}`;
   }
   return JSON.stringify(value);
@@ -90,7 +100,10 @@ function failedRetryMessage(input: {
   request: Record<string, unknown>;
   result: Record<string, unknown>;
 }) {
-  const error = typeof input.result.error === "string" ? ` Last failure: ${input.result.error}` : "";
+  const error =
+    typeof input.result.error === "string"
+      ? ` Last failure: ${input.result.error}`
+      : "";
   const operationId = input.existing.id ?? "unknown";
   const oldMessageId = input.existing.messageId ?? "unknown";
   const currentMessageId = input.currentMessageId ?? "unknown";
@@ -109,12 +122,18 @@ export function resolveSandboxToolOperationReplay(input: {
   request: Record<string, unknown>;
   currentMessageId?: string;
   staleBefore?: Date;
-}): { kind: "proceed" } | { kind: "replay"; result: Record<string, unknown> } | { kind: "error"; message: string } {
+}):
+  | { kind: "proceed" }
+  | { kind: "replay"; result: Record<string, unknown> }
+  | { kind: "error"; message: string } {
   const existing = input.existing;
   if (!existing) {
     return { kind: "proceed" };
   }
-  const sameRequest = sameSandboxRequest(existing.requestJsonRedacted, input.request);
+  const sameRequest = sameSandboxRequest(
+    existing.requestJsonRedacted,
+    input.request,
+  );
   if (!sameRequest && existing.status !== "failed") {
     return {
       kind: "error",
@@ -168,6 +187,7 @@ export class SandboxManager {
       maxCommandTimeoutMs: number;
       environment?: string;
       skillStaging?: SandboxSkillStaging;
+      requiredAssetStaging?: SandboxRuntimeAssetStaging;
     },
   ) {}
 
@@ -180,6 +200,27 @@ export class SandboxManager {
     string,
     Promise<RuntimeAssetResolution[]>
   >();
+  private readonly requiredAssetStagingRuns = new Map<
+    string,
+    Promise<RuntimeAssetResolution[]>
+  >();
+  /** One physical termination request per host-issued execution identity. */
+  private readonly cancellationRuns = new Map<
+    string,
+    Promise<SandboxCancellationResult>
+  >();
+  /** In-flight termination decisions that sibling executions must observe. */
+  private readonly sandboxCancellationRuns = new Map<
+    string,
+    Set<Promise<SandboxCancellationResult>>
+  >();
+  /** Terminal generation fence for a sandbox that must never be reused. */
+  private readonly invalidatedSandboxes = new Map<
+    string,
+    Exclude<SandboxExecutionResultDisposition, "accepted">
+  >();
+  private latestRequiredAssetResolutions: RuntimeAssetResolution[] | null =
+    null;
   private latestSkillResolutions: RuntimeAssetResolution[] | null = null;
 
   private sandboxExpiresAt() {
@@ -199,6 +240,7 @@ export class SandboxManager {
     options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
   ): Promise<SandboxRef> {
     const sandbox = await this.acquireThreadSandbox(context, options);
+    await this.ensureRequiredAssetsOnce(sandbox);
     await this.ensureSkillAssetsOnce(sandbox);
     return sandbox;
   }
@@ -214,10 +256,11 @@ export class SandboxManager {
     const waitStartedAt = Date.now();
 
     for (;;) {
-      const existing = await this.input.sandboxStore.findLatestActiveThreadSandbox({
-        provider: this.input.provider.id,
-        context,
-      });
+      const existing =
+        await this.input.sandboxStore.findLatestActiveThreadSandbox({
+          provider: this.input.provider.id,
+          context,
+        });
 
       if (existing) {
         if (existing.status === "creating") {
@@ -231,10 +274,11 @@ export class SandboxManager {
               "SANDBOX_CREATION_WAIT_TIMEOUT: sandbox creation is still running for this thread.",
             );
           }
-          const claimed = await this.input.sandboxStore.markCreatingSandboxError({
-            sandboxId: existing.id,
-            expectedUpdatedAt: existing.updatedAt,
-          });
+          const claimed =
+            await this.input.sandboxStore.markCreatingSandboxError({
+              sandboxId: existing.id,
+              expectedUpdatedAt: existing.updatedAt,
+            });
           if (!claimed) {
             throw new Error(
               "SANDBOX_CREATION_IN_PROGRESS: stale sandbox creation was already claimed by another worker.",
@@ -352,6 +396,64 @@ export class SandboxManager {
     return this.latestSkillResolutions;
   }
 
+  requiredAssetResolutions() {
+    return this.latestRequiredAssetResolutions;
+  }
+
+  /** Required assets fail the sandbox acquisition instead of degrading. */
+  private async ensureRequiredAssetsOnce(sandbox: SandboxRef) {
+    const staging = this.input.requiredAssetStaging;
+    if (!staging) {
+      return;
+    }
+    let run = this.requiredAssetStagingRuns.get(sandbox.providerSandboxId);
+    if (!run) {
+      run = this.runRequiredAssetStaging(sandbox, staging);
+      this.requiredAssetStagingRuns.set(sandbox.providerSandboxId, run);
+    }
+    this.latestRequiredAssetResolutions = await run;
+  }
+
+  private async runRequiredAssetStaging(
+    sandbox: SandboxRef,
+    staging: SandboxRuntimeAssetStaging,
+  ): Promise<RuntimeAssetResolution[]> {
+    const plans = await staging.plans();
+    const resolutions = await ensureRuntimeAssets({
+      session: this.runtimeAssetStagingSession(
+        sandbox.providerSandboxId,
+        staging,
+      ),
+      assets: plans,
+      ...(staging.logger ? { logger: staging.logger } : {}),
+    });
+    const failed = resolutions.filter((resolution) => !resolution.ok);
+    if (failed.length > 0) {
+      for (const resolution of failed) {
+        staging.logger?.warn?.("sandbox_required_runtime_asset_failed", {
+          asset: resolution.name,
+          version: resolution.version,
+          error: resolution.error,
+        });
+      }
+      throw new Error(
+        `SANDBOX_REQUIRED_RUNTIME_ASSET_UNAVAILABLE: ${failed
+          .map((resolution) => `${resolution.name}@${resolution.version}`)
+          .join(", ")}`,
+      );
+    }
+    for (const resolution of resolutions) {
+      staging.logger?.info?.("sandbox_required_runtime_asset_ready", {
+        asset: resolution.name,
+        version: resolution.version,
+        rung: resolution.rung,
+        ms: resolution.ms,
+        ...(resolution.bytes !== undefined ? { bytes: resolution.bytes } : {}),
+      });
+    }
+    return resolutions;
+  }
+
   /**
    * Stage skill bundles into the sandbox, once per provider sandbox per
    * manager lifetime. Never throws: staging failure leaves the sandbox usable
@@ -380,7 +482,10 @@ export class SandboxManager {
         return [];
       }
       const resolutions = await ensureRuntimeAssets({
-        session: this.skillStagingSession(sandbox.providerSandboxId, staging),
+        session: this.runtimeAssetStagingSession(
+          sandbox.providerSandboxId,
+          staging,
+        ),
         assets: plans,
         ...(staging.logger ? { logger: staging.logger } : {}),
       });
@@ -421,9 +526,9 @@ export class SandboxManager {
    * provider distinguishes it — staging is host-issued work, not model
    * command text.
    */
-  private skillStagingSession(
+  private runtimeAssetStagingSession(
     providerSandboxId: string,
-    staging: SandboxSkillStaging,
+    staging: SandboxRuntimeAssetStaging,
   ): RuntimeAssetSessionLike {
     const provider = this.input.provider;
     const execute = provider.executeSystem
@@ -502,13 +607,14 @@ export class SandboxManager {
     const staleBefore = this.staleOperationBefore();
     const claimNewOperation = async () => {
       const id = randomUUID();
-      const inserted = await this.input.operationStore.insertRunningToolOperation({
-        operationId: id,
-        operationType: input.operationType,
-        toolCallId: input.toolCallId,
-        context: input.context,
-        request: redactedRequest,
-      });
+      const inserted =
+        await this.input.operationStore.insertRunningToolOperation({
+          operationId: id,
+          operationType: input.operationType,
+          toolCallId: input.toolCallId,
+          context: input.context,
+          request: redactedRequest,
+        });
       return inserted ? id : null;
     };
     const existing = await this.input.operationStore.findLatestToolOperation({
@@ -553,28 +659,33 @@ export class SandboxManager {
       return { kind: "claimed", operationId: id };
     }
 
-    const concurrent = await this.input.operationStore.findLatestActiveToolOperation({
-      context: input.context,
-      operationType: input.operationType,
-      toolCallId: input.toolCallId,
-    });
+    const concurrent =
+      await this.input.operationStore.findLatestActiveToolOperation({
+        context: input.context,
+        operationType: input.operationType,
+        toolCallId: input.toolCallId,
+      });
 
-    if (concurrent && !sameSandboxRequest(concurrent.requestJsonRedacted, request)) {
+    if (
+      concurrent &&
+      !sameSandboxRequest(concurrent.requestJsonRedacted, request)
+    ) {
       if (
         concurrent.status === "running" &&
         concurrent.createdAt &&
         concurrent.createdAt <= staleBefore
       ) {
-        const released = await this.input.operationStore.markStaleRunningToolOperationFailed({
-          context: input.context,
-          operationType: input.operationType,
-          toolCallId: input.toolCallId,
-          staleBefore,
-          result: {
-            errorCode: SANDBOX_OPERATION_STALE_RELEASED_CODE,
-            error: `Sandbox ${input.operationType} operation was marked failed after exceeding the stale operation threshold.`,
-          },
-        });
+        const released =
+          await this.input.operationStore.markStaleRunningToolOperationFailed({
+            context: input.context,
+            operationType: input.operationType,
+            toolCallId: input.toolCallId,
+            staleBefore,
+            result: {
+              errorCode: SANDBOX_OPERATION_STALE_RELEASED_CODE,
+              error: `Sandbox ${input.operationType} operation was marked failed after exceeding the stale operation threshold.`,
+            },
+          });
         if (released) {
           const retryId = await claimNewOperation();
           if (retryId) {
@@ -596,16 +707,17 @@ export class SandboxManager {
       concurrent.createdAt &&
       concurrent.createdAt <= staleBefore
     ) {
-      const released = await this.input.operationStore.markStaleRunningToolOperationFailed({
-        context: input.context,
-        operationType: input.operationType,
-        toolCallId: input.toolCallId,
-        staleBefore,
-        result: {
-          errorCode: SANDBOX_OPERATION_STALE_RELEASED_CODE,
-          error: `Sandbox ${input.operationType} operation was marked failed after exceeding the stale operation threshold.`,
-        },
-      });
+      const released =
+        await this.input.operationStore.markStaleRunningToolOperationFailed({
+          context: input.context,
+          operationType: input.operationType,
+          toolCallId: input.toolCallId,
+          staleBefore,
+          result: {
+            errorCode: SANDBOX_OPERATION_STALE_RELEASED_CODE,
+            error: `Sandbox ${input.operationType} operation was marked failed after exceeding the stale operation threshold.`,
+          },
+        });
       if (released) {
         const retryId = await claimNewOperation();
         if (retryId) {
@@ -614,7 +726,9 @@ export class SandboxManager {
       }
     }
 
-    throw new Error(`SANDBOX_OPERATION_IN_PROGRESS: sandbox ${input.operationType} is already running for this tool call.`);
+    throw new Error(
+      `SANDBOX_OPERATION_IN_PROGRESS: sandbox ${input.operationType} is already running for this tool call.`,
+    );
   }
 
   async releaseThreadSandboxLease(input: {
@@ -657,6 +771,201 @@ export class SandboxManager {
     await this.input.sandboxStore.markSandboxExpired({
       sandboxId: input.sandboxId,
     });
+  }
+
+  /**
+   * Physically terminate one provider execution. A provider may confirm a
+   * command-scoped kill; otherwise the manager deletes the whole sandbox.
+   * The promise is memoized so repeated Stop/deadline signals cannot issue a
+   * second destructive provider request.
+   */
+  async cancelExecution(input: {
+    sandbox: SandboxRef;
+    executionId: string;
+    reason: SandboxCancellationReason;
+    /** File I/O has no provider command handle; deletion is the only proof. */
+    forceSandbox?: boolean;
+  }): Promise<SandboxCancellationResult> {
+    const key = `${input.sandbox.providerSandboxId}\0${input.executionId}\0${input.forceSandbox === true ? "sandbox" : "provider"}`;
+    let run = this.cancellationRuns.get(key);
+    if (!run) {
+      run = this.cancelExecutionOnce(input);
+      this.cancellationRuns.set(key, run);
+      let sandboxRuns = this.sandboxCancellationRuns.get(
+        input.sandbox.providerSandboxId,
+      );
+      if (!sandboxRuns) {
+        sandboxRuns = new Set();
+        this.sandboxCancellationRuns.set(
+          input.sandbox.providerSandboxId,
+          sandboxRuns,
+        );
+      }
+      sandboxRuns.add(run);
+      void run
+        .finally(() => {
+          sandboxRuns!.delete(run!);
+          if (sandboxRuns!.size === 0) {
+            this.sandboxCancellationRuns.delete(
+              input.sandbox.providerSandboxId,
+            );
+          }
+        })
+        .catch(() => undefined);
+    }
+    return run;
+  }
+
+  /**
+   * Linearization fence for a provider result. If sandbox-scoped termination
+   * started first, a sibling command may not turn its late bytes into success.
+   * Command-scoped cancellation leaves unrelated siblings reusable.
+   */
+  async resolveExecutionResultDisposition(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ): Promise<SandboxExecutionResultDisposition> {
+    for (;;) {
+      const invalidated = this.invalidatedSandboxes.get(
+        sandbox.providerSandboxId,
+      );
+      if (invalidated) return invalidated;
+
+      const active =
+        await this.input.sandboxStore.findLatestActiveThreadSandbox({
+          provider: sandbox.provider,
+          context,
+        });
+      if (
+        !active ||
+        active.status !== "ready" ||
+        active.id !== sandbox.id ||
+        active.providerSandboxId !== sandbox.providerSandboxId
+      ) {
+        // Another runtime/process invalidated or replaced this generation. Its
+        // local cancellation outcome is unavailable here, so never claim more
+        // than the durable store proves: the late result is unsafe/unknown.
+        return "termination_unknown";
+      }
+
+      const currentRuns = this.sandboxCancellationRuns.get(
+        sandbox.providerSandboxId,
+      );
+      if (!currentRuns || currentRuns.size === 0) return "accepted";
+      const observedRuns = [...currentRuns];
+      const outcomes = await Promise.all(
+        observedRuns.map((run) =>
+          run.catch((): SandboxCancellationResult => ({
+            confirmed: false,
+            mode: "unknown",
+          })),
+        ),
+      );
+      if (outcomes.some((outcome) => !outcome.confirmed)) {
+        return "termination_unknown";
+      }
+      if (outcomes.some((outcome) => outcome.mode === "sandbox")) {
+        return "sandbox_terminated";
+      }
+
+      const latestRuns = this.sandboxCancellationRuns.get(
+        sandbox.providerSandboxId,
+      );
+      if (
+        !latestRuns ||
+        [...latestRuns].every((run) => observedRuns.includes(run))
+      ) {
+        const latestActive =
+          await this.input.sandboxStore.findLatestActiveThreadSandbox({
+            provider: sandbox.provider,
+            context,
+          });
+        return latestActive?.status === "ready" &&
+          latestActive.id === sandbox.id &&
+          latestActive.providerSandboxId === sandbox.providerSandboxId
+          ? "accepted"
+          : "termination_unknown";
+      }
+    }
+  }
+
+  private async cancelExecutionOnce(input: {
+    sandbox: SandboxRef;
+    executionId: string;
+    reason: SandboxCancellationReason;
+    forceSandbox?: boolean;
+  }): Promise<SandboxCancellationResult> {
+    const sandboxScoped =
+      input.forceSandbox === true ||
+      !this.input.provider.cancelExecution ||
+      this.input.provider.cancellationScope !== "command";
+    let persistentFenceConfirmed = true;
+    if (sandboxScoped) {
+      // Persist the generation fence before asking the provider to terminate.
+      // That ordering lets managers in other turns/processes reject late bytes
+      // while physical deletion is still in flight.
+      this.invalidatedSandboxes.set(
+        input.sandbox.providerSandboxId,
+        "termination_unknown",
+      );
+      try {
+        await this.input.sandboxStore.markSandboxExpired({
+          sandboxId: input.sandbox.id,
+        });
+      } catch {
+        persistentFenceConfirmed = false;
+      }
+    }
+
+    let result: SandboxCancellationResult;
+    try {
+      result = input.forceSandbox
+        ? await this.deleteSandboxForCancellation(input.sandbox)
+        : this.input.provider.cancelExecution
+        ? await this.input.provider.cancelExecution({
+            providerSandboxId: input.sandbox.providerSandboxId,
+            executionId: input.executionId,
+            reason: input.reason,
+          })
+        : await this.deleteSandboxForCancellation(input.sandbox);
+    } catch {
+      result = { confirmed: false, mode: "unknown" };
+    }
+
+    if (!persistentFenceConfirmed) {
+      result = { confirmed: false, mode: "unknown" };
+    }
+
+    if (!result.confirmed || result.mode === "sandbox") {
+      this.invalidatedSandboxes.set(
+        input.sandbox.providerSandboxId,
+        result.confirmed ? "sandbox_terminated" : "termination_unknown",
+      );
+      // A command-scoped provider can still report unknown or escalate to a
+      // sandbox kill. Persist that unexpected generation quarantine now; the
+      // ordinary sandbox-scoped path was fenced before provider cancellation.
+      if (!sandboxScoped) {
+        try {
+          await this.input.sandboxStore.markSandboxExpired({
+            sandboxId: input.sandbox.id,
+          });
+        } catch {
+          result = { confirmed: false, mode: "unknown" };
+          this.invalidatedSandboxes.set(
+            input.sandbox.providerSandboxId,
+            "termination_unknown",
+          );
+        }
+      }
+    }
+    return result;
+  }
+
+  private async deleteSandboxForCancellation(
+    sandbox: SandboxRef,
+  ): Promise<SandboxCancellationResult> {
+    await this.input.provider.deleteSandbox(sandbox.providerSandboxId);
+    return { confirmed: true, mode: "sandbox" };
   }
 
   async recordOperation(input: {

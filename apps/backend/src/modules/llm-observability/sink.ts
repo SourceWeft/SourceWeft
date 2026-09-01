@@ -7,11 +7,7 @@ import type {
   ObserveSpan,
 } from "@sourceweft/model-gateway";
 import { db, llmGenerations } from "@sourceweft/db";
-import {
-  endGeneration,
-  recordGenerationError,
-  startGeneration,
-} from ".";
+import { endGeneration, recordGenerationError, startGeneration } from ".";
 import { logger } from "../../shared/logger";
 import { workspaceService } from "../workspace";
 
@@ -38,16 +34,13 @@ const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "byokModelId",
   "credentialId",
   "providerModel",
+  "profileAlias",
+  "profile_alias",
+  "gatewayConfigId",
+  "gateway_config_id",
   "routeStrategy",
   "latencyMs",
 ]);
-
-function toNumeric(value: number | null | undefined) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return value.toFixed(6);
-}
 
 function buildEventAttributes(
   attributes: Record<string, unknown>,
@@ -84,9 +77,7 @@ function readRecord(value: unknown) {
 
 function extractGenerationContext(
   generation:
-    | ObserveGenerationStart
-    | ObserveGenerationEnd
-    | ObserveGenerationError,
+    ObserveGenerationStart | ObserveGenerationEnd | ObserveGenerationError,
 ) {
   const attributes = generation.attributes ?? {};
   return {
@@ -208,6 +199,13 @@ async function resolveGenerationCost(
     return null;
   }
 
+  if (generation.observation?.cost) {
+    return {
+      providerCostUsd: generation.observation.cost.effectiveUsd ?? null,
+      costSource: generation.observation.cost.source,
+    };
+  }
+
   const attributes = generation.attributes ?? {};
   const gatewayConfigId = readAttributeString(attributes, "gatewayConfigId");
   const profileAlias = readAttributeString(attributes, "profileAlias");
@@ -276,6 +274,18 @@ export function createLlmObservabilitySink(options?: {
         modelAlias: generation.modelAlias,
         provider: generation.provider,
         providerModel: generation.providerModel,
+        profileAlias:
+          readAttributeString(
+            generation.attributes ?? {},
+            "profileAlias",
+            "profile_alias",
+          ) ?? null,
+        gatewayConfigId:
+          readAttributeString(
+            generation.attributes ?? {},
+            "gatewayConfigId",
+            "gateway_config_id",
+          ) ?? null,
         executionMode: generation.executionMode,
         routeStrategy: generation.routeDecision?.strategy,
         routeDecision: generation.routeDecision,
@@ -309,6 +319,7 @@ export function createLlmObservabilitySink(options?: {
         finishReason: generation.finishReason,
         reasoningText: generation.reasoningText,
         providerFields: generation.providerFields,
+        observation: generation.observation,
         usage: generation.usage,
         providerResponse: generation.providerResponse,
         providerStatusCode: generation.providerStatusCode,
@@ -406,4 +417,3 @@ export function createLlmObservabilitySink(options?: {
     },
   };
 }
-

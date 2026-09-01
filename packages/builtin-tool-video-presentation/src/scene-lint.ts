@@ -8,9 +8,9 @@ import ts from "typescript";
  * missing SafeArea, and on-screen text overload.
  *
  * Severity contract:
- * - errors feed the scene repair loop and may fail the pipeline.
- * - warnings get at most one targeted repair attempt and are then accepted —
- *   they must never hard-fail the pipeline.
+ * - errors block validation until the root Agent changes the authored scene.
+ * - warnings are evidence for the root Agent and never trigger an automatic
+ *   repair loop inside validation.
  *
  * Deliberately out of scope (needs pixels, left to visual QA): real sibling
  * overlap, contrast, z-index stacking over text, and any style computed at
@@ -216,9 +216,8 @@ export function lintSceneLayout(
       }
 
       if (isAbsolute && (EDGE_PROPS as readonly string[]).includes(name)) {
-        const maxExtent = name === "top" || name === "bottom"
-          ? canvas.height
-          : canvas.width;
+        const maxExtent =
+          name === "top" || name === "bottom" ? canvas.height : canvas.width;
         if (value !== null && (value < 0 || value > maxExtent)) {
           const message = `<${elementName}> is absolutely positioned with ${name}: ${value}, which lands at or beyond the canvas edge (${maxExtent}px).`;
           if (elementHasText) {
@@ -266,6 +265,9 @@ export function lintSceneLayout(
         literal = attribute.initializer.expression.text;
       }
       if (!literal) {
+        errors.push(
+          `<${elementName}> src must be an exact authorized string literal.`,
+        );
         continue;
       }
       const looksRemote =
@@ -295,6 +297,11 @@ export function lintSceneLayout(
       const name = jsxElementName(node);
       if (name === "SafeArea") {
         sawSafeArea = true;
+      }
+      if (name === "img") {
+        errors.push(
+          "Native <img> is not allowed; use Img or AssetImage with an exact authorized source.",
+        );
       }
       if (name === "Img" || name === "AssetImage") {
         checkImageSrc(node, name);

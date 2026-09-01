@@ -19,18 +19,11 @@ import {
 import type { AssistantActivityItem } from "./assistant-activity-items";
 import { AssistantToolCard } from "./assistant-tool-card";
 import { WebToolResults } from "../web-tool-results";
-import type {
-  CitationRecord,
-  ToolConfirmationResolution,
-} from "./types";
+import type { CitationRecord, ToolConfirmationResolution } from "./types";
 import { formatThoughtDuration } from "./duration-format";
 
 function ActivityStatusCell({ children }: { children: ReactNode }) {
-  return (
-    <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
-      {children}
-    </span>
-  );
+  return <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>{children}</span>;
 }
 
 function ActivityDisclosureIcon({ isOpen }: { isOpen: boolean }) {
@@ -60,7 +53,9 @@ function StepStatusIcon({
     );
   }
   if (status === "completed") {
-    return <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />;
+    return (
+      <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+    );
   }
   return <Circle className="size-3.5 text-muted-foreground/70" />;
 }
@@ -86,7 +81,7 @@ function AssistantStepRow({
         ? `${value} ${label}`
         : null;
     })
-      .filter((value): value is string => value !== null);
+    .filter((value): value is string => value !== null);
   const hasDetails = item.items.length > 0 || metadataLabels.length > 0;
 
   return (
@@ -174,9 +169,7 @@ function AssistantReasoningRow({
         <ActivityDisclosureIcon isOpen={isOpen} />
       </button>
       {isOpen ? (
-        <div className={ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS}>
-          {item.text}
-        </div>
+        <div className={ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS}>{item.text}</div>
       ) : null}
     </div>
   );

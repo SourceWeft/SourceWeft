@@ -3,6 +3,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { contentClient } from "../../../../../lib/sdk";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
+import type { ArtifactOutputReconcileTarget } from "./artifact-output-reconcile";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -14,12 +15,19 @@ const RECONNECT_MAX_MS = 30_000;
 // clients don't synchronize their polls; re-probe for a free SSE slot every ~2m.
 const POLL_BASE_MS = 15_000;
 const POLL_REPROBE_TICKS = 8;
+const RECENT_ARTIFACT_RECONCILE_MS = 30_000;
 
 type RoomFrame =
   | { type: "ready" }
   | { type: "resync" }
   | { type: "message"; messageId?: string; role?: string }
-  | { type: "run"; kind?: string; runId?: string; status?: string }
+  | {
+      type: "run";
+      kind?: string;
+      runId?: string;
+      status?: string;
+      assistantMessageId?: string;
+    }
   | { type: "presence"; here?: string[] }
   | { type: "typing"; userId?: string };
 
@@ -92,6 +100,20 @@ export function shouldClearAdoptedRun(input: {
   return !input.isLocallyDriven && !input.isAttached;
 }
 
+export function artifactOutputTargetFromRoomFrame(
+  frame: RoomFrame,
+): ArtifactOutputReconcileTarget | null {
+  if (frame.type !== "run" || (!frame.runId && !frame.assistantMessageId)) {
+    return null;
+  }
+  return {
+    ...(frame.runId ? { runId: frame.runId } : {}),
+    ...(frame.assistantMessageId
+      ? { assistantMessageId: frame.assistantMessageId }
+      : {}),
+  };
+}
+
 type UseThreadRoomInput = {
   workspaceId: string | null | undefined;
   threadId: string;
@@ -107,6 +129,9 @@ type UseThreadRoomInput = {
   ) => void;
   clearRunIfCurrent: (durableRunKey: string) => void;
   appendNewerMessages: () => Promise<void>;
+  reconcileCommittedArtifactOutputs: (
+    target: ArtifactOutputReconcileTarget,
+  ) => Promise<void>;
   // Presence/typing: the full viewer roster (userIds) on each presence frame,
   // and one userId per typing frame (already self-filtered server-side).
   onPresence: (here: string[]) => void;
@@ -130,6 +155,7 @@ export function useThreadRoom({
   setActiveThreadRun,
   clearRunIfCurrent,
   appendNewerMessages,
+  reconcileCommittedArtifactOutputs,
   onPresence,
   onTyping,
 }: UseThreadRoomInput) {
@@ -142,6 +168,7 @@ export function useThreadRoom({
     setActiveThreadRun,
     clearRunIfCurrent,
     appendNewerMessages,
+    reconcileCommittedArtifactOutputs,
     onPresence,
     onTyping,
   });
@@ -152,6 +179,7 @@ export function useThreadRoom({
     setActiveThreadRun,
     clearRunIfCurrent,
     appendNewerMessages,
+    reconcileCommittedArtifactOutputs,
     onPresence,
     onTyping,
   };
@@ -166,11 +194,72 @@ export function useThreadRoom({
     let reconnectAttempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    let recentArtifactTarget: ArtifactOutputReconcileTarget | null = null;
+    let recentArtifactTargetExpiresAt = 0;
     // Latest-wins guard: a run's terminal frame fires the last reconcile, and
     // its (null) result must win even if an earlier "running" fetch resolves
     // afterward — otherwise a stale response re-adopts a finished run and the
     // send-queue never drains.
     let reconcileSeq = 0;
+
+    const targetFromActiveRun = (): ArtifactOutputReconcileTarget | null => {
+      const active = latestRef.current.activeThreadRunRef.current;
+      if (!active?.id && !active?.assistantMessageId) {
+        return null;
+      }
+      return {
+        ...(active.id ? { runId: active.id } : {}),
+        ...(active.assistantMessageId
+          ? { assistantMessageId: active.assistantMessageId }
+          : {}),
+      };
+    };
+
+    const rememberArtifactTarget = (
+      target: ArtifactOutputReconcileTarget | null,
+    ) => {
+      if (!target?.runId && !target?.assistantMessageId) {
+        return;
+      }
+      if (
+        target.runId &&
+        recentArtifactTarget?.runId &&
+        target.runId !== recentArtifactTarget.runId
+      ) {
+        recentArtifactTarget = null;
+      }
+      recentArtifactTarget = {
+        ...(recentArtifactTarget ?? {}),
+        ...target,
+      };
+      recentArtifactTargetExpiresAt = Date.now() + RECENT_ARTIFACT_RECONCILE_MS;
+    };
+
+    const reconcileArtifactOutputs = (
+      preferred?: ArtifactOutputReconcileTarget | null,
+    ) => {
+      const active = targetFromActiveRun();
+      if (active || preferred) {
+        rememberArtifactTarget({
+          ...(recentArtifactTarget ?? {}),
+          ...(active ?? {}),
+          ...(preferred ?? {}),
+        });
+      }
+      const recent =
+        recentArtifactTarget && Date.now() <= recentArtifactTargetExpiresAt
+          ? recentArtifactTarget
+          : null;
+      const target = {
+        ...(recent ?? {}),
+        ...(active ?? {}),
+        ...(preferred ?? {}),
+      };
+      if (!target.runId && !target.assistantMessageId) {
+        return;
+      }
+      void latestRef.current.reconcileCommittedArtifactOutputs(target);
+    };
 
     // Only refetch messages while idle — never reset the list mid-stream, which
     // would drop an in-flight assistant render for the driver or a follower.
@@ -211,6 +300,16 @@ export function useThreadRoom({
         // a second tab; leaving it set would wedge chatExecutionState at
         // "executing" and the send-queue would never fire.
         const current = deps.activeThreadRunRef.current;
+        rememberArtifactTarget(
+          current
+            ? {
+                ...(current.id ? { runId: current.id } : {}),
+                ...(current.assistantMessageId
+                  ? { assistantMessageId: current.assistantMessageId }
+                  : {}),
+              }
+            : null,
+        );
         if (
           current &&
           shouldClearAdoptedRun({
@@ -225,6 +324,10 @@ export function useThreadRoom({
         return;
       }
       const incoming = normalizeRoomRun(summary);
+      rememberArtifactTarget({
+        runId: incoming.id,
+        assistantMessageId: incoming.assistantMessageId,
+      });
       deps.setActiveThreadRun((current) =>
         reconcileRoomRun({
           current,
@@ -236,6 +339,11 @@ export function useThreadRoom({
 
     const handleFrame = (frame: RoomFrame) => {
       if (frame.type === "run") {
+        const artifactTarget = artifactOutputTargetFromRoomFrame(frame);
+        rememberArtifactTarget(artifactTarget);
+        if (frame.kind === "artifact_output" || frame.kind === "run_finished") {
+          reconcileArtifactOutputs(artifactTarget);
+        }
         void reconcileRun();
         return;
       }
@@ -245,6 +353,9 @@ export function useThreadRoom({
       }
       if (frame.type === "presence") {
         latestRef.current.onPresence(frame.here ?? []);
+        // The room's existing 15s presence heartbeat is also the bounded repair
+        // path for a dropped best-effort NotifyHub artifact wake-up.
+        reconcileArtifactOutputs();
         return;
       }
       if (frame.type === "typing") {
@@ -257,7 +368,7 @@ export function useThreadRoom({
         // (Re)connect / gap recovery: reconcile run state and pull messages.
         // The server re-emits the presence snapshot right after ready, so no
         // presence handling is needed here.
-        void reconcileRun();
+        void reconcileRun().then(() => reconcileArtifactOutputs());
         scheduleMessageRefetch();
       }
     };
@@ -280,13 +391,15 @@ export function useThreadRoom({
       }
       pollTicks = 0;
       // ±20% jitter so a wave of evicted clients doesn't poll in lockstep.
-      const interval = Math.round(POLL_BASE_MS * (1 + (Math.random() * 0.4 - 0.2)));
+      const interval = Math.round(
+        POLL_BASE_MS * (1 + (Math.random() * 0.4 - 0.2)),
+      );
       pollTimer = setInterval(() => {
         if (closed) {
           stopPolling();
           return;
         }
-        void reconcileRun();
+        void reconcileRun().then(() => reconcileArtifactOutputs());
         scheduleMessageRefetch();
         pollTicks += 1;
         if (pollTicks % POLL_REPROBE_TICKS === 0) {
@@ -318,7 +431,7 @@ export function useThreadRoom({
         stopPolling();
         // Reconcile immediately on connect so a gap before the first event can't
         // leave stale state.
-        void reconcileRun();
+        void reconcileRun().then(() => reconcileArtifactOutputs());
         scheduleMessageRefetch();
 
         const reader = response.body.getReader();

@@ -190,7 +190,10 @@ export function UserMessageText({
     if (!sourceId) {
       continue;
     }
-    labelToSource.set(token, createFallbackMentionSource({ label: token, sourceId }));
+    labelToSource.set(
+      token,
+      createFallbackMentionSource({ label: token, sourceId }),
+    );
   }
 
   const labels = [...labelToSource.keys()].sort(
@@ -235,4 +238,3 @@ export function UserMessageText({
 
   return parts.length > 0 ? <>{parts}</> : <>{children}</>;
 }
-

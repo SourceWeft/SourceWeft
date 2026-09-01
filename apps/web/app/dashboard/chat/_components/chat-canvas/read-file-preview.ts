@@ -3,8 +3,7 @@ import type { ToolCallRecord } from "./types";
 
 export const READ_FILE_PREVIEW_LINE_LIMIT = 6;
 export const NO_VISIBLE_READ_FILE_CONTENT = "(no visible content)";
-export const READ_FILE_BINARY_UNSUPPORTED_CODE =
-  "READ_FILE_BINARY_UNSUPPORTED";
+export const READ_FILE_BINARY_UNSUPPORTED_CODE = "READ_FILE_BINARY_UNSUPPORTED";
 
 export type ReadFilePreview = {
   fileName: string | null;

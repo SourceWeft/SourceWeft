@@ -29,6 +29,7 @@
     "creem:product:create": "tsx src/scripts/create-creem-product.ts",
     "creem:product:delete": "tsx src/scripts/delete-creem-product.ts",
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
+    "benchmark:video-render": "tsx src/scripts/benchmark-video-render.ts",
     "check-types": "tsc --noEmit",
     "check-types:build": "tsc --noEmit -p tsconfig.build.json"
   },
@@ -78,7 +79,6 @@
     "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
-    "@sourceweft/video-presentation-runtime": "workspace:*",
     "ai": "^6.0.253",
     "better-auth": "1.7.2",
     "bullmq": "^5.81.3",

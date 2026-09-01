@@ -39,12 +39,12 @@ test("capability tool provider projects tool contributions as fixed tool choice"
         title: "Generate Image",
       }),
       capabilityCommand({
-        action: { kind: "tool", targetId: "generate_video_presentation" },
-        aliases: ["video", "slides"],
-        capabilityId: "sourceweft/video-presentation-tool",
-        contributionId: "generate_video_presentation",
-        id: "cap:sourceweft/video-presentation-tool:generate_video_presentation",
-        title: "Generate Video Presentation",
+        action: { kind: "tool", targetId: "publish_report" },
+        aliases: ["report", "document"],
+        capabilityId: "sourceweft/report-builder",
+        contributionId: "publish_report",
+        id: "cap:sourceweft/report-builder:publish_report",
+        title: "Publish Report",
       }),
       capabilityCommand({
         action: { kind: "skill", targetId: "feynman" },
@@ -62,7 +62,7 @@ test("capability tool provider projects tool contributions as fixed tool choice"
     definitions.map((definition) => definition.id),
     [
       "cap:sourceweft/generate-image:generate_image",
-      "cap:sourceweft/video-presentation-tool:generate_video_presentation",
+      "cap:sourceweft/report-builder:publish_report",
     ],
   );
   assert.equal(definitions[0]?.sourceRef.kind, "capability_tool");
@@ -80,7 +80,7 @@ test("capability tool provider projects tool contributions as fixed tool choice"
   );
   assert.equal(definitions[0]?.slashAlias, "/image");
   assert.deepEqual(definitions[0]?.alternateSlashAliases, []);
-  assert.deepEqual(definitions[1]?.alternateSlashAliases, ["/slides"]);
+  assert.deepEqual(definitions[1]?.alternateSlashAliases, ["/document"]);
 });
 
 test("capability tool provider derives projection from arbitrary tool command records", () => {

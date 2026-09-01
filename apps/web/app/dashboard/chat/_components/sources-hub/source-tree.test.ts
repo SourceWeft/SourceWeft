@@ -34,10 +34,28 @@ describe("source tree helpers", () => {
   it("builds a directory-first sorted tree", () => {
     const sources = [
       source({ id: "root-file", title: "Zeta note" }),
-      source({ id: "folder-b", title: "Beta", sourceType: "directory", type: "DIR" }),
-      source({ id: "folder-a", title: "Alpha", sourceType: "directory", type: "DIR" }),
-      source({ id: "child-b", parentSourceId: "folder-a", title: "Beta child" }),
-      source({ id: "child-a", parentSourceId: "folder-a", title: "Alpha child" }),
+      source({
+        id: "folder-b",
+        title: "Beta",
+        sourceType: "directory",
+        type: "DIR",
+      }),
+      source({
+        id: "folder-a",
+        title: "Alpha",
+        sourceType: "directory",
+        type: "DIR",
+      }),
+      source({
+        id: "child-b",
+        parentSourceId: "folder-a",
+        title: "Beta child",
+      }),
+      source({
+        id: "child-a",
+        parentSourceId: "folder-a",
+        title: "Alpha child",
+      }),
     ];
 
     expect(treeIds(sources)).toEqual([
@@ -51,8 +69,17 @@ describe("source tree helpers", () => {
 
   it("keeps descendants visible when an ancestor matches search", () => {
     const sources = [
-      source({ id: "projects", title: "Projects", sourceType: "directory", type: "DIR" }),
-      source({ id: "notes", parentSourceId: "projects", title: "Unrelated child" }),
+      source({
+        id: "projects",
+        title: "Projects",
+        sourceType: "directory",
+        type: "DIR",
+      }),
+      source({
+        id: "notes",
+        parentSourceId: "projects",
+        title: "Unrelated child",
+      }),
       source({ id: "other", title: "Other" }),
     ];
 
@@ -60,11 +87,19 @@ describe("source tree helpers", () => {
   });
 
   it("marks parent folders indeterminate when only some children are selected", () => {
-    const tree = buildSourceTree([
-      source({ id: "folder", title: "Folder", sourceType: "directory", type: "DIR" }),
-      source({ id: "a", parentSourceId: "folder", title: "A" }),
-      source({ id: "b", parentSourceId: "folder", title: "B" }),
-    ], "");
+    const tree = buildSourceTree(
+      [
+        source({
+          id: "folder",
+          title: "Folder",
+          sourceType: "directory",
+          type: "DIR",
+        }),
+        source({ id: "a", parentSourceId: "folder", title: "A" }),
+        source({ id: "b", parentSourceId: "folder", title: "B" }),
+      ],
+      "",
+    );
 
     const states = buildSourceSelectionStateMap(tree, new Set(["a"]));
 
@@ -74,11 +109,19 @@ describe("source tree helpers", () => {
   });
 
   it("replaces a selected ancestor with sibling selections when a child is toggled off", () => {
-    const tree = buildSourceTree([
-      source({ id: "folder", title: "Folder", sourceType: "directory", type: "DIR" }),
-      source({ id: "a", parentSourceId: "folder", title: "A" }),
-      source({ id: "b", parentSourceId: "folder", title: "B" }),
-    ], "");
+    const tree = buildSourceTree(
+      [
+        source({
+          id: "folder",
+          title: "Folder",
+          sourceType: "directory",
+          type: "DIR",
+        }),
+        source({ id: "a", parentSourceId: "folder", title: "A" }),
+        source({ id: "b", parentSourceId: "folder", title: "B" }),
+      ],
+      "",
+    );
     const childA = findNodePath(tree, "a")?.at(-1);
 
     expect(childA).toBeDefined();
@@ -88,11 +131,19 @@ describe("source tree helpers", () => {
   });
 
   it("normalizes explicit child selections into parent selections after tree changes", () => {
-    const tree = buildSourceTree([
-      source({ id: "folder", title: "Folder", sourceType: "directory", type: "DIR" }),
-      source({ id: "a", parentSourceId: "folder", title: "A" }),
-      source({ id: "b", parentSourceId: "folder", title: "B" }),
-    ], "");
+    const tree = buildSourceTree(
+      [
+        source({
+          id: "folder",
+          title: "Folder",
+          sourceType: "directory",
+          type: "DIR",
+        }),
+        source({ id: "a", parentSourceId: "folder", title: "A" }),
+        source({ id: "b", parentSourceId: "folder", title: "B" }),
+      ],
+      "",
+    );
 
     expect(normalizeSourceSelectionFromTree(tree, ["a", "b"])).toEqual([
       "folder",
@@ -100,22 +151,30 @@ describe("source tree helpers", () => {
   });
 
   it("excludes failed and syncing sources from selectable ids", () => {
-    const tree = buildSourceTree([
-      source({ id: "folder", title: "Folder", sourceType: "directory", type: "DIR" }),
-      source({ id: "ready", parentSourceId: "folder", title: "Ready" }),
-      source({
-        id: "failed",
-        parentSourceId: "folder",
-        status: "Failed",
-        title: "Failed",
-      }),
-      source({
-        id: "syncing",
-        parentSourceId: "folder",
-        status: "Syncing",
-        title: "Syncing",
-      }),
-    ], "");
+    const tree = buildSourceTree(
+      [
+        source({
+          id: "folder",
+          title: "Folder",
+          sourceType: "directory",
+          type: "DIR",
+        }),
+        source({ id: "ready", parentSourceId: "folder", title: "Ready" }),
+        source({
+          id: "failed",
+          parentSourceId: "folder",
+          status: "Failed",
+          title: "Failed",
+        }),
+        source({
+          id: "syncing",
+          parentSourceId: "folder",
+          status: "Syncing",
+          title: "Syncing",
+        }),
+      ],
+      "",
+    );
 
     expect(collectSelectableSourceIds(tree)).toEqual(["folder", "ready"]);
   });

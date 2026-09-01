@@ -5,6 +5,7 @@ import { AzureChatAdapter } from "../src/adapters/azure-chat";
 import { DeepInfraChatAdapter } from "../src/adapters/deepinfra-chat";
 import { OpenAICompatibleChatAdapter } from "../src/adapters/openai-compatible-chat";
 import { OpenRouterChatAdapter } from "../src/adapters/openrouter-chat";
+import { ModelGatewayError } from "../src/errors";
 import type {
   ChatCompleteInput,
   RequestOptions,
@@ -39,9 +40,7 @@ function modelRetryCount(model: unknown) {
   return caller?.maxRetries;
 }
 
-function createWithOptions(
-  createModel: (options?: RequestOptions) => unknown,
-) {
+function createWithOptions(createModel: (options?: RequestOptions) => unknown) {
   return {
     withoutOptions: createModel(),
     withoutRetries: createModel({ maxRetries: 0 }),
@@ -248,4 +247,59 @@ test("OpenRouter chat adapter supports object provider routing sort", () => {
       },
     },
   });
+});
+
+test("OpenRouter chat adapter fails fast with a typed auth error when credentials are missing", () => {
+  const adapter = new OpenRouterChatAdapter();
+
+  assert.throws(
+    () =>
+      adapter.createModel(
+        {
+          ...target,
+          apiKey: undefined,
+          provider: "openrouter",
+          providerKind: "openrouter",
+          routeDecision: {
+            ...target.routeDecision,
+            provider: "openrouter",
+            providerKind: "openrouter",
+          },
+        },
+        input,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelGatewayError);
+      assert.equal(error.code, "AUTH");
+      assert.equal(error.retryable, false);
+      assert.equal(error.provider, "openrouter");
+      assert.equal(error.message, "OpenRouter API key is not configured");
+      return true;
+    },
+  );
+});
+
+test("OpenRouter chat adapter does not treat an Authorization header as the SDK API key", () => {
+  const adapter = new OpenRouterChatAdapter();
+
+  assert.throws(
+    () =>
+      adapter.createModel(
+        {
+          ...target,
+          apiKey: undefined,
+          defaultHeaders: { Authorization: "Bearer header-only" },
+          provider: "openrouter",
+          providerKind: "openrouter",
+          routeDecision: {
+            ...target.routeDecision,
+            provider: "openrouter",
+            providerKind: "openrouter",
+          },
+        },
+        input,
+      ),
+    (error: unknown) =>
+      error instanceof ModelGatewayError && error.code === "AUTH",
+  );
 });

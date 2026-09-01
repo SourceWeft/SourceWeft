@@ -28,6 +28,7 @@ ENV PNPM_HOME=/pnpm
 ENV VIRTUAL_ENV=/opt/venv
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 ENV SOURCEWEFT_REMOTION_BROWSER=/opt/chrome-headless-shell/chrome-headless-shell-linux64/chrome-headless-shell
+ENV SOURCEWEFT_PNPM_STORE=/opt/sourceweft-pnpm-store
 ENV NODE_PATH=/usr/local/lib/node_modules
 ENV PATH="${PNPM_HOME}:${VIRTUAL_ENV}/bin:${PATH}"
 

@@ -2,6 +2,8 @@ import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import type { ProviderRoutingConfig } from "../types";
 import { buildOpenAIReasoningModelKwargs } from "./openai-reasoning";
+import { captureProviderResponseFetch } from "../observation/response-capture";
+import { ModelGatewayError } from "../errors";
 
 function mergeOpenRouterProviderRouting(
   extraBody: Record<string, unknown> | undefined,
@@ -12,7 +14,9 @@ function mergeOpenRouterProviderRouting(
   }
 
   const existingProvider =
-    extraBody?.provider && typeof extraBody.provider === "object" && !Array.isArray(extraBody.provider)
+    extraBody?.provider &&
+    typeof extraBody.provider === "object" &&
+    !Array.isArray(extraBody.provider)
       ? (extraBody.provider as Record<string, unknown>)
       : {};
 
@@ -34,6 +38,15 @@ export class OpenRouterChatAdapter implements ChatAdapter {
     input: Parameters<ChatAdapter["createModel"]>[1],
     options?: Parameters<ChatAdapter["createModel"]>[2],
   ) {
+    if (!target.apiKey?.trim()) {
+      throw new ModelGatewayError({
+        code: "AUTH",
+        message: "OpenRouter API key is not configured",
+        provider: target.provider,
+        retryable: false,
+      });
+    }
+
     return new ChatOpenAI({
       model: target.providerModel,
       temperature: input.temperature,
@@ -44,6 +57,7 @@ export class OpenRouterChatAdapter implements ChatAdapter {
       configuration: {
         baseURL: target.baseUrl,
         defaultHeaders: target.defaultHeaders,
+        fetch: captureProviderResponseFetch(),
       },
       modelKwargs: {
         ...(mergeOpenRouterProviderRouting(

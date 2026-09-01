@@ -177,23 +177,23 @@ function meterCalls() {
   );
 }
 
-test("chat completions settle under the legacy job/operation/scope/seq key", async () => {
+test("chat completions settle under the stable job/operation/scope/seq key", async () => {
   const ctx = await buildContext();
 
   await ctx.llm.complete({
     messages: [{ role: "user", content: "hi" }],
-    metadata: { stage: "plan_storyboard", slideNumber: 3 },
+    metadata: { stage: "plan_outline", slideNumber: 3 },
   } as never);
   await ctx.llm.complete({
     messages: [{ role: "user", content: "hi again" }],
-    metadata: { stage: "plan_storyboard", slideNumber: 3 },
+    metadata: { stage: "plan_outline", slideNumber: 3 },
   } as never);
 
   assert.deepEqual(
     meterCalls().map((call) => call.idempotencyKey),
     [
-      "job_1:deliverable.plan_storyboard:3:1",
-      "job_1:deliverable.plan_storyboard:3:2",
+      "job_1:deliverable.plan_outline:3:1",
+      "job_1:deliverable.plan_outline:3:2",
     ],
   );
   assert.deepEqual(
@@ -207,11 +207,11 @@ test("chat billing identity and metadata are preserved", async () => {
 
   await ctx.llm.complete({
     messages: [{ role: "user", content: "hi" }],
-    metadata: { stage: "generate_scene_module" },
+    metadata: { stage: "draft_section" },
   } as never);
 
   const [call] = meterCalls();
-  assert.equal(call?.operation, "deliverable.generate_scene_module");
+  assert.equal(call?.operation, "deliverable.draft_section");
   assert.equal(call?.modelKind, "chat");
   assert.equal(call?.gatewayConfigId, "gw_chat");
   assert.equal(call?.profileAlias, "p_chat");
@@ -222,6 +222,36 @@ test("chat billing identity and metadata are preserved", async () => {
   const metadata = call?.metadata as Record<string, unknown>;
   assert.equal(metadata.artifactId, "artifact_1");
   assert.equal(metadata.jobId, "job_1");
+});
+
+test("missing parsed structured output keeps STRUCTURED_OUTPUT retry metadata", async () => {
+  const complete = vi.fn(async () => ({
+    model: "m",
+    usage: USAGE,
+    raw: { content: "" },
+  }));
+  rawMocks.getRawModelGatewayClient.mockResolvedValue({
+    ...fakeGateway(),
+    chat: { complete },
+  });
+  const ctx = await buildContext();
+
+  await assert.rejects(
+    () =>
+      ctx.llm.completeStructured({
+        messages: [{ role: "user", content: "return structured data" }],
+        metadata: { stage: "plan_outline" },
+        schema: { type: "object" },
+        schemaName: "report_outline",
+      }),
+    (error: unknown) => {
+      assert.equal((error as { code?: unknown }).code, "STRUCTURED_OUTPUT");
+      assert.equal((error as { retryable?: unknown }).retryable, true);
+      return true;
+    },
+  );
+  // One normal call plus the existing same-model tool nudge.
+  assert.equal(complete.mock.calls.length, 2);
 });
 
 test("tts, vision and image each keep their own reserved operation key", async () => {

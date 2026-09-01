@@ -14,7 +14,10 @@ export type PresenceViewer = {
   isSelf: boolean;
 };
 
-function fallbackViewer(userId: string, currentUserId: string | null): PresenceViewer {
+function fallbackViewer(
+  userId: string,
+  currentUserId: string | null,
+): PresenceViewer {
   return {
     userId,
     name: null,
@@ -135,7 +138,14 @@ export function useThreadPresence({
         // Allow a later retry for these ids.
         needed.forEach((id) => requestedIdsRef.current.delete(id));
       });
-  }, [workspaceId, threadId, viewerIds, typingUserIds, identities, currentUserId]);
+  }, [
+    workspaceId,
+    threadId,
+    viewerIds,
+    typingUserIds,
+    identities,
+    currentUserId,
+  ]);
 
   // Reset everything when the thread/workspace changes.
   useEffect(() => {

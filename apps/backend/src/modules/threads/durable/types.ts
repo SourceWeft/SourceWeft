@@ -69,6 +69,8 @@ export type DurableRunResultSnapshot = {
 };
 
 export type ChatRunSnapshot = DurableRunResultSnapshot & {
+  /** Host-only capability receipts/idempotency state; never projected to messages. */
+  protectedAgentTools?: Record<string, unknown>;
   assistantContent?: string;
   errorCode?: string | null;
   errorMessage?: string | null;

@@ -3,10 +3,7 @@ import { config } from "../config";
 import { OPENROUTER_APP_TITLE } from "./attribution";
 import type { ModelGatewayProfileKind } from "./types";
 import { modelCatalog } from "./model-catalog/registry";
-import type {
-  ModelModality,
-  NormalizedModelInfo,
-} from "./model-catalog/types";
+import type { ModelModality, NormalizedModelInfo } from "./model-catalog/types";
 import type { GlobalProfilePricingEntry } from "./global-config";
 
 export type CatalogModelKind = ModelGatewayProfileKind;
@@ -46,7 +43,6 @@ export type CatalogDiscoveryGateway = {
   catalogFormat?: "orcarouter";
 };
 
-
 const SUPPORTED_DYNAMIC_KINDS: Record<CatalogModelKind, string[]> = {
   chat: ["chat", "tool_calling"],
   vision: ["chat", "tool_calling"],
@@ -62,17 +58,18 @@ function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
-function buildAuthHeaders(input: Pick<
-  CatalogDiscoveryGateway,
-  "apiKey" | "apiKeyHeaderName" | "apiKeyHeaderPrefix"
->) {
+function buildAuthHeaders(
+  input: Pick<
+    CatalogDiscoveryGateway,
+    "apiKey" | "apiKeyHeaderName" | "apiKeyHeaderPrefix"
+  >,
+) {
   if (!input.apiKey) {
     return {};
   }
   if (input.apiKeyHeaderName) {
     return {
-      [input.apiKeyHeaderName]:
-        `${input.apiKeyHeaderPrefix ?? ""}${input.apiKey}`,
+      [input.apiKeyHeaderName]: `${input.apiKeyHeaderPrefix ?? ""}${input.apiKey}`,
     };
   }
   return {
@@ -136,9 +133,9 @@ function parseOpenRouterPricing(
   };
 
   return parsed.inputCostPerToken !== null ||
-      parsed.outputCostPerToken !== null ||
-      parsed.cacheReadInputTokenCost !== null ||
-      parsed.inputCostPerImageToken !== null
+    parsed.outputCostPerToken !== null ||
+    parsed.cacheReadInputTokenCost !== null ||
+    parsed.inputCostPerImageToken !== null
     ? parsed
     : null;
 }
@@ -169,7 +166,10 @@ function normalizeSupportedEfforts(supportedParameters: string[]) {
     : [];
 }
 
-function kindAllowed(kind: CatalogModelKind, allowList?: Set<CatalogModelKind>) {
+function kindAllowed(
+  kind: CatalogModelKind,
+  allowList?: Set<CatalogModelKind>,
+) {
   return !allowList || allowList.has(kind);
 }
 
@@ -272,7 +272,9 @@ async function discoverOpenRouterCatalog(input: {
     },
   });
   if (!response.ok) {
-    throw new Error(`Failed to load OpenRouter model catalog: ${response.status}`);
+    throw new Error(
+      `Failed to load OpenRouter model catalog: ${response.status}`,
+    );
   }
 
   const payload = (await response.json()) as { data?: unknown };
@@ -313,12 +315,20 @@ async function discoverOpenRouterCatalog(input: {
       supportedParameters,
     };
 
-    const push = (kind: CatalogModelKind, extra: Partial<CatalogModelCandidate> = {}) => {
-      if (!kindAllowed(kind, input.kinds) || !providerSupportsKind(input.gateway, kind)) {
+    const push = (
+      kind: CatalogModelKind,
+      extra: Partial<CatalogModelCandidate> = {},
+    ) => {
+      if (
+        !kindAllowed(kind, input.kinds) ||
+        !providerSupportsKind(input.gateway, kind)
+      ) {
         return;
       }
-      if ((kind === "chat" || kind === "vision") &&
-          !supportedParameters.includes("tools")) {
+      if (
+        (kind === "chat" || kind === "vision") &&
+        !supportedParameters.includes("tools")
+      ) {
         return;
       }
       items.push({
@@ -381,14 +391,19 @@ async function discoverOrcaRouterCatalog(input: {
   kinds?: Set<CatalogModelKind>;
   resolve: CapabilityResolver;
 }) {
-  const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
-    headers: {
-      ...(input.gateway.defaultHeaders ?? {}),
-      ...buildAuthHeaders(input.gateway),
+  const response = await fetch(
+    `${normalizeBaseUrl(input.gateway.baseUrl)}/models`,
+    {
+      headers: {
+        ...(input.gateway.defaultHeaders ?? {}),
+        ...buildAuthHeaders(input.gateway),
+      },
     },
-  });
+  );
   if (!response.ok) {
-    throw new Error(`Failed to load OrcaRouter model catalog: ${response.status}`);
+    throw new Error(
+      `Failed to load OrcaRouter model catalog: ${response.status}`,
+    );
   }
 
   const payload = (await response.json()) as { data?: unknown };
@@ -463,9 +478,9 @@ async function discoverOrcaRouterCatalog(input: {
         toFiniteNumber(model?.max_completion_tokens) ??
         toFiniteNumber(topProvider?.max_completion_tokens),
       modelId,
-      // OrcaRouter's inline pricing uses the same prompt/completion keys as
-      // OpenRouter. OrcaRouter does not return a per-request `usage.cost`, so
-      // billing is always this inline price × tokens (its own flat rate).
+      // OrcaRouter's catalog pricing uses the same prompt/completion keys as
+      // OpenRouter. Runtime billing uses the provider adapter's opt-in
+      // per-request cost/receipt; this catalog value remains an estimate.
       pricing: parseOpenRouterPricing(model?.pricing, "orcarouter"),
       providerCatalogGatewaySlug: input.gateway.slug,
       providerCatalogSource: "orcarouter-models",
@@ -528,12 +543,15 @@ async function discoverOpenAICompatibleCatalog(input: {
   kinds?: Set<CatalogModelKind>;
   resolve: CapabilityResolver;
 }) {
-  const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
-    headers: {
-      ...(input.gateway.defaultHeaders ?? {}),
-      ...buildAuthHeaders(input.gateway),
+  const response = await fetch(
+    `${normalizeBaseUrl(input.gateway.baseUrl)}/models`,
+    {
+      headers: {
+        ...(input.gateway.defaultHeaders ?? {}),
+        ...buildAuthHeaders(input.gateway),
+      },
     },
-  });
+  );
   if (!response.ok) {
     throw new Error(`Failed to load model catalog: ${response.status}`);
   }
@@ -561,9 +579,8 @@ export async function discoverGatewayCatalog(input: {
   /** Override the capability resolver (tests inject a fixture registry). */
   resolveCapabilities?: CapabilityResolver;
 }) {
-  const kinds = input.kinds && input.kinds.length > 0
-    ? new Set(input.kinds)
-    : undefined;
+  const kinds =
+    input.kinds && input.kinds.length > 0 ? new Set(input.kinds) : undefined;
 
   // OpenRouter is the one provider-self path: its /models carries capabilities.
   if (input.gateway.providerKind === "openrouter") {
@@ -579,7 +596,11 @@ export async function discoverGatewayCatalog(input: {
       modelCatalog.resolve(id, opts));
 
   if (input.gateway.catalogFormat === "orcarouter") {
-    return discoverOrcaRouterCatalog({ gateway: input.gateway, kinds, resolve });
+    return discoverOrcaRouterCatalog({
+      gateway: input.gateway,
+      kinds,
+      resolve,
+    });
   }
 
   return discoverOpenAICompatibleCatalog({

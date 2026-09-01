@@ -22,8 +22,7 @@ export type ByokProviderOption = {
   hasApiKey: boolean;
 };
 
-export type ByokCredentialItem =
-  ListByokCredentialsResponse["items"][number];
+export type ByokCredentialItem = ListByokCredentialsResponse["items"][number];
 export type ByokSavedModelItem = ListByokModelsResponse["items"][number];
 
 export type ByokModelSelection = {
@@ -67,7 +66,9 @@ export function normalizeByokProviderOptions(
   credentials: ByokCredentialItem[],
 ): ByokProviderOption[] {
   const items =
-    input && typeof input === "object" && Array.isArray((input as { items?: unknown }).items)
+    input &&
+    typeof input === "object" &&
+    Array.isArray((input as { items?: unknown }).items)
       ? ((input as { items: unknown[] }).items ?? [])
       : Array.isArray(input)
         ? input
@@ -85,12 +86,15 @@ export function normalizeByokProviderOptions(
       }
       const record = entry as Record<string, unknown>;
       const providerName =
-        typeof record.providerName === "string" ? record.providerName.trim() : "";
+        typeof record.providerName === "string"
+          ? record.providerName.trim()
+          : "";
       if (!providerName) {
         return null;
       }
       const providerKind =
-        typeof record.providerKind === "string" && record.providerKind.trim().length > 0
+        typeof record.providerKind === "string" &&
+        record.providerKind.trim().length > 0
           ? record.providerKind.trim()
           : DEFAULT_BYOK_PROVIDER_KIND;
       const baseUrl =
@@ -251,7 +255,10 @@ export function buildThreadCreateModelSettings(input: {
   return Object.keys(modelSettings).length > 0 ? modelSettings : undefined;
 }
 
-export function getByokStorageKey(workspaceId: string, threadId?: string | null) {
+export function getByokStorageKey(
+  workspaceId: string,
+  threadId?: string | null,
+) {
   return threadId
     ? `chat:byok:${workspaceId}:${threadId}`
     : `chat:byok:${workspaceId}:current`;
@@ -264,7 +271,9 @@ export function readStoredByokState(
   if (typeof window === "undefined") {
     return null;
   }
-  const raw = window.sessionStorage.getItem(getByokStorageKey(workspaceId, threadId));
+  const raw = window.sessionStorage.getItem(
+    getByokStorageKey(workspaceId, threadId),
+  );
   if (!raw) {
     return null;
   }
@@ -340,4 +349,3 @@ export function toCreateByokCredentialPayload(input: {
     ...(input.metadata ? { metadata: input.metadata } : {}),
   };
 }
-

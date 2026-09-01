@@ -19,8 +19,5 @@ export function DashboardChatThreadPageClient({
     threadId,
   });
 
-  return (
-    <DashboardChatThreadPageView {...controller} />
-  );
+  return <DashboardChatThreadPageView {...controller} />;
 }
-

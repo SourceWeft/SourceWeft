@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   AgentToolModelCallOptions,
   AgentToolModelClientRequest,
@@ -61,6 +62,7 @@ const BILLED_MODEL_SURFACES = {
  */
 function toBilledRequestOptions(
   options: AgentToolModelCallOptions,
+  scopeId: string,
 ): BilledRequestOptions {
   return {
     traceId: options.traceId,
@@ -70,10 +72,23 @@ function toBilledRequestOptions(
     profileAlias: options.profileAlias,
     modelAlias: options.modelAlias,
     referenceId: options.referenceId,
-    idempotencyKey: options.idempotencyKey,
+    idempotencyKey: agentToolBillingIdempotencyKey(
+      scopeId,
+      options.idempotencyKey,
+    ),
+    signal: options.signal,
     llm: options.llm as LlmExecutionConfig | undefined,
     billingMetadata: options.billingMetadata,
   };
+}
+
+export function agentToolBillingIdempotencyKey(
+  scopeId: string,
+  semanticKey: string,
+) {
+  return createHash("sha256")
+    .update(`${scopeId}\0${semanticKey}`)
+    .digest("hex");
 }
 
 /** The gateway's own call, and the capability-facing one it is wrapped in. */
@@ -128,7 +143,10 @@ export function createAgentToolModelGatewayService(input: {
                     Record<string, BilledGatewayCall>
                   >
                 )[kind]![method]!;
-                return call(modelRequest, toBilledRequestOptions(options));
+                return call(
+                  modelRequest,
+                  toBilledRequestOptions(options, input.scope.scopeId),
+                );
               },
             );
         }

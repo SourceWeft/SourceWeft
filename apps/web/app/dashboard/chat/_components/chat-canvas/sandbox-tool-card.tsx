@@ -248,7 +248,9 @@ function ExecuteStatusIcon({
   statusKey: ReturnType<typeof sandboxToolStatusKey>;
 }) {
   if (statusKey === "running") {
-    return <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />;
+    return (
+      <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+    );
   }
   if (statusKey === "failed") {
     return <AlertTriangle className="size-3.5 text-destructive" />;
@@ -474,7 +476,9 @@ function TransferStatusIcon({
   statusKey: ReturnType<typeof sandboxToolStatusKey>;
 }) {
   if (statusKey === "running") {
-    return <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />;
+    return (
+      <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+    );
   }
   if (statusKey === "failed") {
     return <AlertTriangle className="size-3.5 text-destructive" />;

@@ -125,6 +125,8 @@ export interface ArtifactPublisher {
     readonly spec: ArtifactPublishSpec;
     /** Pre-allocated when the id had to exist before the work (billing keys). */
     readonly artifactId?: string;
+    /** Host invocation cancellation; not part of model-authored tool input. */
+    readonly signal?: AbortSignal;
   }): Promise<ArtifactPublishResult>;
 }
 

@@ -144,24 +144,33 @@ export function ByokModelConfigDialog({
   workspaceId: string | null;
 }) {
   const type = defaults?.type ?? "llm";
-  const providerOptions = useMemo(() => buildProviderOptions(providers), [providers]);
+  const providerOptions = useMemo(
+    () => buildProviderOptions(providers),
+    [providers],
+  );
   const [providerName, setProviderName] = useState(CUSTOM_PROVIDER_NAME);
   const [baseUrl, setBaseUrl] = useState("");
   const [modelName, setModelName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [credentialId, setCredentialId] = useState("");
   const [credentialAlias, setCredentialAlias] = useState("");
-  const [credentialMode, setCredentialMode] = useState<"existing" | "new">("new");
+  const [credentialMode, setCredentialMode] = useState<"existing" | "new">(
+    "new",
+  );
   const [apiKey, setApiKey] = useState("");
-  const [modelCandidates, setModelCandidates] = useState<Array<{
-    displayName: string;
-    modelId: string;
-  }>>([]);
+  const [modelCandidates, setModelCandidates] = useState<
+    Array<{
+      displayName: string;
+      modelId: string;
+    }>
+  >([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const selectedProvider =
-    providerOptions.find((provider) => provider.providerName === providerName) ??
+    providerOptions.find(
+      (provider) => provider.providerName === providerName,
+    ) ??
     providerOptions[0] ??
     null;
   const isCustomProvider = providerName === CUSTOM_PROVIDER_NAME;
@@ -170,7 +179,7 @@ export function ByokModelConfigDialog({
     : selectedProvider?.providerKind || DEFAULT_BYOK_PROVIDER_KIND;
   const effectiveBaseUrl = isCustomProvider
     ? baseUrl
-    : selectedProvider?.baseUrl ?? "";
+    : (selectedProvider?.baseUrl ?? "");
   const providerCredentials = useMemo(
     () => credentials.filter((item) => item.providerName === providerName),
     [credentials, providerName],
@@ -178,7 +187,8 @@ export function ByokModelConfigDialog({
   const selectedCredential = providerCredentials.find(
     (item) => item.id === credentialId,
   );
-  const requiresNewCredential = credentialMode === "new" || providerCredentials.length === 0;
+  const requiresNewCredential =
+    credentialMode === "new" || providerCredentials.length === 0;
   const canSubmit =
     providerName.trim().length > 0 &&
     (requiresNewCredential
@@ -198,12 +208,15 @@ export function ByokModelConfigDialog({
       providerOptions,
     });
     const nextProvider =
-      providerOptions.find((provider) => provider.providerName === nextProviderName) ??
-      null;
+      providerOptions.find(
+        (provider) => provider.providerName === nextProviderName,
+      ) ?? null;
 
     setProviderName(nextProviderName);
     setBaseUrl(
-      nextProviderName === CUSTOM_PROVIDER_NAME ? (nextProvider?.baseUrl ?? "") : "",
+      nextProviderName === CUSTOM_PROVIDER_NAME
+        ? (nextProvider?.baseUrl ?? "")
+        : "",
     );
     setModelName("");
     setDisplayName("");
@@ -244,7 +257,12 @@ export function ByokModelConfigDialog({
   }, [credentialId, credentialMode, open, providerCredentials]);
 
   useEffect(() => {
-    if (!open || !workspaceId || credentialMode !== "existing" || !credentialId) {
+    if (
+      !open ||
+      !workspaceId ||
+      credentialMode !== "existing" ||
+      !credentialId
+    ) {
       setModelCandidates([]);
       setLoadingModels(false);
       return;
@@ -337,7 +355,8 @@ export function ByokModelConfigDialog({
       const providerLabel = getProviderLabel(trimmedProviderName);
       const selection = toByokSelectionFromCustomModel({
         byokModelId: createdModel.item.id,
-        capabilities: createdModel.item.capabilities as ModelThinkingCapabilities | null,
+        capabilities: createdModel.item
+          .capabilities as ModelThinkingCapabilities | null,
         credentialAlias: activeCredentialAlias,
         credentialId: activeCredentialId,
         modelName: trimmedModelName,
@@ -347,7 +366,8 @@ export function ByokModelConfigDialog({
         byokCredentialId: activeCredentialId,
         byokCredentialAlias: activeCredentialAlias,
         byokModelId: createdModel.item.id,
-        capabilities: createdModel.item.capabilities as ModelThinkingCapabilities | null,
+        capabilities: createdModel.item
+          .capabilities as ModelThinkingCapabilities | null,
         modelAlias: trimmedModelName,
         name: trimmedDisplayName,
         providerLabel,
@@ -492,7 +512,8 @@ export function ByokModelConfigDialog({
               >
                 Saved credential
               </label>
-              {providerCredentials.length > 0 && credentialMode === "existing" ? (
+              {providerCredentials.length > 0 &&
+              credentialMode === "existing" ? (
                 <Select
                   disabled={saving}
                   onValueChange={setCredentialId}
@@ -519,7 +540,8 @@ export function ByokModelConfigDialog({
                 />
               )}
               <p className="text-[10px] text-muted-foreground sm:text-xs">
-                The credential alias identifies the saved API key. Models are stored under this credential.
+                The credential alias identifies the saved API key. Models are
+                stored under this credential.
               </p>
               {providerCredentials.length > 0 ? (
                 <Button
@@ -612,11 +634,7 @@ export function ByokModelConfigDialog({
             form="byok-model-config-form"
             type="submit"
           >
-            {saving ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              "Add Model"
-            )}
+            {saving ? <Loader2 className="size-4 animate-spin" /> : "Add Model"}
           </Button>
         </DialogFooter>
       </DialogContent>

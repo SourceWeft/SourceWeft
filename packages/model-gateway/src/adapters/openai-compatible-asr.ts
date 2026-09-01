@@ -6,19 +6,21 @@ import {
   appendFormValue,
   asrAudioInputToBlob,
   normalizeAsrSegments,
-  normalizeAsrUsage,
   normalizeAsrWords,
   normalizeResponseFormat,
   normalizeTimestampGranularities,
   resolveAsrAudioFormat,
 } from "./asr-utils";
+import { normalizeModelCallObservation } from "../observation/normalize";
 
 export class OpenAICompatibleAsrTransport implements AsrTransport {
   readonly kind: AsrTransport["kind"] = "openai-compatible";
 
   readonly supportedAudioFormats = OPENAI_COMPATIBLE_ASR_AUDIO_FORMATS;
 
-  protected resolveBaseUrl(target: Parameters<AsrTransport["execute"]>[0]["target"]) {
+  protected resolveBaseUrl(
+    target: Parameters<AsrTransport["execute"]>[0]["target"],
+  ) {
     return target.baseUrl.replace(/\/+$/, "");
   }
 
@@ -38,7 +40,10 @@ export class OpenAICompatibleAsrTransport implements AsrTransport {
       input.payload.fileName,
     );
     form.append("model", input.target.providerModel);
-    form.append("response_format", normalizeResponseFormat(input.payload.responseFormat));
+    form.append(
+      "response_format",
+      normalizeResponseFormat(input.payload.responseFormat),
+    );
     for (const granularity of normalizeTimestampGranularities(
       input.payload.timestampGranularities,
     )) {
@@ -74,6 +79,15 @@ export class OpenAICompatibleAsrTransport implements AsrTransport {
     }
 
     const raw = (await response.json()) as Record<string, unknown>;
+    const observation = normalizeModelCallObservation({
+      modelAlias: input.target.routeDecision.alias,
+      context: {
+        target: input.target,
+        modality: "asr",
+        rawResponse: raw,
+        responseHeaders: response.headers,
+      },
+    });
     return {
       model:
         typeof raw.model === "string" ? raw.model : input.target.providerModel,
@@ -86,7 +100,8 @@ export class OpenAICompatibleAsrTransport implements AsrTransport {
           : undefined,
       segments: normalizeAsrSegments(raw.segments),
       words: normalizeAsrWords(raw.words),
-      usage: normalizeAsrUsage(raw),
+      usage: observation.usage,
+      observation,
       provider: input.target.provider,
       providerModel: input.target.providerModel,
       routeDecision: input.target.routeDecision,

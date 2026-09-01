@@ -32,6 +32,7 @@ export async function meterBillableModelUsage(input: {
   idempotencyKey?: string;
   usage?: UsageInfo;
   llm?: LlmExecutionConfig;
+  allowPriceBookFallback?: boolean;
   metadata?: Record<string, unknown>;
 }): Promise<MeterBillableModelUsageResult> {
   const summary = await input.billing.getSummary(
@@ -66,6 +67,7 @@ export async function meterBillableModelUsage(input: {
     profileAlias: input.profileAlias,
     usage: input.usage,
     llm: input.llm,
+    allowPriceBookFallback: input.allowPriceBookFallback,
   });
 
   if (cost.providerCostUsd && cost.providerCostUsd > 0) {
@@ -137,11 +139,13 @@ export async function meterBillableModelUsage(input: {
         pricingSnapshot: cost.pricingSnapshot,
         providerCostUsd: cost.providerCostUsd,
         minimumCreditReason:
-          cost.costSource === "missing_price_components"
-            ? "missing_price_components"
-            : cost.providerCostUsd === null
-              ? "missing_usage"
-              : "missing_or_zero_price",
+          cost.costSource === "missing_provider_actual"
+            ? "missing_provider_actual"
+            : cost.costSource === "missing_price_components"
+              ? "missing_price_components"
+              : cost.providerCostUsd === null
+                ? "missing_usage"
+                : "missing_or_zero_price",
         providerActualCostUsd: input.usage?.providerCostUsd ?? null,
         providerCostSource: input.usage?.providerCostSource ?? null,
         providerCostDetails: input.usage?.costDetails ?? null,

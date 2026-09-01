@@ -12,7 +12,9 @@ import {
   trustDurationChoices,
 } from "./tool-confirmation-trust";
 
-function trustRule(input: Partial<AgentToolTrustRule> = {}): AgentToolTrustRule {
+function trustRule(
+  input: Partial<AgentToolTrustRule> = {},
+): AgentToolTrustRule {
   return {
     id: "rule-1",
     teamId: "team-1",
@@ -108,8 +110,5 @@ test("plain approve and reject copy is unchanged", () => {
     describeDecisionOutcome({ decision: "approve" }),
     "Approved in SourceWeft.",
   );
-  assert.match(
-    describeDecisionOutcome({ decision: "reject" }),
-    /was not run/i,
-  );
+  assert.match(describeDecisionOutcome({ decision: "reject" }), /was not run/i);
 });

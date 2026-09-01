@@ -318,8 +318,7 @@ export function getLiveToolConfirmationItemsForRun(input: {
     return [];
   }
   const assistantMessageId =
-    signal.assistantMessageId ??
-    input.activeThreadRun.assistantMessageId;
+    signal.assistantMessageId ?? input.activeThreadRun.assistantMessageId;
   if (!assistantMessageId) {
     return [];
   }
@@ -330,8 +329,7 @@ export function getLiveToolConfirmationItemsForRun(input: {
       assistantMessageId,
       confirmation: item.confirmation,
       messageId: assistantMessageId,
-      threadRunId:
-        signal.threadRunId ?? input.activeThreadRun?.id ?? null,
+      threadRunId: signal.threadRunId ?? input.activeThreadRun?.id ?? null,
       toolCall: item.toolCall,
     }));
 }
@@ -546,8 +544,7 @@ function getSelectedUserVersionIdForAssistant(input: {
   const latestUserVersionIndex = Math.max(userGroup.versions.length - 1, 0);
   const activeUserBranchIndex = Math.min(
     Math.max(
-      input.activeVersionByGroup?.[userGroup.groupId] ??
-        latestUserVersionIndex,
+      input.activeVersionByGroup?.[userGroup.groupId] ?? latestUserVersionIndex,
       0,
     ),
     latestUserVersionIndex,
@@ -568,7 +565,8 @@ function getSelectedMessageVersion(input: {
   const scopedEntries =
     input.group.role === "assistant" && selectedUserVersionId
       ? entries.filter(
-          (entry) => entry.version.sourceUserMessageId === selectedUserVersionId,
+          (entry) =>
+            entry.version.sourceUserMessageId === selectedUserVersionId,
         )
       : entries;
   const visibleEntries = scopedEntries.length > 0 ? scopedEntries : entries;
@@ -677,10 +675,7 @@ export function shouldLockComposerForApproval(input: {
 
 export function shouldLockComposerForRun(input: {
   chatExecutionState?:
-    | "idle"
-    | "executing"
-    | "waiting_for_approval"
-    | "stopping";
+    "idle" | "executing" | "waiting_for_approval" | "stopping";
   /** Background tool/artifact work that outlives the stream (e.g. async jobs). */
   hasActivelyRunningToolWork?: boolean;
   isStreaming: boolean;

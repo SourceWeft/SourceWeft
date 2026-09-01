@@ -1,4 +1,5 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
+import type { ModelCallObservation } from "./observation/types";
 import type { TargetHealthRegistry } from "./target-health";
 
 export type ModelKind =
@@ -86,6 +87,11 @@ export interface ByokCredentialsInput {
 
 export interface GatewayExecutionInput {
   executionMode?: GatewayExecutionMode;
+  /**
+   * Whether SourceWeft may try another configured route target after a failed
+   * attempt. Router providers remain free to resolve their own upstream model.
+   */
+  fallbackPolicy?: "configured" | "none";
   // Global-only route identity. BYOK requests should route by provider + providerModel.
   profileAlias?: string;
   providerHint?: string;
@@ -125,12 +131,14 @@ export interface UsageInfo {
   imageQuality?: string;
   inputAudioTokens?: number;
   outputAudioTokens?: number;
+  /** @deprecated Use ModelCallObservation.cost. Kept during the dual-write migration. */
   providerCostUsd?: number;
+  /** @deprecated Use ModelCallObservation.cost.source. */
   providerCostSource?:
-    | "usage.cost"
-    | "usage.cost_details.upstream_inference_cost"
-    | "usage.estimated_cost"
-    | "inference_status.cost";
+    "provider_inline" | "provider_estimated" | "provider_receipt";
+  /** @deprecated Provider wire provenance now belongs to ModelCallObservation.provenance. */
+  providerCostSourcePath?: string;
+  /** @deprecated Provider cost details remain for compatibility during migration. */
   costDetails?: Record<string, number>;
 }
 
@@ -148,11 +156,7 @@ export interface ObserveSpan {
 }
 
 export type ObserveRawCaptureMode =
-  | "none"
-  | "normalized"
-  | "sdk_metadata"
-  | "reconstructed"
-  | "provider_wire";
+  "none" | "normalized" | "sdk_metadata" | "reconstructed" | "provider_wire";
 
 export interface ObserveGenerationStart {
   traceId?: string;
@@ -182,6 +186,7 @@ export interface ObserveGenerationEnd {
   finishReason?: string;
   reasoningText?: string;
   providerFields?: Record<string, unknown>;
+  observation?: ModelCallObservation;
   usage?: UsageInfo;
   rawCaptureMode?: ObserveRawCaptureMode;
   providerResponse?: Record<string, unknown>;
@@ -271,12 +276,7 @@ export interface GatewayRequestMetadata {
 export type ToolDefinition = Record<string, unknown>;
 
 export type ToolChoice =
-  | "auto"
-  | "none"
-  | "required"
-  | "any"
-  | string
-  | Record<string, unknown>;
+  "auto" | "none" | "required" | "any" | string | Record<string, unknown>;
 
 export interface ToolBindingOptions {
   toolChoice?: ToolChoice;
@@ -421,10 +421,7 @@ export interface LangChainChatModelLike {
       strict?: boolean;
     },
   ): {
-    invoke(
-      input: unknown,
-      options?: Record<string, unknown>,
-    ): Promise<unknown>;
+    invoke(input: unknown, options?: Record<string, unknown>): Promise<unknown>;
   };
   invoke(input: unknown, options?: Record<string, unknown>): Promise<unknown>;
   stream(
@@ -447,7 +444,9 @@ export interface LangChainRerankerLike {
   compressDocuments?(
     docs: Array<{ pageContent: string; metadata?: Record<string, unknown> }>,
     query: string,
-  ): Promise<Array<{ pageContent: string; metadata?: Record<string, unknown> }>>;
+  ): Promise<
+    Array<{ pageContent: string; metadata?: Record<string, unknown> }>
+  >;
 }
 
 export interface LangChainFactories {
@@ -494,6 +493,7 @@ export interface ChatCompleteResult {
   id?: string;
   model: string;
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   finishReason?: string;
   reasoning?: string;
   providerFields?: Record<string, unknown>;
@@ -514,6 +514,7 @@ export type ChatStreamEvent =
       type: "metadata";
       metadata: {
         usage?: UsageInfo;
+        observation?: ModelCallObservation;
         finishReason?: string;
         reasoning?: string;
         providerFields?: Record<string, unknown>;
@@ -550,6 +551,7 @@ export interface EmbedResult {
   model: string;
   embedding: number[];
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -561,6 +563,7 @@ export interface EmbedBatchResult {
   model: string;
   embeddings: number[][];
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -588,6 +591,7 @@ export interface RerankResult {
   model: string;
   results: RerankItem[];
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -598,11 +602,7 @@ export interface RerankResult {
 export type AsrAudioInput = Blob | ArrayBuffer | Uint8Array;
 
 export type AsrResponseFormat =
-  | "json"
-  | "text"
-  | "srt"
-  | "verbose_json"
-  | "vtt";
+  "json" | "text" | "srt" | "verbose_json" | "vtt";
 
 export type AsrTimestampGranularity = "segment" | "word";
 
@@ -642,6 +642,7 @@ export interface AsrTranscribeResult {
   segments?: AsrSegment[];
   words?: AsrWord[];
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -650,13 +651,7 @@ export interface AsrTranscribeResult {
 }
 
 export type TtsResponseFormat =
-  | "mp3"
-  | "opus"
-  | "aac"
-  | "flac"
-  | "wav"
-  | "pcm"
-  | (string & {});
+  "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" | (string & {});
 
 export interface TtsSpeechInput extends GatewayExecutionInput {
   model: string;
@@ -674,6 +669,7 @@ export interface TtsSpeechResult {
   audio: ArrayBuffer;
   mimeType?: string;
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -727,6 +723,7 @@ export interface ImageGenerateResult {
   model: string;
   images: GeneratedImage[];
   usage?: UsageInfo;
+  observation?: ModelCallObservation;
   provider?: string;
   providerModel?: string;
   routeDecision?: RouteDecision;
@@ -908,4 +905,3 @@ export interface ResolvedRequestTarget {
   timeoutMs?: number;
   maxRetries?: number;
 }
-

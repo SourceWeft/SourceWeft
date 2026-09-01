@@ -89,13 +89,7 @@ export const DAYTONA_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy =
   });
 
 export type DaytonaProviderOperation =
-  | "create"
-  | "get"
-  | "delete"
-  | "execute"
-  | "upload"
-  | "download"
-  | "mkdir";
+  "create" | "get" | "delete" | "execute" | "upload" | "download" | "mkdir";
 
 export type DaytonaSandboxInstance = {
   id: string;
@@ -399,9 +393,7 @@ export function isDaytonaImageReference(value: string) {
 }
 
 export type DaytonaSandboxTargetSource =
-  | "DAYTONA_SANDBOX_SNAPSHOT"
-  | "DAYTONA_SANDBOX_IMAGE"
-  | "request";
+  "DAYTONA_SANDBOX_SNAPSHOT" | "DAYTONA_SANDBOX_IMAGE" | "request";
 
 export type DaytonaSandboxTarget =
   | {
@@ -518,6 +510,7 @@ export type DaytonaSandboxProviderOptions = {
 export class DaytonaSandboxProvider implements SandboxProvider {
   readonly id = "daytona";
   readonly pathPolicy = DAYTONA_SANDBOX_PATH_POLICY;
+  readonly cancellationScope = "sandbox" as const;
   private readonly sandboxTarget: DaytonaSandboxTarget;
   private readonly daytonaSandbox: DaytonaSandboxClient;
 
@@ -595,22 +588,44 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     });
   }
 
+  /** Daytona's wrapper exposes sandbox close, but no stable command-kill handle. */
+  async cancelExecution(input: {
+    providerSandboxId: string;
+    executionId: string;
+    reason: "user_cancelled" | "timed_out";
+  }) {
+    try {
+      await this.deleteSandbox(input.providerSandboxId);
+    } catch (error) {
+      if (
+        !providerErrorMessage(error).includes("SANDBOX_NOT_FOUND_OR_EXPIRED")
+      ) {
+        throw error;
+      }
+    }
+    return { confirmed: true, mode: "sandbox" } as const;
+  }
+
   async execute(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }) {
     return this.executeSystem(input);
   }
 
   async executeSystem(input: {
     providerSandboxId: string;
+    executionId?: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
     maxOutputChars: number;
+    signal?: AbortSignal;
   }) {
     return this.withProviderErrorMapping("execute", async () => {
       const sandbox = await this.connectSandbox(
@@ -648,7 +663,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
 
   async downloadFile(input: {
     providerSandboxId: string;
+    executionId?: string;
     sandboxPath: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   }) {
     return this.withProviderErrorMapping("download", async () => {
       const sandbox = await this.connectSandbox(input.providerSandboxId);

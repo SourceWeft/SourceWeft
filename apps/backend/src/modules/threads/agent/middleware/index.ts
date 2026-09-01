@@ -29,6 +29,7 @@ import {
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
 import { createSourceWeftToolErrorMiddleware } from "./tool-error";
+import { createSourceWeftToolExecutionTimeoutMiddleware } from "./tool-execution-timeout";
 import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
@@ -110,6 +111,7 @@ export function createSourceWeftSubagentMiddlewareStack(
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
     }),
+    createSourceWeftToolExecutionTimeoutMiddleware(),
     toolRetryMiddleware({
       tools: RETRYABLE_READ_TOOL_NAMES,
       onFailure: "error",
@@ -170,6 +172,7 @@ export async function createSourceWeftAgentMiddlewareStack(
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
     }),
+    createSourceWeftToolExecutionTimeoutMiddleware(),
     toolRetryMiddleware({
       tools: RETRYABLE_READ_TOOL_NAMES,
       onFailure: "error",
@@ -224,4 +227,21 @@ export {
   createSourceWeftToolCallContextMiddleware,
   currentSourceWeftToolCallContext,
   currentSourceWeftToolCallId,
+  currentSourceWeftToolInvocationSignal,
+  runWithSourceWeftToolInvocationSignal,
 } from "./tool-call-context";
+export {
+  AGENT_TOOL_EXECUTION_TIMEOUT_CODE,
+  AGENT_TOOL_HOST_EXECUTION_TIMEOUT_MAX_MS,
+  AGENT_TOOL_TERMINATION_GRACE_MS,
+  AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
+  AgentToolExecutionTimeoutError,
+  AgentToolTerminationUnknownError,
+  createSourceWeftToolExecutionTimeoutMiddleware,
+  findAgentToolTerminationUnknownReason,
+  isAgentToolExecutionTimeoutReason,
+  isAgentToolTerminationUnknownReason,
+  type AgentToolExecutionTimeoutReason,
+  type AgentToolTerminationUnknownReason,
+  type SourceWeftToolExecutionTimeoutMiddlewareInput,
+} from "./tool-execution-timeout";

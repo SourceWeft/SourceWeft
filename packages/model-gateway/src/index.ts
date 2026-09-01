@@ -30,7 +30,20 @@ export {
 export { createLangChainChatModel } from "./bridge/utils";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
 export { resolveThinkingMode } from "./thinking";
-export { normalizeProviderUsage, normalizeUsage } from "./normalize/usage";
+export { normalizeModelCallObservation } from "./observation/normalize";
+export type {
+  ModelCallCost,
+  ModelCallCostSource,
+  ModelCallCostStatus,
+  ModelCallDiagnostic,
+  ModelCallIdentity,
+  ModelCallObservation,
+  ModelCallProvenance,
+  ProviderReceipt,
+  ProviderResponseAdapter,
+} from "./observation/types";
+export { getProviderResponseAdapter } from "./adapters/providers/registry";
+export { ProviderReceiptPendingError } from "./adapters/providers/orcarouter/receipt";
 
 export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 export { createDeepInfraProvider } from "./providers/deepinfra";

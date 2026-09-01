@@ -165,7 +165,10 @@ afterEach(async () => {
 
 test("initial mount loads sources and reports them via onSourceLoad", async () => {
   sdk.listSources.mockResolvedValue({
-    items: [apiSource("s1", { title: "Alpha" }), apiSource("s2", { title: "Beta" })],
+    items: [
+      apiSource("s1", { title: "Alpha" }),
+      apiSource("s2", { title: "Beta" }),
+    ],
   });
   const onSourceLoad = vi.fn();
   const props = makeProps({ onSourceLoad });
@@ -194,7 +197,10 @@ test("a failing list call sets loadingError and clears loading", async () => {
 
 test("derived tree state reflects the loaded sources", async () => {
   sdk.listSources.mockResolvedValue({
-    items: [apiSource("s1", { title: "Alpha" }), apiSource("s2", { title: "Beta" })],
+    items: [
+      apiSource("s1", { title: "Alpha" }),
+      apiSource("s2", { title: "Beta" }),
+    ],
   });
   const captured = await renderHook(makeProps());
 
@@ -209,7 +215,10 @@ test("derived tree state reflects the loaded sources", async () => {
 
 test("selection handlers emit the expected ids", async () => {
   sdk.listSources.mockResolvedValue({
-    items: [apiSource("s1", { title: "Alpha" }), apiSource("s2", { title: "Beta" })],
+    items: [
+      apiSource("s1", { title: "Alpha" }),
+      apiSource("s2", { title: "Beta" }),
+    ],
   });
   const onSelectionChange = vi.fn();
   const captured = await renderHook(makeProps({ onSelectionChange }));

@@ -81,7 +81,6 @@ import {
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
-  hasPresentationArtifactUrl,
   normalizeToolOutputString,
   parseJsonObjectText,
 } from "./output-normalizer";

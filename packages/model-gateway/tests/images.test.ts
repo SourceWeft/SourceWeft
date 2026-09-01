@@ -42,7 +42,10 @@ test("images.generate sends SiliconflowCN image_size and batch_size", async () =
     count: 2,
   });
 
-  assert.equal(requests[0]?.url, "https://api.siliconflow.cn/v1/images/generations");
+  assert.equal(
+    requests[0]?.url,
+    "https://api.siliconflow.cn/v1/images/generations",
+  );
   assert.equal(
     (requests[0]?.init.headers as Record<string, string>).Authorization,
     "Bearer sf-key",
@@ -120,7 +123,9 @@ test("openai-compatible images support custom API key headers", async () => {
     modelRoutes: {
       "image-default": {
         strategy: "priority",
-        targets: [{ provider: "openai-proxy", model: "image-model", priority: 1 }],
+        targets: [
+          { provider: "openai-proxy", model: "image-model", priority: 1 },
+        ],
       },
     },
   });
@@ -141,7 +146,8 @@ test("openai-compatible images support custom API key headers", async () => {
     "proxy-token",
   );
   assert.equal(
-    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    (requests[0]?.init.headers as Record<string, string> | undefined)
+      ?.Authorization,
     undefined,
   );
 });
@@ -201,8 +207,9 @@ test("images.generate preserves OpenRouter provider cost from usage", async () =
   assert.equal(result.usage?.outputTokens, 1120);
   assert.equal(result.usage?.outputImageTokens, 1120);
   assert.equal(result.usage?.providerCostUsd, 0.0673);
+  assert.equal(result.usage?.providerCostSource, "provider_inline");
   assert.equal(
-    result.usage?.providerCostSource,
-    "usage.cost",
+    result.usage?.providerCostSourcePath,
+    "provider:openrouter.usage.cost",
   );
 });

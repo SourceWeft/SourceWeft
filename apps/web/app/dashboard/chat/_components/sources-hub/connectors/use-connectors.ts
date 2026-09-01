@@ -14,10 +14,7 @@ import {
   type ConnectorOAuthCompletionMessage,
 } from "../../../../connectors/oauth/_components/oauth-messaging";
 import type { SourceItem } from "../../source-types";
-import {
-  getErrorMessage,
-  isConnectorAlreadyHandledError,
-} from "../lib/errors";
+import { getErrorMessage, isConnectorAlreadyHandledError } from "../lib/errors";
 import {
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,

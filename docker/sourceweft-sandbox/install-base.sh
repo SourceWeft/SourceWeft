@@ -13,7 +13,7 @@
 # user or chown the workspace — that is provider-specific (Daytona uses
 # `sourceweft`, Cloudflare uses `sandbox`) and each Dockerfile owns it. The
 # matching ENV declarations (PATH, PNPM_HOME, VIRTUAL_ENV, PLAYWRIGHT_BROWSERS_PATH,
-# SOURCEWEFT_REMOTION_BROWSER, NODE_PATH, LANG…) also live in each Dockerfile so
+# SOURCEWEFT_REMOTION_BROWSER, SOURCEWEFT_PNPM_STORE, NODE_PATH, LANG…) also live in each Dockerfile so
 # they take effect at runtime; the values are identical on both sides.
 #
 # The two bases differ: Daytona = debian:bookworm, Cloudflare = ubuntu:22.04.
@@ -32,12 +32,14 @@ NODE_VERSION="${NODE_VERSION:-22.19.0}"
 PNPM_VERSION="${PNPM_VERSION:-10.19.0}"
 CHROME_HEADLESS_SHELL_VERSION="${CHROME_HEADLESS_SHELL_VERSION:-149.0.7790.0}"
 CHROME_HEADLESS_SHELL_SHA256="${CHROME_HEADLESS_SHELL_SHA256:-a3b011ab4c726e215cdeb623907a09cfb48f07054a7271fdda555ee2ae4f804d}"
+REMOTION_RENDERER_VERSION="${REMOTION_RENDERER_VERSION:-4.0.468}"
 
 export DEBIAN_FRONTEND=noninteractive
 export PNPM_HOME="${PNPM_HOME:-/pnpm}"
 export VIRTUAL_ENV="${VIRTUAL_ENV:-/opt/venv}"
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"
 export SOURCEWEFT_REMOTION_BROWSER="${SOURCEWEFT_REMOTION_BROWSER:-/opt/chrome-headless-shell/chrome-headless-shell-linux64/chrome-headless-shell}"
+export SOURCEWEFT_PNPM_STORE="${SOURCEWEFT_PNPM_STORE:-/opt/sourceweft-pnpm-store}"
 export PATH="${PNPM_HOME}:${VIRTUAL_ENV}/bin:${PATH}"
 
 # ── System deps + locale ────────────────────────────────────────────────────
@@ -95,6 +97,33 @@ corepack prepare "pnpm@${PNPM_VERSION}" --activate
 corepack disable
 npm install -g "pnpm@${PNPM_VERSION}"
 pnpm --version
+
+# ── Trusted video render dependency cache ───────────────────────────────────
+# Runtime validation still uses its generated frozen lockfile as authority.
+# This image layer only prewarms the shared content-addressed pnpm store so a
+# sandbox does not perform a cold registry install while it is serving a turn.
+videoRenderCache=/tmp/sourceweft-video-render-cache
+mkdir -p "${videoRenderCache}" "${SOURCEWEFT_PNPM_STORE}"
+printf '%s\n' \
+    '{' \
+    '  "name": "sourceweft-video-render-cache",' \
+    '  "private": true,' \
+    '  "dependencies": {' \
+    "    \"@remotion/bundler\": \"${REMOTION_RENDERER_VERSION}\"," \
+    "    \"@remotion/renderer\": \"${REMOTION_RENDERER_VERSION}\"," \
+    '    "@types/react": "18.3.18",' \
+    '    "@types/react-dom": "18.3.5",' \
+    '    "react": "18.3.1",' \
+    '    "react-dom": "18.3.1",' \
+    "    \"remotion\": \"${REMOTION_RENDERER_VERSION}\"," \
+    '    "typescript": "5.9.2"' \
+    '  }' \
+    '}' > "${videoRenderCache}/package.json"
+pnpm --dir "${videoRenderCache}" install \
+    --ignore-scripts \
+    --store-dir "${SOURCEWEFT_PNPM_STORE}"
+rm -rf "${videoRenderCache}"
+chmod -R a+rwX "${SOURCEWEFT_PNPM_STORE}"
 
 # ── Python 3.11 + isolated venv with the document-processing packages ───────
 # Native, distro-packaged CPython (dynamically linked) so it works both natively

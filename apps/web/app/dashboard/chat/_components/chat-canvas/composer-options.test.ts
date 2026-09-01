@@ -52,9 +52,7 @@ describe("composer options", () => {
   });
 
   it("falls back to an empty state for invalid input", () => {
-    expect(normalizeComposerOptionsState(null)).toEqual(
-      EMPTY_COMPOSER_OPTIONS,
-    );
+    expect(normalizeComposerOptionsState(null)).toEqual(EMPTY_COMPOSER_OPTIONS);
     expect(isComposerOptionsStateEmpty(normalizeComposerOptionsState([]))).toBe(
       true,
     );

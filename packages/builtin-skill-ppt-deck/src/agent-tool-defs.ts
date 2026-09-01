@@ -24,6 +24,7 @@ export const reviewDeckVisualsAgentTool = defineAgentTool({
     },
   },
   defaultPermission: "allow",
+  executionTimeoutMs: 5 * 60_000,
   riskLevel: "low",
   turnPreflight: reviewDeckVisualsTurnPreflight,
 });

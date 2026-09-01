@@ -11,10 +11,8 @@ import { ContentError } from "../../modules/content/errors";
  * checkpoint skip, per-stage time budget + retry, ready/failed terminal
  * transitions, and overall-progress computation.
  *
- * Generalized from the video-presentation worker; a pipeline definition
- * supplies the stage catalog (ids/labels/budgets) and may override the
- * progress function (video does, to stay byte-identical with the web
- * client's shared contracts computation).
+ * A pipeline definition supplies the stage catalog (ids/labels/budgets) and
+ * may override the progress function.
  */
 
 /**
@@ -66,7 +64,7 @@ export class StageBudgetExceededError extends Error {
 /**
  * Default overall-progress: budget-weighted stage completion, capped at 99
  * until every step completes. Pipelines whose clients compute progress
- * independently (video) must override with the shared function instead.
+ * independently may override this function.
  */
 export function createBudgetWeightedProgress(
   stages: readonly DeliverableStageDescriptor[],

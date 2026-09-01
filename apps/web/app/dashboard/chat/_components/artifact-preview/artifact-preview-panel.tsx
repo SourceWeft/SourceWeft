@@ -12,7 +12,10 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { ShareLink } from "@sourceweft/contracts";
+import {
+  artifactVersionMediaProjectionSchema,
+  type ShareLink,
+} from "@sourceweft/contracts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +52,7 @@ import {
 import { resolveArtifactPreviewRenderer } from "./preview-registry";
 import type { ArtifactPreviewLayout } from "./types";
 import { isArtifactPending, payloadRecord } from "./utils";
+import { withArtifactVersionMediaProxyUrls } from "../chat-canvas/use-artifact-version-media";
 
 export function ArtifactPreviewPanel({
   artifact,
@@ -70,7 +74,13 @@ export function ArtifactPreviewPanel({
   const proxyFileUrl = resolveArtifactProxyFileUrl({ artifact, workspaceId });
   const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
   const title = artifactTitle(artifact);
-  const payload = payloadRecord(artifact);
+  const storedPayload = payloadRecord(artifact);
+  const versionMedia =
+    artifactVersionMediaProjectionSchema.safeParse(storedPayload);
+  const payload =
+    versionMedia.success && workspaceId
+      ? withArtifactVersionMediaProxyUrls(versionMedia.data, workspaceId)
+      : storedPayload;
   const previewContext = {
     artifact,
     downloadUrl,

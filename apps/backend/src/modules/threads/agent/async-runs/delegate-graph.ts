@@ -17,11 +17,19 @@
  * the billed gateway model + tenant backend from the run config (the billing /
  * tenancy propagation step); this module owns only the compilation.
  */
-import { createDeepAgent, type AnyBackendProtocol, type SubAgent } from "deepagents";
+import {
+  createDeepAgent,
+  type AnyBackendProtocol,
+  type SubAgent,
+} from "deepagents";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { AgentMiddleware } from "langchain";
 import type { z } from "zod";
-import { createExploreSubagent, exploreResponseSchema } from "../subagents/explore";
+import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
+import {
+  createExploreSubagent,
+  exploreResponseSchema,
+} from "../subagents/explore";
 import { createPlanSubagent, planResponseSchema } from "../subagents/plan";
 
 export const DELEGATE_GRAPH_IDS = ["explore", "plan"] as const;
@@ -69,10 +77,17 @@ export function createDelegateGraph(input: {
   availableTools: readonly { readonly name: string }[];
   middleware?: readonly AgentMiddleware[];
 }): ReturnType<typeof createDeepAgent> {
+  const governance = createSourceWeftSubagentMiddlewareStack({
+    backend: input.backend,
+    model: input.model,
+    toolObservabilityContext: {
+      subagentType: `${input.graphId}-async`,
+    },
+  });
   const delegate = DELEGATE_FACTORIES[input.graphId]({
     availableTools: input.availableTools,
     backend: input.backend,
-    middleware: input.middleware ?? [],
+    middleware: [...governance, ...(input.middleware ?? [])],
   });
 
   // No `responseFormat`: the delegate investigates and returns free-text; the
@@ -83,6 +98,8 @@ export function createDelegateGraph(input: {
     systemPrompt: delegate.systemPrompt,
     middleware: (delegate.middleware ?? []) as never,
     backend: input.backend as never,
-    ...(input.checkpointer ? { checkpointer: input.checkpointer as never } : {}),
+    ...(input.checkpointer
+      ? { checkpointer: input.checkpointer as never }
+      : {}),
   } as never);
 }

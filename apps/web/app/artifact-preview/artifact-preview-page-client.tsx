@@ -10,20 +10,10 @@ import { contentClient } from "../../lib/sdk";
 import { ArtifactPreviewPanel } from "../dashboard/chat/_components/artifact-preview/artifact-preview-panel";
 import type { ArtifactListItem } from "../dashboard/chat/_components/sources-hub/types";
 
-const VIDEO_PRESENTATION_POLL_INTERVAL_MS = 3000;
-const VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES = 3;
-
 type LoadState =
   | { artifact: ArtifactListItem; error?: never; status: "ready" }
   | { artifact?: never; error: string; status: "error" }
   | { artifact?: never; error?: never; status: "loading" };
-
-function shouldPollArtifact(artifact: ArtifactListItem) {
-  return (
-    artifact.artifactType === "video_presentation" &&
-    (artifact.status === "pending" || artifact.status === "running")
-  );
-}
 
 export function ArtifactPreviewPageClient({
   artifactId,
@@ -33,7 +23,6 @@ export function ArtifactPreviewPageClient({
   workspaceId: string | null;
 }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [, setPollFailureCount] = useState(0);
   const canLoad = Boolean(artifactId && workspaceId);
 
   useEffect(() => {
@@ -49,12 +38,10 @@ export function ArtifactPreviewPageClient({
       }
 
       setState({ status: "loading" });
-      setPollFailureCount(0);
       try {
         const result = await contentClient.getArtifact(workspaceId, artifactId);
         if (!cancelled) {
           setState({ artifact: result.artifact, status: "ready" });
-          setPollFailureCount(0);
         }
       } catch (error) {
         if (!cancelled) {
@@ -74,55 +61,6 @@ export function ArtifactPreviewPageClient({
       cancelled = true;
     };
   }, [artifactId, workspaceId]);
-
-  useEffect(() => {
-    if (
-      !artifactId ||
-      !workspaceId ||
-      state.status !== "ready" ||
-      !shouldPollArtifact(state.artifact)
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      void contentClient
-        .getArtifact(workspaceId, artifactId)
-        .then((result) => {
-          if (cancelled) {
-            return;
-          }
-
-          setPollFailureCount(0);
-          setState({ artifact: result.artifact, status: "ready" });
-        })
-        .catch((error) => {
-          if (cancelled) {
-            return;
-          }
-
-          setPollFailureCount((current) => {
-            const next = current + 1;
-            if (next >= VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES) {
-              setState({
-                error:
-                  error instanceof Error
-                    ? error.message
-                    : "Could not refresh this video presentation status.",
-                status: "error",
-              });
-            }
-            return next;
-          });
-        });
-    }, VIDEO_PRESENTATION_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [artifactId, state, workspaceId]);
 
   const handleClose = useCallback(() => {
     if (window.history.length > 1) {

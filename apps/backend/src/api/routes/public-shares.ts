@@ -125,6 +125,78 @@ export function registerPublicShareRoutes(app: Hono) {
     return ApiResponse.success(c, { artifact });
   });
 
+  app.get(
+    "/v1/public/shares/:token/versions/:versionId/media/:resource",
+    async (c) => {
+      const token = requireRouteParam(c, "token");
+      const resource = requireRouteParam(c, "resource");
+      if (resource !== "video" && resource !== "cover") {
+        throw new ApiError(
+          404,
+          "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+          "Artifact version media not found",
+        );
+      }
+      const resolved = await sharingService.resolvePublicArtifactBytes(token, {
+        countView:
+          resource === "video" &&
+          shouldCountView(
+            token,
+            clientIpOf({
+              cfConnectingIp: c.req.header("cf-connecting-ip"),
+              xRealIp: c.req.header("x-real-ip"),
+              xForwardedFor: c.req.header("x-forwarded-for"),
+            }),
+            Date.now(),
+          ),
+      });
+      if (!resolved) {
+        throw new ApiError(
+          404,
+          "SHARE_NOT_FOUND",
+          "This share is not available",
+        );
+      }
+      const media =
+        await contentArtifactsService.getSharedArtifactVersionMediaBytes(
+          resolved.artifact,
+          {
+            artifactVersionId: requireRouteParam(c, "versionId"),
+            resource,
+            range: c.req.header("range"),
+            ifNoneMatch: c.req.header("if-none-match"),
+            download: c.req.query("download") === "1",
+          },
+        );
+      if (!media) {
+        throw new ApiError(
+          404,
+          "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+          "Artifact version media not found",
+        );
+      }
+      c.header("ETag", media.etag);
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("Referrer-Policy", "no-referrer");
+      c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
+      if (resolved.share.noindex) c.header("X-Robots-Tag", "noindex");
+      if (media.kind === "not_modified") return c.body(null, 304);
+      c.header("Accept-Ranges", "bytes");
+      if (media.kind === "range_not_satisfiable") {
+        c.header("Content-Range", `bytes */${media.totalLength}`);
+        return c.body(null, 416);
+      }
+      c.header("Content-Type", media.contentType);
+      c.header("Content-Length", String(media.contentLength));
+      c.header(
+        "Content-Disposition",
+        `${media.download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(media.fileName)}`,
+      );
+      if (media.contentRange) c.header("Content-Range", media.contentRange);
+      return c.body(Buffer.from(media.body), media.status);
+    },
+  );
+
   app.get("/v1/public/shares/:token/raw", async (c) => {
     const token = requireRouteParam(c, "token");
     const countView = shouldCountView(
@@ -148,6 +220,10 @@ export function registerPublicShareRoutes(app: Hono) {
     );
 
     c.header("Content-Type", file.contentType);
+    c.header(
+      "Content-Disposition",
+      `${c.req.query("download") === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
     c.header("Content-Security-Policy", SANDBOX_CSP);
     c.header("X-Content-Type-Options", "nosniff");
     // Framing is controlled by the CSP `frame-ancestors` above (our web origin
@@ -182,7 +258,7 @@ export function registerPublicShareRoutes(app: Hono) {
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
-    return c.body(preview.body);
+    return c.body(Buffer.from(preview.body));
   });
 
   // Sub-assets (narration, images) for a share that client-renders in the

@@ -4,7 +4,6 @@ import {
   normalizeGatewayError,
   toGatewayErrorData,
 } from "../errors";
-import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 import {
   createChatModel,
   requestForcedToolChoiceSupport,
@@ -13,6 +12,14 @@ import {
 import { executeStructuredOutput } from "./structured-output";
 import { resolveModelCapabilities } from "../model-capabilities";
 import { resolveThinkingMode } from "../thinking";
+import {
+  mergeModelCallObservations,
+  normalizeModelCallObservation,
+} from "../observation/normalize";
+import {
+  createProviderResponseCapture,
+  runWithProviderResponseCapture,
+} from "../observation/response-capture";
 import type {
   ChatCompleteInput,
   ChatCompleteResult,
@@ -216,6 +223,7 @@ export async function runBridgeChatComplete(input: {
     const request = { ...input, payload };
     const model = createChatModel(request);
     const messages = toLangChainMessages(payload.messages);
+    const responseCapture = createProviderResponseCapture();
     let rawMessage: AIMessage;
     let structuredOutput: Record<string, unknown> | undefined;
 
@@ -235,28 +243,48 @@ export async function runBridgeChatComplete(input: {
       // `method`/`strict` come from the caller only (capability plays no part in
       // the dispatch — chat.complete pins no fallback method, preserving its
       // long-standing behavior).
-      const executed = await executeStructuredOutput({
-        model,
-        schema,
-        name: config.name,
-        messages,
-        target: input.target,
-        supportsForcedToolChoice: requestForcedToolChoiceSupport(request),
-        ...(config.method !== undefined ? { method: config.method } : {}),
-        ...(config.strict !== undefined ? { strict: config.strict } : {}),
-        allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
-        ...(input.options !== undefined ? { options: input.options } : {}),
-        logger: input.config.logger,
-      });
+      const executed = await runWithProviderResponseCapture(
+        responseCapture,
+        () =>
+          executeStructuredOutput({
+            model,
+            schema,
+            name: config.name,
+            messages,
+            target: input.target,
+            supportsForcedToolChoice: requestForcedToolChoiceSupport(request),
+            ...(config.method !== undefined ? { method: config.method } : {}),
+            ...(config.strict !== undefined ? { strict: config.strict } : {}),
+            allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+            ...(input.options !== undefined ? { options: input.options } : {}),
+            logger: input.config.logger,
+          }),
+      );
       rawMessage = executed.rawMessage;
       structuredOutput = executed.parsed;
     } else {
-      rawMessage = (await model.invoke(
-        messages,
-        langChainInvokeOptions(input.options),
+      rawMessage = (await runWithProviderResponseCapture(responseCapture, () =>
+        model.invoke(messages, langChainInvokeOptions(input.options)),
       )) as AIMessage;
     }
     const responseMetadata = extractResponseMetadata(rawMessage);
+    const observation = normalizeModelCallObservation({
+      modelAlias: payload.model,
+      context: {
+        target: input.target,
+        modality: "chat",
+        rawResponse: rawMessage,
+        sdkUsage:
+          rawMessage.usage_metadata ??
+          extractUsage({
+            raw: rawMessage,
+            usageMetadata: rawMessage.usage_metadata,
+            responseMetadata,
+          }),
+        responseMetadata,
+        responseHeaders: responseCapture.headers,
+      },
+    });
 
     return {
       id: typeof rawMessage.id === "string" ? rawMessage.id : undefined,
@@ -264,15 +292,8 @@ export async function runBridgeChatComplete(input: {
         typeof responseMetadata?.model === "string"
           ? responseMetadata.model
           : input.target.providerModel,
-      usage:
-        normalizeProviderUsage(rawMessage) ??
-        normalizeUsage(
-          extractUsage({
-            raw: rawMessage,
-            usageMetadata: rawMessage.usage_metadata,
-            responseMetadata,
-          }),
-        ),
+      usage: observation.usage,
+      observation,
       finishReason: extractFinishReason(responseMetadata),
       reasoning: extractReasoning(rawMessage),
       providerFields: cloneRecord(responseMetadata),
@@ -313,27 +334,50 @@ export async function* runBridgeChatStream(input: {
       ...input,
       payload,
     });
-    const stream = await model.stream(
-      toLangChainMessages(payload.messages),
-      langChainInvokeOptions(input.options),
+    const responseCapture = createProviderResponseCapture();
+    const stream = await runWithProviderResponseCapture(responseCapture, () =>
+      model.stream(
+        toLangChainMessages(payload.messages),
+        langChainInvokeOptions(input.options),
+      ),
     );
     let usage = undefined;
+    let observation = undefined;
     let finishReason: string | undefined;
     let reasoning: string | undefined;
     let providerFields: Record<string, unknown> | undefined;
 
-    for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
+    const iterator = (stream as AsyncIterable<AIMessageChunk>)[
+      Symbol.asyncIterator
+    ]();
+    while (true) {
+      const next = await runWithProviderResponseCapture(responseCapture, () =>
+        iterator.next(),
+      );
+      if (next.done) {
+        break;
+      }
+      const chunk = next.value;
       const responseMetadata = extractResponseMetadata(chunk);
-      usage =
-        normalizeProviderUsage(chunk) ??
-        normalizeUsage(
-          extractUsage({
-            raw: chunk,
-            usageMetadata: chunk.usage_metadata,
-            responseMetadata,
-          }),
-        ) ??
-        usage;
+      const nextObservation = normalizeModelCallObservation({
+        modelAlias: payload.model,
+        context: {
+          target: input.target,
+          modality: "chat",
+          rawResponse: chunk,
+          sdkUsage:
+            chunk.usage_metadata ??
+            extractUsage({
+              raw: chunk,
+              usageMetadata: chunk.usage_metadata,
+              responseMetadata,
+            }),
+          responseMetadata,
+          responseHeaders: responseCapture.headers,
+        },
+      });
+      observation = mergeModelCallObservations(observation, nextObservation);
+      usage = observation.usage ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
       reasoning = appendText(reasoning, extractReasoning(chunk));
       providerFields = cloneRecord(responseMetadata) ?? providerFields;
@@ -345,6 +389,7 @@ export async function* runBridgeChatStream(input: {
       type: "metadata",
       metadata: {
         usage,
+        observation,
         finishReason,
         reasoning,
         providerFields,

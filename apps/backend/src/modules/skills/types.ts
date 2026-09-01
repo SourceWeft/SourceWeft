@@ -42,6 +42,8 @@ export type EnabledSkillDescriptor = {
   displayName?: string;
   version: string;
   description: string;
+  /** Passive turn selection; it does not make runtime policy mandatory. */
+  defaultEnabled?: boolean;
   capabilities?: {
     required?: string[];
     optional?: string[];

@@ -20,10 +20,7 @@ export type ActiveThreadRun = {
 };
 
 export type ChatExecutionState =
-  | "idle"
-  | "executing"
-  | "waiting_for_approval"
-  | "stopping";
+  "idle" | "executing" | "waiting_for_approval" | "stopping";
 
 type StreamRequestErrorHandler = (response: Response) => Promise<never>;
 

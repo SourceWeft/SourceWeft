@@ -30,10 +30,7 @@ export function ThreadTypingIndicator({
   }
 
   return (
-    <div
-      className="px-1 text-xs text-muted-foreground"
-      aria-live="polite"
-    >
+    <div className="px-1 text-xs text-muted-foreground" aria-live="polite">
       {text}
     </div>
   );

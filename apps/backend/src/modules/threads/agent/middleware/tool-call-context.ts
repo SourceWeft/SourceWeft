@@ -7,9 +7,11 @@ type SourceWeftToolCallContext = {
     subagentType?: string;
   };
   toolCallId: string | null;
+  toolName: string;
 };
 
 const toolCallContext = new AsyncLocalStorage<SourceWeftToolCallContext>();
+const toolInvocationSignalContext = new AsyncLocalStorage<AbortSignal>();
 
 export function currentSourceWeftToolCallId() {
   return toolCallContext.getStore()?.toolCallId ?? null;
@@ -17,6 +19,23 @@ export function currentSourceWeftToolCallId() {
 
 export function currentSourceWeftToolCallContext() {
   return toolCallContext.getStore() ?? null;
+}
+
+/**
+ * Deep Agents' BackendProtocolV2 methods do not receive ToolRuntime. Keep the
+ * host-owned invocation signal in a backend-local async context so a
+ * preconstructed backend can still observe the exact Stop/deadline signal for
+ * the tool call that reached it.
+ */
+export function currentSourceWeftToolInvocationSignal() {
+  return toolInvocationSignalContext.getStore();
+}
+
+export function runWithSourceWeftToolInvocationSignal<T>(
+  signal: AbortSignal,
+  callback: () => T,
+) {
+  return toolInvocationSignalContext.run(signal, callback);
 }
 
 /**
@@ -40,6 +59,7 @@ export function createSourceWeftToolCallContextMiddleware(input?: {
             typeof request.toolCall.id === "string"
               ? request.toolCall.id
               : null,
+          toolName: request.toolCall.name,
         },
         () => handler(request),
       ),

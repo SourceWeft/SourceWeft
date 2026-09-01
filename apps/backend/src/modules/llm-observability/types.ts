@@ -1,3 +1,5 @@
+import type { ModelCallObservation } from "@sourceweft/model-gateway";
+
 export type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
 
 export type LlmSpanKind =
@@ -14,11 +16,7 @@ export type LlmSpanKind =
   | "http";
 
 export type RawCaptureMode =
-  | "none"
-  | "normalized"
-  | "sdk_metadata"
-  | "reconstructed"
-  | "provider_wire";
+  "none" | "normalized" | "sdk_metadata" | "reconstructed" | "provider_wire";
 
 export type AuditPayloadMode = "metadata_only" | "preview" | "full";
 
@@ -69,16 +67,17 @@ export type EndTraceInput = WriterOptions & {
   metadata?: Record<string, unknown>;
 };
 
-export type StartSpanInput = WriterOptions & TraceContext & {
-  spanId?: string;
-  parentSpanId?: string | null;
-  name: string;
-  kind: LlmSpanKind;
-  operation: string;
-  input?: unknown;
-  metadata?: Record<string, unknown>;
-  startedAt?: Date;
-};
+export type StartSpanInput = WriterOptions &
+  TraceContext & {
+    spanId?: string;
+    parentSpanId?: string | null;
+    name: string;
+    kind: LlmSpanKind;
+    operation: string;
+    input?: unknown;
+    metadata?: Record<string, unknown>;
+    startedAt?: Date;
+  };
 
 export type EndSpanInput = WriterOptions & {
   traceId: string;
@@ -102,25 +101,28 @@ export type UsageLike = {
   cacheWriteTokens?: number;
 };
 
-export type StartGenerationInput = WriterOptions & TraceContext & {
-  spanId?: string;
-  parentSpanId?: string | null;
-  operation: string;
-  modelAlias?: string | null;
-  provider?: string | null;
-  providerModel?: string | null;
-  executionMode?: "GLOBAL" | "BYOK" | string | null;
-  keySource?: string | null;
-  routeStrategy?: string | null;
-  routeDecision?: unknown;
-  modelParameters?: Record<string, unknown>;
-  input?: unknown;
-  rawCaptureMode?: RawCaptureMode;
-  providerRequest?: unknown;
-  providerRequestHeaders?: Record<string, unknown> | null;
-  metadata?: Record<string, unknown>;
-  startedAt?: Date;
-};
+export type StartGenerationInput = WriterOptions &
+  TraceContext & {
+    spanId?: string;
+    parentSpanId?: string | null;
+    operation: string;
+    modelAlias?: string | null;
+    provider?: string | null;
+    providerModel?: string | null;
+    profileAlias?: string | null;
+    gatewayConfigId?: string | null;
+    executionMode?: "GLOBAL" | "BYOK" | string | null;
+    keySource?: string | null;
+    routeStrategy?: string | null;
+    routeDecision?: unknown;
+    modelParameters?: Record<string, unknown>;
+    input?: unknown;
+    rawCaptureMode?: RawCaptureMode;
+    providerRequest?: unknown;
+    providerRequestHeaders?: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+    startedAt?: Date;
+  };
 
 export type EndGenerationInput = WriterOptions & {
   traceId: string;
@@ -132,6 +134,7 @@ export type EndGenerationInput = WriterOptions & {
   finishReason?: string | null;
   reasoningText?: string | null;
   providerFields?: unknown;
+  observation?: ModelCallObservation | null;
   usage?: UsageLike | null;
   inputTokens?: number | null;
   outputTokens?: number | null;

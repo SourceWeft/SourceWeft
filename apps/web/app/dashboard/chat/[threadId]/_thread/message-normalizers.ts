@@ -1365,7 +1365,7 @@ function resolveToolCallFromStreamEvent(input: {
     approvalConfirmationId:
       normalizedToolCall?.approvalConfirmationId ??
       existing?.approvalConfirmationId,
-    ...(normalizedToolCall?.producer ?? existing?.producer
+    ...((normalizedToolCall?.producer ?? existing?.producer)
       ? {
           producer: normalizedToolCall?.producer ?? existing?.producer,
         }

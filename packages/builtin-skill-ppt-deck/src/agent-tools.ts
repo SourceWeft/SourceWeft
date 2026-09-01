@@ -1,9 +1,10 @@
 import { tool, type ToolRuntime } from "langchain";
 import { z } from "zod";
 import type { ModelGateway } from "@sourceweft/model-gateway";
-import type {
-  AgentToolHostServices,
-  AgentToolTurnContext,
+import {
+  resolveAgentToolHostInvocationSignal,
+  type AgentToolHostServices,
+  type AgentToolTurnContext,
 } from "@sourceweft/contracts/agent-tools";
 import { REVIEW_DECK_VISUALS_TOOL_NAME } from "./agent-tool-defs";
 import { readReviewDeckVisualsTurnState } from "./turn-preflight";
@@ -87,6 +88,23 @@ function resolveToolRuntimeCallId(runtime: ToolRuntime) {
   return typeof callId === "string" && callId.length > 0 ? callId : null;
 }
 
+function throwDeckReviewAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("The deck review invocation was aborted.", "AbortError")
+  );
+}
+
+function isSandboxTerminationUnknown(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "SANDBOX_TERMINATION_UNKNOWN"
+  );
+}
+
 export function createCapabilityAgentTools(
   input: CapabilityAgentToolFactoryInput,
 ) {
@@ -116,6 +134,8 @@ export function createCapabilityAgentTools(
       args: z.infer<typeof reviewDeckVisualsInputSchema>,
       runtime: ToolRuntime,
     ) => {
+      const signal = resolveAgentToolHostInvocationSignal(runtime);
+      throwDeckReviewAbortReason(signal);
       if (!visionProfile) {
         return JSON.stringify({
           skipped: true,
@@ -130,6 +150,7 @@ export function createCapabilityAgentTools(
       }> = [];
       const rejectedPaths: string[] = [];
       for (const [index, rawPath] of args.imagePaths.entries()) {
+        throwDeckReviewAbortReason(signal);
         const path = normalizeSandboxPath(rawPath);
         const mimeType = mimeTypeForImagePath(path);
         if (!mimeType || !isUnderAllowedRoot(path, sandbox.allowedReadRoots)) {
@@ -139,16 +160,21 @@ export function createCapabilityAgentTools(
         try {
           const data = await sandbox.downloadCurrentFile({
             sandboxPath: path,
+            ...(signal ? { signal } : {}),
           });
+          throwDeckReviewAbortReason(signal);
           if (data.byteLength === 0 || data.byteLength > MAX_IMAGE_BYTES) {
             rejectedPaths.push(rawPath);
             continue;
           }
           images.push({ slideNumber: index + 1, data, mimeType });
-        } catch {
+        } catch (error) {
+          if (isSandboxTerminationUnknown(error)) throw error;
+          throwDeckReviewAbortReason(signal);
           rejectedPaths.push(rawPath);
         }
       }
+      throwDeckReviewAbortReason(signal);
       if (images.length === 0) {
         return JSON.stringify({
           skipped: true,
@@ -167,11 +193,8 @@ export function createCapabilityAgentTools(
 
       const verdicts: DeckVisualQaSlideVerdict[] = [];
       let failedBatches = 0;
-      for (
-        let offset = 0;
-        offset < images.length;
-        offset += JUDGE_BATCH_SIZE
-      ) {
+      for (let offset = 0; offset < images.length; offset += JUDGE_BATCH_SIZE) {
+        throwDeckReviewAbortReason(signal);
         const batch = images.slice(offset, offset + JUDGE_BATCH_SIZE);
         try {
           const result = await client.chat.complete(
@@ -210,9 +233,11 @@ export function createCapabilityAgentTools(
               profileAlias: visionProfile.profileAlias,
               modelAlias: visionProfile.modelAlias,
               idempotencyKey: `${toolCallId}:${offset}`,
+              ...(signal ? { signal } : {}),
               ...(context.traceId ? { traceId: context.traceId } : {}),
             },
           );
+          throwDeckReviewAbortReason(signal);
           const raw =
             typeof result.raw.content === "string"
               ? result.raw.content
@@ -227,6 +252,7 @@ export function createCapabilityAgentTools(
           }
           verdicts.push(...parsed);
         } catch (error) {
+          throwDeckReviewAbortReason(signal);
           failedBatches += 1;
           logger?.warn?.("ppt_deck_visual_qa_judge_failed", {
             slideNumbers: batch.map((image) => image.slideNumber),

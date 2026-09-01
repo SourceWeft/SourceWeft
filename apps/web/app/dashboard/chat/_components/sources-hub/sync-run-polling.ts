@@ -12,11 +12,7 @@ export const CONNECTOR_SYNC_RUN_CHANNEL_PREFIX =
   "sourceweft:connector-sync-runs";
 
 export type ConnectorSyncRunPollMode =
-  | "active"
-  | "cooldown"
-  | "error"
-  | "hidden"
-  | "idle";
+  "active" | "cooldown" | "error" | "hidden" | "idle";
 
 export type ConnectorSyncRunPollState = {
   errorCount: number;
@@ -70,8 +66,7 @@ export function selectConnectorSyncRunLeader(
 ) {
   return candidates
     .filter(
-      (candidate) =>
-        candidate.visible && now - candidate.lastSeenAt <= staleMs,
+      (candidate) => candidate.visible && now - candidate.lastSeenAt <= staleMs,
     )
     .map((candidate) => candidate.id)
     .sort()
@@ -180,7 +175,10 @@ export function planConnectorSyncRunResult(
     incrementalTargets.push({
       runId: run.id,
       connectorId,
-      updatedAfter: getIncrementalUpdatedAfter(prior.lastSourceUpdatedAt, overlapMs),
+      updatedAfter: getIncrementalUpdatedAfter(
+        prior.lastSourceUpdatedAt,
+        overlapMs,
+      ),
     });
   }
 

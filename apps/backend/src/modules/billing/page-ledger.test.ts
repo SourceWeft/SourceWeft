@@ -468,6 +468,104 @@ test("page quota writes grant and consume ledger balances", async () => {
   });
 });
 
+test("provider receipt reconciliation appends an idempotent extra credit adjustment", async () => {
+  const store = new MemoryBillingStore();
+  const accountService = new BillingAccountService(store, runtimeConfig);
+  const usageService = new BillingUsageService(
+    store,
+    runtimeConfig,
+    accountService,
+  );
+
+  await usageService.meterConsume(
+    "team_1",
+    {
+      providerCostUsd: 0.01,
+      feature: "chat",
+      idempotencyKey: "model-call-1",
+    },
+    "user_1",
+  );
+  const first = await usageService.reconcileModelProviderCost({
+    teamId: "team_1",
+    actorUserId: "user_1",
+    workspaceId: "workspace_1",
+    feature: "chat",
+    originalIdempotencyKey: "model-call-1",
+    reconciliationIdempotencyKey: "provider-cost-reconcile:generation-1:v1",
+    generationId: "generation-1",
+    provider: "orcarouter",
+    providerRequestId: "orca-request-1",
+    settledProviderCostUsd: 0.02,
+  });
+  const replay = await usageService.reconcileModelProviderCost({
+    teamId: "team_1",
+    actorUserId: "user_1",
+    workspaceId: "workspace_1",
+    feature: "chat",
+    originalIdempotencyKey: "model-call-1",
+    reconciliationIdempotencyKey: "provider-cost-reconcile:generation-1:v1",
+    generationId: "generation-1",
+    provider: "orcarouter",
+    providerRequestId: "orca-request-1",
+    settledProviderCostUsd: 0.02,
+  });
+  const usage = await usageService.getUsage("team_1", "user_1");
+
+  assert.deepEqual(first, { adjustedCredits: -10, idempotencyReplayed: false });
+  assert.deepEqual(replay, { adjustedCredits: -10, idempotencyReplayed: true });
+  assert.equal(store.account?.monthlyCreditsBalance, 2980);
+  const reconciliationEntries = store.ledgers.filter((entry) =>
+    entry.idempotencyKey?.includes("provider-cost-reconcile"),
+  );
+  assert.equal(reconciliationEntries.length, 1);
+  assert.equal(reconciliationEntries[0]?.eventType, "consume");
+  assert.equal(reconciliationEntries[0]?.delta, -10);
+  assert.equal(usage.totals.creditsConsumed, 20);
+});
+
+test("provider receipt reconciliation refunds the original consumed bucket", async () => {
+  const store = new MemoryBillingStore();
+  const accountService = new BillingAccountService(store, runtimeConfig);
+  const usageService = new BillingUsageService(
+    store,
+    runtimeConfig,
+    accountService,
+  );
+
+  await usageService.meterConsume(
+    "team_1",
+    {
+      providerCostUsd: 0.02,
+      feature: "chat",
+      idempotencyKey: "model-call-2",
+    },
+    "user_1",
+  );
+  const result = await usageService.reconcileModelProviderCost({
+    teamId: "team_1",
+    actorUserId: "user_1",
+    feature: "chat",
+    originalIdempotencyKey: "model-call-2",
+    reconciliationIdempotencyKey: "provider-cost-reconcile:generation-2:v1",
+    generationId: "generation-2",
+    provider: "orcarouter",
+    providerRequestId: "orca-request-2",
+    settledProviderCostUsd: 0.01,
+  });
+  const usage = await usageService.getUsage("team_1", "user_1");
+
+  assert.deepEqual(result, { adjustedCredits: 10, idempotencyReplayed: false });
+  assert.equal(store.account?.monthlyCreditsBalance, 2990);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+  const refund = store.ledgers.find((entry) =>
+    entry.idempotencyKey?.includes("provider-cost-reconcile"),
+  );
+  assert.equal(refund?.eventType, "refund");
+  assert.equal(refund?.delta, 10);
+  assert.equal(usage.totals.creditsConsumed, 10);
+});
+
 test("shadow page overage grants add-on pages before consuming", async () => {
   const store = new MemoryBillingStore();
   const shadowConfig: BillingRuntimeConfig = {

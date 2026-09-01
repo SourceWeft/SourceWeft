@@ -7,10 +7,7 @@ export function payloadRecord(artifact: ArtifactListItem) {
     : {};
 }
 
-export function payloadString(
-  payload: Record<string, unknown>,
-  key: string,
-) {
+export function payloadString(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()

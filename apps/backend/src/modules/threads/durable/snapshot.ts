@@ -10,6 +10,12 @@ import { buildTerminalAssistantTraceState } from "../turn/assistant-run-terminal
 import type { ChatRunSnapshot, ChatThreadRunStatus } from "./types";
 import type { EmbeddingVectorStrategy } from "../../content/types";
 import { CLIENT_CANCELLED_CODE } from "./run-constants";
+import {
+  mergeCommittedArtifactRenderBlocks,
+  mergeCommittedArtifactToolCalls,
+} from "../render-block-projection";
+
+export { mergeCommittedArtifactRenderBlocks } from "../render-block-projection";
 
 export type RunSnapshotSource = {
   snapshotJson?: Record<string, unknown> | null;
@@ -40,6 +46,123 @@ export function getObjectRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function getRenderBlocks(value: unknown): unknown[] | undefined {
+  const record = getObjectRecord(value);
+  return Array.isArray(record?.renderBlocks) ? record.renderBlocks : undefined;
+}
+
+function getAssistantRenderBlocks(snapshot: ChatRunSnapshot) {
+  return getRenderBlocks(snapshot.assistantMessage?.metadata);
+}
+
+/**
+ * Merge a full runner snapshot with persisted publication facts. Incoming
+ * scalar/tool/progress fields win, while committed artifact outputs survive
+ * stale runner, approval, cancellation, and recovery projections.
+ */
+export function mergeChatRunSnapshot(input: {
+  current: ChatRunSnapshot;
+  incoming?: ChatRunSnapshot;
+  assistantMessageMetadata?: Record<string, unknown> | null;
+}): ChatRunSnapshot {
+  const { protectedAgentTools: _untrustedProtectedState, ...incoming } =
+    input.incoming ?? {};
+  const messageBlocks = getRenderBlocks(input.assistantMessageMetadata);
+  const currentAssistant = input.current.assistantMessage;
+  const incomingAssistant = incoming.assistantMessage;
+  const assistantMessage = incomingAssistant ?? currentAssistant;
+  const currentMetadata = getObjectRecord(currentAssistant?.metadata) ?? {};
+  const incomingMetadata = getObjectRecord(incomingAssistant?.metadata) ?? {};
+  const renderBlocks = mergeCommittedArtifactRenderBlocks({
+    incoming: Array.isArray(incoming.renderBlocks)
+      ? incoming.renderBlocks
+      : input.current.renderBlocks,
+    authoritative: [
+      input.current.renderBlocks,
+      getAssistantRenderBlocks(input.current),
+      messageBlocks,
+      getAssistantRenderBlocks(incoming),
+    ],
+  });
+  const messageToolCalls = Array.isArray(
+    input.assistantMessageMetadata?.toolCalls,
+  )
+    ? input.assistantMessageMetadata.toolCalls
+    : undefined;
+  const toolCalls = mergeCommittedArtifactToolCalls({
+    incoming: Array.isArray(incoming.toolCalls)
+      ? incoming.toolCalls
+      : input.current.toolCalls,
+    authoritative: [
+      {
+        toolCalls: input.current.toolCalls,
+        renderBlocks: input.current.renderBlocks,
+      },
+      {
+        toolCalls: Array.isArray(currentMetadata.toolCalls)
+          ? currentMetadata.toolCalls
+          : undefined,
+        renderBlocks: getRenderBlocks(currentMetadata),
+      },
+      { toolCalls: messageToolCalls, renderBlocks: messageBlocks },
+    ],
+  });
+  const assistantRenderBlocks = mergeCommittedArtifactRenderBlocks({
+    incoming:
+      getRenderBlocks(incomingMetadata) ?? getRenderBlocks(currentMetadata),
+    authoritative: [
+      getRenderBlocks(currentMetadata),
+      messageBlocks,
+      renderBlocks,
+    ],
+  });
+  const assistantToolCalls = mergeCommittedArtifactToolCalls({
+    incoming:
+      (Array.isArray(incomingMetadata.toolCalls)
+        ? incomingMetadata.toolCalls
+        : undefined) ??
+      (Array.isArray(currentMetadata.toolCalls)
+        ? currentMetadata.toolCalls
+        : undefined),
+    authoritative: [
+      {
+        toolCalls: Array.isArray(currentMetadata.toolCalls)
+          ? currentMetadata.toolCalls
+          : undefined,
+        renderBlocks: getRenderBlocks(currentMetadata),
+      },
+      { toolCalls: messageToolCalls, renderBlocks: messageBlocks },
+      { toolCalls, renderBlocks },
+    ],
+  });
+
+  return {
+    ...input.current,
+    ...incoming,
+    ...(input.current.protectedAgentTools
+      ? { protectedAgentTools: input.current.protectedAgentTools }
+      : {}),
+    ...(renderBlocks ? { renderBlocks } : {}),
+    ...(toolCalls ? { toolCalls } : {}),
+    ...(assistantMessage
+      ? {
+          assistantMessage: {
+            ...(currentAssistant ?? assistantMessage),
+            ...(incomingAssistant ?? {}),
+            metadata: {
+              ...currentMetadata,
+              ...incomingMetadata,
+              ...(assistantRenderBlocks
+                ? { renderBlocks: assistantRenderBlocks }
+                : {}),
+              ...(assistantToolCalls ? { toolCalls: assistantToolCalls } : {}),
+            },
+          },
+        }
+      : {}),
+  };
 }
 
 export function getToolConfirmationStatus(

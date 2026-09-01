@@ -31,8 +31,17 @@ export type ArtifactSourceAdapter = {
   readonly read: (input: {
     readonly publishInput: PublishArtifactInput;
     readonly services: ArtifactSourceServices;
+    readonly signal?: AbortSignal;
   }) => Promise<ArtifactSourceBytes>;
 };
+
+function throwArtifactSourceAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("Artifact source reading was aborted.", "AbortError")
+  );
+}
 
 function messageFromUnknown(error: unknown) {
   if (typeof error === "string" && error.trim().length > 0) {
@@ -122,6 +131,7 @@ function assertWorkFileSourcePath(value: string) {
 const sandboxPathAdapter: ArtifactSourceAdapter = {
   kind: "sandbox_path",
   async read(input) {
+    throwArtifactSourceAbortReason(input.signal);
     const source = input.publishInput.source;
     if (source.kind !== "sandbox_path") {
       throw new ArtifactPublishError(
@@ -142,13 +152,18 @@ const sandboxPathAdapter: ArtifactSourceAdapter = {
     }
 
     try {
-      const bytes = await download({ sandboxPath });
+      const bytes = await download({
+        sandboxPath,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      throwArtifactSourceAbortReason(input.signal);
       return {
         bytes: Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes),
         path: sandboxPath,
         source,
       };
     } catch (error) {
+      throwArtifactSourceAbortReason(input.signal);
       throw new ArtifactPublishError(
         "ARTIFACT_SOURCE_NOT_FOUND",
         `sandbox download failed for ${sandboxPath}: ${messageFromUnknown(error)}`,
@@ -160,6 +175,7 @@ const sandboxPathAdapter: ArtifactSourceAdapter = {
 const workFileAdapter: ArtifactSourceAdapter = {
   kind: "work_file",
   async read(input) {
+    throwArtifactSourceAbortReason(input.signal);
     const source = input.publishInput.source;
     if (source.kind !== "work_file") {
       throw new ArtifactPublishError(
@@ -179,6 +195,7 @@ const workFileAdapter: ArtifactSourceAdapter = {
 
     if (filesystem.downloadFiles) {
       const [result] = await filesystem.downloadFiles([workFilePath]);
+      throwArtifactSourceAbortReason(input.signal);
       if (result?.content) {
         return {
           bytes: Buffer.isBuffer(result.content)
@@ -200,6 +217,7 @@ const workFileAdapter: ArtifactSourceAdapter = {
     }
 
     const raw = await filesystem.readRaw?.(workFilePath);
+    throwArtifactSourceAbortReason(input.signal);
     if (!raw?.data) {
       throw new ArtifactPublishError(
         "ARTIFACT_SOURCE_NOT_FOUND",

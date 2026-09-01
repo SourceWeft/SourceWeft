@@ -41,11 +41,14 @@ Avoid contradicting the preset (e.g. `executive` + "grungy neon collage").
 - `canvas` defaults to 1920×1080@30fps; only override for vertical (1080×1920)
   or square targets the user asks for.
 
-## Built-in layout guardrails (context, not knobs)
+## Validation guardrails (evidence, not a fixed repair loop)
 
-The worker constrains generated scenes so content stays readable: all text
-lives inside a safe-area container with ~6% margins, font sizes are capped
-relative to canvas height, per-slide on-screen text is budgeted, and rendered
-frames are reviewed by a vision model for cut-off/overlap/contrast defects
-(with automatic repair). You do not need to restate any of this in the brief —
-spend the brief on content and direction instead.
+Author scenes with readable text inside `SafeArea`, bounded type relative to the
+canvas, and concise on-screen copy. `validate_video_presentation` then runs
+static safety/layout checks, a clean trusted Remotion build, and
+beginning/middle/end runtime renders for every scene. When a vision profile
+is configured it also checks rendered frames for cut-off, overlap, and contrast;
+without one it records `visualChecked: false` instead of claiming visual review.
+The same prepared bundle must then produce a probed, streamable final MP4.
+Diagnostics are evidence for the root Agent to make a targeted semantic edit —
+there is no fixed automatic repair attempt.

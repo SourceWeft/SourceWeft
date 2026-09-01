@@ -54,6 +54,37 @@ test("terminalizeToolCall marks running tools as error on failure", () => {
   assert.equal(toolCall.error, "Tool execution failed.");
 });
 
+test("terminal assistant state preserves a supplied cancellation reason", () => {
+  const toolCall = terminalizeToolCall({
+    errorMessage: "Chat run was cancelled",
+    mode: "error",
+    toolCall: runningToolCall(),
+  });
+  const state = buildTerminalAssistantTraceState({
+    errorMessage: "Chat run was cancelled",
+    mode: "error",
+    traceParts: [
+      {
+        id: "tool-1",
+        kind: "tool",
+        order: 0,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        toolCallId: "tool-1",
+        tool: "web_search",
+        status: "running",
+        input: {},
+      },
+    ],
+  });
+
+  assert.equal(toolCall.error, "Chat run was cancelled");
+  assert.equal(
+    state.traceParts.find((part) => part.kind === "tool")?.error,
+    "Chat run was cancelled",
+  );
+});
+
 test("buildTerminalAssistantTraceState closes active steps and trace parts", () => {
   const state = buildTerminalAssistantTraceState({
     mode: "success",

@@ -31,19 +31,20 @@ import {
   type EnqueueDeliverableJobInput,
 } from "./queue";
 
-// A capability's job: the name comes from its manifest, the extra fields
-// (requestKey, narrationEnabled) are its own and pass through untouched.
-const CAPABILITY_JOB_NAME = "video-presentation-generate";
+// A capability's job: the name comes from its manifest, and capability-private
+// fields pass through the generic queue hop untouched.
+const CAPABILITY_JOB_NAME = "fake-deliverable-generate";
+const CAPABILITY_JOB_ID = "fake-deliverable_artifact-1";
 
 function enqueueInput(): EnqueueDeliverableJobInput {
   return {
     jobName: CAPABILITY_JOB_NAME,
-    jobId: "video-presentation-render_artifact-1",
+    jobId: CAPABILITY_JOB_ID,
     payload: {
       artifactId: "artifact-1",
-      jobId: "video-presentation-render_artifact-1",
-      narrationEnabled: true,
-      request: { brief: "Explain the Feynman technique" },
+      jobId: CAPABILITY_JOB_ID,
+      layoutMode: "compact",
+      request: { brief: "Write a concise report" },
       requestKey: "request-1",
       teamId: "team-1",
       threadId: "thread-1",
@@ -63,7 +64,7 @@ beforeEach(() => {
 });
 
 test("deliverable jobs use the dedicated deliverables queue under the capability's job name", async () => {
-  const queuedJob = { id: "video-presentation-render_artifact-1" };
+  const queuedJob = { id: CAPABILITY_JOB_ID };
   mocks.deliverablesGetJob.mockResolvedValue(null);
   mocks.enqueueWithAudit.mockResolvedValue(queuedJob);
 
@@ -77,8 +78,8 @@ test("deliverable jobs use the dedicated deliverables queue under the capability
   assert.equal(data.artifactId, "artifact-1");
   // Capability-private fields survive the generic hop verbatim.
   assert.equal(data.requestKey, "request-1");
-  assert.equal(data.narrationEnabled, true);
-  assert.equal(options.jobId, "video-presentation-render_artifact-1");
+  assert.equal(data.layoutMode, "compact");
+  assert.equal(options.jobId, CAPABILITY_JOB_ID);
   assert.equal(options.attempts, DELIVERABLES_QUEUE_JOB_ATTEMPTS);
   assert.equal(options.backoff.type, "exponential");
   assert.equal(target.queueName, "test-deliverables");

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { ToolCallRecord, TracePartRecord } from "../../_components/chat-canvas";
+import type {
+  ToolCallRecord,
+  TracePartRecord,
+} from "../../_components/chat-canvas";
 import {
   excludeResolvedToolConfirmationCalls,
   resolveReasoningTraceEventsFromMetadata,
@@ -100,7 +103,9 @@ test("approval continuations mark resolved trace parts terminal", () => {
     },
   ];
   const resume = {
-    decisions: [{ type: "reject" as const, message: "Rejected in SourceWeft." }],
+    decisions: [
+      { type: "reject" as const, message: "Rejected in SourceWeft." },
+    ],
   };
 
   const [resolvedToolCall] = resolveToolConfirmationCalls(
@@ -131,9 +136,7 @@ test("approval continuations mark resolved trace parts terminal", () => {
     "rejected",
   );
   assert.equal(
-    resolvedPart?.kind === "tool"
-      ? resolvedPart.approvalConfirmationId
-      : null,
+    resolvedPart?.kind === "tool" ? resolvedPart.approvalConfirmationId : null,
     "rejected-action",
   );
   assert.equal(

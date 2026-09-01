@@ -1,7 +1,4 @@
-export {
-  ArtifactPreviewPanel,
-  SourcesHub,
-} from "./sources-hub/index";
+export { ArtifactPreviewPanel, SourcesHub } from "./sources-hub/index";
 
 export type {
   ArtifactListItem,

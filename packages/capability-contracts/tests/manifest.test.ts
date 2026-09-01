@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CAPABILITY_COMMAND_TOOL_POLICY_MAX_IDS,
   capabilityManifestSchema,
   parseCapabilityManifest,
 } from "../src/index";
@@ -102,6 +103,143 @@ test("capability-manifest.runtime parses artifact tool runtime metadata", () => 
   );
 });
 
+test("capability-manifest.runtime parses automatic entry and bounded allow/deny tool policy", () => {
+  const manifest = capabilityManifestSchema.parse({
+    ...webSearchManifest,
+    id: "sourceweft/report-agent",
+    kind: "skill",
+    tools: undefined,
+    skills: [
+      {
+        id: "report-agent",
+        runtime: {
+          execution: "agent",
+          tools: ["write_todos", "publish_report"],
+          initialToolPolicy: "auto",
+          toolPolicy: {
+            allow: ["write_todos", "publish_report"],
+            deny: ["task", "execute"],
+          },
+          output: {
+            kind: "artifact",
+            artifactType: "report",
+            publisherTool: "publish_report",
+          },
+        },
+      },
+    ],
+  });
+
+  const runtime = manifest.contributes.skills[0]?.runtime;
+  assert.equal(runtime?.initialToolPolicy, "auto");
+  assert.deepEqual(runtime?.toolPolicy, {
+    allow: ["write_todos", "publish_report"],
+    deny: ["task", "execute"],
+  });
+});
+
+test("capability-manifest.command workflow parses an explicit forced initial tool", () => {
+  const manifest = capabilityManifestSchema.parse({
+    ...webSearchManifest,
+    tools: [
+      {
+        ...webSearchManifest.tools[0],
+        command: {
+          aliases: ["web"],
+          workflow: {
+            execution: "agent",
+            initialToolPolicy: {
+              kind: "force",
+              toolName: "web_search",
+            },
+            successCriteria: {
+              kind: "tool_call",
+              toolName: "web_search",
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    manifest.contributes.tools[0]?.command?.workflow?.initialToolPolicy,
+    { kind: "force", toolName: "web_search" },
+  );
+});
+
+test("capability-manifest rejects a tool present in both allow and deny policy", () => {
+  const result = capabilityManifestSchema.safeParse({
+    ...webSearchManifest,
+    tools: [
+      {
+        ...webSearchManifest.tools[0],
+        runtime: {
+          execution: "agent",
+          toolPolicy: {
+            allow: ["web_search"],
+            deny: ["web_search"],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test("capability-manifest rejects a forced initial tool excluded by command policy", () => {
+  const result = capabilityManifestSchema.safeParse({
+    ...webSearchManifest,
+    tools: [
+      {
+        ...webSearchManifest.tools[0],
+        command: {
+          workflow: {
+            execution: "agent",
+            initialToolPolicy: {
+              kind: "force",
+              toolName: "web_search",
+            },
+            toolPolicy: {
+              allow: ["read_file"],
+              deny: ["web_search"],
+            },
+            successCriteria: {
+              kind: "tool_call",
+              toolName: "web_search",
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test("capability-manifest bounds command tool policy ids", () => {
+  const result = capabilityManifestSchema.safeParse({
+    ...webSearchManifest,
+    tools: [
+      {
+        ...webSearchManifest.tools[0],
+        runtime: {
+          execution: "agent",
+          toolPolicy: {
+            deny: Array.from(
+              { length: CAPABILITY_COMMAND_TOOL_POLICY_MAX_IDS + 1 },
+              (_, index) => `tool_${index}`,
+            ),
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () => {
   const manifest = capabilityManifestSchema.parse({
     schemaVersion: 1,
@@ -114,6 +252,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
       {
         id: "ppt-deck",
         visibility: "restricted",
+        defaultEnabled: true,
         categories: ["create", "present"],
         options: [
           {
@@ -128,11 +267,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
           },
         ],
         runtime: {
-          tools: [
-            "prepare_sandbox_workspace",
-            "execute",
-            "publish_artifact",
-          ],
+          tools: ["prepare_sandbox_workspace", "execute", "publish_artifact"],
           output: {
             kind: "artifact",
             artifactType: "slides",
@@ -153,6 +288,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
     publisherTool: "publish_artifact",
   });
   assert.equal(manifest.contributes.skills[0]?.visibility, "restricted");
+  assert.equal(manifest.contributes.skills[0]?.defaultEnabled, true);
   assert.deepEqual(manifest.contributes.skills[0]?.categories, [
     "create",
     "present",
@@ -382,29 +518,29 @@ test("capability manifest ignores an unknown top-level contributes key", () => {
 test("capability-manifest.pipeline parses a deliverable pipeline declaration", () => {
   const manifest = capabilityManifestSchema.parse({
     schemaVersion: 1,
-    id: "sourceweft/video-presentation-tool",
+    id: "sourceweft/report-builder",
     kind: "tool",
-    name: "Video Presentation",
+    name: "Report Builder",
     version: "1.0.0",
     entry: "./src/index.ts",
     tools: [
       {
-        id: "generate_video_presentation",
-        title: "Generate Video Presentation",
-        description: "Generate a narrated video presentation artifact.",
+        id: "publish_report",
+        title: "Publish Report",
+        description: "Generate and publish a report artifact.",
         inputSchema: { type: "object" },
         outputSchema: { type: "object" },
         risk: "write",
         runtime: {
           execution: "agent",
-          tools: ["generate_video_presentation"],
+          tools: ["publish_report"],
           output: {
             kind: "artifact",
-            artifactType: "video_presentation",
-            publisherTool: "generate_video_presentation",
+            artifactType: "report",
+            publisherTool: "publish_report",
           },
           pipeline: {
-            jobName: "video-presentation-generate",
+            jobName: "report-generate",
           },
         },
       },
@@ -412,7 +548,7 @@ test("capability-manifest.pipeline parses a deliverable pipeline declaration", (
   });
 
   const pipeline = manifest.contributes.tools[0]?.runtime?.pipeline;
-  assert.equal(pipeline?.jobName, "video-presentation-generate");
+  assert.equal(pipeline?.jobName, "report-generate");
   assert.equal(pipeline?.queue, "deliverables");
 });
 

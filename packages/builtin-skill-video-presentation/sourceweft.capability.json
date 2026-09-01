@@ -3,13 +3,14 @@
   "id": "sourceweft/video-presentation",
   "kind": "skill",
   "name": "Video Presentation",
-  "description": "Create narrated video presentation artifacts from source material with storyboard planning, visual asset planning, scene-code generation, audio narration, a rendered preview image, and browser-based preview/export.",
-  "version": "1.2.0",
+  "description": "Author, validate, render, and atomically publish trusted MP4 video presentations with an autonomous root Agent skill.",
+  "version": "1.0.0",
   "entry": "./src/index.ts",
   "skills": [
     {
       "id": "video-presentation",
       "visibility": "restricted",
+      "defaultEnabled": false,
       "listing": "listed",
       "categories": ["create", "present", "visual"],
       "resources": [
@@ -17,7 +18,8 @@
         "references/brief-guidelines.md",
         "references/narration-guidelines.md",
         "references/visual-quality.md",
-        "references/style-gallery.md"
+        "references/style-gallery.md",
+        "references/draft-template.md"
       ],
       "options": [
         {
@@ -27,8 +29,7 @@
           "valueType": "string",
           "defaultValue": "cinematic",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "renderProfile.stylePreset"
+            "path": "config.renderProfile.stylePreset"
           },
           "values": [
             { "value": "cinematic", "label": "Cinematic" },
@@ -45,8 +46,7 @@
           "valueType": "string",
           "defaultValue": "balanced",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "renderProfile.visualDensity"
+            "path": "config.renderProfile.visualDensity"
           },
           "values": [
             { "value": "light", "label": "Light" },
@@ -61,8 +61,7 @@
           "valueType": "string",
           "defaultValue": "medium",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "renderProfile.durationTarget"
+            "path": "config.renderProfile.durationTarget"
           },
           "values": [
             { "value": "short", "label": "Short" },
@@ -76,8 +75,7 @@
           "description": "Target number of generated scenes/slides.",
           "valueType": "number",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "slideCount"
+            "path": "config.slideCount"
           },
           "values": [
             { "value": 4, "label": "4" },
@@ -93,8 +91,7 @@
           "valueType": "string",
           "defaultValue": "dynamic",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "motion.pacing"
+            "path": "config.motion.pacing"
           },
           "values": [
             { "value": "calm", "label": "Calm" },
@@ -109,8 +106,7 @@
           "valueType": "number",
           "defaultValue": 30,
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "canvas.fps"
+            "path": "config.canvas.fps"
           },
           "values": [
             { "value": 24, "label": "24" },
@@ -125,8 +121,7 @@
           "valueType": "string",
           "defaultValue": "auto",
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "renderProfile.language"
+            "path": "config.renderProfile.language"
           },
           "values": [
             { "value": "auto", "label": "Auto" },
@@ -141,35 +136,72 @@
           "valueType": "boolean",
           "defaultValue": true,
           "target": {
-            "toolName": "generate_video_presentation",
-            "path": "narration.enabled"
+            "path": "config.narration.enabled"
           },
           "values": []
         }
       ],
       "runtime": {
         "execution": "agent",
-        "tools": ["generate_video_presentation"],
+        "initialToolPolicy": "auto",
+        "toolPolicy": {
+          "allow": [
+            "write_todos",
+            "ls",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "ask_user",
+            "prepare_sandbox_workspace",
+            "load_video_presentation",
+            "generate_video_assets",
+            "generate_video_narration",
+            "validate_video_presentation",
+            "publish_video_presentation"
+          ],
+          "deny": [
+            "task",
+            "generate_image",
+            "execute",
+            "collect_sandbox_outputs"
+          ]
+        },
+        "tools": [
+          "prepare_sandbox_workspace",
+          "load_video_presentation",
+          "generate_video_assets",
+          "generate_video_narration",
+          "validate_video_presentation",
+          "publish_video_presentation"
+        ],
         "permissionOverrides": {
-          "generate_video_presentation": "allow"
+          "prepare_sandbox_workspace": "allow",
+          "load_video_presentation": "allow",
+          "generate_video_assets": "allow",
+          "generate_video_narration": "allow",
+          "validate_video_presentation": "allow",
+          "publish_video_presentation": "allow"
         },
         "output": {
           "kind": "artifact",
           "artifactType": "video_presentation",
-          "publisherTool": "generate_video_presentation"
+          "publisherTool": "publish_video_presentation"
         },
         "requiredArguments": {
           "description": "video presentation brief",
           "clarificationPrompt": "Describe the topic, audience, and source material for the video presentation."
         },
-        "promptIntro": "Create a SourceWeft narrated video presentation artifact by following the video-presentation skill workflow and calling generate_video_presentation with a concise brief-first payload plus optional slideCount/visualDirection/brand/motion/canvas constraints. Do not pass a storyboard, blueprint, slide list, scene code, TSX, or HTML; the worker plans and builds the Remotion project internally. The command is complete only after generate_video_presentation returns a ready worker-built video project.",
+        "promptIntro": "Use the video-presentation skill as a root Agent studio: plan with todos, author the canonical draft and Remotion scene modules in the sandbox, generate only the assets/narration that the plan needs, inspect validation evidence, repair files when evidence changes, and finish only through publish_video_presentation.",
         "additionalPromptLines": [
-          "Read /skills/video-presentation/SKILL.md before calling generate_video_presentation.",
+          "Read /skills/video-presentation/SKILL.md before authoring files or calling a video tool.",
           "Read a file under /skills/video-presentation/references/ only when SKILL.md's Quick Reference says the situation applies (rich source material, explicit length/language/voice asks, visual-style asks, or edits).",
-          "Only pass brief plus optional title/sourceDigest/audience/tone/language/stylePreset/durationTarget/renderProfile/slideCount/visualDirection/brand/motion/canvas/narrationEnabled/narration/assets/regeneration.",
-          "Do not claim the final MP4/WebM has been rendered server-side; browser export happens from the ready artifact preview.",
-          "If generate_video_presentation returns a processing/still-generating result, do not call it again for the same request; report that generation continues in the background.",
-          "The pipeline stores a cover still as the artifact preview image automatically; it is best-effort and may be absent, so never promise a thumbnail."
+          "For an edit, call load_video_presentation first and preserve its loadReceiptId and current version identity.",
+          "Do not repeat an identical failed action. Change the draft from concrete diagnostics, choose another allowed action when evidence supports it, or stop with the blocker.",
+          "A passed validate_video_presentation receipt, required three-frame scene samples, and a cover are mandatory before publication.",
+          "Only publish_video_presentation may declare success. A processing, blocked, failed, or plain ready-shaped result is not success.",
+          "The committed artifact must include the trusted sandbox-rendered MP4 and cover bound by the latest validation receipt."
         ]
       },
       "command": {

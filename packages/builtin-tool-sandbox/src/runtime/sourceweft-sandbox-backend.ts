@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   EditResult,
   FileDownloadResponse,
@@ -21,12 +22,19 @@ import {
 } from "./paths";
 import type {
   SandboxProvider,
+  SandboxCancellationReason,
+  SandboxCancellationResult,
   SandboxProviderPathPolicy,
+  SandboxRef,
   SandboxRuntimeContext,
   SandboxRuntimeLimits,
 } from "./types";
 import { SandboxManager } from "./sandbox-manager";
 import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
+import {
+  isPinnedOperationProviderTimeout,
+  runPinnedSandboxOperation,
+} from "./pinned-sandbox-operation";
 
 function applyGrepMaxCount(params: {
   result: GrepResult;
@@ -290,6 +298,113 @@ function executeOperationRequest(command: string) {
   };
 }
 
+class SandboxModelExecutionAbortError extends Error {
+  readonly code:
+    | "SANDBOX_OPERATION_CANCELLED"
+    | "SANDBOX_OPERATION_TIMED_OUT"
+    | "SANDBOX_TERMINATION_UNKNOWN";
+  readonly cancellationMode: SandboxCancellationResult["mode"];
+  readonly physicalCancellationConfirmed: boolean;
+
+  constructor(input: {
+    cancellation: SandboxCancellationResult;
+    reason: SandboxCancellationReason;
+  }) {
+    const code = !input.cancellation.confirmed
+      ? "SANDBOX_TERMINATION_UNKNOWN"
+      : input.reason === "timed_out"
+        ? "SANDBOX_OPERATION_TIMED_OUT"
+        : "SANDBOX_OPERATION_CANCELLED";
+    super(
+      input.cancellation.confirmed
+        ? `Sandbox ${input.cancellation.mode} termination was confirmed after ${input.reason === "timed_out" ? "timeout" : "cancellation"}.`
+        : "Sandbox termination was requested, but the provider could not confirm that the remote execution stopped.",
+    );
+    this.code = code;
+    this.cancellationMode = input.cancellation.mode;
+    this.physicalCancellationConfirmed = input.cancellation.confirmed;
+    this.name = input.reason === "timed_out" ? "TimeoutError" : "AbortError";
+  }
+}
+
+class SandboxModelExecutionResultDiscardedError extends Error {
+  readonly code = "SANDBOX_EXECUTION_RESULT_DISCARDED" as const;
+
+  constructor() {
+    super(
+      "Sandbox execution result was discarded because its sandbox generation was terminated.",
+    );
+    this.name = "AbortError";
+  }
+}
+
+function modelExecutionCancellationReason(
+  signal?: AbortSignal,
+): SandboxCancellationReason {
+  const reason = signal?.reason;
+  const record =
+    reason && typeof reason === "object"
+      ? (reason as Record<string, unknown>)
+      : null;
+  const marker = [record?.name, record?.code, record?.message, reason]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  return marker.includes("timeout") || marker.includes("timed_out")
+    ? "timed_out"
+    : "user_cancelled";
+}
+
+function isProviderCommandTimeout(error: unknown) {
+  return (
+    error instanceof Error && error.message.includes("SANDBOX_COMMAND_TIMEOUT")
+  );
+}
+
+function waitForModelExecutionAbort(
+  signal: AbortSignal | undefined,
+  onAbortRequested: () => void,
+) {
+  if (!signal) {
+    return {
+      promise: new Promise<never>(() => undefined),
+      dispose() {},
+    };
+  }
+  let listener: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    const notify = () => {
+      onAbortRequested();
+      resolve();
+    };
+    if (signal.aborted) {
+      notify();
+      return;
+    }
+    listener = notify;
+    signal.addEventListener("abort", listener, { once: true });
+  });
+  return {
+    promise,
+    dispose() {
+      if (listener) signal.removeEventListener("abort", listener);
+    },
+  };
+}
+
+export type SandboxBackendHostOperationOptions = {
+  /** Host invocation cancellation; never sourced from model arguments. */
+  readonly signal?: AbortSignal;
+};
+
+function throwBackendOperationAbortReason(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw (
+    signal.reason ??
+    new DOMException("Sandbox file operation was cancelled.", "AbortError")
+  );
+}
+
 export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   readonly id: string;
   private readonly executeFailureCountsByCommand = new Map<string, number>();
@@ -326,22 +441,194 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     return this.input.manager.providerForSandbox().pathPolicy;
   }
 
-  private async runInternalCommand(command: string) {
+  private async runPinnedFileOperation<T>(
+    options: SandboxBackendHostOperationOptions,
+    operation: (input: {
+      sandbox: SandboxRef;
+      provider: SandboxProvider;
+      executionId: string;
+      signal: AbortSignal;
+      timeoutMs: number;
+    }) => Promise<T>,
+  ) {
+    throwBackendOperationAbortReason(options.signal);
     const sandbox = await this.sandboxRef();
+    throwBackendOperationAbortReason(options.signal);
     const provider = this.input.manager.providerForSandbox();
-    const execute = provider.executeSystem
-      ? provider.executeSystem.bind(provider)
-      : provider.execute.bind(provider);
-    return execute({
-      providerSandboxId: sandbox.providerSandboxId,
-      command,
-      cwd: assertExecuteCwd(undefined, provider.pathPolicy),
+    return runPinnedSandboxOperation({
+      manager: this.input.manager,
+      context: this.input.context,
+      sandbox,
+      signal: options.signal,
       timeoutMs: this.input.commandTimeoutMs,
-      maxOutputChars: this.input.limits.maxOutputChars,
+      timeoutMessage: "Sandbox file operation timed out.",
+      invalidStateMessage:
+        "SANDBOX_CANCELLATION_STATE_INVALID: aborted file operation reached the success path.",
+      createAbortError: (abortInput) =>
+        new SandboxModelExecutionAbortError(abortInput),
+      createDiscardedError: () =>
+        new SandboxModelExecutionResultDiscardedError(),
+      operation: (operationOptions) =>
+        operation({ sandbox, provider, ...operationOptions }),
     });
   }
 
-  async ls(path: string): Promise<LsResult> {
+  private runInternalCommand(
+    command: string,
+    options: SandboxBackendHostOperationOptions,
+  ) {
+    return this.runPinnedFileOperation(options, ({
+      sandbox,
+      provider,
+      executionId,
+      signal,
+      timeoutMs,
+    }) => {
+      const execute = provider.executeSystem
+        ? provider.executeSystem.bind(provider)
+        : provider.execute.bind(provider);
+      return execute({
+        providerSandboxId: sandbox.providerSandboxId,
+        executionId,
+        command,
+        cwd: assertExecuteCwd(undefined, provider.pathPolicy),
+        timeoutMs,
+        maxOutputChars: this.input.limits.maxOutputChars,
+        signal,
+      });
+    });
+  }
+
+  private async downloadFilesFromPinnedSandbox(input: {
+    sandbox: SandboxRef;
+    provider: SandboxProvider;
+    executionId: string;
+    paths: string[];
+    signal: AbortSignal;
+    timeoutMs: number;
+  }): Promise<FileDownloadResponse[]> {
+    return Promise.all(
+      input.paths.map(async (filePath) => {
+        try {
+          throwBackendOperationAbortReason(input.signal);
+          const normalized = assertSandboxBackendPath(
+            filePath,
+            input.provider.pathPolicy,
+          );
+          const content = await input.provider.downloadFile({
+            providerSandboxId: input.sandbox.providerSandboxId,
+            executionId: input.executionId,
+            sandboxPath: normalized,
+            signal: input.signal,
+            timeoutMs: input.timeoutMs,
+          });
+          throwBackendOperationAbortReason(input.signal);
+          return { path: filePath, content, error: null };
+        } catch (error) {
+          if (
+            input.signal.aborted ||
+            isPinnedOperationProviderTimeout(error)
+          ) {
+            throw error;
+          }
+          const message =
+            error instanceof Error ? error.message : String(error);
+          if (
+            message.includes("SANDBOX_READ_PATH_DENIED") ||
+            message.includes("SANDBOX_FILE_PATH_DENIED")
+          ) {
+            return {
+              path: filePath,
+              content: null,
+              error: "permission_denied" as const,
+            };
+          }
+          return {
+            path: filePath,
+            content: null,
+            error: "file_not_found" as const,
+          };
+        }
+      }),
+    );
+  }
+
+  private async uploadFilesToPinnedSandbox(input: {
+    sandbox: SandboxRef;
+    provider: SandboxProvider;
+    files: Array<[string, Uint8Array]>;
+    signal: AbortSignal;
+  }): Promise<FileUploadResponse[]> {
+    return Promise.all(
+      input.files.map(async ([filePath, content]) => {
+        let normalized: string;
+        try {
+          normalized = assertSandboxWritePath(
+            filePath,
+            input.provider.pathPolicy,
+          );
+        } catch {
+          return { path: filePath, error: "permission_denied" as const };
+        }
+        try {
+          throwBackendOperationAbortReason(input.signal);
+          const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
+          await input.provider.ensureDirectory({
+            providerSandboxId: input.sandbox.providerSandboxId,
+            directory: dir,
+          });
+          throwBackendOperationAbortReason(input.signal);
+          await input.provider.uploadFile({
+            providerSandboxId: input.sandbox.providerSandboxId,
+            sandboxPath: normalized,
+            content,
+          });
+          throwBackendOperationAbortReason(input.signal);
+          return { path: filePath, error: null };
+        } catch (error) {
+          if (input.signal.aborted) throw error;
+          return { path: filePath, error: "permission_denied" as const };
+        }
+      }),
+    );
+  }
+
+  private async readRawFromPinnedSandbox(input: {
+    sandbox: SandboxRef;
+    provider: SandboxProvider;
+    executionId: string;
+    filePath: string;
+    signal: AbortSignal;
+    timeoutMs: number;
+  }): Promise<ReadRawResult> {
+    const [result] = await this.downloadFilesFromPinnedSandbox({
+      ...input,
+      paths: [input.filePath],
+    });
+    if (result?.error || !result?.content) {
+      return {
+        error: `ENOENT: no such file, read_file '${input.filePath}'`,
+      };
+    }
+    const mimeType = inferMimeType(input.filePath);
+    const now = new Date().toISOString();
+    return {
+      data: {
+        content: isTextMimeType(mimeType)
+          ? new TextDecoder().decode(result.content)
+          : result.content,
+        mimeType,
+        created_at: now,
+        modified_at: now,
+      },
+    };
+  }
+
+  async ls(
+    path: string,
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<LsResult> {
+    throwBackendOperationAbortReason(options.signal);
     const policy = this.pathPolicy();
     let normalized: string;
     try {
@@ -360,6 +647,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         `[ -d "$dir" ] || exit 2`,
         `find "$dir" -mindepth 1 -maxdepth 1 -exec stat -c '%F\t%s\t%Y\t%n' {} \\; | awk -F '\\t' '{type=($1=="directory"?"d":"f"); print type "\\t" $2 "\\t" $3 "\\t" $4}'`,
       ].join("; "),
+      options,
     );
     if (result.exitCode !== 0) {
       return { error: `ENOENT: no such directory, ls '${normalized}'` };
@@ -374,7 +662,13 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     };
   }
 
-  async read(filePath: string, offset = 0, limit = 500): Promise<ReadResult> {
+  async read(
+    filePath: string,
+    offset = 0,
+    limit = 500,
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<ReadResult> {
+    throwBackendOperationAbortReason(options.signal);
     let normalized: string;
     try {
       normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
@@ -396,6 +690,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       startLine + Math.max(1, Math.min(Math.floor(limit), 1000)) - 1;
     const result = await this.runInternalCommand(
       `awk 'NR>=${startLine} && NR<=${endLine} {print $0}' ${shellQuote(normalized)}`,
+      options,
     );
     if (result.exitCode !== 0) {
       return { error: `ENOENT: no such file, read_file '${normalized}'` };
@@ -403,7 +698,11 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     return { content: result.output, mimeType };
   }
 
-  async readRaw(filePath: string): Promise<ReadRawResult> {
+  async readRaw(
+    filePath: string,
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<ReadRawResult> {
+    throwBackendOperationAbortReason(options.signal);
     let normalized: string;
     try {
       normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
@@ -413,22 +712,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     if (normalized === "/") {
       return { error: `EISDIR: is a directory, read_file '${normalized}'` };
     }
-    const [result] = await this.downloadFiles([normalized]);
-    if (result?.error || !result?.content) {
-      return { error: `ENOENT: no such file, read_file '${normalized}'` };
-    }
-    const mimeType = inferMimeType(normalized);
-    const now = new Date().toISOString();
-    return {
-      data: {
-        content: isTextMimeType(mimeType)
-          ? new TextDecoder().decode(result.content)
-          : result.content,
-        mimeType,
-        created_at: now,
-        modified_at: now,
-      },
-    };
+    return this.runPinnedFileOperation(options, (operationInput) =>
+      this.readRawFromPinnedSandbox({
+        ...operationInput,
+        filePath: normalized,
+      }),
+    );
   }
 
   async grep(
@@ -436,7 +725,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     path: string | null = "/",
     glob?: string | null,
     maxCount?: number | null,
+    options: SandboxBackendHostOperationOptions = {},
   ): Promise<GrepResult> {
+    throwBackendOperationAbortReason(options.signal);
     const policy = this.pathPolicy();
     let normalized: string;
     try {
@@ -449,6 +740,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     }
     const result = await this.runInternalCommand(
       `grep -RIn -- ${shellQuote(pattern)} ${shellQuote(normalized)} || true`,
+      options,
     );
     const matcher = glob ? globToRegExp(glob) : null;
     const matches: GrepMatch[] = [];
@@ -479,7 +771,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     return applyGrepMaxCount({ result: { matches }, maxCount });
   }
 
-  async glob(pattern: string, path = "/"): Promise<GlobResult> {
+  async glob(
+    pattern: string,
+    path = "/",
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<GlobResult> {
+    throwBackendOperationAbortReason(options.signal);
     const policy = this.pathPolicy();
     let normalized: string;
     try {
@@ -503,6 +800,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     }
     const result = await this.runInternalCommand(
       `find ${shellQuote(normalized)} -exec stat -c '%F\t%s\t%Y\t%n' {} \\; | awk -F '\\t' '{type=($1=="directory"?"d":"f"); print type "\\t" $2 "\\t" $3 "\\t" $4}'`,
+      options,
     );
     if (result.exitCode !== 0) {
       return { error: `ENOENT: no such directory, glob '${normalized}'` };
@@ -526,7 +824,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     };
   }
 
-  async write(filePath: string, content: string): Promise<WriteResult> {
+  async write(
+    filePath: string,
+    content: string,
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<WriteResult> {
+    throwBackendOperationAbortReason(options.signal);
     let normalized: string;
     try {
       normalized = assertSandboxWritePath(filePath, this.pathPolicy());
@@ -536,19 +839,27 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     if (normalized === "/") {
       return { error: `EISDIR: is a directory, write_file '${normalized}'` };
     }
-    const existing = await this.downloadFiles([normalized]);
-    if (existing[0]?.content !== null && !existing[0]?.error) {
-      return {
-        error: `Cannot write to ${normalized} because it already exists. Read and then make an edit, or write to a new path.`,
-      };
-    }
-    const result = await this.uploadFiles([
-      [normalized, new TextEncoder().encode(content)],
-    ]);
-    if (result[0]?.error) {
-      return { error: `Failed to write to ${normalized}: ${result[0].error}` };
-    }
-    return { path: normalized, filesUpdate: null };
+    return this.runPinnedFileOperation(options, async (operationInput) => {
+      const existing = await this.downloadFilesFromPinnedSandbox({
+        ...operationInput,
+        paths: [normalized],
+      });
+      if (existing[0]?.content !== null && !existing[0]?.error) {
+        return {
+          error: `Cannot write to ${normalized} because it already exists. Read and then make an edit, or write to a new path.`,
+        };
+      }
+      const result = await this.uploadFilesToPinnedSandbox({
+        ...operationInput,
+        files: [[normalized, new TextEncoder().encode(content)]],
+      });
+      if (result[0]?.error) {
+        return {
+          error: `Failed to write to ${normalized}: ${result[0].error}`,
+        };
+      }
+      return { path: normalized, filesUpdate: null };
+    });
   }
 
   async edit(
@@ -556,7 +867,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     oldString: string,
     newString: string,
     replaceAll = false,
+    options: SandboxBackendHostOperationOptions = {},
   ): Promise<EditResult> {
+    throwBackendOperationAbortReason(options.signal);
     let normalized: string;
     try {
       normalized = assertSandboxWritePath(filePath, this.pathPolicy());
@@ -566,97 +879,60 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     if (normalized === "/") {
       return { error: `EISDIR: is a directory, edit_file '${normalized}'` };
     }
-    const raw = await this.readRaw(normalized);
-    if (raw.error || !raw.data)
-      return { error: raw.error ?? `File '${normalized}' not found` };
-    if (typeof raw.data.content !== "string") {
-      return { error: `Cannot edit binary file '${normalized}'` };
-    }
-    const replaced = performStringReplacement(
-      raw.data.content,
-      oldString,
-      newString,
-      replaceAll,
-    );
-    if (typeof replaced === "string") {
-      return { error: replaced };
-    }
-    const [content, occurrences] = replaced;
-    const result = await this.uploadFiles([
-      [normalized, new TextEncoder().encode(content)],
-    ]);
-    if (result[0]?.error) {
-      return { error: `Failed to edit ${normalized}: ${result[0].error}` };
-    }
-    return { path: normalized, filesUpdate: null, occurrences };
+    return this.runPinnedFileOperation(options, async (operationInput) => {
+      const raw = await this.readRawFromPinnedSandbox({
+        ...operationInput,
+        filePath: normalized,
+      });
+      if (raw.error || !raw.data) {
+        return { error: raw.error ?? `File '${normalized}' not found` };
+      }
+      if (typeof raw.data.content !== "string") {
+        return { error: `Cannot edit binary file '${normalized}'` };
+      }
+      const replaced = performStringReplacement(
+        raw.data.content,
+        oldString,
+        newString,
+        replaceAll,
+      );
+      if (typeof replaced === "string") {
+        return { error: replaced };
+      }
+      const [content, occurrences] = replaced;
+      const result = await this.uploadFilesToPinnedSandbox({
+        ...operationInput,
+        files: [[normalized, new TextEncoder().encode(content)]],
+      });
+      if (result[0]?.error) {
+        return { error: `Failed to edit ${normalized}: ${result[0].error}` };
+      }
+      return { path: normalized, filesUpdate: null, occurrences };
+    });
   }
 
-  async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
-    const sandbox = await this.sandboxRef();
-    const provider = this.input.manager.providerForSandbox();
-    return Promise.all(
-      paths.map(async (filePath) => {
-        try {
-          const normalized = assertSandboxBackendPath(
-            filePath,
-            provider.pathPolicy,
-          );
-          const content = await provider.downloadFile({
-            providerSandboxId: sandbox.providerSandboxId,
-            sandboxPath: normalized,
-          });
-          return { path: filePath, content, error: null };
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          if (
-            message.includes("SANDBOX_READ_PATH_DENIED") ||
-            message.includes("SANDBOX_FILE_PATH_DENIED")
-          ) {
-            return {
-              path: filePath,
-              content: null,
-              error: "permission_denied" as const,
-            };
-          }
-          return {
-            path: filePath,
-            content: null,
-            error: "file_not_found" as const,
-          };
-        }
+  async downloadFiles(
+    paths: string[],
+    options: SandboxBackendHostOperationOptions = {},
+  ): Promise<FileDownloadResponse[]> {
+    throwBackendOperationAbortReason(options.signal);
+    return this.runPinnedFileOperation(options, (operationInput) =>
+      this.downloadFilesFromPinnedSandbox({
+        ...operationInput,
+        paths,
       }),
     );
   }
 
   async uploadFiles(
     files: Array<[string, Uint8Array]>,
+    options: SandboxBackendHostOperationOptions = {},
   ): Promise<FileUploadResponse[]> {
-    const sandbox = await this.sandboxRef();
-    const provider: SandboxProvider = this.input.manager.providerForSandbox();
-    return Promise.all(
-      files.map(async ([filePath, content]) => {
-        let normalized: string;
-        try {
-          normalized = assertSandboxWritePath(filePath, provider.pathPolicy);
-        } catch {
-          return { path: filePath, error: "permission_denied" as const };
-        }
-        try {
-          const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
-          await provider.ensureDirectory({
-            providerSandboxId: sandbox.providerSandboxId,
-            directory: dir,
-          });
-          await provider.uploadFile({
-            providerSandboxId: sandbox.providerSandboxId,
-            sandboxPath: normalized,
-            content,
-          });
-          return { path: filePath, error: null };
-        } catch {
-          return { path: filePath, error: "permission_denied" as const };
-        }
+    throwBackendOperationAbortReason(options.signal);
+    return this.runPinnedFileOperation(options, (operationInput) =>
+      this.uploadFilesToPinnedSandbox({
+        ...operationInput,
+        files,
       }),
     );
   }
@@ -766,7 +1042,19 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     return failure.result;
   }
 
-  async execute(command: string, options: { toolCallId?: string | null } = {}) {
+  async execute(
+    command: string,
+    options: {
+      signal?: AbortSignal;
+      toolCallId?: string | null;
+    } = {},
+  ) {
+    if (options.signal?.aborted) {
+      throw (
+        options.signal.reason ??
+        new DOMException("Sandbox execution was cancelled.", "AbortError")
+      );
+    }
     const startedAt = Date.now();
     const toolCallId = this.executeToolCallId(options);
     const claim = await this.input.manager.beginToolOperation({
@@ -779,6 +1067,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       return replayExecuteResult(claim.result);
     }
     let sandboxId: string | null = null;
+    let executionId: string | null = null;
     try {
       // Two-phase path policy (docs/architecture/sandbox-skill-staging.md D2):
       // /workfiles and /kb fail fast here; a /skills-referencing command is
@@ -820,33 +1109,134 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           startedAt,
         });
       }
-      const result = await this.input.manager.providerForSandbox().execute({
-        providerSandboxId: sandbox.providerSandboxId,
-        command,
-        cwd: assertExecuteCwd(
-          undefined,
-          this.input.manager.providerForSandbox().pathPolicy,
-        ),
-        timeoutMs: this.input.commandTimeoutMs,
-        maxOutputChars: this.input.limits.maxOutputChars,
+      executionId = randomUUID();
+      let cancellationRun: Promise<SandboxCancellationResult> | undefined;
+      const beginCancellation = (reason: SandboxCancellationReason) => {
+        cancellationRun ??= this.input.manager.cancelExecution({
+          sandbox,
+          executionId: executionId!,
+          reason,
+        });
+        return cancellationRun;
+      };
+      const abortWait = waitForModelExecutionAbort(options.signal, () => {
+        void beginCancellation(
+          modelExecutionCancellationReason(options.signal),
+        ).catch(() => undefined);
       });
-      const redactedResult = redactExecuteResult(result);
-      await this.input.manager.completeToolOperation({
-        operationId: claim.operationId,
-        sandboxId: sandbox.id,
-        status: "succeeded",
-        result: {
-          output: redactedResult.output,
-          exitCode: redactedResult.exitCode,
-          truncated: redactedResult.truncated,
-          outputChars: redactedResult.output.length,
-        },
-        durationMs: Date.now() - startedAt,
-      });
-      return redactedResult;
+      const execution = this.input.manager
+        .providerForSandbox()
+        .execute({
+          providerSandboxId: sandbox.providerSandboxId,
+          executionId,
+          command,
+          cwd: assertExecuteCwd(
+            undefined,
+            this.input.manager.providerForSandbox().pathPolicy,
+          ),
+          timeoutMs: this.input.commandTimeoutMs,
+          maxOutputChars: this.input.limits.maxOutputChars,
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+        .then(
+          (result) => ({ kind: "result" as const, result }),
+          (error: unknown) => ({ kind: "error" as const, error }),
+        );
+      try {
+        const outcome = await Promise.race([
+          execution,
+          abortWait.promise.then(() => ({ kind: "aborted" as const })),
+        ]);
+        const reason: SandboxCancellationReason | null =
+          outcome.kind === "aborted" ||
+          (outcome.kind === "error" && options.signal?.aborted)
+            ? modelExecutionCancellationReason(options.signal)
+            : outcome.kind === "error" &&
+                isProviderCommandTimeout(outcome.error)
+              ? "timed_out"
+              : null;
+        if (reason) {
+          let cancellation: SandboxCancellationResult;
+          try {
+            cancellation = await beginCancellation(reason);
+          } catch {
+            cancellation = { confirmed: false, mode: "unknown" };
+          }
+          throw new SandboxModelExecutionAbortError({
+            cancellation,
+            reason,
+          });
+        }
+        if (outcome.kind === "error") throw outcome.error;
+        if (outcome.kind === "aborted") {
+          throw new Error(
+            "SANDBOX_CANCELLATION_STATE_INVALID: aborted execution reached the result path.",
+          );
+        }
+
+        const disposition =
+          await this.input.manager.resolveExecutionResultDisposition(
+            sandbox,
+            this.input.context,
+          );
+        if (disposition === "termination_unknown") {
+          throw new SandboxModelExecutionAbortError({
+            cancellation: { confirmed: false, mode: "unknown" },
+            reason: "user_cancelled",
+          });
+        }
+        if (disposition === "sandbox_terminated") {
+          throw new SandboxModelExecutionResultDiscardedError();
+        }
+        if (options.signal?.aborted) {
+          let cancellation: SandboxCancellationResult;
+          const reason = modelExecutionCancellationReason(options.signal);
+          try {
+            cancellation = await beginCancellation(reason);
+          } catch {
+            cancellation = { confirmed: false, mode: "unknown" };
+          }
+          throw new SandboxModelExecutionAbortError({ cancellation, reason });
+        }
+        const redactedResult = redactExecuteResult(outcome.result);
+        await this.input.manager.completeToolOperation({
+          operationId: claim.operationId,
+          sandboxId: sandbox.id,
+          status: "succeeded",
+          result: {
+            output: redactedResult.output,
+            exitCode: redactedResult.exitCode,
+            truncated: redactedResult.truncated,
+            outputChars: redactedResult.output.length,
+            executionId,
+          },
+          durationMs: Date.now() - startedAt,
+        });
+        if (options.signal?.aborted) {
+          let cancellation: SandboxCancellationResult;
+          const reason = modelExecutionCancellationReason(options.signal);
+          try {
+            cancellation = await beginCancellation(reason);
+          } catch {
+            cancellation = { confirmed: false, mode: "unknown" };
+          }
+          throw new SandboxModelExecutionAbortError({ cancellation, reason });
+        }
+        return redactedResult;
+      } finally {
+        abortWait.dispose();
+      }
     } catch (error) {
       const commandFingerprint = sandboxRequestFingerprint({ command });
-      const errorCode = sandboxErrorCode(compactError(error));
+      const cancellation =
+        error instanceof SandboxModelExecutionAbortError ? error : null;
+      const structuredCode =
+        error &&
+        typeof error === "object" &&
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : null;
+      const errorCode = structuredCode ?? sandboxErrorCode(compactError(error));
       await this.input.manager.completeToolOperation({
         operationId: claim.operationId,
         sandboxId,
@@ -856,18 +1246,30 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             redactSandboxText(compactError(error)),
           ),
           ...(errorCode ? { errorCode, failureCode: errorCode } : {}),
+          ...(executionId ? { executionId } : {}),
+          ...(cancellation
+            ? {
+                cancellationMode: cancellation.cancellationMode,
+                cancellationRequested: true,
+                physicalCancellationConfirmed:
+                  cancellation.physicalCancellationConfirmed,
+                resultDiscarded: true,
+              }
+            : {}),
           commandFingerprint,
           runId: this.input.context.runId,
           toolName: EXECUTE_TOOL_NAME,
         },
         durationMs: Date.now() - startedAt,
       });
-      await this.input.manager
-        .releaseThreadSandboxLease({
-          context: this.input.context,
-          reason: "sandbox_execute_runtime_error",
-        })
-        .catch(() => undefined);
+      if (!cancellation) {
+        await this.input.manager
+          .releaseThreadSandboxLease({
+            context: this.input.context,
+            reason: "sandbox_execute_runtime_error",
+          })
+          .catch(() => undefined);
+      }
       throw error;
     }
   }

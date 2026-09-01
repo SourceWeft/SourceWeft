@@ -29,7 +29,10 @@
  * package it already depends on and assignability still checks the pair.
  */
 
-import type { ArtifactStorage } from "../artifact-storage";
+import {
+  ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
+  type ArtifactStorage,
+} from "../artifact-storage";
 import type {
   ArtifactPublishResult,
   ArtifactPublishSpec,
@@ -37,6 +40,7 @@ import type {
   ArtifactWriteContext,
 } from "../artifact-write";
 import type { AgentToolModelCallOptions } from "./model-call";
+import type { CommittedArtifactToolResult } from "./define";
 
 /* -------------------------------------------------------------------------- */
 /* Turn context                                                                */
@@ -184,6 +188,8 @@ export type AgentToolArtifactServices = {
     readonly artifactId: string;
     readonly spec: ArtifactPublishSpec;
     readonly expectedVersionNo?: number;
+    /** Host invocation signal; never sourced from model-authored arguments. */
+    readonly signal?: AbortSignal;
   }) => Promise<ArtifactPublishResult>;
   /** The generic artifact-row primitives, artifact type first. */
   readonly createPendingArtifact: (
@@ -206,6 +212,66 @@ export type AgentToolArtifactServices = {
   readonly findReusableArtifact: (
     query: AgentToolReusableArtifactQuery,
   ) => Promise<AgentToolArtifactRecord | null>;
+};
+
+/**
+ * A ready artifact version after the host has applied tenant, visibility, type,
+ * and current-version checks. The payload remains inside trusted capability
+ * code; model-visible tool output must project it to paths, digests, and opaque
+ * handles instead of returning storage coordinates.
+ */
+export type AgentToolAuthorizedArtifactVersion = {
+  readonly artifactId: string;
+  readonly versionId: string;
+  readonly versionNo: number;
+  readonly payload: Readonly<Record<string, unknown>>;
+};
+
+export type AgentToolArtifactVersionServices = {
+  readonly readAuthorizedCurrentVersion: (input: {
+    readonly artifactId: string;
+    readonly expectedArtifactType: string;
+  }) => Promise<AgentToolAuthorizedArtifactVersion | null>;
+};
+
+export type AgentToolCurrentRunArtifactPublicationServices = {
+  readonly allocateArtifactId: () => string;
+  readonly cleanupPreallocatedArtifact: (artifactId: string) => Promise<void>;
+  readonly publishCommitted: (input: {
+    readonly artifactType: string;
+    readonly mode:
+      | { readonly kind: "create"; readonly artifactId: string }
+      | {
+          readonly kind: "republish";
+          readonly artifactId: string;
+          readonly expectedVersionNo: number;
+        };
+    readonly payload: Readonly<Record<string, unknown>>;
+    readonly previewMetadata?: Readonly<Record<string, unknown>> | null;
+    readonly previewStorageKey?: string | null;
+    readonly prompt: string;
+    readonly semanticRequestKey: string;
+    readonly storageBucket?: string | null;
+    readonly storageKey?: string | null;
+    readonly title: string;
+    readonly workflowVersion: string;
+  }) => Promise<
+    | {
+        readonly ok: true;
+        readonly result: CommittedArtifactToolResult;
+        readonly reused: boolean;
+        readonly versionNo: number;
+      }
+    | {
+        readonly ok: false;
+        readonly reason:
+          | "artifact_not_found"
+          | "forbidden"
+          | "message_unavailable"
+          | "run_inactive"
+          | "version_conflict";
+      }
+  >;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -355,11 +421,193 @@ export type AgentToolFilesystemServices = {
     | readonly AgentToolFileDownloadResult[];
 };
 
+export type AgentToolSandboxHostLimits = {
+  readonly commandTimeoutMs: number;
+  readonly maxOutputChars: number;
+  readonly maxUploadFileBytes: number;
+  readonly maxUploadTotalBytes: number;
+  readonly maxDownloadFileBytes: number;
+  readonly maxDownloadTotalBytes: number;
+  readonly maxCaptureFiles: number;
+};
+
 export type AgentToolSandboxServices = {
   readonly allowedReadRoots?: readonly string[];
   readonly downloadCurrentFile: (input: {
     readonly sandboxPath: string;
+    /** Trusted host cancellation; never sourced from model arguments. */
+    readonly signal?: AbortSignal;
+    /** Trusted host deadline, clamped again by the sandbox runtime. */
+    readonly timeoutMs?: number;
   }) => Promise<Buffer | Uint8Array>;
+  /** Trusted tools require a concrete provider session before side effects. */
+  readonly ensureCurrentSession?: () => Promise<{
+    readonly sessionGeneration: string;
+    /** Effective trusted-host ceilings after backend configuration/clamping. */
+    readonly hostLimits?: AgentToolSandboxHostLimits;
+    /** Host-resolved executable paths keyed by catalog identity. */
+    readonly runtimeAssets?: Readonly<Record<string, string>>;
+  }>;
+  readonly uploadCurrentFiles?: (
+    files: readonly {
+      readonly path: string;
+      readonly bytes: Uint8Array;
+    }[],
+    options?: {
+      /** Trusted host cancellation; never sourced from model arguments. */
+      readonly signal?: AbortSignal;
+      /** Trusted host deadline, clamped again by the sandbox runtime. */
+      readonly timeoutMs?: number;
+    },
+  ) => Promise<void>;
+  readonly listCurrentFiles?: (input: {
+    readonly root: string;
+  }) => Promise<readonly string[]>;
+  readonly executeCurrent?: (input: {
+    readonly command: string;
+    readonly timeoutMs: number;
+    readonly signal?: AbortSignal;
+  }) => Promise<{
+    readonly exitCode: number | null;
+    readonly output: string;
+    readonly truncated?: boolean;
+  }>;
+  readonly captureCurrentTree?: (input: {
+    readonly root: string;
+    readonly maxFiles: number;
+    readonly maxTotalBytes: number;
+    /** Trusted host cancellation; never sourced from model arguments. */
+    readonly signal?: AbortSignal;
+    /** Trusted host deadline, clamped again by the sandbox runtime. */
+    readonly timeoutMs?: number;
+  }) => Promise<
+    readonly {
+      readonly relativePath: string;
+      readonly bytes: Uint8Array;
+    }[]
+  >;
+};
+
+/**
+ * Hard ceilings for the new generic host ports. Backends may configure smaller
+ * limits but must never accept a caller-supplied value above these bounds.
+ */
+export const AGENT_TOOL_HOST_LIMITS = Object.freeze({
+  operationClaimMaxKeys: 256,
+  protectedJsonMaxBytes: 256 * 1024,
+  sandboxCaptureMaxFiles: 200,
+  sandboxCaptureMaxTotalBytes: ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
+  sandboxCommandMaxOutputChars: 80_000,
+  sandboxCommandMaxTimeoutMs: 10 * 60 * 1000,
+  workBlobMaxBytes: ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
+  workBlobMaxTtlSeconds: 24 * 60 * 60,
+});
+
+export type AgentToolReceiptServices = {
+  readonly issueCurrentRunReceipt: (input: {
+    readonly producerToolName: string;
+    readonly producerToolCallId: string;
+    readonly schemaVersion: string;
+    readonly payload: Readonly<Record<string, unknown>>;
+  }) => Promise<{ readonly receiptId: string }>;
+  readonly resolveCurrentRunReceipt: (input: {
+    readonly receiptId: string;
+    readonly producerToolName: string;
+    readonly expectedSchemaVersion?: string;
+    readonly executionScope: "root_only";
+  }) => Promise<unknown | null>;
+};
+
+export type AgentToolOperationClaimedItem =
+  | {
+      readonly semanticKey: string;
+      readonly action: "execute";
+      readonly claimToken: string;
+    }
+  | {
+      readonly semanticKey: string;
+      readonly action: "reuse";
+      readonly observationId: string;
+      readonly observation: unknown;
+    };
+
+export type AgentToolOperationClaimManyResult =
+  | {
+      readonly kind: "claimed";
+      readonly items: readonly AgentToolOperationClaimedItem[];
+    }
+  | { readonly kind: "wait"; readonly ownerToolCallId: string }
+  | {
+      readonly kind: "unknown";
+      readonly code: "SIDE_EFFECT_OUTCOME_UNKNOWN";
+    };
+
+export type AgentToolOperationCacheServices = {
+  /**
+   * The host canonicalizes/sorts/deduplicates keys and claims them all-or-none.
+   * Team/workspace/run identity is injected from the active tool context.
+   */
+  readonly claimMany: (input: {
+    readonly toolName: string;
+    readonly toolCallId: string;
+    readonly semanticKeys: readonly string[];
+    readonly executionScope: "root_only";
+  }) => Promise<AgentToolOperationClaimManyResult>;
+  readonly complete: (input: {
+    readonly toolName: string;
+    readonly semanticKey: string;
+    readonly claimToken: string;
+    readonly observation: Readonly<Record<string, unknown>>;
+  }) => Promise<{ readonly observationId: string }>;
+  readonly markUnknown: (input: {
+    readonly toolName: string;
+    readonly semanticKey: string;
+    readonly claimToken: string;
+    readonly reason: string;
+  }) => Promise<void>;
+};
+
+export type AgentToolVerifiedWorkBlob = {
+  readonly blobRef: string;
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+  readonly contentDigest: string;
+};
+
+export type AgentToolWorkBlobServices = {
+  readonly putIfAbsent: (input: {
+    readonly semanticKey: string;
+    readonly bytes: Uint8Array;
+    readonly contentType: string;
+    readonly contentDigest: string;
+    readonly ttlSeconds: number;
+  }) => Promise<{
+    readonly blobRef: string;
+    readonly contentDigest: string;
+  }>;
+  readonly getVerified: (input: {
+    readonly blobRef: string;
+    readonly contentDigest: string;
+  }) => Promise<Pick<
+    AgentToolVerifiedWorkBlob,
+    "bytes" | "contentType"
+  > | null>;
+  readonly getBySemanticKey: (input: {
+    readonly semanticKey: string;
+  }) => Promise<AgentToolVerifiedWorkBlob | null>;
+  /** Delete every WIP object in the host-injected current-run scope. */
+  readonly deleteScope: () => Promise<void>;
+};
+
+export type AgentToolDeliverableJob = {
+  /** Host-normalized job id; capabilities never inspect BullMQ internals. */
+  readonly id: string;
+  /** Fence publication and remove the job when BullMQ has not started it yet. */
+  readonly cancel: () => Promise<void>;
+  /** Resolves with the worker result and rejects with the terminal job error. */
+  readonly waitUntilFinished: (input?: {
+    readonly timeoutMs?: number;
+  }) => Promise<unknown>;
 };
 
 export type AgentToolQueueServices = {
@@ -372,13 +620,20 @@ export type AgentToolQueueServices = {
     readonly jobName: string;
     readonly jobId: string;
     readonly payload: Record<string, unknown>;
-  }) => Promise<unknown>;
+  }) => Promise<AgentToolDeliverableJob>;
 };
 
 export type AgentToolLogger = {
   info: (message: string, meta?: Record<string, unknown>) => void;
   warn: (message: string, meta?: Record<string, unknown>) => void;
   error: (message: string, meta?: Record<string, unknown>) => void;
+};
+
+export type AgentToolMediaServices = {
+  readonly probeAudioDurationSeconds: (input: {
+    readonly bytes: Uint8Array;
+    readonly mimeType: string;
+  }) => Promise<number | null>;
 };
 
 /**
@@ -495,14 +750,21 @@ export type AgentToolModelGatewayService<TGateway = AgentToolGatewaySurface> = {
  */
 export type AgentToolHostServices<TGateway = AgentToolGatewaySurface> = {
   readonly artifacts: AgentToolArtifactServices;
+  /** Optional until a durable current-run context installs the trusted reader. */
+  readonly artifactVersions?: AgentToolArtifactVersionServices;
+  readonly currentRunArtifacts?: AgentToolCurrentRunArtifactPublicationServices;
   readonly citationRegistry: AgentToolCitationRegistry;
   readonly filesystem?: AgentToolFilesystemServices;
   readonly llm?: AgentToolLlmExecutionConfig;
   readonly logger: AgentToolLogger;
+  readonly media?: AgentToolMediaServices;
   readonly modelGateway: AgentToolModelGatewayService<TGateway>;
+  readonly operationCache?: AgentToolOperationCacheServices;
   readonly queue: AgentToolQueueServices;
+  readonly receipts?: AgentToolReceiptServices;
   readonly retrieval: AgentToolRetrievalServices;
   readonly sandbox?: AgentToolSandboxServices;
   readonly storage: ArtifactStorage;
+  readonly workBlobs?: AgentToolWorkBlobServices;
   readonly webProvider: AgentToolWebProvider | null;
 };

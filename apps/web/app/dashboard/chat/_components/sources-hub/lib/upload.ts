@@ -108,11 +108,13 @@ export const SOURCE_FILE_EXTENSIONS = [
   "webm",
 ] as const;
 
-export const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(
-  ",",
-);
+export const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map(
+  (ext) => `.${ext}`,
+).join(",");
 
-export const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
+export const SOURCE_FILE_EXTENSION_SET = new Set<string>(
+  SOURCE_FILE_EXTENSIONS,
+);
 
 export function getUploadFileExtension(fileName: string) {
   const baseName = fileName.split(/[\\/]/).at(-1)?.trim().toLowerCase() ?? "";

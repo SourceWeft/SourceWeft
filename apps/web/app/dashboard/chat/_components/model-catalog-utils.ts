@@ -170,7 +170,10 @@ function isInternalOpenRouterAlias(alias: string) {
 }
 
 function deriveDisplayNameFromAlias(alias: string) {
-  const modelPart = alias.replace(/^global-openrouter-(chat|image|vision):/, "");
+  const modelPart = alias.replace(
+    /^global-openrouter-(chat|image|vision):/,
+    "",
+  );
   if (!modelPart || modelPart === alias) {
     return alias;
   }
@@ -316,7 +319,9 @@ function pickSelectedModelForType(input: {
 
   return (
     resolveByAliases(resolveAliasesForType(input.type, input.threadAliases)) ??
-    resolveByAliases(resolveAliasesForType(input.type, input.fallbackAliases)) ??
+    resolveByAliases(
+      resolveAliasesForType(input.type, input.fallbackAliases),
+    ) ??
     kindModels[0] ??
     null
   );
@@ -417,7 +422,8 @@ export function createCustomModelItemsFromSavedModels(input: {
     models.push({
       ...createCustomModelItem({
         byokCredentialAlias: credential?.credentialAlias ?? null,
-        capabilities: savedModel.capabilities as ModelThinkingCapabilities | null,
+        capabilities:
+          savedModel.capabilities as ModelThinkingCapabilities | null,
         modelAlias: savedModel.modelName,
         name: savedModel.displayName,
         providerLabel,

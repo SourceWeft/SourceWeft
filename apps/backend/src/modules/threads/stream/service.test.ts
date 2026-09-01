@@ -27,6 +27,10 @@ import type {
   ToolCallTrace,
 } from "../turn/types";
 import { SANDBOX_EXECUTE_TOOL_CALL_ID_REQUIRED } from "../turn/sandbox-execute-error";
+import {
+  AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
+  AgentToolTerminationUnknownError,
+} from "../agent/middleware/tool-execution-timeout";
 
 afterAll(async () => {
   await closeQueue();
@@ -1994,6 +1998,62 @@ test("streamThreadEvents converts LangChain tool middleware failures into termin
   assert.ok(finishEvent);
 });
 
+test("external Stop preserves termination_unknown instead of claiming cancellation", async () => {
+  const abortController = new AbortController();
+  let persistedCode: string | undefined;
+  const turnService = createTurnService();
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      abortController.abort(
+        new DOMException("user requested Stop", "AbortError"),
+      );
+      const terminationUnknown = new AgentToolTerminationUnknownError({
+        cause: abortController.signal.reason,
+        terminationGraceMs: 30_000,
+        toolName: "validate_video_presentation",
+      });
+      const wrapped = new Error("MiddlewareError", {
+        cause: terminationUnknown,
+      });
+      wrapped.name = "MiddlewareError";
+      throw wrapped;
+    },
+    async () => null,
+    async (input) => {
+      persistedCode = input.contentError.code;
+      return createAssistantMessageRecord({
+        id: "assistant-termination-unknown-1",
+        content: input.contentError.message,
+      });
+    },
+    createBillingPort(),
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents(
+    {
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      content: "Render the video",
+    },
+    {
+      abortSignal: abortController.signal,
+      shouldCancel: async () => true,
+    },
+  )) {
+    events.push(parseSseData(event));
+  }
+
+  const errorEvent = events.find((event) => event.type === "error");
+  assert.equal(errorEvent?.code, AGENT_TOOL_TERMINATION_UNKNOWN_CODE);
+  assert.equal(persistedCode, AGENT_TOOL_TERMINATION_UNKNOWN_CODE);
+  assert.notEqual(errorEvent?.code, "CLIENT_CANCELLED");
+});
+
 test("streamThreadEvents preserves preflight billing on persisted errors", async () => {
   let errorPrepared: PreparedThreadTurn | undefined;
   const preparedWithPreflightBilling = createPrepared({
@@ -2392,6 +2452,7 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   let persistedCancelledError: {
     errorCode?: string;
     partialAssistantContent?: string;
+    toolCalls?: unknown[];
   } | null = null;
   vi.spyOn(threadStreamObservability, "startTrace").mockImplementation(
     async (input: StartTraceInput) => ({
@@ -2425,12 +2486,29 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
     >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield { type: "text-delta", delta: "partial" };
+      yield {
+        type: "tool-call-start",
+        id: "tool-cancelled",
+        tool: "validate_demo",
+        input: {},
+        toolCall: {
+          id: "tool-cancelled",
+          tool: "validate_demo",
+          input: {},
+          output: null,
+          status: "running",
+          latencyMs: null,
+          error: null,
+          sequence: 1,
+        },
+      };
     },
     async () => null,
     async (input) => {
       persistedCancelledError = {
         errorCode: input.contentError.code,
         partialAssistantContent: input.partialAssistantContent,
+        toolCalls: input.partialState?.toolCalls,
       };
       return createAssistantMessageRecord({
         id: "assistant-message-cancelled",
@@ -2450,6 +2528,10 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   assert.equal(parseSseData((await iterator.next()).value).type, "start");
   assert.equal(parseSseData((await iterator.next()).value).type, "text-start");
   assert.equal(parseSseData((await iterator.next()).value).type, "text-delta");
+  assert.equal(
+    parseSseData((await iterator.next()).value).type,
+    "tool-call-start",
+  );
   await iterator.return(undefined);
 
   assert.equal(
@@ -2469,6 +2551,18 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   assert.deepEqual(persistedCancelledError, {
     errorCode: "CLIENT_CANCELLED",
     partialAssistantContent: "partial",
+    toolCalls: [
+      {
+        id: "tool-cancelled",
+        tool: "validate_demo",
+        input: {},
+        output: null,
+        status: "error",
+        latencyMs: null,
+        error: "Client closed the stream before completion",
+        sequence: 1,
+      },
+    ],
   });
 });
 
@@ -2478,6 +2572,7 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
   let persistedCancelledError: {
     errorCode?: string;
     partialAssistantContent?: string;
+    toolCalls?: unknown[];
   } | null = null;
   vi.spyOn(threadStreamObservability, "startTrace").mockImplementation(
     async (input: StartTraceInput) => ({
@@ -2508,6 +2603,22 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
       typeof ContentThreadStreamService
     >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "tool-call-start",
+        id: "tool-cancelled",
+        tool: "validate_demo",
+        input: {},
+        toolCall: {
+          id: "tool-cancelled",
+          tool: "validate_demo",
+          input: {},
+          output: null,
+          status: "running",
+          latencyMs: null,
+          error: null,
+          sequence: 1,
+        },
+      };
       yield { type: "text-delta", delta: "partial" };
       yield { type: "text-delta", delta: " after cancel" };
     },
@@ -2516,6 +2627,7 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
       persistedCancelledError = {
         errorCode: input.contentError.code,
         partialAssistantContent: input.partialAssistantContent,
+        toolCalls: input.partialState?.toolCalls,
       };
       return null;
     },
@@ -2533,12 +2645,13 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
     {
       shouldCancel: async () => {
         cancelChecks += 1;
-        return cancelChecks > 1;
+        return cancelChecks > 2;
       },
       createErrorMessage: async (input) => {
         persistedCancelledError = {
           errorCode: input.contentError.code,
           partialAssistantContent: input.partialAssistantContent,
+          toolCalls: input.partialState?.toolCalls,
         };
         return createAssistantMessageRecord({
           id: "assistant-message-cancelled",
@@ -2592,6 +2705,18 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
   assert.deepEqual(persistedCancelledError, {
     errorCode: "CLIENT_CANCELLED",
     partialAssistantContent: "partial",
+    toolCalls: [
+      {
+        id: "tool-cancelled",
+        tool: "validate_demo",
+        input: {},
+        output: null,
+        status: "error",
+        latencyMs: null,
+        error: "Chat run was cancelled",
+        sequence: 1,
+      },
+    ],
   });
   assert.equal(
     events.find((event) => event.type === "error")?.code,

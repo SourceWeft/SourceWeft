@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { mergeCommittedArtifactOutputsIntoMessage } from "./_thread/artifact-output-reconcile";
 
 export type ChatMessageItem = {
   id: string;
@@ -29,6 +30,16 @@ export function mergeStreamingMessageIntoMessages(
 
   const snapshotIds = new Set([...snapshot.messageIds, snapshot.messageId]);
   let found = false;
+  let streamingMessage = snapshot.message;
+  for (const message of messages) {
+    if (!snapshotIds.has(message.id)) {
+      continue;
+    }
+    streamingMessage = mergeCommittedArtifactOutputsIntoMessage({
+      authoritative: message,
+      current: streamingMessage,
+    });
+  }
   const merged = messages.flatMap((message) => {
     if (!snapshotIds.has(message.id)) {
       return message;
@@ -37,10 +48,10 @@ export function mergeStreamingMessageIntoMessages(
       return [];
     }
     found = true;
-    return [snapshot.message];
+    return [streamingMessage];
   });
 
-  return found ? merged : [...merged, snapshot.message];
+  return found ? merged : [...merged, streamingMessage];
 }
 
 export function useStreamingAssistantTransientState() {

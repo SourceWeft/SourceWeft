@@ -11,7 +11,8 @@ export type HubSkillItem = {
   name: string;
   displayName: string;
   description: string;
-  sourceType: "builtin" | "workspace_custom" | "team_custom" | "registry_github";
+  sourceType:
+    "builtin" | "workspace_custom" | "team_custom" | "registry_github";
   version: string;
   enabled?: boolean;
   hasReadme: boolean;
@@ -30,7 +31,10 @@ export function skillSourceLabel(sourceType: HubSkillItem["sourceType"]) {
   return "Workspace";
 }
 
-export function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
+export function countFilteredSkills(
+  items: HubSkillItem[],
+  searchQuery: string,
+) {
   const q = searchQuery.trim().toLowerCase();
   if (!q) {
     return items.length;

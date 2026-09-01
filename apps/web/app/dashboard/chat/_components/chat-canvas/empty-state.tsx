@@ -41,11 +41,7 @@ function promptFilesToImages(files: FileUIPart[] | undefined) {
       dataUrl: file.url,
       fileName: file.filename,
       mimeType: file.mediaType as
-        | "image/png"
-        | "image/jpeg"
-        | "image/webp"
-        | "image/gif"
-        | undefined,
+        "image/png" | "image/jpeg" | "image/webp" | "image/gif" | undefined,
     }));
 }
 

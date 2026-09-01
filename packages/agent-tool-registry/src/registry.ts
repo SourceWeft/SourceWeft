@@ -24,7 +24,7 @@ import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox/agent-too
 import { retrievalAgentToolDefs } from "@sourceweft/builtin-retrieval/agent-tool-defs";
 import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-image/agent-tool-defs";
 import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact/agent-tool-defs";
-import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
+import { videoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
 import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck/agent-tool-defs";
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 
@@ -61,7 +61,7 @@ export const AGENT_TOOLS = [
   ...retrievalAgentToolDefs,
   ...webAgentToolDefs,
   ...publishArtifactAgentToolDefs,
-  ...generateVideoPresentationAgentToolDefs,
+  ...videoPresentationAgentToolDefs,
   ...pptDeckAgentToolDefs,
   ...sandboxAgentToolDefs,
   ...LOCAL_AGENT_TOOLS,

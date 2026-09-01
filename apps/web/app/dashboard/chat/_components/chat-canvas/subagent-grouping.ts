@@ -86,7 +86,10 @@ export function partitionWorkflowBlocksBySubagent(
       const list = childrenByTask.get(producer.taskCallId) ?? [];
       list.push({ block, index });
       childrenByTask.set(producer.taskCallId, list);
-      if (producer.subagentType && !subagentTypeByTask.has(producer.taskCallId)) {
+      if (
+        producer.subagentType &&
+        !subagentTypeByTask.has(producer.taskCallId)
+      ) {
         subagentTypeByTask.set(producer.taskCallId, producer.subagentType);
       }
     }

@@ -497,6 +497,103 @@ test("chat.complete sanitizes invalid JSON errors from the real OpenAI-compatibl
   }
 });
 
+test("OrcaRouter real adapter captures success headers, resolved model, and inline cost", async () => {
+  let includeCostHeader: string | undefined;
+  const server = createServer(async (request, response) => {
+    const rawIncludeCostHeader = request.headers["x-orcarouter-include-cost"];
+    includeCostHeader = Array.isArray(rawIncludeCostHeader)
+      ? rawIncludeCostHeader[0]
+      : rawIncludeCostHeader;
+    for await (const _chunk of request) {
+      // Drain the request body before replying.
+    }
+    response.writeHead(200, {
+      "Content-Type": "application/json",
+      "X-Orca-Request-Id": "orca-request-live-shape",
+      "X-Orca-Resolved-Model": "qwen/qwen3.7-plus",
+      "X-Orca-Router": "auto",
+    });
+    response.end(
+      JSON.stringify({
+        id: "chatcmpl_orca",
+        object: "chat.completion",
+        created: 1,
+        model: "qwen3.7-plus",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "ok", refusal: null },
+            finish_reason: "stop",
+            logprobs: null,
+          },
+        ],
+        usage: {
+          prompt_tokens: 842,
+          completion_tokens: 5012,
+          total_tokens: 5854,
+          cost_usd: 0.012345678901,
+          completion_tokens_details: { reasoning_tokens: 3938 },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const gateway = createModelGateway({
+      providers: {
+        orcarouter: {
+          kind: "openai-compatible",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          apiKey: "test-key",
+          supports: ["chat"],
+        },
+      },
+      modelRoutes: {
+        "chat-default": {
+          strategy: "priority",
+          targets: [
+            {
+              provider: "orcarouter",
+              model: "orcarouter/auto",
+              priority: 1,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await gateway.chat.complete({
+      model: "chat-default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    assert.equal(includeCostHeader, "true");
+    assert.equal(
+      result.observation?.identity.resolvedProviderModel,
+      "qwen/qwen3.7-plus",
+    );
+    assert.equal(
+      result.observation?.identity.providerRequestId,
+      "orca-request-live-shape",
+    );
+    assert.equal(result.observation?.cost?.inlineUsd, 0.012345678901);
+    assert.equal(result.usage?.reasoningTokens, 3938);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 test("chat.stream rejects structured output without falling back", async () => {
   const gateway = createModelGateway({
     baseUrl: "https://gateway.example.com",
@@ -1251,7 +1348,31 @@ test("chat.stream passes through LangChain chunks and emits metadata", async () 
     events.push(event);
   }
 
-  assert.deepEqual(events, [
+  const metadataEvent = events.at(-1);
+  assert.equal(metadataEvent?.type, "metadata");
+  if (metadataEvent?.type === "metadata") {
+    assert.deepEqual(metadataEvent.metadata.observation?.identity, {
+      modelAlias: "chat-default",
+      provider: "anthropic",
+      requestedProviderModel: "claude-3-5-sonnet-latest",
+    });
+    assert.deepEqual(metadataEvent.metadata.observation?.usage, {
+      inputTokens: 2,
+      outputTokens: 3,
+      totalTokens: 5,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+    });
+  }
+  const comparableEvents = events.map((event) => {
+    if (event.type !== "metadata") {
+      return event;
+    }
+    const { observation: _observation, ...metadata } = event.metadata;
+    return { type: "metadata" as const, metadata };
+  });
+
+  assert.deepEqual(comparableEvents, [
     { type: "chunk", chunk: { content: "Hello" } },
     {
       type: "chunk",

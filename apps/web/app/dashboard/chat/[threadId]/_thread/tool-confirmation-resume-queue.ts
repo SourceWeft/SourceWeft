@@ -71,9 +71,7 @@ function hashString(value: string) {
 }
 
 function keySegment(value: string, maxLength: number) {
-  const segment = value
-    .replace(/[^a-zA-Z0-9._:-]+/g, "_")
-    .slice(0, maxLength);
+  const segment = value.replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, maxLength);
   return segment || "unknown";
 }
 

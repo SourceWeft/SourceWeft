@@ -2,8 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { lintSceneLayout } from "../src/scene-lint";
+import { sceneRuntimeSafetyDiagnostics } from "../src/pipeline/scene-source";
 
 const CANVAS = { width: 1920, height: 1080 };
+
+test("computed constructor and browser navigation escapes are rejected structurally", () => {
+  const diagnostics = sceneRuntimeSafetyDiagnostics(`
+    export default function VideoScene() {
+      const escaped = React.createElement["con" + "structor"]("return this")();
+      escaped["par" + "ent"]["loc" + "ation"] = "https://example.test/leak";
+      return <AbsoluteFill><SafeArea><a href="https://example.test">x</a></SafeArea></AbsoluteFill>;
+    }
+  `);
+  assert.ok(
+    diagnostics.some((entry) => entry.includes("Computed property access")),
+  );
+  assert.ok(diagnostics.some((entry) => entry.includes("Browser element")));
+  assert.ok(diagnostics.some((entry) => entry.includes("Remote or navigable")));
+});
+
+test("trusted motion and local asset primitives remain allowed", () => {
+  assert.deepEqual(
+    sceneRuntimeSafetyDiagnostics(`
+      export default function VideoScene() {
+        const frame = useCurrentFrame();
+        const opacity = interpolate(frame, [0, 20], [0, 1]);
+        return <AbsoluteFill><SafeArea><AssetImage src="sourceweft-asset:hero" style={{opacity}} /></SafeArea></AbsoluteFill>;
+      }
+    `),
+    [],
+  );
+});
+
+test("dynamic element creation and network-capable styles are rejected", () => {
+  const diagnostics = sceneRuntimeSafetyDiagnostics(`
+    export default function VideoScene() {
+      const remote = "https" + "://example.test/leak.png";
+      return React.createElement("img", {src: remote, style: {backgroundImage: remote}});
+    }
+  `);
+  assert.ok(diagnostics.some((entry) => entry.includes("createElement")));
+  assert.ok(diagnostics.some((entry) => entry.includes("backgroundImage")));
+});
 
 function scene(body: string) {
   return `
@@ -157,7 +197,9 @@ test("image src literals must come from the provided asset list", () => {
     { allowedImageUrls: [allowed] },
   );
   assert.ok(
-    invented.errors.some((error) => error.includes("not in the provided asset list")),
+    invented.errors.some((error) =>
+      error.includes("not in the provided asset list"),
+    ),
     invented.errors.join("; "),
   );
 
@@ -175,4 +217,28 @@ test("image src literals must come from the provided asset list", () => {
       error.includes("not in the provided asset list"),
     ),
   );
+});
+
+test("dynamic and native image sources are rejected before rendering", () => {
+  const dynamic = lintSceneLayout(
+    scene(`
+      <SafeArea>
+        <AssetImage src={computedUrl} />
+        <div>caption</div>
+      </SafeArea>
+    `),
+    CANVAS,
+  );
+  assert.ok(dynamic.errors.some((error) => error.includes("exact authorized")));
+
+  const native = lintSceneLayout(
+    scene(`
+      <SafeArea>
+        <img src="https://example.com/tracker" />
+        <div>caption</div>
+      </SafeArea>
+    `),
+    CANVAS,
+  );
+  assert.ok(native.errors.some((error) => error.includes("Native <img>")));
 });

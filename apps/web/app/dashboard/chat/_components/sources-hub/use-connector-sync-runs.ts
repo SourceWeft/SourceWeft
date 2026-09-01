@@ -370,17 +370,18 @@ export function useConnectorSyncRuns(input: {
       }
 
       if (plan.completedRunIds.length > 0) {
-        const finalRefreshes = plan.finalRefreshConnectorIds.map((connectorId) =>
-          contentClient
-            .listSources(activeWorkspaceId, {
-              view: "tree",
-              connectorId,
-            })
-            .then((sourcesResult) => ({
-              connectorId,
-              items: mapSourcesToUi(sourcesResult.items),
-            }))
-            .catch(() => ({ connectorId, items: [] as SourceItem[] })),
+        const finalRefreshes = plan.finalRefreshConnectorIds.map(
+          (connectorId) =>
+            contentClient
+              .listSources(activeWorkspaceId, {
+                view: "tree",
+                connectorId,
+              })
+              .then((sourcesResult) => ({
+                connectorId,
+                items: mapSourcesToUi(sourcesResult.items),
+              }))
+              .catch(() => ({ connectorId, items: [] as SourceItem[] })),
         );
         for (const runId of plan.completedRunIds) {
           const tracked = activeSyncRunsRef.current.get(runId);

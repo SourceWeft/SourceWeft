@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { beforeAll, test, vi } from "vitest";
 import { connectorAdaptersReady } from "../../../connectors";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
 import {
   normalizeGeneratedImageProgressEvent,
@@ -35,6 +39,7 @@ import type { DeepAgentTurnEvent } from "./events";
 import type { PreparedThreadTurn } from "../..";
 import type { ConnectorActionExecutionCursor } from "../../../connectors/agent-tool-idempotency";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
+import { adaptToolsEvent } from "./v3-protocol";
 import {
   createSyntheticRuntimePromptProvider,
   SYNTHETIC_PROMPT_MARKER,
@@ -164,6 +169,88 @@ test("main-agent tool calls carry no producer tag", () => {
   });
   assert.equal(toolCallsById.get("main-1")?.producer, undefined);
 });
+
+for (const error of [
+  "[AGENT_TOOL_EXECUTION_TIMEOUT] Tool 'validate_video_presentation' timed out after 600000ms. The call did not produce a successful result.",
+  "[AGENT_TOOL_TERMINATION_UNKNOWN] Tool 'validate_video_presentation' did not confirm termination within 30000ms. Do not treat this call as successful or reuse its execution environment.",
+]) {
+  test(`serialized error ToolMessage projects ${error.split("]")[0]}] to live and collected error state`, async () => {
+    const prepared = createToolLoggingPreparedTurn();
+    const runtime = createTurnRuntime({ prepared });
+    const toolNameByCallId = new Map<string, string>();
+    const callId = "call-timeout-projection";
+    const toolName = "validate_video_presentation";
+    const startPayload = adaptToolsEvent(
+      {
+        event: "tool-started",
+        tool_call_id: callId,
+        tool_name: toolName,
+        input: "{}",
+      },
+      toolNameByCallId,
+    );
+    assert.ok(startPayload);
+    const startSnapshot = resolveToolsStreamToolCall({
+      payload: startPayload,
+      resolveToolCallSequence: runtime.resolveToolCallSequence,
+      toolCallOrder: runtime.toolCallOrder,
+      toolCallsById: runtime.toolCallsById,
+    });
+    assert.ok(startSnapshot);
+    await collectToolStreamEvents(
+      handleToolStartStreamChunk({
+        prepared,
+        runtime,
+        snapshot: startSnapshot,
+      }),
+    );
+
+    const message = new ToolMessage({
+      content: error,
+      name: toolName,
+      status: "error",
+      tool_call_id: callId,
+    });
+    const finishPayload = adaptToolsEvent(
+      {
+        event: "tool-finished",
+        tool_call_id: callId,
+        output: message.toJSON(),
+      },
+      toolNameByCallId,
+    );
+    assert.ok(finishPayload);
+    const errorSnapshot = resolveToolsStreamToolCall({
+      payload: finishPayload,
+      resolveToolCallSequence: runtime.resolveToolCallSequence,
+      toolCallOrder: runtime.toolCallOrder,
+      toolCallsById: runtime.toolCallsById,
+    });
+    assert.ok(errorSnapshot);
+    const liveEvents = await collectToolStreamEvents(
+      handleToolErrorStreamChunk({
+        prepared,
+        runtime,
+        snapshot: errorSnapshot,
+      }),
+    );
+
+    assert.deepEqual(
+      liveEvents.map((event) => event.type),
+      ["tool-call-error", "tool-call-end"],
+    );
+    assert.equal(
+      liveEvents[0]?.type === "tool-call-error"
+        ? liveEvents[0].toolCall.status
+        : null,
+      "error",
+    );
+    assert.equal(runtime.toolCallsById.get(callId)?.status, "error");
+    assert.equal(runtime.toolCallsById.get(callId)?.error, error);
+    assert.equal(runtime.collectToolCalls()[0]?.status, "error");
+    assert.equal(runtime.collectToolCalls()[0]?.error, error);
+  });
+}
 
 test("tool stream handler leaves generic tool logging to middleware", async () => {
   const prepared = createToolLoggingPreparedTurn();
@@ -594,13 +681,16 @@ test("sanitizes image blocks from persisted agent history", () => {
 
 test("command tool choice middleware forces target on first call for explicit tool command", async () => {
   const middleware = agentTestExports.createCommandToolChoiceMiddleware({
-    targetToolName: "generate_video_presentation",
+    initialToolPolicy: {
+      kind: "force",
+      toolName: "target_tool",
+    },
   });
   const calls: Array<{ toolChoice?: unknown; tools: string[] }> = [];
   const request = {
-    messages: [new HumanMessage("make video")],
-    state: { messages: [new HumanMessage("make video")] },
-    tools: [{ name: "web_search" }, { name: "generate_video_presentation" }],
+    messages: [new HumanMessage("run target")],
+    state: { messages: [new HumanMessage("run target")] },
+    tools: [{ name: "web_search" }, { name: "target_tool" }],
   } as never;
 
   const response = await middleware.wrapModelCall?.(request, async (next) => {
@@ -612,9 +702,9 @@ test("command tool choice middleware forces target on first call for explicit to
       content: "",
       tool_calls: [
         {
-          args: { title: "ASR" },
-          id: "call-video",
-          name: "generate_video_presentation",
+          args: { title: "Target" },
+          id: "call-target",
+          name: "target_tool",
         },
       ],
     });
@@ -623,10 +713,8 @@ test("command tool choice middleware forces target on first call for explicit to
   assert.equal(AIMessage.isInstance(response), true);
   assert.deepEqual(calls, [
     {
-      toolChoice: agentTestExports.forcedToolChoice(
-        "generate_video_presentation",
-      ),
-      tools: ["generate_video_presentation"],
+      toolChoice: agentTestExports.forcedToolChoice("target_tool"),
+      tools: ["target_tool"],
     },
   ]);
 });
@@ -660,7 +748,10 @@ test("command execution policy force-targets complete explicit tool commands", (
   } as unknown as Parameters<typeof commandExecutionPolicyFor>[0];
 
   assert.deepEqual(commandExecutionPolicyFor(prepared), {
-    targetToolName: "search_notion_pages",
+    initialToolPolicy: {
+      kind: "force",
+      toolName: "search_notion_pages",
+    },
   });
 });
 
@@ -682,13 +773,61 @@ test("command execution policy does not force publisher tools for skill artifact
   assert.equal(commandExecutionPolicyFor(prepared), undefined);
 });
 
+test("command execution policy keeps automatic skill entry separate from terminal publisher", () => {
+  const prepared = {
+    command: {
+      kind: "skill",
+      workflow: {
+        execution: "agent",
+        initialToolPolicy: "auto",
+        toolPolicy: {
+          allow: ["write_file", "publish_video_presentation"],
+          deny: ["task", "execute"],
+        },
+      },
+    },
+    commandSuccessCriteria: {
+      kind: "artifact",
+      artifactType: "video_presentation",
+      toolName: "publish_video_presentation",
+    },
+  } as unknown as Parameters<typeof commandExecutionPolicyFor>[0];
+
+  assert.deepEqual(commandExecutionPolicyFor(prepared), {
+    initialToolPolicy: "auto",
+    toolPolicy: {
+      allow: ["write_file", "publish_video_presentation"],
+      deny: ["task", "execute"],
+    },
+  });
+});
+
+test("selected skill tool policy applies without a slash command", () => {
+  const prepared = {
+    command: null,
+    activeToolPolicy: {
+      allow: ["write_todos", "publish_video_presentation"],
+      deny: ["task"],
+    },
+    commandSuccessCriteria: { kind: "none" },
+  } as unknown as Parameters<typeof commandExecutionPolicyFor>[0];
+
+  assert.deepEqual(commandExecutionPolicyFor(prepared), {
+    initialToolPolicy: "auto",
+    toolPolicy: prepared.activeToolPolicy,
+  });
+});
+
 test("command tool choice middleware fails fast when target tool is missing", async () => {
   const middleware = agentTestExports.createCommandToolChoiceMiddleware({
-    targetToolName: "generate_video_presentation",
+    initialToolPolicy: {
+      kind: "force",
+      toolName: "missing_target_tool",
+    },
   });
   const request = {
-    messages: [new HumanMessage("make video")],
-    state: { messages: [new HumanMessage("make video")] },
+    messages: [new HumanMessage("run target")],
+    state: { messages: [new HumanMessage("run target")] },
     tools: [{ name: "web_search" }],
   } as never;
 
@@ -697,12 +836,15 @@ test("command tool choice middleware fails fast when target tool is missing", as
       request,
       async () => new AIMessage("nope"),
     );
-  }, /Command target tool 'generate_video_presentation' is not bound to the model request/);
+  }, /Command initial tool 'missing_target_tool' is not available under the command tool policy/);
 });
 
 test("command tool choice middleware re-calls explicit tool command when target is not called", async () => {
   const middleware = agentTestExports.createCommandToolChoiceMiddleware({
-    targetToolName: "search_notion_pages",
+    initialToolPolicy: {
+      kind: "force",
+      toolName: "search_notion_pages",
+    },
   });
   const calls: Array<{ toolChoice?: unknown; tools: string[] }> = [];
   const request = {
@@ -2720,34 +2862,6 @@ test("final assistant text stays empty for tool-only successful turns", () => {
   );
 });
 
-test("final assistant text uses async video presentation tool content", () => {
-  assert.equal(
-    testExports.resolveFinalAssistantText({
-      assistantContent: "",
-      assistantContentFromUpdates: null,
-      hasCompletedToolOutput: true,
-      toolCalls: [
-        {
-          id: "call-1",
-          sequence: 0,
-          tool: "generate_video_presentation",
-          input: {},
-          output: {
-            type: "video_presentation_processing_result",
-            content:
-              "Video presentation project is still being generated: demo.mp4",
-            status: "running",
-          },
-          status: "completed",
-          error: null,
-          latencyMs: 120,
-        },
-      ],
-    }),
-    "Video presentation project is still being generated: demo.mp4",
-  );
-});
-
 test("final assistant text preserves natural artifact summaries", () => {
   assert.equal(
     testExports.resolveFinalAssistantText({
@@ -2914,66 +3028,6 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   assert.equal(ready?.status, "completed");
   assert.deepEqual(ready?.items, ["Presentation artifact created"]);
   assert.equal(ready?.metadata?.toolCallId, "call-1");
-});
-
-test("video presentation progress events map to background build steps", () => {
-  const progressEvent = normalizeGeneratedPresentationProgressEvent({
-    type: "generate_video_presentation_progress",
-    toolCallId: "call-video",
-    tool: "generate_video_presentation",
-    stage: "planning",
-    title: "Feynman Method",
-  });
-  assert.ok(progressEvent);
-
-  const planning = testExports.buildPresentationProgressThinkingStep({
-    data: progressEvent.data,
-    toolCallId: "call-video",
-  });
-  const generating = testExports.buildPresentationProgressThinkingStep({
-    data: {
-      ...progressEvent.data,
-      stage: "generating",
-    },
-    toolCallId: "call-video",
-  });
-  const ready = testExports.buildPresentationProgressThinkingStep({
-    data: {
-      ...progressEvent.data,
-      stage: "ready",
-    },
-    toolCallId: "call-video",
-  });
-
-  assert.equal(progressEvent.tool, "generate_video_presentation");
-  assert.equal(planning?.id, "video-presentation-generation");
-  assert.equal(planning?.title, "Building video presentation");
-  assert.deepEqual(planning?.items, ["Planning video scenes"]);
-  assert.deepEqual(generating?.items, ["Building video project"]);
-  assert.equal(ready?.title, "Video presentation ready");
-  assert.deepEqual(ready?.items, ["Ready for browser video export"]);
-  assert.equal(ready?.metadata?.artifactType, "video_presentation");
-});
-
-test("video presentation retry progress events include retry error context", () => {
-  const progressEvent = normalizeGeneratedPresentationProgressEvent({
-    type: "generate_video_presentation_progress",
-    toolCallId: "call-video",
-    tool: "generate_video_presentation",
-    stage: "planning_storyboard",
-    retrying: true,
-    error_message:
-      "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED: Storyboard provider call failed: The operation was aborted due to timeout",
-  });
-  assert.ok(progressEvent);
-
-  const retrying = testExports.buildPresentationProgressThinkingStep({
-    data: progressEvent.data,
-    toolCallId: "call-video",
-  });
-
-  assert.deepEqual(retrying?.items, ["Retrying video generation"]);
-  assert.match(retrying?.description ?? "", /Storyboard provider call failed/u);
 });
 
 test("unknown presentation progress stages do not create CoT steps", () => {
@@ -4092,7 +4146,7 @@ test("skill commands bind workflow default artifact tools", () => {
   assert.equal(
     testExports.shouldBindAgentTool({
       prepared,
-      toolName: "generate_video_presentation",
+      toolName: "unselected_tool",
     }),
     false,
   );
@@ -4105,7 +4159,7 @@ test("non-command active skill turns bind runtime-selected artifact tools", () =
       publish_artifact: {
         shouldBind: true,
       },
-      generate_video_presentation: {
+      unselected_tool: {
         shouldBind: false,
       },
     },
@@ -4123,7 +4177,7 @@ test("non-command active skill turns bind runtime-selected artifact tools", () =
   assert.equal(
     testExports.shouldBindAgentTool({
       prepared,
-      toolName: "generate_video_presentation",
+      toolName: "unselected_tool",
     }),
     false,
   );

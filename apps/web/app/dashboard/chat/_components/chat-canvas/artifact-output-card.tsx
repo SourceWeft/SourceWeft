@@ -9,6 +9,7 @@ import type {
   MessageRenderBlock,
 } from "./types";
 import { useArtifactSnapshot } from "./use-artifact-snapshot";
+import { useArtifactVersionMedia } from "./use-artifact-version-media";
 
 type ArtifactOutputBlock = Extract<
   MessageRenderBlock,
@@ -25,7 +26,9 @@ function artifactIcon(type: string) {
   return <File className="size-5 text-foreground/80" />;
 }
 
-function toPreviewRecord(snapshot: ArtifactStatusSnapshot): ArtifactPreviewRecord {
+function toPreviewRecord(
+  snapshot: ArtifactStatusSnapshot,
+): ArtifactPreviewRecord {
   return { ...snapshot };
 }
 
@@ -48,19 +51,57 @@ export function ArtifactOutputCard({
     toolCallOutput: { artifact_id: block.artifactId },
     workspaceId,
   });
+  const exactVersion = useArtifactVersionMedia({
+    workspaceId,
+    artifactId: block.artifactId,
+    artifactVersionId: block.artifactVersionId,
+    enabled: snapshot?.artifactType === "video_presentation",
+  });
+  const exactVideoSnapshot =
+    snapshot?.artifactType === "video_presentation" && exactVersion.media
+      ? {
+          ...snapshot,
+          artifactVersionId: block.artifactVersionId,
+          title: exactVersion.media.title,
+          promptText: exactVersion.media.description,
+          payloadJson: exactVersion.media,
+          previewMetadataJson: {},
+          previewStorageKey: null,
+          previewUrl: exactVersion.media.coverImage?.url ?? null,
+          storageBucket: null,
+          storageKey: null,
+          capabilities: {
+            canDownloadFile: true,
+            canOpenFile: true,
+            canPreviewInline: true,
+            canRenderClientSide: true,
+          },
+        }
+      : null;
+  const effectiveSnapshot =
+    snapshot?.artifactType === "video_presentation"
+      ? exactVideoSnapshot
+      : snapshot;
+  const effectiveError =
+    error ??
+    (snapshot?.artifactType === "video_presentation"
+      ? exactVersion.error
+      : null);
 
-  if (error || (snapshot && snapshot.status !== "ready")) {
+  if (effectiveError || (snapshot && snapshot.status !== "ready")) {
     return (
       <div className="max-w-xl rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
         <p className="font-medium text-foreground/80">Artifact unavailable</p>
         <p className="mt-0.5 text-xs">
-          {error ?? snapshot?.errorMessage ?? "The published artifact is no longer available."}
+          {effectiveError ??
+            snapshot?.errorMessage ??
+            "The published artifact is no longer available."}
         </p>
       </div>
     );
   }
 
-  if (!snapshot) {
+  if (!effectiveSnapshot) {
     return (
       <ArtifactCard
         action={{
@@ -76,7 +117,7 @@ export function ArtifactOutputCard({
     );
   }
 
-  const record = toPreviewRecord(snapshot);
+  const record = toPreviewRecord(effectiveSnapshot);
   const canPreview = Boolean(onArtifactPreview);
   const handlePreview = () => {
     if (canPreview) {
@@ -84,16 +125,18 @@ export function ArtifactOutputCard({
     }
   };
   const previewImageUrl =
-    host.resolveArtifactPreviewImageUrl({
-      artifactId: snapshot.id,
-      previewMetadataJson: snapshot.previewMetadataJson,
-      previewStorageKey: snapshot.previewStorageKey,
-      workspaceId: snapshot.workspaceId,
-    }) ??
-    (snapshot.artifactType === "image" && snapshot.storageKey
+    (snapshot?.artifactType === "video_presentation"
+      ? (exactVersion.media?.coverImage?.url ?? null)
+      : host.resolveArtifactPreviewImageUrl({
+          artifactId: effectiveSnapshot.id,
+          previewMetadataJson: effectiveSnapshot.previewMetadataJson,
+          previewStorageKey: effectiveSnapshot.previewStorageKey,
+          workspaceId: effectiveSnapshot.workspaceId,
+        })) ??
+    (effectiveSnapshot.artifactType === "image" && effectiveSnapshot.storageKey
       ? host.resolveArtifactFileUrl({
-          artifactId: snapshot.id,
-          workspaceId: snapshot.workspaceId,
+          artifactId: effectiveSnapshot.id,
+          workspaceId: effectiveSnapshot.workspaceId,
         })
       : null);
 
@@ -107,16 +150,16 @@ export function ArtifactOutputCard({
         title: "Open artifact",
       }}
       badges={[
-        { label: snapshot.artifactType.replaceAll("_", " ") },
+        { label: effectiveSnapshot.artifactType.replaceAll("_", " ") },
         ...(block.producer.kind === "subagent"
           ? [{ label: block.producer.subagentType ?? "Sub-agent" }]
           : []),
       ]}
-      description={snapshot.promptText}
-      fallbackIcon={artifactIcon(snapshot.artifactType)}
+      description={effectiveSnapshot.promptText}
+      fallbackIcon={artifactIcon(effectiveSnapshot.artifactType)}
       onActivate={canPreview ? handlePreview : undefined}
       thumbnailUrl={previewImageUrl}
-      title={snapshot.title ?? "Published artifact"}
+      title={effectiveSnapshot.title ?? "Published artifact"}
     />
   );
 }

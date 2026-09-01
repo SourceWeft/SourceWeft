@@ -17,9 +17,7 @@ import type {
 } from "../../_components/model-catalog-utils";
 import type { ByokModelSelection } from "../../_components/byok-state";
 import { DEFAULT_MODEL_SELECTION_SOURCES } from "../../_components/skill-model-presets";
-import {
-  normalizeSkillIdsForRequest,
-} from "../../_components/chat-canvas/tool-selection";
+import { normalizeSkillIdsForRequest } from "../../_components/chat-canvas/tool-selection";
 import type { ThreadStreamActionInput } from "./use-thread-stream-action";
 
 const useBrowserLayoutEffect =

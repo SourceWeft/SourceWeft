@@ -132,9 +132,7 @@ export function artifactPreviewImageMetadataFromArtifact(input: {
         ? metadata.fileName.trim()
         : "preview.jpg",
     mimeType:
-      typeof metadata?.mimeType === "string"
-        ? metadata.mimeType.trim()
-        : "",
+      typeof metadata?.mimeType === "string" ? metadata.mimeType.trim() : "",
     storageKey,
   } satisfies ArtifactPreviewImageMetadata;
 }

@@ -11,7 +11,17 @@ export type SourceItem = {
     | "connector"
     | "directory";
   parentSourceId: string | null;
-  type: "DIR" | "PDF" | "DOC" | "WEB" | "NOTE" | "TEXT" | "CSV" | "JSON" | "IMG" | "AUDIO";
+  type:
+    | "DIR"
+    | "PDF"
+    | "DOC"
+    | "WEB"
+    | "NOTE"
+    | "TEXT"
+    | "CSV"
+    | "JSON"
+    | "IMG"
+    | "AUDIO";
   status: "Indexed" | "Syncing" | "Failed" | "Needs review";
   meta: string;
   contentText: string;

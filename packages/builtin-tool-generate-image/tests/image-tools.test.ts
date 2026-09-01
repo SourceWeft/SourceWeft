@@ -12,6 +12,7 @@ import {
   sanitizeImageArtifactFileBase,
 } from "../src/index";
 import type { ImageToolContext, ImageToolRuntimeDeps } from "../src/index";
+import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
 import type { ArtifactPublishSpec } from "@sourceweft/contracts/artifact-write";
 
@@ -132,6 +133,7 @@ function createImageToolHarness(
   options: {
     readonly bytes?: Buffer;
     readonly mimeType?: string;
+    readonly onGenerate?: (signal?: AbortSignal) => void | Promise<void>;
     /**
      * Providers may hand back a URL instead of inline base64. It is also the
      * only way to deliver zero bytes: an empty `b64Json` is falsy, so the
@@ -173,6 +175,7 @@ function createImageToolHarness(
           // gateway settles here, so the key has to exist now rather than
           // being derived from the artifact published afterwards.
           billingEvents.push(opts);
+          await options.onGenerate?.(opts.signal);
           return {
             model: "gpt-image-1",
             provider: "openai",
@@ -217,15 +220,58 @@ function createImageToolHarness(
     generatedBytes,
     progressEvents,
     published,
-    invoke: (args: { prompt: string; title?: string }) =>
-      imageTool.invoke(args, {
+    invoke: (
+      args: { prompt: string; title?: string },
+      signal?: AbortSignal,
+    ) => {
+      const config = {
         toolCallId: "tool-call-1",
         writer: (event: unknown) => {
           progressEvents.push(event);
         },
-      } as never),
+      };
+      return imageTool.invoke(
+        args,
+        (signal
+          ? withAgentToolHostInvocationSignal(config, signal)
+          : config) as never,
+      );
+    },
   };
 }
+
+test("generate_image forwards the invocation signal and cannot publish after abort", async () => {
+  const controller = new AbortController();
+  const abortReason = new DOMException("user stopped", "AbortError");
+  let releaseGenerate!: () => void;
+  let providerStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    providerStarted = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    releaseGenerate = resolve;
+  });
+  let observedSignal: AbortSignal | undefined;
+  const harness = createImageToolHarness({
+    onGenerate: async (signal) => {
+      observedSignal = signal;
+      providerStarted();
+      await blocked;
+    },
+  });
+
+  const invocation = harness.invoke(
+    { prompt: "Draw a launch image", title: "Launch Image" },
+    controller.signal,
+  );
+  await started;
+  controller.abort(abortReason);
+  releaseGenerate();
+
+  await assert.rejects(invocation, (error: unknown) => error === abortReason);
+  assert.equal(observedSignal, controller.signal);
+  assert.deepEqual(harness.published, []);
+});
 
 test("generate_image publishes through the shared artifact writer", async () => {
   const harness = createImageToolHarness();
@@ -446,8 +492,14 @@ test("generated image file names follow the provider's actual mime type", () => 
   assert.equal(imageFileExtensionForMimeType("image/webp"), ".webp");
   assert.equal(imageFileExtensionForMimeType("image/PNG"), ".png");
   // Content-Type headers routinely carry parameters.
-  assert.equal(imageFileExtensionForMimeType("image/jpeg; charset=binary"), ".jpg");
+  assert.equal(
+    imageFileExtensionForMimeType("image/jpeg; charset=binary"),
+    ".jpg",
+  );
   // Unknown/absent types keep the historical default rather than producing ".bin".
-  assert.equal(imageFileExtensionForMimeType("application/octet-stream"), ".png");
+  assert.equal(
+    imageFileExtensionForMimeType("application/octet-stream"),
+    ".png",
+  );
   assert.equal(imageFileExtensionForMimeType(undefined), ".png");
 });

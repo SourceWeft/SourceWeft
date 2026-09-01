@@ -10,8 +10,6 @@ import {
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
   getSkillInstructionDisplayMetadata,
-  getArtifactProgressToolOutputError,
-  isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   sanitizeThreadMessageMetadataForClient,
   sanitizeFilesystemToolInputForClient,
@@ -44,100 +42,6 @@ test("sandbox operation timeline augments client observability without changing 
     appendSandboxOperationTimeline("read_file", "hello", operations),
     "hello",
   );
-});
-
-/**
- * The output shapes below are written out as literals rather than built with a
- * capability's result builder. What is under test is the host's reading of a
- * tool output — that `status: "running"` beats the presence of an artifact_url
- * — and building the fixture with the real builder made this test fail whenever
- * that capability changed a field it does not read.
- */
-test("video presentation running output with artifact_url is not ready", () => {
-  const runningOutput = {
-    type: "video_presentation_processing_result",
-    artifact_id: "artifact-1",
-    artifact_url: "/artifact-preview?artifactId=artifact-1",
-    file_name: "demo.video-presentation.json",
-    narration_enabled: true,
-    status: "running",
-    title: "Demo",
-  };
-
-  assert.equal(isVideoPresentationArtifactReady(runningOutput), false);
-  assert.equal(
-    getFilesystemToolEndTitle(
-      "generate_video_presentation",
-      {},
-      runningOutput,
-    ),
-    "Video presentation generating",
-  );
-});
-
-test("video presentation ready output is marked ready", () => {
-  const readyOutput = {
-    artifact_url: "/artifact-preview?artifactId=artifact-1",
-    status: "ready",
-  };
-
-  assert.equal(isVideoPresentationArtifactReady(readyOutput), true);
-  assert.equal(
-    getFilesystemToolEndTitle(
-      "generate_video_presentation",
-      {},
-      readyOutput,
-    ),
-    "Video presentation ready",
-  );
-});
-
-test("video presentation failed output exposes error text", () => {
-  const failedOutput = {
-    type: "video_presentation_artifact_result",
-    artifact_url: "/artifact-preview?artifactId=artifact-1",
-    status: "failed",
-    error:
-      "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED: Storyboard provider call failed: The operation was aborted due to timeout",
-  };
-
-  assert.equal(
-    getArtifactProgressToolOutputError(failedOutput),
-    failedOutput.error,
-  );
-  assert.equal(
-    getFilesystemToolEndTitle(
-      "generate_video_presentation",
-      {},
-      failedOutput,
-    ),
-    "Video presentation failed",
-  );
-});
-
-test("unwraps LangChain ToolMessage video presentation outputs for observability", () => {
-  const structured = {
-    type: "video_presentation_processing_result",
-    artifact_id: "artifact-1",
-    status: "running",
-    stage: "planning_storyboard",
-  };
-  const output = normalizeToolOutputForObservability(
-    "generate_video_presentation",
-    {
-      type: "tool",
-      status: "success",
-      stage: "planning_storyboard",
-      artifact_id: "artifact-1",
-      content: JSON.stringify(structured),
-      lc_kwargs: {
-        content: JSON.stringify(structured),
-        status: "success",
-      },
-    },
-  );
-
-  assert.deepEqual(output, structured);
 });
 
 test("redacts skills read_file output for client observability", () => {

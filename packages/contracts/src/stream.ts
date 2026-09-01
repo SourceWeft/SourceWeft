@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { toolApprovalResumeSchema } from "./agent-confirmations";
-import { APPEND_NOTION_PAGE_TOOL_NAME, CREATE_NOTION_PAGE_TOOL_NAME, DELETE_NOTION_PAGE_TOOL_NAME, GENERATE_IMAGE_TOOL_NAME, GENERATE_VIDEO_PRESENTATION_TOOL_NAME, PUBLISH_ARTIFACT_TOOL_NAME, READ_NOTION_PAGE_TOOL_NAME, SAVE_ARTIFACT_TO_NOTION_TOOL_NAME, SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME, SEARCH_NOTION_PAGES_TOOL_NAME, UPDATE_NOTION_PAGE_TOOL_NAME, WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from "./agent-tools";
+import {
+  APPEND_NOTION_PAGE_TOOL_NAME,
+  CREATE_NOTION_PAGE_TOOL_NAME,
+  DELETE_NOTION_PAGE_TOOL_NAME,
+  GENERATE_IMAGE_TOOL_NAME,
+  PUBLISH_ARTIFACT_TOOL_NAME,
+  READ_NOTION_PAGE_TOOL_NAME,
+  SAVE_ARTIFACT_TO_NOTION_TOOL_NAME,
+  SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME,
+  SEARCH_NOTION_PAGES_TOOL_NAME,
+  UPDATE_NOTION_PAGE_TOOL_NAME,
+  WEB_FETCH_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
+} from "./agent-tools";
 import { meterConsumeResponseSchema } from "./billing";
 import {
   capabilityOptionModelValuesSchema,
@@ -9,8 +22,12 @@ import {
 import { messageSchema } from "./messages";
 import { skillRuntimeConfigSelectionSchema } from "./skills";
 import { retrievalResponseSchema } from "./sources";
-import { createThreadRequestSchema, threadCommandRequestSchema, threadModelSettingsInputSchema, threadWithChatPreferencesSchema } from "./threads";
-import { videoPresentationBrandSchema, videoPresentationCanvasSchema, videoPresentationMotionSchema, videoPresentationRenderProfileSchema } from "./video-presentation";
+import {
+  createThreadRequestSchema,
+  threadCommandRequestSchema,
+  threadModelSettingsInputSchema,
+  threadWithChatPreferencesSchema,
+} from "./threads";
 
 const thinkingConfigSchema = z.object({
   mode: z.enum(["auto", "off", "effort"]).optional(),
@@ -123,29 +140,6 @@ const generateImageToolSelectionSchema = z
 const publishArtifactToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
-  })
-  .strict();
-
-const generateVideoPresentationToolSelectionSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    language: z.string().trim().min(1).max(20).optional(),
-    durationTarget:
-      videoPresentationRenderProfileSchema.shape.durationTarget.optional(),
-    stylePreset:
-      videoPresentationRenderProfileSchema.shape.stylePreset.optional(),
-    renderProfile: videoPresentationRenderProfileSchema.partial().optional(),
-    slideCount: z.number().int().min(1).max(12).optional(),
-    visualDirection: z.string().trim().min(1).max(1000).optional(),
-    brand: videoPresentationBrandSchema.optional(),
-    motion: videoPresentationMotionSchema.optional(),
-    canvas: videoPresentationCanvasSchema.optional(),
-    narration: z
-      .object({
-        enabled: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -309,10 +303,7 @@ const threadToolsRequestSchema = z
       .optional(),
     skillRuntimeConfig: skillRuntimeConfigSelectionSchema.optional(),
     [GENERATE_IMAGE_TOOL_NAME]: generateImageToolSelectionSchema.optional(),
-    [PUBLISH_ARTIFACT_TOOL_NAME]:
-      publishArtifactToolSelectionSchema.optional(),
-    [GENERATE_VIDEO_PRESENTATION_TOOL_NAME]:
-      generateVideoPresentationToolSelectionSchema.optional(),
+    [PUBLISH_ARTIFACT_TOOL_NAME]: publishArtifactToolSelectionSchema.optional(),
     [WEB_SEARCH_TOOL_NAME]: webToolSelectionSchema.optional(),
     [WEB_FETCH_TOOL_NAME]: webToolSelectionSchema.optional(),
     [SEARCH_NOTION_PAGES_TOOL_NAME]: connectorToolSelectionSchema.optional(),
@@ -498,9 +489,6 @@ export type GenerateImageToolSelection = z.infer<
 >;
 export type PublishArtifactToolSelection = z.infer<
   typeof publishArtifactToolSelectionSchema
->;
-export type GenerateVideoPresentationToolSelection = z.infer<
-  typeof generateVideoPresentationToolSelectionSchema
 >;
 export type WebSearchToolSelection = z.infer<typeof webToolSelectionSchema>;
 export type WebFetchToolSelection = z.infer<typeof webToolSelectionSchema>;

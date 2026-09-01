@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ModelPricing } from "@sourceweft/db";
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import { computeProviderCostFromPricing } from "./provider-cost";
+import {
+  computeProviderCost,
+  computeProviderCostFromPricing,
+} from "./provider-cost";
 
 // A full ModelPricing with everything null, overlaid with the fields a scenario
 // needs — so each test states exactly the prices that participate.
@@ -40,6 +43,28 @@ test("chat: input + output tokens", () => {
   );
   assert.equal(r.providerCostUsd, 0.0075);
   assert.equal(r.costSource, "price_book");
+});
+
+test("provider actual-cost policy bypasses the price book when inline cost is absent", async () => {
+  let pricingReads = 0;
+  const result = await computeProviderCost({
+    gatewayConfigId: "gateway-orca",
+    modelKind: "chat",
+    profileAlias: "chat-default",
+    usage: { inputTokens: 842, outputTokens: 5012 },
+    allowPriceBookFallback: false,
+    lookups: {
+      isGatewayByok: async () => false,
+      getProfilePricing: async () => {
+        pricingReads += 1;
+        return price({ input_cost_per_token: 1, output_cost_per_token: 1 });
+      },
+    },
+  });
+
+  assert.equal(pricingReads, 0);
+  assert.equal(result.providerCostUsd, null);
+  assert.equal(result.costSource, "missing_provider_actual");
 });
 
 // 2) Prompt caching. inputTokens=1000 splits into cacheRead 800, cacheWrite 100,
@@ -138,7 +163,12 @@ test("image per-pixel tier: perPixel × width × height × count", () => {
     price({
       output_cost_per_image: 0.04,
       image_pricing_tiers: [
-        { quality: "hd", size: "1024x1024", perImage: null, perPixel: 7.629e-8 },
+        {
+          quality: "hd",
+          size: "1024x1024",
+          perImage: null,
+          perPixel: 7.629e-8,
+        },
       ],
     }),
     { outputImageCount: 1, imageQuality: "hd", imageSize: "1024x1024" },
@@ -152,7 +182,12 @@ test("image per-image tier: perImage × count", () => {
   const r = cost(
     price({
       image_pricing_tiers: [
-        { quality: "standard", size: "1024x1024", perImage: 0.04, perPixel: null },
+        {
+          quality: "standard",
+          size: "1024x1024",
+          perImage: 0.04,
+          perPixel: null,
+        },
       ],
     }),
     { outputImageCount: 2, imageQuality: "standard", imageSize: "1024x1024" },

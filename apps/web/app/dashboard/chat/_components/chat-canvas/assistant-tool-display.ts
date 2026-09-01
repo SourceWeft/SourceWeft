@@ -47,7 +47,10 @@ export function getSkillInstructionReadFileLabel(toolCall: ToolCallRecord) {
   }
 
   const outputSkillPath = getRecordValue(output ?? undefined, "skillPath");
-  if (typeof outputSkillPath === "string" && outputSkillPath.trim().length > 0) {
+  if (
+    typeof outputSkillPath === "string" &&
+    outputSkillPath.trim().length > 0
+  ) {
     return outputSkillPath.trim();
   }
 

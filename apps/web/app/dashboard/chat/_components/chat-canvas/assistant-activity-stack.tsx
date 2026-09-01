@@ -10,10 +10,7 @@ import {
 import { AssistantActivitySegment } from "./assistant-activity-segment";
 import { AssistantToolCard } from "./assistant-tool-card";
 import { WebToolResults } from "../web-tool-results";
-import type {
-  CitationRecord,
-  ToolConfirmationResolution,
-} from "./types";
+import type { CitationRecord, ToolConfirmationResolution } from "./types";
 
 export type AssistantActivityPlaceholderPhase = "thinking" | "responding";
 

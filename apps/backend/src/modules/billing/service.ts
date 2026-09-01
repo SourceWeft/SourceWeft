@@ -261,6 +261,12 @@ export class BillingService {
     return this.usageService.meterConsume(teamId, input, actorUserId);
   }
 
+  reconcileModelProviderCost(
+    input: Parameters<BillingUsageService["reconcileModelProviderCost"]>[0],
+  ) {
+    return this.usageService.reconcileModelProviderCost(input);
+  }
+
   meterIngestion(
     teamId: string,
     input: MeterIngestionRequest,

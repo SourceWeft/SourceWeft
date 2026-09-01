@@ -1,5 +1,10 @@
 # Better Auth migrations
 
+SourceWeft targets Better Auth 1.7.2. The first release uses the 1.7 schema as
+its clean baseline: there is no supported 1.6 account, OAuth client, consent, or
+token backfill. Rebuild disposable pre-release databases instead of applying a
+data-preserving 1.6-to-1.7 migration.
+
 SourceWeft uses two database migration owners in the backend:
 
 - Better Auth owns its auth and plugin schema through the Better Auth CLI.
@@ -22,8 +27,22 @@ Run auth migrations before Drizzle migrations:
 
 ```sh
 pnpm --filter @sourceweft/backend migrate:auth
+pnpm --filter @sourceweft/db db:migrate
+pnpm --filter @sourceweft/backend auth:provision-extension
+```
+
+The normal combined command runs these steps in that order:
+
+```sh
 pnpm --filter @sourceweft/backend db:migrate
 ```
+
+Extension client provisioning is enabled only when `AUTH_EXTENSION_ID` or a
+valid Chromium extension `AUTH_EXTENSION_REDIRECT_URI` resolves a 32-character
+extension ID. Disabled deployments log the decision and do not create an OAuth
+client. Enabled deployments create or strictly verify one public PKCE client
+and its single protected-resource link; a policy mismatch fails the command and
+is never overwritten silently.
 
 `migrate:auth` uses the locally installed Better Auth CLI package, `auth`. Do
 not use `pnpm dlx` for this path: the CLI version should come from
@@ -39,6 +58,17 @@ upgrading any of:
 - `@better-auth/*`
 - `@creem_io/better-auth`
 - Better Auth plugins in `src/modules/auth/auth-config.ts`
+
+Keep `better-auth`, the versioned `@better-auth/*` packages, and the `auth` CLI
+on the same release. Packages with independent versioning, such as
+`@better-auth/utils`, use the exact peer version selected by that release. The
+lockfile must not retain a Better Auth 1.6 runtime or CLI instance.
+
+Better Auth 1.7 replaces `validAudiences` with persisted protected resources.
+SourceWeft seeds one resource identified by the canonical backend base URL and
+enforces per-client resource links. The browser-extension auth contract exposes
+that identifier through `/v1/auth/config`. Authorization codes and refresh
+tokens may retain or narrow their authorized resources, but never widen them.
 
 The Creem plugin persists subscription data and extends the Better Auth `user`
 model while `persistSubscriptions` is enabled. In particular, it requires:
@@ -76,11 +106,12 @@ migrations second:
 
 ```sh
 pnpm --filter @sourceweft/backend migrate:auth
-pnpm --filter @sourceweft/backend db:migrate
+pnpm --filter @sourceweft/db db:migrate
+pnpm --filter @sourceweft/backend auth:provision-extension
 ```
 
-`db:migrate` already chains `migrate:auth` before `drizzle-kit migrate`, so it
-is the normal single command once the database is reachable.
+The backend `db:migrate` script already chains all three steps, so it is the
+normal single command once the database is reachable.
 
 Postgres must have the `pgvector` extension available to the application
 database user before applying the historical Drizzle baseline, because the
@@ -97,14 +128,18 @@ runtime plugin is enabled.
 ```sh
 pnpm --filter @sourceweft/backend auth:generate --output /tmp/sourceweft-auth-schema.sql
 pnpm --filter @sourceweft/backend migrate:auth
+pnpm --filter @sourceweft/db db:migrate
+pnpm --filter @sourceweft/backend auth:provision-extension
+pnpm --filter @sourceweft/backend auth:provision-extension
 pnpm --filter @sourceweft/backend migrate:auth
-pnpm --filter @sourceweft/backend db:migrate
 pnpm --filter @sourceweft/backend check-types
 ```
 
 When auth schema drift exists, the generated schema should include
-`"user"."creemCustomerId"`, `"user"."hadTrial"`, and `creem_subscription`
-whenever Creem schema persistence is enabled in the migration config. When the
-database is already current, `auth:generate` reports that the schema is up to
-date; in that case, verify those columns and tables directly in Postgres. The
-second `migrate:auth` run should be a no-op.
+`"user"."creemCustomerId"`, `"user"."hadTrial"`, `creem_subscription`,
+`oauthResource`, `oauthClientResource`, and resource columns on OAuth token and
+consent tables whenever their plugins are enabled. When the database is already
+current, `auth:generate` reports that the schema is up to date; in that case,
+verify those objects directly in Postgres. The second provisioning run must be
+a strict no-op, and the final `migrate:auth` run must report that no migrations
+are needed.

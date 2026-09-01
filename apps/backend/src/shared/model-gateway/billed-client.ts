@@ -20,6 +20,7 @@ import type {
   TtsSpeechInput,
   TtsSpeechResult,
   UsageInfo,
+  ModelCallObservation,
 } from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "../../modules/content/billing-port";
 import {
@@ -35,6 +36,7 @@ import { openBillingScope, type BillingScope } from "./billing/scope";
 import type { MeterUsageFn } from "./billing/settle";
 import { createBilledAgentChatModel } from "./billing/langchain-proxy";
 import { getRawModelGatewayClient } from "./internal/raw";
+import { enqueueProviderCostReconciliation } from "./provider-cost-reconciliation";
 
 /**
  * Per-call options for a billed gateway call.
@@ -214,11 +216,17 @@ async function openBilledGateway(
     billingMode: decision.billingMode,
     availableCredits: decision.availableCredits,
     meterUsage: input.meterUsage,
+    scheduleReconciliation: enqueueProviderCostReconciliation,
   });
 
   const raw = await getRawModelGatewayClient(input.gatewayConfigId);
 
-  async function settled<R extends { usage?: UsageInfo }>(
+  async function settled<
+    R extends {
+      usage?: UsageInfo;
+      observation?: ModelCallObservation;
+    },
+  >(
     options: BilledRequestOptions,
     call: (requestOptions: RequestOptions) => Promise<R>,
   ): Promise<R> {
@@ -227,7 +235,11 @@ async function openBilledGateway(
       ...requestOptions,
       metadata: buildRequestMetadata(input.context, billingOptions),
     });
-    await scope.settle({ options: billingOptions, usage: result.usage });
+    await scope.settle({
+      options: billingOptions,
+      usage: result.usage,
+      observation: result.observation,
+    });
     return result;
   }
 
@@ -303,6 +315,7 @@ async function* billedStream(
 ): AsyncIterable<ChatStreamEvent> {
   const { billingOptions, requestOptions } = splitOptions(options);
   let usage: UsageInfo | undefined;
+  let observation: ModelCallObservation | undefined;
   let settled = false;
   let inFlightError: unknown;
 
@@ -316,6 +329,9 @@ async function* billedStream(
       if (event.type === "metadata" && event.metadata.usage) {
         usage = event.metadata.usage;
       }
+      if (event.type === "metadata" && event.metadata.observation) {
+        observation = event.metadata.observation;
+      }
       yield event;
     }
   } catch (error) {
@@ -325,7 +341,7 @@ async function* billedStream(
     if (!settled) {
       settled = true;
       try {
-        await scope.settle({ options: billingOptions, usage });
+        await scope.settle({ options: billingOptions, usage, observation });
       } catch (settleError) {
         // Never let a settlement failure mask the error that ended the stream.
         if (!inFlightError) {

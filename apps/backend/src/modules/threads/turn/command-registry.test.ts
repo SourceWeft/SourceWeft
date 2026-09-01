@@ -155,21 +155,21 @@ test("renderSkillCommandWorkflow keeps slides artifact success criteria", () => 
   });
 });
 
-test("renderSkillCommandWorkflow keeps video presentation artifact success criteria", () => {
+test("renderSkillCommandWorkflow keeps a manifest-declared artifact success criterion", () => {
   const workflow = renderSkillCommandWorkflow({
-    arguments: "create a training video",
-    canonicalName: "/video",
-    displayName: "Video Presentation",
-    skillSlug: "video-presentation",
+    arguments: "create a training report",
+    canonicalName: "/report",
+    displayName: "Report Builder",
+    skillSlug: "report-builder",
     workflow: {
       execution: "agent",
-      promptIntro: "Create a video presentation artifact.",
-      defaultTools: ["generate_video_presentation"],
-      permissionOverrides: { generate_video_presentation: "allow" },
+      promptIntro: "Create a report artifact.",
+      defaultTools: ["publish_report"],
+      permissionOverrides: { publish_report: "allow" },
       successCriteria: {
         kind: "artifact",
-        artifactType: "video_presentation",
-        toolName: "generate_video_presentation",
+        artifactType: "custom_report",
+        toolName: "publish_report",
       },
       additionalPromptLines: [],
     },
@@ -177,7 +177,7 @@ test("renderSkillCommandWorkflow keeps video presentation artifact success crite
 
   assert.deepEqual(workflow?.successCriteria, {
     kind: "artifact",
-    artifactType: "video_presentation",
-    toolName: "generate_video_presentation",
+    artifactType: "custom_report",
+    toolName: "publish_report",
   });
 });

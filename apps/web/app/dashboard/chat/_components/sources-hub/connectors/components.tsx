@@ -324,7 +324,7 @@ export function getCatalogStatus(input: {
     hasActiveAccount: hasActiveAccount && !connector,
     isBusy: Boolean(
       input.connectorWaitingByType[input.item.id] ||
-        (connector && input.connectorBusyById[connector.id]),
+      (connector && input.connectorBusyById[connector.id]),
     ),
     item: input.item,
     readiness: connector
@@ -401,155 +401,162 @@ export function ConnectorLogo({
   );
 }
 
-export const ConnectorCatalogCard = memoComponent(function ConnectorCatalogCard({
-  item,
-  status,
-  connector,
-  onCancelConnector,
-  onConfigure,
-  onConnectConnector,
-  onCreateConnector,
-  onDisconnect,
-  onRequestConnector,
-}: {
-  item: ConnectorCatalogItem;
-  status: ConnectorCatalogStatus;
-  connector: ConnectorItem | null;
-  onCancelConnector: (item: ConnectorCatalogItem) => void;
-  onConfigure: () => void;
-  onConnectConnector: (item: ConnectorCatalogItem) => void;
-  onCreateConnector: (item: ConnectorCatalogItem) => void;
-  onDisconnect: (connector: ConnectorItem) => void;
-  onRequestConnector: (item: ConnectorCatalogItem) => void;
-}) {
-  const isBusy = status.kind === "syncing";
-  const cta =
-    item.connectMode === "coming_soon"
-      ? "Request"
-      : isBusy
-        ? "Connecting..."
-        : connector
-          ? "Connected"
-          : status.kind === "connected" && item.postOAuthMode !== "auto_create"
-            ? "Configure"
-            : "Connect";
+export const ConnectorCatalogCard = memoComponent(
+  function ConnectorCatalogCard({
+    item,
+    status,
+    connector,
+    onCancelConnector,
+    onConfigure,
+    onConnectConnector,
+    onCreateConnector,
+    onDisconnect,
+    onRequestConnector,
+  }: {
+    item: ConnectorCatalogItem;
+    status: ConnectorCatalogStatus;
+    connector: ConnectorItem | null;
+    onCancelConnector: (item: ConnectorCatalogItem) => void;
+    onConfigure: () => void;
+    onConnectConnector: (item: ConnectorCatalogItem) => void;
+    onCreateConnector: (item: ConnectorCatalogItem) => void;
+    onDisconnect: (connector: ConnectorItem) => void;
+    onRequestConnector: (item: ConnectorCatalogItem) => void;
+  }) {
+    const isBusy = status.kind === "syncing";
+    const cta =
+      item.connectMode === "coming_soon"
+        ? "Request"
+        : isBusy
+          ? "Connecting..."
+          : connector
+            ? "Connected"
+            : status.kind === "connected" &&
+                item.postOAuthMode !== "auto_create"
+              ? "Configure"
+              : "Connect";
 
-  function handleAction() {
-    if (item.connectMode === "coming_soon") {
-      onRequestConnector(item);
-      return;
+    function handleAction() {
+      if (item.connectMode === "coming_soon") {
+        onRequestConnector(item);
+        return;
+      }
+      if (connector) {
+        return;
+      }
+      if (status.kind === "connected" && item.postOAuthMode !== "auto_create") {
+        onCreateConnector(item);
+        return;
+      }
+      onConnectConnector(item);
     }
-    if (connector) {
-      return;
-    }
-    if (status.kind === "connected" && item.postOAuthMode !== "auto_create") {
-      onCreateConnector(item);
-      return;
-    }
-    onConnectConnector(item);
-  }
 
-  return (
-    <article
-      className={cn(
-        "group flex min-h-[96px] flex-col justify-between rounded-lg border bg-background p-2.5 shadow-xs transition-colors hover:bg-accent/30",
-        status.kind === "error" && "border-destructive/30",
-      )}
-    >
-      <div className="flex items-start gap-2.5">
-        <ConnectorLogo
-          active={status.kind === "active" || status.kind === "connected"}
-          icon={item.icon}
-          label={item.name}
-          logoIconName={item.logoIconName}
-          logoIconTone={item.logoIconTone}
-          logoSrc={item.logoSrc}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start justify-between gap-1.5">
-            <div className="min-w-0">
-              <h4 className="truncate text-sm font-medium text-foreground">
-                {item.name}
-              </h4>
-              <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
-                {item.description}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-start gap-1">
-              <div className="hidden max-w-[120px] sm:block">
-                <ConnectorStatusBadge status={status} />
+    return (
+      <article
+        className={cn(
+          "group flex min-h-[96px] flex-col justify-between rounded-lg border bg-background p-2.5 shadow-xs transition-colors hover:bg-accent/30",
+          status.kind === "error" && "border-destructive/30",
+        )}
+      >
+        <div className="flex items-start gap-2.5">
+          <ConnectorLogo
+            active={status.kind === "active" || status.kind === "connected"}
+            icon={item.icon}
+            label={item.name}
+            logoIconName={item.logoIconName}
+            logoIconTone={item.logoIconTone}
+            logoSrc={item.logoSrc}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-start justify-between gap-1.5">
+              <div className="min-w-0">
+                <h4 className="truncate text-sm font-medium text-foreground">
+                  {item.name}
+                </h4>
+                <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
+                  {item.description}
+                </p>
               </div>
-              {connector ? (
-                <Button
-                  className="size-7 text-destructive opacity-80 hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
-                  disabled={isBusy}
-                  onClick={() => onDisconnect(connector)}
-                  size="icon-xs"
-                  title={`Disconnect ${item.name}`}
-                  type="button"
-                  variant="ghost"
-                >
-                  <Power className="size-3.5" />
-                  <span className="sr-only">Disconnect {item.name}</span>
-                </Button>
-              ) : null}
+              <div className="flex shrink-0 items-start gap-1">
+                <div className="hidden max-w-[120px] sm:block">
+                  <ConnectorStatusBadge status={status} />
+                </div>
+                {connector ? (
+                  <Button
+                    className="size-7 text-destructive opacity-80 hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
+                    disabled={isBusy}
+                    onClick={() => onDisconnect(connector)}
+                    size="icon-xs"
+                    title={`Disconnect ${item.name}`}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Power className="size-3.5" />
+                    <span className="sr-only">Disconnect {item.name}</span>
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
+              <TypeBadge
+                label={item.isIndexable ? "Indexable" : "Search API"}
+              />
+              {item.capabilities.slice(0, 2).map((capability) => (
+                <TypeBadge key={capability} label={capability} />
+              ))}
             </div>
           </div>
-          <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
-            <TypeBadge label={item.isIndexable ? "Indexable" : "Search API"} />
-            {item.capabilities.slice(0, 2).map((capability) => (
-              <TypeBadge key={capability} label={capability} />
-            ))}
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="truncate text-[10px] text-muted-foreground">
+            {status.detail}
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            {connector ? (
+              <Button
+                className="size-7"
+                onClick={onConfigure}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <Settings2 className="size-3.5" />
+                <span className="sr-only">Configure {item.name}</span>
+              </Button>
+            ) : null}
+            {isBusy ? (
+              <Button
+                className="h-7 px-2 text-[11px]"
+                onClick={() => onCancelConnector(item)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <X className="size-3.5" />
+                Cancel
+              </Button>
+            ) : null}
+            <Button
+              className="shrink-0"
+              disabled={isBusy || Boolean(connector)}
+              onClick={handleAction}
+              size="xs"
+              type="button"
+              variant={
+                connector || status.kind === "coming_soon"
+                  ? "outline"
+                  : "default"
+              }
+            >
+              {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {cta}
+            </Button>
           </div>
         </div>
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="truncate text-[10px] text-muted-foreground">
-          {status.detail}
-        </span>
-        <div className="flex shrink-0 items-center gap-1">
-          {connector ? (
-            <Button
-              className="size-7"
-              onClick={onConfigure}
-              size="icon-xs"
-              type="button"
-              variant="ghost"
-            >
-              <Settings2 className="size-3.5" />
-              <span className="sr-only">Configure {item.name}</span>
-            </Button>
-          ) : null}
-          {isBusy ? (
-            <Button
-              className="h-7 px-2 text-[11px]"
-              onClick={() => onCancelConnector(item)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <X className="size-3.5" />
-              Cancel
-            </Button>
-          ) : null}
-          <Button
-            className="shrink-0"
-            disabled={isBusy || Boolean(connector)}
-            onClick={handleAction}
-            size="xs"
-            type="button"
-            variant={
-              connector || status.kind === "coming_soon" ? "outline" : "default"
-            }
-          >
-            {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            {cta}
-          </Button>
-        </div>
-      </div>
-    </article>
-  );
-});
+      </article>
+    );
+  },
+);
 
 export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
   connector,

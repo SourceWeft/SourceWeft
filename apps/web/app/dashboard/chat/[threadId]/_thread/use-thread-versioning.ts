@@ -39,7 +39,10 @@ export function useThreadVersioning({
     useRef<PendingLatestVersionSelection | null>(null);
 
   const messageGroups = useMemo(
-    () => buildVersionedMessageGroups(mergeStreamingAssistantIntoMessages(messages)),
+    () =>
+      buildVersionedMessageGroups(
+        mergeStreamingAssistantIntoMessages(messages),
+      ),
     [mergeStreamingAssistantIntoMessages, messages],
   );
   const assistantVersionById = useMemo(() => {

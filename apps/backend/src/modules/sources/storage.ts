@@ -12,8 +12,10 @@ import {
 } from "@sourceweft/contracts/artifact-errors";
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   type GetObjectCommandOutput,
   PutObjectCommand,
   S3Client,
@@ -108,6 +110,61 @@ async function putObject(input: {
   );
 }
 
+export type ArtifactObjectPutIfAbsentResult = "created" | "exists";
+
+function isConditionalObjectAlreadyPresent(error: unknown) {
+  const name = (error as { name?: unknown } | null)?.name;
+  const status = (error as { $metadata?: { httpStatusCode?: unknown } } | null)
+    ?.$metadata?.httpStatusCode;
+  return name === "PreconditionFailed" || status === 412;
+}
+
+function isConditionalObjectConflict(error: unknown) {
+  const name = (error as { name?: unknown } | null)?.name;
+  const status = (error as { $metadata?: { httpStatusCode?: unknown } } | null)
+    ?.$metadata?.httpStatusCode;
+  return name === "ConditionalRequestConflict" || status === 409;
+}
+
+/**
+ * Atomically creates an immutable object using S3's real conditional-write
+ * precondition. A concurrent 409 is retried with the same precondition; this
+ * function never falls back to a HEAD-then-unconditional-PUT sequence.
+ */
+export async function putArtifactObjectIfAbsent(input: {
+  key: string;
+  body: Uint8Array;
+  contentType: string;
+  metadata?: Record<string, string>;
+  signal?: AbortSignal;
+}): Promise<ArtifactObjectPutIfAbsentResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: getConfiguredBucket(),
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+          IfNoneMatch: "*",
+          ...(input.metadata ? { Metadata: input.metadata } : {}),
+        }),
+        { abortSignal: input.signal },
+      );
+      return "created";
+    } catch (error) {
+      if (isConditionalObjectAlreadyPresent(error)) {
+        return "exists";
+      }
+      if (attempt === 0 && isConditionalObjectConflict(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Conditional artifact object write exhausted its retry");
+}
+
 /**
  * The one read. `bucket` falls back to the configured one so callers can pass
  * through a stored bucket column that may predate the current configuration.
@@ -150,6 +207,7 @@ export const artifactStorage: ArtifactStorage = {
   buildArtifactStorageKey,
   getBucketName: getContentStorageBucketName,
   upload: uploadArtifactObject,
+  delete: deleteArtifactObject,
   download: downloadArtifactObjectForPort,
 };
 
@@ -183,6 +241,99 @@ export async function deleteArtifactObject(input: {
       Key: input.key,
     }),
   );
+}
+
+const PREFIX_DELETE_MAX_OBJECTS = 10_000;
+const S3_DELETE_BATCH_SIZE = 1_000;
+
+/**
+ * Deletes one already-scoped object prefix. Keys are fully listed under a hard
+ * bound before deletion starts, so a malformed/broad prefix cannot cause an
+ * unbounded or partially-discovered destructive operation.
+ */
+export async function deleteArtifactObjectsByPrefix(input: {
+  prefix: string;
+  maxObjects?: number;
+}) {
+  const prefix = input.prefix.trim();
+  if (
+    !prefix ||
+    prefix !== input.prefix ||
+    prefix === "/" ||
+    prefix.length > 1_024 ||
+    prefix.includes("\0") ||
+    !prefix.endsWith("/")
+  ) {
+    throw new Error(
+      "A canonical non-empty scoped storage prefix ending in '/' is required",
+    );
+  }
+  const requestedMaxObjects = input.maxObjects ?? PREFIX_DELETE_MAX_OBJECTS;
+  if (!Number.isSafeInteger(requestedMaxObjects) || requestedMaxObjects <= 0) {
+    throw new Error(
+      "Scoped storage cleanup maxObjects must be a positive integer",
+    );
+  }
+  const maxObjects = Math.min(requestedMaxObjects, PREFIX_DELETE_MAX_OBJECTS);
+  const keys: string[] = [];
+  const seenTokens = new Set<string>();
+  let continuationToken: string | undefined;
+  let pagesRead = 0;
+  do {
+    pagesRead += 1;
+    if (pagesRead > Math.ceil(maxObjects / S3_DELETE_BATCH_SIZE) + 1) {
+      throw new Error("Scoped storage cleanup exceeded its page limit");
+    }
+    const response = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: getConfiguredBucket(),
+        Prefix: prefix,
+        MaxKeys: S3_DELETE_BATCH_SIZE,
+        ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+      }),
+    );
+    for (const item of response.Contents ?? []) {
+      if (!item.Key || !item.Key.startsWith(prefix)) {
+        continue;
+      }
+      keys.push(item.Key);
+      if (keys.length > maxObjects) {
+        throw new Error(
+          `Scoped storage cleanup exceeds the ${maxObjects} object limit`,
+        );
+      }
+    }
+    if (!response.IsTruncated) {
+      continuationToken = undefined;
+      break;
+    }
+    const nextToken = response.NextContinuationToken;
+    if (!nextToken || seenTokens.has(nextToken)) {
+      throw new Error(
+        "Scoped storage cleanup received an invalid continuation token",
+      );
+    }
+    seenTokens.add(nextToken);
+    continuationToken = nextToken;
+  } while (continuationToken);
+
+  for (let offset = 0; offset < keys.length; offset += S3_DELETE_BATCH_SIZE) {
+    const batch = keys.slice(offset, offset + S3_DELETE_BATCH_SIZE);
+    const response = await s3Client.send(
+      new DeleteObjectsCommand({
+        Bucket: getConfiguredBucket(),
+        Delete: {
+          Quiet: true,
+          Objects: batch.map((key) => ({ Key: key })),
+        },
+      }),
+    );
+    if ((response.Errors?.length ?? 0) > 0) {
+      throw new Error(
+        `Scoped storage cleanup failed for ${response.Errors!.length} object(s)`,
+      );
+    }
+  }
 }
 
 export function downloadArtifactObject(input: {
@@ -230,9 +381,14 @@ function isMissingObjectError(error: unknown) {
  * after `transformToByteArray` is only the backstop for a store that omitted
  * the header, where the bytes are unavoidably already in the heap.
  */
-export async function downloadArtifactObjectForPort(
+export async function downloadArtifactObjectWithMetadata(
   input: ArtifactStorageDownloadInput,
-): Promise<ArtifactStorageDownloadResult | null> {
+): Promise<
+  | (ArtifactStorageDownloadResult & {
+      metadata: Record<string, string>;
+    })
+  | null
+> {
   // A caller may only tighten the ceiling; `Math.min` is what makes the port's
   // constant a ceiling instead of a default.
   const maxBytes = Math.min(
@@ -273,7 +429,11 @@ export async function downloadArtifactObjectForPort(
   if (!bytes) {
     // The object exists (the GET succeeded); the store just handed back no
     // stream. That is emptiness, not absence, so it must not read as `null`.
-    return { body: new Uint8Array(0), contentType };
+    return {
+      body: new Uint8Array(0),
+      contentType,
+      metadata: response.Metadata ?? {},
+    };
   }
   if (bytes.byteLength > maxBytes) {
     throw tooLargeToDownload({
@@ -283,7 +443,72 @@ export async function downloadArtifactObjectForPort(
     });
   }
 
-  return { body: bytes, contentType };
+  return {
+    body: bytes,
+    contentType,
+    metadata: response.Metadata ?? {},
+  };
+}
+
+/** Bounded S3 range read used by immutable media streaming. */
+export async function downloadArtifactObjectRange(input: {
+  bucket?: string | null;
+  key: string;
+  start: number;
+  end: number;
+  totalLength: number;
+}) {
+  const expectedLength = input.end - input.start + 1;
+  if (
+    !Number.isSafeInteger(input.start) ||
+    !Number.isSafeInteger(input.end) ||
+    input.start < 0 ||
+    input.end < input.start ||
+    expectedLength > ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES ||
+    input.end >= input.totalLength
+  ) {
+    throw new Error("ARTIFACT_STORAGE_RANGE_INVALID");
+  }
+  let response: GetObjectCommandOutput;
+  try {
+    response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: input.bucket || getConfiguredBucket(),
+        Key: input.key,
+        Range: `bytes=${input.start}-${input.end}`,
+      }),
+    );
+  } catch (error) {
+    if (isMissingObjectError(error)) return null;
+    throw error;
+  }
+  if (
+    typeof response.ContentLength === "number" &&
+    response.ContentLength !== expectedLength
+  ) {
+    throw new Error("ARTIFACT_STORAGE_RANGE_LENGTH_MISMATCH");
+  }
+  if (
+    response.ContentRange !==
+    `bytes ${input.start}-${input.end}/${input.totalLength}`
+  ) {
+    throw new Error("ARTIFACT_STORAGE_RANGE_IDENTITY_MISMATCH");
+  }
+  const bytes = await response.Body?.transformToByteArray();
+  if (!bytes || bytes.byteLength !== expectedLength) {
+    throw new Error("ARTIFACT_STORAGE_RANGE_LENGTH_MISMATCH");
+  }
+  return {
+    body: bytes,
+    contentType: response.ContentType || DEFAULT_DOWNLOAD_CONTENT_TYPE,
+  };
+}
+
+export async function downloadArtifactObjectForPort(
+  input: ArtifactStorageDownloadInput,
+): Promise<ArtifactStorageDownloadResult | null> {
+  const result = await downloadArtifactObjectWithMetadata(input);
+  return result ? { body: result.body, contentType: result.contentType } : null;
 }
 
 /**
@@ -362,7 +587,11 @@ export async function uploadSandboxAssetObject(input: {
   key: string;
   body: Uint8Array;
 }) {
-  await putObject({ key: input.key, body: input.body, contentType: "application/zip" });
+  await putObject({
+    key: input.key,
+    body: input.body,
+    contentType: "application/zip",
+  });
 }
 
 export function getSandboxAssetDownloadUrl(input: {

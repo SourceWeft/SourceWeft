@@ -254,11 +254,7 @@ test("completed presentation publisher with error is not treated as artifact car
   );
 });
 
-/**
- * Readiness is the owning capability's call, not this file's. These cases pin
- * the three answers the contract allows: "not until my worker says ready"
- * (video), "a URL is the artifact" (deck) and no opinion at all (image).
- */
+/** Readiness is the owning capability's call, not this file's. */
 function artifactToolCall(
   tool: string,
   output: unknown,
@@ -275,30 +271,6 @@ function artifactToolCall(
 }
 
 const RESULT_EVENT = { type: "tool-call-result", id: "tool-1" } as const;
-
-test("video presentation is not artifact-ready until its worker reports ready", () => {
-  assert.equal(
-    isCompletedArtifactToolCall(
-      artifactToolCall("generate_video_presentation", {
-        artifact_url: "/artifact-preview?artifactId=artifact-1",
-        status: "running",
-      }),
-      RESULT_EVENT,
-    ),
-    false,
-  );
-
-  assert.equal(
-    isCompletedArtifactToolCall(
-      artifactToolCall("generate_video_presentation", {
-        artifact_url: "/artifact-preview?artifactId=artifact-1",
-        status: "ready",
-      }),
-      RESULT_EVENT,
-    ),
-    true,
-  );
-});
 
 test("published deck is artifact-ready on a returned URL, and not without one", () => {
   assert.equal(

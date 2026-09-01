@@ -1,7 +1,10 @@
 import { Clock3, Loader2, RotateCcw, Sparkles, Webhook } from "lucide-react";
 
 import type { ConnectorActivityItem } from "@sourceweft/sdk";
-import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
+import {
+  Alert,
+  AlertDescription,
+} from "@sourceweft/ui-web/components/ui/alert";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HubEmptyState } from "../components/hub-empty-state";

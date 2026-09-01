@@ -42,7 +42,10 @@ export function writeStoredSourceSelection(
   window.localStorage.setItem(key, JSON.stringify(sourceIds));
 }
 
-export function clearStoredSourceSelection(workspaceId: string, bucket: string) {
+export function clearStoredSourceSelection(
+  workspaceId: string,
+  bucket: string,
+) {
   const key = getSourceSelectionStorageKey(workspaceId, bucket);
   window.localStorage.removeItem(key);
   window.sessionStorage.removeItem(key);

@@ -208,7 +208,8 @@ test("approve and reject resumes share the same queue behavior", () => {
       throw new Error("Expected queued resume request to flush.");
     }
     assert.deepEqual(
-      buildToolConfirmationResumeStreamInput(flushed.runnable).toolApprovalResume,
+      buildToolConfirmationResumeStreamInput(flushed.runnable)
+        .toolApprovalResume,
       request.toolApprovalResume,
     );
   }

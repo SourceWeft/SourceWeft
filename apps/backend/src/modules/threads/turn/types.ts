@@ -225,6 +225,10 @@ export type PreparedThreadTurn = {
   command: ResolvedThreadCommand | null;
   invocation: ResolvedThreadInvocation | null;
   commandSuccessCriteria: CommandSuccessCriteria;
+  activeToolPolicy?: {
+    allow?: string[];
+    deny: string[];
+  };
   toolPermissions: Record<string, ToolPermission>;
   effectiveTools: ThreadToolsSelection;
   runtimeTools: Record<string, PreparedRuntimeTool>;
@@ -309,10 +313,7 @@ export type RetrievalCallTrace = {
 };
 
 export type ToolCallStatus =
-  | "running"
-  | "approval_requested"
-  | "completed"
-  | "error";
+  "running" | "approval_requested" | "completed" | "error";
 
 /**
  * Which agent produced a tool call. `main` is the top-level thread agent (the

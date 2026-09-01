@@ -4,7 +4,7 @@ import {
   type BackendProtocolV2,
   type SandboxBackendProtocolV2,
 } from "deepagents";
-import { afterEach, beforeAll, beforeEach, describe, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, test, vi } from "vitest";
 import { config } from "../../../../shared/config";
 import type { PreparedThreadTurn } from "../..";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
@@ -25,7 +25,9 @@ import {
 import {
   createSourceWeftToolCallContextMiddleware,
   currentSourceWeftToolCallContext,
+  runWithSourceWeftToolInvocationSignal,
 } from "../middleware";
+import { agentSandboxService } from "../sandbox-service/service";
 
 const SANDBOX_PATH_POLICY_STUB = {
   workspaceRoot: "/workspace",
@@ -61,6 +63,7 @@ test("tool-call context attributes sub-agent artifact publishers", async () => {
   assert.deepEqual(observed, {
     producer: { kind: "subagent", subagentType: "general-purpose" },
     toolCallId: "publish-call-1",
+    toolName: "publish_artifact",
   });
 });
 
@@ -136,18 +139,109 @@ function stubBackend(label: string): BackendProtocolV2 {
 
 function stubSandboxBackend(
   input: {
-    executeCalls?: Array<{ command: string; toolCallId?: string | null }>;
+    executeCalls?: Array<{
+      command: string;
+      signal?: AbortSignal;
+      toolCallId?: string | null;
+    }>;
+    fileCalls?: Array<{ method: string; signal?: AbortSignal }>;
   } = {},
 ): SandboxBackendProtocolV2 {
   return {
     ...stubBackend("sandbox"),
     id: "sandbox-test",
+    ls: async (path: string, options?: { signal?: AbortSignal }) => {
+      input.fileCalls?.push({ method: "ls", signal: options?.signal });
+      return { files: [{ path, is_dir: true }] };
+    },
+    read: async (
+      path: string,
+      _offset?: number,
+      _limit?: number,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "read", signal: options?.signal });
+      return { content: `sandbox:read:${path}` };
+    },
+    readRaw: async (path: string, options?: { signal?: AbortSignal }) => {
+      input.fileCalls?.push({ method: "readRaw", signal: options?.signal });
+      return {
+        data: {
+          content: `sandbox:raw:${path}`,
+          mimeType: "text/plain",
+          created_at: "",
+          modified_at: "",
+        },
+      };
+    },
+    grep: async (
+      _pattern: string,
+      path?: string | null,
+      _glob?: string | null,
+      _maxCount?: number | null,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "grep", signal: options?.signal });
+      return {
+        matches: [
+          { path: `${path ?? "/"}/match.txt`, line: 1, text: "sandbox" },
+        ],
+      };
+    },
+    glob: async (
+      _pattern: string,
+      path?: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "glob", signal: options?.signal });
+      return { files: [{ path: `${path ?? "/"}/glob.txt`, is_dir: false }] };
+    },
+    write: async (
+      path: string,
+      _content: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "write", signal: options?.signal });
+      return { path, filesUpdate: null };
+    },
+    edit: async (
+      path: string,
+      _oldString: string,
+      _newString: string,
+      _replaceAll?: boolean,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "edit", signal: options?.signal });
+      return { path, filesUpdate: null, occurrences: 1 };
+    },
+    uploadFiles: async (
+      files: Array<[string, Uint8Array]>,
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({ method: "uploadFiles", signal: options?.signal });
+      return files.map(([path]) => ({ path, error: null }));
+    },
+    downloadFiles: async (
+      paths: string[],
+      options?: { signal?: AbortSignal },
+    ) => {
+      input.fileCalls?.push({
+        method: "downloadFiles",
+        signal: options?.signal,
+      });
+      return paths.map((path) => ({
+        path,
+        content: new TextEncoder().encode(`sandbox:download:${path}`),
+        error: null,
+      }));
+    },
     execute: async (
       command: string,
-      options?: { toolCallId?: string | null },
+      options?: { signal?: AbortSignal; toolCallId?: string | null },
     ) => {
       input.executeCalls?.push({
         command,
+        ...(options?.signal ? { signal: options.signal } : {}),
         toolCallId: options?.toolCallId,
       });
       return {
@@ -299,6 +393,7 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
     },
     sandboxRuntime: {
       backend: stubSandboxBackend() as never,
+      trustedHost: {} as never,
       tools: [],
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
@@ -350,6 +445,7 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ executeCalls }) as never,
+      trustedHost: {} as never,
       tools: [],
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
@@ -393,6 +489,107 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
   ]);
 });
 
+test("preconstructed agent backend receives the host invocation signal", async () => {
+  const executeCalls: Array<{
+    command: string;
+    signal?: AbortSignal;
+    toolCallId?: string | null;
+  }> = [];
+  const backend = buildAgentBackend({
+    filesystemBackend: {
+      backend: stubBackend("mounted") as never,
+      knowledgeBackend: stubBackend("kb") as never,
+      workingFilesBackend: stubBackend("work") as never,
+      filesystemMounts: [],
+      skillsBackend: null,
+    },
+    sandboxRuntime: {
+      backend: stubSandboxBackend({ executeCalls }) as never,
+      trustedHost: {} as never,
+      tools: [],
+      interruptOn: {},
+      downloadFile: async () => Buffer.from(""),
+      buildRuntimePrompt: () => "",
+      getOperationTimeline: async () => [],
+      pathPolicy: SANDBOX_PATH_POLICY_STUB,
+    },
+  });
+  const invocation = new AbortController();
+
+  await runWithSourceWeftToolInvocationSignal(invocation.signal, () =>
+    (backend as SandboxBackendProtocolV2).execute(
+      "node /workspace/ppt-deck/a.js",
+    ),
+  );
+
+  assert.equal(executeCalls[0]?.signal, invocation.signal);
+});
+
+test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file method without touching DB routes", async () => {
+  const fileCalls: Array<{ method: string; signal?: AbortSignal }> = [];
+  let workingReads = 0;
+  const workingBackend = {
+    ...stubBackend("work"),
+    read: async (path: string) => {
+      workingReads += 1;
+      return { content: `work:read:${path}` };
+    },
+  } satisfies BackendProtocolV2;
+  const backend = buildAgentBackend({
+    filesystemBackend: {
+      backend: stubBackend("mounted") as never,
+      knowledgeBackend: stubBackend("kb") as never,
+      workingFilesBackend: workingBackend as never,
+      filesystemMounts: [],
+      skillsBackend: null,
+    },
+    sandboxRuntime: {
+      backend: stubSandboxBackend({ fileCalls }) as never,
+      trustedHost: {} as never,
+      tools: [],
+      interruptOn: {},
+      downloadFile: async () => Buffer.from(""),
+      buildRuntimePrompt: () => "",
+      getOperationTimeline: async () => [],
+      pathPolicy: SANDBOX_PATH_POLICY_STUB,
+    },
+  });
+  const invocation = new AbortController();
+  const sandboxBackend = backend as SandboxBackendProtocolV2;
+
+  await runWithSourceWeftToolInvocationSignal(invocation.signal, async () => {
+    await backend.ls("/workspace");
+    await backend.read("/workspace/a.txt");
+    await backend.readRaw("/workspace/a.txt");
+    await backend.grep("a", "/workspace");
+    await backend.glob("*.txt", "/workspace");
+    await backend.write("/workspace/a.txt", "a");
+    await backend.edit("/workspace/a.txt", "a", "b");
+    await sandboxBackend.uploadFiles?.([
+      ["/workspace/a.txt", new TextEncoder().encode("a")],
+    ]);
+    await sandboxBackend.downloadFiles?.(["/workspace/a.txt"]);
+    await backend.read("/workfiles/a.txt");
+  });
+
+  assert.deepEqual(
+    fileCalls.map((call) => call.method),
+    [
+      "ls",
+      "read",
+      "readRaw",
+      "grep",
+      "glob",
+      "write",
+      "edit",
+      "uploadFiles",
+      "downloadFiles",
+    ],
+  );
+  assert.ok(fileCalls.every((call) => call.signal === invocation.signal));
+  assert.equal(workingReads, 1);
+});
+
 test("agent backend exposes selected skills through the DeepAgents skills mount", async () => {
   const skillMarkdown = `---
 name: ppt-deck
@@ -429,6 +626,7 @@ Read this before creating slides.`;
     },
     sandboxRuntime: {
       backend: stubSandboxBackend() as never,
+      trustedHost: {} as never,
       tools: [],
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
@@ -501,6 +699,64 @@ describe("sandbox runtime assembly tool permissions", () => {
       prompt.includes(AGENT_TOOL_NAMES.collectSandboxOutputs),
       false,
     );
+  });
+
+  test("root-only trusted sandbox tools keep the runtime when raw execute is denied", async () => {
+    const prepared = createPreparedTurn({
+      [AGENT_TOOL_NAMES.execute]: "deny",
+    });
+    prepared.runtimeTools = {
+      validate_video_presentation: {
+        toolName: "validate_video_presentation",
+        enabled: true,
+        permission: "allow",
+        shouldBind: true,
+        selection: {},
+        options: {},
+      },
+    };
+    const { sandboxRuntime } = await promptFor(prepared);
+
+    assert.ok(sandboxRuntime);
+    assert.ok(sandboxRuntime.trustedHost);
+  });
+
+  test("video trusted-host binding never widens raw execute beyond interactive", async () => {
+    const prepared = createPreparedTurn();
+    prepared.runtimeTools = {
+      validate_video_presentation: {
+        toolName: "validate_video_presentation",
+        enabled: true,
+        permission: "allow",
+        shouldBind: true,
+        selection: {},
+        options: {},
+      },
+    };
+    const createRuntime = vi.spyOn(agentSandboxService, "createRuntimeForTurn");
+    try {
+      const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+        prepared,
+        filesystemBackend,
+      });
+
+      assert.ok(sandboxRuntime);
+      assert.equal(typeof sandboxRuntime.backend.execute, "function");
+      const runtimeInput = createRuntime.mock.calls.at(-1)?.[0];
+      assert.ok(runtimeInput);
+      assert.equal(runtimeInput.commandBudget, undefined);
+      assert.ok(runtimeInput.runtimeAssets);
+      assert.deepEqual(
+        (await runtimeInput.runtimeAssets.plans()).map((plan) => plan.name),
+        ["chrome-headless-shell"],
+      );
+      assert.equal(
+        typeof sandboxRuntime.trustedHost.executeCurrent,
+        "function",
+      );
+    } finally {
+      createRuntime.mockRestore();
+    }
   });
 
   test("denied prepare omits prepare tool and prepare prompt instruction", async () => {

@@ -29,7 +29,8 @@ export async function loadArtifactDetail(input: {
   const load =
     input.load ??
     (async (activeWorkspaceId: string, artifactId: string) =>
-      (await contentClient.getArtifact(activeWorkspaceId, artifactId)).artifact);
+      (await contentClient.getArtifact(activeWorkspaceId, artifactId))
+        .artifact);
   const entry: DetailEntry = { updatedAt: summary.updatedAt };
   const promise = load(workspaceId, summary.id)
     .then((artifact) => {

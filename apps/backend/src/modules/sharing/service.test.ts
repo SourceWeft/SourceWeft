@@ -13,7 +13,9 @@ const mockRevokeForThread = vi.fn();
 const mockAuditRecord = vi.fn();
 const mockInlineRenderable = vi.fn();
 const mockHasServableFile = vi.fn();
+const mockHasPreview = vi.fn();
 const mockBuildPublicPayload = vi.fn();
+const mockCurrentVersionMedia = vi.fn();
 
 vi.mock("../workspace", () => ({
   workspaceService: {
@@ -37,8 +39,11 @@ vi.mock("../artifacts", () => ({
       mockInlineRenderable(...a),
     sharedArtifactHasServableFile: (...a: unknown[]) =>
       mockHasServableFile(...a),
+    sharedArtifactHasPreview: (...a: unknown[]) => mockHasPreview(...a),
     buildSharedArtifactPublicPayload: (...a: unknown[]) =>
       mockBuildPublicPayload(...a),
+    getSharedCurrentArtifactVersionMedia: (...a: unknown[]) =>
+      mockCurrentVersionMedia(...a),
   },
 }));
 vi.mock("./store", () => ({
@@ -94,7 +99,9 @@ beforeEach(() => {
   mockCanAdministerContent.mockReturnValue(false);
   mockInlineRenderable.mockResolvedValue(true);
   mockHasServableFile.mockResolvedValue(true);
+  mockHasPreview.mockResolvedValue(false);
   mockBuildPublicPayload.mockResolvedValue(null);
+  mockCurrentVersionMedia.mockResolvedValue(null);
 });
 
 test("the artifact's creator may share it", async () => {
@@ -276,44 +283,6 @@ test("public resolve projects a ready artifact without counting a view", async (
   assert.equal(mockIncrement.mock.calls.length, 0);
 });
 
-test("public projection mints a fileUrl from a payload-stored primary file when there is no top-level storageKey", async () => {
-  // A video presentation keeps its rendered mp4 in the payload, not the
-  // top-level `storageKey` column. The projection must still hand out a
-  // `fileUrl` (served by the handler's resolvePrimaryFile) so the share page
-  // plays the video instead of falling back to the poster.
-  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
-  mockFindArtifact.mockResolvedValue(
-    artifact({ artifactType: "video_presentation", storageKey: null }),
-  );
-  mockHasServableFile.mockResolvedValue(true);
-
-  const projection = await sharingService.resolvePublicArtifact("tok");
-  assert.equal(
-    projection?.fileUrl,
-    "https://api.test/v1/public/shares/tok/raw",
-  );
-});
-
-test("public projection carries a capability's client-render payload, asset-scoped", async () => {
-  // A video presentation ships a sanitized payload the share page compiles in
-  // the browser; the sharing layer supplies the token-scoped asset URL builder
-  // and passes the result through verbatim.
-  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
-  mockFindArtifact.mockResolvedValue(
-    artifact({ artifactType: "video_presentation", storageKey: null }),
-  );
-  mockBuildPublicPayload.mockImplementation(async (_artifact, assetUrl) => ({
-    kind: "video_presentation",
-    audioUrl: (assetUrl as (f: string) => string)("slide-1.mp3"),
-  }));
-
-  const projection = await sharingService.resolvePublicArtifact("tok");
-  assert.equal(
-    (projection?.payload as Record<string, unknown> | null)?.audioUrl,
-    "https://api.test/v1/public/shares/tok/assets/slide-1.mp3",
-  );
-});
-
 test("public projection payload is null when the type has none", async () => {
   mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
   mockFindArtifact.mockResolvedValue(artifact());
@@ -421,6 +390,51 @@ test("public projection leaks no internal payload fields", async () => {
       `public projection must not contain "${needle}": ${serialized}`,
     );
   }
+});
+
+test("public Video Presentation projection pins immutable version media and exposes no payload", async () => {
+  mockFindLive.mockResolvedValue({
+    token: "tok",
+    targetType: "artifact",
+    targetId: "art-1",
+    teamId: "team-1",
+    workspaceId: "ws-1",
+    isPublic: true,
+    noindex: false,
+    accessLevel: "viewer",
+    viewCount: 0,
+    createdAt: new Date(0),
+  });
+  mockFindArtifact.mockResolvedValue(
+    artifact({
+      artifactType: "video_presentation",
+      payloadJson: { secret: true },
+    }),
+  );
+  mockCurrentVersionMedia.mockResolvedValue({
+    versionId: "version-1",
+    media: {
+      title: "Recorded video",
+      description: null,
+      durationSeconds: 10,
+      media: {},
+      coverImage: {},
+    },
+  });
+
+  const projection = await sharingService.resolvePublicArtifact("tok");
+
+  assert.equal(
+    projection?.fileUrl,
+    "https://api.test/v1/public/shares/tok/versions/version-1/media/video",
+  );
+  assert.equal(
+    projection?.previewImageUrl,
+    "https://api.test/v1/public/shares/tok/versions/version-1/media/cover",
+  );
+  assert.equal(projection?.payload, null);
+  assert.equal(projection?.title, "Recorded video");
+  assert.equal(mockBuildPublicPayload.mock.calls.length, 0);
 });
 
 test("serving the bytes counts a view only when asked", async () => {

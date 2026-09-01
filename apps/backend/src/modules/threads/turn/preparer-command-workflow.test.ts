@@ -105,7 +105,7 @@ test("capability workflow discovery fails when configured packages root is missi
 });
 
 test("resolveThreadCommand rejects hidden artifact tool slash commands", async () => {
-  const cases = ["/generate_image", "/generate_video_presentation"] as const;
+  const cases = ["/generate_image", "/publish_video_presentation"] as const;
 
   for (const alias of cases) {
     await assert.rejects(
@@ -125,7 +125,7 @@ test("resolveThreadCommand rejects hidden artifact tool slash commands", async (
   }
 });
 
-test("resolveThreadCommand resolves video skill alias to agent generate_video_presentation workflow", async () => {
+test("resolveThreadCommand resolves video skill alias to the root Agent workflow", async () => {
   const command = await resolveThreadCommand({
     command: {
       arguments: "make an onboarding video",
@@ -141,9 +141,17 @@ test("resolveThreadCommand resolves video skill alias to agent generate_video_pr
         displayName: "Video Presentation",
         version: "1.0.0",
         description: "Create video presentation artifacts",
+        defaultEnabled: false,
         files: [],
         slash: false,
-        tools: ["generate_video_presentation"],
+        tools: [
+          "prepare_sandbox_workspace",
+          "load_video_presentation",
+          "generate_video_assets",
+          "generate_video_narration",
+          "validate_video_presentation",
+          "publish_video_presentation",
+        ],
       },
     ],
   });
@@ -156,29 +164,49 @@ test("resolveThreadCommand resolves video skill alias to agent generate_video_pr
   assert.equal(command?.workflow?.kind, "skill_workflow");
   assert.equal(command?.workflow?.execution, "agent");
   assert.deepEqual(command?.workflow?.defaultTools, [
-    "generate_video_presentation",
+    "prepare_sandbox_workspace",
+    "load_video_presentation",
+    "generate_video_assets",
+    "generate_video_narration",
+    "validate_video_presentation",
+    "publish_video_presentation",
   ]);
   assert.deepEqual(command?.workflow?.permissionOverrides, {
-    generate_video_presentation: "allow",
+    prepare_sandbox_workspace: "allow",
+    load_video_presentation: "allow",
+    generate_video_assets: "allow",
+    generate_video_narration: "allow",
+    validate_video_presentation: "allow",
+    publish_video_presentation: "allow",
   });
   assert.deepEqual(command?.workflow?.successCriteria, {
     kind: "artifact",
     artifactType: "video_presentation",
-    toolName: "generate_video_presentation",
+    toolName: "publish_video_presentation",
   });
+  assert.equal(command?.workflow?.initialToolPolicy, "auto");
+  assert.ok(command?.workflow?.toolPolicy?.deny.includes("execute"));
+  assert.ok(
+    command?.workflow?.toolPolicy?.allow?.includes(
+      "publish_video_presentation",
+    ),
+  );
   assert.match(
     command?.workflow?.renderedPrompt ?? "",
     /kind="skill_workflow"/,
   );
   assert.match(
     command?.workflow?.renderedPrompt ?? "",
-    /video-presentation skill workflow/,
+    /video-presentation skill as a root Agent studio/,
   );
   assert.match(
     command?.workflow?.renderedPrompt ?? "",
     /\/skills\/video-presentation\/SKILL\.md/,
   );
-  assert.match(command?.workflow?.renderedPrompt ?? "", /generate_video_presentation/);
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /publish_video_presentation/,
+  );
 });
 
 test("resolveThreadCommand rejects legacy generate_image tool alias", async () => {

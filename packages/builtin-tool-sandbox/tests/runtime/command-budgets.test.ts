@@ -151,11 +151,13 @@ function createOperationStore(): SandboxOperationStore {
   };
 }
 
-function createRuntime(input: {
-  limits?: SandboxRuntimeLimits;
-  commandBudget?: SandboxCommandBudget;
-  operationStore?: SandboxOperationStore;
-} = {}) {
+function createRuntime(
+  input: {
+    limits?: SandboxRuntimeLimits;
+    commandBudget?: SandboxCommandBudget;
+    operationStore?: SandboxOperationStore;
+  } = {},
+) {
   const provider = createProvider();
   const runtime = createSandboxRuntimeForTurn({
     filesystem: {} as never,
@@ -203,7 +205,24 @@ test("sandbox commands use the interactive budget when no budget is named", asyn
   );
 });
 
-test("host-initiated runtimes can name the batch budget", async () => {
+test("trusted host gets batch while model backend stays interactive", async () => {
+  const { provider, runtime } = createRuntime();
+
+  await runtime.backend.execute("echo model", {
+    toolCallId: "tool-call-execute",
+  });
+  await runtime.trustedHost.executeCurrent({
+    command: "npm ci",
+    timeoutMs: BATCH_MS,
+  });
+
+  assert.deepEqual(
+    provider.executeInputs.map((input) => input.timeoutMs),
+    [INTERACTIVE_MS, BATCH_MS],
+  );
+});
+
+test("a host-only runtime may still name batch for its backend", async () => {
   const { provider, runtime } = createRuntime({ commandBudget: "batch" });
 
   await runtime.backend.execute("npm ci", { toolCallId: "tool-call-execute" });

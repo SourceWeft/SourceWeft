@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
 import { getCapabilityContributions } from "@sourceweft/capability-runtime";
+import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { builtinSandboxCapabilityManifest } from "../src/manifest";
 import {
   buildSandboxToolDescriptions,
@@ -22,6 +23,15 @@ import type {
   SandboxRuntimeLimits,
   SandboxStore,
 } from "../src";
+import { createTrustedSandboxHostAdapter } from "../src/runtime/trusted-host-adapter";
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   workspaceRoot: "/workspace",
@@ -440,6 +450,12 @@ test("collect_sandbox_outputs returns a recoverable error for binary PPTX output
     manager,
     context: TEST_CONTEXT,
     limits: TEST_LIMITS,
+    trustedHost: {
+      async uploadCurrentFiles() {},
+      async downloadCurrentFile() {
+        return Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]);
+      },
+    },
   });
   const collectTool = tools.find(
     (candidate) => candidate.name === "collect_sandbox_outputs",
@@ -461,7 +477,7 @@ test("collect_sandbox_outputs returns a recoverable error for binary PPTX output
     {
       toolCall: {
         id: "collect-call-1",
-        type: "tool_call",
+        type: "tool_call" as const,
         name: "collect_sandbox_outputs",
         args: {},
       },
@@ -531,6 +547,14 @@ test("prepare_sandbox_workspace returns a recoverable error instead of throwing"
     manager,
     context: TEST_CONTEXT,
     limits: TEST_LIMITS,
+    trustedHost: {
+      async uploadCurrentFiles() {
+        throw new Error("should not upload missing source");
+      },
+      async downloadCurrentFile() {
+        return Buffer.from("");
+      },
+    },
   });
   const prepareTool = tools.find(
     (candidate) => candidate.name === "prepare_sandbox_workspace",
@@ -549,7 +573,7 @@ test("prepare_sandbox_workspace returns a recoverable error instead of throwing"
     {
       toolCall: {
         id: "prepare-call-1",
-        type: "tool_call",
+        type: "tool_call" as const,
         name: "prepare_sandbox_workspace",
         args: {},
       },
@@ -575,4 +599,268 @@ test("prepare_sandbox_workspace returns a recoverable error instead of throwing"
       result: output,
     },
   ]);
+});
+
+test("prepare_sandbox_workspace forwards Stop through the Host side channel and waits for sandbox deletion", async () => {
+  const operationStore = createOperationStore();
+  const uploadStarted = deferred<void>();
+  const lateUpload = deferred<void>();
+  const deletionStarted = deferred<void>();
+  const deletionConfirmed = deferred<void>();
+  const provider: SandboxProvider = {
+    id: "fake",
+    pathPolicy: TEST_SANDBOX_PATH_POLICY,
+    async createSandbox() {
+      return { id: "provider-sandbox-1" };
+    },
+    async getSandbox() {
+      return {};
+    },
+    async deleteSandbox() {
+      deletionStarted.resolve();
+      await deletionConfirmed.promise;
+    },
+    async execute() {
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async executeSystem(input) {
+      if (input.command.includes("SOURCEWEFT_CANONICAL_PATH=")) {
+        return {
+          output:
+            "SOURCEWEFT_CANONICAL_PATH=/workspace/input/presentation.js\n",
+          exitCode: 0,
+          truncated: false,
+        };
+      }
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async uploadFile() {
+      uploadStarted.resolve();
+      await lateUpload.promise;
+    },
+    async ensureDirectory() {},
+    async downloadFile() {
+      return Buffer.from("");
+    },
+  };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore,
+    ttlSeconds: TEST_LIMITS.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(TEST_LIMITS),
+  });
+  const trustedHost = createTrustedSandboxHostAdapter({
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+    commandTimeoutMs: TEST_LIMITS.commandBudgetsMs.interactive,
+  });
+  const tools = createSandboxTools({
+    filesystem: {
+      readRaw: async () => ({
+        data: {
+          content: "console.log('ready')",
+          mimeType: "application/javascript",
+          created_at: "",
+          modified_at: "",
+        },
+      }),
+    } as never,
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+    trustedHost,
+  });
+  const prepareTool = tools.find(
+    (candidate) => candidate.name === "prepare_sandbox_workspace",
+  );
+  assert.ok(prepareTool);
+  const stop = new AbortController();
+  const config = withAgentToolHostInvocationSignal(
+    {
+      toolCall: {
+        id: "prepare-stop-call",
+        type: "tool_call" as const,
+        name: "prepare_sandbox_workspace",
+        args: {},
+      },
+    },
+    stop.signal,
+  );
+  const invocation = prepareTool.invoke(
+    {
+      files: [
+        {
+          sourcePath: "/workfiles/presentation.js",
+          sandboxPath: "/workspace/input/presentation.js",
+        },
+      ],
+    },
+    config,
+  );
+  void invocation.catch(() => undefined);
+
+  await uploadStarted.promise;
+  stop.abort(new DOMException("user stopped", "AbortError"));
+  await deletionStarted.promise;
+  let settled = false;
+  void invocation.finally(() => {
+    settled = true;
+  }).catch(() => undefined);
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  deletionConfirmed.resolve();
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_HOST_OPERATION_CANCELLED",
+    );
+    return true;
+  });
+  assert.equal(operationStore.completed.at(-1)?.status, "failed");
+  assert.equal(
+    operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_HOST_OPERATION_CANCELLED",
+  );
+
+  lateUpload.resolve();
+  await Promise.resolve();
+  assert.equal(
+    operationStore.completed.some((operation) => operation.status === "succeeded"),
+    false,
+  );
+});
+
+test("collect_sandbox_outputs forwards Host timeout and never persists late sandbox bytes", async () => {
+  const operationStore = createOperationStore();
+  const downloadStarted = deferred<void>();
+  const lateDownload = deferred<Buffer>();
+  let deleteCalls = 0;
+  const writes: string[] = [];
+  const outputPath = "/workspace/output/result.txt";
+  const provider: SandboxProvider = {
+    id: "fake",
+    pathPolicy: TEST_SANDBOX_PATH_POLICY,
+    async createSandbox() {
+      return { id: "provider-sandbox-1" };
+    },
+    async getSandbox() {
+      return {};
+    },
+    async deleteSandbox() {
+      deleteCalls += 1;
+    },
+    async execute() {
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async executeSystem(input) {
+      if (input.command.includes("SOURCEWEFT_CANONICAL_PATH=")) {
+        return {
+          output: `SOURCEWEFT_CANONICAL_PATH=${outputPath}\n`,
+          exitCode: 0,
+          truncated: false,
+        };
+      }
+      if (input.command.includes("SOURCEWEFT_FILE=")) {
+        return {
+          output: `SOURCEWEFT_FILE=4\t1\t1\t${outputPath}\n`,
+          exitCode: 0,
+          truncated: false,
+        };
+      }
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async uploadFile() {},
+    async ensureDirectory() {},
+    async downloadFile() {
+      downloadStarted.resolve();
+      return lateDownload.promise;
+    },
+  };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore,
+    ttlSeconds: TEST_LIMITS.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(TEST_LIMITS),
+  });
+  const trustedHost = createTrustedSandboxHostAdapter({
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+    commandTimeoutMs: TEST_LIMITS.commandBudgetsMs.interactive,
+  });
+  const tools = createSandboxTools({
+    filesystem: {
+      readRaw: async () => ({ error: "not found" }),
+      write: async (path: string) => {
+        writes.push(path);
+        return { path };
+      },
+    } as never,
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+    trustedHost,
+  });
+  const collectTool = tools.find(
+    (candidate) => candidate.name === "collect_sandbox_outputs",
+  );
+  assert.ok(collectTool);
+  const deadline = new AbortController();
+  const config = withAgentToolHostInvocationSignal(
+    {
+      toolCall: {
+        id: "collect-timeout-call",
+        type: "tool_call" as const,
+        name: "collect_sandbox_outputs",
+        args: {},
+      },
+    },
+    deadline.signal,
+  );
+  const invocation = collectTool.invoke(
+    {
+      outputs: [
+        {
+          sandboxPath: outputPath,
+          target: {
+            kind: "workfile",
+            path: "/workfiles/result.txt",
+          },
+        },
+      ],
+    },
+    config,
+  );
+  void invocation.catch(() => undefined);
+
+  await downloadStarted.promise;
+  deadline.abort(
+    Object.assign(new Error("tool deadline elapsed"), {
+      code: "AGENT_TOOL_EXECUTION_TIMEOUT",
+      name: "TimeoutError",
+    }),
+  );
+
+  await assert.rejects(invocation, (error: unknown) => {
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_HOST_OPERATION_TIMED_OUT",
+    );
+    return true;
+  });
+  assert.equal(deleteCalls, 1);
+  assert.deepEqual(writes, []);
+  assert.equal(operationStore.completed.at(-1)?.status, "failed");
+
+  lateDownload.resolve(Buffer.from("late"));
+  await Promise.resolve();
+  assert.deepEqual(writes, []);
+  assert.equal(
+    operationStore.completed.some((operation) => operation.status === "succeeded"),
+    false,
+  );
 });

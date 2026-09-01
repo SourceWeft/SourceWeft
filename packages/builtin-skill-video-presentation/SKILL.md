@@ -1,169 +1,153 @@
 ---
 name: video-presentation
 description: >
-  Create narrated video presentation artifacts from source material. Use when
-  the user asks for a video presentation, narrated explainer, animated deck,
-  lesson video, product walkthrough, or presentation video artifact.
+  Author, validate, render, edit, and publish trusted MP4 video presentations
+  as an autonomous root Agent studio.
 ---
 
-# Video Presentation
+# Video Presentation Studio
 
-Create a SourceWeft `video_presentation` artifact from a concise brief. The
-agent does not build or pass a storyboard, blueprint, slide array, scene code,
-TSX, HTML, or executable project files. The background worker plans the
-storyboard internally, generates Remotion scene code, validates/repairs the
-project (including audio-synced timing and rendered-frame visual QA), publishes
-source JSON, and exposes a browser-previewable Remotion project for MP4/WebM
-export.
+Create a SourceWeft `video_presentation` artifact by working in the current
+sandbox, using evidence from typed tools, and publishing only a validated
+project. You are the studio controller: maintain the plan, choose the next
+useful action, inspect observations, and revise the project when evidence says
+it is not ready.
 
-Keep the default path short: write one good brief, call the tool once, report
-the result. Read a reference only when the situation below applies.
+This is an open Agent workflow, not a fixed stage list. Do not count attempts or
+repeat an unchanged failed action. Time, billing, cancellation, semantic
+no-progress, sandbox, and publication fences are enforced by the host.
+
+## Non-negotiable boundaries
+
+- Work in the root Agent. Do not delegate video authoring, validation, or
+  publication to a subagent.
+- Use `write_todos` to keep the current plan and revise it as observations
+  arrive.
+- Use bounded file tools for draft/scene authoring. Do not call raw `execute`,
+  `generate_image`, or `collect_sandbox_outputs`.
+- Do not change provider/model, implementation, source, or tool after a failure
+  unless the user explicitly authorizes that change.
+- Never treat `processing`, `blocked`, `failed`, `cancelled`, a plain
+  `{status:"ready"}`, or an uncommitted artifact as success.
+- Only `publish_video_presentation` can finish successfully. Its committed
+  result must name the exact artifact version and artifact-output block.
+- The output is the trusted sandbox-rendered MP4 and cover committed by the
+  publisher. Never claim completion from source files or samples alone.
+- Validation renders the MP4 and cover before it returns. Do not announce a
+  background build, and do not imply an artifact exists before publication.
 
 ## Quick Reference
 
-| Situation | What to do |
-| --- | --- |
-| Any generation request | Follow Workflow below; SKILL.md alone is enough |
-| Brief feels vague, or user gave rich source material | Read [brief-guidelines.md](references/brief-guidelines.md) |
-| User asked for a specific length, language, or voice | Read [narration-guidelines.md](references/narration-guidelines.md) |
-| User cares about visual style, branding, or art direction | Read [visual-quality.md](references/visual-quality.md) |
-| User asks for a specific style/look/风格, wants variety, or is unsure how the video should look | Read [style-gallery.md](references/style-gallery.md) and pick a recipe |
-| Editing an existing video artifact | Follow "Editing an existing presentation" below |
-| User asks about the artifact's thumbnail/preview image | Read "Preview image" below |
+| Situation                                        | Read / choose                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| First draft in a turn                            | [draft-template.md](references/draft-template.md)             |
+| Rich or vague source material                    | [brief-guidelines.md](references/brief-guidelines.md)         |
+| Explicit duration, language, narration, or voice | [narration-guidelines.md](references/narration-guidelines.md) |
+| Branding, visual defects, layout, or quality     | [visual-quality.md](references/visual-quality.md)             |
+| Named style, look exploration, or visual variety | [style-gallery.md](references/style-gallery.md)               |
+| Existing artifact edit                           | Start with `load_video_presentation`                          |
 
-## Runtime Options
+## Runtime constraints
 
-When `<skill_runtime_config name="video-presentation">` is present, treat those
-values as generation constraints:
+Honor `<skill_runtime_config name="video-presentation">` and explicit user
+instructions. Relevant values include style preset, visual density, duration,
+slide count, language, narration enabled, visual direction, brand, motion, and
+canvas/fps. Explicit user intent wins over defaults.
 
-- `stylePreset`: visual direction, default `cinematic`.
-- `visualDensity`: scene information density, default `balanced`.
-- `durationTarget`: pacing target, default `medium`.
-- `language`: narration and scene language; `auto` means infer from the user.
-- `narrationEnabled`: whether to generate narration audio, default `true`.
-- `slideCount`: target number of scenes/slides.
-- `visualDirection`: high-level art direction for the generated Remotion scenes.
-- `brand`: optional colors, typography, or logo asset constraints.
-- `motion`: optional pacing, transition, and animation-intensity constraints.
-- `canvas`: optional width, height, and fps constraints.
+Resolve these values into the draft; do not assume a later tool will infer them
+from chat history.
 
-Follow explicit user instructions over defaults when they conflict.
+## Working project contract
 
-## Workflow
+Use a fresh project root under `/workspace`. The canonical source file is
+`video-presentation.draft.json` and must parse as the current draft contract:
 
-1. Build one concise `brief` from the user's request and any selected source
-   material: topic + thesis, intended narrative arc, and constraints. One core
-   idea per slide — the worker enforces per-slide density and narration
-   budgets. Put must-include facts/numbers in `sourceDigest`, not the brief.
-   Include `audience` or `tone` only when the user provides them or they are
-   obvious from context.
-2. If the user asked for a target length, pick `durationTarget` and
-   `slideCount` so the math lands near it (per-slide ≈ 6s short / 10s medium /
-   14s long).
-3. When the user names a mood/style or the topic clearly suggests one, pick or
-   adapt a recipe from [style-gallery.md](references/style-gallery.md) and
-   pass its `visualDirection` (plus its brand/motion values) — do not leave
-   `visualDirection` empty when the user expressed any style intent.
-4. Call `generate_video_presentation` with brief-first input: `brief` plus any
-   useful optional fields from the Tool Input Contract below. Pass
-   customization as constraints, not as prebuilt slides or code.
-5. Do not ask for clarification when the topic is sufficient; infer reasonable
-   defaults and proceed.
-6. After the tool succeeds, verify the result before reporting: the artifact is
-   `ready`, the slide count matches what was requested, and the reported
-   duration is plausible for the target. Then respond briefly that the video
-   presentation project is ready for browser preview/export.
-   Do not describe it as a completed MP4. The ready artifact includes a source
-   JSON endpoint for audit/reuse.
+- `schemaVersion: 1`, `kind: "video_presentation_draft"`;
+- `workflowVersion: "video-presentation-agent"`;
+- `builderVersion: "remotion-project"`;
+- explicit `narrationPolicy` and fully resolved `renderProfile`;
+- semantic `sourceDigest`, project/canvas, slides, scene modules, themes;
+- local WIP or protected committed-handle refs for narration/assets.
 
-## Preview image
+Keep one core idea per slide. Scene modules must be bounded, readable Remotion
+components and must use the project’s safe layout primitives. Narration-enabled
+drafts require exactly one measured track per slide; narration-disabled drafts
+must contain none.
 
-The pipeline renders slide stills while checking visual quality and stores the
-first one as the artifact's preview image — the same thumbnail slot every
-artifact type uses, so it shows up in artifact lists and chat cards without any
-extra step from you. It is not part of the payload; do not look for it in the
-source JSON.
+Scene code refers to a draft asset only through the stable URI
+`sourceweft-asset:<assetId>` (for example `sourceweft-asset:black-hole-photo`).
+Never embed a sandbox path, `/assets/...` path, object-storage key, or returned
+provider URL in scene code. Validation materializes the stable URI to the exact
+captured bytes inside the trusted sandbox. Browser playback receives only the
+resulting committed MP4 and cover, never scene code.
 
-The preview image is **best-effort**: the sandbox may fail to render stills, in
-which case the artifact simply has no thumbnail. Never promise one, and never
-treat its absence as a generation failure — the artifact is still fully valid
-and playable.
+## Choosing the next action
 
-## Editing an existing presentation
+Use the smallest action supported by current evidence:
 
-When the user asks to change an already-generated video presentation:
+- Author or edit draft/scene files when the content or diagnostics changed.
+- `generate_video_assets` only for explicitly planned visual slots. It claims
+  the full batch before provider calls and stages durable WIP bytes; it does not
+  publish standalone image artifacts.
+- `generate_video_narration` only for the current narration plan. It stores
+  bytes durably, measures real audio duration, and stages exact tracks.
+- `validate_video_presentation` after the semantic draft and referenced bytes
+  are coherent. It rebuilds a clean canonical tree, typechecks/smoke-renders,
+  renders beginning/middle/end samples for every scene, performs visual review
+  when a vision profile is configured, and always requires deterministic
+  runtime evidence, a cover, and the final streamable MP4.
+- Edit files and validate again only when the new input digest differs and the
+  diagnostics justify the change.
+- `publish_video_presentation` only with the latest passed validation receipt.
 
-1. Read the artifact's source JSON (the ready artifact's `source_json_url`)
-   to see each slide's number, title, and narration — locate exactly which
-   slides the user's request touches.
-2. Call `generate_video_presentation` with `regeneration`:
-   `{ artifactId, slideNumbers: [<only the affected slides>], instruction }`.
-   Make `instruction` specific ("shorten slide 3's on-screen text to one
-   phrase; keep the same narration topic"), not a restatement of the whole
-   brief. Omit `slideNumbers` only when the user wants the entire
-   presentation redone.
-3. The tool returns immediately with a processing result: tell the user the
-   edit is running in the background and the SAME artifact will update to a
-   new version when done. Do not call the tool again for this edit.
+If an action says another identical action is in progress, do not issue it
+again. If it reports an unknown side-effect outcome, stop and surface that
+blocker. For auth, quota, policy, path, configuration, permission, or missing
+provider errors, fail fast rather than switching paths. For content/layout
+diagnostics, modify the relevant source and continue when semantic progress is
+real.
 
-## Tool Input Contract
+## Create
 
-The only required semantic value is `brief`. If there is no usable brief, the
-tool returns an input-required result instead of creating an artifact.
+Form a concise thesis and narrative arc from the request and selected sources.
+Choose a plausible scene count/duration, author the draft and scene files,
+generate only required media, then use validation evidence to decide whether
+to repair or publish. Do not ask for clarification when the topic and intended
+output are already sufficient.
 
-Allowed input fields:
+For style intent, use a concrete visual direction rather than a generic label.
+For factual source material, retain the must-include facts in `sourceDigest`
+and keep displayed text concise.
 
-- `brief`: short description of what to generate.
-- `title`: optional user-facing project title.
-- `sourceDigest`: optional source summary.
-- `audience`: optional target audience.
-- `tone`: optional delivery tone.
-- `language`: optional narration/scene language.
-- `stylePreset`: `cinematic`, `editorial`, `executive`, `technical`, or
-  `product`.
-- `durationTarget`: `short`, `medium`, or `long`.
-- `renderProfile`: optional grouped style/language/duration settings.
-- `slideCount`: target number of generated scenes/slides, 1-12.
-- `visualDirection`: art direction such as "chalkboard classroom with kinetic
-  diagrams" or "executive product demo with crisp dashboards".
-- `brand`: optional `{ colors, typography, logoAssetId }`.
-- `motion`: optional `{ pacing, transitionStyle, animationIntensity }`.
-- `canvas`: optional `{ width, height, fps }`.
-- `narrationEnabled`: boolean.
-- `narration`: optional grouped narration settings.
-- `assets`: optional provided asset references —
-  `[{ assetId, role }]` where `assetId` is an existing image artifact in this
-  workspace (e.g. one the user uploaded or you created with `generate_image`)
-  and `role` describes its use (e.g. `hero`, `diagrammatic_visual`,
-  `scene_background`). The pipeline copies each image into the video and
-  scenes display it; slides whose visual needs no provided asset covers may
-  get platform-generated imagery automatically (when an image model is
-  configured).
-- `regeneration`: edit an existing artifact in place —
-  `{ artifactId, instruction, slideNumbers? }`. With `slideNumbers`, ONLY
-  those slides are regenerated (untouched slides keep their narration audio
-  and scene code byte-for-byte, and only the regenerated slides are billed);
-  without `slideNumbers` all slides regenerate. Either way the SAME artifact
-  gets a new version — the previous version survives if the edit fails.
+## Edit
 
-## Boundaries
+Call `load_video_presentation({artifactId})` first. It materializes the current
+authorized ready version and returns `loadReceiptId`, exact version identity,
+paths, and digests. Work only in that loaded project root. Preserve untouched
+slides/resources; replace only what the user asked to change.
 
-- Do not pass `presentationBlueprint`, `slides`, `sceneIntents`,
-  `narrationPlan`, TSX, HTML, or raw project files as tool input.
-- Do not call `publish_artifact`; `generate_video_presentation` creates the
-  artifact.
-- Do not promise server-side MP4/WebM rendering. Browser export happens from the
-  ready artifact preview.
-- Do not claim success until `generate_video_presentation` returns a ready
-  `video_presentation` artifact result.
-- If the tool returns a processing/still-generating result, do NOT call it
-  again for the same request — the artifact keeps building in the background
-  and a retry duplicates it. Report that generation is in progress instead.
-- A failed result is not task completion. Read the error before deciding the
-  next step. If changing the generation request can address it, retry by
-  setting `regeneration.artifactId` to the failed artifact id and explain the
-  corrective instruction. Do not repeat an identical request or create a
-  duplicate artifact.
-- Do not implicitly switch the model, provider, implementation, tool, or data
-  source after a failure. Report credential, permission, configuration,
-  sandbox, or missing-input blockers instead of bypassing them.
+Pass the same load receipt through validation, then publish with:
+
+- the same artifact id;
+- the loaded `expectedVersionNo`;
+- the latest validation receipt;
+- the load receipt.
+
+If the current version changed, do not overwrite it. Report the version
+conflict and reload only with user authority to continue the edit.
+
+## Validation and publication evidence
+
+A passed validation receipt binds the exact draft bytes, referenced resources,
+builder/render policy, runtime sample digests, project checks, vision review,
+cover, and final probed MP4. Any source/resource change invalidates it.
+The draft itself never contains published media URLs or storage coordinates.
+
+Publication re-captures and hashes the draft closure, resolves protected
+resource authority, uploads local WIP bytes, converts to the strict committed
+payload, and atomically commits artifact/version + canonical tool result + chat
+card under the active run fence. If that transaction rejects, do not claim the
+artifact exists.
+
+After the committed result, respond briefly that the video is ready for
+playback/download. Do not narrate an imaginary background build.

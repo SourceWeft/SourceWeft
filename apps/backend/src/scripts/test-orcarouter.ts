@@ -3,7 +3,7 @@ import "dotenv/config";
 /**
  * OrcaRouter live smoke test — exercises the four modalities we integrate
  * (chat + reasoning_effort, embeddings, image, tts) against the real gateway
- * and surfaces the per-request `usage.cost` we bill on.
+ * and surfaces the per-request `usage.cost_usd` reported by OrcaRouter.
  *
  * Usage:
  *   ORCAROUTER_API_KEY=sk-orca-... pnpm --filter @sourceweft/backend exec \
@@ -16,9 +16,13 @@ import "dotenv/config";
 type JsonRecord = Record<string, unknown>;
 
 const apiKey = process.env.ORCAROUTER_API_KEY;
-const baseUrl = (process.env.ORCAROUTER_API_BASE ?? "https://api.orcarouter.ai/v1").replace(/\/+$/, "");
-const chatModel = process.env.ORCAROUTER_CHAT_MODEL ?? "anthropic/claude-opus-4.6";
-const embedModel = process.env.ORCAROUTER_EMBED_MODEL ?? "openai/text-embedding-3-small";
+const baseUrl = (
+  process.env.ORCAROUTER_API_BASE ?? "https://api.orcarouter.ai/v1"
+).replace(/\/+$/, "");
+const chatModel =
+  process.env.ORCAROUTER_CHAT_MODEL ?? "anthropic/claude-opus-4.6";
+const embedModel =
+  process.env.ORCAROUTER_EMBED_MODEL ?? "openai/text-embedding-3-small";
 const imageModel = process.env.ORCAROUTER_IMAGE_MODEL ?? "openai/gpt-image-1";
 const ttsModel = process.env.ORCAROUTER_TTS_MODEL ?? "openai/tts-1";
 
@@ -52,12 +56,12 @@ function logUsage(label: string, body: JsonRecord) {
     prompt_tokens: usage.prompt_tokens,
     completion_tokens: usage.completion_tokens,
     reasoning_tokens: details?.reasoning_tokens,
-    cost: usage.cost,
+    cost_usd: usage.cost_usd,
     cost_details: usage.cost_details,
   });
-  if (usage.cost === undefined) {
+  if (usage.cost_usd === undefined) {
     console.warn(
-      `${label}: no usage.cost on the response — enable per-request cost so runtime billing has a real number.`,
+      `${label}: no usage.cost_usd on the response — enable per-request cost so runtime billing has a real number.`,
     );
   }
 }
@@ -68,6 +72,7 @@ async function postJson(path: string, payload: JsonRecord) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      "X-OrcaRouter-Include-Cost": "true",
     },
     body: JSON.stringify(payload),
   });
@@ -85,7 +90,12 @@ async function checkChat() {
   console.log(`\n=== chat + reasoning_effort (${chatModel}) ===`);
   const { ok, status, json } = await postJson("/chat/completions", {
     model: chatModel,
-    messages: [{ role: "user", content: "Which is bigger, 9.11 or 9.9? Answer briefly." }],
+    messages: [
+      {
+        role: "user",
+        content: "Which is bigger, 9.11 or 9.9? Answer briefly.",
+      },
+    ],
     reasoning_effort: "high",
   });
   console.log("status", status);
@@ -95,7 +105,12 @@ async function checkChat() {
   }
   const choice = asRecord((json.choices as unknown[])?.[0]);
   const message = asRecord(choice?.message);
-  console.log("content", typeof message?.content === "string" ? message.content.slice(0, 200) : message?.content);
+  console.log(
+    "content",
+    typeof message?.content === "string"
+      ? message.content.slice(0, 200)
+      : message?.content,
+  );
   if (typeof message?.reasoning_content === "string") {
     console.log("reasoning_content.length", message.reasoning_content.length);
   }
@@ -158,7 +173,12 @@ async function checkTts() {
       response_format: "mp3",
     }),
   });
-  console.log("status", response.status, "content-type", response.headers.get("content-type"));
+  console.log(
+    "status",
+    response.status,
+    "content-type",
+    response.headers.get("content-type"),
+  );
   if (!response.ok) {
     console.error("tts failed", await response.text());
     return false;
@@ -182,13 +202,18 @@ const results: Array<{ check: string; ok: boolean }> = [];
 for (const check of checks) {
   const runner = runners[check];
   if (!runner) {
-    console.error(`Unknown check: ${check} (expected chat|embeddings|image|tts|all)`);
+    console.error(
+      `Unknown check: ${check} (expected chat|embeddings|image|tts|all)`,
+    );
     continue;
   }
   try {
     results.push({ check, ok: await runner() });
   } catch (error) {
-    console.error(`${check} threw`, error instanceof Error ? error.message : error);
+    console.error(
+      `${check} threw`,
+      error instanceof Error ? error.message : error,
+    );
     results.push({ check, ok: false });
   }
 }

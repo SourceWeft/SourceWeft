@@ -1,8 +1,8 @@
 # Writing an Effective Brief
 
-The worker plans the storyboard from your brief, so brief quality decides
-presentation quality. A good brief states the topic, the narrative arc, and the
-constraints — nothing else.
+The root studio Agent turns the request into a concrete draft, so source quality
+still decides presentation quality. Extract the topic, narrative arc, facts, and
+constraints before authoring scenes; do not invent a second hidden worker plan.
 
 ## Structure of a good brief
 
@@ -12,8 +12,8 @@ One to four sentences covering:
    area. "Explain how the Feynman technique exposes gaps in understanding" beats
    "a video about learning".
 2. **Narrative arc** — the intended progression (problem → mechanism → payoff,
-   or overview → deep dives → recap). One core idea per slide; the worker
-   enforces per-slide density budgets, so an overloaded arc gets split anyway.
+   or overview → deep dives → recap). Keep one core idea per slide and split an
+   overloaded arc before writing scene code.
 3. **Audience and register** — who watches, and pass `audience`/`tone` fields
    when the user provides them instead of burying them in the brief.
 
@@ -29,7 +29,7 @@ Good:
 > the enterprise tier, churn ticked up in SMB, and the ask is headcount for two
 > more account managers. Confident, numbers-forward.
 
-Bad (over-specified, does the worker's job):
+Bad (mechanically copies a requested layout without resolving the thesis):
 
 > Slide 1 shows a title card, slide 2 has three bullets about..., slide 3...
 
@@ -54,6 +54,6 @@ storyboard should stay faithful to.
   (short ≈ 6s, medium ≈ 10s, long ≈ 14s per slide). A "2-minute medium" video
   is ~12 slides at most; fewer, denser slides usually read better than many
   thin ones.
-- For edits to an existing artifact, pass `regeneration` with the instruction
-  (and `slideNumbers` when only some slides change) instead of re-describing
-  the whole video.
+- For edits, call `load_video_presentation` first and modify only the requested
+  slides/resources in the loaded draft; keep the protected load receipt through
+  validation and publication.

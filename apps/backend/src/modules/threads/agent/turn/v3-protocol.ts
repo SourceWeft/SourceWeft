@@ -16,7 +16,7 @@
  * `graph.stream({ subgraphs: true })` — so sub-agent grouping in
  * subagent-namespace.ts is reused as-is.
  */
-import { toObjectRecord } from "./content";
+import { stringifyAgentMessageContent, toObjectRecord } from "./content";
 
 /** One event from `run` (the DeepAgentRunStream is an AsyncIterable of these). */
 export type V3ProtocolEvent = {
@@ -56,16 +56,41 @@ function parseMaybeJson(value: unknown): unknown {
  * The downstream normalizers expect the tool's actual return value: prefer the
  * structured `artifact` (content_and_artifact tools), else the parsed `content`.
  */
-function extractToolFinishedOutput(output: unknown): unknown {
+function errorMessageContent(content: unknown): string {
+  const text = stringifyAgentMessageContent(content).trim();
+  if (text.length > 0) {
+    return text;
+  }
+  try {
+    const serialized = JSON.stringify(content);
+    return serialized && serialized !== "{}"
+      ? serialized
+      : "Tool execution failed.";
+  } catch {
+    return "Tool execution failed.";
+  }
+}
+
+function extractToolFinishedResult(output: unknown): {
+  error: string | null;
+  output: unknown;
+} {
   const record = toObjectRecord(output);
   const kwargs = toObjectRecord(record?.kwargs);
   if (record && record.lc !== undefined && kwargs) {
-    if (kwargs.artifact !== undefined && kwargs.artifact !== null) {
-      return kwargs.artifact;
+    const content = parseMaybeJson(kwargs.content);
+    if (kwargs.status === "error") {
+      return {
+        error: errorMessageContent(content),
+        output: content,
+      };
     }
-    return parseMaybeJson(kwargs.content);
+    if (kwargs.artifact !== undefined && kwargs.artifact !== null) {
+      return { error: null, output: kwargs.artifact };
+    }
+    return { error: null, output: content };
   }
-  return output;
+  return { error: null, output };
 }
 
 /**
@@ -115,13 +140,23 @@ export function adaptToolsEvent(
         toolCallId,
         data: record.delta,
       };
-    case "tool-finished":
+    case "tool-finished": {
+      const finished = extractToolFinishedResult(record.output);
+      if (finished.error !== null) {
+        return {
+          event: "on_tool_error",
+          name,
+          toolCallId,
+          error: finished.error,
+        };
+      }
       return {
         event: "on_tool_end",
         name,
         toolCallId,
-        output: extractToolFinishedOutput(record.output),
+        output: finished.output,
       };
+    }
     case "tool-error":
       return {
         event: "on_tool_error",

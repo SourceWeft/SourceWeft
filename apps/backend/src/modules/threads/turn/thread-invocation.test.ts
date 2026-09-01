@@ -28,20 +28,20 @@ function generateImageCommand(): CapabilityCommandListItem {
   };
 }
 
-function generateVideoPresentationCommand(): CapabilityCommandListItem {
+function publishReportCommand(): CapabilityCommandListItem {
   return {
-    action: { kind: "tool", targetId: "generate_video_presentation" },
-    aliases: ["video", "slides"],
-    capabilityId: "sourceweft/video-presentation-tool",
+    action: { kind: "tool", targetId: "publish_report" },
+    aliases: ["report", "document"],
+    capabilityId: "sourceweft/report-builder",
     category: "Artifacts",
-    contributionId: "generate_video_presentation",
-    displayTitle: "Generate Video Presentation",
-    id: "cap:sourceweft/video-presentation-tool:generate_video_presentation",
+    contributionId: "publish_report",
+    displayTitle: "Publish Report",
+    id: "cap:sourceweft/report-builder:publish_report",
     order: 0,
     parentKind: null,
     parentTitle: null,
     sourcePackageName: null,
-    title: "Generate Video Presentation",
+    title: "Publish Report",
     visible: true,
     workflow: null,
   };
@@ -51,7 +51,7 @@ function registry() {
   return createSelectableInvocationRegistry({
     providers: [
       createCapabilityToolInvocationProvider({
-        commands: [generateImageCommand(), generateVideoPresentationCommand()],
+        commands: [generateImageCommand(), publishReportCommand()],
       }),
     ],
   });

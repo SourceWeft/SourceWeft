@@ -11,6 +11,7 @@ let deliverablesQueueInstance: Queue<QueueJobPayload, unknown, string> | null =
   null;
 
 let jobsQueueEvents: QueueEvents | null = null;
+let deliverablesQueueEvents: QueueEvents | null = null;
 
 function getJobsQueue() {
   jobsQueueInstance ??= new Queue<QueueJobPayload, unknown, string>(
@@ -75,6 +76,13 @@ export function getJobsQueueEvents() {
   return jobsQueueEvents;
 }
 
+export function getDeliverablesQueueEvents() {
+  deliverablesQueueEvents ??= new QueueEvents(config.deliverablesQueueName, {
+    connection: connectionOptions,
+  });
+  return deliverablesQueueEvents;
+}
+
 export async function enqueueWithAudit(
   type: string,
   payload: Record<string, unknown>,
@@ -104,8 +112,10 @@ export async function closeQueue() {
     jobsQueueInstance?.close() ?? Promise.resolve(),
     deliverablesQueueInstance?.close() ?? Promise.resolve(),
     jobsQueueEvents?.close() ?? Promise.resolve(),
+    deliverablesQueueEvents?.close() ?? Promise.resolve(),
   ]);
   jobsQueueInstance = null;
   deliverablesQueueInstance = null;
   jobsQueueEvents = null;
+  deliverablesQueueEvents = null;
 }

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronRight, Circle, CircleDot, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronRight,
+  Circle,
+  CircleDot,
+  XCircle,
+} from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatErrorNotice } from "./chat-error-notice";
 
@@ -48,7 +54,10 @@ function renderDisplayText(value: string) {
     const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, partIndex) => {
       if (part.startsWith("**") && part.endsWith("**")) {
         return (
-          <strong className="font-medium text-foreground" key={`b-${partIndex}`}>
+          <strong
+            className="font-medium text-foreground"
+            key={`b-${partIndex}`}
+          >
             {part.slice(2, -2)}
           </strong>
         );
@@ -74,8 +83,8 @@ function PipelineStepRow({
 }) {
   const hasDetails = Boolean(
     step.display ||
-      (step.logTail && step.logTail.length > 0) ||
-      step.errorMessage,
+    (step.logTail && step.logTail.length > 0) ||
+    step.errorMessage,
   );
   const [open, setOpen] = useState(defaultOpen && hasDetails);
   // Steps mount as pending and transition to running/failed later; auto-open
@@ -112,7 +121,9 @@ function PipelineStepRow({
             {step.label}
           </span>
           {step.summary ? (
-            <span className="ml-1 text-muted-foreground/80">· {step.summary}</span>
+            <span className="ml-1 text-muted-foreground/80">
+              · {step.summary}
+            </span>
           ) : null}
           {step.status === "running" ? (
             <span className="ml-1 text-primary">· Running</span>
@@ -192,7 +203,12 @@ export function ArtifactPipeline({
     );
 
   return (
-    <div className={cn("space-y-2 rounded-md border border-border/60 p-3", className)}>
+    <div
+      className={cn(
+        "space-y-2 rounded-md border border-border/60 p-3",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between gap-3 text-xs">
         <button
           className={cn(
@@ -214,7 +230,9 @@ export function ArtifactPipeline({
           ) : null}
         </button>
         {footerRight ? (
-          <span className="tabular-nums text-muted-foreground">{footerRight}</span>
+          <span className="tabular-nums text-muted-foreground">
+            {footerRight}
+          </span>
         ) : null}
       </div>
       {historyOpen ? (

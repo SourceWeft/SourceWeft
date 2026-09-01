@@ -100,9 +100,7 @@ export function useMcp(input: {
       );
       const enabledToolIds = new Set(
         result.items.flatMap((install) =>
-          install.tools
-            .filter((tool) => tool.enabled)
-            .map((tool) => tool.id),
+          install.tools.filter((tool) => tool.enabled).map((tool) => tool.id),
         ),
       );
       const currentInstallIds = selectedMcpInstallIdsRef.current;

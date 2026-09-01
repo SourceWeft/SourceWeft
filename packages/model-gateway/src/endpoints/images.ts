@@ -52,6 +52,10 @@ export class ModelGatewayImagesEndpoint {
         payload: input,
         options,
       });
+      if (result.observation) {
+        result.observation.traceId = generation.start.traceId;
+        result.observation.spanId = generation.spanId;
+      }
       await emitGenerationEnd(this.config, {
         traceId: generation.start.traceId,
         spanId: generation.spanId,
@@ -65,6 +69,7 @@ export class ModelGatewayImagesEndpoint {
           routeDecision: result.routeDecision,
         },
         usage: result.usage,
+        observation: result.observation,
         rawCaptureMode: "provider_wire",
         providerResponse: toProviderResponse(result.raw),
         attributes: generation.start.attributes,

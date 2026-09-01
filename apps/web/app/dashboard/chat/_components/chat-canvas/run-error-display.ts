@@ -53,7 +53,8 @@ export function shouldShowRunErrorBanner(input: {
   isStreamingThisVersion: boolean;
   renderState: RunErrorRenderState;
 }): boolean {
-  const { hasActiveRunOnThisGroup, isStreamingThisVersion, renderState } = input;
+  const { hasActiveRunOnThisGroup, isStreamingThisVersion, renderState } =
+    input;
   if (!renderState.error) {
     return false;
   }

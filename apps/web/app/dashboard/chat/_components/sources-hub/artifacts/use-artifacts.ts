@@ -34,12 +34,8 @@ export function useArtifacts(input: {
   currentWorkspaceIdRef: { current: string | null | undefined };
   enabled: boolean;
 }) {
-  const {
-    workspaceId,
-    artifactsRefreshKey,
-    currentWorkspaceIdRef,
-    enabled,
-  } = input;
+  const { workspaceId, artifactsRefreshKey, currentWorkspaceIdRef, enabled } =
+    input;
 
   const [artifacts, setArtifacts] = useState<ArtifactSummaryItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
@@ -125,10 +121,13 @@ export function useArtifacts(input: {
     setIsLoadingMoreArtifacts(true);
     setArtifactsLoadingError(null);
     try {
-      const result = await contentClient.listArtifactSummaries(activeWorkspaceId, {
-        cursor: artifactsNextCursor,
-        limit: 100,
-      });
+      const result = await contentClient.listArtifactSummaries(
+        activeWorkspaceId,
+        {
+          cursor: artifactsNextCursor,
+          limit: 100,
+        },
+      );
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
       }

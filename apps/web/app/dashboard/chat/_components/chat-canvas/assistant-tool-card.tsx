@@ -250,11 +250,7 @@ function ReadFileBinaryUnsupportedDetails({
 }) {
   const pathLabel = unsupported.path ?? "this file";
   const message = `${pathLabel} is not a UTF-8 text file. Use artifact preview, media-aware inspection, or publish it as an artifact instead of read_file.`;
-  return (
-    <p className="break-words text-muted-foreground/80">
-      {message}
-    </p>
-  );
+  return <p className="break-words text-muted-foreground/80">{message}</p>;
 }
 
 export type AssistantToolCardProps = {
@@ -317,13 +313,12 @@ function GenericAssistantToolCard({
   const parentVideoPresentationSnapshot = deliverableArtifactId
     ? artifactStatuses?.get(deliverableArtifactId)
     : undefined;
-  const { snapshot: deliverableSnapshot } =
-    useArtifactSnapshot({
-      artifactSnapshot: parentVideoPresentationSnapshot,
-      enabled: isDeliverableTool,
-      toolCallOutput: toolCall.output,
-      workspaceId,
-    });
+  const { snapshot: deliverableSnapshot } = useArtifactSnapshot({
+    artifactSnapshot: parentVideoPresentationSnapshot,
+    enabled: isDeliverableTool,
+    toolCallOutput: toolCall.output,
+    workspaceId,
+  });
   const effectiveArtifactStatuses = (() => {
     if (!deliverableArtifactId || !deliverableSnapshot) {
       return artifactStatuses;
@@ -395,14 +390,13 @@ function GenericAssistantToolCard({
         artifactSnapshot: deliverableSnapshot,
         nowMs,
         toolCallOutput: toolCall.output,
+        toolCallStatus: toolCall.status,
         toolName: toolCall.tool,
       })
     : null;
   // Never show the fire-and-forget tool latency (~200ms) for video presentation.
   const duration = formatToolDuration(
-    isDeliverableTool
-      ? deliverableElapsedMs
-      : toolCall.latencyMs,
+    isDeliverableTool ? deliverableElapsedMs : toolCall.latencyMs,
   );
   const deliverableProgress = isDeliverableTool
     ? resolveDeliverableProgress({

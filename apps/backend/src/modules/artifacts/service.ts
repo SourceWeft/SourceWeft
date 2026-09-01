@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ARTIFACT_MIME_TYPES,
   extensionForMimeType,
@@ -5,21 +6,29 @@ import {
   normalizeMimeType,
   sniffAudioMimeType,
 } from "@sourceweft/contracts/artifact-files";
+import { ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES } from "@sourceweft/contracts/artifact-storage";
 import {
   buildArtifactPreviewUrl as buildArtifactPreviewPageUrl,
   buildArtifactRestUrl,
+  buildArtifactVersionMediaRestUrl,
 } from "@sourceweft/contracts/artifact-urls";
 import type {
   ArtifactCapabilities,
+  ArtifactVersionMedia,
+  ArtifactVersionMediaAssetLocation,
   ArtifactViewHandler,
 } from "@sourceweft/contracts";
+import { artifactVersionMediaProjectionSchema } from "@sourceweft/contracts";
 import { requireContentWorkspace } from "../workspace/guards";
 import { workspaceService } from "../workspace";
 import { canViewContent } from "../workspace/content-visibility";
 import { ContentError } from "../content/errors";
 import {
   deleteArtifactObject,
+  deleteArtifactObjectsByPrefix,
   downloadArtifactObject,
+  downloadArtifactObjectRange,
+  downloadArtifactObjectWithMetadata,
 } from "../sources/storage";
 import {
   findPubliclySharedArtifactIds,
@@ -30,18 +39,273 @@ import { logger } from "../../shared/logger";
 import {
   deleteArtifactRecord,
   findArtifactRecord,
+  findCurrentReadyArtifactVersionRecord,
+  findReadyArtifactVersionRecord,
+  listCurrentReadyArtifactVersionRecords,
+  listArtifactVersionContentRecords,
   listArtifactRecords,
   listArtifactSummaryRecords,
 } from "./repository";
 import { loadArtifactViewHandlerRegistry } from "./view-handlers";
 
 type ArtifactRecord = Awaited<ReturnType<typeof findArtifactRecord>>;
+type ExactArtifactVersionRecord = NonNullable<
+  Awaited<ReturnType<typeof findReadyArtifactVersionRecord>>
+>;
+type CurrentArtifactVersionRecord = NonNullable<
+  Awaited<ReturnType<typeof findCurrentReadyArtifactVersionRecord>>
+>;
+
+export type ArtifactVersionMediaResource = "video" | "cover";
+
+export type ArtifactVersionMediaBytesResult =
+  | {
+      kind: "bytes";
+      status: 200 | 206;
+      body: Uint8Array;
+      contentType: string;
+      fileName: string;
+      etag: string;
+      contentLength: number;
+      totalLength: number;
+      contentRange?: string;
+      download: boolean;
+    }
+  | { kind: "not_modified"; etag: string }
+  | { kind: "range_not_satisfiable"; etag: string; totalLength: number };
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+export function isArtifactOwnedStorageKey(input: {
+  workspaceId: string;
+  artifactId: string;
+  storageKey: string;
+}) {
+  return input.storageKey.startsWith(
+    `workspaces/${input.workspaceId}/artifacts/${input.artifactId}/`,
+  );
+}
+
+export function resolveByteRange(value: string, totalLength: number) {
+  if (!Number.isSafeInteger(totalLength) || totalLength <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/u.exec(value.trim());
+  if (!match) return null;
+  const [, startText, endText] = match;
+  if (!startText && !endText) return null;
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    return {
+      start: Math.max(0, totalLength - suffixLength),
+      end: totalLength - 1,
+    };
+  }
+  const start = Number(startText);
+  const requestedEnd = endText ? Number(endText) : totalLength - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    requestedEnd < start ||
+    start >= totalLength
+  ) {
+    return null;
+  }
+  return { start, end: Math.min(requestedEnd, totalLength - 1) };
+}
+
+function versionMediaEtag(contentDigest: string) {
+  const opaque = createHash("sha256").update(contentDigest).digest("hex");
+  return `"sourceweft-${opaque}"`;
+}
+
+function etagMatches(header: string | undefined, etag: string) {
+  if (!header) return false;
+  return header
+    .split(",")
+    .map((value) => value.trim().replace(/^W\//u, ""))
+    .some((value) => value === "*" || value === etag);
+}
+
+function exactVersionArtifact(record: ExactArtifactVersionRecord) {
+  return {
+    ...record,
+    payloadJson: record.contentJson,
+  };
+}
+
+function assertVersionMediaStorage(input: {
+  workspaceId: string;
+  artifactId: string;
+  media: ArtifactVersionMedia;
+}) {
+  for (const location of [input.media.media, input.media.coverImage]) {
+    if (
+      location &&
+      (!isArtifactOwnedStorageKey({
+        workspaceId: input.workspaceId,
+        artifactId: input.artifactId,
+        storageKey: location.storageKey,
+      }) ||
+        location.byteLength > ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES)
+    ) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+  }
+}
+
+function buildVersionMediaProjection(input: {
+  workspaceId: string;
+  artifactId: string;
+  artifactVersionId: string;
+  artifactType: string;
+  media: ArtifactVersionMedia;
+}) {
+  const routeInput = {
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+    artifactVersionId: input.artifactVersionId,
+  };
+  return artifactVersionMediaProjectionSchema.parse({
+    artifactId: input.artifactId,
+    artifactVersionId: input.artifactVersionId,
+    artifactType: input.artifactType,
+    title: input.media.title,
+    description: input.media.description ?? null,
+    durationSeconds: input.media.durationSeconds ?? null,
+    media: {
+      url: buildArtifactVersionMediaRestUrl({
+        ...routeInput,
+        resource: "video",
+      }),
+      downloadUrl: buildArtifactVersionMediaRestUrl({
+        ...routeInput,
+        resource: "video",
+        download: true,
+      }),
+      contentType: input.media.media.contentType,
+      fileName: input.media.media.fileName,
+      byteLength: input.media.media.byteLength,
+      ...(input.media.media.width ? { width: input.media.media.width } : {}),
+      ...(input.media.media.height ? { height: input.media.media.height } : {}),
+      ...(input.media.media.fps ? { fps: input.media.media.fps } : {}),
+      ...(typeof input.media.media.hasAudio === "boolean"
+        ? { hasAudio: input.media.media.hasAudio }
+        : {}),
+    },
+    coverImage: input.media.coverImage
+      ? {
+          url: buildArtifactVersionMediaRestUrl({
+            ...routeInput,
+            resource: "cover",
+          }),
+          contentType: input.media.coverImage.contentType,
+          fileName: input.media.coverImage.fileName,
+          byteLength: input.media.coverImage.byteLength,
+          ...(input.media.coverImage.width
+            ? { width: input.media.coverImage.width }
+            : {}),
+          ...(input.media.coverImage.height
+            ? { height: input.media.coverImage.height }
+            : {}),
+        }
+      : null,
+  });
+}
+
+async function readVersionMediaBytes(input: {
+  location: ArtifactVersionMediaAssetLocation;
+  range?: string;
+  ifNoneMatch?: string;
+  download: boolean;
+}): Promise<ArtifactVersionMediaBytesResult> {
+  const { location } = input;
+  const etag = versionMediaEtag(location.contentDigest);
+  if (etagMatches(input.ifNoneMatch, etag)) {
+    return { kind: "not_modified", etag };
+  }
+  const range = input.range
+    ? resolveByteRange(input.range, location.byteLength)
+    : undefined;
+  if (input.range && !range) {
+    return {
+      kind: "range_not_satisfiable",
+      etag,
+      totalLength: location.byteLength,
+    };
+  }
+  if (range) {
+    const ranged = await downloadArtifactObjectRange({
+      bucket: location.storageBucket,
+      key: location.storageKey,
+      start: range.start,
+      end: range.end,
+      totalLength: location.byteLength,
+    });
+    if (!ranged) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+    return {
+      kind: "bytes",
+      status: 206,
+      body: ranged.body,
+      contentType: location.contentType,
+      fileName: location.fileName,
+      etag,
+      contentLength: ranged.body.byteLength,
+      totalLength: location.byteLength,
+      contentRange: `bytes ${range.start}-${range.end}/${location.byteLength}`,
+      download: input.download,
+    };
+  }
+  const stored = await downloadArtifactObjectWithMetadata({
+    bucket: location.storageBucket,
+    key: location.storageKey,
+    maxBytes: location.byteLength,
+  });
+  if (!stored) {
+    throw new ContentError(
+      404,
+      "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+      "Artifact version media not found",
+    );
+  }
+  const body = stored.body;
+  const actualDigest = `sha256:${createHash("sha256").update(body).digest("hex")}`;
+  if (
+    body.byteLength !== location.byteLength ||
+    actualDigest !== location.contentDigest
+  ) {
+    throw new ContentError(
+      502,
+      "ARTIFACT_VERSION_MEDIA_INTEGRITY_FAILED",
+      "Artifact version media failed integrity verification",
+    );
+  }
+  return {
+    kind: "bytes",
+    status: 200,
+    body,
+    contentType: location.contentType,
+    fileName: location.fileName,
+    etag,
+    contentLength: body.byteLength,
+    totalLength: body.byteLength,
+    download: input.download,
+  };
 }
 
 /**
@@ -181,9 +445,9 @@ function buildArtifactCapabilities(
   // top-level file and the artifact is ready.
   const hasHandlerPrimaryFile = Boolean(
     artifact &&
-      artifact.status === "ready" &&
-      !artifact.storageKey &&
-      handler?.resolvePrimaryFile?.({ artifact }),
+    artifact.status === "ready" &&
+    !artifact.storageKey &&
+    handler?.resolvePrimaryFile?.({ artifact }),
   );
   const canRenderClientSide = Boolean(
     artifact && handler && artifact.status !== "failed",
@@ -338,15 +602,43 @@ export class ContentArtifactsService {
     return { workspace, artifact };
   }
 
+  private async requireViewableArtifactVersion(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const version = await findReadyArtifactVersionRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      artifactId: input.artifactId,
+      artifactVersionId: input.artifactVersionId,
+    });
+    if (!version || !canViewContent(input.userId, version)) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_NOT_FOUND",
+        "Artifact version not found",
+      );
+    }
+    return { workspace, version };
+  }
+
   private buildArtifactResponse(input: {
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>;
     workspaceId: string;
     handler?: ArtifactViewHandler | null;
     isPublic?: boolean;
+    artifactVersionId?: string | null;
   }) {
     const { artifact, workspaceId } = input;
     return {
       id: artifact.id,
+      artifactVersionId: input.artifactVersionId ?? null,
       teamId: artifact.teamId,
       workspaceId: artifact.workspaceId,
       threadId: artifact.threadId,
@@ -377,6 +669,78 @@ export class ContentArtifactsService {
     };
   }
 
+  private async buildWebArtifactResponse(input: {
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>;
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    handler?: ArtifactViewHandler | null;
+    isPublic?: boolean;
+    currentVersion?: CurrentArtifactVersionRecord | null;
+  }) {
+    const base = this.buildArtifactResponse(input);
+    if (!input.handler?.resolveVersionMedia) return base;
+    const unavailable = () => ({
+      ...base,
+      payloadJson: {},
+      storageBucket: null,
+      storageKey: null,
+      previewStorageKey: null,
+      previewMetadataJson: {},
+      previewUrl: null,
+    });
+    if (input.artifact.status !== "ready") return unavailable();
+    const version =
+      "currentVersion" in input
+        ? input.currentVersion
+        : await findCurrentReadyArtifactVersionRecord({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            artifactId: input.artifact.id,
+            expectedArtifactType: input.artifact.artifactType,
+          });
+    if (version && !canViewContent(input.userId, version)) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+    const media = version
+      ? input.handler.resolveVersionMedia({
+          artifact: {
+            ...input.artifact,
+            payloadJson: version.contentJson,
+          },
+        })
+      : null;
+    if (!version || !media) return unavailable();
+    try {
+      assertVersionMediaStorage({
+        workspaceId: input.workspaceId,
+        artifactId: input.artifact.id,
+        media,
+      });
+    } catch {
+      return unavailable();
+    }
+    const projection = buildVersionMediaProjection({
+      workspaceId: input.workspaceId,
+      artifactId: input.artifact.id,
+      artifactVersionId: version.versionId,
+      artifactType: input.artifact.artifactType,
+      media,
+    });
+    return {
+      ...base,
+      artifactVersionId: version.versionId,
+      title: projection.title,
+      promptText: projection.description,
+      payloadJson: projection,
+      storageBucket: null,
+      storageKey: null,
+      previewStorageKey: null,
+      previewMetadataJson: {},
+      previewUrl: projection.coverImage?.url ?? null,
+    };
+  }
+
   async listArtifacts(input: {
     cursor?: string;
     workspaceId: string;
@@ -398,15 +762,35 @@ export class ContentArtifactsService {
     const publicArtifactIds = await findPubliclySharedArtifactIds(
       artifacts.items.map((artifact) => artifact.id),
     );
+    const versionedArtifactIds = artifacts.items
+      .filter((artifact) =>
+        Boolean(
+          registry.handlerFor(artifact.artifactType)?.resolveVersionMedia,
+        ),
+      )
+      .map((artifact) => artifact.id);
+    const currentVersions = await listCurrentReadyArtifactVersionRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      artifactIds: versionedArtifactIds,
+    });
+    const currentVersionByArtifact = new Map(
+      currentVersions.map((version) => [version.artifactId, version]),
+    );
 
     return {
-      items: artifacts.items.map((artifact) =>
-        this.buildArtifactResponse({
-          artifact,
-          workspaceId: workspace.id,
-          handler: registry.handlerFor(artifact.artifactType),
-          isPublic: publicArtifactIds.has(artifact.id),
-        }),
+      items: await Promise.all(
+        artifacts.items.map((artifact) =>
+          this.buildWebArtifactResponse({
+            artifact,
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            userId: input.userId,
+            handler: registry.handlerFor(artifact.artifactType),
+            isPublic: publicArtifactIds.has(artifact.id),
+            currentVersion: currentVersionByArtifact.get(artifact.id) ?? null,
+          }),
+        ),
       ),
       nextCursor: artifacts.nextCursor,
     };
@@ -480,15 +864,98 @@ export class ContentArtifactsService {
     const publicArtifactIds = await findPubliclySharedArtifactIds([
       artifact.id,
     ]);
-
+    const handler = registry.handlerFor(artifact.artifactType);
     return {
-      artifact: this.buildArtifactResponse({
+      artifact: await this.buildWebArtifactResponse({
         artifact,
+        teamId: workspace.organizationId,
         workspaceId: workspace.id,
-        handler: registry.handlerFor(artifact.artifactType),
+        userId: input.userId,
+        handler,
         isPublic: publicArtifactIds.has(artifact.id),
       }),
     };
+  }
+
+  async getArtifactVersionMedia(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    userId: string;
+  }) {
+    const { workspace, version } =
+      await this.requireViewableArtifactVersion(input);
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(version.artifactType);
+    const media = handler?.resolveVersionMedia?.({
+      artifact: exactVersionArtifact(version),
+    });
+    if (!media) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+    assertVersionMediaStorage({
+      workspaceId: workspace.id,
+      artifactId: version.id,
+      media,
+    });
+    return {
+      media: buildVersionMediaProjection({
+        workspaceId: workspace.id,
+        artifactId: version.id,
+        artifactVersionId: version.versionId,
+        artifactType: version.artifactType,
+        media,
+      }),
+    };
+  }
+
+  async getArtifactVersionMediaBytes(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    userId: string;
+    resource: ArtifactVersionMediaResource;
+    range?: string;
+    ifNoneMatch?: string;
+    download: boolean;
+  }): Promise<ArtifactVersionMediaBytesResult> {
+    const { workspace, version } =
+      await this.requireViewableArtifactVersion(input);
+    const registry = await loadArtifactViewHandlerRegistry();
+    const media = registry
+      .handlerFor(version.artifactType)
+      ?.resolveVersionMedia?.({ artifact: exactVersionArtifact(version) });
+    if (!media) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+    assertVersionMediaStorage({
+      workspaceId: workspace.id,
+      artifactId: version.id,
+      media,
+    });
+    const location =
+      input.resource === "video" ? media.media : media.coverImage;
+    if (!location) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+    return readVersionMediaBytes({
+      location,
+      range: input.range,
+      ifNoneMatch: input.ifNoneMatch,
+      download: input.download,
+    });
   }
 
   buildArtifactPreviewUrl(input: { workspaceId: string; artifactId: string }) {
@@ -540,6 +1007,56 @@ export class ContentArtifactsService {
       );
     }
 
+    const registry = await loadArtifactViewHandlerRegistry();
+    const versionMediaObjects = new Map<
+      string,
+      { bucket: string | null; key: string }
+    >();
+    const versionHandler = registry.handlerFor(artifact.artifactType);
+    if (
+      versionHandler?.listOwnedStorageObjects ||
+      versionHandler?.resolveVersionMedia
+    ) {
+      const versions = await listArtifactVersionContentRecords({
+        teamId: access.organizationId,
+        workspaceId: input.workspaceId,
+        artifactId: artifact.id,
+      });
+      for (const version of versions) {
+        const versionArtifact = {
+          ...artifact,
+          payloadJson: version.contentJson,
+        };
+        const media = versionHandler.resolveVersionMedia?.({
+          artifact: versionArtifact,
+        });
+        const locations =
+          versionHandler.listOwnedStorageObjects?.({
+            artifact: versionArtifact,
+          }) ?? (media ? [media.media, media.coverImage] : []);
+        for (const location of locations) {
+          if (
+            !location ||
+            !isArtifactOwnedStorageKey({
+              workspaceId: input.workspaceId,
+              artifactId: artifact.id,
+              storageKey: location.storageKey,
+            })
+          ) {
+            continue;
+          }
+          const bucket = location.storageBucket ?? artifact.storageBucket;
+          versionMediaObjects.set(
+            `${bucket ?? ""}\u0000${location.storageKey}`,
+            {
+              bucket,
+              key: location.storageKey,
+            },
+          );
+        }
+      }
+    }
+
     await revokeShareLink({
       targetType: "artifact",
       targetId: artifact.id,
@@ -563,6 +1080,7 @@ export class ContentArtifactsService {
         ? payload.sourceJsonStorageKey.trim()
         : "";
     const storedObjects = [
+      ...versionMediaObjects.values(),
       ...(artifact.storageKey
         ? [{ bucket: artifact.storageBucket, key: artifact.storageKey }]
         : []),
@@ -588,6 +1106,16 @@ export class ContentArtifactsService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+    try {
+      await deleteArtifactObjectsByPrefix({
+        prefix: `workspaces/${input.workspaceId}/artifacts/${artifact.id}/`,
+      });
+    } catch (error) {
+      logger.warn("artifact_storage_prefix_delete_failed", {
+        artifactId: artifact.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     await teamAuditService.record({
@@ -615,6 +1143,13 @@ export class ContentArtifactsService {
 
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    if (handler?.resolveVersionMedia) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_FILE_MISSING",
+        "Artifact has no generic stored file",
+      );
+    }
 
     // Capabilities that keep their deliverable in the payload (e.g. a video
     // presentation's rendered mp4) have no top-level storageKey; serve the
@@ -688,6 +1223,18 @@ export class ContentArtifactsService {
       };
     }
 
+    const registry = await loadArtifactViewHandlerRegistry();
+    const source = registry
+      .handlerFor(artifact.artifactType)
+      ?.buildSourceJson?.({ artifact });
+    if (source) {
+      return {
+        body: Buffer.from(JSON.stringify(source.payload, null, 2), "utf8"),
+        contentType: "application/json",
+        fileName: source.fileName ?? resolveSourceJsonFileName(artifact),
+      };
+    }
+
     throw new ContentError(
       404,
       "ARTIFACT_SOURCE_JSON_MISSING",
@@ -731,6 +1278,13 @@ export class ContentArtifactsService {
   ) {
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    if (handler?.resolveVersionMedia) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_FILE_MISSING",
+        "Artifact has no generic stored file",
+      );
+    }
     // Capabilities that keep their deliverable in the payload (e.g. a video
     // presentation's rendered mp4) have no top-level storageKey; serve the
     // handler's declared primary file instead so the public share can play it.
@@ -762,6 +1316,71 @@ export class ContentArtifactsService {
       fileName: resolveArtifactFileName(artifact, handler),
       renderer: resolveArtifactRenderer(artifact, handler),
     };
+  }
+
+  async getSharedCurrentArtifactVersionMedia(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ) {
+    const version = await findCurrentReadyArtifactVersionRecord({
+      teamId: artifact.teamId,
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      expectedArtifactType: artifact.artifactType,
+    });
+    if (!version) return null;
+    const registry = await loadArtifactViewHandlerRegistry();
+    const media = registry
+      .handlerFor(artifact.artifactType)
+      ?.resolveVersionMedia?.({
+        artifact: { ...artifact, payloadJson: version.contentJson },
+      });
+    if (!media) return null;
+    assertVersionMediaStorage({
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      media,
+    });
+    return { versionId: version.versionId, media };
+  }
+
+  async getSharedArtifactVersionMediaBytes(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+    input: {
+      artifactVersionId: string;
+      resource: ArtifactVersionMediaResource;
+      range?: string;
+      ifNoneMatch?: string;
+      download: boolean;
+    },
+  ): Promise<ArtifactVersionMediaBytesResult | null> {
+    const version = await findCurrentReadyArtifactVersionRecord({
+      teamId: artifact.teamId,
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      expectedArtifactType: artifact.artifactType,
+    });
+    if (!version || version.versionId !== input.artifactVersionId) return null;
+    const registry = await loadArtifactViewHandlerRegistry();
+    const media = registry
+      .handlerFor(artifact.artifactType)
+      ?.resolveVersionMedia?.({
+        artifact: { ...artifact, payloadJson: version.contentJson },
+      });
+    if (!media) return null;
+    assertVersionMediaStorage({
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      media,
+    });
+    const location =
+      input.resource === "video" ? media.media : media.coverImage;
+    if (!location) return null;
+    return readVersionMediaBytes({
+      location,
+      range: input.range,
+      ifNoneMatch: input.ifNoneMatch,
+      download: input.download,
+    });
   }
 
   /**
@@ -802,6 +1421,15 @@ export class ContentArtifactsService {
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
     return Boolean(handler?.resolvePrimaryFile?.({ artifact }));
+  }
+
+  async sharedArtifactHasPreview(
+    artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
+  ) {
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    const media = handler?.resolveVersionMedia?.({ artifact });
+    return Boolean(media?.coverImage || resolveArtifactPreviewImage(artifact));
   }
 
   /**
@@ -860,6 +1488,10 @@ export class ContentArtifactsService {
   async getSharedArtifactPreview(
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
   ) {
+    const registry = await loadArtifactViewHandlerRegistry();
+    if (registry.handlerFor(artifact.artifactType)?.resolveVersionMedia) {
+      return null;
+    }
     const previewImage = resolveArtifactPreviewImage(artifact);
     if (!previewImage) {
       return null;
@@ -942,4 +1574,6 @@ export const testExports = {
   resolveArtifactContentType,
   resolveArtifactFileName,
   resolveArtifactRenderer,
+  resolveByteRange,
+  isArtifactOwnedStorageKey,
 };

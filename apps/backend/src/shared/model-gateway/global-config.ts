@@ -36,7 +36,14 @@ export type GlobalGatewayEntry = {
   modelCatalog?: {
     enabled: boolean;
     kinds?: Array<
-      "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "image" | "video"
+      | "chat"
+      | "rerank"
+      | "embedding"
+      | "asr"
+      | "tts"
+      | "vision"
+      | "image"
+      | "video"
     >;
     /**
      * Optional discovery-format override. Defaults to the provider-kind's
@@ -176,7 +183,13 @@ type RawGlobalModelProfileEntry = {
   imageGeneration?: unknown;
 };
 
-const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const REASONING_EFFORTS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
 const PROVIDER_ROUTING_SORT_BY = ["price", "throughput", "latency"] as const;
 const PROVIDER_ROUTING_SORT_PARTITIONS = ["model", "none"] as const;
 const MODEL_CATALOG_KINDS = [
@@ -202,11 +215,19 @@ function asModelCatalogKinds(value: unknown, field: string) {
     new Set(
       value.map((item, index) => {
         if (typeof item !== "string") {
-          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+          throw new Error(
+            `Invalid global model gateway config field: ${field}[${index}]`,
+          );
         }
         const normalized = item.trim().toLowerCase();
-        if (!MODEL_CATALOG_KINDS.includes(normalized as (typeof MODEL_CATALOG_KINDS)[number])) {
-          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        if (
+          !MODEL_CATALOG_KINDS.includes(
+            normalized as (typeof MODEL_CATALOG_KINDS)[number],
+          )
+        ) {
+          throw new Error(
+            `Invalid global model gateway config field: ${field}[${index}]`,
+          );
         }
         return normalized as (typeof MODEL_CATALOG_KINDS)[number];
       }),
@@ -226,11 +247,19 @@ function asReasoningEffortArray(value: unknown, field: string) {
     new Set(
       value.map((item, index) => {
         if (typeof item !== "string") {
-          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+          throw new Error(
+            `Invalid global model gateway config field: ${field}[${index}]`,
+          );
         }
         const normalized = item.trim().toLowerCase();
-        if (!REASONING_EFFORTS.includes(normalized as (typeof REASONING_EFFORTS)[number])) {
-          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        if (
+          !REASONING_EFFORTS.includes(
+            normalized as (typeof REASONING_EFFORTS)[number],
+          )
+        ) {
+          throw new Error(
+            `Invalid global model gateway config field: ${field}[${index}]`,
+          );
         }
         return normalized as (typeof REASONING_EFFORTS)[number];
       }),
@@ -284,7 +313,10 @@ function asNonEmptyString(value: unknown, fieldName: string): string {
   return value.trim();
 }
 
-function asOptionalEnvName(value: unknown, fieldName: string): string | undefined {
+function asOptionalEnvName(
+  value: unknown,
+  fieldName: string,
+): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
@@ -417,7 +449,10 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return value;
 }
 
-function asOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+function asOptionalBoolean(
+  value: unknown,
+  fieldName: string,
+): boolean | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
@@ -462,7 +497,9 @@ function asProviderRoutingSort(
         normalized as (typeof PROVIDER_ROUTING_SORT_BY)[number],
       )
     ) {
-      throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+      throw new Error(
+        `Invalid global model gateway config field: ${fieldName}`,
+      );
     }
     return normalized as (typeof PROVIDER_ROUTING_SORT_BY)[number];
   }
@@ -472,13 +509,16 @@ function asProviderRoutingSort(
   }
 
   const record = value as Record<string, unknown>;
-  const by = typeof record.by === "string" ? record.by.trim().toLowerCase() : "";
+  const by =
+    typeof record.by === "string" ? record.by.trim().toLowerCase() : "";
   if (
     !PROVIDER_ROUTING_SORT_BY.includes(
       by as (typeof PROVIDER_ROUTING_SORT_BY)[number],
     )
   ) {
-    throw new Error(`Invalid global model gateway config field: ${fieldName}.by`);
+    throw new Error(
+      `Invalid global model gateway config field: ${fieldName}.by`,
+    );
   }
 
   const partition =
@@ -521,7 +561,9 @@ function asOptionalProviderRouting(
       ? undefined
       : asStringArray(record.only, `${fieldName}.only`);
   if (only !== undefined && only.length === 0) {
-    throw new Error(`Invalid global model gateway config field: ${fieldName}.only`);
+    throw new Error(
+      `Invalid global model gateway config field: ${fieldName}.only`,
+    );
   }
 
   const sort = asProviderRoutingSort(record.sort, `${fieldName}.sort`);
@@ -551,7 +593,10 @@ function resolveHeaderValueEnv(rawValue: string, fieldName: string): string {
   });
 }
 
-function asStringRecord(value: unknown, fieldName: string): Record<string, string> {
+function asStringRecord(
+  value: unknown,
+  fieldName: string,
+): Record<string, string> {
   if (value === undefined || value === null) {
     return {};
   }
@@ -560,22 +605,28 @@ function asStringRecord(value: unknown, fieldName: string): Record<string, strin
   }
 
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, headerValue]) => {
-      if (typeof headerValue !== "string") {
-        throw new Error(`Invalid global model gateway config field: ${fieldName}.${key}`);
-      }
+    Object.entries(value as Record<string, unknown>).map(
+      ([key, headerValue]) => {
+        if (typeof headerValue !== "string") {
+          throw new Error(
+            `Invalid global model gateway config field: ${fieldName}.${key}`,
+          );
+        }
 
-      const headerName = key.trim();
-      const normalizedValue = resolveHeaderValueEnv(
-        headerValue.trim(),
-        `${fieldName}.${key}`,
-      );
-      if (!headerName || !normalizedValue) {
-        throw new Error(`Invalid global model gateway config field: ${fieldName}.${key}`);
-      }
+        const headerName = key.trim();
+        const normalizedValue = resolveHeaderValueEnv(
+          headerValue.trim(),
+          `${fieldName}.${key}`,
+        );
+        if (!headerName || !normalizedValue) {
+          throw new Error(
+            `Invalid global model gateway config field: ${fieldName}.${key}`,
+          );
+        }
 
-      return [headerName, normalizedValue] as const;
-    }),
+        return [headerName, normalizedValue] as const;
+      },
+    ),
   );
 }
 
@@ -677,12 +728,13 @@ function hasExplicitPricing(
   if (!pricing) {
     return false;
   }
-  if (typeof pricing.litellmKey === "string" && pricing.litellmKey.trim().length > 0) {
+  if (
+    typeof pricing.litellmKey === "string" &&
+    pricing.litellmKey.trim().length > 0
+  ) {
     return true;
   }
-  return PRICING_COST_FIELDS.some(
-    (name) => typeof pricing[name] === "number",
-  );
+  return PRICING_COST_FIELDS.some((name) => typeof pricing[name] === "number");
 }
 
 function parsePricingEntry(
@@ -768,7 +820,7 @@ function parseGatewayEntry(
       : undefined;
   const apiKeyHeaderName =
     typeof entry.apiKeyHeaderName === "string" &&
-      entry.apiKeyHeaderName.trim().length > 0
+    entry.apiKeyHeaderName.trim().length > 0
       ? entry.apiKeyHeaderName.trim()
       : undefined;
   const apiKeyHeaderPrefix =
@@ -795,8 +847,9 @@ function parseGatewayEntry(
       );
 
   const modelCatalog =
-    entry.modelCatalog && typeof entry.modelCatalog === "object" &&
-      !Array.isArray(entry.modelCatalog)
+    entry.modelCatalog &&
+    typeof entry.modelCatalog === "object" &&
+    !Array.isArray(entry.modelCatalog)
       ? {
           enabled: asBoolean(
             (entry.modelCatalog as Record<string, unknown>).enabled,
@@ -826,7 +879,8 @@ function parseGatewayEntry(
       `gateways[${index}].defaultHeaders`,
     ),
     providerName:
-      typeof entry.providerName === "string" && entry.providerName.trim().length > 0
+      typeof entry.providerName === "string" &&
+      entry.providerName.trim().length > 0
         ? entry.providerName.trim()
         : slug,
     providerKind: asProviderKind(
@@ -862,7 +916,9 @@ function parseModelCapabilities(value: unknown): ModelCapabilityRule[] {
     return [];
   }
   if (!Array.isArray(value)) {
-    throw new Error("Invalid global model gateway config field: modelCapabilities");
+    throw new Error(
+      "Invalid global model gateway config field: modelCapabilities",
+    );
   }
   return value.map((raw, index) => {
     const field = `modelCapabilities[${index}]`;
@@ -871,8 +927,14 @@ function parseModelCapabilities(value: unknown): ModelCapabilityRule[] {
     }
     const record = raw as Record<string, unknown>;
     const capabilities = record.capabilities;
-    if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
-      throw new Error(`Invalid global model gateway config field: ${field}.capabilities`);
+    if (
+      !capabilities ||
+      typeof capabilities !== "object" ||
+      Array.isArray(capabilities)
+    ) {
+      throw new Error(
+        `Invalid global model gateway config field: ${field}.capabilities`,
+      );
     }
     const caps = capabilities as Record<string, unknown>;
     const disabledParams = parseDisabledParams(
@@ -918,7 +980,9 @@ function parseDisabledParams(
     throw new Error(`Invalid global model gateway config field: ${field}`);
   }
   const out: Record<string, null | readonly unknown[]> = {};
-  for (const [param, entry] of Object.entries(value as Record<string, unknown>)) {
+  for (const [param, entry] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     if (entry !== null && !Array.isArray(entry)) {
       throw new Error(
         `Invalid global model gateway config field: ${field}.${param}`,
@@ -957,7 +1021,10 @@ function parseProfileTarget(input: {
   );
 
   return {
-    gatewaySlug: asNonEmptyString(input.raw.gatewaySlug, `${input.field}.gatewaySlug`),
+    gatewaySlug: asNonEmptyString(
+      input.raw.gatewaySlug,
+      `${input.field}.gatewaySlug`,
+    ),
     providerName:
       typeof input.raw.providerName === "string" &&
       input.raw.providerName.trim().length > 0
@@ -969,9 +1036,11 @@ function parseProfileTarget(input: {
         ? input.raw.targetModel.trim()
         : input.modelAlias,
     priority:
-      asOptionalPositiveNumber(input.raw.priority, `${input.field}.priority`) ?? 1,
+      asOptionalPositiveNumber(input.raw.priority, `${input.field}.priority`) ??
+      1,
     weight:
-      asOptionalNonNegativeNumber(input.raw.weight, `${input.field}.weight`) ?? 0,
+      asOptionalNonNegativeNumber(input.raw.weight, `${input.field}.weight`) ??
+      0,
     ...(providerRouting !== undefined ? { providerRouting } : {}),
   };
 }
@@ -1005,7 +1074,9 @@ function parseProfileTargets(input: {
   }
 
   if (!Array.isArray(entry.targets) || entry.targets.length === 0) {
-    throw new Error(`Invalid global model gateway config field: ${field}.targets`);
+    throw new Error(
+      `Invalid global model gateway config field: ${field}.targets`,
+    );
   }
 
   const targets = entry.targets.map((raw, targetIndex) => {
@@ -1051,7 +1122,10 @@ function parseModelProfileEntry(
     `${field}[${index}].modelAlias`,
   );
 
-  const pricing = parsePricingEntry(entry.pricing, `${field}[${index}].pricing`);
+  const pricing = parsePricingEntry(
+    entry.pricing,
+    `${field}[${index}].pricing`,
+  );
   const supportedParameters = asOptionalStringArray(
     entry.supportedParameters,
     `${field}[${index}].supportedParameters`,
@@ -1070,9 +1144,10 @@ function parseModelProfileEntry(
     modelAlias,
   });
 
-  // A single alias spanning several providers is priced once, at the alias.
-  // Leaving that price to be auto-derived would let a mis-derivation go unnoticed
-  // across every provider behind it, so multi-target opts out of guessing.
+  // A single alias spanning several providers needs an explicit price-book
+  // fallback. Providers that report actual cost bypass it at runtime; targets
+  // without actual-cost reporting use this alias price rather than an inferred
+  // price from whichever route happened to be primary during sync.
   if (targets.length > 1 && !hasExplicitPricing(pricing)) {
     throw new Error(
       `Global model gateway config entry '${field}[${index}]' declares multiple targets and must set an explicit 'pricing' block or 'pricing.litellmKey'`,
@@ -1085,7 +1160,8 @@ function parseModelProfileEntry(
         ? entry.profileId.trim()
         : undefined,
     profileAlias:
-      typeof entry.profileAlias === "string" && entry.profileAlias.trim().length > 0
+      typeof entry.profileAlias === "string" &&
+      entry.profileAlias.trim().length > 0
         ? entry.profileAlias.trim()
         : modelAlias,
     modelAlias,

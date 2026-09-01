@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createMessageRenderBlockBuilder } from "../../turn/render-blocks";
-import { recordPublishedArtifactOutput } from "./host-services";
+import {
+  publishArtifactAndRecordOutput,
+  recordPublishedArtifactOutput,
+} from "./host-services";
 
 test("records multiple main and sub-agent publications on one chat run", () => {
   const renderBlocks = createMessageRenderBlockBuilder();
@@ -55,4 +58,43 @@ test("records multiple main and sub-agent publications on one chat run", () => {
       },
     ],
   );
+});
+
+test("an aborted publisher cannot append an artifact output card", async () => {
+  const renderBlocks = createMessageRenderBlockBuilder();
+  const controller = new AbortController();
+  const abortReason = new DOMException("tool timeout", "TimeoutError");
+  controller.abort(abortReason);
+
+  await assert.rejects(
+    publishArtifactAndRecordOutput({
+      origin: {
+        producer: { kind: "main" },
+        sourceToolCallId: "publish-aborted",
+        threadRunId: "run-1",
+      },
+      publish: async (input) => {
+        assert.equal(input.signal, controller.signal);
+        throw input.signal?.reason;
+      },
+      publishInput: {
+        context: {
+          teamId: "team-1",
+          workspaceId: "workspace-1",
+          threadId: "thread-1",
+          userId: "user-1",
+        },
+        signal: controller.signal,
+        spec: {
+          artifactType: "image",
+          title: "Aborted image",
+          payload: {},
+        },
+      },
+      runtime: { renderBlocks },
+    }),
+    (error: unknown) => error === abortReason,
+  );
+
+  assert.deepEqual(renderBlocks.list(), []);
 });

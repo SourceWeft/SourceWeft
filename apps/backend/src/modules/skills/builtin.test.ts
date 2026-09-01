@@ -7,7 +7,6 @@ import {
   listBuiltinSkills,
   loadBuiltinSkillBundle,
 } from "./builtin";
-import { testExports as skillServiceTestExports } from "./service";
 
 const legacyBuiltinSkillsDir = resolve(import.meta.dirname, "builtin");
 
@@ -57,6 +56,7 @@ test("image-generate builtin skill exposes agent image artifact workflow without
   assert.ok(skill);
   assert.equal(skill.visibility, "restricted");
   assert.equal(skill.manifestJson.visibility, "restricted");
+  assert.equal(skill.manifestJson.defaultEnabled, true);
   assert.equal(skill.manifestJson.slash, false);
   // Generators are listed in the market but always-on (not user-installable).
   assert.equal(skill.manifestJson.listing, "listed");
@@ -101,38 +101,22 @@ test("image-generate builtin skill exposes agent image artifact workflow without
   assert.doesNotMatch(content ?? "", /publish_artifact/);
 });
 
-test("restricted builtin artifact skills are default enabled", async () => {
-  assert.equal(
-    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
-      slug: "image-generate",
-      visibility: "restricted",
-    }),
-    true,
-  );
-  assert.equal(
-    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
-      slug: "ppt-deck",
-      visibility: "restricted",
-    }),
-    true,
-  );
-  assert.equal(
-    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
-      slug: "video-presentation",
-      visibility: "restricted",
-    }),
-    true,
-  );
-});
-
 test("video-presentation builtin skill exposes agent video artifact workflow", async () => {
   const skill = await getBuiltinSkillBySlug("video-presentation");
 
   assert.ok(skill);
   assert.equal(skill.visibility, "restricted");
   assert.equal(skill.manifestJson.visibility, "restricted");
+  assert.equal(skill.manifestJson.defaultEnabled, false);
   assert.equal(skill.manifestJson.slash, false);
-  assert.deepEqual(skill.manifestJson.tools, ["generate_video_presentation"]);
+  assert.deepEqual(skill.manifestJson.tools, [
+    "prepare_sandbox_workspace",
+    "load_video_presentation",
+    "generate_video_assets",
+    "generate_video_narration",
+    "validate_video_presentation",
+    "publish_video_presentation",
+  ]);
   assert.deepEqual(
     skill.manifestJson.options?.map((option) => ({
       id: option.id,
@@ -142,57 +126,49 @@ test("video-presentation builtin skill exposes agent video artifact workflow", a
       {
         id: "stylePreset",
         target: {
-          toolName: "generate_video_presentation",
-          path: "renderProfile.stylePreset",
+          path: "config.renderProfile.stylePreset",
         },
       },
       {
         id: "visualDensity",
         target: {
-          toolName: "generate_video_presentation",
-          path: "renderProfile.visualDensity",
+          path: "config.renderProfile.visualDensity",
         },
       },
       {
         id: "durationTarget",
         target: {
-          toolName: "generate_video_presentation",
-          path: "renderProfile.durationTarget",
+          path: "config.renderProfile.durationTarget",
         },
       },
       {
         id: "slideCount",
         target: {
-          toolName: "generate_video_presentation",
-          path: "slideCount",
+          path: "config.slideCount",
         },
       },
       {
         id: "motionPacing",
         target: {
-          toolName: "generate_video_presentation",
-          path: "motion.pacing",
+          path: "config.motion.pacing",
         },
       },
       {
         id: "canvasFps",
         target: {
-          toolName: "generate_video_presentation",
-          path: "canvas.fps",
+          path: "config.canvas.fps",
         },
       },
       {
         id: "language",
         target: {
-          toolName: "generate_video_presentation",
-          path: "renderProfile.language",
+          path: "config.renderProfile.language",
         },
       },
       {
         id: "narrationEnabled",
         target: {
-          toolName: "generate_video_presentation",
-          path: "narration.enabled",
+          path: "config.narration.enabled",
         },
       },
     ],
@@ -203,12 +179,9 @@ test("video-presentation builtin skill exposes agent video artifact workflow", a
     (file) => file.path === "SKILL.md",
   )?.contentText;
   assert.match(content ?? "", /video_presentation/);
-  assert.match(content ?? "", /generate_video_presentation/);
-  assert.match(content ?? "", /brief-first/);
-  assert.match(content ?? "", /browser preview\/export/);
-  assert.match(content ?? "", /Do not call `publish_artifact`/);
-  assert.doesNotMatch(content ?? "", /prepare_sandbox_workspace/);
-  assert.match(content ?? "", /Do not describe it as a completed MP4/);
+  assert.match(content ?? "", /publish_video_presentation/);
+  assert.match(content ?? "", /root Agent/);
+  assert.doesNotMatch(content ?? "", /built in the background/iu);
 });
 
 test("ppt-deck builtin skill stays hidden from the public gallery", async () => {
@@ -217,6 +190,7 @@ test("ppt-deck builtin skill stays hidden from the public gallery", async () => 
   assert.ok(skill);
   assert.equal(skill.visibility, "restricted");
   assert.equal(skill.manifestJson.visibility, "restricted");
+  assert.equal(skill.manifestJson.defaultEnabled, true);
   assert.equal(skill.manifestJson.slash, false);
   assert.deepEqual(skill.manifestJson.tools, [
     "prepare_sandbox_workspace",

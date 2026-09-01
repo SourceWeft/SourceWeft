@@ -47,6 +47,11 @@ export type SandboxRuntimeRequest = {
     import("./runtime/sandbox-manager").SandboxSkillStaging,
     "plans" | "logger"
   >;
+  /** Host-catalog assets required by the tools bound for this turn. */
+  runtimeAssets?: Pick<
+    import("./runtime/sandbox-manager").SandboxRuntimeAssetStaging,
+    "plans" | "logger"
+  >;
 };
 
 export type AgentSandboxRuntimeForTurn = SandboxRuntimeForTurn & {
@@ -113,6 +118,7 @@ export class AgentSandboxService {
       commandBudget: input.commandBudget,
       ...(input.artifacts ? { artifacts: input.artifacts } : {}),
       ...(input.skillAssets ? { skillAssets: input.skillAssets } : {}),
+      ...(input.runtimeAssets ? { runtimeAssets: input.runtimeAssets } : {}),
     });
 
     const agentRuntime: AgentSandboxRuntimeForTurn = {

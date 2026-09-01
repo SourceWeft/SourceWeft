@@ -85,6 +85,11 @@ const fixtureRecords = [
             promptIntro: "Write a report and publish the final artifact.",
             tools: ["publish_report"],
             permissionOverrides: { publish_report: "allow" },
+            initialToolPolicy: "auto",
+            toolPolicy: {
+              allow: ["write_todos", "publish_report"],
+              deny: ["task", "execute"],
+            },
             output: {
               kind: "artifact",
               artifactType: "report",
@@ -375,6 +380,11 @@ test("commands.workflow adds artifact publisher tools to runtime defaults", () =
   assert.deepEqual(reportCommand?.workflow?.defaultTools, ["publish_report"]);
   assert.deepEqual(reportCommand?.workflow?.permissionOverrides, {
     publish_report: "allow",
+  });
+  assert.equal(reportCommand?.workflow?.initialToolPolicy, "auto");
+  assert.deepEqual(reportCommand?.workflow?.toolPolicy, {
+    allow: ["write_todos", "publish_report"],
+    deny: ["task", "execute"],
   });
   assert.deepEqual(reportCommand?.workflow?.successCriteria, {
     kind: "artifact",

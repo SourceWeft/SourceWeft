@@ -113,17 +113,21 @@ export function spendCredits(
   creditsToConsume: number,
 ) {
   let remaining = creditsToConsume;
+  let monthly = 0;
+  let addOn = 0;
 
   if (account.monthlyCreditsBalance > 0) {
     const fromMonthly = Math.min(account.monthlyCreditsBalance, remaining);
     account.monthlyCreditsBalance -= fromMonthly;
     remaining -= fromMonthly;
+    monthly += fromMonthly;
   }
 
   if (remaining > 0 && account.addOnCreditsBalance > 0) {
     const fromAddOn = Math.min(account.addOnCreditsBalance, remaining);
     account.addOnCreditsBalance -= fromAddOn;
     remaining -= fromAddOn;
+    addOn += fromAddOn;
   }
 
   if (remaining > 0) {
@@ -133,6 +137,32 @@ export function spendCredits(
       "Unable to allocate credit buckets for consumption",
     );
   }
+
+  return { monthly, addOn };
+}
+
+export function refundConsumedCredits(
+  account: BillingAccountState,
+  creditsToRefund: number,
+  originalAllocation?: { monthly?: number; addOn?: number },
+) {
+  let remaining = creditsToRefund;
+  // Reverse the original monthly-first consumption order: add-on credits are
+  // restored before monthly credits for a partial refund.
+  const addOn = Math.min(originalAllocation?.addOn ?? 0, remaining);
+  account.addOnCreditsBalance += addOn;
+  remaining -= addOn;
+  const monthly = Math.min(originalAllocation?.monthly ?? 0, remaining);
+  account.monthlyCreditsBalance += monthly;
+  remaining -= monthly;
+  // Legacy/malformed allocation metadata cannot identify the original bucket.
+  // Preserve value without inventing monthly entitlement by restoring it to
+  // the non-expiring add-on bucket.
+  if (remaining > 0) {
+    account.addOnCreditsBalance += remaining;
+    remaining = 0;
+  }
+  return { monthly, addOn, legacyAddOn: creditsToRefund - monthly - addOn };
 }
 
 export function getTotalCreditsBalance(account: BillingAccountState) {

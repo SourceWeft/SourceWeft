@@ -1,23 +1,17 @@
-# @sourceweft/builtin-skill-video-presentation
+# Video Presentation Skill
 
-**Content bundle + ID namespace — no executable code lives here.**
+The Video Presentation skill runs in the existing root Agent turn. The Agent
+authors a canonical draft in the active sandbox and chooses among five
+root-only typed tools:
 
-This package ships the agent-facing instructions for the video-presentation
-skill, following the Anthropic Agent Skills model:
+- `load_video_presentation`
+- `generate_video_assets`
+- `generate_video_narration`
+- `validate_video_presentation`
+- `publish_video_presentation`
 
-- `SKILL.md` — the skill workflow the agent reads before acting (mounted
-  read-only at `/skills/video-presentation/SKILL.md`).
-- `references/*.md` — progressive-disclosure references the agent reads only
-  when SKILL.md's Quick Reference says the situation applies.
-- `sourceweft.capability.json` — the SourceWeft manifest (visibility,
-  categories, runtime options, command aliases); `resources` lists the content
-  files above.
-- `src/index.ts` — exports only the capability ID constant.
-
-Executable behavior lives elsewhere by design:
-
-- The `generate_video_presentation` tool and its background worker pipeline
-  (storyboard → audio → scenes → QA → publish):
-  `@sourceweft/builtin-tool-video-presentation` (`src/pipeline/`).
-- Browser/sandbox scene rendering (compiler, layout primitives, player):
-  `@sourceweft/video-presentation-runtime`.
+Validation binds the exact draft/resources, three runtime samples per scene,
+visual review, required cover, and trusted sandbox-rendered MP4 to a protected
+receipt. Publication atomically commits that media, the artifact version,
+canonical tool result, and chat card under the active run fence. Browser clients
+only play or download the committed MP4; they never execute authored scene code.

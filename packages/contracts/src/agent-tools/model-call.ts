@@ -19,6 +19,8 @@ export type AgentToolModelCallOptions = {
    * the same logical generation replays rather than charging twice.
    */
   readonly idempotencyKey: string;
+  /** Cancels the provider request when the enclosing tool invocation stops. */
+  readonly signal?: AbortSignal;
   readonly llm?: unknown;
   readonly billingMetadata?: Record<string, unknown>;
 };

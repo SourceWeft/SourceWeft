@@ -1,5 +1,5 @@
 import { createHttpGatewayError, ModelGatewayError } from "../errors";
-import { normalizeProviderUsage } from "../normalize/usage";
+import { normalizeModelCallObservation } from "../observation/normalize";
 import type {
   GeneratedImage,
   ImageAspectRatio,
@@ -104,7 +104,10 @@ export async function parseJsonResponse(response: Response) {
   }
 }
 
-export function throwIfHttpError(response: Response, body: Record<string, unknown>) {
+export function throwIfHttpError(
+  response: Response,
+  body: Record<string, unknown>,
+) {
   if (response.ok) {
     return;
   }
@@ -147,7 +150,9 @@ function normalizeDimension(value: unknown) {
     : undefined;
 }
 
-function imageFromRecord(record: Record<string, unknown>): GeneratedImage | null {
+function imageFromRecord(
+  record: Record<string, unknown>,
+): GeneratedImage | null {
   const imageUrl =
     record.image_url && typeof record.image_url === "object"
       ? (record.image_url as Record<string, unknown>)
@@ -157,7 +162,10 @@ function imageFromRecord(record: Record<string, unknown>): GeneratedImage | null
       ? (record.image as Record<string, unknown>)
       : null;
 
-  const url = normalizeUrl(record.url) ?? normalizeUrl(imageUrl?.url) ?? normalizeUrl(image?.url);
+  const url =
+    normalizeUrl(record.url) ??
+    normalizeUrl(imageUrl?.url) ??
+    normalizeUrl(image?.url);
   const b64Json =
     normalizeBase64(record.b64_json) ??
     normalizeBase64(record.b64Json) ??
@@ -188,7 +196,9 @@ function imageFromRecord(record: Record<string, unknown>): GeneratedImage | null
           ? record.revisedPrompt
           : undefined,
     width: normalizeDimension(record.width ?? imageUrl?.width ?? image?.width),
-    height: normalizeDimension(record.height ?? imageUrl?.height ?? image?.height),
+    height: normalizeDimension(
+      record.height ?? imageUrl?.height ?? image?.height,
+    ),
   });
 }
 
@@ -231,7 +241,8 @@ export function normalizeGeneratedImages(raw: Record<string, unknown>) {
           !Array.isArray(toolCallRecord.function)
             ? (toolCallRecord.function as Record<string, unknown>)
             : null;
-        const rawArguments = functionRecord?.arguments ?? toolCallRecord.arguments;
+        const rawArguments =
+          functionRecord?.arguments ?? toolCallRecord.arguments;
         const parsedArguments =
           typeof rawArguments === "string"
             ? (() => {
@@ -252,7 +263,11 @@ export function normalizeGeneratedImages(raw: Record<string, unknown>) {
         if (argumentsRecord.image) {
           candidates.push(argumentsRecord.image);
         }
-        if (argumentsRecord.url || argumentsRecord.b64_json || argumentsRecord.b64Json) {
+        if (
+          argumentsRecord.url ||
+          argumentsRecord.b64_json ||
+          argumentsRecord.b64Json
+        ) {
           candidates.push(argumentsRecord);
         }
       }
@@ -290,7 +305,15 @@ export function buildImageGenerateResult(input: {
   imageQuality?: string;
   traceId?: string;
 }): ImageGenerateResult {
-  const usage = input.usage ?? normalizeProviderUsage(input.raw);
+  const observation = normalizeModelCallObservation({
+    modelAlias: input.target.routeDecision.alias,
+    context: {
+      target: input.target,
+      modality: "image",
+      rawResponse: input.raw,
+    },
+  });
+  const usage = input.usage ?? observation.usage;
   const imageUsage =
     usage || input.images.length > 0
       ? {
@@ -300,6 +323,7 @@ export function buildImageGenerateResult(input: {
           ...(input.imageQuality ? { imageQuality: input.imageQuality } : {}),
         }
       : usage;
+  observation.usage = imageUsage;
 
   return {
     model:
@@ -308,6 +332,7 @@ export function buildImageGenerateResult(input: {
         : input.target.providerModel,
     images: input.images,
     usage: imageUsage,
+    observation,
     provider: input.target.provider,
     providerModel: input.target.providerModel,
     routeDecision: input.target.routeDecision,

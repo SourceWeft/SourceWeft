@@ -50,8 +50,7 @@ function artifactSummary(
     completedAt: "2026-06-01T00:00:01.000Z",
     updatedAt: "2026-06-01T00:00:01.000Z",
     hasPrimaryFile: true,
-    primaryFileUrl:
-      "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
+    primaryFileUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
     previewImage: null,
     ...overrides,
   };
@@ -155,7 +154,8 @@ test("artifact URL helpers return null when there is no artifact file", () => {
 test("artifact URL helpers respect file capabilities", () => {
   const videoProject = artifact({
     artifactType: "video_presentation",
-    previewUrl: "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    previewUrl:
+      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
     storageKey: null,
     capabilities: {
       canDownloadFile: false,
@@ -166,7 +166,10 @@ test("artifact URL helpers respect file capabilities", () => {
   });
 
   assert.equal(
-    resolveArtifactPageUrl({ artifact: videoProject, workspaceId: "workspace-1" }),
+    resolveArtifactPageUrl({
+      artifact: videoProject,
+      workspaceId: "workspace-1",
+    }),
     "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
   );
   assert.equal(resolveArtifactDownloadUrl({ artifact: videoProject }), null);

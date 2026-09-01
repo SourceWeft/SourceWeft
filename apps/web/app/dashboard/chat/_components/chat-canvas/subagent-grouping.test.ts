@@ -103,8 +103,16 @@ test("main-agent tool calls and reasoning stay ungrouped and in place", () => {
 test("children fold into the parent `task` delegate block, anchored at it", () => {
   // Stream: parent `task` block, then its two child tool blocks.
   const producers: Record<string, ToolProducer> = {
-    c1: { kind: "subagent", taskCallId: "task1", subagentType: "general-purpose" },
-    c2: { kind: "subagent", taskCallId: "task1", subagentType: "general-purpose" },
+    c1: {
+      kind: "subagent",
+      taskCallId: "task1",
+      subagentType: "general-purpose",
+    },
+    c2: {
+      kind: "subagent",
+      taskCallId: "task1",
+      subagentType: "general-purpose",
+    },
   };
   const blocks = [toolBlock("task1"), toolBlock("c1"), toolBlock("c2")];
   const items = partitionWorkflowBlocksBySubagent(

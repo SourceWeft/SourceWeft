@@ -71,8 +71,43 @@ export type ArtifactAssetLocation = {
   readonly storageKey: string;
 };
 
+export type ArtifactStoredObjectLocation = {
+  readonly storageBucket: string | null;
+  readonly storageKey: string;
+};
+
+/**
+ * Trusted, immutable media resolved from one artifact version's content JSON.
+ * Storage coordinates stay inside the backend; only the safe projection below
+ * crosses into Web code.
+ */
+export type ArtifactVersionMediaAssetLocation = ArtifactAssetLocation & {
+  readonly byteLength: number;
+  readonly contentDigest: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly fps?: number;
+  readonly hasAudio?: boolean;
+};
+
+export type ArtifactVersionMedia = {
+  readonly title: string;
+  readonly description?: string | null;
+  readonly durationSeconds?: number | null;
+  readonly media: ArtifactVersionMediaAssetLocation;
+  readonly coverImage?: ArtifactVersionMediaAssetLocation | null;
+};
+
 export type ArtifactViewHandler = {
   readonly artifactType: string;
+  /** Resolve browser-playable media from this exact payload version. */
+  readonly resolveVersionMedia?: (input: {
+    readonly artifact: ArtifactViewRecord;
+  }) => ArtifactVersionMedia | null;
+  /** Enumerate immutable objects owned by this exact payload for deletion. */
+  readonly listOwnedStorageObjects?: (input: {
+    readonly artifact: ArtifactViewRecord;
+  }) => readonly ArtifactStoredObjectLocation[];
   /** Resolve a sub-asset of the artifact by (already decoded) file name. */
   readonly resolveAsset?: (input: {
     readonly artifact: ArtifactViewRecord;
@@ -91,6 +126,13 @@ export type ArtifactViewHandler = {
   readonly resolvePrimaryFile?: (input: {
     readonly artifact: ArtifactViewRecord;
   }) => ArtifactAssetLocation | null;
+  /** Capability-owned canonical JSON when no separately stored source exists. */
+  readonly buildSourceJson?: (input: {
+    readonly artifact: ArtifactViewRecord;
+  }) => {
+    readonly payload: Record<string, unknown>;
+    readonly fileName?: string;
+  } | null;
   /**
    * The payload a PUBLIC share may hand an anonymous browser so it can render
    * the artifact client-side (the same path the owner's in-app preview uses).
@@ -140,11 +182,11 @@ export type ArtifactViewHandler = {
 
 /** Factory a capability package exports so hosts can collect its handlers. */
 export type CreateArtifactViewHandlers = () =>
-  | readonly ArtifactViewHandler[]
-  | Promise<readonly ArtifactViewHandler[]>;
+  readonly ArtifactViewHandler[] | Promise<readonly ArtifactViewHandler[]>;
 
 export const artifactSchema = z.object({
   id: z.string(),
+  artifactVersionId: z.string().nullable().default(null),
   teamId: z.string(),
   workspaceId: z.string(),
   threadId: z.string().nullable(),
@@ -172,6 +214,42 @@ export const artifactSchema = z.object({
   previewUrl: z.string().nullable(),
   capabilities: artifactCapabilitiesSchema,
 });
+
+const artifactVersionMediaAssetSchema = z
+  .object({
+    url: z.string().trim().min(1),
+    downloadUrl: z.string().trim().min(1).optional(),
+    contentType: z.string().trim().min(1),
+    fileName: z.string().trim().min(1),
+    byteLength: z.number().int().positive(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    fps: z.number().positive().optional(),
+    hasAudio: z.boolean().optional(),
+  })
+  .strict();
+
+/** Browser-safe exact-version projection. No payload source or storage keys. */
+export const artifactVersionMediaProjectionSchema = z
+  .object({
+    artifactId: z.string().trim().min(1),
+    artifactVersionId: z.string().trim().min(1),
+    artifactType: artifactTypeSchema,
+    title: z.string().trim().min(1),
+    description: z.string().nullable(),
+    durationSeconds: z.number().nonnegative().nullable(),
+    media: artifactVersionMediaAssetSchema.extend({
+      downloadUrl: z.string().trim().min(1),
+    }),
+    coverImage: artifactVersionMediaAssetSchema
+      .omit({ downloadUrl: true })
+      .nullable(),
+  })
+  .strict();
+
+export const getArtifactVersionMediaResponseSchema = z
+  .object({ media: artifactVersionMediaProjectionSchema })
+  .strict();
 
 /**
  * Bounded collection projection for artifact galleries.
@@ -225,6 +303,12 @@ export const deleteArtifactResponseSchema = z.object({
 export type Artifact = z.infer<typeof artifactSchema>;
 export type ArtifactSummary = z.infer<typeof artifactSummarySchema>;
 export type GetArtifactResponse = z.infer<typeof getArtifactResponseSchema>;
+export type ArtifactVersionMediaProjection = z.infer<
+  typeof artifactVersionMediaProjectionSchema
+>;
+export type GetArtifactVersionMediaResponse = z.infer<
+  typeof getArtifactVersionMediaResponseSchema
+>;
 export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>;
 export type ListArtifactSummariesResponse = z.infer<
   typeof listArtifactSummariesResponseSchema

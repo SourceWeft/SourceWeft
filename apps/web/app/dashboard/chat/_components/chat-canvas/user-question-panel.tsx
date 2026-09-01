@@ -24,8 +24,7 @@ import type { UserQuestionItem } from "./tool-confirmation-state";
  */
 
 export type UserQuestionAnswer =
-  | { status: "answered"; answers: string[] }
-  | { status: "cancelled" };
+  { status: "answered"; answers: string[] } | { status: "cancelled" };
 
 const OTHER_LABEL = "Other…";
 
@@ -57,7 +56,10 @@ function isRequired(question: AgentQuestionItem) {
 }
 
 /** Collapse a draft to the single positional answer string the backend expects. */
-function draftAnswer(question: AgentQuestionItem, draft: QuestionDraft): string {
+function draftAnswer(
+  question: AgentQuestionItem,
+  draft: QuestionDraft,
+): string {
   if (question.type === "text") {
     return draft.text.trim();
   }
@@ -96,7 +98,10 @@ function UserQuestionPanel({
   const [showErrors, setShowErrors] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  function updateDraft(index: number, updater: (draft: QuestionDraft) => QuestionDraft) {
+  function updateDraft(
+    index: number,
+    updater: (draft: QuestionDraft) => QuestionDraft,
+  ) {
     setDrafts((previous) =>
       previous.map((draft, i) => (i === index ? updater(draft) : draft)),
     );
@@ -143,7 +148,10 @@ function UserQuestionPanel({
           const unanswered = required && !hasAnswer(question, draft);
           const invalid = showErrors && unanswered;
           return (
-            <div className="flex flex-col gap-2" key={`${item.question.id}:${index}`}>
+            <div
+              className="flex flex-col gap-2"
+              key={`${item.question.id}:${index}`}
+            >
               <div className="flex items-start gap-2">
                 <MessageCircleQuestionIcon className="mt-0.5 size-4 shrink-0 text-primary" />
                 <div className="min-w-0 space-y-1">

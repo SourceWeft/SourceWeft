@@ -95,9 +95,7 @@ describe("connector sync run polling", () => {
   it("backs off failed requests", () => {
     expect(getConnectorSyncRunErrorDelay(1)).toBe(5000);
     expect(getConnectorSyncRunErrorDelay(2)).toBe(10000);
-    expect(getConnectorSyncRunErrorDelay(3)).toBe(
-      MAX_SYNC_RUN_ERROR_POLL_MS,
-    );
+    expect(getConnectorSyncRunErrorDelay(3)).toBe(MAX_SYNC_RUN_ERROR_POLL_MS);
   });
 
   it("selects the lowest visible non-stale tab as leader", () => {

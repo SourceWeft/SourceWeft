@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type {
   LangChainModelExecutionConfig,
+  ModelCallObservation,
   ObserveGenerationEnd,
   ObserveSink,
   UsageInfo,
@@ -64,7 +65,10 @@ const STREAMING_ENTRY_POINTS = new Set([
 
 const warnedUnknownEntryPoints = new Set<string>();
 
-type UsageSlot = { usage?: UsageInfo };
+type UsageSlot = {
+  usage?: UsageInfo;
+  observation?: ModelCallObservation;
+};
 
 /**
  * One capture slot per in-flight model call.
@@ -93,6 +97,7 @@ function createUsageCaptureSink(): ObserveSink {
       const slot = usageStorage.getStore();
       if (slot) {
         slot.usage = generation.usage;
+        slot.observation = generation.observation;
       }
     },
   };
@@ -141,6 +146,7 @@ function wrapBilledModel<T extends object>(
     await scope.settle({
       options: { ...billing, operation },
       usage: slot.usage,
+      observation: slot.observation,
     });
     return result;
   }
@@ -172,20 +178,30 @@ function wrapBilledModel<T extends object>(
       if (STREAMING_ENTRY_POINTS.has(prop)) {
         return async (...args: unknown[]) => {
           const slot: UsageSlot = {};
-          const stream = (await usageStorage.run(
-            slot,
-            async () => value.apply(target, args),
+          const stream = (await usageStorage.run(slot, async () =>
+            value.apply(target, args),
           )) as AsyncIterable<unknown>;
-          return billedModelStream(stream, slot, scope, billing, `chat.${prop}`);
+          return billedModelStream(
+            stream,
+            slot,
+            scope,
+            billing,
+            `chat.${prop}`,
+          );
         };
       }
 
       // Anything else passes through unbilled. Warned once per method so a
       // LangChain upgrade that introduces a new way to drive the model shows up
       // as a log line rather than silent lost revenue.
-      if (!warnedUnknownEntryPoints.has(prop) && !IGNORED_ENTRY_POINTS.has(prop)) {
+      if (
+        !warnedUnknownEntryPoints.has(prop) &&
+        !IGNORED_ENTRY_POINTS.has(prop)
+      ) {
         warnedUnknownEntryPoints.add(prop);
-        logger.debug("Unbilled LangChain model method invoked", { method: prop });
+        logger.debug("Unbilled LangChain model method invoked", {
+          method: prop,
+        });
       }
       return value.bind(target);
     },
@@ -249,6 +265,7 @@ async function* billedModelStream(
       await scope.settle({
         options: { ...billing, operation },
         usage: slot.usage,
+        observation: slot.observation,
       });
     } catch (settleError) {
       if (!inFlightError) {

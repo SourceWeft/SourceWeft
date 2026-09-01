@@ -149,125 +149,30 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
 test("buildRuntimeTools exposes generic options without enabled flag", () => {
   assert.deepEqual(
     buildRuntimeTools({
-      toolPermissions: { generate_video_presentation: "allow" },
+      toolPermissions: { custom_tool: "allow" },
       tools: {
-        generate_video_presentation: {
+        custom_tool: {
           enabled: true,
-          narration: { enabled: false },
+          format: { density: "compact" },
         },
         skillIds: ["skill-1"],
       },
     }),
     {
-      generate_video_presentation: {
-        toolName: "generate_video_presentation",
+      custom_tool: {
+        toolName: "custom_tool",
         enabled: true,
         permission: "allow",
         shouldBind: true,
         selection: {
           enabled: true,
-          narration: { enabled: false },
+          format: { density: "compact" },
         },
         options: {
-          narration: { enabled: false },
+          format: { density: "compact" },
         },
       },
     },
-  );
-});
-
-test("video presentation selection comes from the explicit tool entry only", () => {
-  const tools: ThreadToolsSelection = {
-    skillRuntimeConfig: {
-      "builtin:video-presentation": {
-        slideCount: 9,
-        stylePreset: "editorial",
-        visualDirection: "ignored legacy runtime config",
-      },
-    },
-    generate_video_presentation: {
-      enabled: true,
-      slideCount: 5,
-      visualDirection: "chalkboard classroom",
-      renderProfile: {
-        stylePreset: "technical",
-        visualDensity: "dense",
-        durationTarget: "short",
-        language: "zh-CN",
-      },
-      motion: { pacing: "dynamic" },
-      canvas: { fps: 30 },
-      narration: { enabled: false },
-    },
-  };
-  const selection =
-    resolveTurnToolSelections(tools).generate_video_presentation;
-
-  assert.deepEqual(selection, {
-    enabled: true,
-    slideCount: 5,
-    visualDirection: "chalkboard classroom",
-    renderProfile: {
-      stylePreset: "technical",
-      visualDensity: "dense",
-      durationTarget: "short",
-      language: "zh-CN",
-    },
-    motion: {
-      pacing: "dynamic",
-    },
-    canvas: {
-      fps: 30,
-    },
-    narration: {
-      enabled: false,
-    },
-  });
-  const runtimeTool = buildRuntimeTools({
-    toolPermissions: { generate_video_presentation: "allow" },
-    tools: {
-      generate_video_presentation: selection,
-    },
-  }).generate_video_presentation;
-  assert.ok(runtimeTool);
-  assert.deepEqual(runtimeTool.options, {
-    slideCount: 5,
-    visualDirection: "chalkboard classroom",
-    renderProfile: {
-      stylePreset: "technical",
-      visualDensity: "dense",
-      durationTarget: "short",
-      language: "zh-CN",
-    },
-    motion: {
-      pacing: "dynamic",
-    },
-    canvas: {
-      fps: 30,
-    },
-    narration: {
-      enabled: false,
-    },
-  });
-});
-
-test("video presentation disabled selection stays disabled without runtime values", () => {
-  assert.deepEqual(
-    resolveTurnToolSelections({
-      skillRuntimeConfig: {
-        "builtin:video-presentation": { slideCount: 9, stylePreset: "editorial" },
-      },
-      generate_video_presentation: { enabled: false },
-    }).generate_video_presentation,
-    { enabled: false },
-  );
-  assert.equal(
-    resolveTurnToolSelections({
-      skillRuntimeConfig: {
-        "builtin:video-presentation": { slideCount: 9 },
-      },
-    }).generate_video_presentation,
-    undefined,
   );
 });
 

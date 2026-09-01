@@ -3,6 +3,7 @@ import { ModelGatewayError } from "../errors";
 import { resolveThinkingMode } from "../thinking";
 import type { ChatCompleteInput, ReasoningEffort } from "../types";
 import type { ChatAdapter } from "./types";
+import { captureProviderResponseFetch } from "../observation/response-capture";
 
 /**
  * DeepSeek's effort scale is only "high" | "max", so the shared five-value
@@ -84,6 +85,7 @@ export class DeepSeekChatAdapter implements ChatAdapter {
       configuration: {
         baseURL: target.baseUrl,
         defaultHeaders: target.defaultHeaders,
+        fetch: captureProviderResponseFetch(),
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

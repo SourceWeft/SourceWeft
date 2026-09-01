@@ -100,6 +100,54 @@ function artifactRestRoot(workspaceId: string, artifactId: string) {
   return `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}`;
 }
 
+export type ArtifactVersionMediaResource = "video" | "cover";
+
+function artifactVersionRestRoot(input: {
+  readonly workspaceId: string;
+  readonly artifactId: string;
+  readonly artifactVersionId: string;
+}) {
+  return `${artifactRestRoot(input.workspaceId, input.artifactId)}/versions/${encodeURIComponent(input.artifactVersionId)}`;
+}
+
+export function buildArtifactVersionMediaProjectionRestUrl(input: {
+  readonly workspaceId: string;
+  readonly artifactId: string;
+  readonly artifactVersionId: string;
+}) {
+  return `${artifactVersionRestRoot(input)}/media`;
+}
+
+export function buildArtifactVersionMediaRestUrl(input: {
+  readonly workspaceId: string;
+  readonly artifactId: string;
+  readonly artifactVersionId: string;
+  readonly resource: ArtifactVersionMediaResource;
+  readonly download?: boolean;
+}) {
+  const url = `${artifactVersionRestRoot(input)}/media/${input.resource}`;
+  return input.download ? `${url}?download=1` : url;
+}
+
+export function buildArtifactVersionMediaProxyUrl(input: {
+  readonly workspaceId: string;
+  readonly artifactId: string;
+  readonly artifactVersionId: string;
+  readonly resource: ArtifactVersionMediaResource;
+  readonly download?: boolean;
+}) {
+  const params = new URLSearchParams({
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+    artifactVersionId: input.artifactVersionId,
+    versionMedia: input.resource,
+  });
+  if (input.download) {
+    params.set("download", "1");
+  }
+  return `${ARTIFACT_FILE_PROXY_ROUTE}?${params.toString()}`;
+}
+
 /**
  * Canonical backend-relative URL for an artifact resource.
  *
@@ -152,7 +200,9 @@ export function buildArtifactAssetUrl(input: {
  * `URLSearchParams`) but is pinned so that regenerating a URL for an unchanged
  * artifact yields an unchanged string.
  */
-export function buildArtifactProxyQuery(input: ArtifactUrlTarget): URLSearchParams | null {
+export function buildArtifactProxyQuery(
+  input: ArtifactUrlTarget,
+): URLSearchParams | null {
   const params = new URLSearchParams({
     artifactId: input.artifactId,
     workspaceId: input.workspaceId,

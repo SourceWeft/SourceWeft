@@ -43,8 +43,13 @@ export function useWorkfiles(input: {
   workfilesRefreshKey: number;
   currentWorkspaceIdRef: { current: string | null | undefined };
 }) {
-  const { mode, workspaceId, threadId, workfilesRefreshKey, currentWorkspaceIdRef } =
-    input;
+  const {
+    mode,
+    workspaceId,
+    threadId,
+    workfilesRefreshKey,
+    currentWorkspaceIdRef,
+  } = input;
 
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
   const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);

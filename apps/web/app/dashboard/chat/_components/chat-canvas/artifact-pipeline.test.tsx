@@ -3,43 +3,40 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 import { ArtifactPipeline } from "./artifact-pipeline";
 
-test("failed pipeline opens the failed step with code and attempt", () => {
+test("failed pipeline opens the failed step and de-duplicates its error", () => {
   const html = renderToStaticMarkup(
     <ArtifactPipeline
-      errorCode="VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED"
-      errorMessage="VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED: Theme provider returned invalid structured content."
-      footerRight="1m 42s · 3 / 11 · attempt 2/2"
+      errorCode="REPORT_BUILD_FAILED"
+      errorMessage="REPORT_BUILD_FAILED: Report provider returned invalid structured content."
+      footerRight="1m 42s · 2 / 4"
       status="failed"
       steps={[
         {
-          id: "planning_storyboard",
-          label: "Planning storyboard",
+          id: "planning",
+          label: "Planning report",
           status: "completed",
-          summary: "Planned 8 slides",
+          summary: "Planned 8 sections",
         },
         {
-          id: "assigning_slide_themes",
-          label: "Assigning slide themes",
+          id: "building",
+          label: "Building report",
           status: "failed",
-          attempt: 2,
-          maxAttempts: 2,
           errorMessage:
-            "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED: Theme provider returned invalid structured content.",
-          logTail: ["validation failed after repair"],
+            "REPORT_BUILD_FAILED: Report provider returned invalid structured content.",
+          logTail: ["validation failed"],
         },
       ]}
-      title="Video presentation failed · Assigning slide themes"
+      title="Report failed · Building report"
     />,
   );
 
-  assert.match(html, /Video presentation failed · Assigning slide themes/);
-  assert.match(html, /attempt 2\/2/);
-  assert.match(html, /Theme provider returned invalid structured content/);
-  assert.match(html, /VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED/);
-  assert.match(html, /validation failed after repair/);
+  assert.match(html, /Report failed · Building report/);
+  assert.match(html, /Report provider returned invalid structured content/);
+  assert.match(html, /REPORT_BUILD_FAILED/);
+  assert.match(html, /validation failed/);
   assert.equal(
-    html.match(/Theme provider returned invalid structured content/g)?.length,
+    html.match(/Report provider returned invalid structured content/g)?.length,
     1,
   );
-  assert.equal(html.match(/VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED/g)?.length, 1);
+  assert.equal(html.match(/REPORT_BUILD_FAILED/g)?.length, 1);
 });

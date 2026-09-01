@@ -1,0 +1,332 @@
+import type { MessageRenderBlock } from "../../_components/chat-canvas";
+import type {
+  ChatMessageItem,
+  StreamingAssistantSnapshot,
+} from "../streaming-assistant-state";
+
+export type ArtifactOutputReconcileTarget = {
+  assistantMessageId?: string | null;
+  runId?: string | null;
+};
+
+type ArtifactOutputBlock = Extract<
+  MessageRenderBlock,
+  { type: "artifact_output" }
+>;
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeArtifactOutputBlock(
+  value: unknown,
+): ArtifactOutputBlock | null {
+  const record = objectRecord(value);
+  const producer = objectRecord(record?.producer);
+  const producerKind = producer?.kind;
+  if (
+    record?.type !== "artifact_output" ||
+    typeof record.id !== "string" ||
+    typeof record.artifactId !== "string" ||
+    typeof record.artifactVersionId !== "string" ||
+    typeof record.sourceToolCallId !== "string" ||
+    typeof record.threadRunId !== "string" ||
+    typeof record.sequence !== "number" ||
+    !Number.isFinite(record.sequence) ||
+    (producerKind !== "main" && producerKind !== "subagent")
+  ) {
+    return null;
+  }
+
+  return {
+    artifactId: record.artifactId,
+    artifactVersionId: record.artifactVersionId,
+    id: record.id,
+    placement: "terminal",
+    producer: {
+      kind: producerKind,
+      ...(typeof producer?.subagentType === "string"
+        ? { subagentType: producer.subagentType }
+        : {}),
+    },
+    sequence: record.sequence,
+    sourceToolCallId: record.sourceToolCallId,
+    threadRunId: record.threadRunId,
+    type: "artifact_output",
+  };
+}
+
+function artifactOutputBlocks(message: ChatMessageItem) {
+  const blocks = Array.isArray(message.metadata.renderBlocks)
+    ? message.metadata.renderBlocks
+    : [];
+  return blocks
+    .map(normalizeArtifactOutputBlock)
+    .filter((block): block is ArtifactOutputBlock => block !== null);
+}
+
+function producerMatchesArtifactOutput(input: {
+  block: ArtifactOutputBlock;
+  toolCall: Record<string, unknown>;
+}) {
+  const producer = objectRecord(input.toolCall.producer);
+  const kind = producer?.kind ?? "main";
+  return (
+    kind === input.block.producer.kind &&
+    producer?.subagentType === input.block.producer.subagentType
+  );
+}
+
+/**
+ * The atomic publisher writes a completed tool call and its artifact block in
+ * the same transaction. Only that paired identity is safe to promote over a
+ * still-running local stream projection; unrelated REST tool calls may lag and
+ * remain owned by the live stream.
+ */
+function committedArtifactToolCalls(
+  message: ChatMessageItem,
+  blocks: readonly ArtifactOutputBlock[],
+) {
+  const blockByToolCallId = new Map(
+    blocks.map((block) => [block.sourceToolCallId, block]),
+  );
+  const calls = Array.isArray(message.metadata.toolCalls)
+    ? message.metadata.toolCalls
+    : [];
+  return calls.flatMap((value) => {
+    const call = objectRecord(value);
+    const output = objectRecord(call?.output);
+    const id = typeof call?.id === "string" ? call.id : null;
+    const block = id ? blockByToolCallId.get(id) : undefined;
+    if (
+      !call ||
+      !id ||
+      !block ||
+      typeof call.tool !== "string" ||
+      call.status !== "completed" ||
+      Boolean(call.error) ||
+      output?.status !== "ready" ||
+      output.type !== "committed_artifact_result" ||
+      typeof output.artifactType !== "string" ||
+      typeof output.workflowVersion !== "string" ||
+      output.artifactId !== block.artifactId ||
+      output.artifactVersionId !== block.artifactVersionId ||
+      output.artifactOutputBlockId !== block.id ||
+      !producerMatchesArtifactOutput({ block, toolCall: call })
+    ) {
+      return [];
+    }
+    return [call];
+  });
+}
+
+function mergeCommittedArtifactToolCalls(input: {
+  authoritative: readonly Record<string, unknown>[];
+  current: unknown;
+}) {
+  if (input.authoritative.length === 0) {
+    return null;
+  }
+  const authoritativeById = new Map(
+    input.authoritative.map((call) => [call.id as string, call]),
+  );
+  const current = Array.isArray(input.current) ? input.current : [];
+  const merged: unknown[] = [];
+  const seen = new Set<string>();
+  for (const value of current) {
+    const record = objectRecord(value);
+    const id = typeof record?.id === "string" ? record.id : null;
+    if (!id) {
+      merged.push(value);
+      continue;
+    }
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    merged.push(authoritativeById.get(id) ?? value);
+  }
+  for (const [id, call] of authoritativeById) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    merged.push(call);
+  }
+  return merged;
+}
+
+function messageRunId(message: ChatMessageItem) {
+  const threadRun = objectRecord(message.metadata.threadRun);
+  return typeof threadRun?.id === "string" ? threadRun.id : null;
+}
+
+function hasTargetArtifactOutput(
+  message: ChatMessageItem,
+  target: ArtifactOutputReconcileTarget,
+) {
+  const blocks = artifactOutputBlocks(message);
+  return blocks.some(
+    (block) => !target.runId || block.threadRunId === target.runId,
+  );
+}
+
+export function findArtifactOutputMessage(input: {
+  messages: ChatMessageItem[];
+  target: ArtifactOutputReconcileTarget;
+}): ChatMessageItem | null {
+  const { messages, target } = input;
+  if (target.assistantMessageId) {
+    const exact = messages.find(
+      (message) =>
+        message.id === target.assistantMessageId &&
+        hasTargetArtifactOutput(message, target),
+    );
+    if (exact) {
+      return exact;
+    }
+  }
+  if (!target.runId) {
+    return null;
+  }
+  return (
+    messages.find((message) =>
+      artifactOutputBlocks(message).some(
+        (block) => block.threadRunId === target.runId,
+      ),
+    ) ?? null
+  );
+}
+
+function messageMatchesTarget(input: {
+  authoritativeMessageId: string;
+  message: ChatMessageItem;
+  target: ArtifactOutputReconcileTarget;
+}) {
+  return (
+    input.message.id === input.authoritativeMessageId ||
+    (Boolean(input.target.assistantMessageId) &&
+      input.message.id === input.target.assistantMessageId) ||
+    (Boolean(input.target.runId) &&
+      messageRunId(input.message) === input.target.runId)
+  );
+}
+
+export function mergeCommittedArtifactOutputsIntoMessage(input: {
+  authoritative: ChatMessageItem;
+  current: ChatMessageItem;
+}): ChatMessageItem {
+  const authoritativeBlocks = artifactOutputBlocks(input.authoritative);
+  if (authoritativeBlocks.length === 0) {
+    return input.current;
+  }
+  const authoritativeToolCalls = committedArtifactToolCalls(
+    input.authoritative,
+    authoritativeBlocks,
+  );
+  const mergedToolCalls = mergeCommittedArtifactToolCalls({
+    authoritative: authoritativeToolCalls,
+    current: input.current.metadata.toolCalls,
+  });
+
+  const currentBlocks = Array.isArray(input.current.metadata.renderBlocks)
+    ? input.current.metadata.renderBlocks
+    : [];
+  const authoritativeById = new Map(
+    authoritativeBlocks.map((block) => [block.id, block]),
+  );
+  const seen = new Set<string>();
+  const merged = currentBlocks.flatMap((block) => {
+    const record = objectRecord(block);
+    const id = typeof record?.id === "string" ? record.id : null;
+    if (!id || !authoritativeById.has(id)) {
+      return [block];
+    }
+    if (seen.has(id)) {
+      return [];
+    }
+    seen.add(id);
+    return [authoritativeById.get(id)!];
+  });
+  for (const block of authoritativeBlocks) {
+    if (!seen.has(block.id)) {
+      seen.add(block.id);
+      merged.push(block);
+    }
+  }
+
+  return {
+    ...input.current,
+    metadata: {
+      ...input.current.metadata,
+      renderBlocks: merged,
+      ...(mergedToolCalls ? { toolCalls: mergedToolCalls } : {}),
+    },
+  };
+}
+
+export function mergeCommittedArtifactOutputsIntoMessages(input: {
+  authoritative: ChatMessageItem;
+  current: ChatMessageItem[];
+  target: ArtifactOutputReconcileTarget;
+}): ChatMessageItem[] {
+  const index = input.current.findIndex((message) =>
+    messageMatchesTarget({
+      authoritativeMessageId: input.authoritative.id,
+      message,
+      target: input.target,
+    }),
+  );
+  if (index < 0) {
+    return input.current;
+  }
+  const currentMessage = input.current[index]!;
+  const mergedMessage = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: input.authoritative,
+    current: currentMessage,
+  });
+  if (mergedMessage === currentMessage) {
+    return input.current;
+  }
+  const next = [...input.current];
+  next[index] = mergedMessage;
+  return next;
+}
+
+export function mergeCommittedArtifactOutputsIntoStreamingSnapshot(input: {
+  authoritative: ChatMessageItem;
+  current: StreamingAssistantSnapshot | null;
+  target: ArtifactOutputReconcileTarget;
+}): StreamingAssistantSnapshot | null {
+  if (!input.current) {
+    return null;
+  }
+  const matches =
+    input.current.messageId === input.authoritative.id ||
+    input.current.messageIds.includes(input.authoritative.id) ||
+    messageMatchesTarget({
+      authoritativeMessageId: input.authoritative.id,
+      message: input.current.message,
+      target: input.target,
+    });
+  if (!matches) {
+    return input.current;
+  }
+  const message = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: input.authoritative,
+    current: input.current.message,
+  });
+  if (message === input.current.message) {
+    return input.current;
+  }
+  return {
+    ...input.current,
+    message,
+    messageIds: Array.from(
+      new Set([...input.current.messageIds, input.authoritative.id]),
+    ),
+    renderVersion: input.current.renderVersion + 1,
+  };
+}

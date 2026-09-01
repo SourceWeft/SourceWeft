@@ -1,4 +1,7 @@
-import type { ChatSkillItem, ChatToolName } from "../../_components/chat-canvas";
+import type {
+  ChatSkillItem,
+  ChatToolName,
+} from "../../_components/chat-canvas";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 
 function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
@@ -41,8 +44,7 @@ function resolveAttachOnlyAssistantMessage(input: {
   const latestAssistantMessage =
     [...input.messages]
       .reverse()
-      .find((message) => message.role === "assistant") ??
-    null;
+      .find((message) => message.role === "assistant") ?? null;
   if (!input.assistantMessageId) {
     return latestAssistantMessage;
   }
@@ -51,8 +53,7 @@ function resolveAttachOnlyAssistantMessage(input: {
     input.messages.find(
       (message) =>
         message.role === "assistant" && message.id === input.assistantMessageId,
-    ) ??
-    latestAssistantMessage
+    ) ?? latestAssistantMessage
   );
 }
 

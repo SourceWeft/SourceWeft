@@ -183,6 +183,7 @@ function runtimeToCommandWorkflow(
   runtime?: {
     readonly additionalPromptLines?: readonly string[];
     readonly execution?: "agent";
+    readonly initialToolPolicy?: CapabilityCommandWorkflow["initialToolPolicy"];
     readonly permissionOverrides?: Readonly<
       Record<string, "allow" | "ask" | "deny">
     >;
@@ -191,6 +192,7 @@ function runtimeToCommandWorkflow(
       readonly clarificationPrompt: string;
       readonly description: string;
     };
+    readonly toolPolicy?: CapabilityCommandWorkflow["toolPolicy"];
   },
 ): CapabilityCommandWorkflow {
   const defaultTools = new Set(tools);
@@ -200,6 +202,19 @@ function runtimeToCommandWorkflow(
   return {
     execution: runtime?.execution ?? "agent",
     ...(runtime?.promptIntro ? { promptIntro: runtime.promptIntro } : {}),
+    ...(runtime?.initialToolPolicy
+      ? { initialToolPolicy: runtime.initialToolPolicy }
+      : {}),
+    ...(runtime?.toolPolicy
+      ? {
+          toolPolicy: {
+            ...(runtime.toolPolicy.allow
+              ? { allow: [...runtime.toolPolicy.allow] }
+              : {}),
+            deny: [...runtime.toolPolicy.deny],
+          },
+        }
+      : {}),
     defaultTools: Array.from(defaultTools),
     permissionOverrides: { ...(runtime?.permissionOverrides ?? {}) },
     ...(runtime?.requiredArguments

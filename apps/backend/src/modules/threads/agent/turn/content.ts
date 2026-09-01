@@ -1,9 +1,3 @@
-import {
-  normalizeProviderUsage,
-  normalizeUsage,
-  type UsageInfo,
-} from "@sourceweft/model-gateway";
-
 export function extractTextDeltas(content: unknown): string[] {
   if (typeof content === "string") {
     return content.length > 0 ? [content] : [];
@@ -106,29 +100,6 @@ export function isAssistantMessageLike(message: unknown): boolean {
   );
 }
 
-export function extractUsageFromMessageChunk(chunk: unknown): UsageInfo | undefined {
-  const providerUsage = normalizeProviderUsage(chunk);
-  if (providerUsage) {
-    return providerUsage;
-  }
-
-  const record = toObjectRecord(chunk);
-  if (!record) {
-    return undefined;
-  }
-
-  const responseMetadata = toObjectRecord(record.response_metadata);
-  const usageSource =
-    toObjectRecord(record.usage_metadata) ??
-    toObjectRecord(responseMetadata?.usage) ??
-    toObjectRecord(responseMetadata?.tokenUsage);
-  if (!usageSource) {
-    return undefined;
-  }
-
-  return normalizeUsage(usageSource);
-}
-
 export function extractFinishReasonFromMessageChunk(chunk: unknown) {
   const record = toObjectRecord(chunk);
   const responseMetadata = toObjectRecord(record?.response_metadata);
@@ -206,7 +177,9 @@ function extractReasoningFromOpenRouterDetail(detail: unknown): string | null {
   return null;
 }
 
-function extractReasoningFromOpenRouterDetails(value: unknown): string | undefined {
+function extractReasoningFromOpenRouterDetails(
+  value: unknown,
+): string | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -225,9 +198,8 @@ function extractReasoningFromContentBlock(block: unknown): string | null {
     return null;
   }
 
-  const blockType = typeof blockRecord.type === "string"
-    ? blockRecord.type.toLowerCase()
-    : "";
+  const blockType =
+    typeof blockRecord.type === "string" ? blockRecord.type.toLowerCase() : "";
   if (!blockType.includes("reasoning") && !blockType.includes("thinking")) {
     return null;
   }
@@ -286,7 +258,9 @@ function extractReasoningDeep(value: unknown, depth = 0): string | undefined {
     return direct;
   }
 
-  const details = extractReasoningFromOpenRouterDetails(record.reasoning_details);
+  const details = extractReasoningFromOpenRouterDetails(
+    record.reasoning_details,
+  );
   if (details) {
     return details;
   }
@@ -348,7 +322,8 @@ export function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
           return [] as string[];
         }
         const part = block as Record<string, unknown>;
-        const partType = typeof part.type === "string" ? part.type.toLowerCase() : "";
+        const partType =
+          typeof part.type === "string" ? part.type.toLowerCase() : "";
         if (partType.includes("reasoning") || partType.includes("thinking")) {
           return [] as string[];
         }

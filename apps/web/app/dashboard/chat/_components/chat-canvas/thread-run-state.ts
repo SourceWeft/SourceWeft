@@ -2,10 +2,7 @@ import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-contro
 import type { MessageVersion } from "./types";
 
 export type MessageVersionRunLifecycle =
-  | "live"
-  | "waiting_for_approval"
-  | "terminal"
-  | "idle";
+  "live" | "waiting_for_approval" | "terminal" | "idle";
 
 export function summarizeActiveThreadRun(run?: ActiveThreadRun | null) {
   if (!run) {
@@ -66,7 +63,11 @@ function isMessageVersionForActiveThreadRun(input: {
     return false;
   }
 
-  if (activeThreadRun.id && versionRun.id && activeThreadRun.id === versionRun.id) {
+  if (
+    activeThreadRun.id &&
+    versionRun.id &&
+    activeThreadRun.id === versionRun.id
+  ) {
     return true;
   }
 
@@ -96,7 +97,7 @@ function hasTerminalMessageVersionStatus(version: MessageVersion) {
 function hasTerminalMessageVersionFinishReason(version: MessageVersion) {
   return Boolean(
     version.finishReason &&
-      version.finishReason !== "tool_confirmation_requested",
+    version.finishReason !== "tool_confirmation_requested",
   );
 }
 
@@ -134,7 +135,11 @@ export function resolveMessageVersionRunLifecycle(input: {
       : "live";
   }
 
-  if (activeThreadRun && isLatestAssistantGroup && !isTerminalMessageVersion(version)) {
+  if (
+    activeThreadRun &&
+    isLatestAssistantGroup &&
+    !isTerminalMessageVersion(version)
+  ) {
     return activeThreadRun.status === "waiting_for_approval"
       ? "waiting_for_approval"
       : "live";

@@ -273,23 +273,31 @@ test("buildSkillOptionToolsSelection maps selected skill option overrides to too
   });
 });
 
-test("resolveDefaultActiveSkillIds keeps default-enabled skills active", () => {
+test("resolveDefaultActiveSkillIds keeps only explicitly default-enabled builtin skills active", () => {
   assert.deepEqual(
     resolveDefaultActiveSkillIds({
       availableSkills: [
         { id: "builtin:image-generate", defaultEnabled: true },
         { id: "builtin:ppt-deck", defaultEnabled: true },
-        { id: "builtin:video-presentation", defaultEnabled: true },
+        { id: "builtin:video-presentation", defaultEnabled: false },
         { id: "manual-skill", defaultEnabled: false },
       ],
       currentSkillIds: ["missing-skill", "manual-skill"],
     }),
-    [
-      "builtin:image-generate",
-      "builtin:ppt-deck",
-      "builtin:video-presentation",
-      "manual-skill",
-    ],
+    ["builtin:image-generate", "builtin:ppt-deck", "manual-skill"],
+  );
+});
+
+test("resolveDefaultActiveSkillIds retains an explicitly selected non-default skill", () => {
+  assert.deepEqual(
+    resolveDefaultActiveSkillIds({
+      availableSkills: [
+        { id: "builtin:image-generate", defaultEnabled: true },
+        { id: "builtin:video-presentation", defaultEnabled: false },
+      ],
+      currentSkillIds: ["builtin:video-presentation"],
+    }),
+    ["builtin:image-generate", "builtin:video-presentation"],
   );
 });
 
@@ -321,13 +329,7 @@ test("resolveDefaultActiveSkillIds caps default-enabled skills to the contract m
 test("toggleSkillSelection rejects adding a sixth skill", () => {
   assert.deepEqual(
     toggleSkillSelection({
-      currentSkillIds: [
-        "skill-1",
-        "skill-2",
-        "skill-3",
-        "skill-4",
-        "skill-5",
-      ],
+      currentSkillIds: ["skill-1", "skill-2", "skill-3", "skill-4", "skill-5"],
       selected: true,
       skillId: "skill-6",
     }),
@@ -379,6 +381,56 @@ test("buildSkillOptionToolsSelection maps runtime skill options to skill config"
   assert.deepEqual(tools?.skillRuntimeConfig, {
     "ppt-skill": {
       stylePreset: "executive",
+    },
+  });
+});
+
+test("buildSkillOptionToolsSelection keeps nested video options in skill config", () => {
+  const tools = buildSkillOptionToolsSelection({
+    selectedSkills: [
+      {
+        id: "builtin:video-presentation",
+        catalogId: "builtin:video-presentation",
+        slug: "video-presentation",
+        name: "video-presentation",
+        displayName: "Video Presentation",
+        description: "Create a video presentation.",
+        sourceType: "builtin",
+        version: "1.0.0",
+        hasReadme: false,
+        defaultEnabled: false,
+        options: [
+          {
+            id: "stylePreset",
+            title: "Style",
+            valueType: "string",
+            target: { path: "config.renderProfile.stylePreset" },
+            values: [],
+          },
+          {
+            id: "narrationEnabled",
+            title: "Narration",
+            valueType: "boolean",
+            target: { path: "config.narration.enabled" },
+            values: [],
+          },
+        ],
+      },
+    ],
+    overrides: {
+      "builtin:video-presentation": {
+        stylePreset: "cinematic",
+        narrationEnabled: false,
+      },
+    },
+  });
+
+  assert.deepEqual(tools, {
+    skillRuntimeConfig: {
+      "builtin:video-presentation": {
+        renderProfile: { stylePreset: "cinematic" },
+        narration: { enabled: false },
+      },
     },
   });
 });

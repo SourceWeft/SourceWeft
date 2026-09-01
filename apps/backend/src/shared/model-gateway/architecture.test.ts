@@ -46,12 +46,14 @@ const ALLOWED_PREFIX = join("shared", "model-gateway") + sep;
  */
 const EXEMPTIONS: { file: string; reason: string }[] = [
   {
-    file: join("modules", "threads", "agent", "turn", "content.ts"),
-    // TODO(billing-boundary): re-export `normalizeUsage` / `normalizeProviderUsage`
-    // from `src/shared/model-gateway` (they are pure usage-shape normalizers with
-    // no gateway access, like `errors.ts`) and switch this import over.
+    file: join("scripts", "smoke-orcarouter-observation.ts"),
     reason:
-      "Value-imports normalizeUsage/normalizeProviderUsage. Pure token-accounting helpers — they cannot reach a model — but they are still a direct package import. Owned by an in-flight refactor of modules/threads, so it is left alone here rather than fixed in a conflicting branch.",
+      "Manual smoke tool, run by hand against an operator-supplied " +
+      "ORCAROUTER_API_KEY to verify observation normalization (resolved " +
+      "model, request id, inline usage cost). It serves no user traffic and " +
+      "burning the operator's own tokens unmetered is its purpose; wrapping " +
+      "it in withBilledModelGateway would charge a billing scope for a " +
+      "connectivity probe.",
   },
 ];
 

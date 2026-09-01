@@ -9,7 +9,6 @@ import {
   extractProviderFieldsFromMessageChunk,
   extractReasoningFromMessageChunk,
   extractTextDeltasFromMessageChunk,
-  extractUsageFromMessageChunk,
 } from "./content";
 import {
   shouldSuppressLeakedCommandSpecText,
@@ -77,7 +76,6 @@ export async function* handleMessagesStreamChunk(input: {
       },
     };
   }
-  const nextUsage = extractUsageFromMessageChunk(messageChunk);
   const nextFinishReason = extractFinishReasonFromMessageChunk(messageChunk);
   runtime.finishReason = nextFinishReason ?? runtime.finishReason;
   runtime.providerFields =

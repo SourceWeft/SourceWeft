@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
 import type { ChatAdapter } from "./types";
+import { captureProviderResponseFetch } from "../observation/response-capture";
 
 /**
  * Chat adapter for Cloudflare AI Gateway's OpenAI-compatible REST endpoint
@@ -33,6 +34,7 @@ export class CloudflareAIGChatAdapter implements ChatAdapter {
       configuration: {
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
+        fetch: captureProviderResponseFetch(),
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

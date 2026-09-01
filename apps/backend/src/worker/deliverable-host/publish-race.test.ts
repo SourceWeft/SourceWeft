@@ -46,7 +46,7 @@ function buildProcessor(input: {
   const definition = {
     id: "fake_pipeline",
     jobName: "fake-generate",
-    artifactType: "video_presentation",
+    artifactType: "report",
     stages: [{ id: "one", label: "One", budgetMs: 1000, maxAttempts: 1 }],
     defaultErrorCode: "FAKE_FAILED",
     invalidPayloadErrorCode: "FAKE_INVALID",
@@ -227,7 +227,7 @@ test("the completion carries the pipeline's artifact type and finished payload",
   // The type is the pipeline's own declaration, not host knowledge, and the
   // payload is finalize()'s whole result — a completion republishes the entire
   // artifact, never a patch onto the previous version.
-  assert.equal(calls.markReady[0]?.artifactType, "video_presentation");
+  assert.equal(calls.markReady[0]?.artifactType, "report");
   assert.deepEqual(calls.markReady[0]?.payload, { done: true });
 });
 

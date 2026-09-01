@@ -83,6 +83,66 @@ export function registerArtifactRoutes(app: Hono) {
     return c.body(result.body);
   });
 
+  app.get("/artifacts/:id/versions/:versionId/media", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const result = await contentArtifactsService.getArtifactVersionMedia({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      artifactVersionId: requireRouteParam(c, "versionId"),
+      userId: getSessionUserId(session),
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/artifacts/:id/versions/:versionId/media/:resource", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const resource = requireRouteParam(c, "resource");
+    if (resource !== "video" && resource !== "cover") {
+      throw new ApiError(
+        404,
+        "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
+        "Artifact version media not found",
+      );
+    }
+    const result = await contentArtifactsService.getArtifactVersionMediaBytes({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      artifactVersionId: requireRouteParam(c, "versionId"),
+      userId: getSessionUserId(session),
+      resource,
+      range: c.req.header("range"),
+      ifNoneMatch: c.req.header("if-none-match"),
+      download: c.req.query("download") === "1",
+    });
+    c.header("ETag", result.etag);
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Cache-Control", "private, no-cache, max-age=0, must-revalidate");
+    if (result.kind === "not_modified") {
+      return c.body(null, 304);
+    }
+    c.header("Accept-Ranges", "bytes");
+    if (result.kind === "range_not_satisfiable") {
+      c.header("Content-Range", `bytes */${result.totalLength}`);
+      return c.body(null, 416);
+    }
+    c.header("Content-Type", result.contentType);
+    c.header("Content-Length", String(result.contentLength));
+    c.header(
+      "Content-Disposition",
+      `${result.download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+    );
+    if (result.contentRange) {
+      c.header("Content-Range", result.contentRange);
+    }
+    return c.body(Buffer.from(result.body), result.status);
+  });
+
   app.get("/artifacts/:id", async (c) => {
     const session = await requireSession(c);
     if (!session) {

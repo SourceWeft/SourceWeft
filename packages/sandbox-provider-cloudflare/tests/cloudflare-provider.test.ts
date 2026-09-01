@@ -21,6 +21,7 @@ type RecordedRequest = {
   url: string;
   headers: Record<string, string>;
   body: Uint8Array | string | null;
+  signal: AbortSignal | null;
 };
 
 type RouteHandler = (request: RecordedRequest) => Response;
@@ -53,6 +54,7 @@ function createMockBridge(routes: Array<[RegExp, RouteHandler]>) {
       url,
       headers: (init?.headers ?? {}) as Record<string, string>,
       body,
+      signal: init?.signal ?? null,
     };
     requests.push(recorded);
     for (const [pattern, handler] of routes) {
@@ -99,7 +101,10 @@ describe("path policy", () => {
 
 describe("workspaceRelativePath", () => {
   test("maps workspace paths onto bridge route segments", () => {
-    assert.equal(workspaceRelativePath("/workspace/input/a.txt"), "input/a.txt");
+    assert.equal(
+      workspaceRelativePath("/workspace/input/a.txt"),
+      "input/a.txt",
+    );
   });
 
   test("percent-encodes path segments", () => {
@@ -178,10 +183,7 @@ describe("CloudflareSandboxProvider", () => {
       requests[1]?.url,
       `${BRIDGE_URL}/v1/sandbox/sb-1/file/workspace/${SOURCEWEFT_SANDBOX_STAMP_PATH.slice("/workspace/".length)}`,
     );
-    assert.deepEqual(
-      requests[1]?.body,
-      new TextEncoder().encode("sb-1"),
-    );
+    assert.deepEqual(requests[1]?.body, new TextEncoder().encode("sb-1"));
   });
 
   test("fails clearly when create returns no id", async () => {
@@ -280,10 +282,7 @@ describe("CloudflareSandboxProvider", () => {
 
   test("wraps cwd into the shell line", async () => {
     const { provider, requests } = createProvider([
-      [
-        /^POST .*\/exec$/,
-        () => sseResponse([{ event: "exit", data: "0" }]),
-      ],
+      [/^POST .*\/exec$/, () => sseResponse([{ event: "exit", data: "0" }])],
     ]);
 
     await provider.execute({
@@ -328,10 +327,7 @@ describe("CloudflareSandboxProvider", () => {
 
   test("keeps short-budget commands unwrapped", async () => {
     const { provider, requests } = createProvider([
-      [
-        /^POST .*\/exec$/,
-        () => sseResponse([{ event: "exit", data: "0" }]),
-      ],
+      [/^POST .*\/exec$/, () => sseResponse([{ event: "exit", data: "0" }])],
     ]);
     await provider.execute({
       providerSandboxId: "sb-1",
@@ -415,6 +411,7 @@ describe("CloudflareSandboxProvider", () => {
 
   test("uploads and downloads workspace files", async () => {
     const payload = new TextEncoder().encode("file-bytes");
+    const controller = new AbortController();
     const { provider, requests } = createProvider([
       [/^PUT /, () => new Response(null, { status: 200 })],
       [/^GET /, () => new Response(payload)],
@@ -428,12 +425,15 @@ describe("CloudflareSandboxProvider", () => {
     const downloaded = await provider.downloadFile({
       providerSandboxId: "sb-1",
       sandboxPath: "/workspace/output/b.txt",
+      signal: controller.signal,
+      timeoutMs: 5_000,
     });
 
     assert.equal(
       requests[0]?.url,
       `${BRIDGE_URL}/v1/sandbox/sb-1/file/workspace/input/a.txt`,
     );
+    assert.equal(requests[1]?.signal, controller.signal);
     assert.equal(requests[0]?.method, "PUT");
     assert.equal(
       requests[1]?.url,
@@ -464,12 +464,42 @@ describe("CloudflareSandboxProvider", () => {
     assert.equal(requests[0]?.url, `${BRIDGE_URL}/v1/sandbox/sb-1`);
   });
 
+  test("confirms execution cancellation by deleting the sandbox", async () => {
+    const { provider, requests } = createProvider([
+      [/^DELETE /, () => new Response(null, { status: 200 })],
+    ]);
+
+    assert.deepEqual(
+      await provider.cancelExecution({
+        providerSandboxId: "sb-1",
+        executionId: "execution-1",
+        reason: "user_cancelled",
+      }),
+      { confirmed: true, mode: "sandbox" },
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.method, "DELETE");
+    assert.equal(requests[0]?.url, `${BRIDGE_URL}/v1/sandbox/sb-1`);
+  });
+
+  test("treats an already absent sandbox as confirmed cancellation", async () => {
+    const { provider } = createProvider([
+      [/^DELETE /, () => new Response("missing", { status: 404 })],
+    ]);
+
+    assert.deepEqual(
+      await provider.cancelExecution({
+        providerSandboxId: "sb-1",
+        executionId: "execution-1",
+        reason: "user_cancelled",
+      }),
+      { confirmed: true, mode: "sandbox" },
+    );
+  });
+
   test("ensureDirectory shells a quoted mkdir -p", async () => {
     const { provider, requests } = createProvider([
-      [
-        /^POST .*\/exec$/,
-        () => sseResponse([{ event: "exit", data: "0" }]),
-      ],
+      [/^POST .*\/exec$/, () => sseResponse([{ event: "exit", data: "0" }])],
     ]);
     await provider.ensureDirectory({
       providerSandboxId: "sb-1",
@@ -551,8 +581,10 @@ describe("mapCloudflareProviderError", () => {
 
   test("maps timeouts and aborts", () => {
     assert.match(
-      mapCloudflareProviderError(new Error("The operation was aborted"), "execute")
-        .message,
+      mapCloudflareProviderError(
+        new Error("The operation was aborted"),
+        "execute",
+      ).message,
       /SANDBOX_COMMAND_TIMEOUT/,
     );
     assert.match(
@@ -581,10 +613,7 @@ describe("mapCloudflareProviderError", () => {
 
   test("passes through platform-coded errors unchanged", () => {
     const original = new Error("SANDBOX_FILE_PATH_DENIED: nope");
-    assert.equal(
-      mapCloudflareProviderError(original, "upload"),
-      original,
-    );
+    assert.equal(mapCloudflareProviderError(original, "upload"), original);
   });
 
   test("falls back to a generic provider error with a diagnostic", () => {

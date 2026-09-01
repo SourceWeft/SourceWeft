@@ -1,11 +1,11 @@
 import type { PreparedThreadTurn } from "../..";
-import { isAgentToolEnabledByDefault } from "@sourceweft/agent-tool-registry";
+import {
+  getAgentToolDefinition,
+  isAgentToolEnabledByDefault,
+} from "@sourceweft/agent-tool-registry";
 
 export type ToolCallStatus =
-  | "running"
-  | "approval_requested"
-  | "completed"
-  | "error";
+  "running" | "approval_requested" | "completed" | "error";
 
 export function normalizeToolInput(value: unknown): Record<string, unknown> {
   if (typeof value === "string" && value.trim().length > 0) {
@@ -88,6 +88,30 @@ export function filterAllowedTools<T extends { name: string }>(
   tools: T[],
 ) {
   return tools.filter((tool) => !isToolDenied(prepared, tool.name));
+}
+
+export function filterCommandPolicyTools<T extends { name: string }>(
+  prepared: PreparedThreadTurn,
+  tools: readonly T[],
+) {
+  const policy =
+    prepared.command?.workflow?.toolPolicy ?? prepared.activeToolPolicy;
+  if (!policy) {
+    return [...tools];
+  }
+  const allowed = policy.allow ? new Set(policy.allow) : null;
+  const denied = new Set(policy.deny);
+  return tools.filter(
+    (tool) => !denied.has(tool.name) && (!allowed || allowed.has(tool.name)),
+  );
+}
+
+export function filterInheritableAgentTools<T extends { name: string }>(
+  tools: readonly T[],
+) {
+  return tools.filter(
+    (tool) => getAgentToolDefinition(tool.name)?.executionScope !== "root_only",
+  );
 }
 
 export function shouldBindAgentTool(input: {

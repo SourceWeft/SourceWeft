@@ -1,6 +1,6 @@
 # Style Gallery
 
-Named style recipes for `generate_video_presentation`, tuned to produce
+Named style recipes for the Video Presentation Agent, tuned to produce
 clearly different videos. Recipes are starting points, not locked themes: keep
 a recipe's palette logic and motion character, but swap the imagery nouns in
 its direction to fit the topic (a circuit-trace recipe explaining farming
@@ -205,17 +205,17 @@ Engineering blueprint — cyanotype precision, drafted live.
 
 ## Picking a recipe
 
-| Ask / topic | First choice | Alternate |
-| --- | --- | --- |
-| Teaching, learning, training | Chalk Talk | Storybook Wash |
-| AI / dev tools / launch hype | Neon Circuit | Blueprint Draft |
-| Children, wellness, nonprofits | Storybook Wash | Golden Hour Docu |
-| Board updates, finance, QBRs | Boardroom Navy | Night Observatory |
-| Culture, history, retrospectives | Newsstand '72 | Golden Hour Docu |
-| Manifesto, single bold idea | Concrete Mono | Kanso Whitespace |
-| Consumer app / feature launch | Pastel Launchpad | Festival Gradient |
-| Analytics, metrics, research | Night Observatory | Boardroom Navy |
-| Human stories, impact, culture films | Golden Hour Docu | Storybook Wash |
-| Design, craft, premium brand | Kanso Whitespace | Concrete Mono |
-| Events, campaigns, creators | Festival Gradient | Pastel Launchpad |
-| Architecture, how-it-works | Blueprint Draft | Night Observatory |
+| Ask / topic                          | First choice      | Alternate         |
+| ------------------------------------ | ----------------- | ----------------- |
+| Teaching, learning, training         | Chalk Talk        | Storybook Wash    |
+| AI / dev tools / launch hype         | Neon Circuit      | Blueprint Draft   |
+| Children, wellness, nonprofits       | Storybook Wash    | Golden Hour Docu  |
+| Board updates, finance, QBRs         | Boardroom Navy    | Night Observatory |
+| Culture, history, retrospectives     | Newsstand '72     | Golden Hour Docu  |
+| Manifesto, single bold idea          | Concrete Mono     | Kanso Whitespace  |
+| Consumer app / feature launch        | Pastel Launchpad  | Festival Gradient |
+| Analytics, metrics, research         | Night Observatory | Boardroom Navy    |
+| Human stories, impact, culture films | Golden Hour Docu  | Storybook Wash    |
+| Design, craft, premium brand         | Kanso Whitespace  | Concrete Mono     |
+| Events, campaigns, creators          | Festival Gradient | Pastel Launchpad  |
+| Architecture, how-it-works           | Blueprint Draft   | Night Observatory |

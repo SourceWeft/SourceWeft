@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { downloadPptxFromSandbox } from "../src/sandbox-output";
 import {
   createCapabilityAgentTools,
@@ -19,7 +20,10 @@ function validPptxBuffer() {
 }
 
 function services(input?: {
-  download?: (input: { sandboxPath: string }) => Promise<Buffer>;
+  download?: (input: {
+    sandboxPath: string;
+    signal?: AbortSignal;
+  }) => Promise<Buffer>;
   filesystem?: {
     readRaw?: (path: string) => Promise<{
       data?: { content: string | Uint8Array; mimeType?: string };
@@ -93,6 +97,7 @@ function services(input?: {
         ),
       getBucketName: vi.fn().mockReturnValue("content"),
       upload: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
       // Publishing only writes; the port requires a reader, and "nothing is
       // stored" is the honest answer for a fake that keeps no bytes.
       download: vi.fn().mockResolvedValue(null),
@@ -129,7 +134,7 @@ const context = {
   userId: "user-1",
 };
 
-function createPublisherTool() {
+function createPublisherTool(mockedServices = services()) {
   const result = createCapabilityAgentTools({
     toolIds: ["publish_artifact"],
     context: {
@@ -140,12 +145,52 @@ function createPublisherTool() {
       userId: "user-1",
       userMessageId: "message-1",
     },
-    services: services(),
+    services: mockedServices,
   });
   const publisher = result.tools[0]?.tool;
   assert.ok(publisher);
   return publisher;
 }
+
+test("publish_artifact aborts its sandbox download and never enters the writer", async () => {
+  const controller = new AbortController();
+  const abortReason = new DOMException("user stopped", "AbortError");
+  let downloadStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    downloadStarted = resolve;
+  });
+  let observedSignal: AbortSignal | undefined;
+  const mockedServices = services({
+    download: async (input) => {
+      observedSignal = input.signal;
+      downloadStarted();
+      assert.ok(input.signal);
+      await new Promise<void>((resolve) =>
+        input.signal!.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      throw input.signal.reason;
+    },
+  });
+  const publisher = createPublisherTool(mockedServices);
+
+  const invocation = publisher.invoke(
+    {
+      artifactType: "file",
+      title: "Cancelled export",
+      source: { kind: "sandbox_path", path: "/workspace/output.txt" },
+    },
+    withAgentToolHostInvocationSignal(
+      { toolCall: { id: "publish-cancelled" } },
+      controller.signal,
+    ) as never,
+  );
+  await started;
+  controller.abort(abortReason);
+
+  await assert.rejects(invocation, (error: unknown) => error === abortReason);
+  assert.equal(observedSignal, controller.signal);
+  assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 0);
+});
 
 test("createCapabilityAgentTools does not bind publisher without a source read service", () => {
   const result = createCapabilityAgentTools({
@@ -990,6 +1035,60 @@ test("publishPreparedArtifact publishes generated image bytes", async () => {
   // carries one — the attachment is what says where the bytes came from.
   assert.equal("storageKey" in published.payload, false);
   assert.equal(published?.attachments?.[0]?.fileName, "generated-image.png");
+});
+
+test("publishPreparedArtifact forwards the host signal through republish", async () => {
+  const mockedServices = services();
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | undefined;
+  const republishArtifact = vi.fn(
+    async (input: { signal?: AbortSignal }) => {
+      observedSignal = input.signal;
+      return {
+        artifactId: "artifact-1",
+        versionId: "version-2",
+        reused: false,
+      };
+    },
+  );
+
+  const result = await publishPreparedArtifact({
+    context,
+    descriptor: {
+      artifactType: "file",
+      title: "Updated report",
+      description: "Republished report",
+      republishArtifactId: "artifact-1",
+      source: {
+        kind: "sandbox_path",
+        path: "/workspace/report.txt",
+      },
+    },
+    source: {
+      bytes: Buffer.from("updated"),
+      mimeType: "text/plain",
+      path: "/workspace/report.txt",
+    },
+    services: {
+      ...mockedServices,
+      artifacts: {
+        ...mockedServices.artifacts,
+        findArtifact: async () => ({
+          id: "artifact-1",
+          status: "ready",
+          artifactType: "file",
+          currentVersionNo: 1,
+          title: "Existing report",
+        }),
+        republishArtifact,
+      },
+    },
+    signal: controller.signal,
+  });
+
+  assert.equal(result.record.versionId, "version-2");
+  assert.equal(republishArtifact.mock.calls.length, 1);
+  assert.equal(observedSignal, controller.signal);
 });
 
 test("publishPreparedArtifact rejects slides without preview image", async () => {

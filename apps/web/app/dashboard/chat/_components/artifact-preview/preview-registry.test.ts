@@ -43,9 +43,7 @@ function context(
 describe("resolveArtifactPreviewRenderer", () => {
   it("selects feature adapters by artifact capability/type", () => {
     expect(
-      resolveArtifactPreviewRenderer(
-        context({ artifactType: "image" }),
-      )?.id,
+      resolveArtifactPreviewRenderer(context({ artifactType: "image" }))?.id,
     ).toBe("image");
     expect(
       resolveArtifactPreviewRenderer(
@@ -63,8 +61,8 @@ describe("resolveArtifactPreviewRenderer", () => {
   });
 
   it("returns null for unsupported artifacts", () => {
-    expect(resolveArtifactPreviewRenderer(context({ artifactType: "file" }))).toBe(
-      null,
-    );
+    expect(
+      resolveArtifactPreviewRenderer(context({ artifactType: "file" })),
+    ).toBe(null);
   });
 });

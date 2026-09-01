@@ -100,9 +100,7 @@ test("suppresses banner when a failed tool card already shows the error", () => 
 test("still shows banner when the failed tool error differs from the run error", () => {
   const state = renderState({
     error: { message: "The model stopped unexpectedly" },
-    activityItems: [
-      toolItem({ status: "error", error: "File not found" }),
-    ],
+    activityItems: [toolItem({ status: "error", error: "File not found" })],
   });
   assert.equal(isRunErrorCoveredByToolCard(state), false);
   assert.equal(
@@ -118,9 +116,7 @@ test("still shows banner when the failed tool error differs from the run error",
 test("does not treat a succeeded tool call (no error) as covering the run error", () => {
   const state = renderState({
     error: { message: "Sandbox command failed" },
-    activityItems: [
-      toolItem({ status: "done", error: null }),
-    ],
+    activityItems: [toolItem({ status: "done", error: null })],
   });
   assert.equal(isRunErrorCoveredByToolCard(state), false);
 });
@@ -130,7 +126,8 @@ test("covers a failed deliverable tool that carries the error despite non-error 
   // pipeline/card still shows the same message off toolCall.error.
   const state = renderState({
     error: {
-      message: "Generated Remotion project dependency install failed: pnpm not found",
+      message:
+        "Generated Remotion project dependency install failed: pnpm not found",
     },
     activityItems: [
       toolItem({

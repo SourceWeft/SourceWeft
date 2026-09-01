@@ -93,9 +93,11 @@ test("buildAssistantRenderSegments alternates text and tool segments", () => {
 });
 
 test("buildAssistantRenderSegments keeps trailing text as final answer", () => {
-  const segments = buildAssistantRenderSegments(
-    [reasoning("reasoning-1"), tool("tool-1"), text("text-1")],
-  );
+  const segments = buildAssistantRenderSegments([
+    reasoning("reasoning-1"),
+    tool("tool-1"),
+    text("text-1"),
+  ]);
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
@@ -138,7 +140,10 @@ test("buildAssistantRenderSegments preserves terminal block order at the end", (
   );
   assert.deepEqual(
     segments.map((segment) => segment.blocks.map((block) => block.id)),
-    [["text-1", "text-2"], ["artifact-1", "artifact-2"]],
+    [
+      ["text-1", "text-2"],
+      ["artifact-1", "artifact-2"],
+    ],
   );
 });
 

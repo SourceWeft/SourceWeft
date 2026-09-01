@@ -825,22 +825,6 @@ export function extractGeneratedImageArtifacts(
     });
 }
 
-export function hasPresentationArtifactUrl(output: unknown) {
-  return Boolean(
-    extractToolOutputField(output, "artifact_url") ??
-      extractToolOutputField(output, "pptx_url") ??
-      extractToolOutputField(output, "artifactUrl") ??
-      extractToolOutputField(output, "pptxUrl"),
-  );
-}
-
-export function isVideoPresentationArtifactReady(output: unknown) {
-  return (
-    hasPresentationArtifactUrl(output) &&
-    extractToolOutputField(output, "status") === "ready"
-  );
-}
-
 /**
  * The failure message of a background deliverable, if its output is a terminal
  * record reporting failure. Which `type` values are terminal is the

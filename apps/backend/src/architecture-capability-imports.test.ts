@@ -153,16 +153,6 @@ const FILE_EXEMPTIONS: readonly {
   readonly reason: string;
 }[] = [
   {
-    file: "scripts/smoke-video-presentation-job.ts",
-    reason:
-      "Developer smoke harness, not runtime. It is not reachable from any of the three bundled entrypoints (see tsup.config.ts: api, worker, scheduler), so nothing it imports ships. Its entire purpose is to drive one capability end to end through the host's queue and database, so a capability-agnostic version of it could not do its job; and moving it into the owning package would force that package to depend on @sourceweft/db and bullmq — the host's database and queue — which is a strictly worse coupling than a script naming a package.",
-  },
-  {
-    file: "worker/deliverable-host/video-presentation-pipeline.integration.test.ts",
-    reason:
-      "Genuine integration test. Its subject is the seam itself: the host's generic deliverable processor driving a real pipeline definition end to end. Replacing the pipeline with a synthetic one would leave a test that asserts the host talks to itself. It cannot move into the capability package either, because the other half — the processor — is host code.",
-  },
-  {
     file: "modules/threads/agent/capability-tools/types.ts",
     // TODO(capability-boundary): the sandbox runtime a turn holds is host
     // state; move `AgentSandboxRuntimeForTurn`'s shape into
@@ -170,11 +160,6 @@ const FILE_EXEMPTIONS: readonly {
     // sandbox package alias it, the way the web provider port was moved.
     reason:
       "Type-imports AgentSandboxRuntimeForTurn from @sourceweft/builtin-tool-sandbox to type the turn input. That package is infrastructure, so this would pass anywhere else in the host; it is called out only because capability-tools is an INFRASTRUCTURE_STRICT_DIRECTORIES entry. Pre-dates that module; the sandbox runtime is threaded through turn assembly, which is not this refactor's to move.",
-  },
-  {
-    file: "worker/deliverable-host/video-stage-runner.test.ts",
-    reason:
-      "Genuine integration test, same seam as above: the host's generic stage runner bound to a real pipeline's stage list and progress function. What is being checked is that the host's runner behaves correctly against a pipeline it did not author.",
   },
   {
     file: "shared/sandbox-assets/catalog.ts",

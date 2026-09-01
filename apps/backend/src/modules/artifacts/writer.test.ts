@@ -43,6 +43,7 @@ type ArtifactWriterDeps = import("./writer").ArtifactWriterDeps;
 type Upload = { key: string; contentType: string; byteLength: number };
 
 const uploads: Upload[] = [];
+const deletedKeys: string[] = [];
 const created: Array<Record<string, unknown>> = [];
 const pending: Array<Record<string, unknown>> = [];
 const completed: Array<Record<string, unknown>> = [];
@@ -52,7 +53,11 @@ let markReadyResult: { artifactId: string; versionId: string } | null = {
   artifactId: "artifact-1",
   versionId: "version-2",
 };
+let currentVersionNo = 1;
 let uploadError: Error | null = null;
+let onUpload:
+  | ((input: { key: string; signal?: AbortSignal }) => void | Promise<void>)
+  | null = null;
 
 type ReusableRecord = {
   id: string;
@@ -75,6 +80,7 @@ const storage = {
     key: string;
     body: Uint8Array;
     contentType: string;
+    signal?: AbortSignal;
   }) => {
     if (uploadError) {
       throw uploadError;
@@ -84,6 +90,10 @@ const storage = {
       contentType: input.contentType,
       byteLength: input.body.byteLength,
     });
+    await onUpload?.(input);
+  },
+  delete: async (input: { key: string }) => {
+    deletedKeys.push(input.key);
   },
   // The writer never reads objects back; present only because the port
   // requires it, so a stub that fails loudly is better than a plausible one.
@@ -102,6 +112,7 @@ const repository = {
   },
   markReady: async (input: Record<string, unknown>) => {
     completed.push(input);
+    if (markReadyResult) currentVersionNo += 1;
     return markReadyResult;
   },
   markFailed: async (input: Record<string, unknown>) => {
@@ -140,12 +151,15 @@ function spec(overrides: Partial<ArtifactPublishSpec> = {}): ArtifactPublishSpec
 
 beforeEach(() => {
   uploads.length = 0;
+  deletedKeys.length = 0;
   created.length = 0;
   pending.length = 0;
   completed.length = 0;
   failed.length = 0;
   markReadyResult = { artifactId: "artifact-1", versionId: "version-2" };
+  currentVersionNo = 1;
   uploadError = null;
+  onUpload = null;
   reusableRecord = null;
   requestKeyLookups.length = 0;
 });
@@ -269,6 +283,57 @@ test("a storage failure is reported as infrastructure, not as bad input", async 
   assert.deepEqual(created, []);
 });
 
+test("abort during upload cleans attempted objects and reaches neither row nor output recorder", async () => {
+  const controller = new AbortController();
+  const abortReason = new DOMException("tool timeout", "TimeoutError");
+  let releaseUpload!: () => void;
+  let uploadStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    uploadStarted = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let outputCards = 0;
+  let observedSignal: AbortSignal | undefined;
+  onUpload = async (input) => {
+    observedSignal = input.signal;
+    uploadStarted();
+    await blocked;
+  };
+
+  const publication = makeWriter()
+    .publishArtifact({
+      context: CONTEXT,
+      signal: controller.signal,
+      spec: spec({
+        attachments: [
+          {
+            fileName: "a-cat.png",
+            contentType: "image/png",
+            bytes: new Uint8Array(8),
+            role: "primary",
+          },
+        ],
+      }),
+    })
+    .then((result) => {
+      outputCards += 1;
+      return result;
+    });
+  await started;
+  controller.abort(abortReason);
+  releaseUpload();
+
+  await assert.rejects(publication, (error: unknown) => error === abortReason);
+  assert.equal(observedSignal, controller.signal);
+  assert.deepEqual(created, []);
+  assert.deepEqual(deletedKeys, [
+    "workspaces/workspace-1/artifacts/artifact-1/a-cat.png",
+  ]);
+  assert.equal(outputCards, 0);
+});
+
 /* ========================================================================== */
 /* 3. Preview images are an enhancement                                       */
 /* ========================================================================== */
@@ -376,6 +441,52 @@ test("completeArtifact publishes the next version with its bytes", async () => {
   });
   assert.equal(completed[0]?.storageBucket, "content-bucket");
   assert.deepEqual(completed[0]?.expectedStatuses, ["pending", "running"]);
+});
+
+test("abort during republish upload cleans attempted bytes and leaves the current version unchanged", async () => {
+  const controller = new AbortController();
+  const abortReason = new DOMException("tool timeout", "TimeoutError");
+  let releaseUpload!: () => void;
+  let uploadStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    uploadStarted = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let observedSignal: AbortSignal | undefined;
+  onUpload = async (input) => {
+    observedSignal = input.signal;
+    uploadStarted();
+    await blocked;
+  };
+
+  const republish = makeWriter().completeArtifact({
+    artifactId: "artifact-1",
+    context: CONTEXT,
+    signal: controller.signal,
+    spec: spec({
+      attachments: [
+        {
+          fileName: "a-cat-v2.png",
+          contentType: "image/png",
+          bytes: new Uint8Array(8),
+          role: "primary",
+        },
+      ],
+    }),
+  });
+  await started;
+  controller.abort(abortReason);
+  releaseUpload();
+
+  await assert.rejects(republish, (error: unknown) => error === abortReason);
+  assert.equal(observedSignal, controller.signal);
+  assert.deepEqual(completed, []);
+  assert.equal(currentVersionNo, 1);
+  assert.deepEqual(deletedKeys, [
+    "workspaces/workspace-1/artifacts/artifact-1/a-cat-v2.png",
+  ]);
 });
 
 test("completeArtifact leaves storage pointers alone when there are no bytes", async () => {
@@ -496,10 +607,10 @@ test("failArtifact preserves a code the thrower already chose", async () => {
     artifactId: "artifact-1",
     context: CONTEXT,
     error: Object.assign(new Error("sandbox is down"), {
-      code: "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE",
+      code: "ARTIFACT_STORAGE_UNAVAILABLE",
     }),
   });
-  assert.equal(failed[0]?.errorCode, "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE");
+  assert.equal(failed[0]?.errorCode, "ARTIFACT_STORAGE_UNAVAILABLE");
 });
 
 /* ========================================================================== */

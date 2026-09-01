@@ -195,7 +195,9 @@ export type DeliverableHostContext = {
       body: Uint8Array;
       contentType: string;
       key: string;
+      signal?: AbortSignal;
     }): Promise<void>;
+    delete(input: { bucket?: string | null; key: string }): Promise<void>;
     /**
      * Read back an object this port wrote — `null` when the key does not exist.
      * A pipeline stage needs it because per-run `scratch` does not survive a

@@ -2,8 +2,10 @@
 
 Narration audio drives slide timing: each slide stays on screen for its real
 spoken duration (measured from the generated audio) plus a short settle
-padding. The worker enforces per-slide narration budgets at storyboard time,
-so a brief that fights these numbers gets rewritten toward them.
+padding. The Agent should author within these ranges before asking the narration
+tool.
+Validation re-probes the exact frozen audio bytes and rejects a scene that does
+not cover measured speech plus tail padding.
 
 ## Pacing math
 

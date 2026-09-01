@@ -1,12 +1,19 @@
 import type { BillingMode } from "@sourceweft/contracts";
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import type {
+  ModelCallObservation,
+  UsageInfo,
+} from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import type {
   MeteredModelCallTrace,
   ModelCallBillingOptions,
   ModelUsageContext,
 } from "./context";
-import { settleModelCall, type MeterUsageFn } from "./settle";
+import {
+  settleModelCall,
+  type MeterUsageFn,
+  type ScheduleProviderCostReconciliationFn,
+} from "./settle";
 import { addUsage } from "./usage";
 
 export interface BillingScope {
@@ -26,6 +33,7 @@ export interface BillingScope {
   settle(input: {
     options: ModelCallBillingOptions;
     usage: UsageInfo | undefined;
+    observation?: ModelCallObservation;
   }): Promise<MeteredModelCallTrace | null>;
 }
 
@@ -58,6 +66,7 @@ export function openBillingScope(input: {
   billingMode: BillingMode;
   availableCredits: number;
   meterUsage?: MeterUsageFn;
+  scheduleReconciliation?: ScheduleProviderCostReconciliationFn;
 }): BillingScope {
   const traces: MeteredModelCallTrace[] = [];
   const sequences = new Map<string, number>();
@@ -80,7 +89,7 @@ export function openBillingScope(input: {
         undefined,
       ),
     remainingCredits: () => remaining,
-    async settle({ options, usage }) {
+    async settle({ options, usage, observation }) {
       const seq = nextSeq(options.operation, options.scopeKey);
       const idempotencyKey = deriveIdempotencyKey({
         explicitKey: options.idempotencyKey,
@@ -98,9 +107,11 @@ export function openBillingScope(input: {
         billing: input.billing,
         options,
         usage,
+        observation,
         idempotencyKey,
         referenceId,
         meterUsage: input.meterUsage,
+        scheduleReconciliation: input.scheduleReconciliation,
       });
 
       if (trace) {

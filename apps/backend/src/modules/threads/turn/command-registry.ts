@@ -30,6 +30,8 @@ export type ResolvedCommandWorkflow = {
   kind: "workflow" | "skill_workflow" | "tool_workflow";
   renderedPrompt: string;
   defaultTools: string[];
+  initialToolPolicy?: CapabilityCommandWorkflow["initialToolPolicy"];
+  toolPolicy?: CapabilityCommandWorkflow["toolPolicy"];
   permissionOverrides: Record<string, ToolPermission>;
   successCriteria: CommandSuccessCriteria;
   execution: "agent" | "direct";
@@ -54,6 +56,24 @@ function normalizeSuccessCriteria(
     kind: "artifact",
     artifactType: criteria.artifactType,
     toolName: criteria.toolName,
+  };
+}
+
+function resolvedToolPolicyFields(workflow: CapabilityCommandWorkflow) {
+  return {
+    ...(workflow.initialToolPolicy
+      ? { initialToolPolicy: workflow.initialToolPolicy }
+      : {}),
+    ...(workflow.toolPolicy
+      ? {
+          toolPolicy: {
+            ...(workflow.toolPolicy.allow
+              ? { allow: [...workflow.toolPolicy.allow] }
+              : {}),
+            deny: [...workflow.toolPolicy.deny],
+          },
+        }
+      : {}),
   };
 }
 
@@ -104,6 +124,7 @@ export function renderToolCommandWorkflow(input: {
       kind: "workflow",
       renderedPrompt,
       defaultTools: [],
+      ...resolvedToolPolicyFields(workflow),
       permissionOverrides: {},
       successCriteria: { kind: "none" },
       execution: workflow.execution,
@@ -135,6 +156,7 @@ export function renderToolCommandWorkflow(input: {
       workflow.defaultTools.length > 0
         ? workflow.defaultTools
         : [input.toolName],
+    ...resolvedToolPolicyFields(workflow),
     permissionOverrides: workflow.permissionOverrides,
     successCriteria,
     execution: workflow.execution,
@@ -173,6 +195,7 @@ export function renderSkillCommandWorkflow(input: {
       kind: "workflow",
       renderedPrompt,
       defaultTools: [],
+      ...resolvedToolPolicyFields(workflow),
       permissionOverrides: {},
       successCriteria: { kind: "none" },
       execution: workflow.execution,
@@ -200,6 +223,7 @@ export function renderSkillCommandWorkflow(input: {
     kind: "skill_workflow",
     renderedPrompt,
     defaultTools: workflow.defaultTools,
+    ...resolvedToolPolicyFields(workflow),
     permissionOverrides: workflow.permissionOverrides,
     successCriteria,
     execution: workflow.execution,

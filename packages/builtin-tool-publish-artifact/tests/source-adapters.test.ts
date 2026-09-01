@@ -40,6 +40,32 @@ test("sandbox_path source adapter reads bytes from sandbox service", async () =>
   assert.equal(downloadCurrentFile.mock.calls[0]?.[0].sandboxPath, "/workspace/deck.pptx");
 });
 
+test("sandbox_path source adapter forwards the host invocation signal", async () => {
+  const controller = new AbortController();
+  const downloadCurrentFile = vi
+    .fn()
+    .mockResolvedValue(Buffer.from("bytes"));
+  const adapter = adapterForSource({
+    kind: "sandbox_path",
+    path: "/workspace/deck.pptx",
+  });
+  assert.ok(adapter);
+
+  await adapter.read({
+    publishInput: validInput({
+      kind: "sandbox_path",
+      path: "/workspace/deck.pptx",
+    }),
+    services: { sandbox: { downloadCurrentFile } },
+    signal: controller.signal,
+  });
+
+  assert.equal(
+    downloadCurrentFile.mock.calls[0]?.[0].signal,
+    controller.signal,
+  );
+});
+
 test("sandbox_path source adapter rejects paths outside allowed roots", async () => {
   const adapter = adapterForSource({
     kind: "sandbox_path",

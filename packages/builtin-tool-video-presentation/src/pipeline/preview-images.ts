@@ -1,56 +1,38 @@
 import type { DeliverablePreviewImage } from "@sourceweft/capability-contracts";
-import type { VideoPresentationProjectPayload } from "@sourceweft/contracts/video-presentation";
+import type { VideoPresentationRenderableProject } from "@sourceweft/contracts/video-presentation";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
-import type { VideoPipelineDeps } from "./deps";
-import { imageExtensionForMimeType, safeStorageSegment } from "./util";
+import { sanitizeVideoPresentationFileBase } from "../video-presentation-files";
 
-/** Stills come out of the sandbox as JPEG (see project-code render-stills). */
-const STILL_MIME_TYPE = "image/jpeg";
+const STILL_MIME_TYPE = "image/jpeg" as const;
 
-/**
- * Guard against a pathological still blowing up the artifact row. The renderer
- * emits ~100-300KB frames at 1920x1080/q80, so this only trips on corruption.
- */
-const MAX_COVER_IMAGE_BYTES = ARTIFACT_LIMITS.previewImageBytes;
+export type VideoPresentationCoverFile = {
+  slideNumber: number;
+  data: Uint8Array;
+  contentType: typeof STILL_MIME_TYPE;
+  fileName: string;
+  metadata: DeliverablePreviewImage["metadata"];
+};
 
-/**
- * Upload the lowest-numbered QA still as the artifact thumbnail, mirroring the
- * pptx convention of previewing slide 1. Returns null when no usable still
- * exists — stills are best-effort in the sandbox, so a missing thumbnail is a
- * normal outcome, not a failure.
- */
-export async function uploadCoverImage(input: {
-  artifactId: string;
-  deps: VideoPipelineDeps;
-  payload: VideoPresentationProjectPayload;
+/** Select the lowest-numbered accepted runtime sample as the required cover. */
+export function buildCoverFile(input: {
+  payload: Pick<VideoPresentationRenderableProject, "project">;
   stills: ReadonlyArray<{ slideNumber: number; data: Uint8Array }>;
-  workspaceId: string;
-}): Promise<DeliverablePreviewImage | null> {
+}): VideoPresentationCoverFile | null {
   const cover = [...input.stills]
     .sort((left, right) => left.slideNumber - right.slideNumber)
     .find(
       (still) =>
         still.data.byteLength > 0 &&
-        still.data.byteLength <= MAX_COVER_IMAGE_BYTES,
+        still.data.byteLength <= ARTIFACT_LIMITS.previewImageBytes,
     );
-  if (!cover) {
-    return null;
-  }
+  if (!cover) return null;
 
-  const fileName = `${safeStorageSegment(input.payload.project.title)}-cover${imageExtensionForMimeType(STILL_MIME_TYPE)}`;
-  const storageKey = input.deps.storage.buildArtifactStorageKey({
-    artifactId: input.artifactId,
-    fileName,
-    workspaceId: input.workspaceId,
-  });
-  await input.deps.storage.upload({
-    body: cover.data,
-    contentType: STILL_MIME_TYPE,
-    key: storageKey,
-  });
-
+  const fileName = `${sanitizeVideoPresentationFileBase(input.payload.project.title)}-cover.jpg`;
   return {
-    storageKey,
+    slideNumber: cover.slideNumber,
+    data: cover.data,
+    contentType: STILL_MIME_TYPE,
+    fileName,
     metadata: {
       altText: `Slide ${cover.slideNumber} of ${input.payload.project.title}`,
       byteLength: cover.data.byteLength,

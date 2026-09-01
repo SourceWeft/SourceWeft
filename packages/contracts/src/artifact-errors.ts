@@ -1,7 +1,7 @@
 /**
  * One error vocabulary for everything that writes an artifact.
  *
- * Four independent schemes grew up around the write path, each answering the
+ * Three independent schemes grew up around the write path, each answering the
  * same two questions ("whose fault is it?" and "should the caller try again?")
  * in its own way:
  *
@@ -9,7 +9,6 @@
  * | ------------------------------- | ----------------------------------------------- |
  * | `ARTIFACT_PUBLISH_ERROR_CODES`  | `builtin-tool-publish-artifact/src/schemas.ts`   |
  * | bare `Error`                    | `builtin-tool-generate-image/src/tool-runtime.ts`|
- * | `VIDEO_PRESENTATION_ERROR_CODES`| `contracts/src/video-presentation.ts`            |
  * | `DELIVERABLE_JOB_FAILED_CODE`   | `backend/src/worker/deliverable-host/…`          |
  *
  * The codes themselves are a wire contract — clients and stored artifact rows
@@ -82,7 +81,7 @@ export type ArtifactWriteErrorCode =
 /* -------------------------------------------------------------------------- */
 
 /**
- * The union of the four legacy schemes, each assigned its one category.
+ * The union of the three existing generic schemes, each assigned its category.
  *
  * The `publish-artifact` rows reproduce `isRecoverableArtifactPublishErrorCode`
  * exactly: the three it called unrecoverable are the three classed
@@ -123,14 +122,6 @@ export const ARTIFACT_ERROR_CATEGORY_BY_CODE: Readonly<
   ARTIFACT_STATE_CONFLICT: "conflict",
   ARTIFACT_NOT_FOUND: "conflict",
 
-  // ── video-presentation pipeline ──────────────────────────────────────────
-  VIDEO_PRESENTATION_INVALID_PAYLOAD: "validation",
-  VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE: "infrastructure",
-  VIDEO_PRESENTATION_SANDBOX_EXECUTION_FAILED: "infrastructure",
-  VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED: "infrastructure",
-  VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED: "infrastructure",
-  VIDEO_PRESENTATION_GENERATION_FAILED: "infrastructure",
-
   // ── deliverable job boundary ─────────────────────────────────────────────
   DELIVERABLE_JOB_FAILED: "infrastructure",
 };
@@ -167,7 +158,7 @@ export type ArtifactErrorInit = {
 export class ArtifactError extends Error {
   readonly code: string;
   readonly category: ArtifactErrorCategory;
-  /** Derived from `category`, never set independently — that is how the four schemes drifted. */
+  /** Derived from `category`, never set independently across call sites. */
   readonly recoverable: boolean;
   readonly details?: string;
 
@@ -188,7 +179,7 @@ export class ArtifactError extends Error {
 /**
  * Structural check, never `instanceof`: capability packages may be loaded from
  * a separate module graph, so an error crossing that boundary is recognized by
- * its shape — the same reason `isVideoPresentationSandboxError` exists.
+ * its shape so errors survive package and worker module boundaries.
  */
 export function isArtifactError(error: unknown): error is ArtifactError {
   return (

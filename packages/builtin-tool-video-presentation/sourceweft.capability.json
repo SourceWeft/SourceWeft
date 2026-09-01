@@ -2,168 +2,49 @@
   "schemaVersion": 1,
   "id": "sourceweft/video-presentation-tool",
   "kind": "tool",
-  "name": "Generate Video Presentation",
-  "version": "0.1.0",
+  "name": "Video Presentation",
+  "version": "1.0.0",
   "entry": "./src/index.ts",
   "tools": [
     {
-      "id": "generate_video_presentation",
-      "title": "Generate Video Presentation",
-      "description": "Generate a persisted SourceWeft narrated video presentation artifact.",
-      "inputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-          "brief": {
-            "type": "string",
-            "description": "Short description of the video presentation to generate."
-          },
-          "title": { "type": "string" },
-          "sourceDigest": {
-            "type": "string",
-            "description": "Optional source summary or source material."
-          },
-          "audience": { "type": "string" },
-          "tone": { "type": "string" },
-          "language": { "type": "string" },
-          "durationTarget": {
-            "type": "string",
-            "enum": ["short", "medium", "long"]
-          },
-          "stylePreset": {
-            "type": "string",
-            "enum": ["cinematic", "editorial", "executive", "technical", "product"]
-          },
-          "renderProfile": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "stylePreset": {
-                "type": "string",
-                "enum": ["cinematic", "editorial", "executive", "technical", "product"]
-              },
-              "visualDensity": {
-                "type": "string",
-                "enum": ["light", "balanced", "dense"]
-              },
-              "durationTarget": {
-                "type": "string",
-                "enum": ["short", "medium", "long"]
-              },
-              "language": { "type": "string" }
-            }
-          },
-          "slideCount": {
-            "type": "number",
-            "description": "Target number of planned scenes/slides, 1-12."
-          },
-          "visualDirection": {
-            "type": "string",
-            "description": "High-level visual art direction for the Remotion project."
-          },
-          "brand": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "colors": {
-                "type": "array",
-                "items": { "type": "string" }
-              },
-              "typography": { "type": "string" },
-              "logoAssetId": { "type": "string" }
-            }
-          },
-          "motion": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "pacing": {
-                "type": "string",
-                "enum": ["calm", "dynamic", "energetic"]
-              },
-              "transitionStyle": { "type": "string" },
-              "animationIntensity": {
-                "type": "string",
-                "enum": ["subtle", "balanced", "bold"]
-              }
-            }
-          },
-          "canvas": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "width": { "type": "number" },
-              "height": { "type": "number" },
-              "fps": { "type": "number" }
-            }
-          },
-          "narrationEnabled": { "type": "boolean" },
-          "narration": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "enabled": { "type": "boolean" }
-            }
-          },
-          "assets": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true,
-              "properties": {
-                "assetId": { "type": "string" },
-                "role": { "type": "string" }
-              }
-            }
-          },
-          "regeneration": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "artifactId": { "type": "string" },
-              "instruction": { "type": "string" },
-              "slideNumbers": {
-                "type": "array",
-                "items": { "type": "number" }
-              }
-            }
-          }
-        }
-      },
-      "outputSchema": {
-        "type": "object"
-      },
-      "risk": "write",
-      "options": [
-        {
-          "id": "narrationEnabled",
-          "title": "Narration",
-          "description": "Generate narration audio for the video presentation by default.",
-          "valueType": "boolean",
-          "defaultValue": true,
-          "target": {
-            "path": "narration.enabled"
-          },
-          "values": []
-        }
-      ],
-      "runtime": {
-        "execution": "agent",
-        "promptIntro": "Create a narrated video presentation artifact from the user's request. Call generate_video_presentation with a concise brief-first payload and optional slideCount/visualDirection/brand/motion/canvas constraints; do not pass a storyboard, blueprint, slide list, scene code, TSX, or HTML. The worker plans and builds the Remotion project internally. The command is complete only when the worker-built video_presentation project is ready; do not describe it as server-side MP4 rendering or a completed MP4.",
-        "tools": ["generate_video_presentation"],
-        "permissionOverrides": {
-          "generate_video_presentation": "allow"
-        },
-        "output": {
-          "kind": "artifact",
-          "artifactType": "video_presentation",
-          "publisherTool": "generate_video_presentation"
-        },
-        "pipeline": {
-          "jobName": "video-presentation-generate",
-          "queue": "deliverables"
-        }
-      }
+      "id": "load_video_presentation",
+      "title": "Load Video Presentation",
+      "description": "Load an authorized current video project for an exact edit.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object" },
+      "risk": "write"
+    },
+    {
+      "id": "generate_video_assets",
+      "title": "Generate Video Assets",
+      "description": "Generate and stage a bounded batch of video visual assets.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object" },
+      "risk": "write"
+    },
+    {
+      "id": "generate_video_narration",
+      "title": "Generate Video Narration",
+      "description": "Generate, measure, persist, and stage narration tracks.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object" },
+      "risk": "write"
+    },
+    {
+      "id": "validate_video_presentation",
+      "title": "Validate Video Presentation",
+      "description": "Validate the exact draft and render its required cover and final MP4 in the trusted sandbox.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object" },
+      "risk": "write"
+    },
+    {
+      "id": "publish_video_presentation",
+      "title": "Publish Video Presentation",
+      "description": "Atomically publish a protected, validated video presentation version.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object" },
+      "risk": "write"
     }
   ]
 }

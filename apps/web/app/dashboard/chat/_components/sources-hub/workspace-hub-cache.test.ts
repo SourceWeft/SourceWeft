@@ -98,8 +98,12 @@ describe("workspace-hub-cache", () => {
     );
     expect(retrieved).toEqual(sampleValue);
     expect(retrieved).not.toBe(sampleValue);
-    expect(cache.getCachedWorkspaceHubValue("connectors", "workspace-1")).toBeNull();
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-2")).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("connectors", "workspace-1"),
+    ).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-2"),
+    ).toBeNull();
   });
 
   it("hydrates from sessionStorage after module reload", async () => {
@@ -108,9 +112,9 @@ describe("workspace-hub-cache", () => {
 
     const afterReload = await loadCacheModule();
 
-    expect(afterReload.getCachedWorkspaceHubValue("mcp", "workspace-1")).toEqual(
-      sampleValue,
-    );
+    expect(
+      afterReload.getCachedWorkspaceHubValue("mcp", "workspace-1"),
+    ).toEqual(sampleValue);
   });
 
   it("treats expired cache entries as misses and cleans them up", async () => {
@@ -129,7 +133,9 @@ describe("workspace-hub-cache", () => {
       JSON.stringify(Date.now() - (cache.WORKSPACE_HUB_CACHE_TTL_MS + 1_000)),
     );
 
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-1")).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-1"),
+    ).toBeNull();
     expect(sessionStorageMock.getItem(dataKey)).toBeNull();
     expect(sessionStorageMock.getItem(timestampKey)).toBeNull();
   });
@@ -141,10 +147,12 @@ describe("workspace-hub-cache", () => {
 
     cache.clearWorkspaceHubCache("artifacts", "workspace-1");
 
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-1")).toBeNull();
-    expect(cache.getCachedWorkspaceHubValue("connectors", "workspace-1")).toEqual(
-      sampleValue,
-    );
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-1"),
+    ).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("connectors", "workspace-1"),
+    ).toEqual(sampleValue);
   });
 
   it("clears all entries in one bucket", async () => {
@@ -155,9 +163,15 @@ describe("workspace-hub-cache", () => {
 
     cache.clearWorkspaceHubCache("artifacts");
 
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-1")).toBeNull();
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-2")).toBeNull();
-    expect(cache.getCachedWorkspaceHubValue("mcp", "workspace-1")).toEqual(sampleValue);
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-1"),
+    ).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-2"),
+    ).toBeNull();
+    expect(cache.getCachedWorkspaceHubValue("mcp", "workspace-1")).toEqual(
+      sampleValue,
+    );
   });
 
   it("falls back gracefully when sessionStorage throws", async () => {
@@ -167,12 +181,14 @@ describe("workspace-hub-cache", () => {
     expect(() =>
       cache.setCachedWorkspaceHubValue("artifacts", "workspace-1", sampleValue),
     ).not.toThrow();
-    expect(cache.getCachedWorkspaceHubValue("artifacts", "workspace-1")).toEqual(
-      sampleValue,
-    );
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-1"),
+    ).toEqual(sampleValue);
 
     const freshCache = await loadCacheModule();
-    expect(freshCache.getCachedWorkspaceHubValue("artifacts", "workspace-1")).toBeNull();
+    expect(
+      freshCache.getCachedWorkspaceHubValue("artifacts", "workspace-1"),
+    ).toBeNull();
     expect(() => freshCache.clearWorkspaceHubCache()).not.toThrow();
   });
 });

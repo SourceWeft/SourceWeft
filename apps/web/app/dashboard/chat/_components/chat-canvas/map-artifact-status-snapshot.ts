@@ -47,6 +47,7 @@ export function mapArtifactStatusSnapshot(
     errorCode: artifact.errorCode,
     errorMessage: artifact.errorMessage,
     id: artifact.id,
+    artifactVersionId: artifact.artifactVersionId,
     payloadJson: artifact.payloadJson,
     previewMetadataJson: artifact.previewMetadataJson,
     previewStorageKey: artifact.previewStorageKey,

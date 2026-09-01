@@ -94,7 +94,11 @@ test("DeepInfra rerank preserves inference_status cost", async () => {
 
   assert.equal(result.usage?.inputTokens, 89);
   assert.equal(result.usage?.providerCostUsd, 0.000089);
-  assert.equal(result.usage?.providerCostSource, "inference_status.cost");
+  assert.equal(result.usage?.providerCostSource, "provider_inline");
+  assert.equal(
+    result.usage?.providerCostSourcePath,
+    "provider:deepinfra.inference_status.cost",
+  );
 });
 
 test("DeepInfra embeddings reject base64 encoding format", async () => {
@@ -149,7 +153,9 @@ test("embeddings.embedBatch normalizes LangChain embeddings output", async () =>
     modelRoutes: {
       "embed-default": {
         strategy: "priority",
-        targets: [{ provider: "gemini", model: "text-embedding-004", priority: 1 }],
+        targets: [
+          { provider: "gemini", model: "text-embedding-004", priority: 1 },
+        ],
       },
     },
     langchainFactories: {
@@ -264,15 +270,23 @@ test("embeddings.embed emits generation observation events", async () => {
     modelRoutes: {
       "embed-default": {
         strategy: "priority",
-        targets: [{ provider: "openai", model: "text-embedding-3-small", priority: 1 }],
+        targets: [
+          { provider: "openai", model: "text-embedding-3-small", priority: 1 },
+        ],
       },
     },
     observeSink: {
       onGenerationStart(event) {
-        events.push({ type: "start", event: event as unknown as Record<string, unknown> });
+        events.push({
+          type: "start",
+          event: event as unknown as Record<string, unknown>,
+        });
       },
       onGenerationEnd(event) {
-        events.push({ type: "end", event: event as unknown as Record<string, unknown> });
+        events.push({
+          type: "end",
+          event: event as unknown as Record<string, unknown>,
+        });
       },
     },
     langchainFactories: {
@@ -300,7 +314,10 @@ test("embeddings.embed emits generation observation events", async () => {
   assert.equal(events[0]?.event.operation, "embeddings.embed");
   assert.equal(events[0]?.event.provider, "openai");
   assert.equal(events[1]?.event.spanId, events[0]?.event.spanId);
-  assert.deepEqual((events[1]?.event.output as Record<string, unknown>).dimensions, 3);
+  assert.deepEqual(
+    (events[1]?.event.output as Record<string, unknown>).dimensions,
+    3,
+  );
 });
 
 test("embeddings.embed ignores generation observation failures", async () => {
@@ -317,7 +334,9 @@ test("embeddings.embed ignores generation observation failures", async () => {
     modelRoutes: {
       "embed-default": {
         strategy: "priority",
-        targets: [{ provider: "openai", model: "text-embedding-3-small", priority: 1 }],
+        targets: [
+          { provider: "openai", model: "text-embedding-3-small", priority: 1 },
+        ],
       },
     },
     logger: {
@@ -381,7 +400,13 @@ test("rerank.rank supports SiliconflowCN provider", async () => {
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "SiliconflowCN", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
+        targets: [
+          {
+            provider: "SiliconflowCN",
+            model: "BAAI/bge-reranker-v2-m3",
+            priority: 1,
+          },
+        ],
       },
     },
   });
@@ -415,15 +440,27 @@ test("rerank.rank emits provider-wire generation observation events", async () =
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "SiliconflowCN", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
+        targets: [
+          {
+            provider: "SiliconflowCN",
+            model: "BAAI/bge-reranker-v2-m3",
+            priority: 1,
+          },
+        ],
       },
     },
     observeSink: {
       onGenerationStart(event) {
-        events.push({ type: "start", event: event as unknown as Record<string, unknown> });
+        events.push({
+          type: "start",
+          event: event as unknown as Record<string, unknown>,
+        });
       },
       onGenerationEnd(event) {
-        events.push({ type: "end", event: event as unknown as Record<string, unknown> });
+        events.push({
+          type: "end",
+          event: event as unknown as Record<string, unknown>,
+        });
       },
     },
   });
@@ -441,7 +478,10 @@ test("rerank.rank emits provider-wire generation observation events", async () =
   assert.equal(events.length, 2);
   assert.equal(events[0]?.event.operation, "rerank.rank");
   assert.equal(events[1]?.event.rawCaptureMode, "provider_wire");
-  assert.equal((events[1]?.event.output as Record<string, unknown>).resultCount, 1);
+  assert.equal(
+    (events[1]?.event.output as Record<string, unknown>).resultCount,
+    1,
+  );
 });
 
 test("rerank.rank supports DeepInfra inference endpoint", async () => {
@@ -464,7 +504,13 @@ test("rerank.rank supports DeepInfra inference endpoint", async () => {
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B", priority: 1 }],
+        targets: [
+          {
+            provider: "deepinfra",
+            model: "Qwen/Qwen3-Reranker-4B",
+            priority: 1,
+          },
+        ],
       },
     },
   });
@@ -482,7 +528,8 @@ test("rerank.rank supports DeepInfra inference endpoint", async () => {
   );
   assert.equal(requests[0]?.init.headers instanceof Headers, false);
   assert.equal(
-    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    (requests[0]?.init.headers as Record<string, string> | undefined)
+      ?.Authorization,
     "Bearer deepinfra-key",
   );
   assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
@@ -516,7 +563,9 @@ test("openai-compatible rerank supports custom API key headers", async () => {
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "openai-proxy", model: "rerank-model", priority: 1 }],
+        targets: [
+          { provider: "openai-proxy", model: "rerank-model", priority: 1 },
+        ],
       },
     },
   });
@@ -535,7 +584,8 @@ test("openai-compatible rerank supports custom API key headers", async () => {
     "proxy-token",
   );
   assert.equal(
-    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    (requests[0]?.init.headers as Record<string, string> | undefined)
+      ?.Authorization,
     undefined,
   );
 });

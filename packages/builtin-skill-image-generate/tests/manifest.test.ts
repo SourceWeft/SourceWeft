@@ -18,4 +18,5 @@ test("sourceweft.capability.json parses as a valid image-generate skill manifest
 
   assert.equal(manifest.id, "sourceweft/image-generate");
   assert.equal(skill?.id, "image-generate");
+  assert.equal(skill?.defaultEnabled, true);
 });

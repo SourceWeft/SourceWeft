@@ -164,9 +164,9 @@ test("only the publishing tool produces a published-deck card", () => {
   assert.equal(
     resolve(
       toolCall({
-        tool: "generate_video_presentation",
+        tool: "unrelated_artifact_tool",
         output: {
-          type: "video_presentation_artifact_result",
+          type: "unrelated_artifact_result",
           artifact_id: "artifact-1",
           artifact_url:
             "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
@@ -217,7 +217,8 @@ test("resolves published sandbox presentation artifact output", () => {
       fileName: "费曼学习法介绍.pptx",
       generationMode: "editable_native",
       htmlUrl: null,
-      pptxUrl: "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      pptxUrl:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
       previewImageUrl:
         "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
       previewRenderer: null,

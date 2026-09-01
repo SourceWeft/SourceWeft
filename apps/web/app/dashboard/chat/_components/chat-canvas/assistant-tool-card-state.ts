@@ -4,12 +4,7 @@
  * TOOL_STATUS_LABELS so renaming a label can never silently change behavior.
  */
 export type ToolStatusKey =
-  | "running"
-  | "generating"
-  | "needs-approval"
-  | "failed"
-  | "rejected"
-  | "done";
+  "running" | "generating" | "needs-approval" | "failed" | "rejected" | "done";
 
 export const TOOL_STATUS_LABELS: Record<ToolStatusKey, string> = {
   running: "Running",

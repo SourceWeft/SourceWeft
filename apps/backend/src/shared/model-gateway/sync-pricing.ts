@@ -18,9 +18,9 @@ function toRouteKey(kind: string, alias: string) {
 /**
  * Only the primary target (lowest priority number) is returned per alias.
  *
- * An alias is priced once, at the alias, because that is what the user is
- * charged regardless of which target serves the request. Feeding every target
- * into the LiteLLM auto-match would make a multi-target alias resolve
+ * An alias carries one explicit fallback price for targets that cannot report
+ * actual cost. Feeding every target into the LiteLLM auto-match would make a
+ * multi-target alias resolve
  * `ambiguous`, which downgrades it to `price_source: "unknown"` and quietly
  * bills every call at the one-credit floor. Deriving from a single, stable
  * target keeps the alias priced or explicitly unmatched — never accidentally
@@ -146,8 +146,7 @@ function isAutoManagedPriceSource(source: unknown): boolean {
 
 function hasAnyFinitePriceValue(
   pricing:
-    | Partial<Record<(typeof PRICING_VALUE_KEYS)[number], unknown>>
-    | undefined,
+    Partial<Record<(typeof PRICING_VALUE_KEYS)[number], unknown>> | undefined,
 ): boolean {
   if (!pricing) {
     return false;
@@ -282,11 +281,15 @@ function pricingConfigFromInfo(
     input_cost_per_token: normalizePriceNumber(p?.inputPerToken),
     output_cost_per_token: normalizePriceNumber(p?.outputPerToken),
     cache_read_input_token_cost: normalizePriceNumber(p?.cacheReadPerToken),
-    cache_creation_input_token_cost: normalizePriceNumber(p?.cacheWritePerToken),
+    cache_creation_input_token_cost: normalizePriceNumber(
+      p?.cacheWritePerToken,
+    ),
     output_cost_per_reasoning_token: normalizePriceNumber(
       p?.reasoningOutputPerToken,
     ),
-    input_cost_per_image_token: normalizePriceNumber(p?.inputImageTokenPerToken),
+    input_cost_per_image_token: normalizePriceNumber(
+      p?.inputImageTokenPerToken,
+    ),
     output_cost_per_image_token: normalizePriceNumber(
       p?.outputImageTokenPerToken,
     ),

@@ -172,10 +172,7 @@ describe("source-library-cache", () => {
         sources: sampleSources,
       }),
     );
-    sessionStorageMock.setItem(
-      timestampKey,
-      JSON.stringify(expiredTimestamp),
-    );
+    sessionStorageMock.setItem(timestampKey, JSON.stringify(expiredTimestamp));
 
     expect(cache.getCachedWorkspaceSources("workspace-1")).toBeNull();
     expect(sessionStorageMock.getItem(dataKey)).toBeNull();
@@ -222,9 +219,7 @@ describe("source-library-cache", () => {
     for (let index = 0; index < sessionStorageMock.length; index += 1) {
       const key = sessionStorageMock.key(index);
       expect(key).not.toMatch(new RegExp(`^${cache.CACHE_KEY_PREFIX}:`));
-      expect(key).not.toMatch(
-        new RegExp(`^${cache.CACHE_TIMESTAMP_PREFIX}:`),
-      );
+      expect(key).not.toMatch(new RegExp(`^${cache.CACHE_TIMESTAMP_PREFIX}:`));
     }
   });
 

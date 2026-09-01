@@ -174,6 +174,7 @@ export const skillManifestJsonSchema = z.object({
   version: z.string(),
   description: z.string(),
   visibility: z.enum(["public", "restricted", "workspace", "team"]),
+  defaultEnabled: z.boolean().optional(),
   categories: z.array(z.string()),
   capabilities: z
     .object({

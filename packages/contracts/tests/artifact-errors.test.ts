@@ -21,14 +21,14 @@ import {
  *    rows but must never rename one. The explicit list below is what a rename
  *    would have to walk past.
  * 2. `recoverable` is derived, never restated. That is the drift that produced
- *    four schemes with four answers to the same question.
+ *    separate schemes with conflicting answers to the same question.
  */
 
 /* ========================================================================== */
 /* 1. The wire contract                                                       */
 /* ========================================================================== */
 
-test("classification covers every code the four legacy schemes raised", () => {
+test("classification covers every code the generic artifact schemes raise", () => {
   const publishArtifactCodes = [
     "PUBLISH_INPUT_INVALID",
     "ARTIFACT_TYPE_UNSUPPORTED",
@@ -49,19 +49,7 @@ test("classification covers every code the four legacy schemes raised", () => {
     "SANDBOX_UNAVAILABLE",
     "PPTX_SOURCE_UNSUPPORTED",
   ];
-  const videoPresentationCodes = [
-    "VIDEO_PRESENTATION_INVALID_PAYLOAD",
-    "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE",
-    "VIDEO_PRESENTATION_SANDBOX_EXECUTION_FAILED",
-    "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED",
-    "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
-    "VIDEO_PRESENTATION_GENERATION_FAILED",
-  ];
-  for (const code of [
-    ...publishArtifactCodes,
-    ...videoPresentationCodes,
-    "DELIVERABLE_JOB_FAILED",
-  ]) {
+  for (const code of [...publishArtifactCodes, "DELIVERABLE_JOB_FAILED"]) {
     assert.ok(
       code in ARTIFACT_ERROR_CATEGORY_BY_CODE,
       `${code} lost its classification`,

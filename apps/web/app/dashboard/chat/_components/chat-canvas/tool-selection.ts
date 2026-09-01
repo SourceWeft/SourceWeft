@@ -148,9 +148,7 @@ export function buildChatToolsRequest(input: {
 
   return {
     skillIds,
-    ...(invokedSkillIds.length > 0
-      ? { invokedSkillIds }
-      : {}),
+    ...(invokedSkillIds.length > 0 ? { invokedSkillIds } : {}),
     ...entries,
     ...webAccessSelection,
   };

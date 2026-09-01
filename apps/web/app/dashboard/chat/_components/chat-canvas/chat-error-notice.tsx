@@ -17,6 +17,18 @@ export type ChatErrorNoticeProps = {
   className?: string;
 };
 
+export function formatChatErrorMessage(message: string, code?: string | null) {
+  const codePrefix = code ? `${code}:` : null;
+  const withoutCode =
+    codePrefix && message.startsWith(codePrefix)
+      ? message.slice(codePrefix.length).trimStart()
+      : message;
+  return withoutCode.replace(
+    /Provider returned invalid structured output(?: \(length=\d+, sha256=[a-f0-9]{64}\))?/giu,
+    "The model did not return valid structured content",
+  );
+}
+
 /**
  * The single, canonical error surface for the chat thread. Every red error
  * message in the conversation (run failure, tool failure, sandbox failure,
@@ -30,11 +42,7 @@ export function ChatErrorNotice({
   compact = false,
   className,
 }: ChatErrorNoticeProps) {
-  const codePrefix = code ? `${code}:` : null;
-  const displayMessage =
-    codePrefix && message.startsWith(codePrefix)
-      ? message.slice(codePrefix.length).trimStart()
-      : message;
+  const displayMessage = formatChatErrorMessage(message, code);
 
   return (
     <div

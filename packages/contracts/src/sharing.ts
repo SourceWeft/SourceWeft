@@ -65,6 +65,8 @@ export const publicSharedArtifactSchema = z.object({
   title: z.string().nullable(),
   /** Signed, time-limited URL to the artifact's primary bytes (or null). */
   fileUrl: z.string().nullable(),
+  /** Same immutable bytes with attachment disposition for explicit download. */
+  downloadUrl: z.string().nullable(),
   /**
    * Whether `fileUrl` renders inside the share page's sandboxed iframe (images,
    * text, PDF, JSON, media). False for office docs (e.g. `.pptx`) and other

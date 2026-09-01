@@ -50,7 +50,14 @@ export async function runWithTargetFailover<T>(input: {
   callerSignal?: AbortSignal;
   attempt: (target: ResolvedRequestTarget) => Promise<T>;
 }): Promise<T> {
-  const candidates = await resolveRequestCandidates(input.config, input.payload);
+  const resolvedCandidates = await resolveRequestCandidates(
+    input.config,
+    input.payload,
+  );
+  const candidates =
+    input.payload.fallbackPolicy === "none"
+      ? resolvedCandidates.slice(0, 1)
+      : resolvedCandidates;
   const attempts: TargetAttemptError[] = [];
 
   let index = 0;
