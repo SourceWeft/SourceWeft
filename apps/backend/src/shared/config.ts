@@ -532,22 +532,10 @@ export const config = {
       30 * 60 * 1000,
     ),
     agent: {
-      defaultContextLength: parsePositiveNumber(
-        process.env.AGENT_DEFAULT_CONTEXT_LENGTH,
-        32_768,
-      ),
-      maxReservedOutputTokens: parsePositiveNumber(
-        process.env.AGENT_MAX_RESERVED_OUTPUT_TOKENS,
-        8_192,
-      ),
-      maxGrepRecallTopK: parsePositiveNumber(
-        process.env.AGENT_MAX_GREP_RECALL_TOP_K,
-        300,
-      ),
-      maxReadOutputChars: parsePositiveNumber(
-        process.env.AGENT_MAX_READ_OUTPUT_CHARS,
-        80_000,
-      ),
+      defaultContextLength: 32_768,
+      maxReservedOutputTokens: 8_192,
+      maxGrepRecallTopK: 300,
+      maxReadOutputChars: 80_000,
       toolCallRunLimit: parsePositiveInteger(
         process.env.SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT,
         48,
@@ -704,14 +692,8 @@ export const config = {
       process.env.DOCUMENT_PARSE_PROVIDER,
       "pdf2markdown",
     ),
-    pureTextBitmapThreshold: parseNonNegativeNumber(
-      process.env.DOCUMENT_PARSE_PURE_TEXT_BITMAP_THRESHOLD,
-      0.05,
-    ),
-    pureTextMinCharsPerPage: parseNonNegativeNumber(
-      process.env.DOCUMENT_PARSE_PURE_TEXT_MIN_CHARS_PER_PAGE,
-      80,
-    ),
+    pureTextBitmapThreshold: 0.05,
+    pureTextMinCharsPerPage: 80,
     // Configurable so shipping a new parser version does not require a code
     // change to become the default for newly ingested sources.
     defaultParserVersion:
