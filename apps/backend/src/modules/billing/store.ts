@@ -219,6 +219,22 @@ function parseDateOrUndefined(value: string | null | undefined) {
   return new Date(value);
 }
 
+/**
+ * Persistence floor of the billing module: the Postgres implementation of the
+ * `BillingStore` port.
+ *
+ * Everything above — ledger primitives applied by `account-service`, the
+ * purchase flows, the settle funnel — reaches rows only through the port
+ * declared in `store-port.ts`; tests substitute a memory store against the same
+ * contract. This file is row mapping and SQL, nothing else: no billing rule
+ * lives here, no method decides whether a balance may move. The two behaviors
+ * it does own are transactional: `runInTransaction` hands out the client that
+ * scopes each locked operation (a fresh connection — it does not nest), and the
+ * `FOR UPDATE` readers implement the per-member row locking the services'
+ * admission/settle invariants rely on. Ledger appends are inserts of
+ * already-built entries; uniqueness of member-scoped idempotency keys is
+ * enforced by the table's indexes.
+ */
 export class PostgresBillingStore implements BillingStore {
   async runInTransaction<T>(
     fn: (client: PoolClient) => Promise<T>,

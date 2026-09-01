@@ -6,6 +6,7 @@ import type {
 } from "@sourceweft/contracts";
 import type { PlanFamily } from "@sourceweft/credits-core";
 import { BillingError } from "./errors";
+import { getAvailablePages } from "./page-ledger";
 import type {
   BillingAccountState,
   BillingRuntimeConfig,
@@ -172,41 +173,6 @@ export function getTotalCreditsBalance(account: BillingAccountState) {
 export function getAvailableCredits(account: BillingAccountState) {
   const available = getTotalCreditsBalance(account) - account.creditsReserved;
   return Math.max(available, 0);
-}
-
-export function spendPages(
-  account: BillingAccountState,
-  pagesToConsume: number,
-) {
-  let remaining = pagesToConsume;
-
-  if (account.monthlyPagesBalance > 0) {
-    const fromMonthly = Math.min(account.monthlyPagesBalance, remaining);
-    account.monthlyPagesBalance -= fromMonthly;
-    remaining -= fromMonthly;
-  }
-
-  if (remaining > 0 && account.addOnPagesBalance > 0) {
-    const fromAddOn = Math.min(account.addOnPagesBalance, remaining);
-    account.addOnPagesBalance -= fromAddOn;
-    remaining -= fromAddOn;
-  }
-
-  if (remaining > 0) {
-    throw new BillingError(
-      "INSUFFICIENT_PAGES_INTERNAL",
-      500,
-      "Unable to allocate page buckets for consumption",
-    );
-  }
-}
-
-export function getTotalPagesBalance(account: BillingAccountState) {
-  return account.monthlyPagesBalance + account.addOnPagesBalance;
-}
-
-export function getAvailablePages(account: BillingAccountState) {
-  return Math.max(getTotalPagesBalance(account), 0);
 }
 
 export function toSummary(input: {

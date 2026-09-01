@@ -10,10 +10,17 @@ import {
   createOperationId,
   formatSignedLedgerDelta,
 } from "./ledger";
+import {
+  expireMonthlyPages,
+  getTotalPagesBalance,
+  grantMonthlyPages,
+  regrantMonthlyPages,
+  resetPageCycleCounters,
+  syncPageMirrorFields,
+} from "./page-ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
 import {
-  getTotalPagesBalance,
   getTotalCreditsBalance,
   normalizeTeamId,
   normalizeUserId,
@@ -64,6 +71,27 @@ function formatPlanName(planFamily: BillingAccountState["planFamily"]) {
     .join(" ");
 }
 
+/**
+ * Custodian of the per-member allocation rows — the ledger-primitive layer's
+ * transactional host.
+ *
+ * Every balance-bearing operation in the module enters through one of the
+ * locking wrappers here (`withLockedAccount`, `withLockedTeamAccounts`,
+ * `withRepresentativeTeamAccount`): they open the transaction, lock the
+ * (teamId,userId) row, lazily create it on a member's first touch, and sync the
+ * billing cycle before the caller's callback runs. Cycle lifecycle is owned
+ * here too — expiring the monthly buckets, regranting per-seat quota, realigning
+ * to provider periods, and refusing to self-renew a paid monthly cycle the
+ * provider has not confirmed (the renewal webhook is the source of truth).
+ *
+ * Balance arithmetic is delegated downward to the ledger primitives
+ * (`page-ledger` for pages, `service-helpers` for credits); every transition is
+ * recorded through `appendBillingLedger` in the same transaction. The one
+ * upward-plane read is `store.getSubscriptionByTeam`, consulted as the cycle
+ * authority for provider-billed accounts — this service never drives checkout,
+ * orders, or webhooks (`order-service`/`subscription-service` call down into
+ * it, never the reverse).
+ */
 export class BillingAccountService {
   constructor(
     private readonly store: BillingStore,
@@ -262,8 +290,7 @@ export class BillingAccountService {
     account.planFamily = nextPlanFamily;
     account.monthlyCreditsGrant = nextQuota.monthlyCreditsGrant;
     account.monthlyPagesGrant = nextQuota.monthlyPagesLimit;
-    account.pagesLimit = account.monthlyPagesGrant;
-    account.pagesUsed = account.pagesConsumedThisCycle;
+    syncPageMirrorFields(account);
     const operationId = createOperationId(
       "plan-change",
       account.teamId,
@@ -318,7 +345,7 @@ export class BillingAccountService {
 
     if (!metadata.suppressImmediateGrant && pageGrantDelta > 0) {
       const grantDelta = pageGrantDelta;
-      account.monthlyPagesBalance += grantDelta;
+      grantMonthlyPages(account, grantDelta);
 
       await appendBillingLedger({
         store: this.store,
@@ -419,8 +446,7 @@ export class BillingAccountService {
 
     account.monthlyCreditsGrant = nextQuota.monthlyCreditsGrant;
     account.monthlyPagesGrant = nextQuota.monthlyPagesLimit;
-    account.pagesLimit = account.monthlyPagesGrant;
-    account.pagesUsed = account.pagesConsumedThisCycle;
+    syncPageMirrorFields(account);
 
     if (nextQuota.monthlyCreditsGrant > previousMonthlyGrant) {
       const grantDelta = nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
@@ -452,7 +478,7 @@ export class BillingAccountService {
     if (nextQuota.monthlyPagesLimit > previousMonthlyPagesGrant) {
       const grantDelta =
         nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
-      account.monthlyPagesBalance += grantDelta;
+      grantMonthlyPages(account, grantDelta);
 
       await appendBillingLedger({
         store: this.store,
@@ -532,7 +558,7 @@ export class BillingAccountService {
       }
 
       if (this.runtimeConfig.pagesEnabled && previousMonthlyPagesBalance > 0) {
-        account.monthlyPagesBalance = 0;
+        expireMonthlyPages(account);
         await appendBillingLedger({
           store: this.store,
           client,
@@ -565,10 +591,7 @@ export class BillingAccountService {
     account.creditsReserved = 0;
     account.creditsConsumedThisCycle = 0;
     account.monthlyCreditsGrant = quota.monthlyCreditsGrant;
-    account.monthlyPagesGrant = quota.monthlyPagesLimit;
-    account.pagesConsumedThisCycle = 0;
-    account.pagesLimit = quota.monthlyPagesLimit;
-    account.pagesUsed = 0;
+    resetPageCycleCounters(account, quota.monthlyPagesLimit);
 
     if (input.grantNewMonthly) {
       await this.grantCycleBalancesLocked(account, client, quota, {
@@ -908,10 +931,7 @@ export class BillingAccountService {
     account.creditsReserved = 0;
     account.creditsConsumedThisCycle = 0;
     account.monthlyCreditsGrant = quota.monthlyCreditsGrant;
-    account.monthlyPagesGrant = quota.monthlyPagesLimit;
-    account.pagesConsumedThisCycle = 0;
-    account.pagesLimit = quota.monthlyPagesLimit;
-    account.pagesUsed = 0;
+    resetPageCycleCounters(account, quota.monthlyPagesLimit);
 
     await this.expireAndGrantCycleLocked(
       account,
@@ -965,7 +985,7 @@ export class BillingAccountService {
     }
 
     if (this.runtimeConfig.pagesEnabled) {
-      account.monthlyPagesBalance = 0;
+      expireMonthlyPages(account);
       if (previousMonthlyPagesBalance > 0) {
         await appendBillingLedger({
           store: this.store,
@@ -1039,7 +1059,7 @@ export class BillingAccountService {
     }
 
     if (this.runtimeConfig.pagesEnabled && previousMonthlyPagesBalance > 0) {
-      account.monthlyPagesBalance = 0;
+      expireMonthlyPages(account);
       await appendBillingLedger({
         store: this.store,
         client,
@@ -1126,7 +1146,7 @@ export class BillingAccountService {
     }
 
     if (this.runtimeConfig.pagesEnabled) {
-      account.monthlyPagesBalance = quota.monthlyPagesLimit;
+      regrantMonthlyPages(account, quota.monthlyPagesLimit);
       if (quota.monthlyPagesLimit > 0) {
         await appendBillingLedger({
           store: this.store,
@@ -1155,7 +1175,7 @@ export class BillingAccountService {
         });
       }
     } else {
-      account.monthlyPagesBalance = quota.monthlyPagesLimit;
+      regrantMonthlyPages(account, quota.monthlyPagesLimit);
     }
   }
 }

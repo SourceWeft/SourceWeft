@@ -25,22 +25,43 @@ import {
   formatSignedLedgerDelta,
   scopeMemberLedgerKey,
 } from "./ledger";
+import {
+  consumePages,
+  decidePageAdmission,
+  getAvailablePages,
+  getTotalPagesBalance,
+  grantAddOnPages,
+} from "./page-ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
 import {
   DEFAULT_CONSUME_FEATURE,
   DEFAULT_INGESTION_FEATURE,
   getAvailableCredits,
-  getAvailablePages,
-  getTotalPagesBalance,
   getTotalCreditsBalance,
   normalizeTeamId,
   refundConsumedCredits,
-  spendPages,
   spendCredits,
   toSummary,
 } from "./service-helpers";
 
+/**
+ * Settlement entry: the single funnel every metered consumption goes through.
+ *
+ * `meterConsume` (credits) and `meterIngestion` (pages) are the only places
+ * usage turns into ledger rows, and both keep the same shape: lock the acting
+ * member's own account row (谁问谁付), replay on idempotency key, run the
+ * capacity precheck, then settle — balance transition plus one ledger entry in
+ * the same transaction, only after the work succeeded (settle-on-success).
+ * Read models (`getSummary`/`getUsage`/`getLedger`) live here too because they
+ * present the same funnel's output.
+ *
+ * Dependencies point downward: locking and cycle lifecycle come from
+ * `account-service`; balance transitions from the ledger primitives
+ * (`page-ledger` for pages, `service-helpers` for credits); row writes from
+ * `ledger`/`store-port`. The one lateral hop is `createTopupCheckout`
+ * delegating to `order-service`, since a top-up starts as an order, not usage.
+ */
 export class BillingUsageService {
   constructor(
     private readonly store: BillingStore,
@@ -609,10 +630,7 @@ export class BillingUsageService {
           client,
         });
 
-        spendPages(account, pagesToConsume);
-        account.pagesConsumedThisCycle += pagesToConsume;
-        account.pagesLimit = account.monthlyPagesGrant;
-        account.pagesUsed = account.pagesConsumedThisCycle;
+        consumePages(account, pagesToConsume);
         account.updatedAt = new Date().toISOString();
         await this.store.updateAccount(account, client);
 
@@ -744,15 +762,18 @@ export class BillingUsageService {
   }) {
     const { account, pagesToConsume, feature, actorUserId, client } = input;
     const available = getAvailablePages(account);
+    const decision = decidePageAdmission({
+      availablePages: available,
+      pagesToConsume,
+      mode: this.runtimeConfig.mode,
+      enforceLimits: this.runtimeConfig.enforceLimits,
+    });
 
-    if (available >= pagesToConsume) {
+    if (decision.outcome === "admit") {
       return;
     }
 
-    if (
-      this.runtimeConfig.mode === "enforced" &&
-      this.runtimeConfig.enforceLimits
-    ) {
+    if (decision.outcome === "reject") {
       throw new BillingError(
         "PAGES_LIMIT_EXCEEDED",
         402,
@@ -767,8 +788,8 @@ export class BillingUsageService {
       );
     }
 
-    const missing = pagesToConsume - available;
-    account.addOnPagesBalance += missing;
+    const missing = decision.missingPages;
+    grantAddOnPages(account, missing);
 
     await appendBillingLedger({
       store: this.store,

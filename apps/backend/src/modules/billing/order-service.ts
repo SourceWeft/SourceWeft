@@ -39,10 +39,10 @@ import type {
   BillingRuntimeConfig,
   TeamSubscriptionSnapshot,
 } from "./types";
+import { getTotalPagesBalance } from "./page-ledger";
 import {
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
-  getTotalPagesBalance,
   getTotalCreditsBalance,
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
@@ -297,6 +297,27 @@ function createOrderBase(input: {
   };
 }
 
+/**
+ * Purchase-flow layer: money-for-entitlement orders, from checkout to
+ * fulfillment.
+ *
+ * Owns the `billing_orders` state machine for pricing checkouts (individual
+ * pro, team subscriptions — creating the paid team organization on first
+ * fulfillment) and credit/page top-ups: create or reuse an open order, send the
+ * buyer to the provider's checkout, then fulfill exactly once when payment
+ * confirms (webhook or reconcile retry). Fulfillment is idempotency-keyed on
+ * the order id, so a replayed webhook grants nothing twice.
+ *
+ * Dependencies point downward: rows lock via `account-service`, entries write
+ * via `ledger`, catalog/product resolution via `catalog`. This layer decides
+ * WHAT was purchased; the ledger primitives decide how balances move — the
+ * inline `addOn*Balance` bumps in `fulfillTopupOrderLocked` are the known
+ * exception where this flow still edits bucket state directly. It never meters
+ * usage; `usage-service` calls in for top-up checkout, not the reverse.
+ * Subscription fulfillment applies plan/cycle state member-by-member through
+ * `account-service`'s locked lifecycle methods, fanning out over the members
+ * inside the order transaction.
+ */
 export class BillingOrderService {
   constructor(
     private readonly store: BillingStore,

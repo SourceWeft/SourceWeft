@@ -26,13 +26,13 @@ import type {
   BillingRuntimeConfig,
   TeamSubscriptionSnapshot,
 } from "./types";
+import { getTotalPagesBalance } from "./page-ledger";
 import {
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
   getTotalCreditsBalance,
-  getTotalPagesBalance,
   resolvePlanFromSubscription,
   toSubscriptionSummary,
 } from "./service-helpers";
@@ -287,6 +287,26 @@ function calculateSeatPreview(input: {
   };
 }
 
+/**
+ * Purchase-flow layer: the provider-billed subscription's lifecycle after (and
+ * beside) checkout.
+ *
+ * Owns everything that keeps a team's local plan state faithful to the
+ * provider's subscription record: applying webhook snapshots (with stale/
+ * unusable-period rejection so a bad snapshot never rewrites a cycle), seat
+ * count changes (provider update first, local quota only after it succeeds,
+ * clawback on downgrade), seat-capacity gates for invites/joins, portal and
+ * cancellation. Team-wide changes fan out over every member row via
+ * `account-service.withLockedTeamAccounts`, since plan attributes are
+ * replicated per member.
+ *
+ * Dependencies point downward — plan/cycle/quota transitions go through
+ * `account-service`'s locked lifecycle methods, ledger rows through `ledger` —
+ * with one exception this map should name: `applySeatQuotaClawbackLocked`
+ * debits `monthly*Balance` buckets directly instead of going through a ledger
+ * primitive. This layer never meters usage and never reads the settle funnel;
+ * `webhook-service` and `service` (the facade) are its only callers.
+ */
 export class BillingSubscriptionService {
   constructor(
     private readonly store: BillingStore,
