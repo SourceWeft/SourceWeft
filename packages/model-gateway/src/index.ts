@@ -111,6 +111,7 @@ export type {
   RerankInput,
   RerankItem,
   RerankResult,
+  ReasoningEffort,
   RouteDecision,
   RoutingStrategy,
   StructuredOutputConfig,

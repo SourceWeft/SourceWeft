@@ -37,6 +37,7 @@ import type { MeterUsageFn } from "./billing/settle";
 import { createBilledAgentChatModel } from "./billing/langchain-proxy";
 import { getRawModelGatewayClient } from "./internal/raw";
 import { enqueueProviderCostReconciliation } from "./provider-cost-reconciliation";
+import { resolveChatThinkingWithDefaults } from "./thinking-defaults";
 
 /**
  * Per-call options for a billed gateway call.
@@ -130,6 +131,38 @@ function splitOptions(options: BilledRequestOptions) {
     } satisfies ModelCallBillingOptions,
     requestOptions,
   };
+}
+
+/**
+ * Fills the server-known thinking-support facts (synced onto the chat profile
+ * by provider discovery) into a chat input whose caller expressed thinking
+ * intent without them — see thinking-defaults.ts. Resolution happens here, at
+ * the billed door every model call goes through, so a caller can say
+ * `thinking: { enabled: false }` without also couriering catalog trivia.
+ */
+async function enrichChatThinking<T extends ChatCompleteInput>(
+  chatInput: T,
+  options: BilledRequestOptions,
+): Promise<T> {
+  try {
+    const executionMode = chatInput.executionMode ?? options.llm?.executionMode;
+    const profileAlias = chatInput.profileAlias ?? options.profileAlias;
+    const byokModelId = chatInput.byokModelId ?? options.llm?.byokModelId;
+    const thinking = await resolveChatThinkingWithDefaults({
+      thinking: chatInput.thinking,
+      ...(executionMode ? { executionMode } : {}),
+      ...(byokModelId ? { byokModelId } : {}),
+      ...(profileAlias ? { profileAlias } : {}),
+      modelAlias: options.modelAlias ?? chatInput.model,
+    });
+    return thinking === chatInput.thinking
+      ? chatInput
+      : { ...chatInput, thinking };
+  } catch {
+    // Defaults are best-effort: a profile lookup failure must never break the
+    // model call it decorates — the caller's own thinking rides unchanged.
+    return chatInput;
+  }
 }
 
 /**
@@ -245,10 +278,12 @@ async function openBilledGateway(
 
   const gateway: BilledModelGateway = {
     chat: {
-      complete: (chatInput, options) =>
-        settled(options, (requestOptions) =>
-          raw.chat.complete(chatInput, requestOptions),
-        ),
+      complete: async (chatInput, options) => {
+        const enriched = await enrichChatThinking(chatInput, options);
+        return settled(options, (requestOptions) =>
+          raw.chat.complete(enriched, requestOptions),
+        );
+      },
       stream: (chatInput, options) =>
         billedStream(raw, scope, input.context, chatInput, options),
     },
@@ -286,15 +321,35 @@ async function openBilledGateway(
           raw.images.generate(imageInput, requestOptions),
         ),
     },
-    agentChatModel: (agentInput) =>
-      createBilledAgentChatModel({
+    agentChatModel: async (agentInput) => {
+      const execution = agentInput.execution;
+      // Same best-effort contract as enrichChatThinking: a lookup failure
+      // leaves the caller's thinking unchanged rather than failing the model.
+      const thinking = await resolveChatThinkingWithDefaults({
+        thinking: execution?.thinking,
+        ...(execution?.executionMode
+          ? { executionMode: execution.executionMode }
+          : {}),
+        ...(execution?.byokModelId
+          ? { byokModelId: execution.byokModelId }
+          : {}),
+        ...(execution?.profileAlias
+          ? { profileAlias: execution.profileAlias }
+          : {}),
         modelAlias: agentInput.modelAlias,
-        execution: agentInput.execution,
+      }).catch(() => execution?.thinking);
+      return createBilledAgentChatModel({
+        modelAlias: agentInput.modelAlias,
+        execution:
+          thinking === execution?.thinking
+            ? agentInput.execution
+            : { ...execution, thinking },
         gatewayConfigId: input.gatewayConfigId,
         context: input.context,
         scope,
         billing: agentInput.billing,
-      }),
+      });
+    },
   };
 
   return { gateway, scope };
@@ -319,8 +374,9 @@ async function* billedStream(
   let settled = false;
   let inFlightError: unknown;
 
+  const enrichedInput = await enrichChatThinking(chatInput, options);
   try {
-    for await (const event of raw.chat.stream(chatInput, {
+    for await (const event of raw.chat.stream(enrichedInput, {
       ...requestOptions,
       metadata: buildRequestMetadata(context, billingOptions),
     })) {

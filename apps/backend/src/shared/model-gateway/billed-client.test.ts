@@ -11,6 +11,12 @@ const rawMocks = vi.hoisted(() => ({
 
 vi.mock("./internal/raw", () => rawMocks);
 
+const thinkingMocks = vi.hoisted(() => ({
+  resolveChatThinkingWithDefaults: vi.fn(),
+}));
+
+vi.mock("./thinking-defaults", () => thinkingMocks);
+
 const { withBilledModelGateway } = await import("./billed-client");
 
 const USAGE = { inputTokens: 10, outputTokens: 4 };
@@ -96,6 +102,12 @@ function streamOf(events: unknown[]) {
 beforeEach(() => {
   rawMocks.getRawModelGatewayClient.mockReset();
   rawMocks.createRawAgentChatModel.mockReset();
+  thinkingMocks.resolveChatThinkingWithDefaults.mockReset();
+  // Passthrough by default, mirroring the real resolver's no-op cases, so the
+  // door behaves identically for tests that carry no thinking intent.
+  thinkingMocks.resolveChatThinkingWithDefaults.mockImplementation(
+    async (input: { thinking?: unknown }) => input.thinking,
+  );
 });
 
 test("a non-streaming call settles exactly once with the returned usage", async () => {
@@ -133,6 +145,44 @@ test("the caller cannot override the billing identity in request metadata", asyn
   assert.equal(passedOptions.metadata?.teamId, "team_1");
   assert.equal(passedOptions.metadata?.gatewayConfigId, "gw_1");
   assert.equal(passedOptions.metadata?.profileAlias, "default-chat");
+});
+
+test("the billed door fills thinking support before the raw call", async () => {
+  const gateway = fakeGateway();
+  rawMocks.getRawModelGatewayClient.mockResolvedValue(gateway);
+  const enriched = {
+    enabled: false,
+    supportedParameters: ["reasoning"],
+    supportedEfforts: ["high"],
+  };
+  thinkingMocks.resolveChatThinkingWithDefaults.mockResolvedValueOnce(enriched);
+
+  await withBilledModelGateway(
+    { billing: createBilling(), context, meterUsage: meterUsageStub() as never },
+    async (gw) => {
+      await gw.chat.complete(
+        { model: "m", messages: [], thinking: { enabled: false } } as never,
+        chatOptions,
+      );
+    },
+  );
+
+  // The resolver sees the request's identifiers: the profile alias from the
+  // billing options, the payload model as the model-alias fallback, and no
+  // BYOK keys for a GLOBAL call.
+  assert.deepEqual(
+    thinkingMocks.resolveChatThinkingWithDefaults.mock.calls[0]?.[0],
+    {
+      thinking: { enabled: false },
+      profileAlias: "default-chat",
+      modelAlias: "m",
+    },
+  );
+  // The raw gateway receives the enriched thinking, not the caller's bare one.
+  const passedInput = (
+    gateway.chat.complete.mock.calls as unknown as unknown[][]
+  )[0]?.[0] as { thinking?: unknown };
+  assert.deepEqual(passedInput.thinking, enriched);
 });
 
 test("a fully drained stream settles once with last-wins usage", async () => {
