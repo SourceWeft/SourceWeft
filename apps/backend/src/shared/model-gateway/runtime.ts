@@ -21,6 +21,7 @@ import {
 import { createLlmObservabilitySink } from "../../modules/llm-observability/sink";
 import { resolveObservedGenerationCost } from "./observed-cost";
 import { decryptSecret } from "../secrets";
+import { decryptTeamSecret } from "../team-secrets";
 import type { RoutedGatewayConfig } from "./types";
 import { MODEL_CAPABILITY_DB } from "./model-capability-db";
 import { resolveCustomByokProvider } from "./byok-provider-resolver";
@@ -37,14 +38,18 @@ const gatewayClientCache = new Map<
   }
 >();
 
-export function normalizeDefaultHeaders(value: unknown): Record<string, string> {
+export function normalizeDefaultHeaders(
+  value: unknown,
+): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
 
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      )
       .map(([key, headerValue]) => [key.trim(), headerValue.trim()] as const)
       .filter(([key, headerValue]) => key.length > 0 && headerValue.length > 0),
   );
@@ -79,7 +84,11 @@ export function normalizeRouteProviderRouting(
 
   const record = value as Record<string, unknown>;
   const providerRouting = record.providerRouting;
-  if (!providerRouting || typeof providerRouting !== "object" || Array.isArray(providerRouting)) {
+  if (
+    !providerRouting ||
+    typeof providerRouting !== "object" ||
+    Array.isArray(providerRouting)
+  ) {
     return undefined;
   }
 
@@ -139,10 +148,7 @@ export async function resolveByokApiKeyRef(input: {
     return null;
   }
 
-  return (
-    decryptSecret(row.apiKeyEncrypted, config.modelGatewayEncryptionSecret) ||
-    null
-  );
+  return (await decryptTeamSecret(row.apiKeyEncrypted, row.teamId)) || null;
 }
 
 export async function resolveByokProviderRuntime(input: {
@@ -228,7 +234,10 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
     new Set(
       providerRows
         .map((row) => row.gatewayConfigId)
-        .filter((value): value is string => typeof value === "string" && value.length > 0),
+        .filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0,
+        ),
     ),
   );
 
@@ -241,10 +250,13 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
 
   const providers: RoutedGatewayConfig["providers"] = {};
   for (const row of providerRows) {
-    const gatewayRow = row.gatewayConfigId ? gatewayRowById.get(row.gatewayConfigId) : null;
+    const gatewayRow = row.gatewayConfigId
+      ? gatewayRowById.get(row.gatewayConfigId)
+      : null;
     const supports = Array.isArray(row.capabilitiesJson)
       ? row.capabilitiesJson.filter(
-          (value): value is string => typeof value === "string" && value.length > 0,
+          (value): value is string =>
+            typeof value === "string" && value.length > 0,
         )
       : [];
     const providerConfigJson =
@@ -278,9 +290,10 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
       apiKeyHeaderName: normalizeOptionalHeaderValue(
         providerConfigJson.apiKeyHeaderName,
       ),
-      apiKeyHeaderPrefix: typeof providerConfigJson.apiKeyHeaderPrefix === "string"
-        ? providerConfigJson.apiKeyHeaderPrefix
-        : undefined,
+      apiKeyHeaderPrefix:
+        typeof providerConfigJson.apiKeyHeaderPrefix === "string"
+          ? providerConfigJson.apiKeyHeaderPrefix
+          : undefined,
       isBYOK: gatewayRow?.isBYOK ?? false,
       enabled,
       configured,
@@ -320,7 +333,9 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
     versionId: activeVersion.id,
     providers,
     modelRoutes,
-    modelCapabilities: readDeploymentModelCapabilities(activeVersion.payloadJson),
+    modelCapabilities: readDeploymentModelCapabilities(
+      activeVersion.payloadJson,
+    ),
   };
 }
 
@@ -482,7 +497,9 @@ export function buildRoutedModelGatewayConfig(
   };
 }
 
-export function getOrCreateRoutedGatewayClient(configInput: RoutedGatewayConfig) {
+export function getOrCreateRoutedGatewayClient(
+  configInput: RoutedGatewayConfig,
+) {
   const signature = getRoutedGatewayCacheSignature(configInput);
   const cacheKey = `routed:${configInput.versionId}`;
   const cached = gatewayClientCache.get(cacheKey);

@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "../../shared/config";
-import { decryptSecret, encryptSecret } from "../../shared/secrets";
+import {
+  decryptTeamSecret,
+  encryptTeamSecret,
+} from "../../shared/team-secrets";
 import { ConnectorError } from "./errors";
 import { requireConnectorWorkspace } from "./permissions";
 import {
@@ -22,11 +25,10 @@ function hashState(state: string) {
   return createHash("sha256").update(state).digest("hex");
 }
 
-function resolveOAuthEncryptionSecret() {
-  return config.modelGatewayEncryptionSecret;
-}
-
-function buildCallbackUrl(input: { workspaceId: string; connectorType: string }) {
+function buildCallbackUrl(input: {
+  workspaceId: string;
+  connectorType: string;
+}) {
   return `${config.auth.baseUrl}/v1/workspaces/${input.workspaceId}/connectors/oauth/${input.connectorType}/callback`;
 }
 
@@ -71,7 +73,9 @@ function assertAuthorizationParamsConfigured(input: {
 }
 
 export class ConnectorOAuthService {
-  constructor(private readonly registry: ConnectorRegistry = connectorRegistry) {}
+  constructor(
+    private readonly registry: ConnectorRegistry = connectorRegistry,
+  ) {}
 
   async start(input: {
     workspaceId: string;
@@ -119,7 +123,10 @@ export class ConnectorOAuthService {
       authorizationUrl.searchParams.set(key, value);
     }
     if (manifest.auth.sendScope !== false && manifest.auth.scopes.length > 0) {
-      authorizationUrl.searchParams.set("scope", manifest.auth.scopes.join(" "));
+      authorizationUrl.searchParams.set(
+        "scope",
+        manifest.auth.scopes.join(" "),
+      );
     }
 
     return {
@@ -159,7 +166,6 @@ export class ConnectorOAuthService {
       scopes: manifest.auth.scopes,
     });
     const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);
-    const secret = resolveOAuthEncryptionSecret();
     const account = await createOAuthAccountRecord({
       teamId: stateRow.teamId,
       workspaceId: stateRow.workspaceId,
@@ -171,9 +177,12 @@ export class ConnectorOAuthService {
         tokenSet.providerAccountEmail ??
         `${manifest.displayName} account`,
       scopes,
-      accessTokenEncrypted: encryptSecret(tokenSet.accessToken, secret),
+      accessTokenEncrypted: await encryptTeamSecret(
+        tokenSet.accessToken,
+        stateRow.teamId,
+      ),
       refreshTokenEncrypted: tokenSet.refreshToken
-        ? encryptSecret(tokenSet.refreshToken, secret)
+        ? await encryptTeamSecret(tokenSet.refreshToken, stateRow.teamId)
         : null,
       expiresAt: tokenSet.expiresAt ?? null,
       createdBy: stateRow.userId,
@@ -215,7 +224,6 @@ export class ConnectorOAuthService {
       scopes: manifest.auth.scopes,
     });
     const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);
-    const secret = resolveOAuthEncryptionSecret();
     const account = await createOAuthAccountRecord({
       teamId: stateRow.teamId,
       workspaceId: stateRow.workspaceId,
@@ -227,9 +235,12 @@ export class ConnectorOAuthService {
         tokenSet.providerAccountEmail ??
         `${manifest.displayName} account`,
       scopes,
-      accessTokenEncrypted: encryptSecret(tokenSet.accessToken, secret),
+      accessTokenEncrypted: await encryptTeamSecret(
+        tokenSet.accessToken,
+        stateRow.teamId,
+      ),
       refreshTokenEncrypted: tokenSet.refreshToken
-        ? encryptSecret(tokenSet.refreshToken, secret)
+        ? await encryptTeamSecret(tokenSet.refreshToken, stateRow.teamId)
         : null,
       expiresAt: tokenSet.expiresAt ?? null,
       createdBy: stateRow.userId,
@@ -296,19 +307,23 @@ export class ConnectorOAuthService {
     }
 
     const expiresAt = account.expiresAt ? new Date(account.expiresAt) : null;
-    if (!expiresAt || expiresAt.getTime() > Date.now() + TOKEN_REFRESH_SKEW_MS) {
-      return decryptSecret(
-        account.accessTokenEncrypted,
-        resolveOAuthEncryptionSecret(),
-      );
+    if (
+      !expiresAt ||
+      expiresAt.getTime() > Date.now() + TOKEN_REFRESH_SKEW_MS
+    ) {
+      return decryptTeamSecret(account.accessTokenEncrypted, account.teamId);
     }
 
     return this.refreshAccountToken(account);
   }
 
-  private async refreshAccountToken(account: ConnectorOAuthAccountSecretRecord) {
-    const secret = resolveOAuthEncryptionSecret();
-    const refreshToken = decryptSecret(account.refreshTokenEncrypted, secret);
+  private async refreshAccountToken(
+    account: ConnectorOAuthAccountSecretRecord,
+  ) {
+    const refreshToken = await decryptTeamSecret(
+      account.refreshTokenEncrypted,
+      account.teamId,
+    );
     if (!refreshToken) {
       await updateOAuthAccountStatusRecord({
         teamId: account.teamId,
@@ -334,12 +349,15 @@ export class ConnectorOAuthService {
         teamId: account.teamId,
         workspaceId: account.workspaceId,
         accountId: account.id,
-        accessTokenEncrypted: encryptSecret(tokenSet.accessToken, secret),
+        accessTokenEncrypted: await encryptTeamSecret(
+          tokenSet.accessToken,
+          account.teamId,
+        ),
         refreshTokenEncrypted:
           tokenSet.refreshToken === undefined
             ? undefined
             : tokenSet.refreshToken
-              ? encryptSecret(tokenSet.refreshToken, secret)
+              ? await encryptTeamSecret(tokenSet.refreshToken, account.teamId)
               : null,
         expiresAt: tokenSet.expiresAt ?? null,
         scopes: normalizeScopes(tokenSet, account.scopes),

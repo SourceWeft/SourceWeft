@@ -5,6 +5,15 @@ import {
   randomBytes,
 } from "node:crypto";
 
+/**
+ * Deployment-level secret encryption: AES-256-GCM keyed by the deployment
+ * master secret, `v1:iv:tag:ct` payloads. Use this only for deployment-owned
+ * ciphertexts (e.g. model-gateway global provider keys). Team-owned secrets
+ * (BYOK keys, connector OAuth tokens, workspace MCP credentials, ...) are
+ * envelope-encrypted per tenant — encrypt/decrypt those through
+ * `team-secrets.ts`, whose `decryptTeamSecret` still reads these v1 payloads.
+ */
+
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;

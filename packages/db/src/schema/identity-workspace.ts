@@ -47,6 +47,24 @@ export const workspaces = pgTable(
   ],
 );
 
+/**
+ * One envelope-encryption data key per team. `wrapped_key` holds the team's
+ * random 32-byte data key, base64-encoded and encrypted ("wrapped") with the
+ * deployment master secret in the v1 `secrets.ts` payload format. Tenant-owned
+ * ciphertexts (`v2:` payloads) are encrypted with the unwrapped data key —
+ * see `apps/backend/src/shared/team-secrets.ts`. A team has exactly one
+ * current key; rotation re-encrypts the team's rows and replaces
+ * `wrapped_key`, stamping `rotated_at`.
+ */
+export const teamDataKeys = pgTable("team_data_keys", {
+  teamId: text("team_id").primaryKey(),
+  wrappedKey: text("wrapped_key").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true, mode: "date" }),
+});
+
 export const teamProfiles = pgTable(
   "team_profiles",
   {

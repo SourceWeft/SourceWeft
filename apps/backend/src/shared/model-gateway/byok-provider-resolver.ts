@@ -1,11 +1,10 @@
 import { and, eq } from "drizzle-orm";
-import { config } from "../config";
 import {
   db,
   modelGatewayByokCredentials,
   type ModelGatewayProviderKind,
 } from "@sourceweft/db";
-import { decryptSecret } from "../secrets";
+import { decryptTeamSecret } from "../team-secrets";
 import { normalizeDefaultHeaders } from "./runtime";
 
 export type ResolvedCustomByokProvider = {
@@ -122,7 +121,9 @@ export async function resolveCustomByokProvider(input: {
   });
 
   const row =
-    visibleRows.find((candidate) => candidate.baseUrl && candidate.userId === scope.userId) ??
+    visibleRows.find(
+      (candidate) => candidate.baseUrl && candidate.userId === scope.userId,
+    ) ??
     visibleRows.find((candidate) => candidate.baseUrl) ??
     null;
 
@@ -131,7 +132,7 @@ export async function resolveCustomByokProvider(input: {
   }
 
   const apiKey =
-    decryptSecret(row.apiKeyEncrypted, config.modelGatewayEncryptionSecret) || "";
+    (await decryptTeamSecret(row.apiKeyEncrypted, row.teamId)) || "";
   if (!apiKey) {
     return null;
   }
@@ -146,4 +147,3 @@ export async function resolveCustomByokProvider(input: {
     hasUserScopedKey: row.userId !== null,
   };
 }
-

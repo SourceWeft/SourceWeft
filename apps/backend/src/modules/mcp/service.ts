@@ -10,7 +10,10 @@ import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import { decryptSecret, encryptSecret } from "../../shared/secrets";
+import {
+  decryptTeamSecret,
+  encryptTeamSecret,
+} from "../../shared/team-secrets";
 import { McpError } from "./errors";
 import {
   createLangChainMcpClient,
@@ -64,10 +67,6 @@ import type {
 
 function isDevelopment() {
   return process.env.NODE_ENV === "development";
-}
-
-function encryptionSecret() {
-  return config.modelGatewayEncryptionSecret;
 }
 
 async function assertWebTransport(manifest: MarketMcpManifest) {
@@ -136,7 +135,8 @@ export async function mcpEndpointRequiresAuth(
   }
 }
 
-function headersFromCredential(input: {
+async function headersFromCredential(input: {
+  teamId: string;
   authType: McpAuthType;
   encryptedSecret?: string | null;
   encryptedHeaders?: string | null;
@@ -146,9 +146,9 @@ function headersFromCredential(input: {
     return {};
   }
   if (input.authType === "custom_headers") {
-    const decrypted = decryptSecret(
+    const decrypted = await decryptTeamSecret(
       input.encryptedHeaders ?? "",
-      encryptionSecret(),
+      input.teamId,
     );
     if (!decrypted) {
       return {};
@@ -162,7 +162,7 @@ function headersFromCredential(input: {
     return resolved;
   }
   const secret = resolveCredentialEnvRef(
-    decryptSecret(input.encryptedSecret ?? "", encryptionSecret()),
+    await decryptTeamSecret(input.encryptedSecret ?? "", input.teamId),
   );
   if (input.authType === "bearer") {
     return secret ? { Authorization: `Bearer ${secret}` } : {};
@@ -954,7 +954,10 @@ export class McpService {
           "Bearer token is required",
         );
       }
-      encryptedSecret = encryptSecret(input.bearerToken, encryptionSecret());
+      encryptedSecret = await encryptTeamSecret(
+        input.bearerToken,
+        workspace.organizationId,
+      );
     } else if (input.authType === "api_key_header") {
       if (!input.apiKeyHeaderName || !input.apiKey) {
         throw new McpError(
@@ -964,12 +967,15 @@ export class McpService {
         );
       }
       headerName = sanitizeHeaderName(input.apiKeyHeaderName);
-      encryptedSecret = encryptSecret(input.apiKey, encryptionSecret());
+      encryptedSecret = await encryptTeamSecret(
+        input.apiKey,
+        workspace.organizationId,
+      );
     } else if (input.authType === "custom_headers") {
       const headers = sanitizeHeaders(input.headers ?? {});
-      encryptedHeaders = encryptSecret(
+      encryptedHeaders = await encryptTeamSecret(
         JSON.stringify(headers),
-        encryptionSecret(),
+        workspace.organizationId,
       );
     }
 
@@ -1072,7 +1078,7 @@ export class McpService {
         installId: input.installId,
         userId: input.userId,
       });
-      headers = credential ? headersFromCredential(credential) : {};
+      headers = credential ? await headersFromCredential(credential) : {};
     }
     const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
@@ -1287,7 +1293,7 @@ export class McpService {
               { installId: install.id },
             );
           }
-          headers = credential ? headersFromCredential(credential) : {};
+          headers = credential ? await headersFromCredential(credential) : {};
         }
         // Discovery is strict (`onConnectionError: "throw"`). Any selected
         // server failure closes all clients opened for this turn.

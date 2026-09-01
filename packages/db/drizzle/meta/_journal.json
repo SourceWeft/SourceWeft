@@ -169,6 +169,13 @@
       "when": 1787508171415,
       "tag": "0023_fine_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788279020436,
+      "tag": "0024_mute_pyro",
+      "breakpoints": true
     }
   ]
 }

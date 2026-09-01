@@ -3,7 +3,10 @@ import {
   sanitizeCustomHeaders,
   validatePublicHttpsEndpoint,
 } from "../../shared/security/public-endpoint";
-import { encryptSecret, decryptSecret } from "../../shared/secrets";
+import {
+  decryptTeamSecret,
+  encryptTeamSecret,
+} from "../../shared/team-secrets";
 import { listCustomByokProviders } from "../../shared/model-gateway/byok-provider-resolver";
 import { discoverByokModelCandidates } from "../../shared/model-gateway/catalog-discovery";
 import { resolveModelCapabilitiesFromLitellm } from "../../shared/model-gateway";
@@ -98,9 +101,13 @@ export class ContentByokService {
       userId: input.userId,
       providerName: input.providerName,
       credentialAlias: input.credentialAlias,
-      apiKeyEncrypted: encryptSecret(
+      // Team-envelope (v2) since every reader of this row — this module and
+      // shared/model-gateway's resolveByokApiKeyRef / resolveCustomByokProvider
+      // — decrypts via decryptTeamSecret, which also keeps pre-envelope v1
+      // rows readable forever.
+      apiKeyEncrypted: await encryptTeamSecret(
         input.apiKey,
-        config.modelGatewayEncryptionSecret,
+        workspace.organizationId,
       ),
       providerKind: input.providerKind,
       baseUrl,
@@ -158,10 +165,10 @@ export class ContentByokService {
     }
 
     const apiKey =
-      decryptSecret(
+      (await decryptTeamSecret(
         credential.apiKeyEncrypted,
-        config.modelGatewayEncryptionSecret,
-      ) || null;
+        workspace.organizationId,
+      )) || null;
     if (!apiKey) {
       throw new ContentError(
         400,
@@ -299,10 +306,10 @@ export class ContentByokService {
     }
 
     const apiKey =
-      decryptSecret(
+      (await decryptTeamSecret(
         resolved.credential.apiKeyEncrypted,
-        config.modelGatewayEncryptionSecret,
-      ) || null;
+        workspace.organizationId,
+      )) || null;
     if (!apiKey) {
       throw new ContentError(
         400,

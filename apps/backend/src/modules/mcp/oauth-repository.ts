@@ -5,13 +5,11 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { db, workspaceMcpOAuthSessions } from "@sourceweft/db";
-import { config } from "../../shared/config";
-import { decryptSecret, encryptSecret } from "../../shared/secrets";
+import {
+  decryptTeamSecret,
+  encryptTeamSecret,
+} from "../../shared/team-secrets";
 import type { McpOAuthStore } from "./oauth-provider";
-
-function encryptionSecret() {
-  return config.modelGatewayEncryptionSecret;
-}
 
 export type McpOAuthScope = {
   teamId: string;
@@ -88,8 +86,9 @@ async function upsertSession(scope: McpOAuthScope, patch: SessionPatch) {
 
 /**
  * DB-backed OAuth store for one (install, user). Client info and tokens are
- * encrypted at rest with the shared secret; the PKCE verifier and state are
- * transient (cleared on callback via clearMcpOAuthTransient).
+ * encrypted at rest with the owning team's data key (pre-envelope v1 rows
+ * stay readable); the PKCE verifier and state are transient (cleared on
+ * callback via clearMcpOAuthTransient).
  */
 export function createDbMcpOAuthStore(
   scope: McpOAuthScope,
@@ -98,9 +97,9 @@ export function createDbMcpOAuthStore(
   return {
     async loadClientInformation() {
       const row = await loadSessionRow(scope);
-      const decrypted = decryptSecret(
+      const decrypted = await decryptTeamSecret(
         row?.encryptedClientInfo ?? null,
-        encryptionSecret(),
+        scope.teamId,
       );
       return decrypted
         ? (JSON.parse(decrypted) as OAuthClientInformationFull)
@@ -109,26 +108,26 @@ export function createDbMcpOAuthStore(
     async saveClientInformation(info) {
       await upsertSession(scope, {
         issuer,
-        encryptedClientInfo: encryptSecret(
+        encryptedClientInfo: await encryptTeamSecret(
           JSON.stringify(info),
-          encryptionSecret(),
+          scope.teamId,
         ),
       });
     },
     async loadTokens() {
       const row = await loadSessionRow(scope);
-      const decrypted = decryptSecret(
+      const decrypted = await decryptTeamSecret(
         row?.encryptedTokens ?? null,
-        encryptionSecret(),
+        scope.teamId,
       );
       return decrypted ? (JSON.parse(decrypted) as OAuthTokens) : undefined;
     },
     async saveTokens(tokens) {
       await upsertSession(scope, {
         issuer,
-        encryptedTokens: encryptSecret(
+        encryptedTokens: await encryptTeamSecret(
           JSON.stringify(tokens),
-          encryptionSecret(),
+          scope.teamId,
         ),
       });
     },
