@@ -23,35 +23,15 @@ function deriveKey(secret: string) {
   return createHash("sha256").update(secret).digest();
 }
 
-export function encryptSecret(plainText: string, secret: string) {
-  if (!plainText) {
-    return "";
-  }
-
-  const key = deriveKey(secret);
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(plainText, "utf8"),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
-
-  return [
-    PAYLOAD_PREFIX,
-    iv.toString("base64"),
-    authTag.toString("base64"),
-    encrypted.toString("base64"),
-  ].join(":");
-}
-
-export function decryptSecret(cipherText: string | null, secret: string) {
-  if (!cipherText) {
-    return "";
-  }
-
+/**
+ * Keyed `prefix:iv:tag:ct` GCM payload primitives. Internal to `secrets.ts`
+ * and `team-secrets.ts` — every other caller goes through
+ * `encryptSecret`/`decryptSecret` or the team-secrets envelope, which choose
+ * the key and version prefix.
+ */
+export function parseSecretPayload(cipherText: string, expectedPrefix: string) {
   const [version, ivB64, authTagB64, encryptedB64] = cipherText.split(":");
-  if (version !== PAYLOAD_PREFIX || !ivB64 || !authTagB64 || !encryptedB64) {
+  if (version !== expectedPrefix || !ivB64 || !authTagB64 || !encryptedB64) {
     throw new Error("Invalid encrypted secret payload");
   }
 
@@ -63,7 +43,42 @@ export function decryptSecret(cipherText: string | null, secret: string) {
     throw new Error("Invalid encrypted secret payload");
   }
 
-  const key = deriveKey(secret);
+  return { iv, authTag, encrypted };
+}
+
+/** See {@link parseSecretPayload} — internal to secrets.ts/team-secrets.ts. */
+export function encryptPayloadWithKey(
+  plainText: string,
+  key: Buffer,
+  prefix: string,
+) {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(plainText, "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+
+  return [
+    prefix,
+    iv.toString("base64"),
+    authTag.toString("base64"),
+    encrypted.toString("base64"),
+  ].join(":");
+}
+
+/** See {@link parseSecretPayload} — internal to secrets.ts/team-secrets.ts. */
+export function decryptPayloadWithKey(
+  cipherText: string,
+  key: Buffer,
+  expectedPrefix: string,
+) {
+  const { iv, authTag, encrypted } = parseSecretPayload(
+    cipherText,
+    expectedPrefix,
+  );
+
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
 
@@ -72,4 +87,18 @@ export function decryptSecret(cipherText: string | null, secret: string) {
     decipher.final(),
   ]);
   return decrypted.toString("utf8");
+}
+
+export function encryptSecret(plainText: string, secret: string) {
+  if (!plainText) {
+    return "";
+  }
+  return encryptPayloadWithKey(plainText, deriveKey(secret), PAYLOAD_PREFIX);
+}
+
+export function decryptSecret(cipherText: string | null, secret: string) {
+  if (!cipherText) {
+    return "";
+  }
+  return decryptPayloadWithKey(cipherText, deriveKey(secret), PAYLOAD_PREFIX);
 }

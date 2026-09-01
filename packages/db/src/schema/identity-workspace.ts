@@ -52,13 +52,18 @@ export const workspaces = pgTable(
  * random 32-byte data key, base64-encoded and encrypted ("wrapped") with the
  * deployment master secret in the v1 `secrets.ts` payload format. Tenant-owned
  * ciphertexts (`v2:` payloads) are encrypted with the unwrapped data key —
- * see `apps/backend/src/shared/team-secrets.ts`. A team has exactly one
- * current key; rotation re-encrypts the team's rows and replaces
- * `wrapped_key`, stamping `rotated_at`.
+ * see `apps/backend/src/shared/team-secrets.ts`. A team has one current key
+ * plus at most one retiring key: rotation first atomically moves the current
+ * key into `retiring_wrapped_key` (replacing whatever retired before) and
+ * installs the new key, stamping `rotated_at`, then re-encrypts the team's
+ * rows. The retiring key stays readable until the next rotation replaces it,
+ * so a crash mid-re-encrypt or a stale key cache in another process cannot
+ * strand rows on a destroyed key.
  */
 export const teamDataKeys = pgTable("team_data_keys", {
   teamId: text("team_id").primaryKey(),
   wrappedKey: text("wrapped_key").notNull(),
+  retiringWrappedKey: text("retiring_wrapped_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

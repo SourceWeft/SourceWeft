@@ -1,0 +1,1 @@
+ALTER TABLE "team_data_keys" ADD COLUMN "retiring_wrapped_key" text;
