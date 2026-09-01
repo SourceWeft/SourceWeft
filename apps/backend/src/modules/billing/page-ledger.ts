@@ -12,9 +12,10 @@ import type { BillingAccountState } from "./types";
  * written down — as pure state transitions on `BillingAccountState` plus one
  * pure admission decision. Nothing here talks to the store, appends ledger
  * rows, or knows about transactions: callers (`usage-service` for settlement,
- * `account-service` for cycle lifecycle) run these transitions inside their
- * locked transaction and record the matching ledger entries themselves, which
- * is what keeps `page-ledger.test.ts` green through the services' public API.
+ * `account-service` for cycle lifecycle, the purchase-flow services for top-up
+ * grants and seat clawbacks) run these transitions inside their locked
+ * transaction and record the matching ledger entries themselves, which is
+ * what keeps `page-ledger.test.ts` green through the services' public API.
  *
  * `pagesLimit`/`pagesUsed` are legacy mirror fields kept in sync with
  * `monthlyPagesGrant`/`pagesConsumedThisCycle`; `syncPageMirrorFields` is the
@@ -36,10 +37,7 @@ export function getAvailablePages(account: BillingAccountState) {
  * Callers must have admitted the amount first (`decidePageAdmission`); running
  * out here means the admission invariant was violated, so it fails loudly.
  */
-export function spendPages(
-  account: BillingAccountState,
-  pagesToConsume: number,
-) {
+function spendPages(account: BillingAccountState, pagesToConsume: number) {
   let remaining = pagesToConsume;
 
   if (account.monthlyPagesBalance > 0) {
@@ -118,6 +116,25 @@ export function grantMonthlyPages(account: BillingAccountState, pages: number) {
 }
 
 /**
+ * Debits a mid-cycle quota decrease (seat-downgrade clawback) from the monthly
+ * bucket, clamped to the current balance so the debit never pushes the bucket
+ * negative — a bucket already at or below zero claws back nothing. Cycle
+ * counters and the legacy mirrors stay untouched: clawed-back pages were
+ * granted, not consumed. Returns the clamped amount for the caller's adjust
+ * ledger row; a non-positive return means nothing moved.
+ */
+export function clawbackMonthlyPages(
+  account: BillingAccountState,
+  pages: number,
+) {
+  const pagesToClawback = Math.min(account.monthlyPagesBalance, pages);
+  if (pagesToClawback > 0) {
+    account.monthlyPagesBalance -= pagesToClawback;
+  }
+  return pagesToClawback;
+}
+
+/**
  * Zeroes the expiring monthly bucket at a cycle boundary — add-on pages carry
  * over untouched. Returns the expired amount for the caller's expire ledger row.
  */
@@ -145,8 +162,7 @@ export function resetPageCycleCounters(
 ) {
   account.monthlyPagesGrant = monthlyPagesLimit;
   account.pagesConsumedThisCycle = 0;
-  account.pagesLimit = monthlyPagesLimit;
-  account.pagesUsed = 0;
+  syncPageMirrorFields(account);
 }
 
 /** Refreshes the legacy `pagesLimit`/`pagesUsed` mirrors from their sources of truth. */

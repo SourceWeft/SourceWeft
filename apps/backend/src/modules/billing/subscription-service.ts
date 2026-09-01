@@ -26,7 +26,7 @@ import type {
   BillingRuntimeConfig,
   TeamSubscriptionSnapshot,
 } from "./types";
-import { getTotalPagesBalance } from "./page-ledger";
+import { clawbackMonthlyPages, getTotalPagesBalance } from "./page-ledger";
 import {
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
@@ -303,8 +303,9 @@ function calculateSeatPreview(input: {
  * Dependencies point downward — plan/cycle/quota transitions go through
  * `account-service`'s locked lifecycle methods, ledger rows through `ledger` —
  * with one exception this map should name: `applySeatQuotaClawbackLocked`
- * debits `monthly*Balance` buckets directly instead of going through a ledger
- * primitive. This layer never meters usage and never reads the settle funnel;
+ * debits the `monthlyCreditsBalance` bucket directly instead of going through
+ * a ledger primitive (the pages half goes through `clawbackMonthlyPages`).
+ * This layer never meters usage and never reads the settle funnel;
  * `webhook-service` and `service` (the facade) are its only callers.
  */
 export class BillingSubscriptionService {
@@ -1092,8 +1093,10 @@ export class BillingSubscriptionService {
       account.monthlyCreditsBalance,
       input.quotaAdjustment.actualCredits,
     );
-    const pagesToClawback = Math.min(
-      account.monthlyPagesBalance,
+    // The pages debit goes through the ledger primitive (clamp + debit in one
+    // step); the returned amount drives the ledger row and dirty check below.
+    const pagesToClawback = clawbackMonthlyPages(
+      account,
       input.quotaAdjustment.actualPages,
     );
     const clawbackMetadata = {
@@ -1115,6 +1118,8 @@ export class BillingSubscriptionService {
     };
 
     if (creditsToClawback > 0) {
+      // Credits still lack a clawback primitive (credit math lives in
+      // `service-helpers`); primitive-izing this debit is follow-up work.
       account.monthlyCreditsBalance -= creditsToClawback;
       account.updatedAt = new Date().toISOString();
 
@@ -1138,7 +1143,6 @@ export class BillingSubscriptionService {
     }
 
     if (pagesToClawback > 0) {
-      account.monthlyPagesBalance -= pagesToClawback;
       account.updatedAt = new Date().toISOString();
 
       await appendBillingLedger({
