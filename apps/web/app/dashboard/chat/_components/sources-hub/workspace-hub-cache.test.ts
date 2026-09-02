@@ -191,4 +191,145 @@ describe("workspace-hub-cache", () => {
     ).toBeNull();
     expect(() => freshCache.clearWorkspaceHubCache()).not.toThrow();
   });
+
+  it("reports a hit from has after a set", async () => {
+    const cache = await loadCacheModule();
+    cache.setCachedWorkspaceHubValue("sources", "workspace-1", sampleValue);
+
+    expect(cache.hasCachedWorkspaceHubValue("sources", "workspace-1")).toBe(
+      true,
+    );
+    expect(cache.hasCachedWorkspaceHubValue("sources", "workspace-2")).toBe(
+      false,
+    );
+    expect(cache.hasCachedWorkspaceHubValue("artifacts", "workspace-1")).toBe(
+      false,
+    );
+  });
+
+  it("returns null from get for a missing workspace id", async () => {
+    const cache = await loadCacheModule();
+
+    expect(cache.getCachedWorkspaceHubValue("sources", "missing")).toBeNull();
+    expect(cache.getCachedWorkspaceHubValue("sources", null)).toBeNull();
+    expect(cache.getCachedWorkspaceHubValue("sources", undefined)).toBeNull();
+  });
+
+  it("returns false from has for a missing workspace id", async () => {
+    const cache = await loadCacheModule();
+
+    expect(cache.hasCachedWorkspaceHubValue("sources", "missing")).toBe(false);
+    expect(cache.hasCachedWorkspaceHubValue("sources", null)).toBe(false);
+    expect(cache.hasCachedWorkspaceHubValue("sources", undefined)).toBe(false);
+  });
+
+  it("reports a hit from has after the in-memory cache is wiped", async () => {
+    const beforeReload = await loadCacheModule();
+    beforeReload.setCachedWorkspaceHubValue(
+      "sources",
+      "workspace-1",
+      sampleValue,
+    );
+
+    const afterReload = await loadCacheModule();
+
+    expect(
+      afterReload.hasCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toBe(true);
+    expect(
+      afterReload.getCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toEqual(sampleValue);
+  });
+
+  it("treats a version mismatch in sessionStorage as a miss and cleans up", async () => {
+    const cache = await loadCacheModule();
+    const dataKey = `${cache.WORKSPACE_HUB_CACHE_KEY_PREFIX}:${cache.WORKSPACE_HUB_CACHE_VERSION}:sources:workspace-1`;
+    const timestampKey = `${cache.WORKSPACE_HUB_CACHE_TIMESTAMP_PREFIX}:${cache.WORKSPACE_HUB_CACHE_VERSION}:sources:workspace-1`;
+
+    sessionStorageMock.setItem(
+      dataKey,
+      JSON.stringify({ version: "old", value: sampleValue }),
+    );
+    sessionStorageMock.setItem(timestampKey, JSON.stringify(Date.now()));
+
+    expect(
+      cache.getCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toBeNull();
+    expect(sessionStorageMock.getItem(dataKey)).toBeNull();
+    expect(sessionStorageMock.getItem(timestampKey)).toBeNull();
+  });
+
+  it("clears one workspace in a bucket and preserves the other workspaces", async () => {
+    const cache = await loadCacheModule();
+    cache.setCachedWorkspaceHubValue("sources", "workspace-1", sampleValue);
+    cache.setCachedWorkspaceHubValue("sources", "workspace-2", sampleValue);
+
+    cache.clearWorkspaceHubCache("sources", "workspace-1");
+
+    expect(
+      cache.getCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toBeNull();
+    expect(cache.hasCachedWorkspaceHubValue("sources", "workspace-1")).toBe(
+      false,
+    );
+    expect(
+      sessionStorageMock.getItem(
+        `${cache.WORKSPACE_HUB_CACHE_KEY_PREFIX}:${cache.WORKSPACE_HUB_CACHE_VERSION}:sources:workspace-1`,
+      ),
+    ).toBeNull();
+    expect(
+      sessionStorageMock.getItem(
+        `${cache.WORKSPACE_HUB_CACHE_TIMESTAMP_PREFIX}:${cache.WORKSPACE_HUB_CACHE_VERSION}:sources:workspace-1`,
+      ),
+    ).toBeNull();
+
+    expect(cache.getCachedWorkspaceHubValue("sources", "workspace-2")).toEqual(
+      sampleValue,
+    );
+  });
+
+  it("clears every bucket from memory and sessionStorage when no bucket is provided", async () => {
+    const cache = await loadCacheModule();
+    cache.setCachedWorkspaceHubValue("sources", "workspace-1", sampleValue);
+    cache.setCachedWorkspaceHubValue("artifacts", "workspace-2", sampleValue);
+    sessionStorageMock.setItem("unrelated-key", "keep-me");
+
+    cache.clearWorkspaceHubCache();
+
+    expect(
+      cache.getCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toBeNull();
+    expect(
+      cache.getCachedWorkspaceHubValue("artifacts", "workspace-2"),
+    ).toBeNull();
+    expect(sessionStorageMock.getItem("unrelated-key")).toBe("keep-me");
+
+    for (let index = 0; index < sessionStorageMock.length; index += 1) {
+      const key = sessionStorageMock.key(index);
+      expect(key).not.toMatch(
+        new RegExp(`^${cache.WORKSPACE_HUB_CACHE_KEY_PREFIX}:`),
+      );
+      expect(key).not.toMatch(
+        new RegExp(`^${cache.WORKSPACE_HUB_CACHE_TIMESTAMP_PREFIX}:`),
+      );
+    }
+  });
+
+  it("keeps has false and clears safely when sessionStorage throws", async () => {
+    installWindow(createThrowingStorage());
+    const cache = await loadCacheModule();
+
+    cache.setCachedWorkspaceHubValue("sources", "workspace-1", sampleValue);
+    expect(cache.hasCachedWorkspaceHubValue("sources", "workspace-1")).toBe(
+      true,
+    );
+
+    const freshCache = await loadCacheModule();
+    expect(
+      freshCache.hasCachedWorkspaceHubValue("sources", "workspace-1"),
+    ).toBe(false);
+    expect(() =>
+      freshCache.clearWorkspaceHubCache("sources", "workspace-1"),
+    ).not.toThrow();
+  });
 });

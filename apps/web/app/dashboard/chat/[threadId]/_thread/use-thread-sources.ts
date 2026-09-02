@@ -7,10 +7,10 @@ import type {
   PromptInputMentionSourceLoader,
 } from "../../_components/chat-canvas";
 import {
-  getCachedWorkspaceSources,
-  hasCachedWorkspaceSources,
-  setCachedWorkspaceSources,
-} from "../../_components/source-library-cache";
+  getCachedWorkspaceHubValue,
+  hasCachedWorkspaceHubValue,
+  setCachedWorkspaceHubValue,
+} from "../../_components/sources-hub/workspace-hub-cache";
 import {
   getSourceSelectionStorageKey,
   readStoredSourceSelection,
@@ -22,6 +22,7 @@ import {
 } from "../../_components/mcp-selection-storage";
 import {
   expandSelectedSources,
+  WORKSPACE_SOURCES_CACHE_BUCKET,
   type SourceItem,
 } from "../../_components/source-types";
 import { contentClient } from "../../../../../lib/sdk";
@@ -42,6 +43,31 @@ type UseThreadSourcesInput = {
   threadId: string;
   workspaceId: string | null;
 };
+
+function getCachedWorkspaceSources(workspaceId: string | null | undefined) {
+  return getCachedWorkspaceHubValue<SourceItem[]>(
+    WORKSPACE_SOURCES_CACHE_BUCKET,
+    workspaceId,
+  );
+}
+
+function hasCachedWorkspaceSources(workspaceId: string | null | undefined) {
+  return hasCachedWorkspaceHubValue(
+    WORKSPACE_SOURCES_CACHE_BUCKET,
+    workspaceId,
+  );
+}
+
+function setCachedWorkspaceSources(
+  workspaceId: string | null | undefined,
+  sources: SourceItem[],
+) {
+  setCachedWorkspaceHubValue<SourceItem[]>(
+    WORKSPACE_SOURCES_CACHE_BUCKET,
+    workspaceId,
+    sources,
+  );
+}
 
 function catalogBuiltinSkillToChatSkill(
   skill: ListSkillsCatalogResponse["items"][number],

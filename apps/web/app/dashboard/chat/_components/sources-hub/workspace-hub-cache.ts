@@ -144,6 +144,28 @@ export function getCachedWorkspaceHubValue<T>(
   return cloneValue(fromStorage);
 }
 
+export function hasCachedWorkspaceHubValue(
+  bucket: string,
+  workspaceId: string | null | undefined,
+) {
+  if (!workspaceId) {
+    return false;
+  }
+
+  const cacheId = getCacheId(bucket, workspaceId);
+  if (workspaceHubCache.has(cacheId)) {
+    return true;
+  }
+
+  const fromStorage = readStorageEntry<unknown>(bucket, workspaceId);
+  if (!fromStorage) {
+    return false;
+  }
+
+  workspaceHubCache.set(cacheId, cloneValue(fromStorage));
+  return true;
+}
+
 export function setCachedWorkspaceHubValue<T>(
   bucket: string,
   workspaceId: string | null | undefined,

@@ -80,7 +80,8 @@ import {
   writePendingThreadTurnFallback,
   type PendingThreadTurn,
 } from "./pending-thread-turn";
-import { hasCachedWorkspaceSources } from "./source-library-cache";
+import { hasCachedWorkspaceHubValue } from "./sources-hub/workspace-hub-cache";
+import { WORKSPACE_SOURCES_CACHE_BUCKET } from "./source-types";
 import { loadThreadModelSelectorCatalog } from "./model-catalog-loader";
 import {
   desktopBridge,
@@ -776,7 +777,10 @@ export function DashboardChatPageClient() {
       disabledToolNames,
       displayedCitations: [],
       initialSources: initialSourcesForWorkspace,
-      initialSourcesLoaded: hasCachedWorkspaceSources(workspaceId),
+      initialSourcesLoaded: hasCachedWorkspaceHubValue(
+        WORKSPACE_SOURCES_CACHE_BUCKET,
+        workspaceId,
+      ),
       mode: "new",
       onArtifactOpen: setPreviewArtifact,
       onArtifactPreviewClose: () => setPreviewArtifact(null),

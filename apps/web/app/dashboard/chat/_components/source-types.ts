@@ -1,3 +1,5 @@
+export const WORKSPACE_SOURCES_CACHE_BUCKET = "sources";
+
 export type SourceItem = {
   id: string;
   title: string;
