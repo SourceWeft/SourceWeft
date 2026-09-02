@@ -369,6 +369,20 @@ export const llmGenerations = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // Populated only when providerCostStatus lands on 'reconcile_failed'
+    // (all reconciliation attempts exhausted) — see
+    // shared/model-gateway/provider-cost-reconciliation.ts. This is a known,
+    // permanent operational gap: nothing rescans or retries these rows today;
+    // recovery is a manual/product decision, not automated. These two fields
+    // exist so ops can see why and when a row got stuck, not to enable any
+    // automated remediation.
+    providerCostReconcileFailureReason: text(
+      "provider_cost_reconcile_failure_reason",
+    ),
+    providerCostReconcileFailedAt: timestamp(
+      "provider_cost_reconcile_failed_at",
+      { withTimezone: true, mode: "date" },
+    ),
     normalizationJson: jsonb("normalization_json").$type<Record<
       string,
       unknown

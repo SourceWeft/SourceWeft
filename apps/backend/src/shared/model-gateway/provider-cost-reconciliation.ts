@@ -5,7 +5,8 @@ import {
 } from "@sourceweft/model-gateway";
 import { db, llmGenerations, modelGatewayConfigs } from "@sourceweft/db";
 import { and, eq } from "drizzle-orm";
-import { billingService } from "../../modules/billing";
+import { billingService, isBillingError } from "../../modules/billing";
+import { opsAlertService } from "../../modules/ops";
 import { config } from "../config";
 import { logger } from "../logger";
 import { enqueueWithAudit } from "../queue";
@@ -223,9 +224,30 @@ export async function processProviderCostReconciliationJob(
       typeof job.opts.attempts === "number" ? job.opts.attempts : 1;
     const finalAttempt = job.attemptsMade + 1 >= attempts;
     if (finalAttempt) {
-      await db
+      const failureReason = isBillingError(error)
+        ? `${error.code}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      // The one case this brief targets — settled provider cost exceeds the
+      // original placeholder charge and the team can't cover the shortfall —
+      // surfaces as a BillingError("CREDITS_EXHAUSTED", ..., { requested,
+      // available }) out of ensureCreditsCapacity, where `requested` is the
+      // credits shortfall (creditsDifference) usage-service.ts was trying to
+      // collect. Other causes (adapter/network failures, etc.) land here too
+      // and simply won't have this figure.
+      const creditsDifference =
+        isBillingError(error) && typeof error.details?.requested === "number"
+          ? (error.details.requested as number)
+          : null;
+
+      const [updated] = await db
         .update(llmGenerations)
-        .set({ providerCostStatus: "reconcile_failed" })
+        .set({
+          providerCostStatus: "reconcile_failed",
+          providerCostReconcileFailureReason: failureReason,
+          providerCostReconcileFailedAt: new Date(),
+        })
         .where(
           and(
             eq(llmGenerations.teamId, payload.teamId),
@@ -233,7 +255,57 @@ export async function processProviderCostReconciliationJob(
             eq(llmGenerations.traceId, payload.traceId),
             eq(llmGenerations.spanId, payload.spanId),
           ),
-        );
+        )
+        .returning({ id: llmGenerations.id });
+
+      // Known, permanent operational gap: a row that lands here is never
+      // automatically rescanned or retried, and this job does not attempt any
+      // automatic recovery (retrying the charge, or deducting credits on its
+      // own) — whether and how to still collect a known-but-uncollected cost
+      // is a product/ops decision, not one this reconciliation path should
+      // make. This structured log plus the ops alert below exist only so a
+      // human can find and act on the row manually; closing that loop is out
+      // of scope here.
+      logger.error("Provider cost reconciliation permanently failed", {
+        teamId: payload.teamId,
+        workspaceId: payload.workspaceId,
+        generationId: updated?.id ?? null,
+        provider: payload.provider,
+        providerRequestId: payload.providerRequestId,
+        traceId: payload.traceId,
+        spanId: payload.spanId,
+        creditsDifference,
+        reason: failureReason,
+      });
+
+      await opsAlertService
+        .trigger({
+          alertKey: `billing:provider-cost-reconcile-failed:${payload.teamId}:${payload.traceId}:${payload.spanId}`,
+          level: "error",
+          source: "billing.provider_cost_reconciliation",
+          title: "Provider cost reconciliation permanently failed",
+          message: failureReason,
+          teamId: payload.teamId,
+          metadata: {
+            generationId: updated?.id ?? null,
+            provider: payload.provider,
+            providerRequestId: payload.providerRequestId,
+            traceId: payload.traceId,
+            spanId: payload.spanId,
+            creditsDifference,
+          },
+        })
+        .catch((alertError) => {
+          logger.error("Failed to emit ops alert for reconciliation failure", {
+            teamId: payload.teamId,
+            traceId: payload.traceId,
+            spanId: payload.spanId,
+            error:
+              alertError instanceof Error
+                ? alertError.message
+                : String(alertError),
+          });
+        });
     }
     logger.warn("Provider cost reconciliation failed", {
       provider: payload.provider,

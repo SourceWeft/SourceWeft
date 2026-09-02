@@ -1,0 +1,2 @@
+ALTER TABLE "llm_generations" ADD COLUMN "provider_cost_reconcile_failure_reason" text;--> statement-breakpoint
+ALTER TABLE "llm_generations" ADD COLUMN "provider_cost_reconcile_failed_at" timestamp with time zone;

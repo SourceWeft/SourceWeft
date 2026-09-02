@@ -327,13 +327,19 @@ export class BillingUsageService {
           }
         }
 
+        // The markup rate actually applied at this moment — captured into the
+        // ledger below so a later async reconciliation (which may run minutes
+        // or hours from now, after `runtimeConfig.defaultMarkupRate` has
+        // possibly changed) recomputes against the rate this charge was made
+        // under, not whatever the platform default happens to be by then.
+        const markupRateApplied =
+          input.markupRate ?? this.runtimeConfig.defaultMarkupRate;
         const creditsToConsume =
           input.credits ??
           computeCreditsFromCost({
             providerCostUsd: input.providerCostUsd ?? 0,
             platformCostUsd: input.platformCostUsd ?? 0,
-            markupRate:
-              input.markupRate ?? this.runtimeConfig.defaultMarkupRate,
+            markupRate: markupRateApplied,
             creditUnitUsd: this.runtimeConfig.creditUnitUsd,
           });
 
@@ -395,9 +401,7 @@ export class BillingUsageService {
               ...(input.platformCostUsd !== undefined
                 ? { platformCostUsd: input.platformCostUsd }
                 : {}),
-              ...(input.markupRate !== undefined
-                ? { markupRate: input.markupRate }
-                : {}),
+              markupRate: markupRateApplied,
               ...(input.metadata ?? {}),
             },
           },
@@ -467,6 +471,11 @@ export class BillingUsageService {
           typeof metadata.creditUnitUsd === "number"
             ? metadata.creditUnitUsd
             : this.runtimeConfig.creditUnitUsd;
+        // Prefer the rate captured on the original charge (meterConsume now
+        // always writes it). Falling back to the current runtime default only
+        // covers ledger rows written before this field existed — for those,
+        // reconciliation can still conflate a markup-rate change with a real
+        // cost change, which is a known, accepted gap for pre-existing rows.
         const markupRate =
           typeof metadata.markupRate === "number"
             ? metadata.markupRate
