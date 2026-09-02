@@ -58,8 +58,6 @@ import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
 import { createExploreSubagent } from "../subagents/explore";
 import { createPlanSubagent } from "../subagents/plan";
-import { buildAsyncDelegates } from "../async-runs/async-subagents";
-import { asyncSubagentsExposed } from "../async-runs/feature-flag";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -730,30 +728,6 @@ export async function buildThreadAgentAssembly(
       backend,
       middleware: childMiddleware("plan"),
     }),
-    // Background (async) delegates: deepagents auto-wires the async task tools
-    // (check/list/update/cancel) that drive the self-hosted runs endpoint. Off
-    // by default; requires the endpoint + run worker (see async-runs). Gated on
-    // `asyncSubagentsExposed()` (flag AND internal token) so the model is never
-    // handed tools that would be rejected by the endpoint's token guard. The
-    // per-turn billing/tenancy context rides a header (deepagents forwards no
-    // metadata otherwise) so the worker rebuilds the billed model + tenant scope.
-    ...(asyncSubagentsExposed()
-      ? buildAsyncDelegates(
-          config.chat.agent.asyncRunsEndpointUrl,
-          {
-            teamId: prepared.workspace.organizationId,
-            workspaceId: prepared.workspace.id,
-            userId: prepared.userId,
-            modelAlias: prepared.modelAlias,
-            providerModel: prepared.providerModel,
-            profileAlias: prepared.profileAlias,
-            gatewayConfigId: prepared.chatProfile.gatewayConfigId,
-            parentThreadId: prepared.thread.id,
-            sourceIds: prepared.sourceIds,
-          },
-          config.chat.agent.asyncRunsInternalToken,
-        )
-      : []),
   ];
 
   const agent = await createThreadAgent({

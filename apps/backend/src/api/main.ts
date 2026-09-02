@@ -14,7 +14,6 @@ import { createApp } from "./app";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
-import { ensureAsyncRunsSchema } from "./routes/async-runs-endpoint";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
@@ -29,10 +28,6 @@ await connectorAdaptersReady();
 await notifyHub.start();
 // Flush a metrics snapshot line periodically (API process only).
 metrics.startPeriodicFlush();
-// Bootstrap the async-runs tables before serving (no-op unless enabled), so the
-// SDK client that drives background delegates never races an unbootstrapped store.
-await ensureAsyncRunsSchema();
-
 const app = createApp();
 
 serve(

@@ -559,22 +559,6 @@ export const config = {
         process.env.SOURCEWEFT_AGENT_ASK_USER_ENABLED,
         true,
       ),
-      // Background (continuable) delegates via deepagents' async task tools over
-      // the self-hosted runs endpoint (docs/architecture/async-subagent-runs.md).
-      // Off by default: requires the endpoint mounted + run worker started.
-      asyncSubagentsEnabled: parseBoolean(
-        process.env.SOURCEWEFT_AGENT_ASYNC_SUBAGENTS_ENABLED,
-        false,
-      ),
-      asyncRunsEndpointUrl:
-        process.env.SOURCEWEFT_ASYNC_RUNS_URL?.trim() ||
-        `http://127.0.0.1:${Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001)}/internal/async-runs`,
-      // Shared secret guarding the internal runs endpoint. The parent turn sends
-      // it as a header; the endpoint rejects any request missing/mismatching it.
-      // Fail-closed: empty ⇒ the endpoint refuses every request, so enabling
-      // async subagents requires setting this.
-      asyncRunsInternalToken:
-        process.env.SOURCEWEFT_AGENT_ASYNC_RUNS_INTERNAL_TOKEN?.trim() || "",
     },
   },
   sandbox: {

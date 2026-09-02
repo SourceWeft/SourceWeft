@@ -68,7 +68,7 @@ const EXPLORE_SYSTEM_PROMPT = [
  * No `responseFormat`: the delegate investigates read-only and produces free-text
  * findings. The structured {@link exploreResponseSchema} report is produced by a
  * dedicated `model.withStructuredOutput(...).invoke(...)` call after the agent
- * finishes (see the async-runs delegate executor). Inline `responseFormat` binds
+ * finishes. Inline `responseFormat` binds
  * the schema as an auto tool each loop, which is ~50% unreliable on DeepSeek (the
  * model answers text instead of calling it → GraphRecursionError); one dedicated
  * structured call is DeepSeek-safe.
