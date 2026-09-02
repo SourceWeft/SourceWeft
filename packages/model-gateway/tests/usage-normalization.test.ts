@@ -55,6 +55,48 @@ test("normalizes OpenAI-compatible token usage without provider extensions", () 
   );
 });
 
+test("normalizes DeepSeek's top-level prompt_cache_hit_tokens as cacheReadTokens", () => {
+  assert.deepEqual(
+    normalizeOpenAICompatibleUsage({
+      prompt_tokens: 1024,
+      completion_tokens: 256,
+      total_tokens: 1280,
+      prompt_cache_hit_tokens: 768,
+      prompt_cache_miss_tokens: 256,
+    }),
+    {
+      inputTokens: 1024,
+      outputTokens: 256,
+      totalTokens: 1280,
+      cacheReadTokens: 768,
+      cacheWriteTokens: undefined,
+    },
+  );
+});
+
+test("prefers nested prompt_tokens_details.cached_tokens over DeepSeek's top-level field", () => {
+  assert.equal(
+    normalizeOpenAICompatibleUsage({
+      prompt_tokens: 1024,
+      completion_tokens: 256,
+      prompt_tokens_details: { cached_tokens: 40 },
+      prompt_cache_hit_tokens: 768,
+    })?.cacheReadTokens,
+    40,
+  );
+});
+
+test("falls back to Anthropic's cache_read_input_tokens when neither OpenAI details nor DeepSeek's field are present", () => {
+  assert.equal(
+    normalizeOpenAICompatibleUsage({
+      prompt_tokens: 1024,
+      completion_tokens: 256,
+      cache_read_input_tokens: 12,
+    })?.cacheReadTokens,
+    12,
+  );
+});
+
 test("OpenRouter provider adapter enriches protocol usage with cost", () => {
   const raw = {
     usage: {

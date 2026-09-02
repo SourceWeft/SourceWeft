@@ -199,10 +199,11 @@ async function resolveGenerationCost(
     return null;
   }
 
-  if (generation.observation?.cost) {
+  const observedCost = generation.observation?.cost;
+  if (observedCost?.effectiveUsd !== undefined) {
     return {
-      providerCostUsd: generation.observation.cost.effectiveUsd ?? null,
-      costSource: generation.observation.cost.source,
+      providerCostUsd: observedCost.effectiveUsd,
+      costSource: observedCost.source,
     };
   }
 

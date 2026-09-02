@@ -58,6 +58,7 @@ export function normalizeOpenAICompatibleUsage(
     totalTokens,
     cacheReadTokens:
       detailsNumber(inputDetails, "cached_tokens") ??
+      finiteNumber(input.prompt_cache_hit_tokens) ??
       finiteNumber(input.cache_read_input_tokens),
     cacheWriteTokens: finiteNumber(input.cache_creation_input_tokens),
   };
