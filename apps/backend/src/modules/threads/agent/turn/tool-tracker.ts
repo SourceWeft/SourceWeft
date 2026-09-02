@@ -4,7 +4,7 @@ import type {
   ToolCallTrace,
   ToolProducer,
 } from "../..";
-import { toObjectRecord } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 import {
   extractToolPayloadInput,
   parseToolArgs,
@@ -527,7 +527,8 @@ function isToolArgsSubset(
 ) {
   return Object.entries(subset).every(
     ([key, value]) =>
-      key in superset && stableJsonStringify(superset[key]) === stableJsonStringify(value),
+      key in superset &&
+      stableJsonStringify(superset[key]) === stableJsonStringify(value),
   );
 }
 

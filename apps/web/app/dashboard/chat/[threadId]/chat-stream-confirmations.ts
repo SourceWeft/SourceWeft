@@ -6,12 +6,7 @@ import type {
   LiveToolConfirmation,
   ToolCallRecord,
 } from "../_components/chat-canvas/types";
-
-function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
+import { toObjectRecord } from "../../../../lib/records";
 
 function getNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
@@ -43,10 +38,10 @@ function missingToolConfirmationFinishPayload(): Error {
 }
 
 function parseFinishToolCall(value: unknown): ToolCallRecord {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   const id = getNonEmptyString(record?.id);
   const tool = getNonEmptyString(record?.tool);
-  const input = getObjectRecord(record?.input);
+  const input = toObjectRecord(record?.input);
   const status = record?.status;
   if (!record || !id || !tool || !input || !isToolCallStatus(status)) {
     throw invalidToolConfirmationFinishPayload();
@@ -88,7 +83,7 @@ export function parseFinishLiveConfirmations(
   }
 
   return value.map((item) => {
-    const record = getObjectRecord(item);
+    const record = toObjectRecord(item);
     if (!record) {
       throw invalidToolConfirmationFinishPayload();
     }

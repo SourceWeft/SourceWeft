@@ -2,6 +2,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Value form of {@link isRecord}: the plain object, or `null`. */
+export function toRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
 export function compactObject<T extends Record<string, unknown>>(value: T): T {
   const entries = Object.entries(value).filter(
     ([, item]) => item !== undefined,

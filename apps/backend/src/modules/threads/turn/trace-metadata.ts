@@ -3,34 +3,29 @@ import {
   upsertTracePart,
   type TracePart,
 } from "./trace-parts";
-
-function getObjectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
+import { toObjectRecord } from "../../../shared/records";
 
 function getTraceItemId(item: unknown) {
-  return getObjectRecord(item)?.id;
+  return toObjectRecord(item)?.id;
 }
 
 function getTraceItemDisplayOrder(item: unknown) {
-  const displayOrder = getObjectRecord(item)?.displayOrder;
+  const displayOrder = toObjectRecord(item)?.displayOrder;
   return typeof displayOrder === "number" && Number.isFinite(displayOrder)
     ? displayOrder
     : null;
 }
 
 function getTraceItemSequence(item: unknown) {
-  const sequence = getObjectRecord(item)?.sequence;
+  const sequence = toObjectRecord(item)?.sequence;
   return typeof sequence === "number" && Number.isFinite(sequence)
     ? sequence
     : null;
 }
 
 function preserveTraceItemState(existing: unknown, next: unknown) {
-  const existingRecord = getObjectRecord(existing);
-  const nextRecord = getObjectRecord(next);
+  const existingRecord = toObjectRecord(existing);
+  const nextRecord = toObjectRecord(next);
   if (!existingRecord || !nextRecord) {
     return next;
   }
@@ -48,7 +43,7 @@ function preserveTraceItemState(existing: unknown, next: unknown) {
 }
 
 function replaceTraceItemPreservingSequence(existing: unknown, next: unknown) {
-  const nextRecord = getObjectRecord(preserveTraceItemState(existing, next));
+  const nextRecord = toObjectRecord(preserveTraceItemState(existing, next));
   if (!nextRecord) {
     return next;
   }
@@ -75,7 +70,7 @@ function appendTraceItemsByEventId(
 
   const output = options.preserveDisplayOrder
     ? existingItems.map((item, index) => {
-        const itemRecord = getObjectRecord(item);
+        const itemRecord = toObjectRecord(item);
         return itemRecord
           ? {
               ...itemRecord,
@@ -96,7 +91,7 @@ function appendTraceItemsByEventId(
     const id = getTraceItemId(item);
     if (typeof id === "string" && indexesById.has(id)) {
       const existingIndex = indexesById.get(id)!;
-      const itemRecord = getObjectRecord(item);
+      const itemRecord = toObjectRecord(item);
       output[existingIndex] =
         options.preserveDisplayOrder && itemRecord
           ? {
@@ -111,7 +106,7 @@ function appendTraceItemsByEventId(
     if (typeof id === "string" && id.length > 0) {
       indexesById.set(id, output.length);
     }
-    const itemRecord = getObjectRecord(item);
+    const itemRecord = toObjectRecord(item);
     output.push(
       options.preserveDisplayOrder && itemRecord
         ? {
@@ -221,7 +216,7 @@ function appendRenderBlocks(existing: unknown, next: unknown) {
   return [
     ...existingItems,
     ...nextItems.map((item, index) => {
-      const record = getObjectRecord(item);
+      const record = toObjectRecord(item);
       const id = typeof record?.id === "string" ? record.id : null;
       if (!record || !id || !usedIds.has(id)) {
         if (id) {

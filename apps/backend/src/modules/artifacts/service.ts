@@ -47,6 +47,7 @@ import {
   listArtifactSummaryRecords,
 } from "./repository";
 import { loadArtifactViewHandlerRegistry } from "./view-handlers";
+import { toObjectRecord } from "../../shared/records";
 
 type ArtifactRecord = Awaited<ReturnType<typeof findArtifactRecord>>;
 type ExactArtifactVersionRecord = NonNullable<
@@ -73,13 +74,6 @@ export type ArtifactVersionMediaBytesResult =
     }
   | { kind: "not_modified"; etag: string }
   | { kind: "range_not_satisfiable"; etag: string; totalLength: number };
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
 
 export function isArtifactOwnedStorageKey(input: {
   workspaceId: string;

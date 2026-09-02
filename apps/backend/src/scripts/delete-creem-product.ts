@@ -1,3 +1,4 @@
+import { parseBooleanEnv as parseBoolean } from "../shared/env";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
@@ -97,23 +98,6 @@ function parseArgs(argv: string[]): Args | null {
     productIds: Array.from(new Set(productIds)),
     yes: argv.includes("--yes") || argv.includes("-y"),
   };
-}
-
-function parseBoolean(value: string | undefined, fallback: boolean) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-
-  if (normalized === "false" || normalized === "0") {
-    return false;
-  }
-
-  return fallback;
 }
 
 function loadEnvFiles() {

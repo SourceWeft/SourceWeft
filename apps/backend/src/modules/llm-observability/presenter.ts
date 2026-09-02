@@ -1,3 +1,4 @@
+import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
 import type { LlmObservabilityAccess } from "./permissions";
 
 const hiddenPermissionPayload = {
@@ -122,21 +123,6 @@ function metadataString(record: Record<string, unknown>, keys: string[]) {
     }
   }
   return null;
-}
-
-function parsePolicyPayload(value: unknown) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return value;
-  }
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return value;
-  }
 }
 
 function generationName(generation: Record<string, unknown>) {

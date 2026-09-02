@@ -6,16 +6,10 @@ import {
 import { isArtifactProgressOutputType } from "@sourceweft/agent-tool-registry";
 import type { ToolCallTrace } from "../turn/types";
 import { toSseData } from "./helpers";
+import { toObjectRecord } from "../../../shared/records";
 
 const MAX_SSE_TOOL_OUTPUT_CHARS = 12_000;
 const MAX_SSE_TOOL_OUTPUT_ITEMS = 120;
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
 
 function truncateTextForSse(value: string) {
   if (value.length <= MAX_SSE_TOOL_OUTPUT_CHARS) {

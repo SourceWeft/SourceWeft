@@ -1,3 +1,4 @@
+import { extractImagePartsFromContentJson } from "../turn/message-image-parts";
 import { randomUUID } from "node:crypto";
 import type { ToolApprovalResume } from "@sourceweft/contracts";
 import { isAgentToolDomain } from "@sourceweft/agent-tool-registry";
@@ -21,76 +22,13 @@ import type { StreamThreadEventInput } from "../turn/service";
 import type {
   AgentCheckpointMetadata,
   AgentCheckpointRef,
-  ChatMessageImagePart,
 } from "../turn/types";
 import type {
   EditThreadInput,
   RefreshThreadInput,
   ResumeThreadInput,
 } from "./types";
-
-function extractImagePartsFromContentJson(value: unknown) {
-  const contentJson =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as { parts?: unknown })
-      : {};
-  if (!Array.isArray(contentJson.parts)) {
-    return [] as ChatMessageImagePart[];
-  }
-
-  return contentJson.parts
-    .map((part): ChatMessageImagePart | null => {
-      if (!part || typeof part !== "object" || Array.isArray(part)) {
-        return null;
-      }
-      const record = part as Record<string, unknown>;
-      if (
-        record.type !== "image" ||
-        typeof record.id !== "string" ||
-        typeof record.fileName !== "string" ||
-        typeof record.mimeType !== "string" ||
-        typeof record.storageKey !== "string" ||
-        typeof record.url !== "string"
-      ) {
-        return null;
-      }
-      return {
-        type: "image" as const,
-        id: record.id,
-        fileName: record.fileName,
-        mimeType: record.mimeType,
-        sizeBytes:
-          typeof record.sizeBytes === "number" &&
-          Number.isFinite(record.sizeBytes)
-            ? record.sizeBytes
-            : 0,
-        width:
-          typeof record.width === "number" && Number.isFinite(record.width)
-            ? record.width
-            : null,
-        height:
-          typeof record.height === "number" && Number.isFinite(record.height)
-            ? record.height
-            : null,
-        storageBucket:
-          typeof record.storageBucket === "string"
-            ? record.storageBucket
-            : null,
-        storageKey: record.storageKey,
-        url: record.url,
-        ...(typeof record.visionDescription === "string"
-          ? { visionDescription: record.visionDescription }
-          : {}),
-        ...(typeof record.visionModelAlias === "string"
-          ? { visionModelAlias: record.visionModelAlias }
-          : {}),
-        ...(typeof record.visionProfileAlias === "string"
-          ? { visionProfileAlias: record.visionProfileAlias }
-          : {}),
-      };
-    })
-    .filter((part): part is ChatMessageImagePart => part !== null);
-}
+import { toObjectRecord } from "../../../shared/records";
 
 function shouldUseSubmittedEditImages(input: {
   images?: EditThreadInput["images"];
@@ -109,12 +47,6 @@ function getMessageMetadataRecord(message: {
     : {};
 }
 
-function getObjectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getStringField(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
   return typeof value === "string" && value.trim().length > 0
@@ -126,7 +58,9 @@ function resolveRequestToolsWithSnapshot(input: {
   requestTools: StreamThreadEventInput["tools"];
   userMessage: Parameters<typeof resolveTurnOptionsToolsFromMessage>[0];
 }) {
-  return input.requestTools ?? resolveTurnOptionsToolsFromMessage(input.userMessage);
+  return (
+    input.requestTools ?? resolveTurnOptionsToolsFromMessage(input.userMessage)
+  );
 }
 
 function resolveSnapshotTools(input: {
@@ -148,7 +82,10 @@ function resolveToolConfirmationResumeCheckpoint(
   checkpoint: AgentCheckpointMetadata | null,
 ) {
   const resumeCheckpoint =
-    checkpoint?.resume ?? checkpoint?.beforeAssistant ?? checkpoint?.final ?? null;
+    checkpoint?.resume ??
+    checkpoint?.beforeAssistant ??
+    checkpoint?.final ??
+    null;
 
   if (!resumeCheckpoint) {
     throw new ContentError(
@@ -177,14 +114,12 @@ function extractApprovedConnectorActionsFromMessage(message: {
   metadata?: unknown;
 }): ConnectorActionResumeRef[] {
   const metadata = getMessageMetadataRecord(message);
-  const toolCalls = Array.isArray(metadata.toolCalls)
-    ? metadata.toolCalls
-    : [];
+  const toolCalls = Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [];
   const actions: ConnectorActionResumeRef[] = [];
 
   for (const toolCall of toolCalls) {
-    const toolCallRecord = getObjectRecord(toolCall);
-    const output = getObjectRecord(toolCallRecord?.output);
+    const toolCallRecord = toObjectRecord(toolCall);
+    const output = toObjectRecord(toolCallRecord?.output);
     if (
       output?.type !== "tool_confirmation_request" ||
       output.status !== "approved"
@@ -192,9 +127,9 @@ function extractApprovedConnectorActionsFromMessage(message: {
       continue;
     }
 
-    const action = getObjectRecord(output.action);
-    const execution = getObjectRecord(output.execution);
-    const executor = getObjectRecord(execution?.executor);
+    const action = toObjectRecord(output.action);
+    const execution = toObjectRecord(output.execution);
+    const executor = toObjectRecord(execution?.executor);
     if (executor?.kind !== "connector_action_run") {
       continue;
     }
@@ -208,8 +143,8 @@ function extractApprovedConnectorActionsFromMessage(message: {
       continue;
     }
 
-    const preview = getObjectRecord(output.preview);
-    const requestJson = getObjectRecord(preview?.requestJson);
+    const preview = toObjectRecord(output.preview);
+    const requestJson = toObjectRecord(preview?.requestJson);
     actions.push({
       actionRunId,
       connectorId,
@@ -229,8 +164,8 @@ function extractApprovedMcpActionsFromMessage(message: {
   const actions: McpActionResumeRef[] = [];
 
   for (const toolCall of toolCalls) {
-    const toolCallRecord = getObjectRecord(toolCall);
-    const output = getObjectRecord(toolCallRecord?.output);
+    const toolCallRecord = toObjectRecord(toolCall);
+    const output = toObjectRecord(toolCallRecord?.output);
     if (
       output?.type !== "tool_confirmation_request" ||
       output.status !== "approved"
@@ -238,8 +173,8 @@ function extractApprovedMcpActionsFromMessage(message: {
       continue;
     }
 
-    const execution = getObjectRecord(output.execution);
-    const executor = getObjectRecord(execution?.executor);
+    const execution = toObjectRecord(output.execution);
+    const executor = toObjectRecord(execution?.executor);
     if (executor?.kind !== "mcp_action_run") {
       continue;
     }
@@ -249,7 +184,7 @@ function extractApprovedMcpActionsFromMessage(message: {
     // tool resolves against — lives on the HITL sourceweft metadata and the
     // trace's `tool` field, NOT on `action.toolName` (which carries the lossy
     // normalizedToolName that would never match the bound tool).
-    const sourceweft = getObjectRecord(execution?.sourceweft);
+    const sourceweft = toObjectRecord(execution?.sourceweft);
     const toolName =
       getStringField(sourceweft, "toolName") ??
       getStringField(toolCallRecord, "tool");
@@ -259,10 +194,10 @@ function extractApprovedMcpActionsFromMessage(message: {
 
     // Match the redacted args the action run persists, mirroring the wrapped
     // tool's own redacted-vs-redacted comparison.
-    const preview = getObjectRecord(output.preview);
+    const preview = toObjectRecord(output.preview);
     const requestJson =
-      getObjectRecord(preview?.requestJson) ??
-      getObjectRecord(toolCallRecord?.input);
+      toObjectRecord(preview?.requestJson) ??
+      toObjectRecord(toolCallRecord?.input);
     if (!requestJson) {
       continue;
     }
@@ -280,17 +215,15 @@ function extractApprovedSandboxActionsFromMessage(message: {
   const sourceUserMessageId =
     getStringField(metadata, "sourceUserMessageId") ??
     getStringField(metadata, "userMessageId");
-  const toolCalls = Array.isArray(metadata.toolCalls)
-    ? metadata.toolCalls
-    : [];
+  const toolCalls = Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [];
   const actions: SandboxActionResumeRef[] = [];
 
   for (const toolCall of toolCalls) {
-    const toolCallRecord = getObjectRecord(toolCall);
-    const output = getObjectRecord(toolCallRecord?.output);
-    const action = getObjectRecord(output?.action);
-    const execution = getObjectRecord(output?.execution);
-    const sourceweft = getObjectRecord(execution?.sourceweft);
+    const toolCallRecord = toObjectRecord(toolCall);
+    const output = toObjectRecord(toolCallRecord?.output);
+    const action = toObjectRecord(output?.action);
+    const execution = toObjectRecord(output?.execution);
+    const sourceweft = toObjectRecord(execution?.sourceweft);
     const toolName =
       getStringField(action, "toolName") ??
       getStringField(toolCallRecord, "tool");
@@ -310,10 +243,10 @@ function extractApprovedSandboxActionsFromMessage(message: {
       getStringField(sourceweft, "toolCallId") ??
       getStringField(toolCallRecord, "approvalConfirmationId") ??
       getStringField(toolCallRecord, "id");
-    const preview = getObjectRecord(output?.preview);
+    const preview = toObjectRecord(output?.preview);
     const requestJson =
-      getObjectRecord(preview?.requestJson) ??
-      getObjectRecord(toolCallRecord?.input);
+      toObjectRecord(preview?.requestJson) ??
+      toObjectRecord(toolCallRecord?.input);
     if (!toolCallId || !requestJson) {
       continue;
     }
@@ -385,8 +318,8 @@ function sandboxActionMatchesResumeIdentity(input: {
   return Boolean(
     (sourceweft.confirmationId &&
       identity.confirmationId === sourceweft.confirmationId) ||
-      (sourceweft.hitlInterruptId &&
-        identity.hitlInterruptId === sourceweft.hitlInterruptId),
+    (sourceweft.hitlInterruptId &&
+      identity.hitlInterruptId === sourceweft.hitlInterruptId),
   );
 }
 
@@ -394,9 +327,9 @@ function resumeHasSandboxIdentity(resume: ToolApprovalResume) {
   const sourceweft = resume.sourceweft;
   return Boolean(
     sourceweft?.confirmationId ||
-      sourceweft?.hitlInterruptId ||
-      sourceweft?.sourceUserMessageId ||
-      sourceweft?.sourceAssistantMessageId,
+    sourceweft?.hitlInterruptId ||
+    sourceweft?.sourceUserMessageId ||
+    sourceweft?.sourceAssistantMessageId,
   );
 }
 
@@ -444,10 +377,7 @@ function mergeToolApprovalResumeActions(input: {
   const seenMcp = new Set<string>();
   const seenSandbox = new Set<string>();
 
-  for (const action of [
-    ...input.priorConnectorActions,
-    ...existingActions,
-  ]) {
+  for (const action of [...input.priorConnectorActions, ...existingActions]) {
     const key = `${action.connectorId}:${action.actionRunId}:${action.toolName}`;
     if (seen.has(key)) {
       continue;
@@ -647,12 +577,15 @@ export async function resolveResumeThreadStreamInput(
   });
   const resumeRunThreadId = `thread:${input.threadId}:resume:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
   const toolApprovalResume = mergeToolApprovalResumeActions({
-    priorConnectorActions:
-      extractApprovedConnectorActionsFromMessage(latestAssistantMessage),
-    priorMcpActions:
-      extractApprovedMcpActionsFromMessage(latestAssistantMessage),
-    priorSandboxActions:
-      extractApprovedSandboxActionsFromMessage(latestAssistantMessage),
+    priorConnectorActions: extractApprovedConnectorActionsFromMessage(
+      latestAssistantMessage,
+    ),
+    priorMcpActions: extractApprovedMcpActionsFromMessage(
+      latestAssistantMessage,
+    ),
+    priorSandboxActions: extractApprovedSandboxActionsFromMessage(
+      latestAssistantMessage,
+    ),
     resume: input.toolApprovalResume,
   });
 
@@ -720,25 +653,21 @@ export async function resolveEditThreadStreamInput(
     tools,
     userMessage: latestUserMessage,
   });
-  const agentBaseCheckpoint =
-    await resolveFallbackEditBaseCheckpoint({
-      workspace,
-      thread,
-      latestUserMessageId: latestUserMessage.id,
-    });
+  const agentBaseCheckpoint = await resolveFallbackEditBaseCheckpoint({
+    workspace,
+    thread,
+    latestUserMessageId: latestUserMessage.id,
+  });
 
   return {
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
     content: input.content,
-    ...(shouldUseSubmittedEditImages(input)
-      ? { images: input.images }
-      : {}),
-    existingImageParts:
-      !shouldUseSubmittedEditImages(input)
-        ? extractImagePartsFromContentJson(latestUserMessage.contentJson)
-        : undefined,
+    ...(shouldUseSubmittedEditImages(input) ? { images: input.images } : {}),
+    existingImageParts: !shouldUseSubmittedEditImages(input)
+      ? extractImagePartsFromContentJson(latestUserMessage.contentJson)
+      : undefined,
     mentionedSourceIds,
     sourceIds,
     tools: tools ? { ...tools, skillIds } : { skillIds },

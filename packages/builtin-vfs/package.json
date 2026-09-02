@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@sourceweft/contracts": "workspace:*",
-    "deepagents": "1.13.1",
-    "langsmith": "^0.7.17"
+    "deepagents": "1.13.1"
   },
   "devDependencies": {
     "@sourceweft/capability-contracts": "workspace:*",

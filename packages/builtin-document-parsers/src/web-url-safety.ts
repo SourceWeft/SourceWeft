@@ -1,5 +1,24 @@
 import { isIP } from "node:net";
 
+/**
+ * SSRF guard for user-supplied URLs.
+ *
+ * DUPLICATE — kept on purpose. `@sourceweft/builtin-tool-web-search`
+ * (`src/url-safety.ts`) carries the same blocklist, `isPrivateIpv4`,
+ * `isBlockedHostname` and `validatePublicHttpUrl`. **A change to the blocking
+ * rules here must be made there too, in the same change.**
+ *
+ * The two are not extracted into one module because they are not actually the
+ * same file: this copy uses Node's `isIP`, while the web-search copy hand-rolls
+ * an equivalent so that module stays free of `node:net` and usable from client
+ * code. Collapsing them would force one side onto the other's IP detection —
+ * either weakening this check to a regex, or dragging `node:net` into a client
+ * bundle. Neither package depends on the other, so a shared home would also
+ * mean a new package or a dependency edge invented purely for two dozen lines.
+ *
+ * For security code, an explicit duplicate that both sides can read beats an
+ * abstraction that quietly changes what one of them blocks.
+ */
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
 
 function isPrivateIpv4(hostname: string) {

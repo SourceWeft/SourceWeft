@@ -5,7 +5,7 @@ import {
   buildGatewayAuditMetadata,
   recordGatewayOperationEvent,
 } from "../../content/model-gateway-audit";
-import { consumeSourceWeftContextCompressionReport } from "../agent/context-compression";
+import { consumeSourceWeftContextCompressionReport } from "../agent/middleware/context-compression";
 import {
   createMessageRecord,
   findMessageRecord,

@@ -1,3 +1,4 @@
+import { extractImagePartsFromContentJson } from "./message-image-parts";
 import { randomUUID } from "node:crypto";
 import type {
   ChatCompleteResult,
@@ -131,6 +132,7 @@ import {
 } from "./capability-command-workflows";
 import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
 import { resolveActiveSkillPromptIds } from "./invoked-skills";
+import { toObjectRecord } from "../../../shared/records";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -274,14 +276,8 @@ type VisionFallbackResult = {
   steps: ThinkingStepTrace[];
 };
 
-function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getTraceSequence(value: unknown) {
-  const sequence = getObjectRecord(value)?.sequence;
+  const sequence = toObjectRecord(value)?.sequence;
   return typeof sequence === "number" && Number.isFinite(sequence)
     ? sequence
     : null;
@@ -321,7 +317,7 @@ function resolveTraceContinuationMetadata(
   const toolSequenceById: Record<string, number> = {};
   if (Array.isArray(metadata.toolCalls)) {
     for (const toolCall of metadata.toolCalls) {
-      const record = getObjectRecord(toolCall);
+      const record = toObjectRecord(toolCall);
       const id = record?.id;
       const sequence = getTraceSequence(record);
       if (typeof id === "string" && id.length > 0 && sequence !== null) {
@@ -494,69 +490,6 @@ function buildMessageContentJson(input: {
       ...input.images,
     ],
   };
-}
-
-function extractImagePartsFromContentJson(value: unknown) {
-  const contentJson =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as { parts?: unknown })
-      : {};
-  if (!Array.isArray(contentJson.parts)) {
-    return [] as ChatMessageImagePart[];
-  }
-
-  return contentJson.parts
-    .map((part): ChatMessageImagePart | null => {
-      if (!part || typeof part !== "object" || Array.isArray(part)) {
-        return null;
-      }
-      const record = part as Record<string, unknown>;
-      if (
-        record.type !== "image" ||
-        typeof record.id !== "string" ||
-        typeof record.fileName !== "string" ||
-        typeof record.mimeType !== "string" ||
-        typeof record.storageKey !== "string" ||
-        typeof record.url !== "string"
-      ) {
-        return null;
-      }
-      return {
-        type: "image" as const,
-        id: record.id,
-        fileName: record.fileName,
-        mimeType: record.mimeType,
-        sizeBytes:
-          typeof record.sizeBytes === "number" &&
-          Number.isFinite(record.sizeBytes)
-            ? record.sizeBytes
-            : 0,
-        width:
-          typeof record.width === "number" && Number.isFinite(record.width)
-            ? record.width
-            : null,
-        height:
-          typeof record.height === "number" && Number.isFinite(record.height)
-            ? record.height
-            : null,
-        storageBucket:
-          typeof record.storageBucket === "string"
-            ? record.storageBucket
-            : null,
-        storageKey: record.storageKey,
-        url: record.url,
-        ...(typeof record.visionDescription === "string"
-          ? { visionDescription: record.visionDescription }
-          : {}),
-        ...(typeof record.visionModelAlias === "string"
-          ? { visionModelAlias: record.visionModelAlias }
-          : {}),
-        ...(typeof record.visionProfileAlias === "string"
-          ? { visionProfileAlias: record.visionProfileAlias }
-          : {}),
-      };
-    })
-    .filter((part): part is ChatMessageImagePart => part !== null);
 }
 
 function shouldRejectEmptyThreadMessage(input: {
@@ -1953,7 +1886,9 @@ function mcpInstallIdsFromTools(
     return undefined;
   }
   const ids = installIds
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    )
     .slice(0, 10);
   return ids.length > 0 ? ids : undefined;
 }

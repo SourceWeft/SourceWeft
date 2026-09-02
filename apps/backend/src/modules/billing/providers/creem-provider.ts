@@ -14,19 +14,12 @@ import type {
   BillingProviderUpdateSeatsResult,
 } from "../types";
 import { BillingError } from "../errors";
+import { toObjectRecord } from "../../../shared/records";
 
 type CreemServerOptions = {
   apiKey: string;
   testMode?: boolean;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, unknown>;
-}
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
@@ -38,11 +31,11 @@ function resolveEntityId(value: unknown) {
     return value;
   }
 
-  return readString(asRecord(value), "id");
+  return readString(toObjectRecord(value), "id");
 }
 
 function resolveSubscriptionProductId(subscription: unknown) {
-  const record = asRecord(subscription);
+  const record = toObjectRecord(subscription);
   return (
     readString(record, "productId") ??
     readString(record, "product_id") ??
@@ -55,13 +48,13 @@ export function resolveCreemSubscriptionSeatUpdateItem(input: {
   seatCount: number;
   fallbackProductId?: string | null;
 }) {
-  const record = asRecord(input.subscription);
+  const record = toObjectRecord(input.subscription);
   const items = record?.items;
   if (!Array.isArray(items) || items.length === 0) {
     return null;
   }
 
-  const firstItem = asRecord(items[0]);
+  const firstItem = toObjectRecord(items[0]);
   const itemId = readString(firstItem, "id");
   if (!itemId) {
     return null;
@@ -166,8 +159,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       {
         productId,
         units:
-          input.kind === "subscription" &&
-          input.planFamily === "individual_pro"
+          input.kind === "subscription" && input.planFamily === "individual_pro"
             ? undefined
             : input.quantity,
         successUrl,

@@ -9,6 +9,7 @@ import type {
 import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 import { readTurnOptionsSnapshotTools } from "./tool-selection";
+import { toObjectRecord } from "../../../shared/records";
 
 export function collapseSupersededMessages(items: MessageRecord[]) {
   const supersededIds = new Set(
@@ -158,13 +159,6 @@ export function resolveTurnOptionsToolsFromMessage(
       : undefined;
   const optionsTools = readTurnOptionsSnapshotTools(metadata?.options);
   return optionsTools;
-}
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 export function normalizeAgentCheckpointRef(

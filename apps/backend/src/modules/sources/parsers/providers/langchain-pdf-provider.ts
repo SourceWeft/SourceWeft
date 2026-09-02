@@ -1,5 +1,5 @@
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { withTempFile } from "../file-buffer";
+import { withTempFile } from "@sourceweft/builtin-document-parsers";
 import type { DocumentParseProvider, ProviderParseInput } from "./types";
 import { buildParsedDocument, normalizeWhitespace } from "./utils";
 
@@ -23,8 +23,7 @@ export const langChainPdfProvider: DocumentParseProvider = {
             }
 
             const loc = doc.metadata?.loc as
-              | { pageNumber?: number }
-              | undefined;
+              { pageNumber?: number } | undefined;
             return {
               pageNumber: loc?.pageNumber ?? 1,
               content,
@@ -36,8 +35,7 @@ export const langChainPdfProvider: DocumentParseProvider = {
           );
         const content = pages.map((page) => page.content).join("\n\n");
         const pdfMeta = docs[0]?.metadata?.pdf as
-          | { totalPages?: number }
-          | undefined;
+          { totalPages?: number } | undefined;
 
         return buildParsedDocument({
           parseInput: input,

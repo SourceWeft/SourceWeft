@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { sha256 } from "./hash";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
   db,
@@ -20,10 +21,6 @@ type WorkspaceSkillRow = typeof workspaceSkills.$inferSelect;
 type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
 type SkillVersionRow = typeof skillVersions.$inferSelect;
 type SkillVersionFileRow = typeof skillVersionFiles.$inferSelect;
-
-function sha256(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 /**
  * Hard invariant 1 (docs/architecture/skill-registry-index.md §0): `pointer`
@@ -185,10 +182,7 @@ function skillManifestJson(input: {
   } satisfies SkillManifestJson;
 }
 
-function visibleSkillCondition(input: {
-  teamId: string;
-  workspaceId: string;
-}) {
+function visibleSkillCondition(input: { teamId: string; workspaceId: string }) {
   return or(
     eq(skillDefinitions.visibility, "public"),
     sql`${skillDefinitions.visibility} = 'restricted' and exists (
@@ -197,7 +191,10 @@ function visibleSkillCondition(input: {
         and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
         and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
     )`,
-    and(eq(skillDefinitions.visibility, "team"), eq(skillDefinitions.teamId, input.teamId)),
+    and(
+      eq(skillDefinitions.visibility, "team"),
+      eq(skillDefinitions.teamId, input.teamId),
+    ),
     and(
       eq(skillDefinitions.visibility, "workspace"),
       eq(skillDefinitions.teamId, input.teamId),
@@ -217,7 +214,10 @@ export async function listWorkspaceInstalledSkills(input: {
       workspaceSkill: workspaceSkills,
     })
     .from(workspaceSkills)
-    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
+    .innerJoin(
+      skillDefinitions,
+      eq(skillDefinitions.id, workspaceSkills.skillId),
+    )
     .innerJoin(
       skillVersions,
       and(
@@ -266,7 +266,10 @@ export async function listEnabledWorkspaceSkillRecords(input: {
   const rows = await db
     .select({ workspaceSkill: workspaceSkills })
     .from(workspaceSkills)
-    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
+    .innerJoin(
+      skillDefinitions,
+      eq(skillDefinitions.id, workspaceSkills.skillId),
+    )
     .where(
       and(
         eq(workspaceSkills.teamId, input.teamId),
@@ -289,7 +292,10 @@ export async function findEnabledWorkspaceSkillRecordBySlug(input: {
   const [row] = await db
     .select({ workspaceSkill: workspaceSkills })
     .from(workspaceSkills)
-    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
+    .innerJoin(
+      skillDefinitions,
+      eq(skillDefinitions.id, workspaceSkills.skillId),
+    )
     .where(
       and(
         eq(workspaceSkills.teamId, input.teamId),
@@ -446,13 +452,15 @@ export async function updateWorkspaceSkillRecord(input: {
   userId?: string;
 }) {
   const now = new Date();
-  const updates: Partial<typeof workspaceSkills.$inferInsert> & { updatedAt: Date } = {
+  const updates: Partial<typeof workspaceSkills.$inferInsert> & {
+    updatedAt: Date;
+  } = {
     updatedAt: now,
   };
   if (input.enabled !== undefined) {
     updates.enabled = input.enabled;
     updates.enabledAt = input.enabled ? now : null;
-    updates.enabledBy = input.enabled ? input.userId ?? null : null;
+    updates.enabledBy = input.enabled ? (input.userId ?? null) : null;
   }
   if (input.configJson !== undefined) {
     updates.configJson = input.configJson;
@@ -517,12 +525,13 @@ export async function loadSkillVersionBundle(input: {
     return null;
   }
 
-  const fileRows = versionRow.version.storageType === "db_text"
-    ? await db
-      .select()
-      .from(skillVersionFiles)
-      .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId))
-    : [];
+  const fileRows =
+    versionRow.version.storageType === "db_text"
+      ? await db
+          .select()
+          .from(skillVersionFiles)
+          .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId))
+      : [];
 
   const files: SkillBundleFile[] = fileRows.map((file) => ({
     path: file.path,
@@ -553,51 +562,66 @@ export async function syncBuiltinSkillMetadata(input: {
   const now = new Date();
   return db.transaction(async (tx) => {
     const [conflict] = await tx
-      .select({ id: skillDefinitions.id, sourceType: skillDefinitions.sourceType })
+      .select({
+        id: skillDefinitions.id,
+        sourceType: skillDefinitions.sourceType,
+      })
       .from(skillDefinitions)
-      .where(and(eq(skillDefinitions.slug, input.slug), sql`${skillDefinitions.sourceType} <> 'builtin'`))
+      .where(
+        and(
+          eq(skillDefinitions.slug, input.slug),
+          sql`${skillDefinitions.sourceType} <> 'builtin'`,
+        ),
+      )
       .limit(1);
     if (conflict) {
-      throw new Error(`Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`);
+      throw new Error(
+        `Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`,
+      );
     }
 
     const [existing] = await tx
       .select()
       .from(skillDefinitions)
-      .where(and(eq(skillDefinitions.slug, input.slug), eq(skillDefinitions.sourceType, "builtin")))
+      .where(
+        and(
+          eq(skillDefinitions.slug, input.slug),
+          eq(skillDefinitions.sourceType, "builtin"),
+        ),
+      )
       .limit(1);
 
     const skillId = existing?.id ?? randomUUID();
     const [definition] = existing
       ? await tx
-        .update(skillDefinitions)
-        .set({
-          teamId: null,
-          workspaceId: null,
-          displayName: input.displayName,
-          description: input.description,
-          visibility: input.visibility,
-          status: "active",
-          updatedAt: now,
-        })
-        .where(eq(skillDefinitions.id, skillId))
-        .returning()
+          .update(skillDefinitions)
+          .set({
+            teamId: null,
+            workspaceId: null,
+            displayName: input.displayName,
+            description: input.description,
+            visibility: input.visibility,
+            status: "active",
+            updatedAt: now,
+          })
+          .where(eq(skillDefinitions.id, skillId))
+          .returning()
       : await tx
-        .insert(skillDefinitions)
-        .values({
-          id: skillId,
-          teamId: null,
-          workspaceId: null,
-          sourceType: "builtin",
-          slug: input.slug,
-          displayName: input.displayName,
-          description: input.description,
-          visibility: input.visibility,
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+          .insert(skillDefinitions)
+          .values({
+            id: skillId,
+            teamId: null,
+            workspaceId: null,
+            sourceType: "builtin",
+            slug: input.slug,
+            displayName: input.displayName,
+            description: input.description,
+            visibility: input.visibility,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
     if (!definition) {
       throw new Error(`Failed to sync builtin skill '${input.slug}'`);
     }
@@ -771,7 +795,8 @@ export async function createNextCustomSkillVersionDraft(input: {
         displayName: definition.displayName,
         version: input.version,
         description: definition.description,
-        visibility: definition.sourceType === "team_custom" ? "team" : "workspace",
+        visibility:
+          definition.sourceType === "team_custom" ? "team" : "workspace",
       }),
       createdBy: input.userId,
       createdAt: now,

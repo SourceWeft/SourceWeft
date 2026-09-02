@@ -66,6 +66,7 @@ import {
   runWithProviderResponseCapture,
   type ProviderResponseCapture,
 } from "../observation/response-capture";
+import { toRecord } from "../utils/object";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
@@ -740,12 +741,6 @@ function cloneRecord<T extends Record<string, unknown> | undefined>(
   value: T,
 ): T {
   return value ? ({ ...value } as T) : value;
-}
-
-function toRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function normalizeBoundToolsForObservation(tools: unknown[]) {

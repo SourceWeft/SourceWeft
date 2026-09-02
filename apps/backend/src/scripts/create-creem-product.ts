@@ -1,3 +1,4 @@
+import { parseBooleanEnv as parseBoolean } from "../shared/env";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
@@ -136,10 +137,14 @@ function parseArgs(argv: string[]): Args | null {
   const planOption = parsePlan(readOption(argv, "plan"));
   const intervalOption = parseInterval(readOption(argv, "interval"));
   const combined =
-    parseCombined(readOption(argv, "product")) ?? parseCombined(positionals[0] ?? null);
-  const plan = planOption ?? combined?.plan ?? parsePlan(positionals[0] ?? null);
+    parseCombined(readOption(argv, "product")) ??
+    parseCombined(positionals[0] ?? null);
+  const plan =
+    planOption ?? combined?.plan ?? parsePlan(positionals[0] ?? null);
   const interval =
-    intervalOption ?? combined?.interval ?? parseInterval(positionals[1] ?? null);
+    intervalOption ??
+    combined?.interval ??
+    parseInterval(positionals[1] ?? null);
 
   if (!plan) {
     return null;
@@ -149,23 +154,6 @@ function parseArgs(argv: string[]): Args | null {
     plan,
     intervals: interval ? [interval] : ["monthly", "yearly"],
   };
-}
-
-function parseBoolean(value: string | undefined, fallback: boolean) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-
-  if (normalized === "false" || normalized === "0") {
-    return false;
-  }
-
-  return fallback;
 }
 
 function loadEnvFiles() {
@@ -207,17 +195,17 @@ function formatInterval(interval: BillingInterval) {
 }
 
 function buildDescription(plan: PlanConfig, interval: BillingInterval) {
-  const lines = [
-    plan.description,
-    "",
-    `Billing: ${formatInterval(interval)}`,
-  ];
+  const lines = [plan.description, "", `Billing: ${formatInterval(interval)}`];
 
   if (plan.id === "team") {
     lines.push("Pricing: per seat. Checkout units represent seats.");
   }
 
-  lines.push("", "Includes:", ...plan.features.map((feature) => `- ${feature}`));
+  lines.push(
+    "",
+    "Includes:",
+    ...plan.features.map((feature) => `- ${feature}`),
+  );
 
   return lines.join("\n");
 }
@@ -292,11 +280,7 @@ async function main() {
   }
 
   console.log(
-    JSON.stringify(
-      products.length === 1 ? products[0] : { products },
-      null,
-      2,
-    ),
+    JSON.stringify(products.length === 1 ? products[0] : { products }, null, 2),
   );
 }
 

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "../hash";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -75,10 +75,6 @@ export type ReadRegistryResult = {
 };
 
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
-
-function sha256(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
 
 async function isFile(candidate: string): Promise<boolean> {
   return stat(candidate)

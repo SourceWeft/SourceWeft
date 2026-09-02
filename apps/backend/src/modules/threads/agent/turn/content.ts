@@ -1,3 +1,4 @@
+import { toObjectRecord } from "../../../../shared/records";
 export function extractTextDeltas(content: unknown): string[] {
   if (typeof content === "string") {
     return content.length > 0 ? [content] : [];
@@ -60,13 +61,6 @@ export function stringifyAgentMessageContent(content: unknown): string {
   }
 
   return "";
-}
-
-export function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 function normalizeMessageKind(value: unknown) {

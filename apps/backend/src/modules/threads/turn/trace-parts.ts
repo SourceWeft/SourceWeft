@@ -3,6 +3,7 @@ import type {
   ThinkingStepTrace,
   ToolCallTrace,
 } from "./types";
+import { toObjectRecord } from "../../../shared/records";
 
 export type TracePartBase = {
   id: string;
@@ -54,12 +55,6 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function getObjectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getTracePartId(part: TracePartCandidate | TracePart) {
   if (part.kind === "tool") {
     return part.toolCallId;
@@ -68,7 +63,7 @@ function getTracePartId(part: TracePartCandidate | TracePart) {
 }
 
 function getTracePartOrder(part: unknown) {
-  const order = getObjectRecord(part)?.order;
+  const order = toObjectRecord(part)?.order;
   return typeof order === "number" && Number.isFinite(order) ? order : null;
 }
 
@@ -79,7 +74,7 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
 
   return value
     .map((part, index) => {
-      const record = getObjectRecord(part);
+      const record = toObjectRecord(part);
       if (!record) {
         return null;
       }
@@ -122,7 +117,7 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
         const toolCallId =
           typeof record.toolCallId === "string" ? record.toolCallId : id;
         const tool = typeof record.tool === "string" ? record.tool : "";
-        const input = getObjectRecord(record.input) ?? {};
+        const input = toObjectRecord(record.input) ?? {};
         const status =
           record.status === "approval_requested" ||
           record.status === "completed" ||
@@ -159,7 +154,9 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
 
       const title = typeof record.title === "string" ? record.title : id;
       const items = Array.isArray(record.items)
-        ? record.items.filter((item): item is string => typeof item === "string")
+        ? record.items.filter(
+            (item): item is string => typeof item === "string",
+          )
         : [];
       const status =
         record.status === "pending" ||
@@ -176,8 +173,8 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
         title,
         status,
         items,
-        ...(getObjectRecord(record.metadata)
-          ? { metadata: getObjectRecord(record.metadata)! }
+        ...(toObjectRecord(record.metadata)
+          ? { metadata: toObjectRecord(record.metadata)! }
           : {}),
       } satisfies StepTracePart;
     })
@@ -235,7 +232,9 @@ export function tracePartFromReasoningSegment(
     ...(segment.phase ? { phase: segment.phase } : {}),
     ...(segment.toolCallId ? { toolCallId: segment.toolCallId } : {}),
     ...(segment.tool ? { tool: segment.tool } : {}),
-    ...(segment.durationMs !== undefined ? { durationMs: segment.durationMs } : {}),
+    ...(segment.durationMs !== undefined
+      ? { durationMs: segment.durationMs }
+      : {}),
   };
 }
 

@@ -1,11 +1,6 @@
-function getObjectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
+import { toObjectRecord } from "../../shared/records";
 function getCommittedArtifactBlockId(value: unknown): string | null {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   return record?.type === "artifact_output" && typeof record.id === "string"
     ? record.id
     : null;
@@ -15,8 +10,8 @@ function getCommittedArtifactToolCall(
   value: unknown,
   blocksById: ReadonlyMap<string, Record<string, unknown>>,
 ) {
-  const call = getObjectRecord(value);
-  const output = getObjectRecord(call?.output);
+  const call = toObjectRecord(value);
+  const output = toObjectRecord(call?.output);
   if (
     !call ||
     typeof call.id !== "string" ||
@@ -33,8 +28,8 @@ function getCommittedArtifactToolCall(
     return null;
   }
   const block = blocksById.get(output.artifactOutputBlockId);
-  const callProducer = getObjectRecord(call.producer);
-  const blockProducer = getObjectRecord(block?.producer);
+  const callProducer = toObjectRecord(call.producer);
+  const blockProducer = toObjectRecord(block?.producer);
   if (
     !block ||
     block.type !== "artifact_output" ||
@@ -54,10 +49,10 @@ function committedArtifactToolCallIdentityMatches(
   left: unknown,
   right: unknown,
 ) {
-  const leftCall = getObjectRecord(left);
-  const rightCall = getObjectRecord(right);
-  const leftOutput = getObjectRecord(leftCall?.output);
-  const rightOutput = getObjectRecord(rightCall?.output);
+  const leftCall = toObjectRecord(left);
+  const rightCall = toObjectRecord(right);
+  const leftOutput = toObjectRecord(leftCall?.output);
+  const rightOutput = toObjectRecord(rightCall?.output);
   return (
     leftCall?.id === rightCall?.id &&
     leftCall?.tool === rightCall?.tool &&
@@ -75,8 +70,8 @@ function applyCommittedArtifactToolCall(
   incoming: unknown,
   authoritative: unknown,
 ) {
-  const incomingRecord = getObjectRecord(incoming);
-  const authoritativeRecord = getObjectRecord(authoritative);
+  const incomingRecord = toObjectRecord(incoming);
+  const authoritativeRecord = toObjectRecord(authoritative);
   if (!authoritativeRecord) {
     return incoming;
   }
@@ -103,10 +98,10 @@ export function committedArtifactBlockIdentityMatches(
   left: unknown,
   right: unknown,
 ) {
-  const leftRecord = getObjectRecord(left);
-  const rightRecord = getObjectRecord(right);
-  const leftProducer = getObjectRecord(leftRecord?.producer);
-  const rightProducer = getObjectRecord(rightRecord?.producer);
+  const leftRecord = toObjectRecord(left);
+  const rightRecord = toObjectRecord(right);
+  const leftProducer = toObjectRecord(leftRecord?.producer);
+  const rightProducer = toObjectRecord(rightRecord?.producer);
   return (
     leftRecord?.type === "artifact_output" &&
     rightRecord?.type === "artifact_output" &&
@@ -194,7 +189,7 @@ export function mergeCommittedArtifactToolCalls(input: {
     const blocksById = new Map<string, Record<string, unknown>>();
     for (const block of projection.renderBlocks ?? []) {
       const id = getCommittedArtifactBlockId(block);
-      const record = getObjectRecord(block);
+      const record = toObjectRecord(block);
       if (id && record) {
         blocksById.set(id, record);
       }
@@ -225,7 +220,7 @@ export function mergeCommittedArtifactToolCalls(input: {
   const merged: unknown[] = [];
   const seenIds = new Set<string>();
   for (const call of input.incoming ?? []) {
-    const record = getObjectRecord(call);
+    const record = toObjectRecord(call);
     const id = typeof record?.id === "string" ? record.id : null;
     if (!id) {
       merged.push(call);
@@ -260,7 +255,7 @@ export function hasPairedCommittedArtifactPublication(input: {
   const blocksById = new Map<string, Record<string, unknown>>();
   for (const block of input.renderBlocks ?? []) {
     const id = getCommittedArtifactBlockId(block);
-    const record = getObjectRecord(block);
+    const record = toObjectRecord(block);
     if (id && record && (!input.runId || record.threadRunId === input.runId)) {
       blocksById.set(id, record);
     }

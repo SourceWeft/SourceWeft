@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { AGENT_TOOL_HOST_LIMITS } from "@sourceweft/contracts/agent-tools";
 import type { ChatRunSnapshot } from "./types";
+import { toObjectRecord } from "../../../shared/records";
 
 export const PROTECTED_AGENT_TOOL_STATE_VERSION = 1 as const;
 
@@ -55,12 +56,6 @@ export type ProtectedAgentToolState = {
   semanticOperations: Record<string, ProtectedSemanticOperation>;
 };
 
-function objectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function canonicalJsonValue(value: unknown): unknown {
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
     throw new Error(
@@ -83,7 +78,7 @@ function canonicalJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalJsonValue);
   }
-  const record = objectRecord(value);
+  const record = toObjectRecord(value);
   if (!record) {
     throw new Error("PROTECTED_AGENT_TOOL_JSON_INVALID: unsupported value");
   }
@@ -133,7 +128,7 @@ export function assertProtectedAgentToolStateSize(
 }
 
 function isScope(value: unknown, expected: ProtectedAgentToolScope) {
-  const scope = objectRecord(value);
+  const scope = toObjectRecord(value);
   return (
     scope?.teamId === expected.teamId &&
     scope.workspaceId === expected.workspaceId &&
@@ -154,12 +149,12 @@ export function readProtectedAgentToolState(input: {
       semanticOperations: {},
     };
   }
-  const state = objectRecord(raw);
+  const state = toObjectRecord(raw);
   if (
     state?.version !== PROTECTED_AGENT_TOOL_STATE_VERSION ||
     !isScope(state.scope, input.scope) ||
-    !objectRecord(state.trustedReceipts) ||
-    !objectRecord(state.semanticOperations)
+    !toObjectRecord(state.trustedReceipts) ||
+    !toObjectRecord(state.semanticOperations)
   ) {
     throw new Error(
       "PROTECTED_AGENT_TOOL_STATE_INVALID: malformed, unscoped, or unsupported protected state",

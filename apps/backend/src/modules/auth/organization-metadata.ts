@@ -1,3 +1,4 @@
+import { isRecord } from "../../shared/records";
 export type SourceweftOrganizationKind = "personal" | "team";
 
 type SourceweftOrganizationMetadata = {
@@ -5,10 +6,6 @@ type SourceweftOrganizationMetadata = {
     kind?: SourceweftOrganizationKind;
   };
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function parseOrganizationMetadataObject(metadata: unknown) {
   let parsed: unknown = metadata;

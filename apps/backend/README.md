@@ -35,14 +35,9 @@ Auth and workspace MVP notes:
 - Google One Tap and native mobile sign-in use ID tokens. Configure
   `AUTH_GOOGLE_ONE_TAP_CLIENT_ID` and `AUTH_GOOGLE_MOBILE_CLIENT_ID` for those
   audiences; they do not choose the browser OAuth redirect client.
-- Future Google Workspace connectors should use
-  `GOOGLE_CONNECTORS_OAUTH_CLIENT_ID` / `GOOGLE_CONNECTORS_OAUTH_CLIENT_SECRET`
-  plus connector-specific redirect URI envs instead of implicitly reusing
-  sign-in credentials.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
 - Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.
-- Scheduler example queue jobs are disabled by default; set `BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED=true` to enable.
 
 Environment template: `apps/backend/.env.example`.
 

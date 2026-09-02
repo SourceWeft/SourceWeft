@@ -2,15 +2,10 @@ import { buildProviderAuthHeaders } from "../auth-headers";
 import { createHttpGatewayError } from "../errors";
 import { normalizeModelCallObservation } from "../observation/normalize";
 import type { RerankTransport } from "./types";
+import { toRecord } from "../utils/object";
 
 function normalizeDocument(document: string | Record<string, unknown>) {
   return typeof document === "string" ? document : JSON.stringify(document);
-}
-
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function resolveScores(raw: Record<string, unknown>): number[] {

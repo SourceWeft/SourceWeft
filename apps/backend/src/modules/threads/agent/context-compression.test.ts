@@ -16,7 +16,7 @@ import {
   resolveSourceWeftContextCompressionBudget,
   sanitizeSourceWeftSummaryResponse,
   sanitizeSourceWeftSummaryText,
-} from "./context-compression";
+} from "./middleware/context-compression";
 
 test("summary prompt requires the fixed SourceWeft sections", () => {
   let previousIndex = -1;
@@ -111,10 +111,7 @@ test("SourceWeft summarizer uses the native Deep Agents history flow and sanitiz
   assert.equal(prompts.length, 2);
   assert.strictEqual(forwardedModel, model);
   assert.match(prompts[0] ?? "", /old message 0/);
-  assert.match(
-    prompts[0] ?? "",
-    /old citation marker input-old removed/,
-  );
+  assert.match(prompts[0] ?? "", /old citation marker input-old removed/);
   assert.doesNotMatch(prompts[0] ?? "", /\[citation:input-old\]/);
   assert.doesNotMatch(prompts[0] ?? "", /\{conversation\}/);
   assert.equal(ordinaryContent, "Ordinary answer [citation:keep-1]");

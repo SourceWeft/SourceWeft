@@ -1,7 +1,10 @@
 import type { ThinkingStepTrace } from "../..";
-import { toObjectRecord } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 
-export function appendReasoningChunk(current: string | undefined, next: string) {
+export function appendReasoningChunk(
+  current: string | undefined,
+  next: string,
+) {
   if (!current) {
     return next;
   }

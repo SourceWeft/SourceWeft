@@ -6,6 +6,7 @@ import type {
   AsrTranscribeInput,
   AsrWord,
 } from "../types";
+import { toRecord } from "../utils/object";
 
 export const OPENAI_COMPATIBLE_ASR_AUDIO_FORMATS = [
   "flac",
@@ -175,12 +176,6 @@ export function appendFormValue(form: FormData, key: string, value: unknown) {
   }
 
   form.append(key, String(value));
-}
-
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function normalizeTimedTextItem(

@@ -9,7 +9,6 @@ import { opsAlertService } from "../modules/ops";
 import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
-import { scheduleExampleJob } from "./schedules/example-schedule";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
@@ -30,10 +29,6 @@ async function tick() {
   tickInFlight = true;
   try {
     const jobs: Array<Promise<unknown>> = [];
-
-    if (config.schedulerExampleJobEnabled) {
-      jobs.push(scheduleExampleJob());
-    }
 
     if (config.billing.teamBillingEnabled && config.billing.reconcileEnabled) {
       jobs.push(reconcileTeamSubscriptionsSchedule());
@@ -122,7 +117,6 @@ const marketFederationTimer = setInterval(() => {
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
   modelPricingSyncIntervalMs: config.modelPricingSyncIntervalMs,
-  exampleJobEnabled: config.schedulerExampleJobEnabled,
   billingReconcileEnabled:
     config.billing.teamBillingEnabled && config.billing.reconcileEnabled,
 });

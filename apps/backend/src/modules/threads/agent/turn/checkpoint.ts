@@ -1,13 +1,8 @@
-import {
-  buildAgentConfig,
-} from "..";
+import { buildAgentConfig } from "..";
 import type { createThreadAgent } from "..";
 import { ContentError } from "../../../content/errors";
-import type {
-  AgentCheckpointRef,
-  PreparedThreadTurn,
-} from "../..";
-import { toObjectRecord } from "./content";
+import type { AgentCheckpointRef, PreparedThreadTurn } from "../..";
+import { toObjectRecord } from "../../../../shared/records";
 
 export type AgentRunnableConfig =
   Awaited<ReturnType<typeof createThreadAgent>> extends {
@@ -56,7 +51,9 @@ export function resolveAgentBaseConfig(input: {
     : buildAgentConfig(input.agentRunThreadId);
 }
 
-export function checkpointRefFromConfig(value: unknown): AgentCheckpointRef | null {
+export function checkpointRefFromConfig(
+  value: unknown,
+): AgentCheckpointRef | null {
   const config = toObjectRecord(value);
   const configurable = toObjectRecord(config?.configurable);
   if (!configurable) {

@@ -9,6 +9,7 @@ import type {
   ToolCallRecord,
   ToolConfirmationResolution,
 } from "./types";
+import { getRecordValue } from "../../../../../lib/records";
 
 function formatToolName(toolName: string) {
   return toolName
@@ -20,13 +21,6 @@ function getToolDisplayName(toolName: string) {
   return (
     getAgentToolSlashCommand(toolName)?.displayName ?? formatToolName(toolName)
   );
-}
-
-function getRecordValue(
-  record: Record<string, unknown> | undefined,
-  key: string,
-) {
-  return record ? record[key] : undefined;
 }
 
 export function getSkillInstructionReadFileLabel(toolCall: ToolCallRecord) {

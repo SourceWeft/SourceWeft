@@ -1,10 +1,6 @@
 import { and, asc, desc, eq, gt, gte, lt, lte, or, sql } from "drizzle-orm";
-import {
-  db,
-  llmGenerations,
-  llmSpans,
-  llmTraces,
-} from "@sourceweft/db";
+import { db, llmGenerations, llmSpans, llmTraces } from "@sourceweft/db";
+import { toObjectRecord } from "../../shared/records";
 
 type TraceListInput = {
   teamId: string;
@@ -40,12 +36,18 @@ type UserDisplayRow = {
   email: string | null;
 };
 
-function cursorValue(row: { startedAt: Date | string | number | null; id: string } | null | undefined) {
+function cursorValue(
+  row:
+    { startedAt: Date | string | number | null; id: string } | null | undefined,
+) {
   if (!row?.startedAt) {
     return null;
   }
-  const date = row.startedAt instanceof Date ? row.startedAt : new Date(row.startedAt);
-  return Number.isNaN(date.getTime()) ? null : `${date.toISOString()}|${row.id}`;
+  const date =
+    row.startedAt instanceof Date ? row.startedAt : new Date(row.startedAt);
+  return Number.isNaN(date.getTime())
+    ? null
+    : `${date.toISOString()}|${row.id}`;
 }
 
 function traceCursorFilter(cursor?: ListCursor) {
@@ -60,7 +62,10 @@ function generationCursorFilter(cursor?: ListCursor) {
   if (!cursor) return undefined;
   return or(
     lt(llmGenerations.startedAt, cursor.startedAt),
-    and(eq(llmGenerations.startedAt, cursor.startedAt), lt(llmGenerations.id, cursor.id)),
+    and(
+      eq(llmGenerations.startedAt, cursor.startedAt),
+      lt(llmGenerations.id, cursor.id),
+    ),
   );
 }
 
@@ -86,7 +91,9 @@ function generationObservationCursorFilter(cursor?: ListCursor) {
 function traceFilters(input: TraceListInput) {
   return [
     eq(llmTraces.teamId, input.teamId),
-    input.workspaceId ? eq(llmTraces.workspaceId, input.workspaceId) : undefined,
+    input.workspaceId
+      ? eq(llmTraces.workspaceId, input.workspaceId)
+      : undefined,
     input.from ? gte(llmTraces.startedAt, input.from) : undefined,
     input.to ? lte(llmTraces.startedAt, input.to) : undefined,
     input.userId ? eq(llmTraces.userId, input.userId) : undefined,
@@ -96,13 +103,17 @@ function traceFilters(input: TraceListInput) {
     input.status ? eq(llmTraces.status, input.status as never) : undefined,
     input.traceId ? eq(llmTraces.traceId, input.traceId) : undefined,
     traceCursorFilter(input.cursor),
-  ].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
+  ].filter((condition): condition is NonNullable<typeof condition> =>
+    Boolean(condition),
+  );
 }
 
 function generationFilters(input: GenerationListInput) {
   return [
     eq(llmGenerations.teamId, input.teamId),
-    input.workspaceId ? eq(llmGenerations.workspaceId, input.workspaceId) : undefined,
+    input.workspaceId
+      ? eq(llmGenerations.workspaceId, input.workspaceId)
+      : undefined,
     input.from ? gte(llmGenerations.startedAt, input.from) : undefined,
     input.to ? lte(llmGenerations.startedAt, input.to) : undefined,
     input.userId ? eq(llmGenerations.userId, input.userId) : undefined,
@@ -113,11 +124,18 @@ function generationFilters(input: GenerationListInput) {
     generationCursorFilter(input.cursor),
     input.operation ? eq(llmGenerations.operation, input.operation) : undefined,
     input.provider ? eq(llmGenerations.provider, input.provider) : undefined,
-    input.modelAlias ? eq(llmGenerations.modelAlias, input.modelAlias) : undefined,
-  ].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
+    input.modelAlias
+      ? eq(llmGenerations.modelAlias, input.modelAlias)
+      : undefined,
+  ].filter((condition): condition is NonNullable<typeof condition> =>
+    Boolean(condition),
+  );
 }
 
-function generationModel(generation: { providerModel: string | null; modelAlias: string | null }) {
+function generationModel(generation: {
+  providerModel: string | null;
+  modelAlias: string | null;
+}) {
   return generation.modelAlias ?? generation.providerModel ?? null;
 }
 
@@ -133,14 +151,10 @@ function compareObservationTime(
   return left.id.localeCompare(right.id);
 }
 
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
 function readString(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function readNumber(value: unknown) {
@@ -150,15 +164,15 @@ function readNumber(value: unknown) {
 function readUsageTotalTokens(value: unknown): number | null {
   const record = unwrapPayloadRecord(value);
   if (!record) return null;
-  const directUsage = toRecord(record.usage);
+  const directUsage = toObjectRecord(record.usage);
   const usage = directUsage ?? record;
   return readNumber(usage.totalTokens) ?? readNumber(usage.total_tokens);
 }
 
 function unwrapPayloadRecord(value: unknown): Record<string, unknown> | null {
-  const record = toRecord(value);
+  const record = toObjectRecord(value);
   if (!record) return null;
-  return toRecord(record.value) ?? record;
+  return toObjectRecord(record.value) ?? record;
 }
 
 function spanModel(span: {
@@ -166,48 +180,79 @@ function spanModel(span: {
   inputJson: Record<string, unknown> | null;
   outputJson: Record<string, unknown> | null;
 }) {
-  return readString(span.metadataJson.modelAlias)
-    ?? readString(span.metadataJson.model)
-    ?? readString(unwrapPayloadRecord(span.inputJson)?.modelAlias)
-    ?? readString(unwrapPayloadRecord(span.inputJson)?.model)
-    ?? readString(unwrapPayloadRecord(span.outputJson)?.modelAlias)
-    ?? readString(unwrapPayloadRecord(span.outputJson)?.model);
+  return (
+    readString(span.metadataJson.modelAlias) ??
+    readString(span.metadataJson.model) ??
+    readString(unwrapPayloadRecord(span.inputJson)?.modelAlias) ??
+    readString(unwrapPayloadRecord(span.inputJson)?.model) ??
+    readString(unwrapPayloadRecord(span.outputJson)?.modelAlias) ??
+    readString(unwrapPayloadRecord(span.outputJson)?.model)
+  );
 }
 
 function spanTotalTokens(span: {
   inputJson: Record<string, unknown> | null;
   outputJson: Record<string, unknown> | null;
 }) {
-  return readUsageTotalTokens(span.outputJson) ?? readUsageTotalTokens(span.inputJson);
+  return (
+    readUsageTotalTokens(span.outputJson) ??
+    readUsageTotalTokens(span.inputJson)
+  );
 }
 
 function traceMetadataModel(trace: { metadataJson: Record<string, unknown> }) {
-  return readString(trace.metadataJson.modelAlias) ?? readString(trace.metadataJson.model);
+  return (
+    readString(trace.metadataJson.modelAlias) ??
+    readString(trace.metadataJson.model)
+  );
 }
 
-function observationScopeKey(input: { teamId: string; workspaceId: string; traceId: string }) {
+function observationScopeKey(input: {
+  teamId: string;
+  workspaceId: string;
+  traceId: string;
+}) {
   return `${input.teamId}\u0000${input.workspaceId}\u0000${input.traceId}`;
 }
 
 function spanPageTraceFilter(traces: Array<typeof llmTraces.$inferSelect>) {
-  return or(...traces.map((trace) => and(
-    eq(llmSpans.teamId, trace.teamId),
-    eq(llmSpans.workspaceId, trace.workspaceId),
-    eq(llmSpans.traceId, trace.traceId),
-  )));
+  return or(
+    ...traces.map((trace) =>
+      and(
+        eq(llmSpans.teamId, trace.teamId),
+        eq(llmSpans.workspaceId, trace.workspaceId),
+        eq(llmSpans.traceId, trace.traceId),
+      ),
+    ),
+  );
 }
 
-function generationPageTraceFilter(traces: Array<typeof llmTraces.$inferSelect>) {
-  return or(...traces.map((trace) => and(
-    eq(llmGenerations.teamId, trace.teamId),
-    eq(llmGenerations.workspaceId, trace.workspaceId),
-    eq(llmGenerations.traceId, trace.traceId),
-  )));
+function generationPageTraceFilter(
+  traces: Array<typeof llmTraces.$inferSelect>,
+) {
+  return or(
+    ...traces.map((trace) =>
+      and(
+        eq(llmGenerations.teamId, trace.teamId),
+        eq(llmGenerations.workspaceId, trace.workspaceId),
+        eq(llmGenerations.traceId, trace.traceId),
+      ),
+    ),
+  );
 }
 
-async function summarizeTraceObservations(traces: Array<typeof llmTraces.$inferSelect>) {
+async function summarizeTraceObservations(
+  traces: Array<typeof llmTraces.$inferSelect>,
+) {
   if (traces.length === 0) {
-    return new Map<string, { observationCount: number; totalTokens: number | null; model: string | null }>();
+    return new Map<
+      string,
+      {
+        observationCount: number;
+        totalTokens: number | null;
+        model: string | null;
+      }
+    >();
   }
   const [spans, generations] = await Promise.all([
     db
@@ -236,7 +281,10 @@ async function summarizeTraceObservations(traces: Array<typeof llmTraces.$inferS
       .orderBy(llmGenerations.startedAt),
   ]);
 
-  const summary = new Map<string, { observationCount: number; totalTokens: number; model: string | null }>();
+  const summary = new Map<
+    string,
+    { observationCount: number; totalTokens: number; model: string | null }
+  >();
   const spanTokenTotals = new Map<string, number>();
   for (const trace of traces) {
     const scopeKey = observationScopeKey(trace);
@@ -293,8 +341,16 @@ async function summarizeTraceObservations(traces: Array<typeof llmTraces.$inferS
   );
 }
 
-async function getTraceUserDisplayNames(traces: Array<typeof llmTraces.$inferSelect>) {
-  const userIds = Array.from(new Set(traces.map((trace) => trace.userId).filter((userId): userId is string => Boolean(userId))));
+async function getTraceUserDisplayNames(
+  traces: Array<typeof llmTraces.$inferSelect>,
+) {
+  const userIds = Array.from(
+    new Set(
+      traces
+        .map((trace) => trace.userId)
+        .filter((userId): userId is string => Boolean(userId)),
+    ),
+  );
   if (userIds.length === 0) {
     return new Map<string, string>();
   }
@@ -308,7 +364,9 @@ async function getTraceUserDisplayNames(traces: Array<typeof llmTraces.$inferSel
   return new Map(
     (rows.rows ?? []).map((row) => [
       row.id,
-      (row.name && row.name.trim()) || (row.email && row.email.trim()) || row.id,
+      (row.name && row.name.trim()) ||
+        (row.email && row.email.trim()) ||
+        row.id,
     ]),
   );
 }
@@ -329,7 +387,9 @@ export async function listLlmTraces(input: TraceListInput) {
   return {
     items: items.map((trace) => ({
       ...trace,
-      userDisplayName: trace.userId ? userDisplayNames.get(trace.userId) ?? null : null,
+      userDisplayName: trace.userId
+        ? (userDisplayNames.get(trace.userId) ?? null)
+        : null,
       ...(observationSummaries.get(observationScopeKey(trace)) ?? {
         observationCount: 0,
         totalTokens: null,
@@ -364,26 +424,32 @@ export async function getLlmTrace(input: {
   }
 
   const observationQueryLimit =
-    input.observationLimit === undefined ? undefined : input.observationLimit + 1;
+    input.observationLimit === undefined
+      ? undefined
+      : input.observationLimit + 1;
   const spanQuery = db
     .select()
     .from(llmSpans)
-    .where(and(
-      eq(llmSpans.teamId, input.teamId),
-      eq(llmSpans.workspaceId, input.workspaceId),
-      eq(llmSpans.traceId, input.traceId),
-      spanObservationCursorFilter(input.observationCursor),
-    ))
+    .where(
+      and(
+        eq(llmSpans.teamId, input.teamId),
+        eq(llmSpans.workspaceId, input.workspaceId),
+        eq(llmSpans.traceId, input.traceId),
+        spanObservationCursorFilter(input.observationCursor),
+      ),
+    )
     .orderBy(asc(llmSpans.startedAt), asc(llmSpans.id));
   const generationQuery = db
     .select()
     .from(llmGenerations)
-    .where(and(
-      eq(llmGenerations.teamId, input.teamId),
-      eq(llmGenerations.workspaceId, input.workspaceId),
-      eq(llmGenerations.traceId, input.traceId),
-      generationObservationCursorFilter(input.observationCursor),
-    ))
+    .where(
+      and(
+        eq(llmGenerations.teamId, input.teamId),
+        eq(llmGenerations.workspaceId, input.workspaceId),
+        eq(llmGenerations.traceId, input.traceId),
+        generationObservationCursorFilter(input.observationCursor),
+      ),
+    )
     .orderBy(asc(llmGenerations.startedAt), asc(llmGenerations.id));
   const [spans, generations] = await Promise.all([
     observationQueryLimit === undefined
@@ -424,7 +490,8 @@ export async function getLlmTrace(input: {
         limitedObservationIds.has(`generation:${generation.id}`),
       )
     : generations;
-  const loadedObservationCount = limitedSpans.length + limitedGenerations.length;
+  const loadedObservationCount =
+    limitedSpans.length + limitedGenerations.length;
   const loadedTotalTokens = limitedGenerations.reduce(
     (sum, generation) => sum + (generation.totalTokens ?? 0),
     0,
@@ -446,14 +513,18 @@ export async function getLlmTrace(input: {
     })),
   ].sort(compareObservationTime);
   const returnedSpans = [...limitedSpans].sort(compareObservationTime);
-  const returnedGenerations = [...limitedGenerations].sort(compareObservationTime);
+  const returnedGenerations = [...limitedGenerations].sort(
+    compareObservationTime,
+  );
 
   const userDisplayNames = await getTraceUserDisplayNames([trace]);
 
   return {
     trace: {
       ...trace,
-      userDisplayName: trace.userId ? userDisplayNames.get(trace.userId) ?? null : null,
+      userDisplayName: trace.userId
+        ? (userDisplayNames.get(trace.userId) ?? null)
+        : null,
       observationCount: observationsTruncated
         ? (trace.metadataJson.observationCount ?? null)
         : loadedObservationCount,

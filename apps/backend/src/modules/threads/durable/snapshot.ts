@@ -1,3 +1,4 @@
+import { toObjectRecord } from "../../../shared/records";
 import type { ToolCallTrace } from "../turn/types";
 import type { ThinkingStepTrace } from "../turn/types";
 import {
@@ -42,14 +43,8 @@ export function parseStringArray(value: unknown) {
     : [];
 }
 
-export function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getRenderBlocks(value: unknown): unknown[] | undefined {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   return Array.isArray(record?.renderBlocks) ? record.renderBlocks : undefined;
 }
 
@@ -73,8 +68,8 @@ export function mergeChatRunSnapshot(input: {
   const currentAssistant = input.current.assistantMessage;
   const incomingAssistant = incoming.assistantMessage;
   const assistantMessage = incomingAssistant ?? currentAssistant;
-  const currentMetadata = getObjectRecord(currentAssistant?.metadata) ?? {};
-  const incomingMetadata = getObjectRecord(incomingAssistant?.metadata) ?? {};
+  const currentMetadata = toObjectRecord(currentAssistant?.metadata) ?? {};
+  const incomingMetadata = toObjectRecord(incomingAssistant?.metadata) ?? {};
   const renderBlocks = mergeCommittedArtifactRenderBlocks({
     incoming: Array.isArray(incoming.renderBlocks)
       ? incoming.renderBlocks
@@ -168,11 +163,11 @@ export function mergeChatRunSnapshot(input: {
 export function getToolConfirmationStatus(
   value: unknown,
 ): ToolCallTrace["approvalState"] {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   if (record?.status === "approved" || record?.status === "rejected") {
     return record.status;
   }
-  const action = getObjectRecord(record?.action);
+  const action = toObjectRecord(record?.action);
   return action?.status === "approved" || action?.status === "rejected"
     ? action.status
     : undefined;
@@ -185,8 +180,8 @@ export function replaceConfirmationInToolCalls(
 ) {
   let changed = false;
   const nextToolCalls = (toolCalls ?? []).map((toolCall) => {
-    const record = getObjectRecord(toolCall);
-    const output = getObjectRecord(record?.output);
+    const record = toObjectRecord(toolCall);
+    const output = toObjectRecord(record?.output);
     if (
       !record ||
       output?.type !== "tool_confirmation_request" ||
@@ -212,8 +207,8 @@ export function replaceConfirmationInToolCalls(
 
 export function hasPendingConfirmations(toolCalls: unknown[] | undefined) {
   return (toolCalls ?? []).some((toolCall) => {
-    const record = getObjectRecord(toolCall);
-    const output = getObjectRecord(record?.output);
+    const record = toObjectRecord(toolCall);
+    const output = toObjectRecord(record?.output);
     return (
       output?.type === "tool_confirmation_request" &&
       output.status === "proposed"
@@ -235,7 +230,7 @@ export function mergeToolCallTraceState(
 }
 
 export function toToolCallTrace(value: unknown): ToolCallTrace | null {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   if (!record) {
     return null;
   }
@@ -255,7 +250,7 @@ export function toToolCallTrace(value: unknown): ToolCallTrace | null {
   return {
     id,
     tool,
-    input: getObjectRecord(record.input) ?? {},
+    input: toObjectRecord(record.input) ?? {},
     output: record.output,
     status,
     latencyMs:
@@ -320,7 +315,7 @@ export function updateExistingTracePartsFromToolCalls(
 }
 
 export function toThinkingStepTrace(value: unknown): ThinkingStepTrace | null {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   if (!record) {
     return null;
   }
@@ -356,8 +351,8 @@ export function toThinkingStepTrace(value: unknown): ThinkingStepTrace | null {
     ...(typeof record.detail === "string" || record.detail === null
       ? { detail: record.detail }
       : {}),
-    ...(getObjectRecord(record.metadata)
-      ? { metadata: getObjectRecord(record.metadata)! }
+    ...(toObjectRecord(record.metadata)
+      ? { metadata: toObjectRecord(record.metadata)! }
       : {}),
   };
 }

@@ -1,8 +1,7 @@
 import type { UsageInfo } from "../../types";
+import { isRecord } from "../../utils/object";
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+export { isRecord } from "../../utils/object";
 
 export function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)

@@ -25,7 +25,7 @@ import {
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { logger } from "../../../../shared/logger";
-import { toObjectRecord } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 import { parseToolArgs, sameToolArgs } from "./output-normalizer";
 import type { ObservedAgentToolCall } from "./tool-tracker";
 
@@ -565,7 +565,10 @@ export async function applyTrustedHitlApproval(input: {
       input.connectorContext.actionExecutionCursor ??= { refs: [], value: 0 };
       input.connectorContext.actionExecutionCursor.refs.push(ref);
     }
-    await touchAgentToolTrustRuleUse({ trustRuleId: match.trustRuleId, tenant });
+    await touchAgentToolTrustRuleUse({
+      trustRuleId: match.trustRuleId,
+      tenant,
+    });
   }
 
   return true;

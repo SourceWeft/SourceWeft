@@ -7,7 +7,7 @@ import {
   recordChatThreadRunConfirmationResponse,
 } from "./repository";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
-import { getObjectRecord } from "./snapshot";
+import { toObjectRecord } from "../../../shared/records";
 import { getRunApprovalPauseState } from "./run-state";
 import {
   updateAssistantMessageConfirmationMetadata,
@@ -59,7 +59,7 @@ export async function markRunWaitingForApproval(input: {
       metadata: {
         ...snapshot.assistantMessage.metadata,
         threadRun: {
-          ...(getObjectRecord(snapshot.assistantMessage.metadata.threadRun) ??
+          ...(toObjectRecord(snapshot.assistantMessage.metadata.threadRun) ??
             {}),
           approvalRequestedAt,
           approvalExpiresAt,

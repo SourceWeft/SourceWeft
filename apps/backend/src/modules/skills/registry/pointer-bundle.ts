@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "../hash";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SkillManifestJson } from "@sourceweft/db";
@@ -123,10 +123,6 @@ function safeManifestPath(filePath: string): boolean {
     !normalized.includes("../") &&
     normalized !== ".."
   );
-}
-
-function sha256(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 // Simple insertion-ordered LRU (mirrors sandbox-assets.ts zipCache): re-set on

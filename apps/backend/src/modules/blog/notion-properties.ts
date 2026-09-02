@@ -8,6 +8,7 @@ import type {
   NotionRichText,
 } from "./notion-client";
 import type { BlogPostStatus } from "./repository";
+import { isRecord } from "../../shared/records";
 
 export const REQUIRED_BLOG_PROPERTIES = [
   ["Sync", "checkbox"],
@@ -120,7 +121,9 @@ export function parseBlogPage(page: NotionPage) {
   const status = normalizeStatus(rawStatus);
   const articleId = readText(property("Article ID")).trim();
   const slug = normalizeSlug(readText(property("Slug")));
-  const canonicalUrl = normalizeCanonicalUrl(readUrl(property("Canonical URL")));
+  const canonicalUrl = normalizeCanonicalUrl(
+    readUrl(property("Canonical URL")),
+  );
   const publishedAt = readDate(property("Published At"));
   const featuredStartsAt = readDate(property("Featured Starts At"));
   const updatedAt = readDate(property("Updated At"));
@@ -181,10 +184,6 @@ export function richTextToPlainText(richText: NotionRichText[] | undefined) {
   return (richText ?? []).map((text) => text.plain_text ?? "").join("");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function namedObject(value: unknown) {
   return isRecord(value) && typeof value.name === "string" ? value.name : "";
 }
@@ -231,9 +230,7 @@ function readMultiSelect(property: NotionProperty | undefined) {
   const values = Array.isArray(property.multi_select)
     ? property.multi_select
     : [];
-  return values
-    .map((item) => namedObject(item).trim())
-    .filter(Boolean);
+  return values.map((item) => namedObject(item).trim()).filter(Boolean);
 }
 
 function readUrl(property: NotionProperty | undefined) {
@@ -243,9 +240,8 @@ function readUrl(property: NotionProperty | undefined) {
 }
 
 function readDate(property: NotionProperty | undefined) {
-  const date = property?.type === "date" && isRecord(property.date)
-    ? property.date
-    : null;
+  const date =
+    property?.type === "date" && isRecord(property.date) ? property.date : null;
   const start = typeof date?.start === "string" ? date.start : null;
   if (!start) {
     return null;

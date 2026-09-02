@@ -1,5 +1,7 @@
 "use client";
 
+import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
+import { toObjectRecord } from "../../../lib/records";
 import * as React from "react";
 import {
   Activity,
@@ -42,7 +44,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, llmObservabilityClient } from "../../../lib/sdk";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
@@ -142,16 +149,30 @@ function statusClassName(status: string | null | undefined) {
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
 }
 
-function statusReason(record: { errorMessage?: string | null; statusMessage?: string | null; errorCode?: string | null }) {
-  return record.errorMessage ?? record.statusMessage ?? record.errorCode ?? null;
+function statusReason(record: {
+  errorMessage?: string | null;
+  statusMessage?: string | null;
+  errorCode?: string | null;
+}) {
+  return (
+    record.errorMessage ?? record.statusMessage ?? record.errorCode ?? null
+  );
 }
 
-function ErrorMessageBlock({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+function ErrorMessageBlock({
+  children,
+  compact = false,
+}: {
+  children: React.ReactNode;
+  compact?: boolean;
+}) {
   return (
-    <div className={cn(
-      "whitespace-pre-wrap break-words rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-200",
-      compact ? "px-2 py-1 text-xs leading-5" : "px-3 py-2 text-xs leading-5",
-    )}>
+    <div
+      className={cn(
+        "whitespace-pre-wrap break-words rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-200",
+        compact ? "px-2 py-1 text-xs leading-5" : "px-3 py-2 text-xs leading-5",
+      )}
+    >
       {children}
     </div>
   );
@@ -204,9 +225,7 @@ function TraceListSkeletonRows({
               <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
               <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
               {allWorkspacesSelected ? (
-                <th className="w-[160px] px-3 py-1.5 font-medium">
-                  Workspace
-                </th>
+                <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th>
               ) : null}
               <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
               <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
@@ -282,9 +301,7 @@ function TraceTreeSkeleton() {
           style={{ paddingLeft: 8 + (index % 4) * 14 }}
         >
           <TraceSkeletonBlock className="size-3 shrink-0 rounded-sm" />
-          <TraceSkeletonLine
-            className={index % 3 === 0 ? "w-52" : "w-36"}
-          />
+          <TraceSkeletonLine className={index % 3 === 0 ? "w-52" : "w-36"} />
           <TraceSkeletonBlock className="h-5 w-14 rounded-full" />
           <TraceSkeletonLine className="w-12" />
         </div>
@@ -406,7 +423,7 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
   const hasChildren = (spanId: string | null) =>
     Boolean(
       (spansByParent.get(spanId)?.length ?? 0) +
-        (generationsByParent.get(spanId)?.length ?? 0),
+      (generationsByParent.get(spanId)?.length ?? 0),
     );
 
   const pushGeneration = (
@@ -435,17 +452,31 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
     const childSpans = spansByParent.get(parentSpanId) ?? [];
     const childGenerations = generationsByParent.get(parentSpanId) ?? [];
     const children = [
-      ...childSpans.map((span) => ({ kind: "span" as const, startedAt: span.startedAt, span })),
-      ...childGenerations.map((generation) => ({ kind: "generation" as const, startedAt: generation.startedAt, generation })),
+      ...childSpans.map((span) => ({
+        kind: "span" as const,
+        startedAt: span.startedAt,
+        span,
+      })),
+      ...childGenerations.map((generation) => ({
+        kind: "generation" as const,
+        startedAt: generation.startedAt,
+        generation,
+      })),
     ].sort((left, right) => {
       const leftTime = left.startedAt ? new Date(left.startedAt).getTime() : 0;
-      const rightTime = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+      const rightTime = right.startedAt
+        ? new Date(right.startedAt).getTime()
+        : 0;
       return leftTime - rightTime;
     });
 
     for (const child of children) {
       if (child.kind === "generation") {
-        pushGeneration(child.generation, depth, parentSpanId ?? detail.trace.traceId);
+        pushGeneration(
+          child.generation,
+          depth,
+          parentSpanId ?? detail.trace.traceId,
+        );
         continue;
       }
       const span = child.span;
@@ -459,7 +490,12 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
         status: span.status,
         latencyMs: span.latencyMs,
         startedAt: span.startedAt,
-        icon: span.kind === "tool" ? Boxes : span.kind === "retrieval" ? DatabaseZap : Activity,
+        icon:
+          span.kind === "tool"
+            ? Boxes
+            : span.kind === "retrieval"
+              ? DatabaseZap
+              : Activity,
         parentId: parentSpanId ?? detail.trace.traceId,
         hasChildren: spanHasChildren,
         defaultCollapsed: span.kind === "retrieval",
@@ -496,8 +532,7 @@ function buildTraceDetailViewModel(
   const finalGeneration =
     [...detail.generations]
       .reverse()
-      .find((generation) => generation.outputText || generation.output) ??
-    null;
+      .find((generation) => generation.outputText || generation.output) ?? null;
   const totalTokens =
     detail.trace.totalTokens ??
     detail.generations.reduce(
@@ -553,13 +588,22 @@ function mergeTraceDetail(
   };
 }
 
-function traceMatchesNameFilter(trace: LlmTraceSummary, selectedNames: string[]) {
+function traceMatchesNameFilter(
+  trace: LlmTraceSummary,
+  selectedNames: string[],
+) {
   return selectedNames.length === 0 || selectedNames.includes(trace.name);
 }
 
-function workspaceLabel(workspaces: Array<{ id: string; name: string }>, workspaceId: string | null | undefined) {
+function workspaceLabel(
+  workspaces: Array<{ id: string; name: string }>,
+  workspaceId: string | null | undefined,
+) {
   if (!workspaceId) return "--";
-  return workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? workspaceId;
+  return (
+    workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
+    workspaceId
+  );
 }
 
 function sessionLabel(trace: Pick<LlmTraceSummary, "sessionId" | "threadId">) {
@@ -594,16 +638,28 @@ function TraceMobileRow({
     >
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium text-foreground">{trace.name}</div>
+          <div className="truncate text-[13px] font-medium text-foreground">
+            {trace.name}
+          </div>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-            <span className="whitespace-nowrap">{formatTime(trace.startedAt)}</span>
+            <span className="whitespace-nowrap">
+              {formatTime(trace.startedAt)}
+            </span>
             <span className="text-border">/</span>
-            <span className="whitespace-nowrap">{formatLatency(trace.latencyMs)}</span>
+            <span className="whitespace-nowrap">
+              {formatLatency(trace.latencyMs)}
+            </span>
             <span className="text-border">/</span>
             <span className="truncate">{trace.model ?? "--"}</span>
           </div>
         </div>
-        <Badge className={cn("h-5 shrink-0 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
+        <Badge
+          className={cn(
+            "h-5 shrink-0 border px-1.5 text-[10px]",
+            statusClassName(trace.status),
+          )}
+          variant="outline"
+        >
           {trace.status}
         </Badge>
       </div>
@@ -612,9 +668,13 @@ function TraceMobileRow({
         <span className="shrink-0">{trace.totalTokens ?? "--"} tokens</span>
         <span className="shrink-0">{trace.observationCount ?? "--"} obs</span>
         {allWorkspacesSelected ? (
-          <span className="min-w-0 truncate">{workspaceLabel(workspaces, trace.workspaceId)}</span>
+          <span className="min-w-0 truncate">
+            {workspaceLabel(workspaces, trace.workspaceId)}
+          </span>
         ) : null}
-        <span className="min-w-0 truncate font-mono">{sessionLabel(trace)}</span>
+        <span className="min-w-0 truncate font-mono">
+          {sessionLabel(trace)}
+        </span>
       </div>
     </button>
   );
@@ -640,21 +700,6 @@ function unwrapPayload(value: unknown) {
   return value;
 }
 
-function parsePolicyPayload(value: unknown) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return value;
-  }
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return value;
-  }
-}
-
 function payloadPreview(value: unknown) {
   const unwrapped = parseMaybeJson(unwrapPayload(value));
   if (unwrapped === null || unwrapped === undefined || unwrapped === "") {
@@ -668,7 +713,13 @@ function payloadPreview(value: unknown) {
 
 function isEmptyPayload(value: unknown) {
   const unwrapped = unwrapDeepPayload(value);
-  if (unwrapped === null || unwrapped === undefined || unwrapped === "" || unwrapped === "[Circular]") return true;
+  if (
+    unwrapped === null ||
+    unwrapped === undefined ||
+    unwrapped === "" ||
+    unwrapped === "[Circular]"
+  )
+    return true;
   if (typeof unwrapped === "object" && !Array.isArray(unwrapped)) {
     const record = unwrapped as Record<string, unknown>;
     if (record.redacted === true) return false;
@@ -687,16 +738,12 @@ function compactPayloadPreview(value: unknown, maxLength = 180) {
   return `${preview.slice(0, maxLength - 3)}...`;
 }
 
-function toRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
 function metadataEntries(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record) return [] as Array<[string, unknown]>;
-  return Object.entries(record).filter(([, entryValue]) => !isEmptyPayload(entryValue));
+  return Object.entries(record).filter(
+    ([, entryValue]) => !isEmptyPayload(entryValue),
+  );
 }
 
 function hasUsefulPayload(value: unknown) {
@@ -706,24 +753,37 @@ function hasUsefulPayload(value: unknown) {
 function extractMessages(value: unknown) {
   const unwrapped = unwrapDeepPayload(value);
   if (Array.isArray(unwrapped)) return unwrapped;
-  const record = toRecord(unwrapped);
+  const record = toObjectRecord(unwrapped);
   if (Array.isArray(record?.messages)) return record.messages;
-  if (Array.isArray(record?.input) && record.input.some(isMessageLike)) return record.input;
-  if (Array.isArray(record?.output) && record.output.some(isMessageLike)) return record.output;
-  if (typeof record?.message === "string") return [{ role: "user", content: record.message }];
+  if (Array.isArray(record?.input) && record.input.some(isMessageLike))
+    return record.input;
+  if (Array.isArray(record?.output) && record.output.some(isMessageLike))
+    return record.output;
+  if (typeof record?.message === "string")
+    return [{ role: "user", content: record.message }];
   if (isMessageLike(record)) return [record];
   return [];
 }
 
 function isMessageLike(value: unknown) {
-  const record = toRecord(value);
+  const record = toObjectRecord(value);
   if (!record) return false;
-  return "role" in record || "content" in record || "tool_call_id" in record || "toolCallId" in record || "lc_kwargs" in record;
+  return (
+    "role" in record ||
+    "content" in record ||
+    "tool_call_id" in record ||
+    "toolCallId" in record ||
+    "lc_kwargs" in record
+  );
 }
 
 function isMessagesContainer(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
-  return Boolean(record && Array.isArray(record.messages) && record.messages.some(isMessageLike));
+  const record = toObjectRecord(unwrapDeepPayload(value));
+  return Boolean(
+    record &&
+    Array.isArray(record.messages) &&
+    record.messages.some(isMessageLike),
+  );
 }
 
 function extractMessageEnvelope(value: unknown) {
@@ -734,13 +794,16 @@ function extractMessageEnvelope(value: unknown) {
       metadata: {} as Record<string, unknown>,
     };
   }
-  const record = toRecord(parsed);
+  const record = toObjectRecord(parsed);
   if (!record) return null;
   if (Array.isArray(record.messages) && record.messages.some(isMessageLike)) {
     return {
       messages: record.messages,
       metadata: Object.fromEntries(
-        Object.entries(record).filter(([key, entryValue]) => key !== "messages" && !isEmptyPayload(entryValue)),
+        Object.entries(record).filter(
+          ([key, entryValue]) =>
+            key !== "messages" && !isEmptyPayload(entryValue),
+        ),
       ),
     };
   }
@@ -748,7 +811,9 @@ function extractMessageEnvelope(value: unknown) {
     return {
       messages: record.input,
       metadata: Object.fromEntries(
-        Object.entries(record).filter(([key, entryValue]) => key !== "input" && !isEmptyPayload(entryValue)),
+        Object.entries(record).filter(
+          ([key, entryValue]) => key !== "input" && !isEmptyPayload(entryValue),
+        ),
       ),
     };
   }
@@ -756,7 +821,10 @@ function extractMessageEnvelope(value: unknown) {
     return {
       messages: record.output,
       metadata: Object.fromEntries(
-        Object.entries(record).filter(([key, entryValue]) => key !== "output" && !isEmptyPayload(entryValue)),
+        Object.entries(record).filter(
+          ([key, entryValue]) =>
+            key !== "output" && !isEmptyPayload(entryValue),
+        ),
       ),
     };
   }
@@ -764,7 +832,7 @@ function extractMessageEnvelope(value: unknown) {
 }
 
 function extractToolCalls(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record) return [];
   for (const key of ["toolCalls", "tool_calls", "tools"]) {
     if (Array.isArray(record[key])) return record[key];
@@ -781,18 +849,20 @@ function extractMessageToolCalls(record: Record<string, unknown> | null) {
 }
 
 function extractUsage(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
-  return toRecord(record?.usage);
+  const record = toObjectRecord(unwrapDeepPayload(value));
+  return toObjectRecord(record?.usage);
 }
 
 function extractReasoning(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record) return null;
-  return record.reasoning ?? record.reasoningText ?? record.reasoningSummary ?? null;
+  return (
+    record.reasoning ?? record.reasoningText ?? record.reasoningSummary ?? null
+  );
 }
 
 function extractReasoningSegments(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record || !Array.isArray(record.reasoningSegments)) {
     return [];
   }
@@ -800,7 +870,7 @@ function extractReasoningSegments(value: unknown) {
 }
 
 function omitRecordKeys(value: unknown, keys: string[]) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record) return value;
   const omitted = new Set(keys);
   const next = Object.fromEntries(
@@ -864,9 +934,10 @@ function partialStructuredStringView(value: unknown) {
   if (typeof unwrapped !== "string") return null;
   const trimmed = unwrapped.trim();
   if (!trimmed.startsWith("{")) return null;
-  const content = extractJsonStringField(trimmed, "content")
-    ?? extractJsonStringField(trimmed, "assistantContent")
-    ?? extractJsonStringField(trimmed, "outputText");
+  const content =
+    extractJsonStringField(trimmed, "content") ??
+    extractJsonStringField(trimmed, "assistantContent") ??
+    extractJsonStringField(trimmed, "outputText");
   if (!content) return null;
   const metadata: Record<string, unknown> = {};
   const citationCount = trimmed.match(/"citationCount"\s*:\s*(\d+)/)?.[1];
@@ -888,38 +959,56 @@ function unwrapDeepPayload(value: unknown): unknown {
   return current;
 }
 
-function normalizeMessageRole(record: Record<string, unknown> | null, fallbackRole: string) {
+function normalizeMessageRole(
+  record: Record<string, unknown> | null,
+  fallbackRole: string,
+) {
   const explicitRole = record?.role ?? record?.type ?? record?._getType;
   if (typeof explicitRole === "string") {
     const lowerRole = explicitRole.toLowerCase();
     if (lowerRole.includes("tool")) return "tool";
     if (lowerRole.includes("system")) return "system";
-    if (lowerRole.includes("assistant") || lowerRole.includes("ai")) return "assistant";
-    if (lowerRole.includes("human") || lowerRole.includes("user")) return "user";
+    if (lowerRole.includes("assistant") || lowerRole.includes("ai"))
+      return "assistant";
+    if (lowerRole.includes("human") || lowerRole.includes("user"))
+      return "user";
     return explicitRole;
   }
-  if (record && ("tool_call_id" in record || "toolCallId" in record || "lc_direct_tool_output" in record)) return "tool";
+  if (
+    record &&
+    ("tool_call_id" in record ||
+      "toolCallId" in record ||
+      "lc_direct_tool_output" in record)
+  )
+    return "tool";
   return fallbackRole;
 }
 
 function normalizeMessageContent(message: unknown): unknown {
   const unwrapped = unwrapDeepPayload(message);
-  const record = toRecord(unwrapped);
-  const kwargs = toRecord(record?.lc_kwargs);
+  const record = toObjectRecord(unwrapped);
+  const kwargs = toObjectRecord(record?.lc_kwargs);
   const content = record?.content ?? kwargs?.content;
   if (typeof content === "string") return parseMaybeJson(content);
   if (Array.isArray(content)) {
     return content
       .map((part) => {
-        const partRecord = toRecord(part);
-        return typeof partRecord?.text === "string" ? partRecord.text : payloadPreview(part);
+        const partRecord = toObjectRecord(part);
+        return typeof partRecord?.text === "string"
+          ? partRecord.text
+          : payloadPreview(part);
       })
       .join("\n");
   }
   if (typeof unwrapped === "string") return parseMaybeJson(unwrapped);
   if (record) {
     const usefulEntries = Object.fromEntries(
-      Object.entries(record).filter(([key, entryValue]) => !NOISY_MESSAGE_FIELDS.has(key) && entryValue !== undefined && entryValue !== null),
+      Object.entries(record).filter(
+        ([key, entryValue]) =>
+          !NOISY_MESSAGE_FIELDS.has(key) &&
+          entryValue !== undefined &&
+          entryValue !== null,
+      ),
     );
     if (Object.keys(usefulEntries).length > 0) return usefulEntries;
   }
@@ -949,13 +1038,29 @@ function messageRoleLabel(role: string) {
   return role;
 }
 
-function MessageEnvelopeSummary({ metadata }: { metadata: Record<string, unknown> }) {
-  const entries = Object.entries(metadata).filter(([, value]) => !isEmptyPayload(value));
+function MessageEnvelopeSummary({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  const entries = Object.entries(metadata).filter(
+    ([, value]) => !isEmptyPayload(value),
+  );
   if (entries.length === 0) return null;
-  const preferred = ["messageCount", "toolCount", "stream", "operation", "model"];
+  const preferred = [
+    "messageCount",
+    "toolCount",
+    "stream",
+    "operation",
+    "model",
+  ];
   const orderedEntries = [
     ...preferred
-      .filter((key) => Object.prototype.hasOwnProperty.call(metadata, key) && !isEmptyPayload(metadata[key]))
+      .filter(
+        (key) =>
+          Object.prototype.hasOwnProperty.call(metadata, key) &&
+          !isEmptyPayload(metadata[key]),
+      )
       .map((key) => [key, metadata[key]] as [string, unknown]),
     ...entries.filter(([key]) => !preferred.includes(key)),
   ];
@@ -985,9 +1090,14 @@ function MessageToolCallSummary({ calls }: { calls: unknown[] }) {
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
       <span>Tool calls:</span>
       {calls.map((call, index) => {
-        const record = toRecord(call) ?? {};
-        const fn = toRecord(record.function);
-        const name = record.name ?? record.tool ?? record.toolName ?? fn?.name ?? `tool_${index + 1}`;
+        const record = toObjectRecord(call) ?? {};
+        const fn = toObjectRecord(record.function);
+        const name =
+          record.name ??
+          record.tool ??
+          record.toolName ??
+          fn?.name ??
+          `tool_${index + 1}`;
         const id = record.id ?? record.toolCallId ?? record.tool_call_id;
         return (
           <span
@@ -996,7 +1106,9 @@ function MessageToolCallSummary({ calls }: { calls: unknown[] }) {
           >
             <Wrench className="h-3 w-3 shrink-0" />
             <span className="truncate">{String(name)}</span>
-            {id ? <span className="truncate opacity-70">{String(id)}</span> : null}
+            {id ? (
+              <span className="truncate opacity-70">{String(id)}</span>
+            ) : null}
           </span>
         );
       })}
@@ -1006,20 +1118,34 @@ function MessageToolCallSummary({ calls }: { calls: unknown[] }) {
 
 function normalizeToolArgs(value: unknown) {
   const parsed = unwrapDeepPayload(value);
-  const record = toRecord(parsed);
+  const record = toObjectRecord(parsed);
   return record ?? { value: parsed };
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="space-y-2">
-      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h4>
+      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
       {children}
     </section>
   );
 }
 
-function PreviewSection({ title, children }: { title: string; children: React.ReactNode }) {
+function PreviewSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="space-y-1.5">
       <h4 className="px-2 text-sm font-medium text-foreground">{title}</h4>
@@ -1031,7 +1157,11 @@ function PreviewSection({ title, children }: { title: string; children: React.Re
 }
 
 function EmptySection({ label = "No data recorded." }: { label?: string }) {
-  return <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">{label}</div>;
+  return (
+    <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
 }
 
 function DashValue() {
@@ -1041,20 +1171,34 @@ function DashValue() {
 function TextValue({ value }: { value: string }) {
   const isLong = value.length > 900 || value.split("\n").length > 14;
   if (!isLong) {
-    return <div className="whitespace-pre-wrap break-words leading-6">{value}</div>;
+    return (
+      <div className="whitespace-pre-wrap break-words leading-6">{value}</div>
+    );
   }
   const preview = value.replace(/\s+/g, " ").trim().slice(0, 360);
   return (
-    <details className="group rounded-md border border-border bg-background" open={false}>
+    <details
+      className="group rounded-md border border-border bg-background"
+      open={false}
+    >
       <summary className="cursor-pointer list-none border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="min-w-0 break-words md:truncate">{preview}{value.length > 360 ? "..." : ""}</span>
-          <span className="shrink-0 font-medium text-foreground group-open:hidden">Show full text</span>
-          <span className="hidden shrink-0 font-medium text-foreground group-open:inline">Hide full text</span>
+          <span className="min-w-0 break-words md:truncate">
+            {preview}
+            {value.length > 360 ? "..." : ""}
+          </span>
+          <span className="shrink-0 font-medium text-foreground group-open:hidden">
+            Show full text
+          </span>
+          <span className="hidden shrink-0 font-medium text-foreground group-open:inline">
+            Hide full text
+          </span>
         </div>
       </summary>
       <div className="max-h-[520px] overflow-auto p-3">
-        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-foreground">{value}</pre>
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-foreground">
+          {value}
+        </pre>
       </div>
     </details>
   );
@@ -1070,12 +1214,21 @@ function MarkdownValue({ value }: { value: string }) {
     );
   }
   return (
-    <details className="group rounded-lg border border-border bg-background" open>
+    <details
+      className="group rounded-lg border border-border bg-background"
+      open
+    >
       <summary className="cursor-pointer list-none border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="min-w-0 break-words">Long markdown output ({value.length.toLocaleString()} chars)</span>
-          <span className="font-medium text-foreground group-open:hidden">Show</span>
-          <span className="hidden font-medium text-foreground group-open:inline">Hide</span>
+          <span className="min-w-0 break-words">
+            Long markdown output ({value.length.toLocaleString()} chars)
+          </span>
+          <span className="font-medium text-foreground group-open:hidden">
+            Show
+          </span>
+          <span className="hidden font-medium text-foreground group-open:inline">
+            Hide
+          </span>
         </div>
       </summary>
       <div className="max-h-[680px] overflow-auto p-4 text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
@@ -1085,11 +1238,20 @@ function MarkdownValue({ value }: { value: string }) {
   );
 }
 
-function DisplayValue({ value, markdown = false }: { value: unknown; markdown?: boolean }) {
+function DisplayValue({
+  value,
+  markdown = false,
+}: {
+  value: unknown;
+  markdown?: boolean;
+}) {
   const parsed = unwrapDeepPayload(value);
-  if (parsed === null || parsed === undefined || parsed === "") return <DashValue />;
-  if (parsed && typeof parsed === "object") return <JsonValueTable value={parsed} />;
-  if (typeof parsed === "string" && markdown) return <MarkdownValue value={parsed} />;
+  if (parsed === null || parsed === undefined || parsed === "")
+    return <DashValue />;
+  if (parsed && typeof parsed === "object")
+    return <JsonValueTable value={parsed} />;
+  if (typeof parsed === "string" && markdown)
+    return <MarkdownValue value={parsed} />;
   return <PrimitiveValue value={parsed} />;
 }
 
@@ -1107,9 +1269,16 @@ function MessageTextValue({ value }: { value: string }) {
     <details className="group">
       <summary className="cursor-pointer list-none text-xs leading-5 text-muted-foreground hover:text-foreground">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="min-w-0 break-words md:truncate">{preview}{value.length > 320 ? "..." : ""}</span>
-          <span className="shrink-0 font-medium text-foreground group-open:hidden">Show full text</span>
-          <span className="hidden shrink-0 font-medium text-foreground group-open:inline">Hide full text</span>
+          <span className="min-w-0 break-words md:truncate">
+            {preview}
+            {value.length > 320 ? "..." : ""}
+          </span>
+          <span className="shrink-0 font-medium text-foreground group-open:hidden">
+            Show full text
+          </span>
+          <span className="hidden shrink-0 font-medium text-foreground group-open:inline">
+            Hide full text
+          </span>
         </div>
       </summary>
       <div className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-sm [&_pre]:bg-muted/40 [&_pre]:p-2">
@@ -1121,7 +1290,8 @@ function MessageTextValue({ value }: { value: string }) {
 
 function MessageContentValue({ value }: { value: unknown }) {
   const parsed = unwrapDeepPayload(value);
-  if (parsed === null || parsed === undefined || parsed === "") return <DashValue />;
+  if (parsed === null || parsed === undefined || parsed === "")
+    return <DashValue />;
   if (typeof parsed === "string") return <MessageTextValue value={parsed} />;
   if (parsed && typeof parsed === "object") {
     return (
@@ -1149,7 +1319,10 @@ function PrimitiveValue({ value }: { value: unknown }) {
 }
 
 function isCompactArrayValue(value: unknown) {
-  return value === null || ["string", "number", "boolean", "bigint"].includes(typeof value);
+  return (
+    value === null ||
+    ["string", "number", "boolean", "bigint"].includes(typeof value)
+  );
 }
 
 function compactArrayLabel(value: unknown) {
@@ -1177,7 +1350,15 @@ function CompactArrayValue({ values }: { values: unknown[] }) {
   );
 }
 
-function JsonValueTable({ value, depth = 0, keepEmpty = false }: { value: unknown; depth?: number; keepEmpty?: boolean }) {
+function JsonValueTable({
+  value,
+  depth = 0,
+  keepEmpty = false,
+}: {
+  value: unknown;
+  depth?: number;
+  keepEmpty?: boolean;
+}) {
   const parsed = unwrapDeepPayload(value);
   const redacted = isRedactedPayload(parsed);
   if (redacted) return <RedactionNotice value={parsed} />;
@@ -1191,35 +1372,79 @@ function JsonValueTable({ value, depth = 0, keepEmpty = false }: { value: unknow
       .filter(({ entryValue }) => keepEmpty || !isEmptyPayload(entryValue));
     if (entries.length === 0) return <DashValue />;
     return (
-      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}>
+      <div
+        className={cn(
+          "min-w-0 overflow-hidden rounded-md text-sm",
+          depth === 0 && "border border-border",
+          depth > 0 && "bg-muted/10",
+        )}
+      >
         {entries.map(({ entryValue, index }) => (
-          <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "md:grid md:grid-cols-[88px_minmax(0,1fr)]")} key={index}>
-            <div className="bg-muted/20 px-2 py-1.5 font-mono text-xs text-muted-foreground">[{index}]</div>
+          <div
+            className={cn(
+              "border-b border-border/60 last:border-b-0",
+              depth === 0 && "md:grid md:grid-cols-[88px_minmax(0,1fr)]",
+            )}
+            key={index}
+          >
+            <div className="bg-muted/20 px-2 py-1.5 font-mono text-xs text-muted-foreground">
+              [{index}]
+            </div>
             <div className="min-w-0 px-2 py-1.5 text-foreground">
-              <JsonValueTable depth={depth + 1} keepEmpty={keepEmpty} value={entryValue} />
+              <JsonValueTable
+                depth={depth + 1}
+                keepEmpty={keepEmpty}
+                value={entryValue}
+              />
             </div>
           </div>
         ))}
       </div>
     );
   }
-  const record = toRecord(parsed);
+  const record = toObjectRecord(parsed);
   if (record) {
-    const entries = Object.entries(record).filter(([, entryValue]) => keepEmpty || !isEmptyPayload(entryValue));
+    const entries = Object.entries(record).filter(
+      ([, entryValue]) => keepEmpty || !isEmptyPayload(entryValue),
+    );
     if (entries.length === 0) return <DashValue />;
     return (
-      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}>
+      <div
+        className={cn(
+          "min-w-0 overflow-hidden rounded-md text-sm",
+          depth === 0 && "border border-border",
+          depth > 0 && "bg-muted/10",
+        )}
+      >
         {entries.map(([key, entryValue]) => {
           const nested = unwrapDeepPayload(entryValue);
           const isNested = Boolean(nested && typeof nested === "object");
           return (
-            <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "md:grid md:grid-cols-[160px_minmax(0,1fr)]")} key={key}>
+            <div
+              className={cn(
+                "border-b border-border/60 last:border-b-0",
+                depth === 0 && "md:grid md:grid-cols-[160px_minmax(0,1fr)]",
+              )}
+              key={key}
+            >
               <div className="flex min-w-0 items-center gap-2 bg-muted/20 px-2 py-1.5 font-medium text-muted-foreground">
-                {isNested ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
+                {isNested ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <span className="w-3.5 shrink-0" />
+                )}
                 <span className="min-w-0 break-all md:truncate">{key}</span>
               </div>
               <div className="min-w-0 px-2 py-1.5 text-foreground">
-                {isNested ? <JsonValueTable depth={depth + 1} keepEmpty={keepEmpty} value={nested} /> : <PrimitiveValue value={nested} />}
+                {isNested ? (
+                  <JsonValueTable
+                    depth={depth + 1}
+                    keepEmpty={keepEmpty}
+                    value={nested}
+                  />
+                ) : (
+                  <PrimitiveValue value={nested} />
+                )}
               </div>
             </div>
           );
@@ -1236,7 +1461,10 @@ function KeyValueTable({ value }: { value: unknown }) {
   return (
     <div className="overflow-hidden rounded-md border border-border text-sm">
       {entries.map(([key, entryValue]) => (
-        <div className="border-b border-border/60 last:border-b-0 md:grid md:grid-cols-[160px_minmax(0,1fr)]" key={key}>
+        <div
+          className="border-b border-border/60 last:border-b-0 md:grid md:grid-cols-[160px_minmax(0,1fr)]"
+          key={key}
+        >
           <div className="min-w-0 bg-muted/20 px-2 py-1.5 font-medium text-muted-foreground">
             <span className="break-all md:break-normal">{key}</span>
           </div>
@@ -1257,9 +1485,13 @@ function PrimaryContentView({
   metadata?: Record<string, unknown>;
 }) {
   const metadataEntries = metadata
-    ? Object.entries(metadata).filter(([, entryValue]) => !isEmptyPayload(entryValue))
+    ? Object.entries(metadata).filter(
+        ([, entryValue]) => !isEmptyPayload(entryValue),
+      )
     : [];
-  const toolCalls = Array.isArray(metadata?.toolCalls) ? metadata.toolCalls : [];
+  const toolCalls = Array.isArray(metadata?.toolCalls)
+    ? metadata.toolCalls
+    : [];
   const otherMetadata = Object.fromEntries(
     metadataEntries.filter(([key]) => key !== "toolCalls" && key !== "content"),
   );
@@ -1281,16 +1513,23 @@ function PrimaryContentView({
 }
 
 function structuredRecordView(value: unknown) {
-  const record = toRecord(unwrapDeepPayload(value));
+  const record = toObjectRecord(unwrapDeepPayload(value));
   if (!record) return null;
-  const primaryKey = ["content", "message", "assistantContent", "outputText"].find(
-    (key) => !isEmptyPayload(record[key]),
-  );
+  const primaryKey = [
+    "content",
+    "message",
+    "assistantContent",
+    "outputText",
+  ].find((key) => !isEmptyPayload(record[key]));
   if (!primaryKey) return null;
   const metadata = Object.fromEntries(
-    Object.entries(record).filter(([key, entryValue]) => key !== primaryKey && !isEmptyPayload(entryValue)),
+    Object.entries(record).filter(
+      ([key, entryValue]) => key !== primaryKey && !isEmptyPayload(entryValue),
+    ),
   );
-  return <PrimaryContentView content={record[primaryKey]} metadata={metadata} />;
+  return (
+    <PrimaryContentView content={record[primaryKey]} metadata={metadata} />
+  );
 }
 
 function ToolCallList({ value }: { value: unknown }) {
@@ -1299,21 +1538,42 @@ function ToolCallList({ value }: { value: unknown }) {
   return (
     <div className="space-y-2">
       {calls.map((call, index) => {
-        const record = toRecord(call) ?? {};
-        const functionRecord = toRecord(record.function);
-        const name = record.tool ?? record.toolName ?? record.name ?? functionRecord?.name ?? `tool_${index + 1}`;
-        const args = record.input ?? record.args ?? record.arguments ?? functionRecord?.arguments ?? record.tool_input;
+        const record = toObjectRecord(call) ?? {};
+        const functionRecord = toObjectRecord(record.function);
+        const name =
+          record.tool ??
+          record.toolName ??
+          record.name ??
+          functionRecord?.name ??
+          `tool_${index + 1}`;
+        const args =
+          record.input ??
+          record.args ??
+          record.arguments ??
+          functionRecord?.arguments ??
+          record.tool_input;
         const rawOutput = record.output ?? record.result;
         const toolMessage = normalizeToolMessage(rawOutput);
         const output = toolMessage?.content ?? rawOutput;
         return (
-          <div className="rounded-lg border border-border bg-background" key={index}>
+          <div
+            className="rounded-lg border border-border bg-background"
+            key={index}
+          >
             <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
               <Wrench className="h-3.5 w-3.5" />
               {String(name)}
             </div>
-            {args !== undefined ? <div className="p-3"><KeyValueTable value={normalizeToolArgs(args)} /></div> : null}
-            {output !== undefined ? <div className="border-t border-border p-3"><JsonValueTable value={output} /></div> : null}
+            {args !== undefined ? (
+              <div className="p-3">
+                <KeyValueTable value={normalizeToolArgs(args)} />
+              </div>
+            ) : null}
+            {output !== undefined ? (
+              <div className="border-t border-border p-3">
+                <JsonValueTable value={output} />
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -1332,15 +1592,19 @@ function ReasoningView({
     return (
       <div className="space-y-2">
         {segments.map((segment, index) => {
-          const record = toRecord(segment);
+          const record = toObjectRecord(segment);
           const text = record?.text ?? segment;
-          const phase = typeof record?.phase === "string" ? record.phase : "initial";
+          const phase =
+            typeof record?.phase === "string" ? record.phase : "initial";
           const tool = record?.tool ?? record?.toolName;
           const toolCallId = record?.toolCallId ?? record?.tool_call_id;
           const durationMs =
             typeof record?.durationMs === "number" ? record.durationMs : null;
           return (
-            <article className="overflow-hidden rounded-lg border border-border bg-background" key={String(record?.id ?? index)}>
+            <article
+              className="overflow-hidden rounded-lg border border-border bg-background"
+              key={String(record?.id ?? index)}
+            >
               <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
                 <Badge variant="secondary">#{index + 1}</Badge>
                 <span className="font-medium text-foreground">
@@ -1378,20 +1642,31 @@ function ReasoningView({
 
 function normalizeToolMessage(value: unknown) {
   const unwrapped = unwrapDeepPayload(value);
-  const record = toRecord(unwrapped);
+  const record = toObjectRecord(unwrapped);
   if (!record) return null;
-  const kwargs = toRecord(record.lc_kwargs) ?? toRecord(record.kwargs);
+  const kwargs =
+    toObjectRecord(record.lc_kwargs) ?? toObjectRecord(record.kwargs);
   const content = usefulContent(record.content, kwargs?.content);
-  const name = record.name ?? kwargs?.name ?? record.toolName ?? record.tool ?? record.tool_name;
+  const name =
+    record.name ??
+    kwargs?.name ??
+    record.toolName ??
+    record.tool ??
+    record.tool_name;
   const id = record.tool_call_id ?? record.toolCallId ?? record.id;
-  const isToolLike = record.lc_direct_tool_output === true || record.type === "tool" || record._getType === "tool" || id !== undefined;
+  const isToolLike =
+    record.lc_direct_tool_output === true ||
+    record.type === "tool" ||
+    record._getType === "tool" ||
+    id !== undefined;
   if (!isToolLike && content === undefined && name === undefined) return null;
   return { content, name, id };
 }
 
 function RedactionNotice({ value }: { value: unknown }) {
   const unwrapped = unwrapPayload(value);
-  if (!unwrapped || typeof unwrapped !== "object" || !("redacted" in unwrapped)) return null;
+  if (!unwrapped || typeof unwrapped !== "object" || !("redacted" in unwrapped))
+    return null;
   const reason = (unwrapped as { reason?: string }).reason ?? "redacted";
   const message =
     reason === "payload_excluded"
@@ -1406,7 +1681,10 @@ function RedactionNotice({ value }: { value: unknown }) {
 
 function RedactedValueNotice() {
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" title="Sensitive value removed before storage">
+    <span
+      className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+      title="Sensitive value removed before storage"
+    >
       redacted sensitive value
     </span>
   );
@@ -1414,7 +1692,9 @@ function RedactedValueNotice() {
 
 function isRedactedPayload(value: unknown) {
   const unwrapped = unwrapDeepPayload(value);
-  return Boolean(unwrapped && typeof unwrapped === "object" && "redacted" in unwrapped);
+  return Boolean(
+    unwrapped && typeof unwrapped === "object" && "redacted" in unwrapped,
+  );
 }
 
 function StructuredValue({
@@ -1426,11 +1706,13 @@ function StructuredValue({
   fallbackRole?: string;
   unwrapToolOutput?: boolean;
 }) {
-  if (value === null || value === undefined || value === "") return <DashValue />;
+  if (value === null || value === undefined || value === "")
+    return <DashValue />;
   if (isRedactedPayload(value)) return <RedactionNotice value={value} />;
   const partialStringView = partialStructuredStringView(value);
   if (partialStringView) return partialStringView;
-  if (isMessagesContainer(value)) return <MessageList fallbackRole={fallbackRole} value={value} />;
+  if (isMessagesContainer(value))
+    return <MessageList fallbackRole={fallbackRole} value={value} />;
   const toolMessage = normalizeToolMessage(value);
   if (toolMessage && unwrapToolOutput) {
     return <DisplayValue markdown value={toolMessage.content} />;
@@ -1441,7 +1723,11 @@ function StructuredValue({
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
           <Wrench className="h-3.5 w-3.5" />
           {toolMessage.name ? String(toolMessage.name) : "tool result"}
-          {toolMessage.id ? <span className="truncate opacity-70">{String(toolMessage.id)}</span> : null}
+          {toolMessage.id ? (
+            <span className="truncate opacity-70">
+              {String(toolMessage.id)}
+            </span>
+          ) : null}
         </div>
         <div className="p-3 text-sm leading-6 text-foreground">
           <DisplayValue markdown value={toolMessage.content} />
@@ -1451,31 +1737,54 @@ function StructuredValue({
   }
   const recordView = structuredRecordView(value);
   if (recordView) return recordView;
-  if (typeof unwrapDeepPayload(value) === "string") return <DisplayValue markdown value={value} />;
-  const record = toRecord(unwrapDeepPayload(value));
-  if (record && ("input" in record || "output" in record) && extractMessages(value).some(isMessageLike)) {
+  if (typeof unwrapDeepPayload(value) === "string")
+    return <DisplayValue markdown value={value} />;
+  const record = toObjectRecord(unwrapDeepPayload(value));
+  if (
+    record &&
+    ("input" in record || "output" in record) &&
+    extractMessages(value).some(isMessageLike)
+  ) {
     return <MessageList fallbackRole={fallbackRole} value={value} />;
   }
-  if (record && ("path" in record || "query" in record || "pattern" in record || "glob" in record)) {
+  if (
+    record &&
+    ("path" in record ||
+      "query" in record ||
+      "pattern" in record ||
+      "glob" in record)
+  ) {
     return <KeyValueTable value={record} />;
   }
   return <JsonValueTable value={value} />;
 }
 
-function MessageList({ value, fallbackRole = "user" }: { value: unknown; fallbackRole?: string }) {
+function MessageList({
+  value,
+  fallbackRole = "user",
+}: {
+  value: unknown;
+  fallbackRole?: string;
+}) {
   const envelope = extractMessageEnvelope(value);
   const messages = envelope?.messages ?? extractMessages(value);
   if (messages.length === 0) {
     const parsed = parseMaybeJson(unwrapPayload(value));
     if (isEmptyPayload(parsed)) return <DashValue />;
-    return <div className="text-sm leading-6 text-foreground"><DisplayValue markdown value={parsed} /></div>;
+    return (
+      <div className="text-sm leading-6 text-foreground">
+        <DisplayValue markdown value={parsed} />
+      </div>
+    );
   }
   return (
     <div className="space-y-1">
-      {envelope ? <MessageEnvelopeSummary metadata={envelope.metadata} /> : null}
+      {envelope ? (
+        <MessageEnvelopeSummary metadata={envelope.metadata} />
+      ) : null}
       <div className="divide-y divide-border/50">
         {messages.map((message, index) => {
-          const record = toRecord(message);
+          const record = toObjectRecord(message);
           const role = normalizeMessageRole(record, fallbackRole);
           const content = normalizeMessageContent(message);
           const toolCalls = extractMessageToolCalls(record);
@@ -1484,13 +1793,21 @@ function MessageList({ value, fallbackRole = "user" }: { value: unknown; fallbac
           const contentLength =
             typeof content === "string"
               ? content.length
-                : typeof toRecord(content)?.length === "number"
-                  ? Number(toRecord(content)?.length)
-                  : null;
+              : typeof toObjectRecord(content)?.length === "number"
+                ? Number(toObjectRecord(content)?.length)
+                : null;
           return (
-            <article className="grid grid-cols-[86px_minmax(0,1fr)] gap-4 py-3 max-sm:grid-cols-1 max-sm:gap-1" key={index}>
+            <article
+              className="grid grid-cols-[86px_minmax(0,1fr)] gap-4 py-3 max-sm:grid-cols-1 max-sm:gap-1"
+              key={index}
+            >
               <div className="min-w-0 px-1 text-[11px] leading-5 text-muted-foreground">
-                <div className={cn("truncate font-semibold", messageRoleClassName(role))}>
+                <div
+                  className={cn(
+                    "truncate font-semibold",
+                    messageRoleClassName(role),
+                  )}
+                >
                   {messageRoleLabel(role)}
                 </div>
                 <div className="font-mono">#{index + 1}</div>
@@ -1504,7 +1821,8 @@ function MessageList({ value, fallbackRole = "user" }: { value: unknown; fallbac
                   ) : null}
                   {toolCalls.length > 0 ? (
                     <span>
-                      {toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}
+                      {toolCalls.length} tool call
+                      {toolCalls.length === 1 ? "" : "s"}
                     </span>
                   ) : null}
                   {contentLength !== null ? (
@@ -1590,7 +1908,9 @@ function McpRunTable({
                 <th className="w-[90px] px-3 py-1.5 font-medium">Risk</th>
                 <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
                 <th className="w-[240px] px-3 py-1.5 font-medium">Input</th>
-                <th className="w-[240px] px-3 py-1.5 font-medium">Output / Error</th>
+                <th className="w-[240px] px-3 py-1.5 font-medium">
+                  Output / Error
+                </th>
                 <th className="w-[120px] px-3 py-1.5 font-medium">Thread</th>
               </tr>
             </thead>
@@ -1742,7 +2062,10 @@ function selectedNodeData(
   if (selected.kind === "trace") {
     const metadata = detail.trace.metadata ?? {};
     const agentRun = viewModel?.spanById.get("agent_run");
-    const fallbackOutput = agentRun?.output ?? viewModel?.finalGeneration?.outputText ?? viewModel?.finalGeneration?.output;
+    const fallbackOutput =
+      agentRun?.output ??
+      viewModel?.finalGeneration?.outputText ??
+      viewModel?.finalGeneration?.output;
     return {
       kind: "trace",
       title: detail.trace.name,
@@ -1754,10 +2077,14 @@ function selectedNodeData(
       input: detail.trace.input,
       reasoning: extractReasoning(detail.trace.output),
       reasoningSegments: extractReasoningSegments(detail.trace.output),
-      output: isEmptyPayload(detail.trace.output) ? fallbackOutput : detail.trace.output,
+      output: isEmptyPayload(detail.trace.output)
+        ? fallbackOutput
+        : detail.trace.output,
       metrics: {
         durationMs: detail.trace.durationMs ?? detail.trace.latencyMs,
-        observationCount: detail.trace.observationCount ?? detail.spans.length + detail.generations.length,
+        observationCount:
+          detail.trace.observationCount ??
+          detail.spans.length + detail.generations.length,
         totalTokens: viewModel?.totalTokens ?? 0,
       },
       parameters: {},
@@ -1839,12 +2166,20 @@ function FilterFacet({
     <details className="group border-b border-border" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 hover:bg-accent/40">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">{label}</div>
-          {summary ? <div className="truncate text-[11px] text-muted-foreground">{summary}</div> : null}
+          <div className="truncate text-xs font-medium text-foreground">
+            {label}
+          </div>
+          {summary ? (
+            <div className="truncate text-[11px] text-muted-foreground">
+              {summary}
+            </div>
+          ) : null}
         </div>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
       </summary>
-      {children ? <div className="space-y-1.5 px-3 pb-2">{children}</div> : null}
+      {children ? (
+        <div className="space-y-1.5 px-3 pb-2">{children}</div>
+      ) : null}
     </details>
   );
 }
@@ -1862,41 +2197,71 @@ function WorkspaceFilter({
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
 }) {
-  const selectedLabel = selectedScope === ALL_WORKSPACES ? "All workspaces" : workspaceName;
+  const selectedLabel =
+    selectedScope === ALL_WORKSPACES ? "All workspaces" : workspaceName;
   return (
-    <FilterFacet defaultOpen label="Workspace" summary={selectedLabel ?? undefined}>
+    <FilterFacet
+      defaultOpen
+      label="Workspace"
+      summary={selectedLabel ?? undefined}
+    >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-xs transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
             type="button"
           >
-            <span className="flex-1 truncate text-left font-medium">{selectedLabel ?? "Workspace"}</span>
+            <span className="flex-1 truncate text-left font-medium">
+              {selectedLabel ?? "Workspace"}
+            </span>
             <ChevronDown className="size-3.5 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64 rounded-lg" side="bottom" sideOffset={4}>
-          <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
+        <DropdownMenuContent
+          align="start"
+          className="w-64 rounded-lg"
+          side="bottom"
+          sideOffset={4}
+        >
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            Workspaces
+          </DropdownMenuLabel>
           <DropdownMenuItem
-            className={cn("gap-2 p-2", selectedScope === ALL_WORKSPACES && "bg-accent/60")}
+            className={cn(
+              "gap-2 p-2",
+              selectedScope === ALL_WORKSPACES && "bg-accent/60",
+            )}
             onClick={() => onWorkspaceChange(ALL_WORKSPACES)}
           >
-            <span className="flex-1 truncate text-left font-medium">All workspaces</span>
+            <span className="flex-1 truncate text-left font-medium">
+              All workspaces
+            </span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {workspaces.map((workspace, index) => (
             <DropdownMenuItem
-              className={cn("gap-2 p-2", selectedScope !== ALL_WORKSPACES && workspace.id === workspaceId && "bg-accent/60")}
+              className={cn(
+                "gap-2 p-2",
+                selectedScope !== ALL_WORKSPACES &&
+                  workspace.id === workspaceId &&
+                  "bg-accent/60",
+              )}
               key={workspace.id}
               onClick={() => onWorkspaceChange(workspace.id)}
             >
-              <span className="flex-1 truncate text-left">{workspace.name}</span>
-              <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
+              <span className="flex-1 truncate text-left">
+                {workspace.name}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                ⌘{index + 1}
+              </span>
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem className="gap-2 p-2">
-            <span className="flex-1 truncate text-left font-medium text-muted-foreground">Add workspace</span>
+            <span className="flex-1 truncate text-left font-medium text-muted-foreground">
+              Add workspace
+            </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1913,37 +2278,52 @@ function NameFilter({
   selectedNames: string[];
   onSelectedNamesChange: (names: string[]) => void;
 }) {
-  const summary = selectedNames.length === 0
-    ? "all"
-    : selectedNames.length === 1
-      ? selectedNames[0]
-      : `${selectedNames.length} selected`;
+  const summary =
+    selectedNames.length === 0
+      ? "all"
+      : selectedNames.length === 1
+        ? selectedNames[0]
+        : `${selectedNames.length} selected`;
   return (
     <FilterFacet defaultOpen label="Name" summary={summary}>
       <div className="space-y-1">
         {options.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No trace names loaded.</p>
-        ) : options.map((name) => {
-          const selected = selectedNames.includes(name);
-          return (
-            <button
-              className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/60",
-                selected && "bg-accent/60 text-foreground",
-              )}
-              key={name}
-              onClick={() => {
-                onSelectedNamesChange(
-                  selected ? selectedNames.filter((item) => item !== name) : [...selectedNames, name],
-                );
-              }}
-              type="button"
-            >
-              <span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded border border-border text-[10px]", selected && "border-primary bg-primary text-primary-foreground")}>{selected ? "✓" : ""}</span>
-              <span className="min-w-0 flex-1 truncate">{name}</span>
-            </button>
-          );
-        })}
+          <p className="text-xs text-muted-foreground">
+            No trace names loaded.
+          </p>
+        ) : (
+          options.map((name) => {
+            const selected = selectedNames.includes(name);
+            return (
+              <button
+                className={cn(
+                  "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/60",
+                  selected && "bg-accent/60 text-foreground",
+                )}
+                key={name}
+                onClick={() => {
+                  onSelectedNamesChange(
+                    selected
+                      ? selectedNames.filter((item) => item !== name)
+                      : [...selectedNames, name],
+                  );
+                }}
+                type="button"
+              >
+                <span
+                  className={cn(
+                    "flex h-3.5 w-3.5 items-center justify-center rounded border border-border text-[10px]",
+                    selected &&
+                      "border-primary bg-primary text-primary-foreground",
+                  )}
+                >
+                  {selected ? "✓" : ""}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{name}</span>
+              </button>
+            );
+          })
+        )}
       </div>
     </FilterFacet>
   );
@@ -2005,7 +2385,11 @@ function FilterPanel({
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Filters</h2>
-          <button className="text-[11px] text-muted-foreground hover:text-foreground" onClick={onClear} type="button">
+          <button
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={onClear}
+            type="button"
+          >
             Clear all
           </button>
         </div>
@@ -2028,7 +2412,10 @@ function FilterPanel({
             selectedNames={selectedTraceNames}
           />
 
-          <FilterFacet label="Trace ID" summary={traceId ? `= ${traceId}` : undefined}>
+          <FilterFacet
+            label="Trace ID"
+            summary={traceId ? `= ${traceId}` : undefined}
+          >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onTraceIdChange(event.target.value)}
@@ -2037,7 +2424,10 @@ function FilterPanel({
             />
           </FilterFacet>
 
-          <FilterFacet label="User ID" summary={userId ? `= ${userId}` : undefined}>
+          <FilterFacet
+            label="User ID"
+            summary={userId ? `= ${userId}` : undefined}
+          >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onUserIdChange(event.target.value)}
@@ -2046,7 +2436,10 @@ function FilterPanel({
             />
           </FilterFacet>
 
-          <FilterFacet label="Session ID" summary={threadId ? `= ${threadId}` : undefined}>
+          <FilterFacet
+            label="Session ID"
+            summary={threadId ? `= ${threadId}` : undefined}
+          >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onThreadIdChange(event.target.value)}
@@ -2055,13 +2448,18 @@ function FilterPanel({
             />
           </FilterFacet>
 
-          <FilterFacet label="Status" summary={status === "all" ? undefined : status}>
+          <FilterFacet
+            label="Status"
+            summary={status === "all" ? undefined : status}
+          >
             <div className="flex flex-wrap gap-1.5">
               {statusFilters.map((item) => (
                 <button
                   className={cn(
                     "rounded border px-2 py-0.5 text-[11px] transition-colors hover:bg-accent",
-                    status === item ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground",
+                    status === item
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground",
                   )}
                   key={item}
                   onClick={() => onStatusChange(item)}
@@ -2074,10 +2472,15 @@ function FilterPanel({
           </FilterFacet>
 
           <div className="p-3">
-          <Button className="h-8 w-full text-xs" onClick={onApply} size="sm" type="button">
-            <Search className="h-4 w-4" />
-            Apply filters
-          </Button>
+            <Button
+              className="h-8 w-full text-xs"
+              onClick={onApply}
+              size="sm"
+              type="button"
+            >
+              <Search className="h-4 w-4" />
+              Apply filters
+            </Button>
           </div>
         </div>
       </ScrollArea>
@@ -2104,12 +2507,50 @@ function TraceSummaryBar({
     <div className="border-b border-border px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
         <span>{formatTime(detail.trace.startedAt)}</span>
-        <span>Status: <span className={cn("font-medium", detail.trace.status === "error" ? "text-red-600 dark:text-red-300" : "text-foreground")}>{detail.trace.status}</span></span>
-        <span>Latency: <span className="font-medium text-foreground">{formatLatency(detail.trace.latencyMs)}</span></span>
-        <span>Session: <span className="font-medium text-foreground">{detail.trace.sessionId ?? detail.trace.threadId ?? "--"}</span></span>
-        <span>User: <span className="font-medium text-foreground">{detail.trace.userDisplayName ?? detail.trace.userId ?? "--"}</span></span>
-        <span>Env: <span className="font-medium text-foreground">{detail.trace.environment ?? "--"}</span></span>
-        <span>Observations: <span className="font-medium text-foreground">{detail.trace.observationCount ?? detail.spans.length + detail.generations.length}</span></span>
+        <span>
+          Status:{" "}
+          <span
+            className={cn(
+              "font-medium",
+              detail.trace.status === "error"
+                ? "text-red-600 dark:text-red-300"
+                : "text-foreground",
+            )}
+          >
+            {detail.trace.status}
+          </span>
+        </span>
+        <span>
+          Latency:{" "}
+          <span className="font-medium text-foreground">
+            {formatLatency(detail.trace.latencyMs)}
+          </span>
+        </span>
+        <span>
+          Session:{" "}
+          <span className="font-medium text-foreground">
+            {detail.trace.sessionId ?? detail.trace.threadId ?? "--"}
+          </span>
+        </span>
+        <span>
+          User:{" "}
+          <span className="font-medium text-foreground">
+            {detail.trace.userDisplayName ?? detail.trace.userId ?? "--"}
+          </span>
+        </span>
+        <span>
+          Env:{" "}
+          <span className="font-medium text-foreground">
+            {detail.trace.environment ?? "--"}
+          </span>
+        </span>
+        <span>
+          Observations:{" "}
+          <span className="font-medium text-foreground">
+            {detail.trace.observationCount ??
+              detail.spans.length + detail.generations.length}
+          </span>
+        </span>
         {detail.observationsTruncated ? (
           <span className="font-medium text-amber-600 dark:text-amber-300">
             Showing {detail.spans.length + detail.generations.length}
@@ -2130,8 +2571,18 @@ function TraceSummaryBar({
             Load more
           </Button>
         ) : null}
-        <span>Model: <span className="font-medium text-foreground">{detail.trace.model ?? rootGeneration?.model ?? "--"}</span></span>
-        <span>Tokens: <span className="font-medium text-foreground">{totalTokens > 0 ? totalTokens : "--"}</span></span>
+        <span>
+          Model:{" "}
+          <span className="font-medium text-foreground">
+            {detail.trace.model ?? rootGeneration?.model ?? "--"}
+          </span>
+        </span>
+        <span>
+          Tokens:{" "}
+          <span className="font-medium text-foreground">
+            {totalTokens > 0 ? totalTokens : "--"}
+          </span>
+        </span>
       </div>
       {reason ? (
         <div className="mt-2">
@@ -2157,7 +2608,8 @@ function TraceTree({
 }) {
   const rows = viewModel?.treeRows ?? EMPTY_TREE_ROWS;
   const defaultCollapsedIds = React.useMemo(
-    () => new Set(rows.filter((row) => row.defaultCollapsed).map((row) => row.id)),
+    () =>
+      new Set(rows.filter((row) => row.defaultCollapsed).map((row) => row.id)),
     [rows],
   );
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
@@ -2254,7 +2706,9 @@ function TraceTree({
             }}
             role="button"
             tabIndex={-1}
-            title={collapsed ? "Show child observations" : "Hide child observations"}
+            title={
+              collapsed ? "Show child observations" : "Hide child observations"
+            }
           >
             <ChevronRight
               className={cn(
@@ -2393,7 +2847,9 @@ function TraceLogView({
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <h4 className="text-sm font-medium text-foreground">Timeline</h4>
-          <p className="text-xs text-muted-foreground">Chronological observations with relative start and duration.</p>
+          <p className="text-xs text-muted-foreground">
+            Chronological observations with relative start and duration.
+          </p>
         </div>
         <Badge variant="secondary">{rows.length} observations</Badge>
       </div>
@@ -2457,21 +2913,39 @@ function NodeDetail({
     );
   }
 
-  const raw = toRecord(node.raw);
-  const metrics = toRecord(node.metrics);
+  const raw = toObjectRecord(node.raw);
+  const metrics = toObjectRecord(node.metrics);
   const usage = extractUsage(node.output) ?? extractUsage(node.raw);
-  const inputTokens = metrics?.promptTokens ?? raw?.promptTokens ?? raw?.inputTokens ?? usage?.inputTokens ?? usage?.input_tokens;
-  const outputTokens = metrics?.completionTokens ?? raw?.completionTokens ?? raw?.outputTokens ?? usage?.outputTokens ?? usage?.output_tokens;
-  const totalTokens = metrics?.totalTokens ?? raw?.totalTokens ?? usage?.totalTokens ?? usage?.total_tokens;
+  const inputTokens =
+    metrics?.promptTokens ??
+    raw?.promptTokens ??
+    raw?.inputTokens ??
+    usage?.inputTokens ??
+    usage?.input_tokens;
+  const outputTokens =
+    metrics?.completionTokens ??
+    raw?.completionTokens ??
+    raw?.outputTokens ??
+    usage?.outputTokens ??
+    usage?.output_tokens;
+  const totalTokens =
+    metrics?.totalTokens ??
+    raw?.totalTokens ??
+    usage?.totalTokens ??
+    usage?.total_tokens;
   const outputToolCalls = extractToolCalls(node.output);
   const hasReasoning =
     !isEmptyPayload(node.reasoning) || Boolean(node.reasoningSegments?.length);
   const outputWithoutReasoning = hasReasoning
-    ? omitRecordKeys(node.output, ["reasoning", "reasoningText", "reasoningSummary", "reasoningSegments"])
+    ? omitRecordKeys(node.output, [
+        "reasoning",
+        "reasoningText",
+        "reasoningSummary",
+        "reasoningSegments",
+      ])
     : node.output;
-  const selectedObservationTitle = detail && selected?.kind === "trace"
-    ? detail.trace.name
-    : node.title;
+  const selectedObservationTitle =
+    detail && selected?.kind === "trace" ? detail.trace.name : node.title;
   const reason = statusReason(node);
 
   return (
@@ -2479,18 +2953,30 @@ function NodeDetail({
       <div className="min-w-0 border-b border-border px-3 py-3 md:px-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-foreground">{node.title}</h3>
+            <h3 className="truncate text-base font-semibold text-foreground">
+              {node.title}
+            </h3>
             <p className="mt-1 text-xs text-muted-foreground">{node.kind}</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              <Badge variant="secondary">Latency: {formatLatency(node.latencyMs)}</Badge>
+              <Badge variant="secondary">
+                Latency: {formatLatency(node.latencyMs)}
+              </Badge>
               {inputTokens || outputTokens || totalTokens ? (
-                <Badge className="h-auto max-w-full whitespace-normal text-left" variant="secondary">
-                  {String(inputTokens ?? 0)} prompt -&gt; {String(outputTokens ?? 0)} completion (sum {String(totalTokens ?? 0)})
+                <Badge
+                  className="h-auto max-w-full whitespace-normal text-left"
+                  variant="secondary"
+                >
+                  {String(inputTokens ?? 0)} prompt -&gt;{" "}
+                  {String(outputTokens ?? 0)} completion (sum{" "}
+                  {String(totalTokens ?? 0)})
                 </Badge>
               ) : null}
             </div>
           </div>
-          <Badge className={cn("border", statusClassName(node.status))} variant="outline">
+          <Badge
+            className={cn("border", statusClassName(node.status))}
+            variant="outline"
+          >
             {node.status}
           </Badge>
         </div>
@@ -2512,18 +2998,30 @@ function NodeDetail({
           <TabsTrigger value="formatted">Formatted</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2" value="preview">
-          <div className="px-2 text-sm font-semibold text-foreground">{selectedObservationTitle}</div>
+        <TabsContent
+          className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2"
+          value="preview"
+        >
+          <div className="px-2 text-sm font-semibold text-foreground">
+            {selectedObservationTitle}
+          </div>
           <PreviewSection title="Input">
             <StructuredValue value={node.input} />
           </PreviewSection>
           {hasReasoning ? (
             <PreviewSection title="Reasoning">
-              <ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} />
+              <ReasoningView
+                reasoning={node.reasoning}
+                segments={node.reasoningSegments}
+              />
             </PreviewSection>
           ) : null}
           <PreviewSection title="Output">
-            <StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} />
+            <StructuredValue
+              fallbackRole="assistant"
+              unwrapToolOutput={node.kind === "tool"}
+              value={outputWithoutReasoning}
+            />
           </PreviewSection>
           {outputToolCalls.length > 0 ? (
             <PreviewSection title="Tool calls">
@@ -2546,7 +3044,10 @@ function NodeDetail({
             </PreviewSection>
           ) : null}
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="log">
+        <TabsContent
+          className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2"
+          value="log"
+        >
           {activeTab === "log" ? (
             <TraceLogView
               detail={detail}
@@ -2556,19 +3057,52 @@ function NodeDetail({
             />
           ) : null}
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2" value="formatted">
+        <TabsContent
+          className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2"
+          value="formatted"
+        >
           {activeTab === "formatted" ? (
             <>
-              <Section title="Input"><StructuredValue value={node.input} /></Section>
-              {hasReasoning ? <Section title="Reasoning"><ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} /></Section> : null}
-              <Section title="Output"><StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} /></Section>
-              {hasUsefulPayload(node.parameters) ? <Section title="Model parameters"><KeyValueTable value={node.parameters} /></Section> : null}
-              {hasUsefulPayload(node.metrics) ? <Section title="Metrics"><KeyValueTable value={node.metrics} /></Section> : null}
-              {hasUsefulPayload(node.metadata) ? <Section title="Metadata"><KeyValueTable value={node.metadata} /></Section> : null}
+              <Section title="Input">
+                <StructuredValue value={node.input} />
+              </Section>
+              {hasReasoning ? (
+                <Section title="Reasoning">
+                  <ReasoningView
+                    reasoning={node.reasoning}
+                    segments={node.reasoningSegments}
+                  />
+                </Section>
+              ) : null}
+              <Section title="Output">
+                <StructuredValue
+                  fallbackRole="assistant"
+                  unwrapToolOutput={node.kind === "tool"}
+                  value={outputWithoutReasoning}
+                />
+              </Section>
+              {hasUsefulPayload(node.parameters) ? (
+                <Section title="Model parameters">
+                  <KeyValueTable value={node.parameters} />
+                </Section>
+              ) : null}
+              {hasUsefulPayload(node.metrics) ? (
+                <Section title="Metrics">
+                  <KeyValueTable value={node.metrics} />
+                </Section>
+              ) : null}
+              {hasUsefulPayload(node.metadata) ? (
+                <Section title="Metadata">
+                  <KeyValueTable value={node.metadata} />
+                </Section>
+              ) : null}
             </>
           ) : null}
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="json">
+        <TabsContent
+          className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2"
+          value="json"
+        >
           {activeTab === "json" ? <JsonBlock value={node.raw} /> : null}
         </TabsContent>
       </Tabs>
@@ -2577,87 +3111,127 @@ function NodeDetail({
 }
 
 export default function ObservabilityPage() {
-  const { organizationId, switchWorkspace, workspaceId, workspaceName, workspaces } = useDashboardChatState();
-  const [activeView, setActiveView] = React.useState<"traces" | "mcp">("traces");
+  const {
+    organizationId,
+    switchWorkspace,
+    workspaceId,
+    workspaceName,
+    workspaces,
+  } = useDashboardChatState();
+  const [activeView, setActiveView] = React.useState<"traces" | "mcp">(
+    "traces",
+  );
   const [traces, setTraces] = React.useState<LlmTraceSummary[]>([]);
   const [mcpRuns, setMcpRuns] = React.useState<WorkspaceMcpToolRun[]>([]);
-  const [mcpActionRuns, setMcpActionRuns] = React.useState<WorkspaceMcpActionRun[]>([]);
-  const [detail, setDetail] = React.useState<LlmTraceDetailResponse | null>(null);
-  const [selectedTraceKey, setSelectedTraceKey] = React.useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = React.useState<SelectedNode | null>(null);
+  const [mcpActionRuns, setMcpActionRuns] = React.useState<
+    WorkspaceMcpActionRun[]
+  >([]);
+  const [detail, setDetail] = React.useState<LlmTraceDetailResponse | null>(
+    null,
+  );
+  const [selectedTraceKey, setSelectedTraceKey] = React.useState<string | null>(
+    null,
+  );
+  const [selectedNode, setSelectedNode] = React.useState<SelectedNode | null>(
+    null,
+  );
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [mcpNextCursor, setMcpNextCursor] = React.useState<string | null>(null);
   const [loadingList, setLoadingList] = React.useState(false);
   const [loadingMcpRuns, setLoadingMcpRuns] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
-  const [loadingMoreObservations, setLoadingMoreObservations] = React.useState(false);
+  const [loadingMoreObservations, setLoadingMoreObservations] =
+    React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<StatusFilter>("all");
-  const [selectedTraceNames, setSelectedTraceNames] = React.useState<string[]>([]);
+  const [selectedTraceNames, setSelectedTraceNames] = React.useState<string[]>(
+    [],
+  );
   const [traceId, setTraceId] = React.useState("");
   const [threadId, setThreadId] = React.useState("");
   const [userId, setUserId] = React.useState("");
   const [filtersVisible, setFiltersVisible] = React.useState(true);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const [timelineDialogOpen, setTimelineDialogOpen] = React.useState(false);
-  const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<string | null>(
-    workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
-  );
+  const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<
+    string | null
+  >(workspaceId ?? (organizationId ? ALL_WORKSPACES : null));
   const listRequestIdRef = React.useRef(0);
   const mcpRequestIdRef = React.useRef(0);
   const detailRequestIdRef = React.useRef(0);
   const allWorkspacesSelected = selectedWorkspaceScope === ALL_WORKSPACES;
-  const selectedWorkspaceId = allWorkspacesSelected ? null : selectedWorkspaceScope;
+  const selectedWorkspaceId = allWorkspacesSelected
+    ? null
+    : selectedWorkspaceScope;
 
   React.useEffect(() => {
     if (!selectedWorkspaceScope) {
-      setSelectedWorkspaceScope(workspaceId ?? (organizationId ? ALL_WORKSPACES : null));
+      setSelectedWorkspaceScope(
+        workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
+      );
     }
   }, [organizationId, selectedWorkspaceScope, workspaceId]);
 
-  const loadTraces = React.useCallback(async (cursor?: string | null) => {
-    if (!selectedWorkspaceScope) {
-      return;
-    }
-    if (allWorkspacesSelected && !organizationId) {
-      return;
-    }
-    if (!allWorkspacesSelected && !selectedWorkspaceId) {
-      return;
-    }
-    const requestId = listRequestIdRef.current + 1;
-    listRequestIdRef.current = requestId;
-    setLoadingList(true);
-    setError(null);
-    try {
-      const query = {
-        limit: LIST_LIMIT,
-        cursor: cursor ?? undefined,
-        status: status === "all" ? undefined : status,
-        traceId: traceId.trim() || undefined,
-        threadId: threadId.trim() || undefined,
-        userId: userId.trim() || undefined,
-      };
-      const page = allWorkspacesSelected
-        ? await llmObservabilityClient.listTeamTraces(organizationId!, query)
-        : await llmObservabilityClient.listWorkspaceTraces(selectedWorkspaceId!, query);
-      if (requestId !== listRequestIdRef.current) {
+  const loadTraces = React.useCallback(
+    async (cursor?: string | null) => {
+      if (!selectedWorkspaceScope) {
         return;
       }
-      setTraces((current) => (cursor ? [...current, ...page.items] : page.items));
-      setNextCursor(page.nextCursor);
-    } catch (err) {
-      if (requestId !== listRequestIdRef.current) {
+      if (allWorkspacesSelected && !organizationId) {
         return;
       }
-      setError(err instanceof Error ? err.message : "Failed to load traces");
-    } finally {
-      if (requestId === listRequestIdRef.current) {
-        setLoadingList(false);
+      if (!allWorkspacesSelected && !selectedWorkspaceId) {
+        return;
       }
-    }
-  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope, status, threadId, traceId, userId]);
+      const requestId = listRequestIdRef.current + 1;
+      listRequestIdRef.current = requestId;
+      setLoadingList(true);
+      setError(null);
+      try {
+        const query = {
+          limit: LIST_LIMIT,
+          cursor: cursor ?? undefined,
+          status: status === "all" ? undefined : status,
+          traceId: traceId.trim() || undefined,
+          threadId: threadId.trim() || undefined,
+          userId: userId.trim() || undefined,
+        };
+        const page = allWorkspacesSelected
+          ? await llmObservabilityClient.listTeamTraces(organizationId!, query)
+          : await llmObservabilityClient.listWorkspaceTraces(
+              selectedWorkspaceId!,
+              query,
+            );
+        if (requestId !== listRequestIdRef.current) {
+          return;
+        }
+        setTraces((current) =>
+          cursor ? [...current, ...page.items] : page.items,
+        );
+        setNextCursor(page.nextCursor);
+      } catch (err) {
+        if (requestId !== listRequestIdRef.current) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Failed to load traces");
+      } finally {
+        if (requestId === listRequestIdRef.current) {
+          setLoadingList(false);
+        }
+      }
+    },
+    [
+      allWorkspacesSelected,
+      organizationId,
+      selectedWorkspaceId,
+      selectedWorkspaceScope,
+      status,
+      threadId,
+      traceId,
+      userId,
+    ],
+  );
 
   const loadTracesRef = React.useRef(loadTraces);
 
@@ -2665,50 +3239,55 @@ export default function ObservabilityPage() {
     loadTracesRef.current = loadTraces;
   }, [loadTraces]);
 
-  const loadMcpRuns = React.useCallback(async (cursor?: string | null) => {
-    if (!selectedWorkspaceId) {
-      setMcpRuns([]);
-      setMcpActionRuns([]);
-      setMcpNextCursor(null);
-      return;
-    }
-    const requestId = mcpRequestIdRef.current + 1;
-    mcpRequestIdRef.current = requestId;
-    setLoadingMcpRuns(true);
-    setError(null);
-    try {
-      const [toolRunsPage, actionRunsPage] = await Promise.all([
-        contentClient.listWorkspaceMcpRuns(selectedWorkspaceId, {
-          cursor: cursor ?? undefined,
-          limit: MCP_RUN_LIMIT,
-        }),
-        cursor
-          ? Promise.resolve({ items: [], nextCursor: null })
-          : contentClient.listWorkspaceMcpActionRuns(selectedWorkspaceId, {
-              limit: MCP_RUN_LIMIT,
-            }),
-      ]);
-      if (requestId !== mcpRequestIdRef.current) {
+  const loadMcpRuns = React.useCallback(
+    async (cursor?: string | null) => {
+      if (!selectedWorkspaceId) {
+        setMcpRuns([]);
+        setMcpActionRuns([]);
+        setMcpNextCursor(null);
         return;
       }
-      setMcpRuns((current) =>
-        cursor ? [...current, ...toolRunsPage.items] : toolRunsPage.items,
-      );
-      if (!cursor) {
-        setMcpActionRuns(actionRunsPage.items);
+      const requestId = mcpRequestIdRef.current + 1;
+      mcpRequestIdRef.current = requestId;
+      setLoadingMcpRuns(true);
+      setError(null);
+      try {
+        const [toolRunsPage, actionRunsPage] = await Promise.all([
+          contentClient.listWorkspaceMcpRuns(selectedWorkspaceId, {
+            cursor: cursor ?? undefined,
+            limit: MCP_RUN_LIMIT,
+          }),
+          cursor
+            ? Promise.resolve({ items: [], nextCursor: null })
+            : contentClient.listWorkspaceMcpActionRuns(selectedWorkspaceId, {
+                limit: MCP_RUN_LIMIT,
+              }),
+        ]);
+        if (requestId !== mcpRequestIdRef.current) {
+          return;
+        }
+        setMcpRuns((current) =>
+          cursor ? [...current, ...toolRunsPage.items] : toolRunsPage.items,
+        );
+        if (!cursor) {
+          setMcpActionRuns(actionRunsPage.items);
+        }
+        setMcpNextCursor(toolRunsPage.nextCursor);
+      } catch (err) {
+        if (requestId !== mcpRequestIdRef.current) {
+          return;
+        }
+        setError(
+          err instanceof Error ? err.message : "Failed to load MCP activity",
+        );
+      } finally {
+        if (requestId === mcpRequestIdRef.current) {
+          setLoadingMcpRuns(false);
+        }
       }
-      setMcpNextCursor(toolRunsPage.nextCursor);
-    } catch (err) {
-      if (requestId !== mcpRequestIdRef.current) {
-        return;
-      }
-      setError(err instanceof Error ? err.message : "Failed to load MCP activity");
-    } finally {
-      if (requestId === mcpRequestIdRef.current) {
-        setLoadingMcpRuns(false);
-      }
-    }
-  }, [selectedWorkspaceId]);
+    },
+    [selectedWorkspaceId],
+  );
 
   const loadMcpRunsRef = React.useRef(loadMcpRuns);
 
@@ -2717,12 +3296,18 @@ export default function ObservabilityPage() {
   }, [loadMcpRuns]);
 
   const traceNameOptions = React.useMemo(
-    () => Array.from(new Set(traces.map((trace) => trace.name))).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Array.from(new Set(traces.map((trace) => trace.name))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [traces],
   );
 
   const visibleTraces = React.useMemo(
-    () => traces.filter((trace) => traceMatchesNameFilter(trace, selectedTraceNames)),
+    () =>
+      traces.filter((trace) =>
+        traceMatchesNameFilter(trace, selectedTraceNames),
+      ),
     [selectedTraceNames, traces],
   );
   const hasTraceNameFilter = selectedTraceNames.length > 0;
@@ -2743,58 +3328,83 @@ export default function ObservabilityPage() {
     setLoadingMoreObservations(false);
     void loadTracesRef.current(null);
     void loadMcpRunsRef.current(null);
-  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
+  }, [
+    allWorkspacesSelected,
+    organizationId,
+    selectedWorkspaceId,
+    selectedWorkspaceScope,
+  ]);
 
-  const openTrace = React.useCallback(async (traceId: string, traceWorkspaceId?: string | null) => {
-    if (!selectedWorkspaceScope) {
-      return;
-    }
-    if (allWorkspacesSelected && !organizationId) {
-      return;
-    }
-    if (!allWorkspacesSelected && !selectedWorkspaceId) {
-      return;
-    }
-    const detailWorkspaceId = allWorkspacesSelected ? traceWorkspaceId : selectedWorkspaceId;
-    if (!detailWorkspaceId) {
-      setError("Trace workspace is required to load team trace detail");
-      return;
-    }
-    setSelectedTraceKey(traceSelectionKey(traceId, detailWorkspaceId));
-    setDrawerOpen(true);
-    setLoadingDetail(true);
-    setLoadingMoreObservations(false);
-    setError(null);
-    const requestId = detailRequestIdRef.current + 1;
-    detailRequestIdRef.current = requestId;
-    try {
-      const nextDetail = allWorkspacesSelected
-        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceId, {
-            includePayload: false,
-            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
-            workspaceId: detailWorkspaceId,
-          })
-        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceId, {
-            includePayload: false,
-            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
-          });
-      if (requestId !== detailRequestIdRef.current) {
+  const openTrace = React.useCallback(
+    async (traceId: string, traceWorkspaceId?: string | null) => {
+      if (!selectedWorkspaceScope) {
         return;
       }
-      setDetail(nextDetail);
-      setSelectedNode({ kind: "trace", id: nextDetail.trace.traceId });
-    } catch (err) {
-      if (requestId !== detailRequestIdRef.current) {
+      if (allWorkspacesSelected && !organizationId) {
         return;
       }
-      setError(err instanceof Error ? err.message : "Failed to load trace detail");
-      setDetail(null);
-    } finally {
-      if (requestId === detailRequestIdRef.current) {
-        setLoadingDetail(false);
+      if (!allWorkspacesSelected && !selectedWorkspaceId) {
+        return;
       }
-    }
-  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
+      const detailWorkspaceId = allWorkspacesSelected
+        ? traceWorkspaceId
+        : selectedWorkspaceId;
+      if (!detailWorkspaceId) {
+        setError("Trace workspace is required to load team trace detail");
+        return;
+      }
+      setSelectedTraceKey(traceSelectionKey(traceId, detailWorkspaceId));
+      setDrawerOpen(true);
+      setLoadingDetail(true);
+      setLoadingMoreObservations(false);
+      setError(null);
+      const requestId = detailRequestIdRef.current + 1;
+      detailRequestIdRef.current = requestId;
+      try {
+        const nextDetail = allWorkspacesSelected
+          ? await llmObservabilityClient.getTeamTrace(
+              organizationId!,
+              traceId,
+              {
+                includePayload: false,
+                observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+                workspaceId: detailWorkspaceId,
+              },
+            )
+          : await llmObservabilityClient.getWorkspaceTrace(
+              detailWorkspaceId,
+              traceId,
+              {
+                includePayload: false,
+                observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+              },
+            );
+        if (requestId !== detailRequestIdRef.current) {
+          return;
+        }
+        setDetail(nextDetail);
+        setSelectedNode({ kind: "trace", id: nextDetail.trace.traceId });
+      } catch (err) {
+        if (requestId !== detailRequestIdRef.current) {
+          return;
+        }
+        setError(
+          err instanceof Error ? err.message : "Failed to load trace detail",
+        );
+        setDetail(null);
+      } finally {
+        if (requestId === detailRequestIdRef.current) {
+          setLoadingDetail(false);
+        }
+      }
+    },
+    [
+      allWorkspacesSelected,
+      organizationId,
+      selectedWorkspaceId,
+      selectedWorkspaceScope,
+    ],
+  );
 
   const loadMoreObservations = React.useCallback(async () => {
     if (!detail?.nextObservationCursor || loadingMoreObservations) {
@@ -2807,40 +3417,48 @@ export default function ObservabilityPage() {
     setError(null);
     try {
       const nextPage = allWorkspacesSelected
-        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceIdValue, {
-            includePayload: false,
-            observationCursor: cursor,
-            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
-            workspaceId: detailWorkspaceId,
-          })
-        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceIdValue, {
-            includePayload: false,
-            observationCursor: cursor,
-            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
-          });
+        ? await llmObservabilityClient.getTeamTrace(
+            organizationId!,
+            traceIdValue,
+            {
+              includePayload: false,
+              observationCursor: cursor,
+              observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+              workspaceId: detailWorkspaceId,
+            },
+          )
+        : await llmObservabilityClient.getWorkspaceTrace(
+            detailWorkspaceId,
+            traceIdValue,
+            {
+              includePayload: false,
+              observationCursor: cursor,
+              observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+            },
+          );
       setDetail((current) =>
         current && current.trace.traceId === traceIdValue
           ? mergeTraceDetail(current, nextPage)
           : current,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load more observations");
+      setError(
+        err instanceof Error ? err.message : "Failed to load more observations",
+      );
     } finally {
       setLoadingMoreObservations(false);
     }
-  }, [
-    allWorkspacesSelected,
-    detail,
-    loadingMoreObservations,
-    organizationId,
-  ]);
+  }, [allWorkspacesSelected, detail, loadingMoreObservations, organizationId]);
 
-  const handleWorkspaceChange = React.useCallback((nextWorkspaceId: string) => {
-    setSelectedWorkspaceScope(nextWorkspaceId);
-    if (nextWorkspaceId !== ALL_WORKSPACES) {
-      void switchWorkspace(nextWorkspaceId);
-    }
-  }, [switchWorkspace]);
+  const handleWorkspaceChange = React.useCallback(
+    (nextWorkspaceId: string) => {
+      setSelectedWorkspaceScope(nextWorkspaceId);
+      if (nextWorkspaceId !== ALL_WORKSPACES) {
+        void switchWorkspace(nextWorkspaceId);
+      }
+    },
+    [switchWorkspace],
+  );
 
   const clearFilters = React.useCallback(() => {
     setStatus("all");
@@ -2861,7 +3479,9 @@ export default function ObservabilityPage() {
       onThreadIdChange={setThreadId}
       onUserIdChange={setUserId}
       onWorkspaceChange={handleWorkspaceChange}
-      selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
+      selectedWorkspaceScope={
+        selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES
+      }
       status={status}
       selectedTraceNames={selectedTraceNames}
       traceId={traceId}
@@ -2885,7 +3505,9 @@ export default function ObservabilityPage() {
       onUserIdChange={setUserId}
       onWorkspaceChange={handleWorkspaceChange}
       placement="drawer"
-      selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
+      selectedWorkspaceScope={
+        selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES
+      }
       status={status}
       selectedTraceNames={selectedTraceNames}
       traceId={traceId}
@@ -2917,17 +3539,50 @@ export default function ObservabilityPage() {
                   <SlidersHorizontal className="h-4 w-4" />
                   Filters
                 </Button>
-                <Button className="hidden h-8 gap-1.5 px-2 text-xs md:inline-flex" onClick={() => setFiltersVisible((visible) => !visible)} size="sm" type="button" variant="outline">
+                <Button
+                  className="hidden h-8 gap-1.5 px-2 text-xs md:inline-flex"
+                  onClick={() => setFiltersVisible((visible) => !visible)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
                   <SlidersHorizontal className="h-4 w-4" />
                   {filtersVisible ? "Hide filters" : "Show filters"}
                 </Button>
-                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="secondary">All time</Badge>
-                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">{traces.length} loaded</Badge>
+                <Badge
+                  className="h-6 shrink-0 px-2 text-[11px]"
+                  variant="secondary"
+                >
+                  All time
+                </Badge>
+                <Badge
+                  className="h-6 shrink-0 px-2 text-[11px]"
+                  variant="outline"
+                >
+                  {traces.length} loaded
+                </Badge>
                 {hasTraceNameFilter ? (
-                  <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">{visibleTraces.length} shown</Badge>
+                  <Badge
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    variant="outline"
+                  >
+                    {visibleTraces.length} shown
+                  </Badge>
                 ) : null}
-                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="secondary">Page size {LIST_LIMIT}</Badge>
-                {allWorkspacesSelected ? <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">All workspaces</Badge> : null}
+                <Badge
+                  className="h-6 shrink-0 px-2 text-[11px]"
+                  variant="secondary"
+                >
+                  Page size {LIST_LIMIT}
+                </Badge>
+                {allWorkspacesSelected ? (
+                  <Badge
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    variant="outline"
+                  >
+                    All workspaces
+                  </Badge>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
                 <Tabs
@@ -2965,7 +3620,11 @@ export default function ObservabilityPage() {
                 </Button>
               </div>
             </div>
-            {error ? <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p> : null}
+            {error ? (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-300">
+                {error}
+              </p>
+            ) : null}
           </div>
           {activeView === "mcp" ? (
             allWorkspacesSelected ? (
@@ -2983,106 +3642,174 @@ export default function ObservabilityPage() {
               />
             )
           ) : (
-          <ScrollArea className="min-h-0 flex-1">
-            {loadingList && visibleTraces.length === 0 ? (
-              <TraceListSkeletonRows
-                allWorkspacesSelected={allWorkspacesSelected}
-              />
-            ) : (
-              <>
-                <div className="md:hidden">
-                  {visibleTraces.map((trace) => (
-                    <TraceMobileRow
-                      allWorkspacesSelected={allWorkspacesSelected}
-                      key={trace.id}
-                      onOpen={() =>
-                        void openTrace(trace.traceId, trace.workspaceId)
-                      }
-                      selected={
-                        selectedTraceKey ===
-                        traceSelectionKey(trace.traceId, trace.workspaceId)
-                      }
-                      trace={trace}
-                      workspaces={workspaces}
-                    />
-                  ))}
-                </div>
-                <div className="hidden min-w-0 overflow-x-auto md:block">
-                  <table
-                    className={cn(
-                      "w-full table-fixed text-xs",
-                      allWorkspacesSelected ? "min-w-[1680px]" : "min-w-[1520px]",
-                    )}
-                  >
-                    <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
-                      <tr>
-                        <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
-                        <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
-                        {allWorkspacesSelected ? <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th> : null}
-                        <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
-                        <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
-                        <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
-                        <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
-                        <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
-                        <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
-                        <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
-                        <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
-                        <th className="w-[36px] px-3 py-1.5 font-medium" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleTraces.map((trace) => (
-                        <tr
-                          className={cn(
-                            "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
-                            selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
-                          )}
-                          key={trace.id}
-                          onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
-                        >
-                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
-                          <td className="px-3 py-1.5">
-                            <div className="truncate font-medium text-foreground">{trace.name}</div>
-                            <div className="truncate font-mono text-[11px] text-muted-foreground">Session: {sessionLabel(trace)}</div>
-                          </td>
+            <ScrollArea className="min-h-0 flex-1">
+              {loadingList && visibleTraces.length === 0 ? (
+                <TraceListSkeletonRows
+                  allWorkspacesSelected={allWorkspacesSelected}
+                />
+              ) : (
+                <>
+                  <div className="md:hidden">
+                    {visibleTraces.map((trace) => (
+                      <TraceMobileRow
+                        allWorkspacesSelected={allWorkspacesSelected}
+                        key={trace.id}
+                        onOpen={() =>
+                          void openTrace(trace.traceId, trace.workspaceId)
+                        }
+                        selected={
+                          selectedTraceKey ===
+                          traceSelectionKey(trace.traceId, trace.workspaceId)
+                        }
+                        trace={trace}
+                        workspaces={workspaces}
+                      />
+                    ))}
+                  </div>
+                  <div className="hidden min-w-0 overflow-x-auto md:block">
+                    <table
+                      className={cn(
+                        "w-full table-fixed text-xs",
+                        allWorkspacesSelected
+                          ? "min-w-[1680px]"
+                          : "min-w-[1520px]",
+                      )}
+                    >
+                      <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
+                        <tr>
+                          <th className="w-[150px] px-3 py-1.5 font-medium">
+                            Timestamp
+                          </th>
+                          <th className="w-[300px] px-3 py-1.5 font-medium">
+                            Name
+                          </th>
                           {allWorkspacesSelected ? (
-                            <td className="truncate px-3 py-1.5 text-muted-foreground">{workspaceLabel(workspaces, trace.workspaceId)}</td>
+                            <th className="w-[160px] px-3 py-1.5 font-medium">
+                              Workspace
+                            </th>
                           ) : null}
-                          <td className="px-3 py-1.5">
-                            <Badge className={cn("h-5 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
-                              {trace.status}
-                            </Badge>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatLatency(trace.latencyMs)}</td>
-                          <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.model ?? "--"}</td>
-                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.totalTokens ?? "--"}</td>
-                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.observationCount ?? "--"}</td>
-                          <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{sessionLabel(trace)}</td>
-                          <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.userDisplayName ?? trace.userId ?? "--"}</td>
-                          <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{trace.traceId}</td>
-                          <td className="px-3 py-1.5 text-right text-muted-foreground">
-                            <ChevronRight className="ml-auto h-3.5 w-3.5" />
-                          </td>
+                          <th className="w-[90px] px-3 py-1.5 font-medium">
+                            Status
+                          </th>
+                          <th className="w-[90px] px-3 py-1.5 font-medium">
+                            Latency
+                          </th>
+                          <th className="w-[150px] px-3 py-1.5 font-medium">
+                            Model
+                          </th>
+                          <th className="w-[90px] px-3 py-1.5 font-medium">
+                            Tokens
+                          </th>
+                          <th className="w-[90px] px-3 py-1.5 font-medium">
+                            Obs.
+                          </th>
+                          <th className="w-[190px] px-3 py-1.5 font-medium">
+                            Session ID
+                          </th>
+                          <th className="w-[140px] px-3 py-1.5 font-medium">
+                            User
+                          </th>
+                          <th className="w-[190px] px-3 py-1.5 font-medium">
+                            Trace ID
+                          </th>
+                          <th className="w-[36px] px-3 py-1.5 font-medium" />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {visibleTraces.map((trace) => (
+                          <tr
+                            className={cn(
+                              "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
+                              selectedTraceKey ===
+                                traceSelectionKey(
+                                  trace.traceId,
+                                  trace.workspaceId,
+                                ) && "bg-accent/60",
+                            )}
+                            key={trace.id}
+                            onClick={() =>
+                              void openTrace(trace.traceId, trace.workspaceId)
+                            }
+                          >
+                            <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                              {formatTime(trace.startedAt)}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <div className="truncate font-medium text-foreground">
+                                {trace.name}
+                              </div>
+                              <div className="truncate font-mono text-[11px] text-muted-foreground">
+                                Session: {sessionLabel(trace)}
+                              </div>
+                            </td>
+                            {allWorkspacesSelected ? (
+                              <td className="truncate px-3 py-1.5 text-muted-foreground">
+                                {workspaceLabel(workspaces, trace.workspaceId)}
+                              </td>
+                            ) : null}
+                            <td className="px-3 py-1.5">
+                              <Badge
+                                className={cn(
+                                  "h-5 border px-1.5 text-[10px]",
+                                  statusClassName(trace.status),
+                                )}
+                                variant="outline"
+                              >
+                                {trace.status}
+                              </Badge>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                              {formatLatency(trace.latencyMs)}
+                            </td>
+                            <td className="truncate px-3 py-1.5 text-muted-foreground">
+                              {trace.model ?? "--"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                              {trace.totalTokens ?? "--"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                              {trace.observationCount ?? "--"}
+                            </td>
+                            <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                              {sessionLabel(trace)}
+                            </td>
+                            <td className="truncate px-3 py-1.5 text-muted-foreground">
+                              {trace.userDisplayName ?? trace.userId ?? "--"}
+                            </td>
+                            <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                              {trace.traceId}
+                            </td>
+                            <td className="px-3 py-1.5 text-right text-muted-foreground">
+                              <ChevronRight className="ml-auto h-3.5 w-3.5" />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+              {!loadingList && visibleTraces.length === 0 ? (
+                <div className="p-6 text-sm text-muted-foreground">
+                  {traces.length === 0
+                    ? "No traces found."
+                    : "No traces match the current search."}
                 </div>
-              </>
-            )}
-            {!loadingList && visibleTraces.length === 0 ? (
-              <div className="p-6 text-sm text-muted-foreground">
-                {traces.length === 0 ? "No traces found." : "No traces match the current search."}
-              </div>
-            ) : null}
-            {nextCursor ? (
-              <div className="border-t border-border p-3">
-                <Button className="w-full" onClick={() => void loadTraces(nextCursor)} size="sm" type="button" variant="outline">
-                  Load older traces
-                </Button>
-              </div>
-            ) : null}
-          </ScrollArea>
+              ) : null}
+              {nextCursor ? (
+                <div className="border-t border-border p-3">
+                  <Button
+                    className="w-full"
+                    onClick={() => void loadTraces(nextCursor)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Load older traces
+                  </Button>
+                </div>
+              ) : null}
+            </ScrollArea>
           )}
         </section>
       </div>
@@ -3112,10 +3839,14 @@ export default function ObservabilityPage() {
         >
           <SheetHeader className="border-b border-border px-4 py-3 pr-12">
             <SheetTitle className="truncate text-base">
-              {detail ? `${detail.trace.name}: ${detail.trace.traceId}` : "Trace"}
+              {detail
+                ? `${detail.trace.name}: ${detail.trace.traceId}`
+                : "Trace"}
             </SheetTitle>
             <SheetDescription className="truncate">
-              {detail ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}` : selectedTraceKey ?? "Trace detail"}
+              {detail
+                ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}`
+                : (selectedTraceKey ?? "Trace detail")}
             </SheetDescription>
           </SheetHeader>
           <TraceSummaryBar
@@ -3132,7 +3863,9 @@ export default function ObservabilityPage() {
                     Timeline
                   </h3>
                   <p className="truncate text-[11px] text-muted-foreground">
-                    {detail ? detail.trace.name : selectedTraceKey ?? "Trace detail"}
+                    {detail
+                      ? detail.trace.name
+                      : (selectedTraceKey ?? "Trace detail")}
                   </p>
                 </div>
               </div>
@@ -3184,7 +3917,9 @@ export default function ObservabilityPage() {
           <DialogHeader className="border-b border-border px-4 py-3 pr-12 text-left">
             <DialogTitle className="text-base">Timeline</DialogTitle>
             <DialogDescription className="truncate">
-              {detail ? detail.trace.name : selectedTraceKey ?? "Trace detail"}
+              {detail
+                ? detail.trace.name
+                : (selectedTraceKey ?? "Trace detail")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden p-2">

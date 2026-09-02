@@ -25,7 +25,7 @@ import {
 } from "./runtime";
 import type { ModelGatewayProfileKind } from "./types";
 import { encryptSecret } from "../secrets";
-import { syncModelPricing } from "./pricing";
+import { syncModelPricing } from "./sync-pricing";
 import { resolveBackendRuntimePath } from "../runtime-paths";
 import {
   discoverGatewayCatalog,
@@ -140,7 +140,9 @@ export function mergeGlobalProfileConfigJson(input: {
     ...pricingConfigJson,
     targetModel: input.entry.targetModel,
     ...(input.entry.targets ? { targets: input.entry.targets } : {}),
-    ...(input.entry.displayName ? { displayName: input.entry.displayName } : {}),
+    ...(input.entry.displayName
+      ? { displayName: input.entry.displayName }
+      : {}),
     ...(input.entry.subtitle ? { subtitle: input.entry.subtitle } : {}),
     ...(input.entry.badges && input.entry.badges.length > 0
       ? { badges: input.entry.badges }
@@ -152,9 +154,13 @@ export function mergeGlobalProfileConfigJson(input: {
       ? { providerCatalogGatewaySlug: input.entry.providerCatalogGatewaySlug }
       : {}),
     ...(input.entry.litellmKey ? { litellm_key: input.entry.litellmKey } : {}),
-    ...(input.entry.architecture ? { architecture: input.entry.architecture } : {}),
+    ...(input.entry.architecture
+      ? { architecture: input.entry.architecture }
+      : {}),
     ...(input.entry.supportsImageInput ? { supportsImageInput: true } : {}),
-    ...(input.entry.contextLength ? { contextLength: input.entry.contextLength } : {}),
+    ...(input.entry.contextLength
+      ? { contextLength: input.entry.contextLength }
+      : {}),
     ...(input.entry.defaultParameters
       ? { defaultParameters: input.entry.defaultParameters }
       : {}),
@@ -376,7 +382,10 @@ function toDynamicProfileEntry(input: {
 function groupDynamicProfilesByKind(input: {
   entries: ReturnType<typeof toDynamicProfileEntry>[];
 }) {
-  const grouped = new Map<ModelGatewayProfileKind, ReturnType<typeof toDynamicProfileEntry>[]>();
+  const grouped = new Map<
+    ModelGatewayProfileKind,
+    ReturnType<typeof toDynamicProfileEntry>[]
+  >();
   for (const entry of input.entries) {
     const list = grouped.get(entry.kind as ModelGatewayProfileKind) ?? [];
     list.push(entry);
@@ -566,7 +575,9 @@ async function loadDynamicCatalogProfiles(input: {
 
       const bySource = new Map<string, Set<ModelGatewayProfileKind>>();
       for (const candidate of candidates) {
-        const kinds = bySource.get(candidate.providerCatalogSource) ?? new Set<ModelGatewayProfileKind>();
+        const kinds =
+          bySource.get(candidate.providerCatalogSource) ??
+          new Set<ModelGatewayProfileKind>();
         kinds.add(candidate.kind);
         bySource.set(candidate.providerCatalogSource, kinds);
       }
@@ -601,20 +612,22 @@ async function loadDynamicCatalogProfiles(input: {
 
 async function syncProfileKind(input: {
   configVersionId: string;
-  entries: Array<GlobalModelProfileEntry & {
-    architecture?: Record<string, unknown>;
-    contextLength?: number | null;
-    defaultParameters?: Record<string, unknown> | null;
-    displayName?: string;
-    maxCompletionTokens?: number | null;
-    providerCatalogSource?: string;
-    providerCatalogGatewaySlug?: string;
-    supportsImageInput?: boolean;
-    supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
-    supportedParameters?: string[];
-    providerRouting?: GlobalModelProfileEntry["providerRouting"];
-    litellmKey?: string;
-  }>;
+  entries: Array<
+    GlobalModelProfileEntry & {
+      architecture?: Record<string, unknown>;
+      contextLength?: number | null;
+      defaultParameters?: Record<string, unknown> | null;
+      displayName?: string;
+      maxCompletionTokens?: number | null;
+      providerCatalogSource?: string;
+      providerCatalogGatewaySlug?: string;
+      supportsImageInput?: boolean;
+      supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+      supportedParameters?: string[];
+      providerRouting?: GlobalModelProfileEntry["providerRouting"];
+      litellmKey?: string;
+    }
+  >;
   gatewayIdBySlug: Map<string, string>;
   kind: ModelGatewayProfileKind;
   now: Date;
@@ -709,27 +722,36 @@ async function syncGlobalModelGatewayConfigFromFile(
   const dynamicByKind = groupDynamicProfilesByKind({
     entries: dynamicCatalog.entries,
   });
-  const configuredChatProfileAliases = buildProfileAliasSet(loaded.chatProfiles);
-  const configuredImageProfileAliases = buildProfileAliasSet(loaded.imageProfiles);
-  const configuredVisionProfileAliases = buildProfileAliasSet(loaded.visionProfiles);
+  const configuredChatProfileAliases = buildProfileAliasSet(
+    loaded.chatProfiles,
+  );
+  const configuredImageProfileAliases = buildProfileAliasSet(
+    loaded.imageProfiles,
+  );
+  const configuredVisionProfileAliases = buildProfileAliasSet(
+    loaded.visionProfiles,
+  );
   const configuredTtsProfileAliases = buildProfileAliasSet(loaded.ttsProfiles);
 
   const chatProfilesToSync = [
     ...loaded.chatProfiles,
-    ...(dynamicByKind.get("chat") ?? []).filter((entry) =>
-      !hasProfileAlias(configuredChatProfileAliases, entry.profileAlias)
+    ...(dynamicByKind.get("chat") ?? []).filter(
+      (entry) =>
+        !hasProfileAlias(configuredChatProfileAliases, entry.profileAlias),
     ),
   ];
   const imageProfilesToSync = [
     ...loaded.imageProfiles,
-    ...(dynamicByKind.get("image") ?? []).filter((entry) =>
-      !hasProfileAlias(configuredImageProfileAliases, entry.profileAlias)
+    ...(dynamicByKind.get("image") ?? []).filter(
+      (entry) =>
+        !hasProfileAlias(configuredImageProfileAliases, entry.profileAlias),
     ),
   ];
   const visionProfilesToSync = [
     ...loaded.visionProfiles,
-    ...(dynamicByKind.get("vision") ?? []).filter((entry) =>
-      !hasProfileAlias(configuredVisionProfileAliases, entry.profileAlias)
+    ...(dynamicByKind.get("vision") ?? []).filter(
+      (entry) =>
+        !hasProfileAlias(configuredVisionProfileAliases, entry.profileAlias),
     ),
   ];
   const embeddingProfilesToSync = [
@@ -746,8 +768,9 @@ async function syncGlobalModelGatewayConfigFromFile(
   ];
   const ttsProfilesToSync = [
     ...loaded.ttsProfiles,
-    ...(dynamicByKind.get("tts") ?? []).filter((entry) =>
-      !hasProfileAlias(configuredTtsProfileAliases, entry.profileAlias)
+    ...(dynamicByKind.get("tts") ?? []).filter(
+      (entry) =>
+        !hasProfileAlias(configuredTtsProfileAliases, entry.profileAlias),
     ),
   ];
   const videoProfilesToSync = dynamicByKind.get("video") ?? [];
@@ -771,7 +794,9 @@ async function syncGlobalModelGatewayConfigFromFile(
 
   const now = new Date();
   await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID})`);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID})`,
+    );
 
     await tx
       .update(modelGatewayConfigVersions)
@@ -806,7 +831,9 @@ async function syncGlobalModelGatewayConfigFromFile(
       .limit(1);
 
     if (!versionRow) {
-      throw new Error("Failed to resolve synchronized model gateway config version");
+      throw new Error(
+        "Failed to resolve synchronized model gateway config version",
+      );
     }
 
     const configVersionId = versionRow.id;
@@ -884,7 +911,9 @@ async function syncGlobalModelGatewayConfigFromFile(
       }
 
       if (!gatewayConfigId) {
-        throw new Error(`Failed to resolve gateway config id for slug '${entry.slug}'`);
+        throw new Error(
+          `Failed to resolve gateway config id for slug '${entry.slug}'`,
+        );
       }
 
       gatewayIdBySlug.set(entry.slug, gatewayConfigId);
@@ -1004,13 +1033,17 @@ async function syncGlobalModelGatewayConfigFromFile(
       tx,
     });
     await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.visionProfiles.map((entry) => entry.profileAlias)),
+      aliases: new Set(
+        loaded.visionProfiles.map((entry) => entry.profileAlias),
+      ),
       kind: "vision",
       now,
       tx,
     });
     await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.rerankProfiles.map((entry) => entry.profileAlias)),
+      aliases: new Set(
+        loaded.rerankProfiles.map((entry) => entry.profileAlias),
+      ),
       kind: "rerank",
       now,
       tx,
@@ -1082,7 +1115,6 @@ async function syncGlobalModelGatewayConfigFromFile(
     await tx
       .delete(modelGatewayRoutes)
       .where(ne(modelGatewayRoutes.configVersionId, configVersionId));
-
   });
 
   logger.info("Synchronized global model gateway config into DB", {

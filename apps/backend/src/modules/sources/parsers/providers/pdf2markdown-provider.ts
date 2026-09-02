@@ -11,7 +11,7 @@ import {
   getPdf2MarkdownTaskStatus,
   submitPdf2MarkdownAsync,
 } from "./pdf2markdown-client";
-import { extractPdf2MarkdownResult } from "./pdf2markdown-result";
+import { extractPdf2MarkdownResult } from "@sourceweft/builtin-document-parsers";
 import { isSupportedImageMimeType } from "./utils";
 import { normalizeImageForPdf2Markdown } from "./image-normalizer";
 

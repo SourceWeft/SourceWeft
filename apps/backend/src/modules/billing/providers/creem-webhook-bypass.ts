@@ -2,14 +2,7 @@ import { validateWebhookSignature } from "@creem_io/better-auth/server";
 import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
 import { syncCreemSubscriptionEvent } from "../index";
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, unknown>;
-}
+import { toObjectRecord } from "../../../shared/records";
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
@@ -17,7 +10,7 @@ function readString(record: Record<string, unknown> | null, key: string) {
 }
 
 function flattenScheduledCancelEvent(event: Record<string, unknown>) {
-  const object = asRecord(event.object);
+  const object = toObjectRecord(event.object);
   if (!object) {
     return null;
   }
@@ -46,7 +39,7 @@ export async function handleCreemScheduledCancelWebhook(request: Request) {
     return null;
   }
 
-  const event = asRecord(parsed);
+  const event = toObjectRecord(parsed);
   if (!event) {
     return null;
   }

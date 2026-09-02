@@ -10,8 +10,8 @@ import {
 } from "./streaming-event-handlers";
 
 function createBaseStreamingContext(
-  overrides: Partial<StreamingEventHandlerContext<ToolCallEventPayload>> = {},
-): StreamingEventHandlerContext<ToolCallEventPayload> {
+  overrides: Partial<StreamingEventHandlerContext> = {},
+): StreamingEventHandlerContext {
   return {
     appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
@@ -48,6 +48,20 @@ function createBaseStreamingContext(
 
 function getToolEventData(event: ToolCallEventPayload) {
   return "data" in event ? event.data : undefined;
+}
+
+/**
+ * Widen a richer stream event down to what the handlers actually declare.
+ *
+ * The handlers only require `{ id?, type }`; the extra payload rides along and
+ * is read back through the context stubs. Passing the literal straight in would
+ * trip excess-property checking on a fresh object literal, so it is widened
+ * through a parameter instead of being cast.
+ */
+function toolCallEventWithData(
+  event: ToolCallEventPayload & { data?: unknown },
+): ToolCallEventPayload {
+  return event;
 }
 
 test("finish event stores finish reason on the streaming assistant message", () => {
@@ -1263,7 +1277,7 @@ test("presentation artifact tool calls render progress and refresh after commit"
     drainQueuedDeltasNow: () => {
       drainCount += 1;
     },
-    event: {
+    event: toolCallEventWithData({
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
@@ -1272,7 +1286,7 @@ test("presentation artifact tool calls render progress and refresh after commit"
         stage: "planning",
         title: "费曼学习法",
       },
-    },
+    }),
     refreshedArtifactToolIds,
     refreshedWorkfileToolIds: new Set(),
     setArtifactsRefreshKey: (updater) => {
@@ -1435,7 +1449,7 @@ test("presentation artifact result keeps earlier progress ordering", () => {
     drainQueuedDeltasNow: () => {
       drainCount += 1;
     },
-    event: {
+    event: toolCallEventWithData({
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
@@ -1444,7 +1458,7 @@ test("presentation artifact result keeps earlier progress ordering", () => {
         stage: "planning",
         title: "费曼学习法",
       },
-    },
+    }),
     refreshedArtifactToolIds,
     refreshedWorkfileToolIds: new Set(),
     setArtifactsRefreshKey: (updater) => {

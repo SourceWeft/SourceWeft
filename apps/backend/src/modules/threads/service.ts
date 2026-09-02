@@ -7,11 +7,8 @@ import { requireContentWorkspace } from "../workspace/guards";
 import { workspaceService } from "../workspace";
 import { canViewThread } from "../workspace/content-visibility";
 import { normalizeContentTitle } from "../../shared/strings";
-import {
-  getMetadataNumber,
-  getMetadataString,
-  toObjectRecord,
-} from "../sources/metadata";
+import { getMetadataNumber, getMetadataString } from "../sources/metadata";
+import { toObjectRecord } from "../../shared/records";
 import {
   createThreadRecord,
   deleteThreadRecord,

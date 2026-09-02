@@ -19,7 +19,6 @@ import {
   hasPairedCommittedArtifactPublication,
 } from "../render-block-projection";
 import {
-  getObjectRecord,
   finalizeTerminalSnapshotTrace,
   hasPendingConfirmations,
   mergeChatRunSnapshot,
@@ -28,6 +27,7 @@ import {
   replaceConfirmationInToolCalls,
   updateExistingTracePartsFromToolCalls,
 } from "./snapshot";
+import { toObjectRecord } from "../../../shared/records";
 import {
   buildAssistantMessageConfirmationMetadata,
   buildThreadRunMetadata,
@@ -99,13 +99,13 @@ async function lockRunSnapshotContext(
   return {
     runRow,
     assistantMessageId,
-    messageMetadata: getObjectRecord(messageRow?.metadata),
+    messageMetadata: toObjectRecord(messageRow?.metadata),
   };
 }
 
 function hasCommittedArtifactBlock(blocks: unknown[] | undefined) {
   return (blocks ?? []).some((value) => {
-    const record = getObjectRecord(value);
+    const record = toObjectRecord(value);
     return record?.type === "artifact_output" && typeof record.id === "string";
   });
 }
@@ -165,8 +165,8 @@ function mergeLockedTerminalSnapshot(input: {
   const incoming = input.incoming ?? {};
   const currentAssistant = current.assistantMessage;
   const incomingAssistant = incoming.assistantMessage;
-  const currentMetadata = getObjectRecord(currentAssistant?.metadata) ?? {};
-  const incomingMetadata = getObjectRecord(incomingAssistant?.metadata) ?? {};
+  const currentMetadata = toObjectRecord(currentAssistant?.metadata) ?? {};
+  const incomingMetadata = toObjectRecord(incomingAssistant?.metadata) ?? {};
   const terminalMetadata = Object.fromEntries(
     ["error", "errorCode", "finishReason", "isCancelled", "isError"]
       .filter((key) => incomingMetadata[key] !== undefined)

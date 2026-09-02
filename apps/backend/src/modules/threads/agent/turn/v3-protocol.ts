@@ -16,7 +16,8 @@
  * `graph.stream({ subgraphs: true })` — so sub-agent grouping in
  * subagent-namespace.ts is reused as-is.
  */
-import { stringifyAgentMessageContent, toObjectRecord } from "./content";
+import { stringifyAgentMessageContent } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 
 /** One event from `run` (the DeepAgentRunStream is an AsyncIterable of these). */
 export type V3ProtocolEvent = {
@@ -32,7 +33,10 @@ export type V3ProtocolEvent = {
 /** The subset of the deepagents v3 run stream the runner relies on. */
 export type V3RunStream = AsyncIterable<V3ProtocolEvent> & {
   readonly interrupted: boolean;
-  readonly interrupts: ReadonlyArray<{ interruptId?: string; payload?: unknown }>;
+  readonly interrupts: ReadonlyArray<{
+    interruptId?: string;
+    payload?: unknown;
+  }>;
   readonly output: Promise<unknown>;
 };
 
@@ -207,7 +211,9 @@ export function adaptMessagesEvent(
     typeof delta?.reasoning === "string" &&
     delta.reasoning.length > 0
   ) {
-    return [[{ role: "assistant", content: "", reasoning: delta.reasoning }, {}]];
+    return [
+      [{ role: "assistant", content: "", reasoning: delta.reasoning }, {}],
+    ];
   }
   // block-delta (tool_call_chunk args) and data-delta: not text/reasoning.
   return [];

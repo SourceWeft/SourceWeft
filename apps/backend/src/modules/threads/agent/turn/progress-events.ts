@@ -5,7 +5,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import type { ArtifactGenerationPhase } from "@sourceweft/contracts/agent-tools";
 import type { ThinkingStepTrace, ToolCallTrace } from "../..";
-import { toObjectRecord } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 import type { DeepAgentTurnEvent } from "./events";
 
 export type GeneratedArtifactProgressEvent = {

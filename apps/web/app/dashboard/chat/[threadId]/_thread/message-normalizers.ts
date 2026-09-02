@@ -1,3 +1,4 @@
+import { sanitizeClientErrorMessage } from "../../_components/chat-canvas/client-error-message";
 import {
   HttpClientError,
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
@@ -31,6 +32,7 @@ import type {
 } from "../chat-stream-runner";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import type { ChatMessageItem } from "../streaming-assistant-state";
+import { toObjectRecord } from "../../../../../lib/records";
 
 type ThreadMessageItem = Awaited<
   ReturnType<typeof contentClient.listThreadMessages>
@@ -138,27 +140,6 @@ function getDisplayErrorMessage(error: unknown) {
   return sanitizeClientErrorMessage(error.message) ?? "Failed to send message.";
 }
 
-export function sanitizeClientErrorMessage(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text) {
-    return null;
-  }
-  if (
-    /Error invoking tool/i.test(text) ||
-    /Received tool input did not match expected schema/i.test(text) ||
-    /\bkwargs\b/i.test(text) ||
-    /Invalid input: expected .*received/i.test(text)
-  ) {
-    const toolName =
-      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
-      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
-    return toolName
-      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
-      : "The generated tool arguments were invalid. Please retry.";
-  }
-  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
-}
-
 type ApiErrorPayload = {
   code?: unknown;
   message?: unknown;
@@ -261,13 +242,6 @@ function waitForThreadMessagesRetry(delayMs: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, delayMs);
   });
-}
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -1779,6 +1753,7 @@ export {
   resolveToolConfirmationCalls,
   resolveToolCallFromStreamEvent,
   resolveToolCallsFromMetadata,
+  sanitizeClientErrorMessage,
   shouldRenderToolCall,
   shouldRetryThreadMessagesLoad,
   STREAM_RENDER_KEY,

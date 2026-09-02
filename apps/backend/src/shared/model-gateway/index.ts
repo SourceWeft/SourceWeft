@@ -21,10 +21,7 @@ export {
   openBilledModelGateway,
   withBilledModelGateway,
 } from "./billed-client";
-export type {
-  BilledModelGateway,
-  BilledRequestOptions,
-} from "./billed-client";
+export type { BilledModelGateway, BilledRequestOptions } from "./billed-client";
 export { modelCatalog } from "./model-catalog/registry";
 export { createAgentToolModelGatewayService } from "./agent-tool-client";
 export type {
@@ -41,7 +38,7 @@ export type { BillingScope } from "./billing/scope";
 export { BillingAdmissionError } from "./billing/admission";
 export { ModelGatewayError } from "./errors";
 export { resolveByokProviderRuntime } from "./runtime";
-export { resolveModelCapabilitiesFromLitellm } from "./pricing";
+export { resolveModelCapabilitiesFromLitellm } from "./sync-pricing";
 export type {
   ModelGatewayProfileKind,
   RoutedGatewayConfig,

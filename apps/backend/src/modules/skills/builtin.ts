@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "./hash";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -72,10 +72,6 @@ const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 let builtinSkillsCache: BuiltinSkillManifest[] | null = null;
-
-function sha256(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function validateSkillName(name: string) {
   return (

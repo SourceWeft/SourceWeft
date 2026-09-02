@@ -11,6 +11,7 @@ import type {
   BillingSubscriptionState,
   TeamSubscriptionSnapshot,
 } from "../types";
+import { toObjectRecord } from "../../../shared/records";
 
 type CreemSubscriptionSyncDeps = {
   billing: BillingService;
@@ -21,14 +22,6 @@ type SubscriptionWebhookContext = {
   account: BillingAccountState | null;
   subscription: BillingSubscriptionState | null;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, unknown>;
-}
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
@@ -71,13 +64,13 @@ function resolveOrderId(metadata: Record<string, unknown> | null) {
 }
 
 function resolveMetadata(record: Record<string, unknown> | null) {
-  const metadata = asRecord(record?.metadata ?? null);
+  const metadata = toObjectRecord(record?.metadata ?? null);
   if (metadata) {
     return metadata;
   }
 
-  const subscription = asRecord(record?.subscription ?? null);
-  return asRecord(subscription?.metadata ?? null);
+  const subscription = toObjectRecord(record?.subscription ?? null);
+  return toObjectRecord(subscription?.metadata ?? null);
 }
 
 function resolvePlanFamily(
@@ -91,9 +84,9 @@ function resolvePlanFamily(
     return metadata.planFamily;
   }
 
-  const product = asRecord(asRecord(data)?.product ?? null);
+  const product = toObjectRecord(toObjectRecord(data)?.product ?? null);
   const productId =
-    readString(product, "id") ?? readString(asRecord(data), "product");
+    readString(product, "id") ?? readString(toObjectRecord(data), "product");
 
   if (
     productId &&
@@ -126,9 +119,9 @@ function resolveBillingIntervalFromProduct(
     return "yearly";
   }
 
-  const product = asRecord(asRecord(data)?.product ?? null);
+  const product = toObjectRecord(toObjectRecord(data)?.product ?? null);
   const productId =
-    readString(product, "id") ?? readString(asRecord(data), "product");
+    readString(product, "id") ?? readString(toObjectRecord(data), "product");
   if (!productId) {
     return null;
   }
@@ -273,10 +266,10 @@ function resolveCreemSeatCount(
     return null;
   };
 
-  const record = asRecord(data);
+  const record = toObjectRecord(data);
   const items = record?.items;
   if (Array.isArray(items) && items.length > 0) {
-    const firstItem = asRecord(items[0]);
+    const firstItem = toObjectRecord(items[0]);
     const units = parseSeatCount(firstItem?.units);
     if (units !== null) {
       return units;
@@ -309,13 +302,13 @@ function resolveCreemSeatCountWithFallback(
 }
 
 function resolveSubscriptionItemId(data: unknown) {
-  const record = asRecord(data);
+  const record = toObjectRecord(data);
   const items = record?.items;
   if (!Array.isArray(items) || items.length === 0) {
     return null;
   }
 
-  const firstItem = asRecord(items[0]);
+  const firstItem = toObjectRecord(items[0]);
   return readString(firstItem, "id");
 }
 
@@ -325,7 +318,7 @@ function buildCreemSubscriptionSnapshot(
   fallbackStatus: BillingSubscriptionStatus,
   context?: SubscriptionWebhookContext | null,
 ): TeamSubscriptionSnapshot | null {
-  const record = asRecord(data);
+  const record = toObjectRecord(data);
   const metadata = resolveMetadata(record);
   const teamId = resolveTeamId(metadata) ?? context?.subscription?.teamId;
   const planFamily =
@@ -348,8 +341,8 @@ function buildCreemSubscriptionSnapshot(
     return null;
   }
 
-  const customer = asRecord(record?.customer ?? null);
-  const product = asRecord(record?.product ?? null);
+  const customer = toObjectRecord(record?.customer ?? null);
+  const product = toObjectRecord(record?.product ?? null);
   const customerId =
     readString(customer, "id") ??
     readString(record, "customer") ??
@@ -361,12 +354,18 @@ function buildCreemSubscriptionSnapshot(
     context?.subscription?.externalProductId ??
     null;
   const rawStatus = readString(record, "status");
-  const currentPeriodStart = toDateIso(
-    record?.current_period_start_date ?? record?.currentPeriodStartDate,
-  ) ?? context?.subscription?.currentPeriodStart ?? null;
-  const currentPeriodEnd = toDateIso(
-    record?.current_period_end_date ?? record?.currentPeriodEndDate,
-  ) ?? context?.subscription?.currentPeriodEnd ?? null;
+  const currentPeriodStart =
+    toDateIso(
+      record?.current_period_start_date ?? record?.currentPeriodStartDate,
+    ) ??
+    context?.subscription?.currentPeriodStart ??
+    null;
+  const currentPeriodEnd =
+    toDateIso(
+      record?.current_period_end_date ?? record?.currentPeriodEndDate,
+    ) ??
+    context?.subscription?.currentPeriodEnd ??
+    null;
   const billingInterval =
     resolveBillingIntervalFromProduct(metadata, data) ??
     (context?.subscription?.billingInterval === "monthly" ||
@@ -419,7 +418,7 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     data: unknown,
     fallbackStatus: BillingSubscriptionStatus,
   ) {
-    const record = asRecord(data);
+    const record = toObjectRecord(data);
     const payload = record ?? {
       raw: data,
     };
@@ -441,7 +440,8 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     const orderId = resolveOrderId(metadata);
     const externalSubscriptionId =
       snapshot?.externalSubscriptionId || rawExternalSubscriptionId;
-    const teamId = snapshot?.teamId || resolveTeamId(asRecord(payload.metadata));
+    const teamId =
+      snapshot?.teamId || resolveTeamId(toObjectRecord(payload.metadata));
 
     async function triggerAlertSafely(
       input: Parameters<typeof deps.alerts.trigger>[0],

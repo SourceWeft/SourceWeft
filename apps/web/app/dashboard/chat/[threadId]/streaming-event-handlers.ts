@@ -1,3 +1,4 @@
+import { sanitizeClientErrorMessage } from "../_components/chat-canvas/client-error-message";
 import type {
   CitationRecord,
   ModelReasoningSegmentRecord,
@@ -22,18 +23,16 @@ export type ToolCallEventPayload = {
   type: string;
 };
 
-export type StreamingEventHandlerContext<
-  TToolEvent extends ToolCallEventPayload = ToolCallEventPayload,
-> = {
+export type StreamingEventHandlerContext = {
   appendReasoningChunk: (current: string | undefined, next: string) => string;
   durableRunKey: string;
   isCompletedArtifactToolCall: (
     toolCall: ToolCallRecord,
-    event: TToolEvent,
+    event: ToolCallEventPayload,
   ) => boolean;
   isCompletedWorkfileWriteToolCall: (
     toolCall: ToolCallRecord,
-    event: TToolEvent,
+    event: ToolCallEventPayload,
   ) => boolean;
   mergeThinkingStepRecords: (
     stepsById: Map<string, ThinkingStepRecord>,
@@ -48,11 +47,11 @@ export type StreamingEventHandlerContext<
   normalizeThinkingStepRecord: (value: unknown) => ThinkingStepRecord | null;
   normalizeThreadCommandRequest: (value: unknown) => unknown;
   resolveToolCallFromStreamEvent: (input: {
-    event: TToolEvent;
+    event: ToolCallEventPayload;
     streamToolCallsById: Map<string, ToolCallRecord>;
   }) => ToolCallRecord;
   resolveTraceEventFromStreamEvent: (input: {
-    event: TToolEvent;
+    event: ToolCallEventPayload;
     toolCall: ToolCallRecord;
   }) => ReasoningTraceEventRecord | null;
   streamRenderBuffer: StreamingRenderBuffer;
@@ -70,60 +69,50 @@ export type StreamingEventHandlerContext<
   updateStreamingAssistantMessage: UpdateStreamingAssistantMessage;
 };
 
-type ContextInput<TToolEvent extends ToolCallEventPayload> = {
-  context: StreamingEventHandlerContext<TToolEvent>;
+type ContextInput = {
+  context: StreamingEventHandlerContext;
 };
 
-type HandleStreamingTextDeltaInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    assistantText: string;
-    delta: string;
-    enqueueDelta: (delta: string) => void;
-    startDeltaDrain: () => void;
-  };
+type HandleStreamingTextDeltaInput = ContextInput & {
+  assistantText: string;
+  delta: string;
+  enqueueDelta: (delta: string) => void;
+  startDeltaDrain: () => void;
+};
 
-type HandleStreamingTextReplaceInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    setAssistantText: (text: string) => void;
-    setHasRenderedDelta: (hasRenderedDelta: boolean) => void;
-    setLatestAssistantMessageContent: (content: string) => void;
-    text: string;
-  };
+type HandleStreamingTextReplaceInput = ContextInput & {
+  setAssistantText: (text: string) => void;
+  setHasRenderedDelta: (hasRenderedDelta: boolean) => void;
+  setLatestAssistantMessageContent: (content: string) => void;
+  text: string;
+};
 
-type HandleStreamingTextInterruptedInput<
-  TToolEvent extends ToolCallEventPayload,
-> = ContextInput<TToolEvent>;
+type HandleStreamingTextInterruptedInput = ContextInput;
 
-type HandleStreamingToolCallEventInput<TEvent extends ToolCallEventPayload> =
-  ContextInput<TEvent> & {
-    drainQueuedDeltasNow: () => void;
-    event: TEvent;
-    refreshedArtifactToolIds: Set<string>;
-    refreshedWorkfileToolIds: Set<string>;
-    setArtifactsRefreshKey: (updater: (value: number) => number) => void;
-    setWorkfilesRefreshKey: (updater: (value: number) => number) => void;
-  };
+type HandleStreamingToolCallEventInput = ContextInput & {
+  drainQueuedDeltasNow: () => void;
+  event: ToolCallEventPayload;
+  refreshedArtifactToolIds: Set<string>;
+  refreshedWorkfileToolIds: Set<string>;
+  setArtifactsRefreshKey: (updater: (value: number) => number) => void;
+  setWorkfilesRefreshKey: (updater: (value: number) => number) => void;
+};
 
-type HandleStreamingThinkingStepInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    step: unknown;
-  };
+type HandleStreamingThinkingStepInput = ContextInput & {
+  step: unknown;
+};
 
-type HandleStreamingReasoningInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    reasoning: string;
-    segment: unknown;
-  };
+type HandleStreamingReasoningInput = ContextInput & {
+  reasoning: string;
+  segment: unknown;
+};
 
-type HandleStreamingCitationsInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    availableCitations: unknown;
-    citations: unknown;
-  };
+type HandleStreamingCitationsInput = ContextInput & {
+  availableCitations: unknown;
+  citations: unknown;
+};
 
-type HandleStreamingThreadTitleUpdateInput<
-  TToolEvent extends ToolCallEventPayload,
-> = ContextInput<TToolEvent> & {
+type HandleStreamingThreadTitleUpdateInput = ContextInput & {
   threadId: string;
   title: string;
 };
@@ -136,14 +125,11 @@ type HandleStreamingThreadTitlePendingInput = {
   threadId: string;
 };
 
-type HandleStreamingFinishInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    finishReason?: string | null;
-  };
+type HandleStreamingFinishInput = ContextInput & {
+  finishReason?: string | null;
+};
 
-type HandleStreamingAssistantMessageInput<
-  TToolEvent extends ToolCallEventPayload,
-> = ContextInput<TToolEvent> & {
+type HandleStreamingAssistantMessageInput = ContextInput & {
   messageId: string;
   parentMessageId?: string | null;
   persistedUserMessageId: string | null;
@@ -191,17 +177,16 @@ type StartEventPayload = {
   threadRun?: unknown;
 };
 
-type HandleStreamingStartInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent> & {
-    event: StartEventPayload;
-    setCreatedUserMessageId: (messageId: string) => void;
-    setMessages: (
-      updater: (messages: ChatMessageItem[]) => ChatMessageItem[],
-    ) => void;
-    setPersistedUserMessageId: (messageId: string) => void;
-    setPreparedEffectiveSourceIds: (sourceIds: string[] | null) => void;
-    tempUserId: string | null;
-  };
+type HandleStreamingStartInput = ContextInput & {
+  event: StartEventPayload;
+  setCreatedUserMessageId: (messageId: string) => void;
+  setMessages: (
+    updater: (messages: ChatMessageItem[]) => ChatMessageItem[],
+  ) => void;
+  setPersistedUserMessageId: (messageId: string) => void;
+  setPreparedEffectiveSourceIds: (sourceIds: string[] | null) => void;
+  tempUserId: string | null;
+};
 
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
@@ -212,21 +197,19 @@ function normalizeStringArray(value: unknown) {
     : null;
 }
 
-export function createStreamingEventHandlerContext<
-  TToolEvent extends ToolCallEventPayload,
->(input: StreamingEventHandlerContext<TToolEvent>) {
+export function createStreamingEventHandlerContext(
+  input: StreamingEventHandlerContext,
+) {
   return input;
 }
 
-export function handleStreamingTextDelta<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingTextDelta({
   assistantText,
   context,
   delta,
   enqueueDelta,
   startDeltaDrain,
-}: HandleStreamingTextDeltaInput<TToolEvent>) {
+}: HandleStreamingTextDeltaInput) {
   const hasVisibleDelta = delta.trim().length > 0;
   const hasRunningTool = [...context.streamToolCallsById.values()].some(
     (toolCall) => toolCall.status === "running",
@@ -254,15 +237,13 @@ export function handleStreamingTextDelta<
   startDeltaDrain();
 }
 
-export function handleStreamingTextReplace<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingTextReplace({
   context,
   setAssistantText,
   setHasRenderedDelta,
   setLatestAssistantMessageContent,
   text,
-}: HandleStreamingTextReplaceInput<TToolEvent>) {
+}: HandleStreamingTextReplaceInput) {
   context.streamRenderBuffer.clearQueuedDeltas();
   setAssistantText(text);
   setLatestAssistantMessageContent(text);
@@ -286,9 +267,9 @@ export function handleStreamingTextReplace<
   }));
 }
 
-export function handleStreamingTextInterrupted<
-  TToolEvent extends ToolCallEventPayload,
->({ context }: HandleStreamingTextInterruptedInput<TToolEvent>) {
+export function handleStreamingTextInterrupted({
+  context,
+}: HandleStreamingTextInterruptedInput) {
   context.updateStreamingAssistantMessage((message) => ({
     ...message,
     metadata: {
@@ -299,9 +280,7 @@ export function handleStreamingTextInterrupted<
   }));
 }
 
-export function handleStreamingToolCallEvent<
-  TEvent extends ToolCallEventPayload,
->({
+export function handleStreamingToolCallEvent({
   context,
   drainQueuedDeltasNow,
   event,
@@ -309,7 +288,7 @@ export function handleStreamingToolCallEvent<
   refreshedWorkfileToolIds,
   setArtifactsRefreshKey,
   setWorkfilesRefreshKey,
-}: HandleStreamingToolCallEventInput<TEvent>) {
+}: HandleStreamingToolCallEventInput) {
   const nextToolCall = context.resolveToolCallFromStreamEvent({
     event,
     streamToolCallsById: context.streamToolCallsById,
@@ -369,9 +348,10 @@ export function handleStreamingToolCallEvent<
   }
 }
 
-export function handleStreamingThinkingStep<
-  TToolEvent extends ToolCallEventPayload,
->({ context, step }: HandleStreamingThinkingStepInput<TToolEvent>) {
+export function handleStreamingThinkingStep({
+  context,
+  step,
+}: HandleStreamingThinkingStepInput) {
   const nextStep = context.normalizeThinkingStepRecord(step);
   if (!nextStep) {
     return;
@@ -478,10 +458,8 @@ function buildDeltaOnlyModelReasoningSegment(input: {
   };
 }
 
-function normalizeStreamingModelReasoningSegment<
-  TToolEvent extends ToolCallEventPayload,
->(input: {
-  context: StreamingEventHandlerContext<TToolEvent>;
+function normalizeStreamingModelReasoningSegment(input: {
+  context: StreamingEventHandlerContext;
   currentSegments: ModelReasoningSegmentRecord[];
   reasoning: string;
   segment: unknown;
@@ -694,9 +672,11 @@ function buildThinkingStepTraceEvent(
   };
 }
 
-export function handleStreamingReasoning<
-  TToolEvent extends ToolCallEventPayload,
->({ context, reasoning, segment }: HandleStreamingReasoningInput<TToolEvent>) {
+export function handleStreamingReasoning({
+  context,
+  reasoning,
+  segment,
+}: HandleStreamingReasoningInput) {
   if (reasoning.length === 0) {
     return;
   }
@@ -760,13 +740,11 @@ export function handleStreamingReasoning<
   });
 }
 
-export function handleStreamingCitations<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingCitations({
   availableCitations,
   citations,
   context,
-}: HandleStreamingCitationsInput<TToolEvent>) {
+}: HandleStreamingCitationsInput) {
   const nextCitations = context.normalizeCitationRecords(citations);
   const nextAvailableCitations =
     context.normalizeCitationRecords(availableCitations);
@@ -779,13 +757,11 @@ export function handleStreamingCitations<
   });
 }
 
-export function handleStreamingThreadTitleUpdate<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingThreadTitleUpdate({
   context,
   threadId,
   title,
-}: HandleStreamingThreadTitleUpdateInput<TToolEvent>) {
+}: HandleStreamingThreadTitleUpdateInput) {
   context.updateChatTitle(threadId, title);
 }
 
@@ -800,10 +776,10 @@ export function handleStreamingThreadTitlePending({
   setPendingTitleJobId(typeof jobId === "string" ? jobId : null);
 }
 
-export function handleStreamingFinish<TToolEvent extends ToolCallEventPayload>({
+export function handleStreamingFinish({
   context,
   finishReason,
-}: HandleStreamingFinishInput<TToolEvent>) {
+}: HandleStreamingFinishInput) {
   const renderBlocks = context.streamRenderBuffer.snapshotRenderBlocks();
   const terminalRecords = finishStreamingAssistantRun({
     durableRunKey: context.durableRunKey,
@@ -873,9 +849,7 @@ export const testExports = {
   upsertReasoningTraceEvent,
 };
 
-export function handleStreamingAssistantMessage<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingAssistantMessage({
   context,
   messageId,
   parentMessageId,
@@ -887,7 +861,7 @@ export function handleStreamingAssistantMessage<
   streamingAssistantMessageId,
   streamingAssistantMessageIds,
   userMessageId,
-}: HandleStreamingAssistantMessageInput<TToolEvent>) {
+}: HandleStreamingAssistantMessageInput) {
   setPersistedAssistantMessageId(messageId);
   const nextUserMessageId = userMessageId ?? persistedUserMessageId;
   const previousAssistantMessageId = streamingAssistantMessageId;
@@ -964,28 +938,7 @@ export function handleStreamingError({
   setStreamError(new Error(errorMessage));
 }
 
-function sanitizeClientErrorMessage(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text) {
-    return null;
-  }
-  if (
-    /Error invoking tool/i.test(text) ||
-    /Received tool input did not match expected schema/i.test(text) ||
-    /\bkwargs\b/i.test(text) ||
-    /Invalid input: expected .*received/i.test(text)
-  ) {
-    const toolName =
-      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
-      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
-    return toolName
-      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
-      : "The generated tool arguments were invalid. Please retry.";
-  }
-  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
-}
-
-export function handleStreamingStart<TToolEvent extends ToolCallEventPayload>({
+export function handleStreamingStart({
   context,
   event,
   setCreatedUserMessageId,
@@ -993,7 +946,7 @@ export function handleStreamingStart<TToolEvent extends ToolCallEventPayload>({
   setPersistedUserMessageId,
   setPreparedEffectiveSourceIds,
   tempUserId,
-}: HandleStreamingStartInput<TToolEvent>) {
+}: HandleStreamingStartInput) {
   const previousUserMessageId = tempUserId;
   const serverUserMessageId = event.messageId;
   const serverSourceIds = normalizeStringArray(event.sourceIds);

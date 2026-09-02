@@ -21,7 +21,7 @@ import {
 import { pdfSourceParser } from "./pdf";
 import { textSourceParser } from "./text";
 import { getSourceParser, listSupportedSourceMimeTypes } from "./index";
-import { extractPdf2MarkdownResult } from "./providers/pdf2markdown-result";
+import { extractPdf2MarkdownResult } from "@sourceweft/builtin-document-parsers";
 import {
   startDocumentParse,
   testExports as documentParseTestExports,

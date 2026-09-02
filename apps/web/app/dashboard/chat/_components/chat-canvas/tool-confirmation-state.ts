@@ -25,6 +25,7 @@ import {
   isDeliverableGenerationActive,
   isDeliverableToolName,
 } from "./artifact-progress";
+import { toObjectRecord } from "../../../../../lib/records";
 
 type ToolConfirmationItem = {
   confirmation: ToolConfirmationRequest;
@@ -55,12 +56,6 @@ type ActiveToolConfirmationRun = {
   status?: string;
 };
 
-function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getStringRecordValue(
   record: Record<string, unknown> | null,
   key: string,
@@ -72,7 +67,7 @@ function getStringRecordValue(
 }
 
 function getErrorCode(error: unknown) {
-  const record = getObjectRecord(error);
+  const record = toObjectRecord(error);
   return getStringRecordValue(record, "code");
 }
 
@@ -88,7 +83,7 @@ export function isStaleToolConfirmationResponse(error: unknown) {
 }
 
 function getThreadRunId(version: { threadRun?: unknown }) {
-  return getStringRecordValue(getObjectRecord(version.threadRun), "id");
+  return getStringRecordValue(toObjectRecord(version.threadRun), "id");
 }
 
 function isCancelledMessageVersion(version: {
@@ -99,7 +94,7 @@ function isCancelledMessageVersion(version: {
   return (
     version.isCancelled === true ||
     version.errorCode === "CLIENT_CANCELLED" ||
-    getStringRecordValue(getObjectRecord(version.threadRun), "status") ===
+    getStringRecordValue(toObjectRecord(version.threadRun), "status") ===
       "cancelled"
   );
 }
@@ -112,7 +107,7 @@ function isExpiredApprovalMessageVersion(version: {
 
 function parseJsonOutput(output: unknown): unknown {
   if (typeof output !== "string") {
-    const record = getObjectRecord(output);
+    const record = toObjectRecord(output);
     const content = getStringRecordValue(record, "content");
     return content ? parseJsonOutput(content) : output;
   }
@@ -131,7 +126,7 @@ export function getToolConfirmationOutput(
   output: unknown,
 ): ToolConfirmationRequest | null {
   const parsed = parseJsonOutput(output);
-  const record = getObjectRecord(parsed);
+  const record = toObjectRecord(parsed);
   if (!record) {
     return null;
   }
@@ -151,7 +146,7 @@ export function getUserQuestionOutput(
   output: unknown,
 ): AgentQuestionRequest | null {
   const parsed = parseJsonOutput(output);
-  const record = getObjectRecord(parsed);
+  const record = toObjectRecord(parsed);
   if (!record) {
     return null;
   }

@@ -1,5 +1,6 @@
 import { isAgentToolDomain } from "@sourceweft/agent-tool-registry";
 import type { MessageVersion, ToolCallRecord } from "./chat-canvas";
+import { toObjectRecord } from "../../../../lib/records";
 
 export type WebPageToolResult = {
   url: string;
@@ -11,13 +12,6 @@ export type WebPageToolResult = {
   truncated?: boolean;
   hasContent?: boolean;
 };
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
 
 function getFetchInputUrls(toolCall: ToolCallRecord) {
   const items = toolCall.input.items;

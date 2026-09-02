@@ -34,6 +34,7 @@
     "./working-files": "./src/working-files.ts",
     "./model-catalog": "./src/model-catalog.ts",
     "./byok": "./src/byok.ts",
+    "./llm-observability": "./src/llm-observability.ts",
     "./misc": "./src/misc.ts",
     "./capabilities": "./src/capabilities.ts",
     "./capability-host-services": "./src/capability-host-services.ts"

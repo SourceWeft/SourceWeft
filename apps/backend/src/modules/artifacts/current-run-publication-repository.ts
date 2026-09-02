@@ -24,6 +24,7 @@ import {
   mergeCommittedArtifactRenderBlocks,
 } from "../threads/render-block-projection";
 import { updateExistingTracePartsFromToolCalls } from "../threads/durable/snapshot";
+import { toObjectRecord } from "../../shared/records";
 
 type ArtifactType = typeof artifacts.$inferSelect.artifactType;
 type ArtifactOutputBlock = Extract<
@@ -119,12 +120,6 @@ class PublicationRejected extends Error {
   }
 }
 
-function objectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -147,7 +142,7 @@ function committedResultMatches(
 function parseCommittedResult(
   value: unknown,
 ): CommittedArtifactToolResult | null {
-  const record = objectRecord(value);
+  const record = toObjectRecord(value);
   return record?.status === "ready" &&
     record.type === "committed_artifact_result" &&
     typeof record.artifactType === "string" &&
@@ -168,10 +163,10 @@ function upsertCanonicalToolCall(input: {
 }): ToolCallTrace[] {
   const calls = arrayValue(input.calls);
   const existingIndex = calls.findIndex(
-    (value) => objectRecord(value)?.id === input.sourceToolCallId,
+    (value) => toObjectRecord(value)?.id === input.sourceToolCallId,
   );
   const existing =
-    existingIndex >= 0 ? objectRecord(calls[existingIndex]) : null;
+    existingIndex >= 0 ? toObjectRecord(calls[existingIndex]) : null;
   if (
     existing &&
     typeof existing.tool === "string" &&
@@ -191,16 +186,16 @@ function upsertCanonicalToolCall(input: {
     );
   }
   const highestSequence = calls.reduce<number>((highest, value) => {
-    const sequence = objectRecord(value)?.sequence;
+    const sequence = toObjectRecord(value)?.sequence;
     return typeof sequence === "number" && Number.isFinite(sequence)
       ? Math.max(highest, sequence)
       : highest;
   }, 0);
-  const existingProducer = objectRecord(existing?.producer);
+  const existingProducer = toObjectRecord(existing?.producer);
   const canonical: ToolCallTrace = {
     id: input.sourceToolCallId,
     tool: input.sourceToolName,
-    input: objectRecord(existing?.input) ?? {},
+    input: toObjectRecord(existing?.input) ?? {},
     output: input.output,
     status: "completed",
     latencyMs:
@@ -243,10 +238,10 @@ function findOrCreateArtifactOutputBlock(input: {
     }) ?? [];
   const id = `artifact-output:${input.runId}:${input.artifactId}:${input.artifactVersionId}`;
   const existing = currentBlocks.find(
-    (value) => objectRecord(value)?.id === id,
+    (value) => toObjectRecord(value)?.id === id,
   );
   if (existing) {
-    const record = objectRecord(existing);
+    const record = toObjectRecord(existing);
     const expectedIdentity = {
       artifactId: input.artifactId,
       artifactVersionId: input.artifactVersionId,
@@ -273,7 +268,7 @@ function findOrCreateArtifactOutputBlock(input: {
   }
   const sequence =
     currentBlocks.reduce<number>((highest, value) => {
-      const record = objectRecord(value);
+      const record = toObjectRecord(value);
       return record?.type === "artifact_output" &&
         typeof record.sequence === "number" &&
         Number.isFinite(record.sequence)
@@ -309,9 +304,9 @@ function findCommittedRepublishReplay(input: {
   workflowVersion: string;
 }) {
   const call = arrayValue(input.snapshot.toolCalls).find(
-    (value) => objectRecord(value)?.id === input.sourceToolCallId,
+    (value) => toObjectRecord(value)?.id === input.sourceToolCallId,
   );
-  const callRecord = objectRecord(call);
+  const callRecord = toObjectRecord(call);
   const output = parseCommittedResult(callRecord?.output);
   if (
     !output ||
@@ -324,7 +319,7 @@ function findCommittedRepublishReplay(input: {
     return null;
   }
   const block = arrayValue(input.snapshot.renderBlocks).find(
-    (value) => objectRecord(value)?.id === output.artifactOutputBlockId,
+    (value) => toObjectRecord(value)?.id === output.artifactOutputBlockId,
   );
   if (
     !block ||
@@ -350,11 +345,11 @@ function nextAssistantSnapshot(input: {
   snapshot: Record<string, unknown>;
   toolCalls: ToolCallTrace[];
 }) {
-  const assistantMessage = objectRecord(input.snapshot.assistantMessage);
+  const assistantMessage = toObjectRecord(input.snapshot.assistantMessage);
   if (!assistantMessage) {
     return input.snapshot;
   }
-  const metadata = objectRecord(assistantMessage.metadata) ?? {};
+  const metadata = toObjectRecord(assistantMessage.metadata) ?? {};
   return {
     ...input.snapshot,
     assistantMessage: {
@@ -491,7 +486,7 @@ export async function commitCurrentRunArtifactPublication(
           artifactType: input.artifact.artifactType,
           producer: input.context.producer,
           runId: runRow.id,
-          snapshot: objectRecord(runRow.snapshotJson) ?? {},
+          snapshot: toObjectRecord(runRow.snapshotJson) ?? {},
           sourceToolCallId: input.context.sourceToolCallId,
           sourceToolName: input.context.sourceToolName,
           workflowVersion: input.artifact.workflowVersion,
@@ -701,8 +696,8 @@ export async function commitCurrentRunArtifactPublication(
         return rejectAfterWrites("message_unavailable");
       }
 
-      const snapshot = objectRecord(runRow.snapshotJson) ?? {};
-      const messageMetadata = objectRecord(messageRow.metadata) ?? {};
+      const snapshot = toObjectRecord(runRow.snapshotJson) ?? {};
+      const messageMetadata = toObjectRecord(messageRow.metadata) ?? {};
       const blockProjection = findOrCreateArtifactOutputBlock({
         artifactId,
         artifactVersionId,

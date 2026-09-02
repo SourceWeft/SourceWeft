@@ -30,6 +30,8 @@ import {
   agentToolNamesByCapability,
   hasAgentToolCapability,
 } from "@sourceweft/agent-tool-registry";
+import { toObjectRecord } from "../../../../shared/records";
+import { readBooleanEnv } from "../../../../shared/env";
 
 const DEFAULT_CONTEXT_LENGTH = config.chat.agent.defaultContextLength;
 export const SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER =
@@ -141,26 +143,11 @@ const compressionReports = new Map<
   SourceWeftContextCompressionReport
 >();
 
-function readFlag(name: string, defaultValue: boolean) {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (!raw) {
-    return defaultValue;
-  }
-  return !["0", "false", "no", "off", "disabled"].includes(raw);
-}
-
 function finitePositiveInteger(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
   }
   return Math.floor(value);
-}
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 function readContextLength(configJson: unknown) {
@@ -228,9 +215,12 @@ function resolveSettings(
   input: SourceWeftContextCompressionMiddlewareInput,
 ): CompressionSettings {
   return {
-    enabled: readFlag("SOURCEWEFT_AGENT_COMPACTION_ENABLED", true),
-    contextEditingEnabled: readFlag("SOURCEWEFT_CONTEXT_EDITING_ENABLED", true),
-    traceEnabled: readFlag("SOURCEWEFT_CONTEXT_COMPRESSION_TRACE", true),
+    enabled: readBooleanEnv("SOURCEWEFT_AGENT_COMPACTION_ENABLED", true),
+    contextEditingEnabled: readBooleanEnv(
+      "SOURCEWEFT_CONTEXT_EDITING_ENABLED",
+      true,
+    ),
+    traceEnabled: readBooleanEnv("SOURCEWEFT_CONTEXT_COMPRESSION_TRACE", true),
     budget: resolveSourceWeftContextCompressionBudget(input.chatProfileConfig),
   };
 }

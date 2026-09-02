@@ -1,4 +1,4 @@
-import { toObjectRecord } from "./content";
+import { toObjectRecord } from "../../../../shared/records";
 import { ContentError } from "../../../content/errors";
 import {
   AGENT_TOOL_NAMES,
@@ -378,10 +378,9 @@ function getSkillInstructionDisplayMetadataFromText(
   const match = value.match(/\/skills\/([^/\s"')\]}]+)(?:\/[^\s"')\]}]*)?/);
   const skillSlug = match?.[1]?.trim();
   const skillPath = match?.[0]?.replace(/[),.;:]+$/g, "");
-  const skillFileName =
-    skillPath?.startsWith(`/skills/${skillSlug}/`)
-      ? skillPath.split("/").at(-1)?.trim()
-      : undefined;
+  const skillFileName = skillPath?.startsWith(`/skills/${skillSlug}/`)
+    ? skillPath.split("/").at(-1)?.trim()
+    : undefined;
   return skillSlug
     ? {
         skillSlug,
@@ -469,9 +468,9 @@ export function shouldRedactFilesystemToolForClient(
 ) {
   return Boolean(
     input &&
-      isFilesystemToolWithPresenter(toolName) &&
-      getFilesystemToolClientMetadata(toolName, input, options).visibility ===
-        "internal_instruction",
+    isFilesystemToolWithPresenter(toolName) &&
+    getFilesystemToolClientMetadata(toolName, input, options).visibility ===
+      "internal_instruction",
   );
 }
 
@@ -1163,9 +1162,7 @@ export function getFilesystemToolFailureMetadata(
   const record = toObjectRecord(output);
   if (!record) {
     const outputText = extractToolOutputText(output);
-    return outputText
-      ? extractExecuteFailureMetadataFromText(outputText)
-      : {};
+    return outputText ? extractExecuteFailureMetadataFromText(outputText) : {};
   }
 
   const commandFingerprint =
@@ -1179,7 +1176,8 @@ export function getFilesystemToolFailureMetadata(
         ? record.errorCode.trim()
         : undefined;
   const repeatCount =
-    typeof record.repeatCount === "number" && Number.isFinite(record.repeatCount)
+    typeof record.repeatCount === "number" &&
+    Number.isFinite(record.repeatCount)
       ? record.repeatCount
       : undefined;
   const runId =
@@ -1223,8 +1221,9 @@ function extractExecuteFailureMetadataFromText(outputText: string) {
   const diagnosticsMatch = outputText.match(/^Diagnostics:\s+(.+)$/mu);
   const fields = diagnosticsMatch?.[1]
     ? Object.fromEntries(
-        [...diagnosticsMatch[1].matchAll(/([A-Za-z][A-Za-z0-9]*)=([^\s]+)/gu)]
-          .map((match) => [match[1], match[2]] as const),
+        [
+          ...diagnosticsMatch[1].matchAll(/([A-Za-z][A-Za-z0-9]*)=([^\s]+)/gu),
+        ].map((match) => [match[1], match[2]] as const),
       )
     : {};
   const repeatCount = Number(fields.repeatCount);

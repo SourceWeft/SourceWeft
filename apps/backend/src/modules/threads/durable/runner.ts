@@ -46,6 +46,8 @@ import type {
   ChatThreadRunStatus,
   DurableRunRequestSnapshot,
 } from "./types";
+import { toObjectRecord } from "../../../shared/records";
+import { parseSsePayload } from "./run-state";
 
 type TerminalRunStatus = Extract<
   ChatThreadRunStatus,
@@ -183,22 +185,6 @@ function createThreadRunStream(input: {
   return input.streamService.streamThreadEvents(input.request, input.options);
 }
 
-function parseSsePayload(payload: string): Record<string, unknown> | null {
-  const trimmed = payload.trim();
-  if (!trimmed.startsWith("data: ")) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(trimmed.slice("data: ".length)) as Record<
-      string,
-      unknown
-    >;
-  } catch {
-    return null;
-  }
-}
-
 function serializeSsePayload(payload: Record<string, unknown>) {
   return toSseData(payload);
 }
@@ -239,7 +225,7 @@ function mergeToolCallFromPayload(input: {
   existing: unknown[];
   payload: Record<string, unknown>;
 }) {
-  const toolCall = getObjectRecord(input.payload.toolCall);
+  const toolCall = toObjectRecord(input.payload.toolCall);
   const fallbackId =
     typeof input.payload.id === "string" && input.payload.id.length > 0
       ? input.payload.id
@@ -253,7 +239,7 @@ function mergeToolCallFromPayload(input: {
   }
 
   const existingRecord = input.existing
-    .map(getObjectRecord)
+    .map(toObjectRecord)
     .find((record) => record?.id === id);
   const tool =
     typeof toolCall?.tool === "string" && toolCall.tool.length > 0
@@ -263,16 +249,16 @@ function mergeToolCallFromPayload(input: {
         : typeof existingRecord?.tool === "string"
           ? existingRecord.tool
           : "tool";
-  const existingOutput = getObjectRecord(existingRecord?.output);
+  const existingOutput = toObjectRecord(existingRecord?.output);
   const eventOutput =
     input.payload.type === "tool-call-event"
       ? input.payload.data
       : input.payload.type === "tool-call-result"
         ? input.payload.output
         : null;
-  const eventOutputRecord = getObjectRecord(eventOutput);
+  const eventOutputRecord = toObjectRecord(eventOutput);
   const toolCallOutput = toolCall ? toolCall.output : undefined;
-  const toolCallOutputRecord = getObjectRecord(toolCallOutput);
+  const toolCallOutputRecord = toObjectRecord(toolCallOutput);
   const output =
     existingOutput || eventOutputRecord || toolCallOutputRecord
       ? {
@@ -299,9 +285,9 @@ function mergeToolCallFromPayload(input: {
     id,
     tool,
     input: {
-      ...(getObjectRecord(existingRecord?.input) ?? {}),
-      ...(getObjectRecord(input.payload.input) ?? {}),
-      ...(getObjectRecord(toolCall?.input) ?? {}),
+      ...(toObjectRecord(existingRecord?.input) ?? {}),
+      ...(toObjectRecord(input.payload.input) ?? {}),
+      ...(toObjectRecord(toolCall?.input) ?? {}),
     },
     output,
     status,
@@ -318,7 +304,7 @@ function mergeToolCallFromPayload(input: {
 }
 
 function getToolCallIdFromPayload(payload: Record<string, unknown>) {
-  const toolCall = getObjectRecord(payload.toolCall);
+  const toolCall = toObjectRecord(payload.toolCall);
   return typeof payload.id === "string" && payload.id.length > 0
     ? payload.id
     : typeof toolCall?.id === "string" && toolCall.id.length > 0
@@ -327,7 +313,7 @@ function getToolCallIdFromPayload(payload: Record<string, unknown>) {
 }
 
 function getToolNameFromPayload(payload: Record<string, unknown>) {
-  const toolCall = getObjectRecord(payload.toolCall);
+  const toolCall = toObjectRecord(payload.toolCall);
   return typeof payload.tool === "string" && payload.tool.length > 0
     ? payload.tool
     : typeof toolCall?.tool === "string" && toolCall.tool.length > 0
@@ -349,7 +335,7 @@ function findToolCallSnapshotById(
   id: string,
 ) {
   return (toolCalls ?? [])
-    .map(getObjectRecord)
+    .map(toObjectRecord)
     .find((record) => record?.id === id);
 }
 
@@ -357,7 +343,7 @@ function toolCallTraceFromPayload(input: {
   payload: Record<string, unknown>;
   snapshot: ChatRunSnapshot;
 }): ToolCallTrace | null {
-  const payloadToolCall = getObjectRecord(input.payload.toolCall);
+  const payloadToolCall = toObjectRecord(input.payload.toolCall);
   const id = getToolCallIdFromPayload(input.payload);
   const tool = getToolNameFromPayload(input.payload);
   if (!id || !tool) {
@@ -380,9 +366,9 @@ function toolCallTraceFromPayload(input: {
     id,
     tool,
     input: {
-      ...(getObjectRecord(snapshotToolCall?.input) ?? {}),
-      ...(getObjectRecord(input.payload.input) ?? {}),
-      ...(getObjectRecord(payloadToolCall?.input) ?? {}),
+      ...(toObjectRecord(snapshotToolCall?.input) ?? {}),
+      ...(toObjectRecord(input.payload.input) ?? {}),
+      ...(toObjectRecord(payloadToolCall?.input) ?? {}),
     },
     output,
     status:
@@ -504,7 +490,7 @@ function mergeReasoningSegment(existing: unknown[], next: unknown) {
 }
 
 function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   const id = typeof record?.id === "string" ? record.id : null;
   if (!record || !id) {
     return null;
@@ -556,7 +542,7 @@ function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
     typeof record.sequence === "number" &&
     (record.producer as { kind?: unknown } | undefined)?.kind !== undefined
   ) {
-    const producer = getObjectRecord(record.producer);
+    const producer = toObjectRecord(record.producer);
     const kind = producer?.kind;
     if (kind !== "main" && kind !== "subagent") {
       return null;
@@ -885,21 +871,15 @@ function buildThreadRunMetadata(run: ChatThreadRunRecord) {
   };
 }
 
-function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function getTraceSequence(value: unknown) {
-  const sequence = getObjectRecord(value)?.sequence;
+  const sequence = toObjectRecord(value)?.sequence;
   return typeof sequence === "number" && Number.isFinite(sequence)
     ? sequence
     : null;
 }
 
 function getTraceEventKey(value: unknown) {
-  const record = getObjectRecord(value);
+  const record = toObjectRecord(value);
   const type = typeof record?.type === "string" ? record.type : null;
   const id = typeof record?.id === "string" ? record.id : null;
   if (!type || !id) {
@@ -950,7 +930,7 @@ function appendTraceEvent(
     return [...current, nextEvent];
   }
 
-  const existing = getObjectRecord(current[existingIndex]);
+  const existing = toObjectRecord(current[existingIndex]);
   const displayOrder =
     typeof existing?.displayOrder === "number" &&
     Number.isFinite(existing.displayOrder)
@@ -976,7 +956,7 @@ function traceEventFromPayload(input: {
   }
 
   if (payload.type === "reasoning") {
-    const segment = getObjectRecord(payload.segment);
+    const segment = toObjectRecord(payload.segment);
     const segmentId = typeof segment?.id === "string" ? segment.id : null;
     if (!segment || !segmentId) {
       return null;
@@ -1000,7 +980,7 @@ function traceEventFromPayload(input: {
   }
 
   if (payload.type === "thinking-step") {
-    const step = getObjectRecord(payload.step);
+    const step = toObjectRecord(payload.step);
     const stepId = typeof step?.id === "string" ? step.id : null;
     if (!step || !stepId) {
       return null;
@@ -1021,7 +1001,7 @@ function traceEventFromPayload(input: {
   }
 
   if (payload.type.startsWith("tool-call-")) {
-    const toolCall = getObjectRecord(payload.toolCall);
+    const toolCall = toObjectRecord(payload.toolCall);
     const eventId =
       typeof payload.id === "string" && payload.id.length > 0
         ? payload.id
@@ -1041,8 +1021,8 @@ function traceEventFromPayload(input: {
         phase:
           typeof payload.event === "string"
             ? payload.event
-            : typeof getObjectRecord(payload.data)?.type === "string"
-              ? (getObjectRecord(payload.data)?.type as string)
+            : typeof toObjectRecord(payload.data)?.type === "string"
+              ? (toObjectRecord(payload.data)?.type as string)
               : null,
         sequence,
       }),

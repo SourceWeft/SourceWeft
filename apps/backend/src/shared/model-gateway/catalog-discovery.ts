@@ -5,6 +5,7 @@ import type { ModelGatewayProfileKind } from "./types";
 import { modelCatalog } from "./model-catalog/registry";
 import type { ModelModality, NormalizedModelInfo } from "./model-catalog/types";
 import type { GlobalProfilePricingEntry } from "./global-config";
+import { toObjectRecord } from "../records";
 
 export type CatalogModelKind = ModelGatewayProfileKind;
 
@@ -75,13 +76,6 @@ function buildAuthHeaders(
   return {
     Authorization: `Bearer ${input.apiKey}`,
   };
-}
-
-function toObjectRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 function toStringArray(value: unknown): string[] {

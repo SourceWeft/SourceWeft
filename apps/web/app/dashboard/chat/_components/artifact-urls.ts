@@ -8,6 +8,7 @@ import {
   type ArtifactResource,
 } from "@sourceweft/contracts/artifact-urls";
 import { apiBaseUrl } from "../../../../lib/sdk";
+import { toObjectRecord } from "../../../../lib/records";
 
 const ARTIFACT_FILE_ROUTE_PATTERN =
   /^\/v1\/workspaces\/([^/]+)\/artifacts\/([^/]+)\/(file|download)\/?$/;
@@ -84,12 +85,6 @@ export function resolveArtifactPreviewImageUrl(input: {
   });
 }
 
-function toRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 export type ArtifactPreviewImageMetadata = {
   altText: string | null;
   byteLength: number | null;
@@ -111,7 +106,7 @@ export function artifactPreviewImageMetadataFromArtifact(input: {
     return null;
   }
 
-  const metadata = toRecord(input.previewMetadataJson);
+  const metadata = toObjectRecord(input.previewMetadataJson);
   const byteLength =
     typeof metadata?.byteLength === "number" &&
     Number.isFinite(metadata.byteLength) &&

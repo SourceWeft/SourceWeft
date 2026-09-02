@@ -3,6 +3,7 @@ import type {
   ChatMessageItem,
   StreamingAssistantSnapshot,
 } from "../streaming-assistant-state";
+import { toObjectRecord } from "../../../../../lib/records";
 
 export type ArtifactOutputReconcileTarget = {
   assistantMessageId?: string | null;
@@ -13,12 +14,6 @@ type ArtifactOutputBlock = Extract<
   MessageRenderBlock,
   { type: "artifact_output" }
 >;
-
-function objectRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
 
 // Reference equality is useless here: `authoritative` is a fresh REST/SSE
 // fetch every reconcile, so its objects never share identity with what's
@@ -41,8 +36,8 @@ function sameJson(a: unknown, b: unknown): boolean {
 function normalizeArtifactOutputBlock(
   value: unknown,
 ): ArtifactOutputBlock | null {
-  const record = objectRecord(value);
-  const producer = objectRecord(record?.producer);
+  const record = toObjectRecord(value);
+  const producer = toObjectRecord(record?.producer);
   const producerKind = producer?.kind;
   if (
     record?.type !== "artifact_output" ||
@@ -89,7 +84,7 @@ function producerMatchesArtifactOutput(input: {
   block: ArtifactOutputBlock;
   toolCall: Record<string, unknown>;
 }) {
-  const producer = objectRecord(input.toolCall.producer);
+  const producer = toObjectRecord(input.toolCall.producer);
   const kind = producer?.kind ?? "main";
   return (
     kind === input.block.producer.kind &&
@@ -114,8 +109,8 @@ function committedArtifactToolCalls(
     ? message.metadata.toolCalls
     : [];
   return calls.flatMap((value) => {
-    const call = objectRecord(value);
-    const output = objectRecord(call?.output);
+    const call = toObjectRecord(value);
+    const output = toObjectRecord(call?.output);
     const id = typeof call?.id === "string" ? call.id : null;
     const block = id ? blockByToolCallId.get(id) : undefined;
     if (
@@ -155,7 +150,7 @@ function mergeCommittedArtifactToolCalls(input: {
   const seen = new Set<string>();
   let changed = false;
   for (const value of current) {
-    const record = objectRecord(value);
+    const record = toObjectRecord(value);
     const id = typeof record?.id === "string" ? record.id : null;
     if (!id) {
       merged.push(value);
@@ -189,7 +184,7 @@ function mergeCommittedArtifactToolCalls(input: {
 }
 
 function messageRunId(message: ChatMessageItem) {
-  const threadRun = objectRecord(message.metadata.threadRun);
+  const threadRun = toObjectRecord(message.metadata.threadRun);
   return typeof threadRun?.id === "string" ? threadRun.id : null;
 }
 
@@ -270,7 +265,7 @@ export function mergeCommittedArtifactOutputsIntoMessage(input: {
   const seen = new Set<string>();
   let blocksChanged = false;
   const merged = currentBlocks.flatMap((block) => {
-    const record = objectRecord(block);
+    const record = toObjectRecord(block);
     const id = typeof record?.id === "string" ? record.id : null;
     if (!id || !authoritativeById.has(id)) {
       return [block];

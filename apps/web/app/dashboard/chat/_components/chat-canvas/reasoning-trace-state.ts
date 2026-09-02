@@ -23,6 +23,7 @@ import {
   resolveDeliverableStatus,
 } from "./artifact-progress";
 import { resolveToolCallArtifactId } from "./artifact-work-state";
+import { getRecordValue } from "../../../../../lib/records";
 
 function isVisionFallbackStep(step: ThinkingStepRecord) {
   return step.metadata?.strategy === "vision_fallback";
@@ -103,13 +104,6 @@ export function isReasoningTraceThinking(input: {
   }
 
   return input.isStreaming;
-}
-
-function getRecordValue(
-  record: Record<string, unknown> | undefined,
-  key: string,
-) {
-  return record ? record[key] : undefined;
 }
 
 function getOutputRecord(toolCall: ToolCallRecord) {

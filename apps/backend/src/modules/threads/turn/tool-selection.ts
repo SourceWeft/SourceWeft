@@ -14,12 +14,7 @@ import type {
   TurnOptionsSnapshot,
 } from "./types";
 import type { ToolPermission } from "./command-registry";
-
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
+import { toObjectRecord } from "../../../shared/records";
 
 const RESERVED_TOOL_SELECTION_KEYS = new Set([
   "invokedSkillIds",
@@ -35,7 +30,7 @@ function cloneToolSelection(
   }
   return Object.fromEntries(
     Object.entries(tools).map(([key, value]) => {
-      const record = toRecord(value);
+      const record = toObjectRecord(value);
       return [key, record ? { ...record } : value];
     }),
   ) as ThreadToolsSelection;
@@ -44,7 +39,7 @@ function cloneToolSelection(
 function normalizeSelectedToolRecord(
   value: unknown,
 ): Record<string, unknown> | undefined {
-  const record = toRecord(value);
+  const record = toObjectRecord(value);
   if (!record) {
     return undefined;
   }
@@ -94,24 +89,24 @@ export function resolveWebSearchEnabled(input: {
 export function readWebAccessOverride(
   tools?: ThreadToolsSelection,
 ): boolean | undefined {
-  const webSearch = toRecord(tools?.[AGENT_TOOL_NAMES.webSearch]);
+  const webSearch = toObjectRecord(tools?.[AGENT_TOOL_NAMES.webSearch]);
   if (typeof webSearch?.enabled === "boolean") {
     return webSearch.enabled;
   }
-  const webFetch = toRecord(tools?.[AGENT_TOOL_NAMES.webFetch]);
+  const webFetch = toObjectRecord(tools?.[AGENT_TOOL_NAMES.webFetch]);
   return typeof webFetch?.enabled === "boolean" ? webFetch.enabled : undefined;
 }
 
 export function readSkillRuntimeConfig(
   tools?: ThreadToolsSelection,
 ): Record<string, Record<string, unknown>> {
-  const config = toRecord(tools?.skillRuntimeConfig);
+  const config = toObjectRecord(tools?.skillRuntimeConfig);
   if (!config) {
     return {};
   }
   return Object.fromEntries(
     Object.entries(config).flatMap(([skillId, value]) => {
-      const record = toRecord(value);
+      const record = toObjectRecord(value);
       return record ? [[skillId, record]] : [];
     }),
   );
@@ -191,8 +186,8 @@ export function buildTurnOptionsSnapshot(input: {
 export function readTurnOptionsSnapshotTools(
   value: unknown,
 ): ThreadToolsSelection | undefined {
-  const options = toRecord(value);
-  const tools = toRecord(options?.tools);
+  const options = toObjectRecord(value);
+  const tools = toObjectRecord(options?.tools);
   if (options?.version === 1 && tools) {
     return tools as ThreadToolsSelection;
   }
@@ -208,7 +203,7 @@ export function buildRuntimeTools(input: {
     if (RESERVED_TOOL_SELECTION_KEYS.has(toolName)) {
       continue;
     }
-    const selection = toRecord(value);
+    const selection = toObjectRecord(value);
     if (!selection) {
       continue;
     }
@@ -229,7 +224,7 @@ export function buildRuntimeTools(input: {
 function normalizeConnectorToolSelection(
   value: unknown,
 ): ConnectorToolSelection | undefined {
-  const record = toRecord(value);
+  const record = toObjectRecord(value);
   if (!record) {
     return undefined;
   }

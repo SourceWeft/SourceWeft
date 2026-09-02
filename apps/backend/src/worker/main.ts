@@ -14,13 +14,12 @@ import {
   runWorkerJobWithIsolation,
 } from "./job-isolation";
 import { processConnectorSyncJob } from "./processors/connector-sync";
-import { processExampleJob } from "./processors/example-job";
 import {
   processSourceParseJob,
   processSourceParsePollJob,
 } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
-import { processProviderCostReconciliationJob } from "./processors/provider-cost-reconciliation";
+import { processProviderCostReconciliationJob } from "../shared/model-gateway/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { handleDeliverableJobFailure } from "./deliverable-host/job-failure-boundary";
 import { buildDeliverableProcessorMap } from "./deliverable-host/registry";
@@ -42,7 +41,6 @@ type JobPayload = Record<string, unknown>;
 type JobProcessor = (job: Job<JobPayload>) => Promise<unknown>;
 
 const primaryProcessors: Record<string, JobProcessor> = {
-  example: processExampleJob,
   "connector-sync": processConnectorSyncJob,
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
@@ -235,10 +233,7 @@ void agentSandboxService.logStartupWarning("worker");
 
 async function shutdown() {
   logger.info("Worker shutting down");
-  await Promise.all([
-    primaryWorker.close(),
-    deliverablesWorker.close(),
-  ]);
+  await Promise.all([primaryWorker.close(), deliverablesWorker.close()]);
   process.exit(0);
 }
 

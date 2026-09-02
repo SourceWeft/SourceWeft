@@ -1,5 +1,7 @@
 import "dotenv/config";
 
+import { parseBooleanEnv as parseBoolean } from "./env";
+
 import type {
   BillingMode,
   BillingProvider,
@@ -8,23 +10,6 @@ import type {
 } from "@sourceweft/credits-core";
 
 type AlertLevel = "warn" | "error" | "critical";
-
-function parseBoolean(value: string | undefined, fallback: boolean) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-
-  if (normalized === "false" || normalized === "0") {
-    return false;
-  }
-
-  return fallback;
-}
 
 function parseStrictBooleanEnv(name: string, fallback: boolean) {
   const value = process.env[name];
@@ -201,7 +186,8 @@ function parseOAuthClients(
   const out: Record<string, { clientId: string; clientSecret?: string }> = {};
   for (const entry of parsed) {
     const issuer = typeof entry?.issuer === "string" ? entry.issuer : null;
-    const clientId = typeof entry?.clientId === "string" ? entry.clientId : null;
+    const clientId =
+      typeof entry?.clientId === "string" ? entry.clientId : null;
     if (!issuer || !clientId) {
       continue;
     }
@@ -210,7 +196,9 @@ function parseOAuthClients(
       out[origin] = {
         clientId,
         clientSecret:
-          typeof entry?.clientSecret === "string" ? entry.clientSecret : undefined,
+          typeof entry?.clientSecret === "string"
+            ? entry.clientSecret
+            : undefined,
       };
     } catch {
       // Skip an entry whose issuer is not a valid URL.
@@ -741,10 +729,6 @@ export const config = {
     // need no entry. See parseOAuthClients.
     clients: parseOAuthClients(process.env.MCP_OAUTH_CLIENTS),
   },
-  schedulerExampleJobEnabled: parseBoolean(
-    process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
-    false,
-  ),
   modelPricingSyncIntervalMs: parsePositiveNumber(
     process.env.MODEL_PRICING_SYNC_INTERVAL_MS,
     60 * 60 * 1000,

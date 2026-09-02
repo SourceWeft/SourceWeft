@@ -1,7 +1,7 @@
 import { findMessageRecord, updateMessageRecord } from "../message-repository";
 import { preserveTraceMetadata } from "../turn/trace-metadata";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
-import { getObjectRecord } from "./snapshot";
+import { toObjectRecord } from "../../../shared/records";
 
 export function buildThreadRunMetadata(run: ChatThreadRunRecord) {
   return {
@@ -129,7 +129,7 @@ export async function updateAssistantMessageThreadRunMetadata(input: {
   if (!current) {
     return null;
   }
-  const extraThreadRun = getObjectRecord(input.metadata?.threadRun);
+  const extraThreadRun = toObjectRecord(input.metadata?.threadRun);
   const snapshotMetadata =
     input.snapshot && current
       ? buildAssistantMessageSnapshotMetadata({
@@ -240,7 +240,7 @@ export function buildAssistantMessageConfirmationMetadata(input: {
   run: ChatThreadRunRecord;
   snapshot: ChatRunSnapshot;
 }) {
-  const currentThreadRun = getObjectRecord(input.currentMetadata.threadRun);
+  const currentThreadRun = toObjectRecord(input.currentMetadata.threadRun);
   const threadRun = buildThreadRunMetadata(input.run).threadRun;
   const approvalRequestedAt =
     input.snapshot.approvalRequestedAt ?? currentThreadRun?.approvalRequestedAt;

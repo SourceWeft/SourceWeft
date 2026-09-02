@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "./hash";
 import path from "node:path";
 import type { SkillManifestJson } from "@sourceweft/db";
 import {
@@ -49,10 +49,6 @@ export type ValidatedCustomSkillBundle = {
   contentHash: string;
   manifestJson: SkillManifestJson;
 };
-
-function sha256(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function validateSkillName(name: string) {
   return (
@@ -511,9 +507,7 @@ export function validateCustomSkillBundle(input: {
   }
   const skillJson = firstJsonObject(files);
   const slug = String(frontmatter.name ?? skillJson?.slug ?? "").trim();
-  const displayName = String(
-    skillJson?.displayName ?? slug,
-  ).trim();
+  const displayName = String(skillJson?.displayName ?? slug).trim();
   const version = String(skillJson?.version ?? "0.1.0").trim();
   const description = String(
     frontmatter.description ?? skillJson?.description ?? "",
@@ -528,10 +522,7 @@ export function validateCustomSkillBundle(input: {
   const capabilities = normalizeCapabilities(skillJson?.capabilities);
   const models = normalizeModels(skillJson?.models);
   const tools = normalizeTools(skillJson?.tools);
-  const defaultConfig = normalizeDefaultConfig(
-    skillJson?.defaultConfig,
-    tools,
-  );
+  const defaultConfig = normalizeDefaultConfig(skillJson?.defaultConfig, tools);
   const options = normalizeSkillOptions(skillJson?.options, tools);
   const slash = normalizeSlash(skillJson?.slash);
   const slashConfig = normalizeSlashConfig(skillJson?.slashConfig);

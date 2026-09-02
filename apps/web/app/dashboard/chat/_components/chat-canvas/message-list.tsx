@@ -1,3 +1,4 @@
+import { sanitizeClientErrorMessage } from "./client-error-message";
 import { memo, useMemo, useState } from "react";
 import {
   Bot,
@@ -116,27 +117,6 @@ import type {
   VersionedMessageGroup,
 } from "./types";
 import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
-
-function sanitizeClientErrorMessage(value: string | null | undefined) {
-  const text = value?.trim();
-  if (!text) {
-    return null;
-  }
-  if (
-    /Error invoking tool/i.test(text) ||
-    /Received tool input did not match expected schema/i.test(text) ||
-    /\bkwargs\b/i.test(text) ||
-    /Invalid input: expected .*received/i.test(text)
-  ) {
-    const toolName =
-      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
-      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
-    return toolName
-      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
-      : "The generated tool arguments were invalid. Please retry.";
-  }
-  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
-}
 
 const messageTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",

@@ -19,8 +19,8 @@ import {
   finalizeTerminalSnapshotTrace,
   getSnapshotRecord,
   resolveTerminalStatusFromFinishedSnapshot,
-  getObjectRecord,
 } from "./snapshot";
+import { toObjectRecord } from "../../../shared/records";
 import {
   getRunApprovalPauseState,
   isApprovalWaitingRunExpired,
@@ -561,7 +561,7 @@ export function hasCommittedArtifactPublication(
   const blocks = new Map(
     (Array.isArray(snapshot.renderBlocks) ? snapshot.renderBlocks : []).flatMap(
       (value) => {
-        const record = getObjectRecord(value);
+        const record = toObjectRecord(value);
         return record?.type === "artifact_output" &&
           typeof record.id === "string"
           ? [[record.id, record] as const]
@@ -571,7 +571,7 @@ export function hasCommittedArtifactPublication(
   );
   return (Array.isArray(snapshot.toolCalls) ? snapshot.toolCalls : []).some(
     (value) => {
-      const call = getObjectRecord(value);
+      const call = toObjectRecord(value);
       const parsed = committedArtifactToolResultSchema.safeParse(call?.output);
       if (
         !call ||
@@ -591,8 +591,8 @@ export function hasCommittedArtifactPublication(
         return false;
       }
       const block = blocks.get(parsed.data.artifactOutputBlockId);
-      const callProducer = getObjectRecord(call.producer);
-      const blockProducer = getObjectRecord(block?.producer);
+      const callProducer = toObjectRecord(call.producer);
+      const blockProducer = toObjectRecord(block?.producer);
       return Boolean(
         block &&
         block.artifactId === parsed.data.artifactId &&
