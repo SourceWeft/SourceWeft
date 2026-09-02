@@ -30,6 +30,7 @@ import { clawbackMonthlyPages, getTotalPagesBalance } from "./page-ledger";
 import {
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
+  clawbackMonthlyCredits,
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
   getTotalCreditsBalance,
@@ -301,11 +302,11 @@ function calculateSeatPreview(input: {
  * replicated per member.
  *
  * Dependencies point downward — plan/cycle/quota transitions go through
- * `account-service`'s locked lifecycle methods, ledger rows through `ledger` —
- * with one exception this map should name: `applySeatQuotaClawbackLocked`
- * debits the `monthlyCreditsBalance` bucket directly instead of going through
- * a ledger primitive (the pages half goes through `clawbackMonthlyPages`).
- * This layer never meters usage and never reads the settle funnel;
+ * `account-service`'s locked lifecycle methods, ledger rows through `ledger`,
+ * and both halves of `applySeatQuotaClawbackLocked` debit through a ledger
+ * primitive (`clawbackMonthlyCredits` / `clawbackMonthlyPages`) rather than
+ * editing bucket state here. This layer never meters usage and never reads the
+ * settle funnel;
  * `webhook-service` and `service` (the facade) are its only callers.
  */
 export class BillingSubscriptionService {
@@ -1089,12 +1090,12 @@ export class BillingSubscriptionService {
       operationId: string;
     },
   ) {
-    const creditsToClawback = Math.min(
-      account.monthlyCreditsBalance,
+    // Both debits go through their ledger primitive (clamp + debit in one
+    // step); the returned amounts drive the ledger rows and dirty check below.
+    const creditsToClawback = clawbackMonthlyCredits(
+      account,
       input.quotaAdjustment.actualCredits,
     );
-    // The pages debit goes through the ledger primitive (clamp + debit in one
-    // step); the returned amount drives the ledger row and dirty check below.
     const pagesToClawback = clawbackMonthlyPages(
       account,
       input.quotaAdjustment.actualPages,
@@ -1118,9 +1119,6 @@ export class BillingSubscriptionService {
     };
 
     if (creditsToClawback > 0) {
-      // Credits still lack a clawback primitive (credit math lives in
-      // `service-helpers`); primitive-izing this debit is follow-up work.
-      account.monthlyCreditsBalance -= creditsToClawback;
       account.updatedAt = new Date().toISOString();
 
       await appendBillingLedger({

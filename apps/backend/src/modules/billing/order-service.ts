@@ -44,6 +44,7 @@ import {
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
   getTotalCreditsBalance,
+  grantAddOnCredits,
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
 } from "./service-helpers";
@@ -310,10 +311,10 @@ function createOrderBase(input: {
  *
  * Dependencies point downward: rows lock via `account-service`, entries write
  * via `ledger`, catalog/product resolution via `catalog`. This layer decides
- * WHAT was purchased; the ledger primitives decide how balances move — the
- * inline `addOnCreditsBalance` bump in `fulfillTopupOrderLocked` is the known
- * exception where this flow still edits bucket state directly (the pages half
- * goes through `grantAddOnPages`). It never meters usage; `usage-service`
+ * WHAT was purchased; the ledger primitives decide how balances move — both
+ * top-up halves in `fulfillTopupOrderLocked` grant through one
+ * (`grantAddOnCredits` / `grantAddOnPages`), so this flow never edits bucket
+ * state directly. It never meters usage; `usage-service`
  * calls in for top-up checkout, not the reverse.
  * Subscription fulfillment applies plan/cycle state member-by-member through
  * `account-service`'s locked lifecycle methods, fanning out over the members
@@ -903,9 +904,7 @@ export class BillingOrderService {
 
     if (!existingLedger) {
       if (order.unitType === "credit") {
-        // Credits still lack a grant primitive (credit math lives in
-        // `service-helpers`); primitive-izing this bump is follow-up work.
-        account.addOnCreditsBalance += grantAmount;
+        grantAddOnCredits(account, grantAmount);
       } else {
         grantAddOnPages(account, grantAmount);
       }

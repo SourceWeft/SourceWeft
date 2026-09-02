@@ -166,6 +166,40 @@ export function refundConsumedCredits(
   return { monthly, addOn, legacyAddOn: creditsToRefund - monthly - addOn };
 }
 
+/**
+ * Adds purchased credits to the non-expiring add-on bucket. The credits
+ * counterpart of `grantAddOnPages`: unguarded, because a top-up grant is
+ * always a positive amount the order flow has already validated.
+ */
+export function grantAddOnCredits(
+  account: BillingAccountState,
+  credits: number,
+) {
+  account.addOnCreditsBalance += credits;
+}
+
+/**
+ * Debits a mid-cycle quota decrease (seat-downgrade clawback) from the monthly
+ * bucket, clamped to the current balance so the debit never pushes the bucket
+ * negative — a bucket already at or below zero claws back nothing. Cycle
+ * counters and the add-on bucket stay untouched: clawed-back credits were
+ * granted, not consumed. Returns the clamped amount for the caller's adjust
+ * ledger row; a non-positive return means nothing moved.
+ *
+ * Mirrors `clawbackMonthlyPages`, including doing the clamp inside the
+ * primitive rather than at the call site.
+ */
+export function clawbackMonthlyCredits(
+  account: BillingAccountState,
+  credits: number,
+) {
+  const creditsToClawback = Math.min(account.monthlyCreditsBalance, credits);
+  if (creditsToClawback > 0) {
+    account.monthlyCreditsBalance -= creditsToClawback;
+  }
+  return creditsToClawback;
+}
+
 export function getTotalCreditsBalance(account: BillingAccountState) {
   return account.monthlyCreditsBalance + account.addOnCreditsBalance;
 }
