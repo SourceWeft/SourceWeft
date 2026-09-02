@@ -487,12 +487,30 @@ export function useThreadStreamAction({
           return;
         }
         streamingAssistantMessage = updater(streamingAssistantMessage);
-        setStreamingAssistantSnapshot((current) => ({
-          message: streamingAssistantMessage as ChatMessageItem,
-          messageId: streamingAssistantMessageId,
-          messageIds: Array.from(streamingAssistantMessageIds),
-          renderVersion: (current?.renderVersion ?? 0) + 1,
-        }));
+        setStreamingAssistantSnapshot((current) => {
+          // reconcileCommittedArtifactOutputs (the room's mid-run repair path)
+          // can write a committed artifact_output block straight into the
+          // snapshot via this same setter, independently of this closure's
+          // local `streamingAssistantMessage`. Without folding that back in
+          // here, the very next stream event (this call, e.g. a text delta)
+          // would blindly overwrite the snapshot with the block-less local
+          // projection and silently revert that reconcile.
+          const message =
+            current?.message &&
+            streamingAssistantMessageIds.has(current.message.id)
+              ? mergeCommittedArtifactOutputsIntoMessage({
+                  authoritative: current.message,
+                  current: streamingAssistantMessage as ChatMessageItem,
+                })
+              : (streamingAssistantMessage as ChatMessageItem);
+          streamingAssistantMessage = message;
+          return {
+            message,
+            messageId: streamingAssistantMessageId,
+            messageIds: Array.from(streamingAssistantMessageIds),
+            renderVersion: (current?.renderVersion ?? 0) + 1,
+          };
+        });
       };
 
       const commitStreamingAssistantMessage = () => {

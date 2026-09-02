@@ -100,6 +100,44 @@ export function shouldClearAdoptedRun(input: {
   return !input.isLocallyDriven && !input.isAttached;
 }
 
+/**
+ * Fold `incoming` into `current`, treating either identifying field (runId,
+ * assistantMessageId) as authoritative: if a field present on BOTH sides
+ * disagrees, the remembered target is a different run/message than the one
+ * just observed, so drop it entirely and start over from `incoming` rather
+ * than splicing its fields onto the stale target. Without this, an update
+ * that only carries one field (e.g. an early frame for a new run that only
+ * has an assistantMessageId yet) would merge onto a leftover runId from the
+ * previous run, producing a target that pairs a fresh id with a stale one —
+ * exactly the split-brain that mis-attributes an artifact_output block.
+ * A null/undefined field on `incoming` is always treated as "unknown", never
+ * as an explicit clear, so it can't clobber a real value already remembered.
+ */
+export function mergeArtifactOutputTarget(
+  current: ArtifactOutputReconcileTarget | null,
+  incoming: ArtifactOutputReconcileTarget | null | undefined,
+): ArtifactOutputReconcileTarget | null {
+  const runId = incoming?.runId ?? undefined;
+  const assistantMessageId = incoming?.assistantMessageId ?? undefined;
+  if (!runId && !assistantMessageId) {
+    return current;
+  }
+  const runIdConflicts = Boolean(
+    runId && current?.runId && runId !== current.runId,
+  );
+  const messageIdConflicts = Boolean(
+    assistantMessageId &&
+    current?.assistantMessageId &&
+    assistantMessageId !== current.assistantMessageId,
+  );
+  const base = runIdConflicts || messageIdConflicts ? null : current;
+  return {
+    ...(base ?? {}),
+    ...(runId ? { runId } : {}),
+    ...(assistantMessageId ? { assistantMessageId } : {}),
+  };
+}
+
 export function artifactOutputTargetFromRoomFrame(
   frame: RoomFrame,
 ): ArtifactOutputReconcileTarget | null {
@@ -221,17 +259,10 @@ export function useThreadRoom({
       if (!target?.runId && !target?.assistantMessageId) {
         return;
       }
-      if (
-        target.runId &&
-        recentArtifactTarget?.runId &&
-        target.runId !== recentArtifactTarget.runId
-      ) {
-        recentArtifactTarget = null;
-      }
-      recentArtifactTarget = {
-        ...(recentArtifactTarget ?? {}),
-        ...target,
-      };
+      recentArtifactTarget = mergeArtifactOutputTarget(
+        recentArtifactTarget,
+        target,
+      );
       recentArtifactTargetExpiresAt = Date.now() + RECENT_ARTIFACT_RECONCILE_MS;
     };
 
@@ -239,23 +270,18 @@ export function useThreadRoom({
       preferred?: ArtifactOutputReconcileTarget | null,
     ) => {
       const active = targetFromActiveRun();
-      if (active || preferred) {
-        rememberArtifactTarget({
-          ...(recentArtifactTarget ?? {}),
-          ...(active ?? {}),
-          ...(preferred ?? {}),
-        });
-      }
-      const recent =
+      // Fold active/preferred in through the same conflict-aware merge used to
+      // persist recentArtifactTarget — building the call's target with a plain
+      // spread here would silently splice a fresh runId onto a stale
+      // assistantMessageId (or vice versa) before rememberArtifactTarget ever
+      // gets a chance to detect the conflict.
+      rememberArtifactTarget(active);
+      rememberArtifactTarget(preferred ?? null);
+      const target =
         recentArtifactTarget && Date.now() <= recentArtifactTargetExpiresAt
           ? recentArtifactTarget
           : null;
-      const target = {
-        ...(recent ?? {}),
-        ...(active ?? {}),
-        ...(preferred ?? {}),
-      };
-      if (!target.runId && !target.assistantMessageId) {
+      if (!target?.runId && !target?.assistantMessageId) {
         return;
       }
       void latestRef.current.reconcileCommittedArtifactOutputs(target);

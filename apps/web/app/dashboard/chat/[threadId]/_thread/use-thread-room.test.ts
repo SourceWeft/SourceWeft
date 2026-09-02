@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   artifactOutputTargetFromRoomFrame,
+  mergeArtifactOutputTarget,
   reconcileRoomRun,
   shouldClearAdoptedRun,
 } from "./use-thread-room";
@@ -103,4 +104,66 @@ test("artifact output room frames retain the exact run and assistant target", ()
     }),
     { runId: "run-1", assistantMessageId: "assistant-1" },
   );
+});
+
+// F1: a run's remembered target must not survive into a new run just because
+// an update for the new run only carries one identifying field (e.g. an early
+// frame that only knows the assistantMessageId yet). Regression coverage for
+// use-thread-room.ts's rememberArtifactTarget / reconcileArtifactOutputs.
+test("mergeArtifactOutputTarget builds up fields for the same run across calls", () => {
+  const withRunId = mergeArtifactOutputTarget(null, { runId: "run-a" });
+  assert.deepEqual(withRunId, { runId: "run-a" });
+
+  const withAssistantMessage = mergeArtifactOutputTarget(withRunId, {
+    assistantMessageId: "assistant-a",
+  });
+  assert.deepEqual(withAssistantMessage, {
+    runId: "run-a",
+    assistantMessageId: "assistant-a",
+  });
+});
+
+test("mergeArtifactOutputTarget resets on a conflicting assistantMessageId even without a runId on the update", () => {
+  const runAComplete = { runId: "run-a", assistantMessageId: "assistant-a" };
+
+  // Run B starts; an early frame only knows its assistantMessageId yet (no
+  // runId). Before the fix, the missing runId meant the conflict check never
+  // fired, so run A's stale runId got paired with run B's assistantMessageId.
+  const result = mergeArtifactOutputTarget(runAComplete, {
+    assistantMessageId: "assistant-b",
+  });
+
+  // deepEqual pins the exact shape, proving the stale runId did not survive.
+  assert.deepEqual(result, { assistantMessageId: "assistant-b" });
+});
+
+test("mergeArtifactOutputTarget resets on a conflicting runId even without an assistantMessageId on the update", () => {
+  const runAComplete = { runId: "run-a", assistantMessageId: "assistant-a" };
+
+  const result = mergeArtifactOutputTarget(runAComplete, { runId: "run-b" });
+
+  // deepEqual pins the exact shape, proving the stale assistantMessageId did
+  // not survive.
+  assert.deepEqual(result, { runId: "run-b" });
+});
+
+test("mergeArtifactOutputTarget treats a null/undefined field as unknown, never as an explicit clear", () => {
+  const current = { runId: "run-a", assistantMessageId: "assistant-a" };
+
+  const result = mergeArtifactOutputTarget(current, {
+    runId: "run-a",
+    assistantMessageId: null,
+  });
+
+  // The room's incoming-run payload can carry assistantMessageId: null before
+  // the server assigns one. That must not wipe an assistantMessageId we
+  // already remembered for the same run.
+  assert.deepEqual(result, current);
+});
+
+test("mergeArtifactOutputTarget with no identifying fields on the update is a no-op", () => {
+  const current = { runId: "run-a", assistantMessageId: "assistant-a" };
+
+  assert.equal(mergeArtifactOutputTarget(current, null), current);
+  assert.equal(mergeArtifactOutputTarget(current, {}), current);
 });

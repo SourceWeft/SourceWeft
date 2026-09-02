@@ -3,6 +3,7 @@ import { test } from "vitest";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import {
   findArtifactOutputMessage,
+  mergeCommittedArtifactOutputsIntoMessage,
   mergeCommittedArtifactOutputsIntoMessages,
   mergeCommittedArtifactOutputsIntoStreamingSnapshot,
 } from "./artifact-output-reconcile";
@@ -247,6 +248,92 @@ test("presence REST repair converges a lost publication notify to completed tool
         (block as { id?: unknown }).id === artifactOutput.id,
     ).length,
     1,
+  );
+});
+
+test("re-merging identical committed data is a no-op that preserves object identity", () => {
+  // `authoritative` is refetched fresh on every reconcile (a new object every
+  // call), so a naive reference check between it and `current` can never
+  // detect "nothing changed". mergeCommittedArtifactOutputsIntoMessage must
+  // compare values instead, so a repeated reconcile of already-committed data
+  // (e.g. the 15s presence heartbeat) returns the exact `current` reference
+  // rather than rebuilding the message (and, transitively, its containing
+  // array/snapshot) for no reason.
+  const authoritativeFirstFetch = message({
+    id: "assistant-1",
+    renderBlocks: [artifactOutput],
+    toolCalls: [committedPublisherCall],
+  });
+  const local = message({
+    id: "temp-assistant",
+    runId: "run-1",
+    toolCalls: [{ ...committedPublisherCall, output: null, status: "running" }],
+  });
+
+  const firstMerge = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: authoritativeFirstFetch,
+    current: local,
+  });
+  assert.notEqual(firstMerge, local);
+
+  // A brand-new object with byte-for-byte identical content, standing in for
+  // the next REST fetch's fresh (but unchanged) response.
+  const authoritativeSecondFetch = message({
+    id: "assistant-1",
+    renderBlocks: [{ ...artifactOutput }],
+    toolCalls: [{ ...committedPublisherCall }],
+  });
+  const secondMerge = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: authoritativeSecondFetch,
+    current: firstMerge,
+  });
+
+  assert.equal(secondMerge, firstMerge);
+
+  // That identity preservation is what makes the array-level short-circuit in
+  // mergeCommittedArtifactOutputsIntoMessages reachable.
+  const messages = mergeCommittedArtifactOutputsIntoMessages({
+    authoritative: authoritativeSecondFetch,
+    current: [firstMerge],
+    target: { assistantMessageId: "assistant-1", runId: "run-1" },
+  });
+  assert.equal(messages[0], firstMerge);
+});
+
+test("a genuinely changed committed field still rebuilds the message", () => {
+  const authoritativeFirstFetch = message({
+    id: "assistant-1",
+    renderBlocks: [artifactOutput],
+    toolCalls: [committedPublisherCall],
+  });
+  const local = message({
+    id: "temp-assistant",
+    runId: "run-1",
+    toolCalls: [{ ...committedPublisherCall, output: null, status: "running" }],
+  });
+  const firstMerge = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: authoritativeFirstFetch,
+    current: local,
+  });
+
+  // A later fetch that legitimately changed one committed field (e.g. a
+  // corrected title/receipt) must still be promoted.
+  const authoritativeUpdatedFetch = message({
+    id: "assistant-1",
+    renderBlocks: [{ ...artifactOutput }],
+    toolCalls: [{ ...committedPublisherCall, latencyMs: 999 }],
+  });
+  const secondMerge = mergeCommittedArtifactOutputsIntoMessage({
+    authoritative: authoritativeUpdatedFetch,
+    current: firstMerge,
+  });
+
+  assert.notEqual(secondMerge, firstMerge);
+  assert.equal(
+    (secondMerge.metadata.toolCalls as Array<{ latencyMs: number }>).find(
+      (call) => call.latencyMs === 999,
+    )?.latencyMs,
+    999,
   );
 });
 

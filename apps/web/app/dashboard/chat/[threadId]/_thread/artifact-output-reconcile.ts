@@ -20,6 +20,24 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+// Reference equality is useless here: `authoritative` is a fresh REST/SSE
+// fetch every reconcile, so its objects never share identity with what's
+// already in state even when nothing actually changed server-side. Fall back
+// to a value comparison, scoped to just the entries being substituted (a
+// handful of artifact-related blocks/tool calls, not the whole message) so
+// repeated reconciles of already-committed data can report "no change" and
+// let the caller skip rebuilding the message/array.
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeArtifactOutputBlock(
   value: unknown,
 ): ArtifactOutputBlock | null {
@@ -125,7 +143,7 @@ function committedArtifactToolCalls(
 function mergeCommittedArtifactToolCalls(input: {
   authoritative: readonly Record<string, unknown>[];
   current: unknown;
-}) {
+}): { changed: boolean; merged: unknown[] } | null {
   if (input.authoritative.length === 0) {
     return null;
   }
@@ -135,6 +153,7 @@ function mergeCommittedArtifactToolCalls(input: {
   const current = Array.isArray(input.current) ? input.current : [];
   const merged: unknown[] = [];
   const seen = new Set<string>();
+  let changed = false;
   for (const value of current) {
     const record = objectRecord(value);
     const id = typeof record?.id === "string" ? record.id : null;
@@ -143,10 +162,20 @@ function mergeCommittedArtifactToolCalls(input: {
       continue;
     }
     if (seen.has(id)) {
+      // A duplicate id is itself a change worth flushing.
+      changed = true;
       continue;
     }
     seen.add(id);
-    merged.push(authoritativeById.get(id) ?? value);
+    const authoritativeCall = authoritativeById.get(id);
+    if (authoritativeCall === undefined) {
+      merged.push(value);
+      continue;
+    }
+    if (!sameJson(value, authoritativeCall)) {
+      changed = true;
+    }
+    merged.push(authoritativeCall);
   }
   for (const [id, call] of authoritativeById) {
     if (seen.has(id)) {
@@ -154,8 +183,9 @@ function mergeCommittedArtifactToolCalls(input: {
     }
     seen.add(id);
     merged.push(call);
+    changed = true;
   }
-  return merged;
+  return { changed, merged };
 }
 
 function messageRunId(message: ChatMessageItem) {
@@ -238,6 +268,7 @@ export function mergeCommittedArtifactOutputsIntoMessage(input: {
     authoritativeBlocks.map((block) => [block.id, block]),
   );
   const seen = new Set<string>();
+  let blocksChanged = false;
   const merged = currentBlocks.flatMap((block) => {
     const record = objectRecord(block);
     const id = typeof record?.id === "string" ? record.id : null;
@@ -245,16 +276,34 @@ export function mergeCommittedArtifactOutputsIntoMessage(input: {
       return [block];
     }
     if (seen.has(id)) {
+      blocksChanged = true;
       return [];
     }
     seen.add(id);
-    return [authoritativeById.get(id)!];
+    const authoritativeBlock = authoritativeById.get(id)!;
+    if (!sameJson(record, authoritativeBlock)) {
+      blocksChanged = true;
+    }
+    return [authoritativeBlock];
   });
   for (const block of authoritativeBlocks) {
     if (!seen.has(block.id)) {
       seen.add(block.id);
       merged.push(block);
+      blocksChanged = true;
     }
+  }
+
+  // Every reconcile refetches `authoritative` fresh, so its objects never
+  // share identity with what's already merged into `current` even when the
+  // committed data hasn't changed since the last reconcile. Without this
+  // value-based check, this function would always return a new object/array
+  // whenever any authoritative block exists, making the identity short-circuit
+  // in mergeCommittedArtifactOutputsIntoMessages (and the streaming-snapshot
+  // equivalent) permanently unreachable — every ~15s presence heartbeat and
+  // poll would rebuild the message (and its containing array) for no reason.
+  if (!blocksChanged && !mergedToolCalls?.changed) {
+    return input.current;
   }
 
   return {
@@ -262,7 +311,7 @@ export function mergeCommittedArtifactOutputsIntoMessage(input: {
     metadata: {
       ...input.current.metadata,
       renderBlocks: merged,
-      ...(mergedToolCalls ? { toolCalls: mergedToolCalls } : {}),
+      ...(mergedToolCalls ? { toolCalls: mergedToolCalls.merged } : {}),
     },
   };
 }

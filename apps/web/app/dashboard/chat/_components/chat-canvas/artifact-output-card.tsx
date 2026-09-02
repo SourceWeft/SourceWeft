@@ -8,6 +8,7 @@ import type {
   ArtifactStatusSnapshot,
   MessageRenderBlock,
 } from "./types";
+import { isArtifactSnapshotTerminal } from "./artifact-work-state";
 import { useArtifactSnapshot } from "./use-artifact-snapshot";
 import { useArtifactVersionMedia } from "./use-artifact-version-media";
 
@@ -45,9 +46,19 @@ export function ArtifactOutputCard({
 }) {
   const host = artifactRenderHost();
   const parentSnapshot = artifactStatuses?.get(block.artifactId);
+  // This card only ever renders for a COMMITTED artifact_output block, so the
+  // artifact is already ready server-side by construction. A parent snapshot
+  // can still be a stale non-terminal ("running") cache, though: the status
+  // hooks that populate `artifactStatuses` fetch it once per artifact-id set
+  // and never revisit an id once it drops out of the pending set (which
+  // happens the instant the tool call commits). Only skip this card's own
+  // one-shot fetch when the parent snapshot is actually terminal — otherwise
+  // a stale "running" entry permanently suppresses the refresh that would
+  // correct it, and the card is stuck showing "Artifact unavailable" for the
+  // rest of the session.
   const { error, snapshot } = useArtifactSnapshot({
     artifactSnapshot: parentSnapshot,
-    enabled: !parentSnapshot,
+    enabled: !parentSnapshot || !isArtifactSnapshotTerminal(parentSnapshot),
     toolCallOutput: { artifact_id: block.artifactId },
     workspaceId,
   });
