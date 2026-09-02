@@ -157,11 +157,12 @@ export function registerPublicShareRoutes(app: Hono) {
           "This share is not available",
         );
       }
+      const requestedVersionId = requireRouteParam(c, "versionId");
       const media =
         await contentArtifactsService.getSharedArtifactVersionMediaBytes(
           resolved.artifact,
           {
-            artifactVersionId: requireRouteParam(c, "versionId"),
+            artifactVersionId: requestedVersionId,
             resource,
             range: c.req.header("range"),
             ifNoneMatch: c.req.header("if-none-match"),
@@ -169,6 +170,29 @@ export function registerPublicShareRoutes(app: Hono) {
           },
         );
       if (!media) {
+        // Serving is pinned to the artifact's exact current version by design
+        // (see `getSharedArtifactVersionMediaBytes`) — a viewer's tab open on
+        // an older publish must not silently start showing newer bytes under
+        // the same URL. But the public projection bakes a specific versionId
+        // into `fileUrl` at load time, so a same-tab republish turns that
+        // baked URL into a permanent 404 with no client-visible signal to
+        // recover from. Distinguish that recoverable case (the artifact still
+        // has *a* current version, just not the one this URL was pinned to)
+        // from a genuine miss, and surface the current version id so a caller
+        // can re-fetch `/v1/public/shares/:token` and retry with the fresh
+        // URL instead of leaving the viewer on a dead link.
+        const current =
+          await contentArtifactsService.getSharedCurrentArtifactVersionMedia(
+            resolved.artifact,
+          );
+        if (current && current.versionId !== requestedVersionId) {
+          throw new ApiError(
+            404,
+            "ARTIFACT_VERSION_STALE",
+            "This artifact has been republished; the requested version is no longer available",
+            { currentVersionId: current.versionId },
+          );
+        }
         throw new ApiError(
           404,
           "ARTIFACT_VERSION_MEDIA_NOT_FOUND",
