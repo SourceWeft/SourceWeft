@@ -284,38 +284,3 @@ export function resolveMessageToolCalls(message: {
   }
   return raw.filter(isLooseToolCallRecord);
 }
-
-/**
- * Artifact IDs that may still need REST/SSE tracking. Skips IDs already known
- * terminal in artifactStatuses so stale fire-and-forget tool output cannot keep
- * polling forever after the job finished.
- */
-export function collectPendingArtifactIds(
-  messages: Array<{
-    metadata?: Record<string, unknown>;
-    toolCalls?: ToolCallRecord[];
-  }>,
-  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>,
-) {
-  const ids = new Set<string>();
-
-  for (const message of messages) {
-    for (const toolCall of resolveMessageToolCalls(message)) {
-      const artifactId = resolveToolCallArtifactId(toolCall.output);
-      if (!artifactId) {
-        continue;
-      }
-      if (isArtifactSnapshotTerminal(artifactStatuses?.get(artifactId))) {
-        continue;
-      }
-      if (
-        isToolOutputClaimingInProgress(toolCall.output) ||
-        toolCall.status === "running"
-      ) {
-        ids.add(artifactId);
-      }
-    }
-  }
-
-  return [...ids];
-}
