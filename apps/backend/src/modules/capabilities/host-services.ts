@@ -1,4 +1,3 @@
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import type { DiscoveredCapabilityRecord } from "@sourceweft/capability-runtime";
 import type {
   CreateSandboxProviderFactories,
@@ -165,8 +164,7 @@ export async function collectCapabilityConnectorContributions(
     [];
 
   const records = await recordsDeclaring(
-    (record) =>
-      getCapabilityContributions(record.manifest).connectors.length > 0,
+    (record) => record.manifest.contributes.connectors.length > 0,
     sources,
   );
   const load = sources.loadModule ?? loadCapabilityEntryModule;

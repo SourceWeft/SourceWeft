@@ -1,10 +1,7 @@
 import { sha256 } from "./hash";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  discoverCapabilities,
-  getCapabilityContributions,
-} from "@sourceweft/capability-runtime";
+import { discoverCapabilities } from "@sourceweft/capability-runtime";
 import type {
   CapabilityManifest,
   SkillContribution,
@@ -348,7 +345,7 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
     roots: [packageWorkspaceRoot],
   });
   const skillRecords = discovery.records.filter((record) => {
-    const contributions = getCapabilityContributions(record.manifest);
+    const contributions = record.manifest.contributes;
     return (
       record.manifest.id.startsWith(`${builtinCapabilityNamespace()}/`) &&
       record.manifest.kind === "skill" &&
@@ -358,7 +355,7 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
   const skills = await Promise.all(
     skillRecords
       .flatMap((record) =>
-        getCapabilityContributions(record.manifest).skills.map((skill) => ({
+        record.manifest.contributes.skills.map((skill) => ({
           record,
           skill,
         })),
