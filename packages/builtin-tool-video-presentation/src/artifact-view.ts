@@ -1,4 +1,5 @@
 import type {
+  ArtifactAssetLocation,
   ArtifactVersionMedia,
   ArtifactViewHandler,
   ArtifactViewRecord,
@@ -103,6 +104,73 @@ function resolveVideoPresentationVersionMedia(
   };
 }
 
+/**
+ * Resolve a sub-asset of the artifact by its (already-decoded) served file
+ * name — the counterpart to `buildArtifactAssetUrl`, which is what the
+ * pipeline writes into every `audioTracks[].assetUrl` and `assets[].sourceUrl`
+ * in the committed payload (see `pipeline/payload-mapping.ts`). Without this
+ * hook the host's generic `/assets/{fileName}` route has nothing to consult
+ * and 404s on every narration track and generated/provided image.
+ *
+ * The rendered mp4 and cover image are also matched here (in addition to being
+ * reachable via `resolveVersionMedia`'s dedicated `/versions/{id}/media`
+ * route) because their own `renderedVideo`/`coverImage.fileName` can also be
+ * dereferenced through the flat asset route by anything holding just a file
+ * name (e.g. scene code that materialized a `sourceweft-asset:` URI back to a
+ * served URL — see `pipeline/asset-uris.ts`).
+ */
+function resolveVideoPresentationAsset(input: {
+  artifact: ArtifactViewRecord;
+  fileName: string;
+}): ArtifactAssetLocation | null {
+  const { artifact, fileName } = input;
+  const parsed = videoPresentationCommittedPayloadSchema.safeParse(
+    artifact.payloadJson,
+  );
+  if (!parsed.success || !fileName) return null;
+  const payload = parsed.data;
+
+  if (payload.renderedVideo.fileName === fileName) {
+    return {
+      contentType: payload.renderedVideo.mimeType,
+      fileName,
+      storageBucket: payload.renderedVideo.storageBucket,
+      storageKey: payload.renderedVideo.storageKey,
+    };
+  }
+  if (payload.coverImage.fileName === fileName) {
+    return {
+      contentType: payload.coverImage.mimeType,
+      fileName,
+      storageBucket: payload.coverImage.storageBucket,
+      storageKey: payload.coverImage.storageKey,
+    };
+  }
+  const track = payload.audioTracks.find(
+    (candidate) => candidate.fileName === fileName,
+  );
+  if (track) {
+    return {
+      contentType: track.contentType,
+      fileName,
+      storageBucket: track.storageBucket,
+      storageKey: track.storageKey,
+    };
+  }
+  const asset = payload.assets.find(
+    (candidate) => candidate.fileName === fileName,
+  );
+  if (asset) {
+    return {
+      contentType: asset.contentType,
+      fileName,
+      storageBucket: asset.storageBucket,
+      storageKey: asset.storageKey,
+    };
+  }
+  return null;
+}
+
 function listVideoPresentationStorageObjects(artifact: ArtifactViewRecord) {
   const parsed = videoPresentationCommittedPayloadSchema.safeParse(
     artifact.payloadJson,
@@ -126,6 +194,7 @@ export const videoPresentationArtifactViewHandler: ArtifactViewHandler = {
     resolveVideoPresentationVersionMedia(artifact),
   listOwnedStorageObjects: ({ artifact }) =>
     listVideoPresentationStorageObjects(artifact),
+  resolveAsset: resolveVideoPresentationAsset,
   buildSourceJson: ({ artifact }) => {
     const parsed = videoPresentationCommittedPayloadSchema.safeParse(
       artifact.payloadJson,

@@ -103,6 +103,68 @@ function artifact(payloadJson: unknown = committedPayload()) {
   };
 }
 
+/**
+ * A payload carrying both an audio track and an image asset, matching what
+ * `pipeline/payload-mapping.ts` writes for a narrated deck with a generated
+ * image — the shape `resolveAsset` must serve.
+ */
+function committedPayloadWithSubAssets() {
+  const base = committedPayload();
+  return videoPresentationCommittedPayloadSchema.parse({
+    ...base,
+    narrationPolicy: { enabled: true },
+    audioTracks: [
+      {
+        slideNumber: 1,
+        assetUrl:
+          "/v1/workspaces/ws-1/artifacts/artifact-1/assets/narration-1.mp3",
+        storageKey: "workspaces/ws-1/artifacts/artifact-1/narration-1.mp3",
+        storageBucket: "content",
+        durationSeconds: 4,
+        mimeType: "audio/mpeg",
+        contentDigest: digest("c"),
+        contentType: "audio/mpeg",
+        fileName: "narration-1.mp3",
+      },
+    ],
+    assets: [
+      {
+        assetId: "asset-1",
+        type: "hero",
+        prompt: "A diagram",
+        fileName: "asset-1.png",
+        storageKey: "workspaces/ws-1/artifacts/artifact-1/asset-1.png",
+        storageBucket: "content",
+        sourceUrl:
+          "/v1/workspaces/ws-1/artifacts/artifact-1/assets/asset-1.png",
+        contentDigest: digest("d"),
+        contentType: "image/png",
+        slideNumbers: [1],
+        source: "generated",
+      },
+    ],
+  });
+}
+
+/**
+ * Mirrors `resolveArtifactAsset` in
+ * apps/backend/src/modules/artifacts/service.ts: decode the URL-carried file
+ * name, then delegate to the handler. Exercising this wrapper (rather than
+ * calling `handler.resolveAsset` bare) is what the real `/assets/{fileName}`
+ * route does, so a regression here reproduces the 404 a consumer would see.
+ */
+function resolveArtifactAssetViaHandler(input: {
+  artifact: ReturnType<typeof artifact>;
+  fileName: string;
+}) {
+  const decoded = decodeURIComponent(input.fileName).trim();
+  if (!decoded) return null;
+  return (
+    handler.resolveAsset?.({ artifact: input.artifact, fileName: decoded }) ??
+    null
+  );
+}
+
 test("the package contributes a handler for its artifact type", async () => {
   const handlers = await createArtifactViewHandlers();
   assert.deepEqual(
@@ -173,5 +235,77 @@ test("deletion enumeration preserves each persisted object bucket", () => {
         storageKey: "workspaces/ws-1/artifacts/artifact-1/cover.jpg",
       },
     ],
+  );
+});
+
+test("resolveAsset resolves a narration audio track by its served file name", () => {
+  const record = artifact(committedPayloadWithSubAssets());
+  assert.deepEqual(
+    resolveArtifactAssetViaHandler({
+      artifact: record,
+      fileName: "narration-1.mp3",
+    }),
+    {
+      contentType: "audio/mpeg",
+      fileName: "narration-1.mp3",
+      storageBucket: "content",
+      storageKey: "workspaces/ws-1/artifacts/artifact-1/narration-1.mp3",
+    },
+  );
+});
+
+test("resolveAsset resolves a generated image asset by its served file name", () => {
+  const record = artifact(committedPayloadWithSubAssets());
+  assert.deepEqual(
+    resolveArtifactAssetViaHandler({
+      artifact: record,
+      fileName: "asset-1.png",
+    }),
+    {
+      contentType: "image/png",
+      fileName: "asset-1.png",
+      storageBucket: "content",
+      storageKey: "workspaces/ws-1/artifacts/artifact-1/asset-1.png",
+    },
+  );
+});
+
+test("resolveAsset also resolves the rendered mp4 and cover image by file name", () => {
+  const record = artifact(committedPayloadWithSubAssets());
+  assert.deepEqual(
+    resolveArtifactAssetViaHandler({ artifact: record, fileName: "video.mp4" }),
+    {
+      contentType: "video/mp4",
+      fileName: "video.mp4",
+      storageBucket: "content",
+      storageKey: "workspaces/ws-1/artifacts/artifact-1/video.mp4",
+    },
+  );
+  assert.deepEqual(
+    resolveArtifactAssetViaHandler({ artifact: record, fileName: "cover.jpg" }),
+    {
+      contentType: "image/jpeg",
+      fileName: "cover.jpg",
+      storageBucket: "content",
+      storageKey: "workspaces/ws-1/artifacts/artifact-1/cover.jpg",
+    },
+  );
+});
+
+test("resolveAsset returns null (not a match) for an unknown file name or an unparsable payload", () => {
+  const record = artifact(committedPayloadWithSubAssets());
+  assert.equal(
+    resolveArtifactAssetViaHandler({
+      artifact: record,
+      fileName: "does-not-exist.png",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveArtifactAssetViaHandler({
+      artifact: artifact({ sceneModules: [{ code: "unsafe" }] }),
+      fileName: "narration-1.mp3",
+    }),
+    null,
   );
 });
