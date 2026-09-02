@@ -12,9 +12,8 @@ import {
   requireDefaultModelGatewayProfile,
   withBilledModelGateway,
 } from "../../../shared/model-gateway/index";
-import { BaseSourceParser } from "@sourceweft/builtin-document-parsers";
 import { buildParsedDocument } from "./providers/utils";
-import type { ParsedDocument, ParseInput } from "./types";
+import type { ParsedDocument, ParseInput, SourceParser } from "./types";
 
 function requireDefaultAsrProfile() {
   return requireDefaultModelGatewayProfile("asr").catch(() => {
@@ -127,7 +126,7 @@ export function formatAsrTranscriptMarkdown(input: {
   return [title, ...lines].join("\n\n");
 }
 
-export class AudioSourceParser extends BaseSourceParser {
+export class AudioSourceParser implements SourceParser {
   readonly id = "audio";
   readonly name = "Audio ASR Parser";
   readonly supportedMimeTypes = [
@@ -204,31 +203,31 @@ export class AudioSourceParser extends BaseSourceParser {
           },
         ),
     ).catch(async (error: unknown) => {
-        const contentError = toContentError(error);
-        if (input.teamId && input.workspaceId) {
-          await recordGatewayOperationEvent({
-            teamId: input.teamId,
-            workspaceId: input.workspaceId,
-            userId: input.userId,
-            feature: "ingestion",
-            operation: "asr.transcribe",
-            modelKind: "asr",
-            modelAlias: profile.modelAlias,
-            traceId: input.sourceId,
-            success: false,
-            errorCode: contentError.code,
-            errorMessage: contentError.message,
-            latencyMs: Date.now() - startedAt,
-            attributes: {
-              sourceId: input.sourceId,
-              fileName: input.fileName,
-              mimeType: input.mimeType,
-              fileSize: input.fileSize,
-            },
-          });
-        }
-        throw contentError;
-      });
+      const contentError = toContentError(error);
+      if (input.teamId && input.workspaceId) {
+        await recordGatewayOperationEvent({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          feature: "ingestion",
+          operation: "asr.transcribe",
+          modelKind: "asr",
+          modelAlias: profile.modelAlias,
+          traceId: input.sourceId,
+          success: false,
+          errorCode: contentError.code,
+          errorMessage: contentError.message,
+          latencyMs: Date.now() - startedAt,
+          attributes: {
+            sourceId: input.sourceId,
+            fileName: input.fileName,
+            mimeType: input.mimeType,
+            fileSize: input.fileSize,
+          },
+        });
+      }
+      throw contentError;
+    });
 
     if (input.teamId && input.workspaceId) {
       await recordGatewayOperationEvent({

@@ -88,6 +88,89 @@ export function resolveToolCommandDefinition(input: {
   return { workflow: input.workflow };
 }
 
+/**
+ * The shared body behind {@link renderToolCommandWorkflow} and
+ * {@link renderSkillCommandWorkflow}. The two flavours differ only in the XML
+ * attribute that names the target (`tool=` vs `skill=`), the `kind` literal on
+ * the main path, the standing instruction line, the `promptIntro` fallback, and
+ * whether `defaultTools` falls back to the target. Everything else — the
+ * missing-argument early return included — is identical, so it lives here once.
+ * The rendered prompt is model input: keep it byte-identical when editing.
+ */
+function renderCommandWorkflow(input: {
+  arguments: string;
+  canonicalName: string;
+  workflow: CapabilityCommandWorkflow;
+  /** `tool` or `skill` — the XML attribute naming the command target. */
+  targetAttribute: "tool" | "skill";
+  /** The attribute's value: the tool name or the skill slug. */
+  targetValue: string;
+  /** The `kind` literal on the main (arguments-supplied) path. */
+  kind: "tool_workflow" | "skill_workflow";
+  /** Used when the workflow declares no `promptIntro`. */
+  promptIntroFallback: string | null;
+  /** The standing instruction line that follows the intro. */
+  standingInstruction: string;
+  defaultTools: string[];
+}): ResolvedCommandWorkflow {
+  const workflow = input.workflow;
+  const target = `${input.targetAttribute}="${input.targetValue}"`;
+  const successCriteria = normalizeSuccessCriteria(workflow.successCriteria);
+  const args = input.arguments.trim();
+  if (!args && workflow.requiredArguments) {
+    const renderedPrompt = [
+      `<sourceweft_command name="${input.canonicalName}" kind="workflow" ${target}>`,
+      workflow.requiredArguments.clarificationPrompt,
+      `Required input: ${workflow.requiredArguments.description}.`,
+      "This command is incomplete until the user provides the required input.",
+      "</sourceweft_command>",
+      "",
+      "<user_request>",
+      args,
+      "</user_request>",
+    ].join("\n");
+
+    return {
+      name: input.canonicalName,
+      arguments: args,
+      kind: "workflow",
+      renderedPrompt,
+      defaultTools: [],
+      ...resolvedToolPolicyFields(workflow),
+      permissionOverrides: {},
+      successCriteria: { kind: "none" },
+      execution: workflow.execution,
+    };
+  }
+
+  const renderedPrompt = [
+    `<sourceweft_command name="${input.canonicalName}" kind="${input.kind}" ${target}>`,
+    workflow.promptIntro ?? input.promptIntroFallback,
+    input.standingInstruction,
+    ...workflow.additionalPromptLines,
+    `Success criteria: ${describeSuccessCriteria(successCriteria)}.`,
+    "</sourceweft_command>",
+    "",
+    "<user_request>",
+    args,
+    "</user_request>",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+
+  return {
+    name: input.canonicalName,
+    arguments: args,
+    kind: input.kind,
+    renderedPrompt,
+    defaultTools: input.defaultTools,
+    ...resolvedToolPolicyFields(workflow),
+    permissionOverrides: workflow.permissionOverrides,
+    successCriteria,
+    execution: workflow.execution,
+  };
+}
+
 export function renderToolCommandWorkflow(input: {
   arguments: string;
   canonicalName: string;
@@ -103,64 +186,21 @@ export function renderToolCommandWorkflow(input: {
     return null;
   }
   const workflow = definition.workflow;
-  const successCriteria = normalizeSuccessCriteria(workflow.successCriteria);
-  const args = input.arguments.trim();
-  if (!args && workflow.requiredArguments) {
-    const renderedPrompt = [
-      `<sourceweft_command name="${input.canonicalName}" kind="workflow" tool="${input.toolName}">`,
-      workflow.requiredArguments.clarificationPrompt,
-      `Required input: ${workflow.requiredArguments.description}.`,
-      "This command is incomplete until the user provides the required input.",
-      "</sourceweft_command>",
-      "",
-      "<user_request>",
-      args,
-      "</user_request>",
-    ].join("\n");
-
-    return {
-      name: input.canonicalName,
-      arguments: args,
-      kind: "workflow",
-      renderedPrompt,
-      defaultTools: [],
-      ...resolvedToolPolicyFields(workflow),
-      permissionOverrides: {},
-      successCriteria: { kind: "none" },
-      execution: workflow.execution,
-    };
-  }
-
-  const renderedPrompt = [
-    `<sourceweft_command name="${input.canonicalName}" kind="tool_workflow" tool="${input.toolName}">`,
-    workflow.promptIntro ??
-      `Use ${input.toolName} to complete the user request.`,
-    "This slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command's success criteria must be satisfied.",
-    ...workflow.additionalPromptLines,
-    `Success criteria: ${describeSuccessCriteria(successCriteria)}.`,
-    "</sourceweft_command>",
-    "",
-    "<user_request>",
-    args,
-    "</user_request>",
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-
-  return {
-    name: input.canonicalName,
-    arguments: args,
+  return renderCommandWorkflow({
+    arguments: input.arguments,
+    canonicalName: input.canonicalName,
+    workflow,
+    targetAttribute: "tool",
+    targetValue: input.toolName,
     kind: "tool_workflow",
-    renderedPrompt,
+    promptIntroFallback: `Use ${input.toolName} to complete the user request.`,
+    standingInstruction:
+      "This slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command's success criteria must be satisfied.",
     defaultTools:
       workflow.defaultTools.length > 0
         ? workflow.defaultTools
         : [input.toolName],
-    ...resolvedToolPolicyFields(workflow),
-    permissionOverrides: workflow.permissionOverrides,
-    successCriteria,
-    execution: workflow.execution,
-  };
+  });
 }
 
 export function renderSkillCommandWorkflow(input: {
@@ -174,60 +214,18 @@ export function renderSkillCommandWorkflow(input: {
     return null;
   }
   const workflow = input.workflow;
-  const successCriteria = normalizeSuccessCriteria(workflow.successCriteria);
-  const args = input.arguments.trim();
-  if (!args && workflow.requiredArguments) {
-    const renderedPrompt = [
-      `<sourceweft_command name="${input.canonicalName}" kind="workflow" skill="${input.skillSlug}">`,
-      workflow.requiredArguments.clarificationPrompt,
-      `Required input: ${workflow.requiredArguments.description}.`,
-      "This command is incomplete until the user provides the required input.",
-      "</sourceweft_command>",
-      "",
-      "<user_request>",
-      args,
-      "</user_request>",
-    ].join("\n");
-
-    return {
-      name: input.canonicalName,
-      arguments: args,
-      kind: "workflow",
-      renderedPrompt,
-      defaultTools: [],
-      ...resolvedToolPolicyFields(workflow),
-      permissionOverrides: {},
-      successCriteria: { kind: "none" },
-      execution: workflow.execution,
-    };
-  }
-
-  const renderedPrompt = [
-    `<sourceweft_command name="${input.canonicalName}" kind="skill_workflow" skill="${input.skillSlug}">`,
-    workflow.promptIntro ?? null,
-    "This slash command explicitly invokes the selected skill for the user request. Rely on the DeepAgents skills middleware for skill discovery, then follow the skill instructions and satisfy the command success criteria.",
-    ...workflow.additionalPromptLines,
-    `Success criteria: ${describeSuccessCriteria(successCriteria)}.`,
-    "</sourceweft_command>",
-    "",
-    "<user_request>",
-    args,
-    "</user_request>",
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-
-  return {
-    name: input.canonicalName,
-    arguments: args,
+  return renderCommandWorkflow({
+    arguments: input.arguments,
+    canonicalName: input.canonicalName,
+    workflow,
+    targetAttribute: "skill",
+    targetValue: input.skillSlug,
     kind: "skill_workflow",
-    renderedPrompt,
+    promptIntroFallback: null,
+    standingInstruction:
+      "This slash command explicitly invokes the selected skill for the user request. Rely on the DeepAgents skills middleware for skill discovery, then follow the skill instructions and satisfy the command success criteria.",
     defaultTools: workflow.defaultTools,
-    ...resolvedToolPolicyFields(workflow),
-    permissionOverrides: workflow.permissionOverrides,
-    successCriteria,
-    execution: workflow.execution,
-  };
+  });
 }
 
 export function describeSuccessCriteria(criteria: CommandSuccessCriteria) {

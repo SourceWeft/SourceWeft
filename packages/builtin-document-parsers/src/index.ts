@@ -3,7 +3,6 @@ export const builtinDocumentParsersCapability = {
 } as const;
 
 export { builtinDocumentParsersCapabilityManifest } from "./manifest";
-export { BaseSourceParser } from "./base";
 export { buildParsedDocument } from "./build-parsed-document";
 export { chunkSourceContent } from "./chunker";
 export { ParserContentError } from "./errors";

@@ -7,7 +7,6 @@ import {
   capabilityManifestSchema,
   parseCapabilityManifest,
 } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import {
   builtinNotionConnectorCapabilityManifest,
   notionConnectorContribution,
@@ -95,16 +94,19 @@ test("notion connector manifest embeds the exported contribution metadata", () =
     builtinNotionConnectorCapabilityManifest,
   );
   assert.deepEqual(
-    getCapabilityContributions(manifest).connectors[0],
+    manifest.contributes.connectors[0],
     notionConnectorContribution,
   );
 });
 
 test("backend manifest adapter injects OAuth runtime fields only at host boundary", () => {
-  const manifest = toBackendNotionConnectorManifest(notionConnectorContribution, {
-    clientId: "client-id",
-    redirectUri: "https://app.example/callback",
-  });
+  const manifest = toBackendNotionConnectorManifest(
+    notionConnectorContribution,
+    {
+      clientId: "client-id",
+      redirectUri: "https://app.example/callback",
+    },
+  );
 
   assert.equal(manifest.type, "notion");
   assert.equal(manifest.auth.redirectUri, "https://app.example/callback");

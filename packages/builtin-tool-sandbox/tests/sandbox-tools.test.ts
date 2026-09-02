@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { builtinSandboxCapabilityManifest } from "../src/manifest";
 import {
@@ -140,7 +139,7 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
     builtinSandboxCapabilityManifest,
   );
   assert.deepEqual(
-    getCapabilityContributions(manifest).tools.map((tool) => tool.id),
+    manifest.contributes.tools.map((tool) => tool.id),
     ["prepare_sandbox_workspace", "execute", "collect_sandbox_outputs"],
   );
 
@@ -357,9 +356,15 @@ test("sandbox runtime prompt admits staged /skills scripts only when skill stagi
     ...capabilities,
     skillScriptsStaged: true,
   });
-  assert.match(staged, /materialized read-only at the same \/skills\/<name>\/ paths/u);
+  assert.match(
+    staged,
+    /materialized read-only at the same \/skills\/<name>\/ paths/u,
+  );
   assert.match(staged, /run bundled skill scripts directly/u);
-  assert.match(staged, /Never include \/workfiles or \/kb in an execute command/u);
+  assert.match(
+    staged,
+    /Never include \/workfiles or \/kb in an execute command/u,
+  );
   assert.match(staged, /Never write to \/skills from execute commands/u);
   assert.match(staged, /Skill bundles are already staged under \/skills/u);
   // The staged prompt must not carry the unstaged prohibitions.
@@ -390,8 +395,14 @@ test("sandbox runtime prompt includes default environment only when enabled", ()
   });
   assert.doesNotMatch(unknownPrompt, /<sandbox_environment>/u);
   assert.doesNotMatch(unknownPrompt, /npm install pptxgenjs/u);
-  assert.match(unknownPrompt, /binary outputs such as \.pptx, \.pdf, \.zip, or \.xlsx files/u);
-  assert.match(unknownPrompt, /artifactType=slides for PPTX decks or artifactType=file/u);
+  assert.match(
+    unknownPrompt,
+    /binary outputs such as \.pptx, \.pdf, \.zip, or \.xlsx files/u,
+  );
+  assert.match(
+    unknownPrompt,
+    /artifactType=slides for PPTX decks or artifactType=file/u,
+  );
 
   const defaultPrompt = buildSandboxRuntimePrompt({
     prepareToolAvailable: true,
@@ -705,9 +716,11 @@ test("prepare_sandbox_workspace forwards Stop through the Host side channel and 
   stop.abort(new DOMException("user stopped", "AbortError"));
   await deletionStarted.promise;
   let settled = false;
-  void invocation.finally(() => {
-    settled = true;
-  }).catch(() => undefined);
+  void invocation
+    .finally(() => {
+      settled = true;
+    })
+    .catch(() => undefined);
   await Promise.resolve();
   assert.equal(settled, false);
 
@@ -728,7 +741,9 @@ test("prepare_sandbox_workspace forwards Stop through the Host side channel and 
   lateUpload.resolve();
   await Promise.resolve();
   assert.equal(
-    operationStore.completed.some((operation) => operation.status === "succeeded"),
+    operationStore.completed.some(
+      (operation) => operation.status === "succeeded",
+    ),
     false,
   );
 });
@@ -860,7 +875,9 @@ test("collect_sandbox_outputs forwards Host timeout and never persists late sand
   await Promise.resolve();
   assert.deepEqual(writes, []);
   assert.equal(
-    operationStore.completed.some((operation) => operation.status === "succeeded"),
+    operationStore.completed.some(
+      (operation) => operation.status === "succeeded",
+    ),
     false,
   );
 });

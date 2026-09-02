@@ -1,5 +1,4 @@
-import { BaseSourceParser } from "@sourceweft/builtin-document-parsers";
-import type { ParsedDocument, ParseInput } from "./types";
+import type { ParsedDocument, ParseInput, SourceParser } from "./types";
 import { startDocumentParse } from "./providers/document-parse-orchestrator";
 
 export class AsyncProviderPendingError extends Error {
@@ -9,7 +8,7 @@ export class AsyncProviderPendingError extends Error {
   }
 }
 
-export class DocumentProviderParser extends BaseSourceParser {
+export class DocumentProviderParser implements SourceParser {
   readonly id = "pdf";
   readonly name = "Document Provider Parser";
   readonly supportedMimeTypes = [

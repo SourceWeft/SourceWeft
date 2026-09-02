@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -17,7 +16,7 @@ test("sourceweft.capability.json parses as a valid web-search manifest", async (
 
   assert.equal(manifest.id, "sourceweft/web-search");
   assert.deepEqual(
-    getCapabilityContributions(manifest).tools.map((tool) => tool.id),
+    manifest.contributes.tools.map((tool) => tool.id),
     ["web_search", "web_fetch"],
   );
 });

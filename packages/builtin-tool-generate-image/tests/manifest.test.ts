@@ -7,7 +7,6 @@ import {
   capabilityManifestSchema,
   parseCapabilityManifest,
 } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import { builtinGenerateImageCapabilityManifest } from "../src";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -28,7 +27,7 @@ test("generate-image manifest exposes tool contributions after parse", () => {
   const manifest = capabilityManifestSchema.parse(
     builtinGenerateImageCapabilityManifest,
   );
-  const tools = getCapabilityContributions(manifest).tools;
+  const tools = manifest.contributes.tools;
 
   assert.equal(tools[0]?.id, "generate_image");
   assert.deepEqual(

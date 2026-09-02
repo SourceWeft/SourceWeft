@@ -1,5 +1,5 @@
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import type { DiscoveredCapabilityRecord } from "@sourceweft/capability-runtime";
+import type { CapabilityManifest } from "@sourceweft/capability-contracts";
 import { getAgentToolDefinition } from "@sourceweft/agent-tool-registry";
 import { listCapabilityRecords } from "../../turn/capability-command-workflows";
 import { ContentError } from "../../../content/errors";
@@ -32,7 +32,7 @@ import type {
  * Missing, unexpected, or duplicate bindings fail turn preparation.
  */
 export function resolveCapabilityRecordToolIds(
-  contributions: ReturnType<typeof getCapabilityContributions>,
+  contributions: CapabilityManifest["contributes"],
   shouldBindAgentTool: (toolId: string) => boolean,
 ): string[] {
   const skillRuntimeToolIds = contributions.skills
@@ -70,7 +70,7 @@ export function resolveCapabilityToolOwners(
   const skillOnlyCandidates = new Map<string, Set<string>>();
 
   for (const record of records) {
-    const contributions = getCapabilityContributions(record.manifest);
+    const contributions = record.manifest.contributes;
     for (const tool of contributions.tools) {
       const definition = getAgentToolDefinition(tool.id);
       if (!definition || definition.name !== tool.id) {
@@ -93,7 +93,7 @@ export function resolveCapabilityToolOwners(
   }
 
   for (const record of records) {
-    const contributions = getCapabilityContributions(record.manifest);
+    const contributions = record.manifest.contributes;
     for (const toolId of contributions.skills.flatMap(
       (skill) => skill.runtime?.tools ?? [],
     )) {
@@ -158,7 +158,7 @@ export async function createCapabilityAgentToolsForTurn(
 
   for (const record of records) {
     const toolIds = resolveCapabilityRecordToolIds(
-      getCapabilityContributions(record.manifest),
+      record.manifest.contributes,
       context.shouldBindAgentTool,
     );
     if (toolIds.length === 0) {

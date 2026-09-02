@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import {
   AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
   resolveAgentToolTimeoutMs,
@@ -36,7 +35,7 @@ test("video-presentation manifest exposes only the five current typed tools", ()
   const manifest = capabilityManifestSchema.parse(
     builtinVideoPresentationCapabilityManifest,
   );
-  const tools = getCapabilityContributions(manifest).tools;
+  const tools = manifest.contributes.tools;
 
   assert.deepEqual(
     tools.map((tool) => tool.id),
@@ -68,14 +67,8 @@ test("long-running video tools declare wall-clock budgets; ordinary tools use th
     }),
     AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
   );
-  assert.equal(
-    generateVideoAssetsAgentTool.executionTimeoutMs,
-    5 * 60_000,
-  );
-  assert.equal(
-    generateVideoNarrationAgentTool.executionTimeoutMs,
-    5 * 60_000,
-  );
+  assert.equal(generateVideoAssetsAgentTool.executionTimeoutMs, 5 * 60_000);
+  assert.equal(generateVideoNarrationAgentTool.executionTimeoutMs, 5 * 60_000);
   assert.equal(
     validateVideoPresentationAgentTool.executionTimeoutMs,
     10 * 60_000,

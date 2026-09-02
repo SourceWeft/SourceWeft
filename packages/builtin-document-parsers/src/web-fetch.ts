@@ -1,7 +1,11 @@
 import { buildParsedDocument } from "./build-parsed-document";
 import { ParserContentError } from "./errors";
-import { BaseSourceParser } from "./base";
-import type { ParsedDocument, ParseInput, WebFetchProviderLike } from "./types";
+import type {
+  ParsedDocument,
+  ParseInput,
+  SourceParser,
+  WebFetchProviderLike,
+} from "./types";
 import { validatePublicHttpUrl } from "./web-url-safety";
 
 export const WEB_FETCH_SOURCE_MIME_TYPE = "text/x-sourceweft-web-url";
@@ -58,19 +62,15 @@ function validateWebSourceUrl(value: string) {
   }
 }
 
-export class WebFetchSourceParser extends BaseSourceParser {
+export class WebFetchSourceParser implements SourceParser {
   readonly id = "web-fetch";
   readonly name = "Web Fetch Parser";
   readonly supportedMimeTypes = [WEB_FETCH_SOURCE_MIME_TYPE] as const;
 
   constructor(
     private readonly createProvider: () =>
-      | WebFetchProviderLike
-      | null
-      | Promise<WebFetchProviderLike | null>,
-  ) {
-    super();
-  }
+      WebFetchProviderLike | null | Promise<WebFetchProviderLike | null>,
+  ) {}
 
   async parse(input: ParseInput): Promise<ParsedDocument> {
     const provider = await this.createProvider();

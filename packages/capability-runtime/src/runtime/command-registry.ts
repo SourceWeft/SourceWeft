@@ -4,10 +4,7 @@ import type {
   CapabilityRuntimeOutput,
   SkillContribution,
 } from "@sourceweft/capability-contracts";
-import {
-  getCapabilityContributions,
-  getContributionDisplayTitle,
-} from "./contributions";
+import { getContributionDisplayTitle } from "./contributions";
 import type {
   CapabilityCommandAction,
   CapabilityCommandContributionConfig,
@@ -99,7 +96,7 @@ export function findCapabilityCommand(
 function collectCommands(
   manifest: CapabilityManifest,
 ): readonly ContributedCommand[] {
-  const contributions = getCapabilityContributions(manifest);
+  const contributions = manifest.contributes;
   // Commands are always contributed by a specific skill/tool/etc., never by the
   // package as a whole: every entry below is derived from a contribution's
   // `command` block.

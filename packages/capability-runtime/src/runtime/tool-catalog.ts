@@ -1,5 +1,4 @@
 import type { ToolContribution } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "./contributions";
 import type {
   CapabilityCommandListConfig,
   CapabilityToolListItem,
@@ -18,7 +17,7 @@ export function buildCapabilityToolList(
       continue;
     }
 
-    for (const tool of getCapabilityContributions(record.manifest).tools) {
+    for (const tool of record.manifest.contributes.tools) {
       const contributionConfig = packageConfig?.contributions?.[tool.id];
       if (contributionConfig?.enabled === false) {
         continue;

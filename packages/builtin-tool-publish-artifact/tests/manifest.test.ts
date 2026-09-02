@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import { builtinPublishArtifactCapabilityManifest } from "../src";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -25,7 +24,7 @@ test("publish-artifact manifest exposes tool contributions after parse", () => {
   const manifest = capabilityManifestSchema.parse(
     builtinPublishArtifactCapabilityManifest,
   );
-  const tools = getCapabilityContributions(manifest).tools;
+  const tools = manifest.contributes.tools;
 
   assert.equal(tools[0]?.id, "publish_artifact");
 });

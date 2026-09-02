@@ -1,7 +1,7 @@
 import type { Document } from "@langchain/core/documents";
-import { BaseSourceParser } from "./base";
 import { chunkSourceContent } from "./chunker";
 import { withTempFile } from "./file-buffer";
+import { normalizeWhitespace, toWordCount } from "./text-utils";
 import type {
   ParsedDocument,
   ParsedPage,
@@ -38,7 +38,7 @@ function defaultMapPages(input: {
   return content.length > 0 ? [{ pageNumber: 1, content }] : [];
 }
 
-class LoaderBackedParser extends BaseSourceParser {
+class LoaderBackedParser implements SourceParser {
   readonly id: string;
   readonly name: string;
   readonly supportedMimeTypes: readonly string[];
@@ -49,7 +49,6 @@ class LoaderBackedParser extends BaseSourceParser {
   >;
 
   constructor(options: LoaderParserOptions) {
-    super();
     this.id = options.id;
     this.name = options.name;
     this.supportedMimeTypes = options.supportedMimeTypes;
@@ -68,7 +67,7 @@ class LoaderBackedParser extends BaseSourceParser {
         const docs = await loader.load();
         const pages = this.mapPagesFn({
           docs,
-          normalizeWhitespace: this.normalizeWhitespace.bind(this),
+          normalizeWhitespace,
         });
         const content = pages.map((page) => page.content).join("\n\n");
         const chunks = await chunkSourceContent(content, input.config);
@@ -81,7 +80,7 @@ class LoaderBackedParser extends BaseSourceParser {
             fileSize: input.fileSize,
             mimeType: input.mimeType,
             pageCount,
-            wordCount: this.toWordCount(content),
+            wordCount: toWordCount(content),
             charCount: content.length,
             extractedAt: new Date().toISOString(),
           },

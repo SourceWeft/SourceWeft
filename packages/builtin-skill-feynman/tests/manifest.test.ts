@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -14,7 +13,7 @@ test("sourceweft.capability.json parses as a valid feynman skill manifest", asyn
     "utf8",
   );
   const manifest = capabilityManifestSchema.parse(JSON.parse(rawManifest));
-  const skill = getCapabilityContributions(manifest).skills[0];
+  const skill = manifest.contributes.skills[0];
 
   assert.equal(manifest.id, "sourceweft/feynman");
   assert.equal(skill?.id, "feynman");

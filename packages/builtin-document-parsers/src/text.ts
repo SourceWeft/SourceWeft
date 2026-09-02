@@ -1,12 +1,15 @@
 import { TextDecoder } from "node:util";
-import { BaseSourceParser } from "./base";
 import { chunkSourceContent } from "./chunker";
-import { assertTextLikeSourceContent } from "./text-utils";
+import {
+  assertTextLikeSourceContent,
+  normalizeWhitespace,
+  toWordCount,
+} from "./text-utils";
 import type { ParsedDocument, ParseInput, SourceParser } from "./types";
 
 const utf8Decoder = new TextDecoder("utf-8");
 
-class TextSourceParser extends BaseSourceParser {
+class TextSourceParser implements SourceParser {
   readonly id = "text";
   readonly name = "Text Parser";
   readonly supportedMimeTypes = [
@@ -32,7 +35,7 @@ class TextSourceParser extends BaseSourceParser {
 
   async parse(input: ParseInput): Promise<ParsedDocument> {
     assertTextLikeSourceContent(input.content, input.fileName);
-    const content = this.normalizeWhitespace(utf8Decoder.decode(input.content));
+    const content = normalizeWhitespace(utf8Decoder.decode(input.content));
     const chunks = await chunkSourceContent(content, input.config);
     const pages = content.length > 0 ? [{ pageNumber: 1, content }] : [];
     return {
@@ -43,7 +46,7 @@ class TextSourceParser extends BaseSourceParser {
         fileSize: input.fileSize,
         mimeType: input.mimeType,
         pageCount: pages.length,
-        wordCount: this.toWordCount(content),
+        wordCount: toWordCount(content),
         charCount: content.length,
         extractedAt: new Date().toISOString(),
       },

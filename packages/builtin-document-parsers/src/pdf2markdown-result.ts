@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeWhitespace } from "./base";
+import { normalizeWhitespace } from "./text-utils";
 import type { ParsedPage } from "./types";
 
 const recordSchema = z.record(z.string(), z.unknown());
