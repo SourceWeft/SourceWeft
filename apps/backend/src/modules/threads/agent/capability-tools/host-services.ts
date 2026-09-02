@@ -314,6 +314,13 @@ export function createCapabilityAgentToolHostServices(
       }) => {
         const origin = requireArtifactOutputOrigin();
         await runCancellation?.throwIfCancelled("republishing the artifact");
+        // The cancellation check above is a point-in-time read; a Stop
+        // between it and the commit below would otherwise still land. Row-
+        // locking the run inside the same transaction as the version write
+        // is what currentRunArtifacts.publishCommitted and the worker's
+        // deliverable-host path already do — this sibling call site is a
+        // durable-run capability too, so it gets the same fence whenever a
+        // run is actually in scope (a non-durable call has none to lock).
         const result = await completeArtifact({
           artifactId: republishInput.artifactId,
           context: republishInput.context,
@@ -321,6 +328,15 @@ export function createCapabilityAgentToolHostServices(
           expectedStatuses: ["ready"],
           ...(republishInput.expectedVersionNo !== undefined
             ? { expectedVersionNo: republishInput.expectedVersionNo }
+            : {}),
+          ...(prepared.threadRunId
+            ? {
+                publishRunFence: {
+                  runId: prepared.threadRunId,
+                  teamId: prepared.workspace.organizationId,
+                  workspaceId: prepared.workspace.id,
+                },
+              }
             : {}),
           ...(republishInput.signal ? { signal: republishInput.signal } : {}),
         });

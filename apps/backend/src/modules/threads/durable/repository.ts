@@ -552,11 +552,13 @@ export async function appendArtifactOutputToChatRun(input: {
         `ARTIFACT_OUTPUT_RUN_NOT_FOUND: chat run ${input.runId} was not found`,
       );
     }
-    if (
-      runRow.status !== "queued" &&
-      runRow.status !== "running" &&
-      runRow.status !== "waiting_for_approval"
-    ) {
+    // Match the module's shared active-status set, not a hand-rolled
+    // subset: this had drifted out of sync and omitted cancel_requested,
+    // silently dropping an artifact that finished publishing during the
+    // cancel window — the publish itself already succeeded (bytes are in
+    // object storage), so refusing to attach the block only orphaned it
+    // from the conversation with no repair path.
+    if (!ACTIVE_RUN_STATUSES.includes(runRow.status)) {
       return { block: null, run: mapRun(runRow) };
     }
 
@@ -869,17 +871,36 @@ export async function recordChatThreadRunConfirmationResponse(input: {
         ? { finishedAt: now.toISOString(), updatedAt: now.toISOString() }
         : {}),
     };
+    const mergedSnapshot = {
+      ...currentSnapshot,
+      toolCalls: replaced.toolCalls,
+      ...(traceParts !== undefined ? { traceParts } : {}),
+      pendingConfirmationIds: completed
+        ? []
+        : parseStringArray(currentSnapshot.pendingConfirmationIds).filter(
+            (id) => id !== input.confirmationId,
+          ),
+    };
+    // Mirror finishChatThreadRun: completing a run must fence any still
+    // "in_progress" protected-tool claim to "unknown" the same way every
+    // other terminal transition does. This path completes a run directly
+    // (the last approval on a waiting_for_approval run drives it straight
+    // to completed) without going through finishChatThreadRun, so it was
+    // the one terminal transition that never fenced — leaving a stale
+    // in_progress claim behind, the exact gap run-fencing exists to close.
     const snapshot = withAssistantThreadRunMetadata(
-      {
-        ...currentSnapshot,
-        toolCalls: replaced.toolCalls,
-        ...(traceParts !== undefined ? { traceParts } : {}),
-        pendingConfirmationIds: completed
-          ? []
-          : parseStringArray(currentSnapshot.pendingConfirmationIds).filter(
-              (id) => id !== input.confirmationId,
-            ),
-      },
+      completed
+        ? fenceProtectedOperationsForTerminal({
+            snapshot: mergedSnapshot,
+            scope: {
+              runId: context.runRow.id,
+              teamId: context.runRow.teamId,
+              workspaceId: context.runRow.workspaceId,
+            },
+            reason: "RUN_TERMINATED_COMPLETED",
+            markedAt: now.toISOString(),
+          })
+        : mergedSnapshot,
       projectedRun,
     );
     const [updated] = await tx
