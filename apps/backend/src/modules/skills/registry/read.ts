@@ -32,11 +32,18 @@ export const REGISTRY_READ_LIMITS = Object.freeze({
   maxSkillFileBytes: GITHUB_ZIP_LIMITS.maxFileBytes,
   maxSkillFilesPerBundle: 200,
   /**
-   * A sanity bound, not the real defence — that is the cumulative uncompressed
-   * ceiling in `github-zip.ts`. Curated skill monorepos are genuinely this
-   * large: a 90-skill repository measured 309 files and 2.7 MiB, comfortably
-   * inside a 64 MiB budget, yet the previous limit of 25 rejected it outright.
-   * Sizing this off skill COUNT was measuring the wrong thing.
+   * An anti-spam bound on the SHARED catalog, not a resource bound — bytes are
+   * already capped in `github-zip.ts`, and a 90-skill repository measured only
+   * 309 files and 2.7 MiB against a 64 MiB budget. What a count protects is
+   * `skill_definitions`: slugs are globally unique and cross-workspace, so one
+   * submission of thousands of tiny SKILL.md files would flood the catalog for
+   * everyone while sailing past every byte ceiling.
+   *
+   * Observed real repositories run 1, 13, 14, 17, 20, 25, 90 skills, so 200
+   * leaves room for the largest curated sets. Crossing it is not a dead end:
+   * the error points at the `/tree/<ref>/<subpath>` deep link, which narrows a
+   * submission to one subtree — the same one-skill-per-submission shape LobeHub
+   * and Dify use as their ONLY intake, kept here as the fallback.
    */
   maxSkillsPerRepo: 200,
 });
@@ -115,21 +122,33 @@ function lastSegment(dirPath: string): string {
 }
 
 /**
- * Locate every skill directory — any directory holding a `SKILL.md` — at the
- * repo root or ANYWHERE beneath `skills/`, `.claude/skills/`, `.agents/skills/`.
+ * Locate every skill directory — any directory holding a `SKILL.md`.
  *
- * Depth is deliberately unbounded under those containers. Requiring exactly one
- * level was an assumption about layout, not a rule anyone follows: repos that
- * ship more than a handful group them by topic
- * (`skills/1-brand-marketing/seo-brief-writer/`), and under the old check a
- * 90-skill repository discovered zero and was rejected outright. The containers
- * still scope the search, so a `SKILL.md` sitting in `docs/` or `examples/` as
- * sample content is not mistaken for an installable skill.
+ * Where it looks depends on how the repo was submitted:
+ *
+ * - **Whole repo** (no subpath): the repo root, plus anything at any depth
+ *   beneath `skills/`, `.claude/skills/`, `.agents/skills/`. Depth is unbounded
+ *   because requiring exactly one level was an assumption about layout, not a
+ *   rule anyone follows — repos shipping more than a handful group them by
+ *   topic (`skills/1-brand-marketing/seo-brief-writer/`), and the old check made
+ *   a 90-skill repository discover zero. The containers still scope the scan, so
+ *   a `SKILL.md` sitting in `docs/` as sample content is not mistaken for a
+ *   skill.
+ * - **A `/tree/<ref>/<subpath>` deep link**: that subtree, and nothing else. An
+ *   explicit subpath IS the statement of where to look, so the container names
+ *   no longer apply — insisting on them here is what made deep links fail
+ *   entirely, since scoping into `skills/1-brand-marketing/` strips the very
+ *   `skills/` prefix the check was looking for. This is the escape hatch for a
+ *   repository too large to index whole.
  *
  * Exported for tests: this is a pure function of the archive's path list, and
  * it decides whether a repository is importable at all.
  */
-export function discoverSkillDirectories(entryPaths: string[]): string[] {
+export function discoverSkillDirectories(
+  entryPaths: string[],
+  subpath = "",
+): string[] {
+  const scope = subpath ? `${subpath}/` : "";
   const dirs: string[] = [];
   for (const entryPath of entryPaths) {
     // The basename must be exactly SKILL.md — `endsWith` alone would also
@@ -138,6 +157,12 @@ export function discoverSkillDirectories(entryPaths: string[]): string[] {
       continue;
     }
     const dir = dirNameOf(entryPath);
+    if (scope) {
+      if (dir === subpath || dir.startsWith(scope)) {
+        dirs.push(dir);
+      }
+      continue;
+    }
     if (dir === "") {
       dirs.push("");
       continue;
@@ -198,18 +223,7 @@ async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
 
   const entries = await listZipEntries(zip);
   const entryPaths = entries.map((entry) => entry.path);
-
-  // A `/tree/<ref>/<subpath>` submission scopes discovery to that subtree.
-  const scope = source.subpath ? `${source.subpath}/` : "";
-  const scopedPaths = scope
-    ? entryPaths.filter((entryPath) => entryPath.startsWith(scope))
-    : entryPaths;
-
-  const skillDirs = discoverSkillDirectories(
-    scope
-      ? scopedPaths.map((entryPath) => entryPath.slice(scope.length))
-      : scopedPaths,
-  ).map((dir) => (scope ? `${scope}${dir}`.replace(/\/$/, "") : dir));
+  const skillDirs = discoverSkillDirectories(entryPaths, source.subpath);
 
   if (skillDirs.length === 0) {
     throw new RegistrySubmissionError(
@@ -220,7 +234,7 @@ async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
   if (skillDirs.length > REGISTRY_READ_LIMITS.maxSkillsPerRepo) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_TOO_LARGE",
-      `Repository ships more than the ${REGISTRY_READ_LIMITS.maxSkillsPerRepo}-skill limit`,
+      `Repository ships ${skillDirs.length} skills, more than the ${REGISTRY_READ_LIMITS.maxSkillsPerRepo}-skill limit for a single submission. Submit a subdirectory instead — a URL like https://github.com/owner/repo/tree/<branch>/skills/<group> indexes only that subtree.`,
     );
   }
 
