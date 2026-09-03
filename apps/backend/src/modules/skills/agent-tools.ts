@@ -79,21 +79,22 @@ export function buildSkillAgentTools(
   );
 
   const installSkill = tool(
-    async ({ source }: { source: string }) => {
+    async ({ source, skill }: { source: string; skill?: string }) => {
       try {
         const { skills } = await contentSkillsService.installSkill({
           teamId: context.teamId,
           workspaceId: context.workspaceId,
           userId: context.userId,
           source,
+          ...(skill ? { skill } : {}),
         });
 
         const lines: string[] = [];
-        const ready = skills.filter((skill) => skill.enabled);
+        const ready = skills.filter((item) => item.enabled);
         const needsEnabling = skills.filter(
-          (skill) => !skill.enabled && skill.status === "indexed",
+          (item) => !item.enabled && item.status === "indexed",
         );
-        const queued = skills.filter((skill) => skill.status === "queued");
+        const queued = skills.filter((item) => item.status === "queued");
 
         if (ready.length > 0) {
           lines.push(
@@ -136,8 +137,14 @@ export function buildSkillAgentTools(
     {
       name: "install_skill",
       description:
-        "Install a skill into this workspace so it is available from the next turn onward. `source` accepts a GitHub URL (optionally deep-linked to one skill's directory), the `owner/repo` shorthand, or the slug of a skill already in the catalog. A repository that is not indexed yet is fetched and indexed first, and a repo shipping several skills installs all of them. Skills that ship executable scripts install disabled and need the user to enable them.",
+        "Install a skill into this workspace so it is available from the next turn onward. `source` accepts a GitHub URL (optionally deep-linked to one skill's directory), the `owner/repo` shorthand, or the slug of a skill already in the catalog. A repository that is not indexed yet is fetched and indexed first. By default every skill the repository ships is installed; pass `skill` to install just one of them when the user asked for a specific capability. Skills that ship executable scripts install disabled and need the user to enable them.",
       schema: z.object({
+        skill: z
+          .string()
+          .optional()
+          .describe(
+            "Install only the skill with this name (the author's name, e.g. 'pdf'), instead of everything the repository ships. Use it whenever the user named one capability rather than asking for the whole repo.",
+          ),
         source: z
           .string()
           .min(1)

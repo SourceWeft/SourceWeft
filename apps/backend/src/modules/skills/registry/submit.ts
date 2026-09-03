@@ -19,6 +19,13 @@ const VERSION_SHA_PREFIX_LENGTH = 12;
 
 export type RegistrySkillSubmissionResult = {
   slug: string;
+  /**
+   * The author's frontmatter `name`. Carried alongside the derived slug because
+   * it is the handle a person uses ("the pdf skill"), and it cannot be
+   * recovered from `gh-<owner>-<repo>-<name>` by string surgery — owner and repo
+   * may contain hyphens of their own.
+   */
+  name: string;
   status: "indexed" | "queued";
   flags: string[];
 };
@@ -153,6 +160,7 @@ export async function submitRegistrySkillFromGitHub(input: {
 
     results.push({
       slug: analyzed.slug,
+      name: analyzed.name,
       status: decision.outcome,
       flags: analyzed.scan.flags,
     });

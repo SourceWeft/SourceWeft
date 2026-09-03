@@ -404,6 +404,13 @@ export class ContentSkillsService {
    * same surface `lh skill install <source>` exposes, and it is what lets the
    * agent act on "install a skill that can do X" without the user leaving chat.
    *
+   * `skill` narrows a multi-skill repository to the one that was asked for,
+   * mirroring `lh skill install <repo> --skill <name>`. Without it, "install the
+   * pdf skill from anthropics/skills" could only install all nineteen, because
+   * naming one otherwise means knowing its directory path — which the model has
+   * no way to learn before the repo is indexed. The whole repo is still INDEXED
+   * (that is what makes the rest searchable); only the install narrows.
+   *
    * A skill that ships executable scripts installs **disabled**. Installing is
    * a judgement about relevance; running third-party code is a separate
    * judgement, and nothing should make it silently for the user. The caller
@@ -414,8 +421,10 @@ export class ContentSkillsService {
     workspaceId: string;
     userId: string;
     source: string;
+    skill?: string;
   }) {
     const source = input.source.trim();
+    const wanted = input.skill?.trim().toLowerCase();
     if (!source) {
       throw new ContentError(
         400,
@@ -443,9 +452,29 @@ export class ContentSkillsService {
           userId: input.userId,
         });
 
-    const slugs = known
-      ? [source]
-      : (submitted?.skills ?? []).map((s) => s.slug);
+    const indexed = known
+      ? [{ slug: source, name: known.version.manifestJson.slug }]
+      : (submitted?.skills ?? []).map((s) => ({ slug: s.slug, name: s.name }));
+    // Match the author's frontmatter name — what a person actually says ("the
+    // pdf skill") rather than `gh-<owner>-<repo>-<name>`. A full slug works too.
+    const selected = wanted
+      ? indexed.filter(
+          (entry) =>
+            entry.name.toLowerCase() === wanted ||
+            entry.slug.toLowerCase() === wanted,
+        )
+      : indexed;
+    if (wanted && selected.length === 0) {
+      throw new ContentError(
+        404,
+        "SKILL_NOT_FOUND",
+        `'${source}' has no skill named '${input.skill}'. It ships: ${indexed
+          .map((entry) => entry.name)
+          .slice(0, 30)
+          .join(", ")}`,
+      );
+    }
+    const slugs = selected.map((entry) => entry.slug);
     for (const slug of slugs) {
       const row = await getRegistrySkillBySlug(slug);
       if (!row) {

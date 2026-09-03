@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
@@ -153,21 +153,21 @@ export async function getRegistrySkillForSubmission(
 }
 
 /**
- * The current definition + version for an indexed registry slug, or null.
+ * The definition + best version for an indexed registry slug, or null.
  * Used by agent-driven install to resolve a slug the model named, and to tell
  * a published skill from one still held in the review queue.
+ *
+ * "Best" is the current version when there is one, else the newest. A version
+ * held for review is never `isCurrent` (only a published one is), so matching
+ * on `isCurrent` alone made every queued skill invisible to this lookup — the
+ * caller then reported "no installable skill found" for a skill that had just
+ * been indexed and was merely awaiting review.
  */
 export async function getRegistrySkillBySlug(slug: string) {
   const [row] = await db
     .select({ definition: skillDefinitions, version: skillVersions })
     .from(skillDefinitions)
-    .innerJoin(
-      skillVersions,
-      and(
-        eq(skillVersions.skillId, skillDefinitions.id),
-        eq(skillVersions.isCurrent, true),
-      ),
-    )
+    .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
     .where(
       and(
         eq(skillDefinitions.slug, slug),
@@ -175,6 +175,7 @@ export async function getRegistrySkillBySlug(slug: string) {
         eq(skillDefinitions.status, "active"),
       ),
     )
+    .orderBy(desc(skillVersions.isCurrent), desc(skillVersions.createdAt))
     .limit(1);
   return row ?? null;
 }
