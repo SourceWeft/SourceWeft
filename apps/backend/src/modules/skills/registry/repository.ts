@@ -4,24 +4,29 @@ import {
   db,
   skillDefinitions,
   type SkillManifestJson,
+  skillVersionFiles,
   skillVersions,
 } from "@sourceweft/db";
-import {
-  assertNoRegistryFileWrite,
-  assertRegistryStorageInvariant,
-} from "../repository";
+import { assertRegistryStorageInvariant } from "../repository";
 import type { RegistryExistingEntry } from "./guard";
 
 /**
- * Stage 5 — Index (persist pointer only).
+ * Stage 5 — Index (persist the definition, version and bundle).
  * docs/architecture/skill-registry-index.md §3 Stage 5 / build phase R2.
  *
- * Writes a `sourceType='registry_github'` definition + a `storageType='pointer'`
- * version carrying frozen metadata (frontmatter + capability/scan +
- * `fileManifest`). It NEVER writes `skill_version_files`: this module does not
- * even import that table, so invariant 2 (the redistribution tripwire) is
- * enforced structurally, and the pointer write site additionally asserts
- * invariant 1 via `assertRegistryStorageInvariant`.
+ * Writes a `sourceType='registry_github'` definition, a `storageType='db_text'`
+ * version carrying the frozen metadata (frontmatter + capability/scan +
+ * `fileManifest`), and the bundle files themselves — the same storage every
+ * custom skill uses, so registry skills resolve through the ordinary
+ * `loadSkillVersionBundle` path with no branch of their own.
+ *
+ * Storing the bundle is what makes an indexed skill survive the upstream repo
+ * being deleted, rewritten or unreachable, and it is how every comparable
+ * project (LobeHub, Dify, Open WebUI) works. The line we do not cross is
+ * exposing that content as a retrievable artifact: there is no endpoint that
+ * hands a skill's files back out by id or hash. Provenance rides in
+ * `storagePointer` (`github:<owner>/<repo>@<40hex>#<subpath>`) and attribution
+ * in `manifestJson.registry`.
  */
 
 // The `version` label is derived from the pinned commit so each distinct commit
@@ -40,6 +45,16 @@ export type UpsertRegistrySkillInput = {
   manifestJson: SkillManifestJson;
   versionStatus: "published" | "draft";
   outcome: "indexed" | "queued";
+  /** The bundle bodies to persist, bundle-relative. */
+  files: RegistrySkillFile[];
+};
+
+export type RegistrySkillFile = {
+  path: string;
+  contentText: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
 };
 
 export type UpsertRegistrySkillResult = {
@@ -51,10 +66,8 @@ export type UpsertRegistrySkillResult = {
 };
 
 /**
- * Build the definition + version insert values for a registry skill, asserting
- * invariant 1 (pointer ⇔ registry_github) at the pointer write site. Pure and
- * body-free — there is no field for file content, which is invariant 2 expressed
- * as a type.
+ * Build the definition + version insert values for a registry skill. Pure; the
+ * bundle bodies are written separately by `upsertRegistrySkillIndex`.
  */
 export function buildRegistryUpsertValues(input: {
   displayName: string;
@@ -66,8 +79,8 @@ export function buildRegistryUpsertValues(input: {
   versionStatus: "published" | "draft";
 }) {
   const sourceType = "registry_github" as const;
-  const storageType = "pointer" as const;
-  // Invariant 1 (§0): pointer storage is used by, and only by, registry skills.
+  const storageType = "db_text" as const;
+  // `repo_builtin` is reserved for skills whose bodies ship in this repo.
   assertRegistryStorageInvariant(sourceType, storageType);
 
   return {
@@ -105,7 +118,7 @@ export function buildRegistryUpsertValues(input: {
  */
 export async function getRegistrySkillForSubmission(
   slug: string,
-): Promise<RegistryExistingEntry & { skillId: string } | null> {
+): Promise<(RegistryExistingEntry & { skillId: string }) | null> {
   const [row] = await db
     .select({
       skillId: skillDefinitions.id,
@@ -153,20 +166,13 @@ export async function upsertRegistrySkillIndex(
     versionStatus: input.versionStatus,
   });
 
-  // Invariant 2 (redistribution tripwire, §0/§1): a pointer version persists
-  // ZERO file bodies. The registry pipeline carries only file *metadata* (the
-  // manifest), so this set is always empty; routing it through the shared
-  // file-write guard reuses the invariant at the write site — if a body ever
-  // reached here, `assertNoRegistryFileWrite` would throw.
-  const fileBodiesToPersist: Array<{ storageType: "pointer" }> = [];
-  for (const body of fileBodiesToPersist) {
-    assertNoRegistryFileWrite(body.storageType);
-  }
-
   const now = new Date();
   return db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ id: skillDefinitions.id, ownerUserId: skillDefinitions.ownerUserId })
+      .select({
+        id: skillDefinitions.id,
+        ownerUserId: skillDefinitions.ownerUserId,
+      })
       .from(skillDefinitions)
       .where(
         and(
@@ -237,8 +243,7 @@ export async function upsertRegistrySkillIndex(
           isCurrent: values.version.isCurrent,
           contentHash: values.version.contentHash,
           manifestJson: values.version.manifestJson,
-          publishedAt:
-            values.version.status === "published" ? now : null,
+          publishedAt: values.version.status === "published" ? now : null,
           updatedAt: now,
         })
         .where(eq(skillVersions.id, skillVersionId));
@@ -258,6 +263,25 @@ export async function upsertRegistrySkillIndex(
         createdAt: now,
         updatedAt: now,
       });
+    }
+
+    // Replace the whole bundle rather than merging: a re-submit of the same
+    // commit must not leave behind files the upstream skill has since dropped.
+    await tx
+      .delete(skillVersionFiles)
+      .where(eq(skillVersionFiles.skillVersionId, skillVersionId));
+    if (input.files.length > 0) {
+      await tx.insert(skillVersionFiles).values(
+        input.files.map((file) => ({
+          id: randomUUID(),
+          skillVersionId,
+          path: file.path,
+          contentText: file.contentText,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          contentHash: file.contentHash,
+        })),
+      );
     }
 
     return {

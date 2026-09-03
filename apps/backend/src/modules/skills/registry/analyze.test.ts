@@ -11,6 +11,7 @@ function file(bundlePath: string, contentText: string): DiscoveredSkillFile {
     bundlePath,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     sizeBytes: bytes.byteLength,
+    mimeType: bundlePath.endsWith(".md") ? "text/markdown" : "text/plain",
     contentText,
   };
 }

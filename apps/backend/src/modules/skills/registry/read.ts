@@ -38,12 +38,42 @@ const SKIP_DIR_NAMES = new Set(["node_modules", "dist", ".git"]);
 /** Containers under which per-skill subdirectories live (§3 Stage 2). */
 const SKILL_CONTAINERS = ["skills", ".claude/skills", ".agents/skills"];
 
+/** Mirrors builtin.ts TEXT_MIME_BY_EXTENSION; anything else serves as text. */
+const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+  ".json": "application/json",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+};
+
+/**
+ * A skill bundle is text — SKILL.md, references, scripts. Real repos also ship
+ * binary assets alongside them (anthropics/skills ships 56 `.ttf` fonts under
+ * `canvas-design/`), and those cannot be carried: `contentText` is a Postgres
+ * `text` column, so invalid UTF-8 is rejected at insert time, and a lossy
+ * decode would store mojibake whose sha256 no longer matches the source. They
+ * are dropped from the bundle rather than mangled — binary assets are a known
+ * non-goal — which also keeps `fileManifest` an honest description of what we
+ * actually carry.
+ */
+function isUtf8Text(bytes: Buffer, decoded: string): boolean {
+  return Buffer.byteLength(decoded, "utf8") === bytes.byteLength;
+}
+
+function mimeTypeFor(bundlePath: string): string {
+  const dot = bundlePath.lastIndexOf(".");
+  const ext = dot < 0 ? "" : bundlePath.slice(dot).toLowerCase();
+  return TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain";
+}
+
 export type DiscoveredSkillFile = {
   /** Path relative to the skill BUNDLE root (e.g. `SKILL.md`, `scripts/run.py`). */
   bundlePath: string;
   /** sha256 over the raw file bytes. */
   sha256: string;
   sizeBytes: number;
+  mimeType: string;
   contentText: string;
 };
 
@@ -190,14 +220,19 @@ export async function readRegistrySkillsFromGitHub(
     if (!bytes) {
       continue;
     }
+    const contentText = bytes.toString("utf8");
+    if (!isUtf8Text(bytes, contentText)) {
+      continue;
+    }
     const prefix = skillDir === "" ? "" : `${skillDir}/`;
+    const bundlePath = entryPath.slice(prefix.length);
     byDir.get(skillDir)?.files.push({
-      bundlePath: entryPath.slice(prefix.length),
+      bundlePath,
+      // sha256 is over the raw bytes, so integrity stays byte-exact.
       sha256: sha256(bytes),
       sizeBytes: bytes.byteLength,
-      // Decoded as UTF-8 for static analysis only; the sha256 above is over the
-      // raw bytes, so stored integrity stays byte-exact.
-      contentText: bytes.toString("utf8"),
+      mimeType: mimeTypeFor(bundlePath),
+      contentText,
     });
   }
   for (const skill of skills) {

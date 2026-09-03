@@ -19,9 +19,13 @@ const guardCalls = vi.hoisted(() => ({
 
 // Tables written inside the transaction, in order.
 const dbState = vi.hoisted(() => ({
-  ops: [] as Array<{ op: "insert" | "update" | "select"; table: string }>,
+  ops: [] as Array<{
+    op: "insert" | "update" | "select" | "delete";
+    table: string;
+  }>,
   definitionRows: [] as unknown[],
   versionRows: [] as unknown[],
+  fileRows: [] as unknown[],
 }));
 
 vi.mock("../repository", async (importOriginal) => {
@@ -31,10 +35,6 @@ vi.mock("../repository", async (importOriginal) => {
     assertRegistryStorageInvariant: (source: never, storage: never) => {
       guardCalls.invariant.push([source, storage]);
       return actual.assertRegistryStorageInvariant(source, storage);
-    },
-    assertNoRegistryFileWrite: (storage: never) => {
-      guardCalls.fileWrite.push([storage]);
-      return actual.assertNoRegistryFileWrite(storage);
     },
   };
 });
@@ -83,8 +83,19 @@ vi.mock("@sourceweft/db", async () => {
       insert(t: unknown) {
         const table = tableNameOf(t);
         return {
-          values: async () => {
+          values: async (rows: unknown) => {
             dbState.ops.push({ op: "insert", table });
+            if (table === "skill_version_files") {
+              dbState.fileRows.push(...(Array.isArray(rows) ? rows : [rows]));
+            }
+          },
+        };
+      },
+      delete(t: unknown) {
+        const table = tableNameOf(t);
+        return {
+          where: async () => {
+            dbState.ops.push({ op: "delete", table });
           },
         };
       },
@@ -110,9 +121,8 @@ vi.mock("@sourceweft/db", async () => {
   };
 });
 
-const { buildRegistryUpsertValues, upsertRegistrySkillIndex } = await import(
-  "./repository"
-);
+const { buildRegistryUpsertValues, upsertRegistrySkillIndex } =
+  await import("./repository");
 
 const MANIFEST: SkillManifestJson = {
   slug: "gh-acme-skills",
@@ -130,12 +140,19 @@ const MANIFEST: SkillManifestJson = {
     scan: { reviewRequired: false, flags: [] },
     license: "MIT",
     fileManifest: [
-      { path: "SKILL.md", sha256: "a".repeat(64), sizeBytes: 10, role: "model-readable" },
+      {
+        path: "SKILL.md",
+        sha256: "a".repeat(64),
+        sizeBytes: 10,
+        role: "model-readable",
+      },
     ],
   },
 };
 
-function upsertInput(overrides: Partial<Parameters<typeof upsertRegistrySkillIndex>[0]> = {}) {
+function upsertInput(
+  overrides: Partial<Parameters<typeof upsertRegistrySkillIndex>[0]> = {},
+) {
   return {
     slug: "gh-acme-skills",
     displayName: "Writer",
@@ -147,19 +164,28 @@ function upsertInput(overrides: Partial<Parameters<typeof upsertRegistrySkillInd
     manifestJson: MANIFEST,
     versionStatus: "published" as const,
     outcome: "indexed" as const,
+    files: [
+      {
+        path: "SKILL.md",
+        contentText: "---\nname: writer\n---\n",
+        mimeType: "text/markdown",
+        sizeBytes: 10,
+        contentHash: "a".repeat(64),
+      },
+    ],
     ...overrides,
   };
 }
 
 beforeEach(() => {
   guardCalls.invariant = [];
-  guardCalls.fileWrite = [];
   dbState.ops = [];
   dbState.definitionRows = [];
   dbState.versionRows = [];
+  dbState.fileRows = [];
 });
 
-test("buildRegistryUpsertValues asserts invariant 1 and emits the pointer pairing", () => {
+test("buildRegistryUpsertValues stores the bundle like a custom skill", () => {
   const values = buildRegistryUpsertValues({
     displayName: "Writer",
     description: "d",
@@ -170,16 +196,19 @@ test("buildRegistryUpsertValues asserts invariant 1 and emits the pointer pairin
     versionStatus: "published",
   });
   assert.equal(values.sourceType, "registry_github");
-  assert.equal(values.storageType, "pointer");
+  // Registry skills get no storage type of their own — `repo_builtin` stays
+  // reserved for bodies that ship in this repo.
+  assert.equal(values.storageType, "db_text");
   assert.equal(values.definition.sourceType, "registry_github");
   assert.equal(values.definition.visibility, "restricted");
-  assert.equal(values.version.storageType, "pointer");
+  assert.equal(values.version.storageType, "db_text");
   assert.equal(values.version.isCurrent, true);
-  // The pointer write site reused the storage-invariant guard.
-  assert.deepEqual(guardCalls.invariant.at(-1), ["registry_github", "pointer"]);
+  // Provenance is still pinned to the immutable commit.
+  assert.equal(values.version.storagePointer, "github:acme/skills@sha");
+  assert.deepEqual(guardCalls.invariant.at(-1), ["registry_github", "db_text"]);
 });
 
-test("a new clean submission writes only definition + version, never files", async () => {
+test("a new clean submission writes the definition, version and bundle", async () => {
   const result = await upsertRegistrySkillIndex(upsertInput());
   assert.equal(result.status, "indexed");
   assert.equal(result.version, "a".repeat(12));
@@ -189,21 +218,27 @@ test("a new clean submission writes only definition + version, never files", asy
     .map((op) => op.table);
   assert.ok(tablesWritten.includes("skill_definitions"));
   assert.ok(tablesWritten.includes("skill_versions"));
-  // Invariant 2: the redistribution tripwire — no file bodies are ever written.
-  assert.equal(tablesWritten.includes("skill_version_files"), false);
-  // Invariant 1 was reused at the write site.
-  assert.deepEqual(guardCalls.invariant.at(-1), ["registry_github", "pointer"]);
+  assert.ok(tablesWritten.includes("skill_version_files"));
+  assert.equal(dbState.fileRows.length, 1);
+  assert.deepEqual(guardCalls.invariant.at(-1), ["registry_github", "db_text"]);
 });
 
-test("a queued (draft) submission also never writes files", async () => {
+test("re-indexing replaces the bundle rather than merging into it", async () => {
+  await upsertRegistrySkillIndex(upsertInput());
+  // A file the upstream skill has since dropped must not survive a re-submit.
+  const deletes = dbState.ops.filter(
+    (op) => op.op === "delete" && op.table === "skill_version_files",
+  );
+  assert.equal(deletes.length, 1);
+});
+
+test("a queued (draft) submission stores its bundle too", async () => {
   const result = await upsertRegistrySkillIndex(
     upsertInput({ versionStatus: "draft", outcome: "queued" }),
   );
   assert.equal(result.status, "queued");
-  const tablesWritten = dbState.ops
-    .filter((op) => op.op !== "select")
-    .map((op) => op.table);
-  assert.equal(tablesWritten.includes("skill_version_files"), false);
+  // Held back from the catalog by `status`, not by withholding its content.
+  assert.equal(dbState.fileRows.length, 1);
 });
 
 test("re-submitting an existing slug updates in place (no duplicate definition)", async () => {
@@ -211,9 +246,18 @@ test("re-submitting an existing slug updates in place (no duplicate definition)"
   dbState.versionRows = [{ id: "ver-1" }];
   await upsertRegistrySkillIndex(upsertInput());
 
-  const inserts = dbState.ops.filter((op) => op.op === "insert").map((op) => op.table);
+  const inserts = dbState.ops
+    .filter((op) => op.op === "insert")
+    .map((op) => op.table);
   // Existing definition + version → updates, not inserts.
   assert.equal(inserts.includes("skill_definitions"), false);
   assert.equal(inserts.includes("skill_versions"), false);
-  assert.equal(inserts.includes("skill_version_files"), false);
+  // The bundle is the exception: it is deleted and rewritten wholesale, so a
+  // file the upstream skill has since dropped does not survive the re-submit.
+  assert.ok(inserts.includes("skill_version_files"));
+  assert.ok(
+    dbState.ops.some(
+      (op) => op.op === "delete" && op.table === "skill_version_files",
+    ),
+  );
 });

@@ -10,7 +10,6 @@ import {
   listWorkspaceSkillRecordsByIds,
   loadSkillVersionBundle,
 } from "./repository";
-import { loadPointerSkillBundle } from "./registry/pointer-bundle";
 import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
 import type { EnabledSkillDescriptor, WorkspaceSkillRecord } from "./types";
 
@@ -239,11 +238,9 @@ async function resolveWorkspaceRuntimeSkill(input: {
       "Selected skill is no longer available to this workspace",
     );
   }
-  // Revocation gate — reused unchanged for pointer/registry skills: flipping a
-  // registry version to `deprecated` (or archiving the definition, filtered out
-  // by loadSkillVersionBundle) already revokes it here, so the pointer branch
-  // needs no separate revocation mechanism (docs/architecture/
-  // skill-registry-index.md §6a).
+  // Revocation gate — shared by every source: flipping a version to
+  // `deprecated` (or archiving the definition, which `loadSkillVersionBundle`
+  // filters out) revokes it here, registry skills included.
   if (bundle.version.status !== "published") {
     throw new ContentError(
       403,
@@ -256,34 +253,6 @@ async function resolveWorkspaceRuntimeSkill(input: {
   if (bundle.version.storageType === "repo_builtin") {
     files = (await loadBuiltinSkillBundle(bundle.version.storagePointer))
       ?.files;
-  } else if (bundle.version.storageType === "pointer") {
-    // R5 fetch-on-use: a registry (`registry_github`) version stores no file
-    // bodies (invariant 2). Fetch from the pinned commit and verify every file.
-    // A selected skill is part of the turn contract, so failure is fatal rather
-    // than silently changing the agent's instruction set.
-    const pointerFiles = await loadPointerSkillBundle(
-      bundle.version.storagePointer,
-      bundle.version.contentHash,
-      bundle.version.manifestJson.registry,
-    );
-    if (!pointerFiles) {
-      throw new ContentError(
-        502,
-        "SKILL_PREPARATION_FAILED",
-        `Selected skill '${bundle.definition.slug}' could not be loaded from its pinned registry source`,
-        {
-          details: {
-            reason: "pointer_fetch_or_integrity_verification_failed",
-            workspaceSkillId: input.record.id,
-            skillId: input.record.skillId,
-            skillVersionId: input.record.skillVersionId,
-            storageType: "pointer",
-          },
-          recoverable: true,
-        },
-      );
-    }
-    files = pointerFiles;
   } else {
     files = bundle.files;
   }

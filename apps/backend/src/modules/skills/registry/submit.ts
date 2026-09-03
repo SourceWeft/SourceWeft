@@ -140,6 +140,13 @@ export async function submitRegistrySkillFromGitHub(input: {
       commitSha,
       contentHash: analyzed.contentSha256,
       manifestJson,
+      files: discovered.files.map((file) => ({
+        path: file.bundlePath,
+        contentText: file.contentText,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        contentHash: file.sha256,
+      })),
       versionStatus: decision.versionStatus,
       outcome: decision.outcome,
     });

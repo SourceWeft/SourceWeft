@@ -190,6 +190,13 @@
       "when": 1788336402781,
       "tag": "0026_brief_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788420013639,
+      "tag": "0027_ancient_wither",
+      "breakpoints": true
     }
   ]
 }

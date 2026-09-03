@@ -57,7 +57,7 @@ function catalogRow(input: {
       skillId: input.id,
       version: "1.0.0",
       status: "published",
-      storageType: "pointer",
+      storageType: "db_text",
       storagePointer: "github:owner/repo@sha#SKILL.md",
       isCurrent: true,
       contentHash: "hash",

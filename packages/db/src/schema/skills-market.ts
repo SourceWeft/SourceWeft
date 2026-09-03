@@ -20,17 +20,12 @@ type SkillDefinitionSourceType =
   | "workspace_custom"
   | "team_custom"
   // Submission-based GitHub registry index (docs/architecture/
-  // skill-registry-index.md): pointer + metadata only, never file bodies.
+  // skill-registry-index.md): indexed from a submitted repo, pinned to an
+  // immutable commit recorded in `storagePointer`.
   | "registry_github";
 type SkillDefinitionStatus = "active" | "archived";
 type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
-type SkillVersionStorageType =
-  | "repo_builtin"
-  | "db_text"
-  // Content fetched-on-use from the pinned upstream commit; a `pointer`
-  // version has ZERO skill_version_files rows (redistribution tripwire,
-  // invariant 2 of skill-registry-index.md).
-  | "pointer";
+type SkillVersionStorageType = "repo_builtin" | "db_text";
 export type SkillManifestVisibility =
   "public" | "restricted" | "workspace" | "team";
 export type SkillManifestJson = {
@@ -222,7 +217,7 @@ export const skillVersions = pgTable(
     ),
     check(
       "skill_versions_storage_type_check",
-      sql`${table.storageType} in ('repo_builtin', 'db_text', 'pointer')`,
+      sql`${table.storageType} in ('repo_builtin', 'db_text')`,
     ),
     uniqueIndex("skill_versions_skill_version_uq").on(
       table.skillId,

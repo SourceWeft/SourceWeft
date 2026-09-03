@@ -7,18 +7,7 @@ import {
   resolveSelectedSkills,
   resolveSkillIdsWithSlashCommand,
 } from "./selection";
-import { __clearPointerBundleCache } from "./registry/pointer-bundle";
 import type { WorkspaceSkillRecord } from "./types";
-
-// selection.ts calls loadPointerSkillBundle without an options bag, so the
-// tarball download can only be faked at the module seam. Everything else in
-// the module (parsePointer, cache reset) stays real.
-const loadPointerSkillBundleMock = vi.hoisted(() => vi.fn());
-vi.mock("./registry/pointer-bundle", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("./registry/pointer-bundle")>();
-  return { ...actual, loadPointerSkillBundle: loadPointerSkillBundleMock };
-});
 
 const emptyWorkspaceSkillDependencies = {
   listEnabledWorkspaceSkills: async () => [],
@@ -242,7 +231,7 @@ test("resolveSelectedSkills ignores disabled workspace skills unless explicitly 
   assert.deepEqual(skills, []);
 });
 
-function pointerBundle(input: {
+function registryBundle(input: {
   record: WorkspaceSkillRecord;
   contentHash: string;
   skillMdSha: string;
@@ -267,7 +256,7 @@ function pointerBundle(input: {
       skillId: input.record.skillId,
       version: "1.0.0",
       status: "published" as const,
-      storageType: "pointer" as const,
+      storageType: "db_text" as const,
       storagePointer: `github:acme/skill@${"a".repeat(40)}`,
       isCurrent: true,
       contentHash: input.contentHash,
@@ -306,24 +295,13 @@ function pointerBundle(input: {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  loadPointerSkillBundleMock.mockReset();
-  __clearPointerBundleCache();
 });
 
-test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use", async () => {
+test("resolveSelectedSkills resolves a registry skill from its stored bundle", async () => {
   const skillMd = "# Community Skill\ninstructions";
   const skillMdSha = createHash("sha256")
     .update(Buffer.from(skillMd, "utf8"))
     .digest("hex");
-  loadPointerSkillBundleMock.mockResolvedValue([
-    {
-      path: "SKILL.md",
-      contentText: skillMd,
-      mimeType: "text/markdown",
-      sizeBytes: Buffer.byteLength(skillMd),
-      contentHash: skillMdSha,
-    },
-  ]);
 
   const record = workspaceSkill();
   const skills = await resolveSelectedSkills({
@@ -332,39 +310,26 @@ test("resolveSelectedSkills resolves a registry pointer skill via fetch-on-use",
     skillIds: [record.id],
     listEnabledWorkspaceSkills: async () => [],
     listWorkspaceSkillsByIds: async () => [record],
-    loadWorkspaceSkillVersion: async () =>
-      pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
+    // A registry skill stores its bundle like any custom skill, so it resolves
+    // through the ordinary db_text path with no branch of its own.
+    loadWorkspaceSkillVersion: async () => ({
+      ...registryBundle({ record, contentHash: skillMdSha, skillMdSha }),
+      files: [
+        {
+          path: "SKILL.md",
+          contentText: skillMd,
+          mimeType: "text/markdown",
+          sizeBytes: Buffer.byteLength(skillMd),
+          contentHash: skillMdSha,
+        },
+      ],
+    }),
   });
 
   assert.equal(skills.length, 1);
   assert.equal(skills[0]?.sourceType, "registry_github");
   assert.equal(skills[0]?.files[0]?.path, "SKILL.md");
   assert.equal(skills[0]?.files[0]?.contentText, skillMd);
-});
-
-test("resolveSelectedSkills fails when a selected pointer skill cannot be prepared", async () => {
-  const skillMdSha = createHash("sha256").update("x").digest("hex");
-  // Tarball download failed / integrity rejected → loader reports null.
-  loadPointerSkillBundleMock.mockResolvedValue(null);
-
-  const record = workspaceSkill();
-  await assert.rejects(
-    () =>
-      resolveSelectedSkills({
-        teamId: "team-1",
-        workspaceId: "workspace-1",
-        skillIds: [record.id],
-        listEnabledWorkspaceSkills: async () => [],
-        listWorkspaceSkillsByIds: async () => [record],
-        loadWorkspaceSkillVersion: async () =>
-          pointerBundle({ record, contentHash: skillMdSha, skillMdSha }),
-      }),
-    (error) =>
-      error instanceof ContentError &&
-      error.code === "SKILL_PREPARATION_FAILED" &&
-      (error.details as { workspaceSkillId?: string }).workspaceSkillId ===
-        record.id,
-  );
 });
 
 test("resolveSelectedSkills rejects explicitly selected disabled workspace skills", async () => {
