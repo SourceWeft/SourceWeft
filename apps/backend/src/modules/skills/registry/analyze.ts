@@ -140,10 +140,35 @@ function referencesOutOfBundlePath(
 }
 
 /**
- * Classify + verify capability (§3 Stage 3). `executable` when the bundle ships
- * scripts, model-readable content contains fenced shell blocks, or `allowed-tools`
- * implies execution. The mismatch flag is the "don't trust the manifest" gate: a
- * skill that reads prompt-only yet ships scripts is flagged for review.
+ * Classify + verify capability (§3 Stage 3).
+ *
+ * `capability` answers one question: **does this bundle ship code we would
+ * stage into the sandbox?** That is what the install gate acts on — an
+ * `executable` skill installs switched off, because running third-party code is
+ * the user's decision. So it is decided by what the bundle CONTAINS: files with
+ * `role: "script"`, or a frontmatter `allowed-tools` that asks for a shell,
+ * which is an explicit declaration of executable intent.
+ *
+ * A fenced shell block in SKILL.md is deliberately NOT part of that answer.
+ * Prose is not capability: measured across a 90-skill repository, 64 of the 78
+ * it classified as executable shipped nothing but markdown and were caught
+ * solely by a one-line `npx skills add …` install snippet in their own docs.
+ * An 82% false-positive rate does not make the gate cautious, it makes it
+ * noise — the user sees a pile of inexplicably disabled skills and switches
+ * them all on, which is strictly worse than not having gated at all.
+ *
+ * Dangerous INSTRUCTIONS are a real hazard, just a different one, and the scan
+ * already owns it: `EGRESS_PATTERNS` flags `curl … | sh`, base64-pipe-to-shell
+ * and outbound posts wherever they appear, prose included, and routes the skill
+ * to review. The fence adds nothing on top of that — what it uniquely matched
+ * here was `npx skills add …` and `make all` — so it raises no flag either.
+ * Raising one would be the same mistake wearing a different hat: every flag
+ * sets `reviewRequired`, so those 64 skills would go from merely disabled to
+ * queued, which the user cannot even switch on.
+ *
+ * It still feeds `undeclaredScripts`, where it does real work: a bundle that
+ * ships scripts while its prose never mentions running anything is exactly the
+ * mismatch a reviewer should see.
  */
 function classifyCapability(input: {
   files: AnalyzedRegistrySkill["fileManifest"];
@@ -151,11 +176,12 @@ function classifyCapability(input: {
   hasSensitiveTool: boolean;
 }): { capability: "prompt-only" | "executable"; undeclaredScripts: boolean } {
   const shipsScripts = input.files.some((file) => file.role === "script");
-  const readsExecutable = input.hasShellFence || input.hasSensitiveTool;
   const capability =
-    shipsScripts || readsExecutable ? "executable" : "prompt-only";
-  // Ships executable material but nothing in the instructions/tools declares it.
-  const undeclaredScripts = shipsScripts && !readsExecutable;
+    shipsScripts || input.hasSensitiveTool ? "executable" : "prompt-only";
+  // Ships executable material but nothing in the instructions/tools declares it
+  // — the "don't trust the manifest" gate.
+  const undeclaredScripts =
+    shipsScripts && !input.hasShellFence && !input.hasSensitiveTool;
   return { capability, undeclaredScripts };
 }
 
