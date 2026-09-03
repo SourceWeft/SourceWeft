@@ -376,7 +376,14 @@ export async function upsertWorkspaceSkill(input: {
   skillVersionId: string;
   enabledBy: string;
   configJson?: Record<string, unknown>;
+  /**
+   * Defaults to true — installing is normally the act of enabling. Agent-driven
+   * installs pass `false` for a skill that ships executable scripts, so nobody
+   * ends up running third-party code they never chose to turn on.
+   */
+  enabled?: boolean;
 }) {
+  const enabled = input.enabled ?? true;
   const now = new Date();
   return db.transaction(async (tx) => {
     const [existing] = await tx
@@ -396,7 +403,7 @@ export async function upsertWorkspaceSkill(input: {
         .update(workspaceSkills)
         .set({
           skillVersionId: input.skillVersionId,
-          enabled: true,
+          enabled,
           configJson: input.configJson ?? {},
           enabledBy: input.enabledBy,
           enabledAt: now,
@@ -418,7 +425,7 @@ export async function upsertWorkspaceSkill(input: {
         workspaceId: input.workspaceId,
         skillId: input.skillId,
         skillVersionId: input.skillVersionId,
-        enabled: true,
+        enabled,
         configJson: input.configJson ?? {},
         enabledBy: input.enabledBy,
         enabledAt: now,

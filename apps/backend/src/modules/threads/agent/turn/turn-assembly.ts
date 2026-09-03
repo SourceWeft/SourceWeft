@@ -4,6 +4,7 @@ import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "../..";
 import type { RunCancellationGate } from "../../run-cancellation";
 import { SelectedSkillsBackend } from "../../../skills/backend";
+import { buildSkillAgentTools } from "../../../skills/agent-tools";
 import {
   buildConnectorActionToolset,
   type ConnectorActionToolContext,
@@ -188,10 +189,7 @@ export function buildAgentBackend(input: {
     sandboxRuntime,
   } = input;
   const defaultBackend = sandboxRuntime
-    ? new TurnScopedSandboxBackend(
-        sandboxRuntime.backend,
-        executeToolCallId,
-      )
+    ? new TurnScopedSandboxBackend(sandboxRuntime.backend, executeToolCallId)
     : filesystemBackend.backend;
   const sandboxRoot = sandboxRuntime
     ? sandboxRuntime.pathPolicy.workspaceRoot ||
@@ -444,6 +442,7 @@ export interface ToolCollectionInput {
 
 export interface ToolCollection {
   capabilityTools: AgentTurnTool[];
+  skillTools: AgentTurnTool[];
   webTools: AgentTurnTool[];
   artifactTools: AgentTurnTool[];
   promptProviders: ArtifactToolRuntimePromptProvider[];
@@ -612,6 +611,7 @@ export async function buildThreadAgentAssembly(
   } = input;
   const {
     capabilityTools,
+    skillTools,
     connectorActionTools,
     connectorInterruptOn,
     mcpTools,
@@ -634,6 +634,7 @@ export async function buildThreadAgentAssembly(
   );
   const boundTools = filterCommandPolicyTools(prepared, [
     ...filterAllowedTools(prepared, capabilityTools),
+    ...filterAllowedTools(prepared, skillTools),
     ...connectorActionTools,
     ...mcpTools,
     ...(sandboxRuntime?.tools ?? []),
@@ -985,6 +986,11 @@ export async function buildToolCollection(
 
   return {
     capabilityTools: [...capabilityAgentTools.tools],
+    skillTools: buildSkillAgentTools({
+      teamId: prepared.workspace.organizationId,
+      workspaceId: prepared.workspace.id,
+      userId: prepared.userId,
+    }),
     webTools: [...capabilityAgentTools.webTools],
     artifactTools: [...capabilityAgentTools.artifactTools],
     promptProviders: [...capabilityAgentTools.promptProviders],

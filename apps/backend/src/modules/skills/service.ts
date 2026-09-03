@@ -37,6 +37,8 @@ import {
 } from "@sourceweft/db";
 import type { SkillCatalogItem, SkillSourceType } from "./types";
 import { builtinSkillSelectionId } from "./selection";
+import { submitRegistrySkillFromGitHub } from "./registry/submit";
+import { getRegistrySkillBySlug } from "./registry/repository";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
 // curated index, not a document corpus (skill-registry-index.md §4).
@@ -188,16 +190,18 @@ export class ContentSkillsService {
     await validateBuiltinSkills();
     const synced = [];
     for (const skill of await listBuiltinSkills()) {
-      synced.push(await syncBuiltinSkillMetadata({
-        slug: skill.slug,
-        displayName: skill.displayName,
-        description: skill.description,
-        visibility: skill.visibility,
-        version: skill.version,
-        storagePointer: skill.storagePointer,
-        contentHash: skill.contentHash,
-        manifestJson: skill.manifestJson,
-      }));
+      synced.push(
+        await syncBuiltinSkillMetadata({
+          slug: skill.slug,
+          displayName: skill.displayName,
+          description: skill.description,
+          visibility: skill.visibility,
+          version: skill.version,
+          storagePointer: skill.storagePointer,
+          contentHash: skill.contentHash,
+          manifestJson: skill.manifestJson,
+        }),
+      );
     }
     return { items: synced };
   }
@@ -391,6 +395,105 @@ export class ContentSkillsService {
     return { items, query };
   }
 
+  /**
+   * Install a skill by source, indexing it first if we have never seen it.
+   *
+   * `source` accepts the three forms a person would naturally give: a GitHub
+   * URL (optionally deep-linked to one skill's directory), the `owner/repo`
+   * shorthand, or the slug of something already in the catalog. That is the
+   * same surface `lh skill install <source>` exposes, and it is what lets the
+   * agent act on "install a skill that can do X" without the user leaving chat.
+   *
+   * A skill that ships executable scripts installs **disabled**. Installing is
+   * a judgement about relevance; running third-party code is a separate
+   * judgement, and nothing should make it silently for the user. The caller
+   * surfaces `enabled: false` so the agent can say so.
+   */
+  async installSkill(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    source: string;
+  }) {
+    const source = input.source.trim();
+    if (!source) {
+      throw new ContentError(
+        400,
+        "SKILL_SOURCE_REQUIRED",
+        "A skill source is required",
+      );
+    }
+
+    const installed: Array<{
+      slug: string;
+      displayName: string;
+      description: string;
+      capability: "prompt-only" | "executable";
+      enabled: boolean;
+      status: "indexed" | "queued";
+    }> = [];
+
+    // An already-indexed slug installs directly; anything else is a repo
+    // reference and goes through the submit pipeline first.
+    const known = await getRegistrySkillBySlug(source);
+    const submitted = known
+      ? null
+      : await submitRegistrySkillFromGitHub({
+          repoUrl: source,
+          userId: input.userId,
+        });
+
+    const slugs = known
+      ? [source]
+      : (submitted?.skills ?? []).map((s) => s.slug);
+    for (const slug of slugs) {
+      const row = await getRegistrySkillBySlug(slug);
+      if (!row) {
+        continue;
+      }
+      const capability =
+        row.version.manifestJson.registry?.capability ?? "prompt-only";
+      // A queued (draft) version is not selectable, so installing it would be a
+      // dead reference — record it in the result and move on.
+      if (row.version.status !== "published") {
+        installed.push({
+          slug,
+          displayName: row.definition.displayName,
+          description: row.definition.description,
+          capability,
+          enabled: false,
+          status: "queued",
+        });
+        continue;
+      }
+      await upsertWorkspaceSkill({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        skillId: row.definition.id,
+        skillVersionId: row.version.id,
+        enabledBy: input.userId,
+        enabled: capability !== "executable",
+      });
+      installed.push({
+        slug,
+        displayName: row.definition.displayName,
+        description: row.definition.description,
+        capability,
+        enabled: capability !== "executable",
+        status: "indexed",
+      });
+    }
+
+    if (installed.length === 0) {
+      throw new ContentError(
+        404,
+        "SKILL_NOT_FOUND",
+        `No installable skill was found at '${source}'`,
+      );
+    }
+    return { skills: installed };
+  }
+
   async listWorkspaceSkills(input: { teamId: string; workspaceId: string }) {
     return { items: await listWorkspaceInstalledSkills(input) };
   }
@@ -430,7 +533,9 @@ export class ContentSkillsService {
     catalogId: string;
   }) {
     const catalog = await this.listCatalog(input);
-    const item = catalog.items.find((candidate) => candidate.catalogId === input.catalogId);
+    const item = catalog.items.find(
+      (candidate) => candidate.catalogId === input.catalogId,
+    );
     if (!item) {
       throw new ContentError(404, "SKILL_NOT_FOUND", "Skill not found");
     }
@@ -441,7 +546,8 @@ export class ContentSkillsService {
     return {
       skill: { ...item, hasReadme: readmeContent !== null },
       readmeContent,
-      skillContent: files.find((file) => file.path === "SKILL.md")?.contentText ?? null,
+      skillContent:
+        files.find((file) => file.path === "SKILL.md")?.contentText ?? null,
     };
   }
 
@@ -452,7 +558,7 @@ export class ContentSkillsService {
     if (!item.installable && item.sourceType === "builtin") {
       const skill = await getBuiltinSkillBySlug(item.slug);
       return skill
-        ? (await loadBuiltinSkillBundle(skill.storagePointer))?.files ?? []
+        ? ((await loadBuiltinSkillBundle(skill.storagePointer))?.files ?? [])
         : [];
     }
     const bundle = await loadSkillVersionBundle({
@@ -465,8 +571,10 @@ export class ContentSkillsService {
       return [];
     }
     if (bundle.version.storageType === "repo_builtin") {
-      return (await loadBuiltinSkillBundle(bundle.version.storagePointer))
-        ?.files ?? [];
+      return (
+        (await loadBuiltinSkillBundle(bundle.version.storagePointer))?.files ??
+        []
+      );
     }
     return bundle.files;
   }
@@ -481,7 +589,11 @@ export class ContentSkillsService {
   }) {
     const skill = await findCatalogSkillVersionForWorkspace(input);
     if (!skill) {
-      throw new ContentError(404, "SKILL_NOT_FOUND", "Skill not found or not available to this workspace");
+      throw new ContentError(
+        404,
+        "SKILL_NOT_FOUND",
+        "Skill not found or not available to this workspace",
+      );
     }
     return {
       workspaceSkill: await upsertWorkspaceSkill({
@@ -526,7 +638,11 @@ export class ContentSkillsService {
   }) {
     const customSkill = await createNextCustomSkillVersionDraft(input);
     if (!customSkill) {
-      throw new ContentError(404, "CUSTOM_SKILL_NOT_FOUND", "Custom skill not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_NOT_FOUND",
+        "Custom skill not found",
+      );
     }
     return { customSkill };
   }
@@ -541,7 +657,11 @@ export class ContentSkillsService {
   }) {
     const draft = await updateWorkspaceCustomDraftMetadata(input);
     if (!draft) {
-      throw new ContentError(404, "CUSTOM_SKILL_DRAFT_NOT_FOUND", "Custom skill draft version not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_DRAFT_NOT_FOUND",
+        "Custom skill draft version not found",
+      );
     }
     return { customSkill: draft };
   }
@@ -568,7 +688,11 @@ export class ContentSkillsService {
       file,
     });
     if (!saved) {
-      throw new ContentError(404, "CUSTOM_SKILL_DRAFT_NOT_FOUND", "Custom skill draft version not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_DRAFT_NOT_FOUND",
+        "Custom skill draft version not found",
+      );
     }
     return { file: saved };
   }
@@ -589,7 +713,11 @@ export class ContentSkillsService {
       path: file.path,
     });
     if (!deleted) {
-      throw new ContentError(404, "CUSTOM_SKILL_FILE_NOT_FOUND", "Custom skill draft file not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_FILE_NOT_FOUND",
+        "Custom skill draft file not found",
+      );
     }
     return { deleted: true as const, path: file.path };
   }
@@ -602,7 +730,11 @@ export class ContentSkillsService {
   }) {
     const draft = await findWorkspaceCustomDraftVersion(input);
     if (!draft) {
-      throw new ContentError(404, "CUSTOM_SKILL_DRAFT_NOT_FOUND", "Custom skill draft version not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_DRAFT_NOT_FOUND",
+        "Custom skill draft version not found",
+      );
     }
     const files = await listCustomSkillVersionFileRecords({
       skillVersionId: input.skillVersionId,
@@ -614,12 +746,21 @@ export class ContentSkillsService {
         mimeType: file.mimeType,
       })),
     });
-    const expectedVisibility = draft.definition.sourceType === "team_custom" ? "team" : "workspace";
+    const expectedVisibility =
+      draft.definition.sourceType === "team_custom" ? "team" : "workspace";
     if (bundle.manifestJson.visibility !== expectedVisibility) {
-      throw new ContentError(400, "CUSTOM_SKILL_VISIBILITY_MISMATCH", "Custom skill manifest visibility does not match its scope");
+      throw new ContentError(
+        400,
+        "CUSTOM_SKILL_VISIBILITY_MISMATCH",
+        "Custom skill manifest visibility does not match its scope",
+      );
     }
     if (bundle.name !== draft.definition.slug) {
-      throw new ContentError(400, "CUSTOM_SKILL_SLUG_MISMATCH", "Custom skill manifest slug cannot change after creation");
+      throw new ContentError(
+        400,
+        "CUSTOM_SKILL_SLUG_MISMATCH",
+        "Custom skill manifest slug cannot change after creation",
+      );
     }
 
     const customSkill = await publishWorkspaceCustomSkillVersion({
@@ -635,7 +776,11 @@ export class ContentSkillsService {
       manifestJson: bundle.manifestJson,
     });
     if (!customSkill) {
-      throw new ContentError(404, "CUSTOM_SKILL_DRAFT_NOT_FOUND", "Custom skill draft version not found");
+      throw new ContentError(
+        404,
+        "CUSTOM_SKILL_DRAFT_NOT_FOUND",
+        "Custom skill draft version not found",
+      );
     }
     return { customSkill };
   }
@@ -650,7 +795,11 @@ export class ContentSkillsService {
   }) {
     const workspaceSkill = await updateWorkspaceSkillRecord(input);
     if (!workspaceSkill) {
-      throw new ContentError(404, "WORKSPACE_SKILL_NOT_FOUND", "Workspace skill not found");
+      throw new ContentError(
+        404,
+        "WORKSPACE_SKILL_NOT_FOUND",
+        "Workspace skill not found",
+      );
     }
     return { workspaceSkill };
   }
@@ -662,7 +811,11 @@ export class ContentSkillsService {
   }) {
     const deleted = await deleteWorkspaceSkillRecord(input);
     if (!deleted) {
-      throw new ContentError(404, "WORKSPACE_SKILL_NOT_FOUND", "Workspace skill not found");
+      throw new ContentError(
+        404,
+        "WORKSPACE_SKILL_NOT_FOUND",
+        "Workspace skill not found",
+      );
     }
     return { deleted: true as const, workspaceSkillId: input.workspaceSkillId };
   }

@@ -152,6 +152,33 @@ export async function getRegistrySkillForSubmission(
   };
 }
 
+/**
+ * The current definition + version for an indexed registry slug, or null.
+ * Used by agent-driven install to resolve a slug the model named, and to tell
+ * a published skill from one still held in the review queue.
+ */
+export async function getRegistrySkillBySlug(slug: string) {
+  const [row] = await db
+    .select({ definition: skillDefinitions, version: skillVersions })
+    .from(skillDefinitions)
+    .innerJoin(
+      skillVersions,
+      and(
+        eq(skillVersions.skillId, skillDefinitions.id),
+        eq(skillVersions.isCurrent, true),
+      ),
+    )
+    .where(
+      and(
+        eq(skillDefinitions.slug, slug),
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function upsertRegistrySkillIndex(
   input: UpsertRegistrySkillInput,
 ): Promise<UpsertRegistrySkillResult> {
