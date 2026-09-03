@@ -7,11 +7,11 @@ import { classifyMcpRepository } from "./classifier";
 import {
   classifyByText,
   inferMcpCategories,
-
   normalizeMcpCategorySlug,
   nonCategorySlugs,
 } from "./categories";
 import type { StaticParseResult } from "../types";
+import { RepoTree, VIRTUAL_REPO_ROOT } from "./repo-tree";
 
 function staticParseFixture(input?: {
   repo?: string;
@@ -62,18 +62,18 @@ function staticParseFixture(input?: {
         })) ?? [],
     },
     source: {
-      commitSha: "abc123",
+      commitSha: "a".repeat(40),
       owner: "microsoft",
       ref: "main",
       repo,
       repoUrl: `https://github.com/microsoft/${repo}`,
       requestedRef: "main",
-      resolvedRef: "main",
-      rootDir: "/tmp/source",
+      resolvedRef: "a".repeat(40),
+      rootDir: VIRTUAL_REPO_ROOT,
       sourceUrl: `https://github.com/microsoft/${repo}`,
       subpath: "",
-      tempRoot: "/tmp/source",
-      workDir: "/tmp/source",
+      tree: new RepoTree(new Map()),
+      workDir: VIRTUAL_REPO_ROOT,
     },
     sourceTools: [],
     warnings: [],
@@ -213,7 +213,8 @@ test("rule classifier covers representative MCP categories", () => {
     {
       expected: "cloud-infrastructure",
       repo: "aws-mcp",
-      summary: "Manage AWS cloud infrastructure, Docker deployments, and Kubernetes clusters.",
+      summary:
+        "Manage AWS cloud infrastructure, Docker deployments, and Kubernetes clusters.",
     },
   ];
 

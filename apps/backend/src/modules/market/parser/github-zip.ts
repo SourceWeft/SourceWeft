@@ -6,12 +6,30 @@ import {
   normalizeGitHubSource,
   resolveCommitSha,
   resolveDefaultBranch,
-} from "../../market/parser/github";
-import type { NormalizedGitHubSource } from "../../market/types";
-import { RegistrySubmissionError } from "./errors";
+} from "./github";
+import type { NormalizedGitHubSource } from "../types";
 
 /**
- * In-memory zipball reader for registry skill ingest.
+ * Failure modes a caller has to distinguish. Kept as a code rather than
+ * per-caller error classes so this module stays free of any one consumer's
+ * error taxonomy — the skills registry and the MCP market each map these onto
+ * their own submission errors.
+ */
+export type GitHubArchiveErrorCode =
+  "ARCHIVE_UNAVAILABLE" | "ARCHIVE_TOO_LARGE" | "ARCHIVE_UNPINNED";
+
+export class GitHubArchiveError extends Error {
+  constructor(
+    readonly code: GitHubArchiveErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GitHubArchiveError";
+  }
+}
+
+/**
+ * In-memory zipball reader for GitHub repository ingest.
  *
  * The host reads a submitted repository **without ever materialising a
  * filesystem tree**: one bounded zipball download, then `fflate` decompresses
@@ -19,10 +37,10 @@ import { RegistrySubmissionError } from "./errors";
  * disk, no archive path is ever joined onto a host directory, and no `tar`
  * subprocess runs — so extraction-time path traversal, symlink escape and
  * `--same-owner` restoration are not defended against here, they are absent.
- * (This is why the skills registry does not use
- * `market/parser/github.ts`'s `prepareGitHubRepository`, which does download +
- * `tar -xzf` to `os.tmpdir()`. Its URL/API half — source normalisation and
- * commit pinning — is reused, because that half only ever touches strings.)
+ * (This is why neither the skills registry nor the MCP market uses
+ * `github.ts`'s `prepareGitHubRepository`, which does download + `tar -xzf` to
+ * `os.tmpdir()`. Its URL/API half — source normalisation and commit pinning —
+ * is reused, because that half only ever touches strings.)
  *
  * The compressed-archive cap alone does not bound a decompression bomb, so the
  * reader enforces three more limits, all of them *before* any byte is
@@ -32,7 +50,7 @@ import { RegistrySubmissionError } from "./errors";
  * re-checked afterwards — a lying `originalSize` fails the second gate.
  */
 
-export const REGISTRY_ZIP_LIMITS = Object.freeze({
+export const GITHUB_ZIP_LIMITS = Object.freeze({
   /** Compressed zipball ceiling — mirrors the MCP-market archive cap. */
   maxArchiveBytes: GITHUB_ARCHIVE_LIMITS.maxArchiveBytes,
   /** Entries considered across the whole repo (dirs excluded). */
@@ -61,8 +79,8 @@ export async function resolvePinnedGitHubSource(
   try {
     source = normalizeGitHubSource(repoUrl);
   } catch (error) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_NOT_SKILL",
+    throw new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -70,9 +88,9 @@ export async function resolvePinnedGitHubSource(
   const ref = source.ref ?? (await resolveDefaultBranch(source));
   const commitSha = (await resolveCommitSha(source, ref))?.toLowerCase();
   if (!commitSha || !COMMIT_SHA_PATTERN.test(commitSha)) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_UNPINNED",
-      "Could not resolve an immutable commit SHA to pin this submission",
+    throw new GitHubArchiveError(
+      "ARCHIVE_UNPINNED",
+      "Could not resolve an immutable commit SHA to pin this source",
     );
   }
 
@@ -90,8 +108,8 @@ export async function downloadRepoZip(
   const url = `https://codeload.github.com/${source.owner}/${source.repo}/zip/${source.commitSha}`;
   const response = await githubFetch(url, githubDownloadHeaders());
   if (!response.ok || !response.body) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_NOT_SKILL",
+    throw new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
       `GitHub zipball download failed ${response.status}`,
     );
   }
@@ -99,10 +117,10 @@ export async function downloadRepoZip(
   const advertised = Number(response.headers.get("content-length"));
   if (
     Number.isFinite(advertised) &&
-    advertised > REGISTRY_ZIP_LIMITS.maxArchiveBytes
+    advertised > GITHUB_ZIP_LIMITS.maxArchiveBytes
   ) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_TOO_LARGE",
+    throw new GitHubArchiveError(
+      "ARCHIVE_TOO_LARGE",
       "Repository archive exceeds the maximum allowed size",
     );
   }
@@ -111,9 +129,9 @@ export async function downloadRepoZip(
   let total = 0;
   for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
     total += chunk.byteLength;
-    if (total > REGISTRY_ZIP_LIMITS.maxArchiveBytes) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_TOO_LARGE",
+    if (total > GITHUB_ZIP_LIMITS.maxArchiveBytes) {
+      throw new GitHubArchiveError(
+        "ARCHIVE_TOO_LARGE",
         "Repository archive exceeds the maximum allowed size",
       );
     }
@@ -168,10 +186,10 @@ export async function listZipEntries(zip: Buffer): Promise<ZipEntryInfo[]> {
     );
   });
 
-  if (entries.length > REGISTRY_ZIP_LIMITS.maxEntries) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_TOO_LARGE",
-      `Repository archive exceeds the maximum allowed ${REGISTRY_ZIP_LIMITS.maxEntries} files`,
+  if (entries.length > GITHUB_ZIP_LIMITS.maxEntries) {
+    throw new GitHubArchiveError(
+      "ARCHIVE_TOO_LARGE",
+      `Repository archive exceeds the maximum allowed ${GITHUB_ZIP_LIMITS.maxEntries} files`,
     );
   }
   return entries;
@@ -184,12 +202,26 @@ export async function listZipEntries(zip: Buffer): Promise<ZipEntryInfo[]> {
  * oversized or bomb-shaped entry is never inflated at all, and the actual-size
  * check afterwards catches an archive that under-declares to slip past them.
  */
+export type ReadZipEntriesOptions = {
+  /**
+   * What to do with an entry over `maxFileBytes`.
+   *
+   * `reject` (default) fails the whole read — right when the entry set IS the
+   * deliverable, as for a skill bundle whose fileManifest promises every file.
+   * `skip` drops it and keeps going — right when the caller is prospecting a
+   * whole repository and a single large asset should not sink the ingest.
+   */
+  oversize?: "reject" | "skip";
+};
+
 export async function readZipEntries(
   zip: Buffer,
   keep: (path: string) => boolean,
+  options: ReadZipEntriesOptions = {},
 ): Promise<Map<string, Buffer>> {
+  const oversize = options.oversize ?? "reject";
   let declaredTotal = 0;
-  let rejection: RegistrySubmissionError | null = null;
+  let rejection: GitHubArchiveError | null = null;
 
   const unzipped = await new Promise<Record<string, Uint8Array>>(
     (resolve, reject) => {
@@ -204,17 +236,20 @@ export async function readZipEntries(
             if (!path || path.endsWith("/") || !keep(path)) {
               return false;
             }
-            if (file.originalSize > REGISTRY_ZIP_LIMITS.maxFileBytes) {
-              rejection = new RegistrySubmissionError(
-                "REGISTRY_SUBMISSION_TOO_LARGE",
-                `Skill file '${path}' exceeds the per-file size limit`,
+            if (file.originalSize > GITHUB_ZIP_LIMITS.maxFileBytes) {
+              if (oversize === "skip") {
+                return false;
+              }
+              rejection = new GitHubArchiveError(
+                "ARCHIVE_TOO_LARGE",
+                `File '${path}' exceeds the per-file size limit`,
               );
               return false;
             }
             declaredTotal += file.originalSize;
-            if (declaredTotal > REGISTRY_ZIP_LIMITS.maxTotalUncompressedBytes) {
-              rejection = new RegistrySubmissionError(
-                "REGISTRY_SUBMISSION_TOO_LARGE",
+            if (declaredTotal > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+              rejection = new GitHubArchiveError(
+                "ARCHIVE_TOO_LARGE",
                 "Repository archive expands beyond the maximum allowed size",
               );
               return false;
@@ -238,16 +273,19 @@ export async function readZipEntries(
     if (!path) {
       continue;
     }
-    if (bytes.byteLength > REGISTRY_ZIP_LIMITS.maxFileBytes) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_TOO_LARGE",
-        `Skill file '${path}' exceeds the per-file size limit`,
+    if (bytes.byteLength > GITHUB_ZIP_LIMITS.maxFileBytes) {
+      if (oversize === "skip") {
+        continue;
+      }
+      throw new GitHubArchiveError(
+        "ARCHIVE_TOO_LARGE",
+        `File '${path}' exceeds the per-file size limit`,
       );
     }
     actualTotal += bytes.byteLength;
-    if (actualTotal > REGISTRY_ZIP_LIMITS.maxTotalUncompressedBytes) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_TOO_LARGE",
+    if (actualTotal > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+      throw new GitHubArchiveError(
+        "ARCHIVE_TOO_LARGE",
         "Repository archive expands beyond the maximum allowed size",
       );
     }

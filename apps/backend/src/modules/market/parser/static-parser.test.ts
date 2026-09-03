@@ -1,39 +1,47 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { test } from "vitest";
 import { parseStaticRepository } from "./static-parser";
-import type { PreparedGitHubRepository } from "../types";
+import {
+  RepoTree,
+  VIRTUAL_REPO_ROOT,
+  type ReadGitHubRepository,
+} from "./repo-tree";
 
-async function createRepositoryFixture(input: {
+// The fixture used to write a real temp directory; ingest no longer touches the
+// filesystem, so the repository is built straight as an in-memory tree.
+function createRepositoryFixture(input: {
   files: Record<string, string>;
   owner?: string;
   repo: string;
 }) {
-  const root = await mkdtemp(path.join(tmpdir(), "sourceweft-mcp-fixture-"));
-  for (const [relativePath, content] of Object.entries(input.files)) {
-    const target = path.join(root, relativePath);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, content);
-  }
+  const owner = input.owner ?? "example";
+  const sha = "a".repeat(40);
+  const tree = new RepoTree(
+    new Map(
+      Object.entries(input.files).map(([relativePath, content]) => [
+        relativePath,
+        Buffer.from(content, "utf8"),
+      ]),
+    ),
+  );
   return {
-    owner: input.owner ?? "example",
-    repo: input.repo,
+    commitSha: sha,
+    owner,
     ref: "main",
+    repo: input.repo,
+    repoUrl: `https://github.com/${owner}/${input.repo}`,
     requestedRef: "main",
-    resolvedRef: "main",
-    rootDir: root,
-    workDir: root,
-    tempRoot: root,
+    resolvedRef: sha,
+    rootDir: VIRTUAL_REPO_ROOT,
+    sourceUrl: `https://github.com/${owner}/${input.repo}`,
     subpath: "",
-    repoUrl: `https://github.com/${input.owner ?? "example"}/${input.repo}`,
-    sourceUrl: `https://github.com/${input.owner ?? "example"}/${input.repo}`,
-  } satisfies PreparedGitHubRepository;
+    tree,
+    workDir: VIRTUAL_REPO_ROOT,
+  } satisfies ReadGitHubRepository;
 }
 
 test("rejects repositories without MCP evidence", async () => {
-  const source = await createRepositoryFixture({
+  const source = createRepositoryFixture({
     repo: "jsondiffpatch",
     owner: "benjamine",
     files: {
@@ -42,7 +50,8 @@ test("rejects repositories without MCP evidence", async () => {
         name: "jsondiffpatch",
         version: "1.0.0",
       }),
-      "src/index.ts": "export function diff(left: unknown, right: unknown) { return [left, right]; }\n",
+      "src/index.ts":
+        "export function diff(left: unknown, right: unknown) { return [left, right]; }\n",
     },
   });
 
@@ -54,10 +63,11 @@ test("rejects repositories without MCP evidence", async () => {
 });
 
 test("accepts repositories with MCP runtime and tool registration evidence", async () => {
-  const source = await createRepositoryFixture({
+  const source = createRepositoryFixture({
     repo: "playwright-mcp",
     files: {
-      "README.md": "# Playwright MCP\n\nA Model Context Protocol server for browser automation.",
+      "README.md":
+        "# Playwright MCP\n\nA Model Context Protocol server for browser automation.",
       "package.json": JSON.stringify({
         name: "playwright-mcp",
         dependencies: {
@@ -85,7 +95,7 @@ test("accepts repositories with MCP runtime and tool registration evidence", asy
 });
 
 test("accepts explicit MCP subdirectories with runnable entrypoints", async () => {
-  const source = await createRepositoryFixture({
+  const source = createRepositoryFixture({
     repo: "monorepo",
     files: {
       "server.py": `

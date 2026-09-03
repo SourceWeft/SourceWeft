@@ -1,10 +1,9 @@
-import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import type { ReadGitHubRepository, RepoTree } from "./repo-tree";
 import type {
   ConnectionCandidate,
   McpRepositoryAssessment,
   ParsedTool,
-  PreparedGitHubRepository,
   ReadmeParseResult,
   RegistryInput,
   RegistryServerJson,
@@ -30,44 +29,32 @@ const maxSourceFileBytes = 300_000;
 const mcpRuntimePattern =
   /(@modelcontextprotocol\/sdk|modelcontextprotocol\/go-sdk|github\.com\/mark3labs\/mcp-go|FastMCP|fastmcp|mcp\.server|mcp\.New(?:Server|Tool)|ModelContextProtocol|McpServer|StdioServerTransport|SSEServerTransport|StreamableHTTPServerTransport|tools\/list|resources\/list|prompts\/list|initializeRequestSchema)/;
 
-async function exists(filePath: string) {
-  return Boolean(await stat(filePath).catch(() => null));
+/**
+ * The repository under analysis, as a virtual tree plus the directory to walk.
+ * Threading this instead of a bare `workDir` string is what let the rest of the
+ * parser stay byte-for-byte the same: `path.join`/`relativeTo` arithmetic is
+ * unchanged, only the primitives that used to hit the disk are re-pointed.
+ */
+type RepoContext = { tree: RepoTree; workDir: string };
+
+function exists(repo: RepoContext, filePath: string) {
+  return repo.tree.exists(filePath);
 }
 
-async function readText(filePath: string) {
-  return readFile(filePath, "utf8");
+function readText(repo: RepoContext, filePath: string) {
+  return repo.tree.readText(filePath);
 }
 
 function relativeTo(root: string, filePath: string) {
   return path.relative(root, filePath).split(path.sep).join("/");
 }
 
-async function walkFiles(root: string, limit = 2_000): Promise<string[]> {
-  const files: string[] = [];
-  async function visit(directory: string) {
-    if (files.length >= limit) {
-      return;
-    }
-    const entries = await readdir(directory, { withFileTypes: true }).catch(
-      () => [],
-    );
-    for (const entry of entries) {
-      if (files.length >= limit) {
-        return;
-      }
-      if (entry.isDirectory()) {
-        if (!ignoredDirectories.has(entry.name)) {
-          await visit(path.join(directory, entry.name));
-        }
-        continue;
-      }
-      if (entry.isFile()) {
-        files.push(path.join(directory, entry.name));
-      }
-    }
-  }
-  await visit(root);
-  return files;
+function walkFiles(repo: RepoContext, limit = 2_000): string[] {
+  return repo.tree.walkFiles({
+    ignoredDirectories,
+    limit,
+    root: repo.workDir,
+  });
 }
 
 function classifyRisk(name: string) {
@@ -75,7 +62,11 @@ function classifyRisk(name: string) {
   if (/(delete|destroy|remove|drop|purge|reset|revoke)/.test(lower)) {
     return "destructive" as const;
   }
-  if (/(create|update|write|edit|merge|close|open|send|post|put|patch)/.test(lower)) {
+  if (
+    /(create|update|write|edit|merge|close|open|send|post|put|patch)/.test(
+      lower,
+    )
+  ) {
     return "write" as const;
   }
   if (/(get|list|read|search|fetch|find|query|lookup)/.test(lower)) {
@@ -209,9 +200,7 @@ function parseReadmeTools(readme: string, sourcePath: string): ParsedTool[] {
       };
       continue;
     }
-    const argMatch = line.match(
-      /^\s{2,}-\s+`([^`]+)`\s+\(([^)]*)\):\s*(.+)$/i,
-    );
+    const argMatch = line.match(/^\s{2,}-\s+`([^`]+)`\s+\(([^)]*)\):\s*(.+)$/i);
     if (argMatch && current) {
       const name = argMatch[1] ?? "";
       const typeInfo = argMatch[2] ?? "";
@@ -254,8 +243,7 @@ function parseMcpConfigConnections(block: string, sourcePath: string) {
   const servers =
     (root.mcpServers as Record<string, unknown> | undefined) ??
     ((root.mcp as Record<string, unknown> | undefined)?.servers as
-      | Record<string, unknown>
-      | undefined);
+      Record<string, unknown> | undefined);
   if (!servers || typeof servers !== "object") {
     return [];
   }
@@ -266,7 +254,8 @@ function parseMcpConfigConnections(block: string, sourcePath: string) {
       continue;
     }
     const config = rawConfig as Record<string, unknown>;
-    const command = typeof config.command === "string" ? config.command : undefined;
+    const command =
+      typeof config.command === "string" ? config.command : undefined;
     const args = Array.isArray(config.args)
       ? config.args.filter((arg): arg is string => typeof arg === "string")
       : undefined;
@@ -309,7 +298,9 @@ function parseShellConnection(line: string, sourcePath: string) {
   if (trimmed.includes("@modelcontextprotocol/inspector")) {
     return undefined;
   }
-  const dockerMatch = trimmed.match(/\bdocker\s+run\b[\s\S]*?\s([^\s]+:[^\s]+|[a-z0-9./_-]+\/[a-z0-9./_-]+)(?:\s|$)/i);
+  const dockerMatch = trimmed.match(
+    /\bdocker\s+run\b[\s\S]*?\s([^\s]+:[^\s]+|[a-z0-9./_-]+\/[a-z0-9./_-]+)(?:\s|$)/i,
+  );
   if (dockerMatch) {
     return {
       confidence: 0.56,
@@ -423,23 +414,27 @@ function isExplicitPublicMcpInstallCommand(line: string) {
   );
 }
 
-async function findServerJson(workDir: string) {
-  const direct = path.join(workDir, "server.json");
-  if (await exists(direct)) {
+async function findServerJson(repo: RepoContext) {
+  const direct = path.join(repo.workDir, "server.json");
+  if (exists(repo, direct)) {
     return direct;
   }
-  const files = await walkFiles(workDir, 500);
+  const files = walkFiles(repo, 500);
   return files.find((file) => path.basename(file) === "server.json");
 }
 
-async function findReadme(workDir: string) {
-  const entries = await readdir(workDir).catch(() => []);
-  const direct = entries.find((entry) => /^readme(\.[a-z0-9_-]+)?$/i.test(entry));
+async function findReadme(repo: RepoContext) {
+  const entries = repo.tree.readDirNames(repo.workDir);
+  const direct = entries.find((entry) =>
+    /^readme(\.[a-z0-9_-]+)?$/i.test(entry),
+  );
   if (direct) {
-    return path.join(workDir, direct);
+    return path.join(repo.workDir, direct);
   }
-  const files = await walkFiles(workDir, 500);
-  return files.find((file) => /^readme(\.[a-z0-9_-]+)?$/i.test(path.basename(file)));
+  const files = walkFiles(repo, 500);
+  return files.find((file) =>
+    /^readme(\.[a-z0-9_-]+)?$/i.test(path.basename(file)),
+  );
 }
 
 function normalizeTransport(value: string | undefined) {
@@ -461,7 +456,9 @@ function secretNames(inputs: RegistryInput[] | undefined) {
     for (const variableName of Object.keys(input.variables ?? {})) {
       names.push(variableName);
     }
-    const envName = input.value?.match(/^([A-Za-z_][A-Za-z0-9_]*)=\{[^}]+\}$/)?.[1];
+    const envName = input.value?.match(
+      /^([A-Za-z_][A-Za-z0-9_]*)=\{[^}]+\}$/,
+    )?.[1];
     if (envName) {
       names.push(envName);
       continue;
@@ -504,7 +501,8 @@ function connectionsFromServerJson(
     const runtimeSecrets = secretNames(pkg.runtimeArguments);
     const packageSecrets = secretNames(pkg.packageArguments);
     connections.push({
-      authRequired: [...envSecrets, ...runtimeSecrets, ...packageSecrets].length > 0,
+      authRequired:
+        [...envSecrets, ...runtimeSecrets, ...packageSecrets].length > 0,
       confidence: 0.9,
       environmentVariables: pkg.environmentVariables,
       identifier: pkg.identifier,
@@ -522,14 +520,14 @@ function connectionsFromServerJson(
 }
 
 async function parseReadme(
+  repo: RepoContext,
   readmePath: string,
-  workDir: string,
 ): Promise<{
   connections: ConnectionCandidate[];
   readme: ReadmeParseResult;
 }> {
-  const content = await readText(readmePath);
-  const sourcePath = relativeTo(workDir, readmePath);
+  const content = readText(repo, readmePath);
+  const sourcePath = relativeTo(repo.workDir, readmePath);
   const install = parseInstallCommands(content, sourcePath);
   return {
     connections: install.connections,
@@ -605,7 +603,8 @@ function parsePythonModelSchemas(source: string) {
     }
     const properties: Record<string, Record<string, unknown>> = {};
     const required: string[] = [];
-    const fieldRegex = /^\s+([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]*?)(?=\n\s+[A-Za-z_][A-Za-z0-9_]*:\s|\n\S|$)/gm;
+    const fieldRegex =
+      /^\s+([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]*?)(?=\n\s+[A-Za-z_][A-Za-z0-9_]*:\s|\n\S|$)/gm;
     for (const field of body.matchAll(fieldRegex)) {
       const fieldName = field[1];
       const fieldBody = (field[2] ?? "").trim();
@@ -644,7 +643,9 @@ function parsePythonTools(source: string, sourcePath: string) {
     const description =
       block.match(/description\s*=\s*"""([\s\S]*?)"""/)?.[1] ??
       block.match(/description\s*=\s*["']([^"']+)["']/)?.[1];
-    const schemaClass = block.match(/inputSchema\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.model_json_schema\(\)/)?.[1];
+    const schemaClass = block.match(
+      /inputSchema\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.model_json_schema\(\)/,
+    )?.[1];
     tools.push(
       toolFrom({
         confidence: 0.82,
@@ -726,19 +727,18 @@ function parseTsTools(source: string, sourcePath: string) {
 }
 
 function parseGoTools(source: string, sourcePath: string) {
-  return [...source.matchAll(/(?:mcp\.)?NewTool\(\s*"([^"]+)"/g)].map(
-    (match) =>
-      toolFrom({
-        confidence: 0.65,
-        name: match[1] ?? "",
-        source: "source",
-        sourcePath,
-      }),
+  return [...source.matchAll(/(?:mcp\.)?NewTool\(\s*"([^"]+)"/g)].map((match) =>
+    toolFrom({
+      confidence: 0.65,
+      name: match[1] ?? "",
+      source: "source",
+      sourcePath,
+    }),
   );
 }
 
-async function parseSourceTools(workDir: string) {
-  const files = await walkFiles(workDir);
+async function parseSourceTools(repo: RepoContext) {
+  const files = walkFiles(repo);
   const tools: ParsedTool[] = [];
   let scanned = 0;
   for (const file of files) {
@@ -749,13 +749,13 @@ async function parseSourceTools(workDir: string) {
     if (!sourceExtensions.has(extension)) {
       continue;
     }
-    const fileStat = await stat(file).catch(() => null);
-    if (!fileStat || fileStat.size > maxSourceFileBytes) {
+    const fileSize = repo.tree.sizeOf(file);
+    if (fileSize === null || fileSize > maxSourceFileBytes) {
       continue;
     }
     scanned += 1;
-    const source = await readText(file);
-    const sourcePath = relativeTo(workDir, file);
+    const source = readText(repo, file);
+    const sourcePath = relativeTo(repo.workDir, file);
     if (!sourceContainsMcpRuntime(source)) {
       continue;
     }
@@ -777,8 +777,8 @@ async function parseSourceTools(workDir: string) {
   return [...byName.values()].filter((tool) => tool.name);
 }
 
-async function parseSourceSignals(workDir: string) {
-  const files = await walkFiles(workDir);
+async function parseSourceSignals(repo: RepoContext) {
+  const files = walkFiles(repo);
   const sourceSignals: McpRepositoryAssessment["signals"] = [];
   let scanned = 0;
   for (const file of files) {
@@ -789,19 +789,19 @@ async function parseSourceSignals(workDir: string) {
     if (!sourceExtensions.has(extension)) {
       continue;
     }
-    const fileStat = await stat(file).catch(() => null);
-    if (!fileStat || fileStat.size > maxSourceFileBytes) {
+    const fileSize = repo.tree.sizeOf(file);
+    if (fileSize === null || fileSize > maxSourceFileBytes) {
       continue;
     }
     scanned += 1;
-    const source = await readText(file);
+    const source = readText(repo, file);
     if (!sourceContainsMcpRuntime(source)) {
       continue;
     }
     sourceSignals.push({
       confidence: 0.75,
       kind: "mcp-source",
-      path: relativeTo(workDir, file),
+      path: relativeTo(repo.workDir, file),
       summary: "Source code imports or initializes an MCP runtime",
     });
     if (sourceSignals.length >= 8) {
@@ -811,8 +811,8 @@ async function parseSourceSignals(workDir: string) {
   return sourceSignals;
 }
 
-async function parseEntrypointSignals(workDir: string) {
-  const files = await walkFiles(workDir);
+async function parseEntrypointSignals(repo: RepoContext) {
+  const files = walkFiles(repo);
   const entrypointSignals: McpRepositoryAssessment["signals"] = [];
   let scanned = 0;
   for (const file of files) {
@@ -823,20 +823,23 @@ async function parseEntrypointSignals(workDir: string) {
     if (!sourceExtensions.has(extension)) {
       continue;
     }
-    const fileStat = await stat(file).catch(() => null);
-    if (!fileStat || fileStat.size > maxSourceFileBytes) {
+    const fileSize = repo.tree.sizeOf(file);
+    if (fileSize === null || fileSize > maxSourceFileBytes) {
       continue;
     }
     scanned += 1;
-    const source = await readText(file);
-    if (!sourceContainsMcpRuntime(source) || !sourceContainsMcpEntrypoint(source)) {
+    const source = readText(repo, file);
+    if (
+      !sourceContainsMcpRuntime(source) ||
+      !sourceContainsMcpEntrypoint(source)
+    ) {
       continue;
     }
     entrypointSignals.push({
       confidence: 0.78,
       detail: { entry: "source" },
       kind: "mcp-entrypoint",
-      path: relativeTo(workDir, file),
+      path: relativeTo(repo.workDir, file),
       summary: "Source code exposes a runnable MCP server transport entrypoint",
     });
     if (entrypointSignals.length >= 8) {
@@ -846,12 +849,12 @@ async function parseEntrypointSignals(workDir: string) {
   return entrypointSignals;
 }
 
-async function parsePackageHints(workDir: string) {
+async function parsePackageHints(repo: RepoContext) {
   const hints: Record<string, unknown>[] = [];
-  const packageJsonPath = path.join(workDir, "package.json");
-  if (await exists(packageJsonPath)) {
+  const packageJsonPath = path.join(repo.workDir, "package.json");
+  if (exists(repo, packageJsonPath)) {
     try {
-      const content = JSON.parse(await readText(packageJsonPath)) as Record<
+      const content = JSON.parse(readText(repo, packageJsonPath)) as Record<
         string,
         unknown
       >;
@@ -874,9 +877,9 @@ async function parsePackageHints(workDir: string) {
       );
     }
   }
-  const pyprojectPath = path.join(workDir, "pyproject.toml");
-  if (await exists(pyprojectPath)) {
-    const content = await readText(pyprojectPath);
+  const pyprojectPath = path.join(repo.workDir, "pyproject.toml");
+  if (exists(repo, pyprojectPath)) {
+    const content = readText(repo, pyprojectPath);
     hints.push({
       type: "pyproject.toml",
       name: content.match(/^name\s*=\s*"([^"]+)"/m)?.[1],
@@ -929,7 +932,7 @@ function assessMcpRepository(input: {
   packageHints: Record<string, unknown>[];
   readme?: ReadmeParseResult;
   serverJson?: StaticParseResult["serverJson"];
-  source: PreparedGitHubRepository;
+  source: ReadGitHubRepository;
   sourceSignals: McpRepositoryAssessment["signals"];
   sourceTools: ParsedTool[];
 }): McpRepositoryAssessment {
@@ -1015,7 +1018,9 @@ function assessMcpRepository(input: {
   const repoIdentity = valueLooksLikeMcpServer(input.source.repo);
   const packageSignal = signals.some((signal) => signal.kind === "mcp-package");
   const sourceSignal = signals.some((signal) => signal.kind === "mcp-source");
-  const toolSignal = signals.some((signal) => signal.kind === "tool-registration");
+  const toolSignal = signals.some(
+    (signal) => signal.kind === "tool-registration",
+  );
   const readmeEntrypointSignal = signals.some(
     (signal) =>
       signal.kind === "mcp-entrypoint" &&
@@ -1045,26 +1050,27 @@ function assessMcpRepository(input: {
     isMcp,
     reasons: isMcp
       ? signals.map((signal) => signal.summary)
-      : [
-          "No public installable or runnable MCP server entrypoint found",
-        ],
+      : ["No public installable or runnable MCP server entrypoint found"],
     signals,
   };
 }
 
 export async function parseStaticRepository(
-  source: PreparedGitHubRepository,
+  source: ReadGitHubRepository,
 ): Promise<StaticParseResult> {
   const warnings: string[] = [];
   const evidence: StaticParseResult["evidence"] = [];
   const connections: ConnectionCandidate[] = [];
 
-  const serverJsonPath = await findServerJson(source.workDir);
+  const repo: RepoContext = { tree: source.tree, workDir: source.workDir };
+  const serverJsonPath = await findServerJson(repo);
   let serverJson: StaticParseResult["serverJson"];
   if (serverJsonPath) {
-    const sourcePath = relativeTo(source.workDir, serverJsonPath);
+    const sourcePath = relativeTo(repo.workDir, serverJsonPath);
     try {
-      const content = JSON.parse(await readText(serverJsonPath)) as RegistryServerJson;
+      const content = JSON.parse(
+        readText(repo, serverJsonPath),
+      ) as RegistryServerJson;
       serverJson = { content, path: sourcePath };
       connections.push(...connectionsFromServerJson(content, sourcePath));
       evidence.push({
@@ -1079,10 +1085,10 @@ export async function parseStaticRepository(
     }
   }
 
-  const readmePath = await findReadme(source.workDir);
+  const readmePath = await findReadme(repo);
   let readme: ReadmeParseResult | undefined;
   if (readmePath) {
-    const parsed = await parseReadme(readmePath, source.workDir);
+    const parsed = await parseReadme(repo, readmePath);
     readme = parsed.readme;
     connections.push(...parsed.connections);
     evidence.push({
@@ -1092,9 +1098,9 @@ export async function parseStaticRepository(
     });
   }
 
-  const sourceTools = await parseSourceTools(source.workDir);
-  const sourceSignals = await parseSourceSignals(source.workDir);
-  const entrypointSignals = await parseEntrypointSignals(source.workDir);
+  const sourceTools = await parseSourceTools(repo);
+  const sourceSignals = await parseSourceSignals(repo);
+  const entrypointSignals = await parseEntrypointSignals(repo);
   if (sourceTools.length > 0) {
     evidence.push({
       source: "source",
@@ -1102,7 +1108,7 @@ export async function parseStaticRepository(
     });
   }
 
-  const packageHints = await parsePackageHints(source.workDir);
+  const packageHints = await parsePackageHints(repo);
   if (packageHints.length > 0) {
     evidence.push({
       source: "package",

@@ -2,18 +2,19 @@ import { sha256 } from "../hash";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
+  GitHubArchiveError,
+  GITHUB_ZIP_LIMITS,
   listZipEntries,
   readZipEntries,
   resolvePinnedGitHubSource,
-  REGISTRY_ZIP_LIMITS,
   type PinnedGitHubSource,
-} from "./zip-read";
+} from "../../market/parser/github-zip";
 
 /**
  * Stage 2 — Read (fetch + locate SKILL.md).
  * docs/architecture/skill-registry-index.md §3 Stage 2 / build phase R2.
  *
- * The repository is read as an in-memory zipball (`zip-read.ts`): one bounded
+ * The repository is read as an in-memory zipball (`market/parser/github-zip.ts`): one bounded
  * download, then only the entries belonging to a discovered skill are
  * decompressed. Nothing is extracted to the host filesystem, so there is no
  * temp directory to clean up and no archive path is ever joined onto a host
@@ -24,11 +25,11 @@ import {
 /**
  * DoS bounds on the ANALYZED skill bundles. The archive-level caps (compressed
  * size, entry count, per-file and cumulative uncompressed size) live in
- * `zip-read.ts`; `maxSkillFileBytes` mirrors its per-file ceiling so a file we
+ * `github-zip.ts`; `maxSkillFileBytes` mirrors its per-file ceiling so a file we
  * index is always re-readable within the same cap.
  */
 export const REGISTRY_READ_LIMITS = Object.freeze({
-  maxSkillFileBytes: REGISTRY_ZIP_LIMITS.maxFileBytes,
+  maxSkillFileBytes: GITHUB_ZIP_LIMITS.maxFileBytes,
   maxSkillFilesPerBundle: 200,
   maxSkillsPerRepo: 25,
 });
@@ -154,6 +155,26 @@ function isBundleFile(skillDir: string, entryPath: string): boolean {
 export async function readRegistrySkillsFromGitHub(
   repoUrl: string,
 ): Promise<ReadRegistryResult> {
+  try {
+    return await readSkills(repoUrl);
+  } catch (error) {
+    // Map the shared reader's transport/size failures onto submission errors;
+    // it deliberately knows nothing about this module's error taxonomy.
+    if (error instanceof GitHubArchiveError) {
+      throw new RegistrySubmissionError(
+        error.code === "ARCHIVE_TOO_LARGE"
+          ? "REGISTRY_SUBMISSION_TOO_LARGE"
+          : error.code === "ARCHIVE_UNPINNED"
+            ? "REGISTRY_SUBMISSION_UNPINNED"
+            : "REGISTRY_SUBMISSION_NOT_SKILL",
+        error.message,
+      );
+    }
+    throw error;
+  }
+}
+
+async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
   const source = await resolvePinnedGitHubSource(repoUrl);
   const zip = await downloadRepoZip(source);
 
