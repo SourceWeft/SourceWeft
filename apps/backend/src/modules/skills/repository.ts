@@ -142,6 +142,9 @@ function mapWorkspaceInstalledSkill(row: {
     configJson: workspaceSkill.configJson,
     enabledBy: workspaceSkill.enabledBy,
     enabledAt: workspaceSkill.enabledAt,
+    ...(manifest.registry?.capability
+      ? { registryCapability: manifest.registry.capability }
+      : {}),
     capabilities: manifest.capabilities,
     models: manifest.models,
     commands: manifest.commands,

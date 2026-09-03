@@ -78,6 +78,15 @@ export function SkillRow({
           {skill.sourceType !== "builtin" ? (
             <TypeBadge label={selected ? "Hub on" : "Hub off"} />
           ) : null}
+          {/*
+            An `executable` skill is installed switched off on purpose: choosing
+            a skill and choosing to run its code are separate decisions. Saying
+            so here is what stops it reading as a failed install — the toggle
+            beside it is exactly how the user opts in.
+          */}
+          {skill.registryCapability === "executable" && !selected ? (
+            <TypeBadge label="Ships scripts — off until you enable it" />
+          ) : null}
         </div>
       </div>
     </article>

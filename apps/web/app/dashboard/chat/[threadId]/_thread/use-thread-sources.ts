@@ -124,6 +124,9 @@ function workspaceInstalledSkillToChatSkill(
     commands: skill.commands,
     defaultConfig: skill.defaultConfig,
     options: skill.options,
+    ...(skill.registryCapability
+      ? { registryCapability: skill.registryCapability }
+      : {}),
   };
 }
 

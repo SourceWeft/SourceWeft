@@ -95,6 +95,11 @@ export const workspaceInstalledSkillSchema = z.object({
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
   enabledAt: z.string().nullable(),
+  // Registry entries only: whether the bundle ships runnable scripts. Surfaced
+  // because an `executable` skill installs DISABLED — the UI has to be able to
+  // say WHY it is off, or a skill the user asked for looks broken rather than
+  // deliberately held back. See skills/agent-tools.ts.
+  registryCapability: z.enum(["prompt-only", "executable"]).optional(),
   capabilities: z
     .object({
       required: z.array(z.string()).optional(),

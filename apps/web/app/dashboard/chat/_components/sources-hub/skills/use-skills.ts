@@ -17,6 +17,7 @@ export type HubSkillItem = {
   enabled?: boolean;
   hasReadme: boolean;
   tools?: string[];
+  registryCapability?: "prompt-only" | "executable";
 };
 
 export type SkillIconSpec = Pick<

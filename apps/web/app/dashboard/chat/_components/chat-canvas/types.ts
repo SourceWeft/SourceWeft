@@ -196,6 +196,12 @@ export type ChatSkillItem = {
   slashConfig?: { enabled?: boolean };
   defaultConfig?: Record<string, unknown>;
   defaultEnabled?: boolean;
+  /**
+   * Registry skills only: `executable` means the bundle ships runnable scripts,
+   * which is why such a skill is installed switched OFF. The row shows it so an
+   * intentionally-held-back skill does not read as a broken install.
+   */
+  registryCapability?: "prompt-only" | "executable";
 };
 
 export type CitationRecord = {
