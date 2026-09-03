@@ -1,42 +1,34 @@
 import { sha256 } from "../hash";
-import { readdir, readFile, stat } from "node:fs/promises";
-import path from "node:path";
-import {
-  cleanupGitHubRepository,
-  prepareGitHubRepository,
-} from "../../market/parser/github";
-import type { PreparedGitHubRepository } from "../../market/types";
 import { RegistrySubmissionError } from "./errors";
+import {
+  downloadRepoZip,
+  listZipEntries,
+  readZipEntries,
+  resolvePinnedGitHubSource,
+  REGISTRY_ZIP_LIMITS,
+  type PinnedGitHubSource,
+} from "./zip-read";
 
 /**
- * Stage 2 — Read (fetch + extract + locate SKILL.md).
+ * Stage 2 — Read (fetch + locate SKILL.md).
  * docs/architecture/skill-registry-index.md §3 Stage 2 / build phase R2.
  *
- * TODO(skill-registry R2 §Stage2/§7.0): the fetch + archive-extract below runs
- * on the app HOST today, reusing the hardened `market/parser/github.ts`
- * (`prepareGitHubRepository` = github.com-allowlisted `normalizeGitHubSource`,
- * `resolveCommitSha` immutable pin, bounded download, `inspectArchiveEntries`
- * symlink/traversal/file-count caps, `tar --no-same-owner`). The design's
- * end-state moves this into the egress-allowlisted *ingestion sandbox*
- * (`networkPolicy: 'ingestion-github'`, `packages/sandbox-provider-daytona`) so
- * untrusted third-party bytes are never extracted on the host. Two R0 TODOs gate
- * a faithful sandboxed egress allowlist and are intentionally NOT touched here:
- *   (1) `@langchain/daytona@0.2.0`'s wrapper drops `networkBlockAll` /
- *       `networkAllowList` (sandbox-provider-daytona/daytona-provider.ts ~L554) —
- *       end-to-end enforcement needs the wrapper to forward them; and
- *   (2) Daytona's allow-list is CIDR-not-hostname (same file ~L25-51), so the
- *       `ingestion-github` policy is expressed as GitHub's published IP ranges,
- *       which drift and need a live `api.github.com/meta` resolver.
+ * The repository is read as an in-memory zipball (`zip-read.ts`): one bounded
+ * download, then only the entries belonging to a discovered skill are
+ * decompressed. Nothing is extracted to the host filesystem, so there is no
+ * temp directory to clean up and no archive path is ever joined onto a host
+ * directory — the traversal / symlink / `tar` hazards that
+ * `prepareGitHubRepository` has to guard against do not arise on this path.
  */
 
 /**
- * Interim host-side DoS bounds on the ANALYZED skill bundles (the archive-level
- * caps live in `parser/github.ts`). `maxSkillFileBytes` matches the runtime
- * per-file ceiling (`pointer-bundle.ts` MAX_POINTER_FILE_BYTES) so a file we
- * index can always be re-fetched within the same cap.
+ * DoS bounds on the ANALYZED skill bundles. The archive-level caps (compressed
+ * size, entry count, per-file and cumulative uncompressed size) live in
+ * `zip-read.ts`; `maxSkillFileBytes` mirrors its per-file ceiling so a file we
+ * index is always re-readable within the same cap.
  */
 export const REGISTRY_READ_LIMITS = Object.freeze({
-  maxSkillFileBytes: 512 * 1024, // 512 KiB — mirrors MAX_POINTER_FILE_BYTES
+  maxSkillFileBytes: REGISTRY_ZIP_LIMITS.maxFileBytes,
   maxSkillFilesPerBundle: 200,
   maxSkillsPerRepo: 25,
 });
@@ -49,7 +41,7 @@ const SKILL_CONTAINERS = ["skills", ".claude/skills", ".agents/skills"];
 export type DiscoveredSkillFile = {
   /** Path relative to the skill BUNDLE root (e.g. `SKILL.md`, `scripts/run.py`). */
   bundlePath: string;
-  /** sha256 over the raw file bytes — the runtime re-verifies against this. */
+  /** sha256 over the raw file bytes. */
   sha256: string;
   sizeBytes: number;
   contentText: string;
@@ -57,167 +49,162 @@ export type DiscoveredSkillFile = {
 
 export type DiscoveredSkill = {
   /**
-   * Skill directory relative to the REPO ROOT — this becomes the pointer's
-   * `#<subpath>`. Empty string when the skill sits at the repo root.
+   * Skill directory relative to the REPO ROOT. Empty string when the skill sits
+   * at the repo root.
    */
   repoSubpath: string;
-  /** Last path segment of the skill dir — the expected frontmatter `name`. */
+  /** Last path segment of the skill dir. */
   dirName: string;
   files: DiscoveredSkillFile[];
 };
 
 export type ReadRegistryResult = {
-  /** Caller owns cleanup: `cleanupGitHubRepository(source)` in a `finally`. */
-  source: PreparedGitHubRepository;
+  source: PinnedGitHubSource;
   /** Immutable 40-hex commit the submission is pinned to. */
   commitSha: string;
   skills: DiscoveredSkill[];
 };
 
-const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
-
-async function isFile(candidate: string): Promise<boolean> {
-  return stat(candidate)
-    .then((entry) => entry.isFile())
-    .catch(() => false);
+/** `a/b/c.md` → `a/b`; a root-level path → `""`. */
+function dirNameOf(filePath: string): string {
+  const slash = filePath.lastIndexOf("/");
+  return slash < 0 ? "" : filePath.slice(0, slash);
 }
 
-async function listSubdirectories(dir: string): Promise<string[]> {
-  return readdir(dir, { withFileTypes: true })
-    .then((entries) =>
-      entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
-    )
-    .catch(() => []);
+function lastSegment(dirPath: string): string {
+  const slash = dirPath.lastIndexOf("/");
+  return slash < 0 ? dirPath : dirPath.slice(slash + 1);
 }
 
 /**
- * Locate every skill directory (one containing a `SKILL.md`) reachable from the
- * work dir: the root itself, plus one level under `skills/`, `.claude/skills/`,
- * `.agents/skills/`. A repo may ship multiple skills (§3 Stage 2).
+ * Locate every skill directory (one containing a `SKILL.md`): the repo root
+ * itself, plus one level under `skills/`, `.claude/skills/`, `.agents/skills/`.
+ * A repo may ship multiple skills (§3 Stage 2).
  */
-async function discoverSkillDirectories(workDir: string): Promise<string[]> {
+function discoverSkillDirectories(entryPaths: string[]): string[] {
   const dirs: string[] = [];
-  if (await isFile(path.join(workDir, "SKILL.md"))) {
-    dirs.push(workDir);
-  }
-  for (const container of SKILL_CONTAINERS) {
-    const containerDir = path.join(workDir, container);
-    for (const name of await listSubdirectories(containerDir)) {
-      const skillDir = path.join(containerDir, name);
-      if (await isFile(path.join(skillDir, "SKILL.md"))) {
-        dirs.push(skillDir);
-      }
+  for (const entryPath of entryPaths) {
+    if (!entryPath.endsWith("SKILL.md")) {
+      continue;
+    }
+    const dir = dirNameOf(entryPath);
+    if (dir === "") {
+      dirs.push("");
+      continue;
+    }
+    const container = dirNameOf(dir);
+    if (SKILL_CONTAINERS.includes(container)) {
+      dirs.push(dir);
     }
   }
-  return dirs;
+  return [...new Set(dirs)].sort();
 }
 
-async function collectBundleFilePaths(
-  skillDir: string,
-  currentDir = skillDir,
-): Promise<string[]> {
-  const entries = await readdir(currentDir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const fullPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      // Keep `scripts/` and other content dirs; drop build/vcs noise. Dotfiles
-      // inside a skill are content (e.g. `.env.example`), but dot *dirs* other
-      // than the vcs one are treated as noise like builtin.ts does.
-      if (SKIP_DIR_NAMES.has(entry.name)) {
-        continue;
-      }
-      files.push(...(await collectBundleFilePaths(skillDir, fullPath)));
-    } else if (entry.isFile()) {
-      files.push(fullPath);
-    }
+/** Bundle membership: under the skill dir, minus build/vcs noise. */
+function isBundleFile(skillDir: string, entryPath: string): boolean {
+  const prefix = skillDir === "" ? "" : `${skillDir}/`;
+  if (!entryPath.startsWith(prefix)) {
+    return false;
   }
-  return files;
-}
-
-async function readSkillDirectory(
-  rootDir: string,
-  skillDir: string,
-): Promise<DiscoveredSkill> {
-  const absPaths = await collectBundleFilePaths(skillDir);
-  if (absPaths.length > REGISTRY_READ_LIMITS.maxSkillFilesPerBundle) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_TOO_LARGE",
-      `Skill bundle exceeds the ${REGISTRY_READ_LIMITS.maxSkillFilesPerBundle}-file limit`,
-    );
+  const relative = entryPath.slice(prefix.length);
+  if (!relative) {
+    return false;
   }
-
-  const files: DiscoveredSkillFile[] = [];
-  for (const absPath of absPaths) {
-    const bytes = await readFile(absPath);
-    if (bytes.byteLength > REGISTRY_READ_LIMITS.maxSkillFileBytes) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_TOO_LARGE",
-        `Skill file '${path.relative(skillDir, absPath)}' exceeds the per-file size limit`,
-      );
-    }
-    files.push({
-      bundlePath: path.relative(skillDir, absPath).split(path.sep).join("/"),
-      sha256: sha256(bytes),
-      sizeBytes: bytes.byteLength,
-      // Read as UTF-8 for static analysis only; the sha256 above is over the
-      // raw bytes, so runtime integrity verification stays byte-exact.
-      contentText: bytes.toString("utf8"),
-    });
-  }
-
-  const repoSubpath = path
-    .relative(rootDir, skillDir)
-    .split(path.sep)
-    .join("/");
-  return {
-    repoSubpath: repoSubpath === "." ? "" : repoSubpath,
-    dirName: path.basename(skillDir),
-    files,
-  };
+  const segments = relative.split("/");
+  // Only the directory segments are checked: a file literally named `dist` is
+  // content, a `dist/` directory is build output.
+  return !segments.slice(0, -1).some((segment) => SKIP_DIR_NAMES.has(segment));
 }
 
 /**
- * Fetch + extract a submitted GitHub repo and return every discovered skill
- * bundle with per-file digests. The commit is pinned to an immutable 40-hex sha
- * (rejected otherwise — the pointer must be frozen, §2/§5). The caller owns temp
- * cleanup; on any failure here we clean up before re-throwing.
+ * Fetch a submitted GitHub repo as an in-memory zipball and return every
+ * discovered skill bundle with per-file digests. The commit is pinned to an
+ * immutable 40-hex sha (rejected otherwise — the record must be frozen, §2/§5).
  */
 export async function readRegistrySkillsFromGitHub(
   repoUrl: string,
 ): Promise<ReadRegistryResult> {
-  const source = await prepareGitHubRepository(repoUrl);
-  try {
-    // Canonical lowercase so the pointer's #sha matches the runtime's
-    // (pointer-bundle.ts lowercases on parse) and the raw URL is stable.
-    const commitSha = source.commitSha?.toLowerCase();
-    if (!commitSha || !COMMIT_SHA_PATTERN.test(commitSha)) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_UNPINNED",
-        "Could not resolve an immutable commit SHA to pin this submission",
-      );
-    }
+  const source = await resolvePinnedGitHubSource(repoUrl);
+  const zip = await downloadRepoZip(source);
 
-    const skillDirs = await discoverSkillDirectories(source.workDir);
-    if (skillDirs.length === 0) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_NOT_SKILL",
-        "No SKILL.md found at the repo root or under skills/, .claude/skills/, .agents/skills/",
-      );
-    }
-    if (skillDirs.length > REGISTRY_READ_LIMITS.maxSkillsPerRepo) {
+  const entries = await listZipEntries(zip);
+  const entryPaths = entries.map((entry) => entry.path);
+
+  // A `/tree/<ref>/<subpath>` submission scopes discovery to that subtree.
+  const scope = source.subpath ? `${source.subpath}/` : "";
+  const scopedPaths = scope
+    ? entryPaths.filter((entryPath) => entryPath.startsWith(scope))
+    : entryPaths;
+
+  const skillDirs = discoverSkillDirectories(
+    scope
+      ? scopedPaths.map((entryPath) => entryPath.slice(scope.length))
+      : scopedPaths,
+  ).map((dir) => (scope ? `${scope}${dir}`.replace(/\/$/, "") : dir));
+
+  if (skillDirs.length === 0) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_NOT_SKILL",
+      "No SKILL.md found at the repo root or under skills/, .claude/skills/, .agents/skills/",
+    );
+  }
+  if (skillDirs.length > REGISTRY_READ_LIMITS.maxSkillsPerRepo) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      `Repository ships more than the ${REGISTRY_READ_LIMITS.maxSkillsPerRepo}-skill limit`,
+    );
+  }
+
+  const wanted = new Map<string, string>();
+  for (const skillDir of skillDirs) {
+    const bundlePaths = entryPaths.filter((entryPath) =>
+      isBundleFile(skillDir, entryPath),
+    );
+    if (bundlePaths.length > REGISTRY_READ_LIMITS.maxSkillFilesPerBundle) {
       throw new RegistrySubmissionError(
         "REGISTRY_SUBMISSION_TOO_LARGE",
-        `Repository ships more than the ${REGISTRY_READ_LIMITS.maxSkillsPerRepo}-skill limit`,
+        `Skill bundle exceeds the ${REGISTRY_READ_LIMITS.maxSkillFilesPerBundle}-file limit`,
       );
     }
-
-    const skills = await Promise.all(
-      skillDirs.map((skillDir) => readSkillDirectory(source.rootDir, skillDir)),
-    );
-    return { source, commitSha, skills };
-  } catch (error) {
-    await cleanupGitHubRepository(source);
-    throw error;
+    for (const bundlePath of bundlePaths) {
+      // A nested skill dir belongs to the innermost skill that owns it; the
+      // longest matching prefix wins.
+      const current = wanted.get(bundlePath);
+      if (!current || skillDir.length > current.length) {
+        wanted.set(bundlePath, skillDir);
+      }
+    }
   }
+
+  const files = await readZipEntries(zip, (entryPath) => wanted.has(entryPath));
+
+  const skills: DiscoveredSkill[] = skillDirs.map((skillDir) => ({
+    repoSubpath: skillDir,
+    dirName: skillDir === "" ? "" : lastSegment(skillDir),
+    files: [],
+  }));
+  const byDir = new Map(skills.map((skill) => [skill.repoSubpath, skill]));
+
+  for (const [entryPath, skillDir] of wanted) {
+    const bytes = files.get(entryPath);
+    if (!bytes) {
+      continue;
+    }
+    const prefix = skillDir === "" ? "" : `${skillDir}/`;
+    byDir.get(skillDir)?.files.push({
+      bundlePath: entryPath.slice(prefix.length),
+      sha256: sha256(bytes),
+      sizeBytes: bytes.byteLength,
+      // Decoded as UTF-8 for static analysis only; the sha256 above is over the
+      // raw bytes, so stored integrity stays byte-exact.
+      contentText: bytes.toString("utf8"),
+    });
+  }
+  for (const skill of skills) {
+    skill.files.sort((left, right) =>
+      left.bundlePath.localeCompare(right.bundlePath),
+    );
+  }
+
+  return { source, commitSha: source.commitSha, skills };
 }

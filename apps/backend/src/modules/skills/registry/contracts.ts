@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /**
@@ -50,29 +49,29 @@ function sanitizeSlugSegment(value: string): string {
 
 /**
  * Derive the global-unique `skill_definitions.slug` from a GitHub identifier
- * (§2): `gh-<owner>-<repo>[-<8-hex subpath hash>]`, always within `[a-z0-9-]`.
+ * plus the skill's own frontmatter `name` (§2): `gh-<owner>-<repo>-<name>`,
+ * always within `[a-z0-9-]`.
  *
- * A single repo can ship many skills under different subpaths, so the subpath
- * must participate in the slug. It is folded in as an 8-hex hash of the RAW
- * (only leading/trailing "/" trimmed) subpath rather than its sanitized form:
- * sanitizing first would let distinct paths collide (`skills/a` and `skills-a`
- * both flatten to `skills-a`), whereas hashing the raw path keeps them distinct
- * while staying in the slug charset. The DB's `skill_definitions_slug_uq` index
- * is the final backstop for the residual owner/repo hyphen ambiguity.
+ * The slug is not just a database key: it becomes the skill's `name` in the
+ * runtime descriptor, the `/skills/<name>/` mount segment, and the label the
+ * model sees in its available-skills list. So it is built to be READ, from the
+ * three parts a person would use to identify the skill — which is also how the
+ * rest of the ecosystem addresses skills (LobeHub's `owner-repo`). An opaque
+ * digest would satisfy uniqueness while telling the model nothing.
+ *
+ * A repo may ship many skills, and `name` is what the agentskills.io spec makes
+ * the skill's identity, so `name` is what disambiguates them here. Two skills in
+ * one repo declaring the same `name` therefore collide — that repo is malformed
+ * by the spec, and the submit loop skips the duplicate with an explicit reason
+ * rather than silently overwriting the first. `skill_definitions_slug_uq` is the
+ * final backstop.
  */
 export function deriveRegistrySlug(
   owner: string,
   repo: string,
-  subpath?: string,
+  name: string,
 ): string {
   const base = `gh-${sanitizeSlugSegment(owner)}-${sanitizeSlugSegment(repo)}`;
-  const normalizedSubpath = (subpath ?? "").replace(/^\/+|\/+$/g, "");
-  if (normalizedSubpath.trim().length === 0) {
-    return base;
-  }
-  const subpathHash = createHash("sha256")
-    .update(normalizedSubpath)
-    .digest("hex")
-    .slice(0, 8);
-  return `${base}-${subpathHash}`;
+  const skill = sanitizeSlugSegment(name);
+  return skill.length > 0 ? `${base}-${skill}` : base;
 }

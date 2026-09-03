@@ -221,6 +221,16 @@ export function normalizeGitHubSource(input: string): NormalizedGitHubSource {
   };
 }
 
+/** Headers for a GitHub archive download (see `githubFetch`). */
+export function githubDownloadHeaders(): Record<string, string> {
+  return {
+    "User-Agent": githubUserAgent,
+    ...(process.env.GITHUB_TOKEN
+      ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+      : {}),
+  };
+}
+
 function githubHeaders() {
   const headers: Record<string, string> = {
     "User-Agent": githubUserAgent,
@@ -278,7 +288,12 @@ function githubRetryDelayMs(response: Response, attempt: number) {
   return backoff + Math.floor(Math.random() * backoff);
 }
 
-async function githubFetch(
+/**
+ * Retry/backoff-aware GitHub fetch. Exported alongside `githubDownloadHeaders`
+ * so the skills registry's in-memory zipball read reuses the same rate-limit
+ * handling and token plumbing instead of re-implementing them.
+ */
+export async function githubFetch(
   url: string,
   headers: Record<string, string>,
 ): Promise<Response> {
@@ -312,14 +327,25 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function resolveDefaultBranch(source: NormalizedGitHubSource) {
+/**
+ * The URL/API half of GitHub source resolution — no archive bytes are touched
+ * here, only a repo URL string and JSON metadata. Exported so the skills
+ * registry can pin a commit without pulling in `prepareGitHubRepository`, whose
+ * download-and-`tar`-extract step it deliberately does not use (it reads the
+ * zipball in memory instead; see `skills/registry/zip-read.ts`).
+ */
+export async function resolveDefaultBranch(source: NormalizedGitHubSource) {
   const data = await fetchJson<{ default_branch?: string }>(
     `https://api.github.com/repos/${source.owner}/${source.repo}`,
   );
   return data.default_branch || "main";
 }
 
-async function resolveCommitSha(source: NormalizedGitHubSource, ref: string) {
+/** See `resolveDefaultBranch` for why this is exported. */
+export async function resolveCommitSha(
+  source: NormalizedGitHubSource,
+  ref: string,
+) {
   try {
     const data = await fetchJson<{ sha?: string }>(
       `https://api.github.com/repos/${source.owner}/${source.repo}/commits/${encodeURIComponent(ref)}`,
@@ -344,7 +370,9 @@ async function downloadTarball(input: {
       : {}),
   });
   if (!response.ok || !response.body) {
-    throw new Error(`GitHub tarball download failed ${response.status}: ${url}`);
+    throw new Error(
+      `GitHub tarball download failed ${response.status}: ${url}`,
+    );
   }
 
   // Reject up front when the server advertises an over-limit body...
@@ -360,7 +388,9 @@ async function downloadTarball(input: {
 
   // ...and enforce the cap on the actual bytes streamed (headers can lie).
   await pipeline(
-    Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
+    Readable.fromWeb(
+      response.body as unknown as Parameters<typeof Readable.fromWeb>[0],
+    ),
     createArchiveSizeLimitStream(GITHUB_ARCHIVE_LIMITS.maxArchiveBytes),
     createWriteStream(input.archivePath),
   );

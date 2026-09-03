@@ -5,10 +5,7 @@ import { analyzeRegistrySkill } from "./analyze";
 import { RegistrySubmissionError } from "./errors";
 import type { DiscoveredSkill, DiscoveredSkillFile } from "./read";
 
-function file(
-  bundlePath: string,
-  contentText: string,
-): DiscoveredSkillFile {
+function file(bundlePath: string, contentText: string): DiscoveredSkillFile {
   const bytes = Buffer.from(contentText, "utf8");
   return {
     bundlePath,
@@ -57,7 +54,14 @@ test("prompt-only skill: no scripts, no shell, permissive license", () => {
     repo: REPO,
     discovered: discovered({
       files: [
-        file("SKILL.md", skillMd({ name: "writer", description: "Writes prose", license: "MIT" })),
+        file(
+          "SKILL.md",
+          skillMd({
+            name: "writer",
+            description: "Writes prose",
+            license: "MIT",
+          }),
+        ),
         file("resources/notes.md", "extra reference notes"),
       ],
     }),
@@ -74,7 +78,14 @@ test("capability classification: ships scripts but reads prompt-only → executa
     repo: REPO,
     discovered: discovered({
       files: [
-        file("SKILL.md", skillMd({ name: "runner", description: "Does a thing", license: "MIT" })),
+        file(
+          "SKILL.md",
+          skillMd({
+            name: "runner",
+            description: "Does a thing",
+            license: "MIT",
+          }),
+        ),
         file("scripts/run.py", "print('hello')"),
       ],
     }),
@@ -116,7 +127,12 @@ test("license string is captured for display; absent license is null and never f
     owner: OWNER,
     repo: REPO,
     discovered: discovered({
-      files: [file("SKILL.md", skillMd({ name: "x", description: "d", license: "GPL-3.0" }))],
+      files: [
+        file(
+          "SKILL.md",
+          skillMd({ name: "x", description: "d", license: "GPL-3.0" }),
+        ),
+      ],
     }),
   });
   assert.equal(gpl.license, "GPL-3.0");
@@ -144,13 +160,18 @@ test("fileManifest paths are bundle-relative with correct roles", () => {
       repoSubpath: "skills/writer",
       dirName: "writer",
       files: [
-        file("SKILL.md", skillMd({ name: "writer", description: "d", license: "MIT" })),
+        file(
+          "SKILL.md",
+          skillMd({ name: "writer", description: "d", license: "MIT" }),
+        ),
         file("resources/notes.md", "notes"),
         file("scripts/run.py", "print(1)"),
       ],
     }),
   });
-  const byPath = new Map(analyzed.fileManifest.map((entry) => [entry.path, entry]));
+  const byPath = new Map(
+    analyzed.fileManifest.map((entry) => [entry.path, entry]),
+  );
   // Bundle-relative, NOT repo-root-relative (no `skills/writer/` prefix).
   assert.ok(byPath.has("SKILL.md"));
   assert.ok(byPath.has("resources/notes.md"));
@@ -167,7 +188,10 @@ test("a script referencing a path above the bundle is flagged (PR-4)", () => {
     repo: REPO,
     discovered: discovered({
       files: [
-        file("SKILL.md", skillMd({ name: "x", description: "d", license: "MIT" })),
+        file(
+          "SKILL.md",
+          skillMd({ name: "x", description: "d", license: "MIT" }),
+        ),
         file("scripts/run.py", "open('../../secrets/creds.txt')"),
       ],
     }),
@@ -180,21 +204,25 @@ test("an oversize description is truncated to 1024 chars, not rejected", () => {
     owner: OWNER,
     repo: REPO,
     discovered: discovered({
-      files: [file("SKILL.md", skillMd({ name: "x", description: "d".repeat(1025) }))],
+      files: [
+        file("SKILL.md", skillMd({ name: "x", description: "d".repeat(1025) })),
+      ],
     }),
   });
   assert.equal(analyzed.description.length, 1024);
   assert.equal(analyzed.description, "d".repeat(1024));
 });
 
-test("frontmatter validation rejects a bad name, empty description, and dir mismatch", () => {
+test("frontmatter validation rejects a bad name and an empty description", () => {
   assert.throws(
     () =>
       analyzeRegistrySkill({
         owner: OWNER,
         repo: REPO,
         discovered: discovered({
-          files: [file("SKILL.md", skillMd({ name: "Bad Name!", description: "d" }))],
+          files: [
+            file("SKILL.md", skillMd({ name: "Bad Name!", description: "d" })),
+          ],
         }),
       }),
     (error) =>
@@ -214,19 +242,25 @@ test("frontmatter validation rejects a bad name, empty description, and dir mism
       }),
     RegistrySubmissionError,
   );
+});
 
-  // Sub-directory skill whose frontmatter name disagrees with its directory.
-  assert.throws(
-    () =>
-      analyzeRegistrySkill({
-        owner: OWNER,
-        repo: REPO,
-        discovered: discovered({
-          repoSubpath: "skills/writer",
-          dirName: "writer",
-          files: [file("SKILL.md", skillMd({ name: "different", description: "d" }))],
-        }),
-      }),
-    RegistrySubmissionError,
-  );
+test("frontmatter name wins over the directory it sits in", () => {
+  // Real repos routinely suffix the directory (`…-skill`) or name the skill
+  // after the technique rather than the folder. The frontmatter is
+  // authoritative, and the slug is derived from it, so the skill still indexes.
+  const analyzed = analyzeRegistrySkill({
+    owner: OWNER,
+    repo: REPO,
+    discovered: discovered({
+      repoSubpath: "skills/writer-skill",
+      dirName: "writer-skill",
+      files: [
+        file("SKILL.md", skillMd({ name: "different", description: "d" })),
+      ],
+    }),
+  });
+
+  assert.equal(analyzed.name, "different");
+  assert.equal(analyzed.slug, `gh-${OWNER}-${REPO}-different`);
+  assert.equal(analyzed.repoSubpath, "skills/writer-skill");
 });

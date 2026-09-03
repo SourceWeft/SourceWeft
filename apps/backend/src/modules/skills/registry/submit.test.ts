@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
   getExisting: vi.fn(),
   upsert: vi.fn(),
-  cleanup: vi.fn(),
 }));
 
 vi.mock("./read", () => ({ readRegistrySkillsFromGitHub: mocks.read }));
@@ -20,10 +19,6 @@ vi.mock("./analyze", () => ({ analyzeRegistrySkill: mocks.analyze }));
 vi.mock("./repository", () => ({
   getRegistrySkillForSubmission: mocks.getExisting,
   upsertRegistrySkillIndex: mocks.upsert,
-}));
-vi.mock("../../market/parser/github", () => ({
-  cleanupGitHubRepository: mocks.cleanup,
-  prepareGitHubRepository: vi.fn(),
 }));
 vi.mock("../../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -60,7 +55,12 @@ function analyzed(overrides: Record<string, unknown> = {}) {
     contentSha256: "h",
     scan: { reviewRequired: false, flags: [] as string[] },
     fileManifest: [
-      { path: "SKILL.md", sha256: "h", sizeBytes: 1, role: "model-readable" as const },
+      {
+        path: "SKILL.md",
+        sha256: "h",
+        sizeBytes: 1,
+        role: "model-readable" as const,
+      },
     ],
     allowedTools: [] as string[],
     ...overrides,
@@ -86,18 +86,24 @@ test("a clean, new skill indexes and stores a pointer + published version", asyn
   const upsertArg = mocks.upsert.mock.calls[0]?.[0];
   assert.equal(upsertArg.versionStatus, "published");
   assert.equal(upsertArg.outcome, "indexed");
-  assert.match(upsertArg.storagePointer, /^github:acme\/skills@a{40}#skills\/writer$/);
+  assert.match(
+    upsertArg.storagePointer,
+    /^github:acme\/skills@a{40}#skills\/writer$/,
+  );
   assert.equal(upsertArg.manifestJson.visibility, "restricted");
   assert.equal(upsertArg.manifestJson.registry.capability, "prompt-only");
-  assert.equal(upsertArg.manifestJson.registry.fileManifest[0].path, "SKILL.md");
-  // Temp dir cleaned up exactly once.
-  assert.equal(mocks.cleanup.mock.calls.length, 1);
+  assert.equal(
+    upsertArg.manifestJson.registry.fileManifest[0].path,
+    "SKILL.md",
+  );
 });
 
 test("a flagged skill queues for review (draft version)", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(
-    analyzed({ scan: { reviewRequired: true, flags: ["egress:pipe-to-shell"] } }),
+    analyzed({
+      scan: { reviewRequired: true, flags: ["egress:pipe-to-shell"] },
+    }),
   );
 
   const result = await submitRegistrySkillFromGitHub({
@@ -109,7 +115,7 @@ test("a flagged skill queues for review (draft version)", async () => {
   assert.equal(mocks.upsert.mock.calls[0]?.[0]?.versionStatus, "draft");
 });
 
-test("an ownership conflict throws and still cleans up", async () => {
+test("an ownership conflict throws before any upsert", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(analyzed());
   mocks.getExisting.mockResolvedValue({
@@ -129,7 +135,6 @@ test("an ownership conflict throws and still cleans up", async () => {
       error.code === "REGISTRY_SUBMISSION_CONFLICT",
   );
   assert.equal(mocks.upsert.mock.calls.length, 0);
-  assert.equal(mocks.cleanup.mock.calls.length, 1);
 });
 
 test("a multi-skill repo aggregates to queued when any skill is flagged", async () => {
@@ -187,6 +192,4 @@ test("read failure is surfaced as NOT_SKILL and does not double-clean", async ()
       error instanceof RegistrySubmissionError &&
       error.code === "REGISTRY_SUBMISSION_NOT_SKILL",
   );
-  // read() owns cleanup on its own failure; submit must not clean again.
-  assert.equal(mocks.cleanup.mock.calls.length, 0);
 });

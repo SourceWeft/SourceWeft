@@ -17,7 +17,9 @@ import { scanRegistrySkill } from "./scan";
  * uses to fetch individual files. No file body ever leaves this stage.
  */
 
-type RegistryFileManifest = NonNullable<SkillManifestJson["registry"]>["fileManifest"];
+type RegistryFileManifest = NonNullable<
+  SkillManifestJson["registry"]
+>["fileManifest"];
 type RegistryFileRole = RegistryFileManifest[number]["role"];
 
 export type AnalyzedRegistrySkill = {
@@ -60,7 +62,8 @@ const SCRIPT_EXTENSIONS = new Set([
 
 // Fenced shell blocks in model-readable content = the skill tells the model to
 // run commands ⇒ executable capability (§3 Stage 3).
-const SHELL_FENCE_PATTERN = /```\s*(bash|sh|shell|zsh|console|shell-session)\b/i;
+const SHELL_FENCE_PATTERN =
+  /```\s*(bash|sh|shell|zsh|console|shell-session)\b/i;
 
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {
@@ -112,7 +115,10 @@ function fileRole(bundlePath: string): RegistryFileRole {
  * against the referencing file's bundle dir; anything normalizing to `../…` (or
  * an absolute/home path) has escaped the bundle.
  */
-function referencesOutOfBundlePath(bundlePath: string, contentText: string): boolean {
+function referencesOutOfBundlePath(
+  bundlePath: string,
+  contentText: string,
+): boolean {
   const fileDir = path.posix.dirname(bundlePath);
   const tokens = contentText.match(/['"`]([^'"`\n]*\/[^'"`\n]*)['"`]/g) ?? [];
   for (const token of tokens) {
@@ -164,7 +170,9 @@ export function analyzeRegistrySkill(input: {
   discovered: DiscoveredSkill;
 }): AnalyzedRegistrySkill {
   const { discovered } = input;
-  const skillMd = discovered.files.find((file) => file.bundlePath === "SKILL.md");
+  const skillMd = discovered.files.find(
+    (file) => file.bundlePath === "SKILL.md",
+  );
   if (!skillMd) {
     // read.ts only surfaces dirs with a SKILL.md, so this is defensive.
     throw new RegistrySubmissionError(
@@ -187,14 +195,12 @@ export function analyzeRegistrySkill(input: {
       `SKILL.md 'name' must be 1-${MAX_NAME_LENGTH} chars of [a-z0-9-]`,
     );
   }
-  // Directory match applies to sub-directory skills (skills/<name>/…); a
-  // repo-root skill has no meaningful dir to match against.
-  if (discovered.repoSubpath !== "" && name !== discovered.dirName) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_INVALID_SKILL",
-      `SKILL.md 'name' (${name}) must match its directory (${discovered.dirName})`,
-    );
-  }
+  // The frontmatter `name` is authoritative; the directory it happens to sit in
+  // is not required to match. The agentskills.io spec recommends they agree, but
+  // real repos routinely differ (a directory suffixed `-skill`, a name
+  // describing the technique), and rejecting those loses the whole skill over a
+  // cosmetic mismatch. Every consumer in the ecosystem — LobeHub, Continue,
+  // goose — reads the frontmatter and ignores the directory, so we do too.
   if (typeof description !== "string" || description.trim().length === 0) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_INVALID_SKILL",
@@ -224,7 +230,9 @@ export function analyzeRegistrySkill(input: {
   const flags = new Set(baseScan.flags);
 
   const hasShellFence = discovered.files.some(
-    (file) => fileRole(file.bundlePath) === "model-readable" && SHELL_FENCE_PATTERN.test(file.contentText),
+    (file) =>
+      fileRole(file.bundlePath) === "model-readable" &&
+      SHELL_FENCE_PATTERN.test(file.contentText),
   );
   const { capability, undeclaredScripts } = classifyCapability({
     files: fileManifest,
@@ -236,7 +244,10 @@ export function analyzeRegistrySkill(input: {
   }
 
   for (const file of scanFiles) {
-    if (file.role === "script" && referencesOutOfBundlePath(file.path, file.contentText)) {
+    if (
+      file.role === "script" &&
+      referencesOutOfBundlePath(file.path, file.contentText)
+    ) {
       flags.add("script:out-of-bundle-path");
       break;
     }
@@ -248,13 +259,11 @@ export function analyzeRegistrySkill(input: {
 
   const finalFlags = [...flags].sort();
   return {
-    slug: deriveRegistrySlug(
-      input.owner,
-      input.repo,
-      discovered.repoSubpath || undefined,
-    ),
+    slug: deriveRegistrySlug(input.owner, input.repo, name),
     name,
-    displayName: firstString(frontmatter.displayName, frontmatter.title) ?? titleCase(name),
+    displayName:
+      firstString(frontmatter.displayName, frontmatter.title) ??
+      titleCase(name),
     description: normalizedDescription,
     repoSubpath: discovered.repoSubpath,
     capability,
