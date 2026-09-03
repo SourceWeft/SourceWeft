@@ -372,6 +372,49 @@ export async function findCatalogSkillVersionForWorkspace(input: {
   return row ?? null;
 }
 
+/**
+ * Grant a workspace access to a skill definition, idempotently.
+ *
+ * `visibleSkillCondition` treats a `restricted` definition as invisible unless
+ * an entitlement names the team or workspace — and every registry skill starts
+ * restricted, by the trust firewall. Nothing used to write this table, so an
+ * installed registry skill produced a `workspace_skills` row that no runtime
+ * query could see: it never mounted and never reached the model. Installing a
+ * skill into a workspace IS the grant, so it is issued here, in the same
+ * transaction, rather than left to an admin step that does not exist.
+ */
+async function grantSkillEntitlement(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  input: {
+    skillId: string;
+    teamId: string;
+    workspaceId: string;
+    grantedBy: string;
+  },
+) {
+  const [existing] = await tx
+    .select({ id: skillEntitlements.id })
+    .from(skillEntitlements)
+    .where(
+      and(
+        eq(skillEntitlements.skillId, input.skillId),
+        eq(skillEntitlements.teamId, input.teamId),
+        eq(skillEntitlements.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    return;
+  }
+  await tx.insert(skillEntitlements).values({
+    id: randomUUID(),
+    skillId: input.skillId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    grantedBy: input.grantedBy,
+  });
+}
+
 export async function upsertWorkspaceSkill(input: {
   teamId: string;
   workspaceId: string;
@@ -389,6 +432,13 @@ export async function upsertWorkspaceSkill(input: {
   const enabled = input.enabled ?? true;
   const now = new Date();
   return db.transaction(async (tx) => {
+    await grantSkillEntitlement(tx, {
+      grantedBy: input.enabledBy,
+      skillId: input.skillId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+    });
+
     const [existing] = await tx
       .select()
       .from(workspaceSkills)

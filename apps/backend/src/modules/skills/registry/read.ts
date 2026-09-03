@@ -31,7 +31,14 @@ import {
 export const REGISTRY_READ_LIMITS = Object.freeze({
   maxSkillFileBytes: GITHUB_ZIP_LIMITS.maxFileBytes,
   maxSkillFilesPerBundle: 200,
-  maxSkillsPerRepo: 25,
+  /**
+   * A sanity bound, not the real defence — that is the cumulative uncompressed
+   * ceiling in `github-zip.ts`. Curated skill monorepos are genuinely this
+   * large: a 90-skill repository measured 309 files and 2.7 MiB, comfortably
+   * inside a 64 MiB budget, yet the previous limit of 25 rejected it outright.
+   * Sizing this off skill COUNT was measuring the wrong thing.
+   */
+  maxSkillsPerRepo: 200,
 });
 
 /** Directories that are never skill content (mirrors builtin.ts denylist). */
@@ -108,14 +115,26 @@ function lastSegment(dirPath: string): string {
 }
 
 /**
- * Locate every skill directory (one containing a `SKILL.md`): the repo root
- * itself, plus one level under `skills/`, `.claude/skills/`, `.agents/skills/`.
- * A repo may ship multiple skills (§3 Stage 2).
+ * Locate every skill directory — any directory holding a `SKILL.md` — at the
+ * repo root or ANYWHERE beneath `skills/`, `.claude/skills/`, `.agents/skills/`.
+ *
+ * Depth is deliberately unbounded under those containers. Requiring exactly one
+ * level was an assumption about layout, not a rule anyone follows: repos that
+ * ship more than a handful group them by topic
+ * (`skills/1-brand-marketing/seo-brief-writer/`), and under the old check a
+ * 90-skill repository discovered zero and was rejected outright. The containers
+ * still scope the search, so a `SKILL.md` sitting in `docs/` or `examples/` as
+ * sample content is not mistaken for an installable skill.
+ *
+ * Exported for tests: this is a pure function of the archive's path list, and
+ * it decides whether a repository is importable at all.
  */
-function discoverSkillDirectories(entryPaths: string[]): string[] {
+export function discoverSkillDirectories(entryPaths: string[]): string[] {
   const dirs: string[] = [];
   for (const entryPath of entryPaths) {
-    if (!entryPath.endsWith("SKILL.md")) {
+    // The basename must be exactly SKILL.md — `endsWith` alone would also
+    // match `NOT-SKILL.md` or `MY-SKILL.md` and index their directory.
+    if (lastSegment(entryPath) !== "SKILL.md") {
       continue;
     }
     const dir = dirNameOf(entryPath);
@@ -123,8 +142,7 @@ function discoverSkillDirectories(entryPaths: string[]): string[] {
       dirs.push("");
       continue;
     }
-    const container = dirNameOf(dir);
-    if (SKILL_CONTAINERS.includes(container)) {
+    if (SKILL_CONTAINERS.some((container) => dir.startsWith(`${container}/`))) {
       dirs.push(dir);
     }
   }
