@@ -4,7 +4,10 @@ import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "../..";
 import type { RunCancellationGate } from "../../run-cancellation";
 import { SelectedSkillsBackend } from "../../../skills/backend";
-import { buildSkillAgentTools } from "../../../skills/agent-tools";
+import {
+  buildSkillAgentTools,
+  createSkillToolInterruptConfigs,
+} from "../../../skills/agent-tools";
 import {
   buildConnectorActionToolset,
   type ConnectorActionToolContext,
@@ -682,6 +685,7 @@ export async function buildThreadAgentAssembly(
     ...(sandboxRuntime?.interruptOn ?? {}),
     ...(mcpToolRuntime?.interruptOn ?? {}),
     ...connectorInterruptOn,
+    ...createSkillToolInterruptConfigs(),
   };
   if (sandboxRuntime) {
     agentSandboxService.warnIfHitlBypassed({

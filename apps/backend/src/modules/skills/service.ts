@@ -332,6 +332,12 @@ export class ContentSkillsService {
         or(
           ilike(skillDefinitions.displayName, like),
           ilike(skillDefinitions.description, like),
+          // The slug matters as much as the prose: it carries the author's own
+          // name for the skill, which is what someone types when they already
+          // know what they want ("internal-comms"). Matching only display name
+          // and description made that exact search miss, and the caller then
+          // had to guess at synonyms.
+          ilike(skillDefinitions.slug, like),
         ),
       );
     }
@@ -411,10 +417,20 @@ export class ContentSkillsService {
    * no way to learn before the repo is indexed. The whole repo is still INDEXED
    * (that is what makes the rest searchable); only the install narrows.
    *
-   * A skill that ships executable scripts installs **disabled**. Installing is
-   * a judgement about relevance; running third-party code is a separate
-   * judgement, and nothing should make it silently for the user. The caller
-   * surfaces `enabled: false` so the agent can say so.
+   * Nothing installed here is enabled. Every skill this method handles is
+   * `registry_github` — third-party, `visibility: restricted`, publisher
+   * "Community", `verified: false` — and enabling one puts its author's text
+   * into the agent's available-skills list on every subsequent turn. That is
+   * not hypothetical: a community skill observed in the wild uses its own
+   * DESCRIPTION to demand "skill invocation before ANY response including
+   * clarifying questions". Instruction injection needs no scripts.
+   *
+   * So installing and enabling separate by SOURCE, not by capability: builtin
+   * and workspace-authored skills enable on install (we ship the first, the
+   * user wrote the second), while a registry skill waits for someone to approve
+   * that specific skill through `enable_skill`. `capability` still matters — it
+   * decides what the approval prompt warns about — it just no longer decides
+   * whether third-party text goes live on its own.
    */
   async installSkill(input: {
     teamId: string;
@@ -501,14 +517,14 @@ export class ContentSkillsService {
         skillId: row.definition.id,
         skillVersionId: row.version.id,
         enabledBy: input.userId,
-        enabled: capability !== "executable",
+        enabled: false,
       });
       installed.push({
         slug,
         displayName: row.definition.displayName,
         description: row.definition.description,
         capability,
-        enabled: capability !== "executable",
+        enabled: false,
         status: "indexed",
       });
     }
@@ -521,6 +537,54 @@ export class ContentSkillsService {
       );
     }
     return { skills: installed };
+  }
+
+  /**
+   * Switch on an already-installed skill, by slug.
+   *
+   * The counterpart to `installSkill` leaving everything off. Its tool goes
+   * through human approval, which is the point: this is where a person accepts
+   * a specific third party's instructions — and, for an `executable` skill,
+   * their code — into the agent. A model completing a task is exactly the actor
+   * that would otherwise flip it on as a means to an end.
+   */
+  async enableWorkspaceSkillBySlug(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    slug: string;
+  }) {
+    const slug = input.slug.trim();
+    const installed = await listWorkspaceInstalledSkills({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+    });
+    const match =
+      installed.find((item) => item.slug === slug) ??
+      // Accept the author's own name too — it is what a person says out loud,
+      // and the same handle `install_skill` takes.
+      installed.find(
+        (item) => item.slug.endsWith(`-${slug}`) || item.name === slug,
+      );
+    if (!match) {
+      throw new ContentError(
+        404,
+        "SKILL_NOT_FOUND",
+        `'${input.slug}' is not installed in this workspace. Install it first with install_skill.`,
+      );
+    }
+    if (match.enabled) {
+      return { skill: match, alreadyEnabled: true };
+    }
+    await upsertWorkspaceSkill({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      skillId: match.skillId,
+      skillVersionId: match.skillVersionId,
+      enabledBy: input.userId,
+      enabled: true,
+    });
+    return { skill: match, alreadyEnabled: false };
   }
 
   async listWorkspaceSkills(input: { teamId: string; workspaceId: string }) {

@@ -62,7 +62,7 @@ export function buildSkillAgentTools(
           }),
         ),
         "",
-        "Install one by passing its slug to install_skill.",
+        "If one of these is already installed and the user wants it turned on, call enable_skill with its slug. Otherwise install it with install_skill.",
       ].join("\n");
     },
     {
@@ -90,31 +90,32 @@ export function buildSkillAgentTools(
         });
 
         const lines: string[] = [];
-        const ready = skills.filter((item) => item.enabled);
-        const needsEnabling = skills.filter(
-          (item) => !item.enabled && item.status === "indexed",
-        );
+        const installed = skills.filter((item) => item.status === "indexed");
         const queued = skills.filter((item) => item.status === "queued");
+        const withScripts = installed.filter(
+          (item) => item.capability === "executable",
+        );
 
-        if (ready.length > 0) {
+        if (installed.length > 0) {
           lines.push(
-            `Installed and enabled ${ready.length} skill(s):`,
-            ...ready.map(describe),
+            `Installed ${installed.length} skill(s), all switched OFF:`,
+            ...installed.map(describe),
             "",
-            "These become available on your NEXT turn — this turn's skill set was fixed before you started. Tell the user they are installed; do not try to read or use them yet.",
+            "Skills from a third-party repository do not switch themselves on: enabling one puts its author's instructions into every later turn. Ask the user which of these they want, then call enable_skill for each. Do not enable anything they did not ask for.",
           );
         }
-        if (needsEnabling.length > 0) {
+        if (withScripts.length > 0) {
           lines.push(
-            `${needsEnabling.length} skill(s) ship executable scripts, so they were installed but left DISABLED:`,
-            ...needsEnabling.map(describe),
             "",
-            "Running third-party code is the user's call, not yours. Tell them these are installed and that enabling them in workspace skill settings will let their scripts run.",
+            `Of those, ${withScripts.length} also ship executable scripts, so enabling them additionally makes that code runnable: ${withScripts
+              .map((item) => item.slug)
+              .join(", ")}. Say so when you offer them.`,
           );
         }
         if (queued.length > 0) {
           lines.push(
-            `${queued.length} skill(s) were indexed but held for review, so they cannot be used yet:`,
+            "",
+            `${queued.length} skill(s) were indexed but held for review, so they cannot be enabled at all yet:`,
             ...queued.map(describe),
           );
         }
@@ -137,7 +138,7 @@ export function buildSkillAgentTools(
     {
       name: "install_skill",
       description:
-        "Install a skill into this workspace so it is available from the next turn onward. `source` accepts a GitHub URL (optionally deep-linked to one skill's directory), the `owner/repo` shorthand, or the slug of a skill already in the catalog. A repository that is not indexed yet is fetched and indexed first. By default every skill the repository ships is installed; pass `skill` to install just one of them when the user asked for a specific capability. Skills that ship executable scripts install disabled and need the user to enable them.",
+        "Install skills from a repository into this workspace. `source` accepts a GitHub URL (optionally deep-linked to one skill's directory), the `owner/repo` shorthand, or the slug of a skill already in the catalog. A repository that is not indexed yet is fetched and indexed first. By default every skill it ships is installed; pass `skill` to install just one when the user named a specific capability. Everything installs switched OFF — use enable_skill afterwards for the ones the user wants. If the skill is already installed and the user simply wants it turned on, call enable_skill directly instead of installing again.",
       schema: z.object({
         skill: z
           .string()
@@ -155,5 +156,77 @@ export function buildSkillAgentTools(
     },
   );
 
-  return [searchSkills, installSkill];
+  const enableSkill = tool(
+    async ({ slug }: { slug: string }) => {
+      try {
+        const { skill, alreadyEnabled } =
+          await contentSkillsService.enableWorkspaceSkillBySlug({
+            teamId: context.teamId,
+            workspaceId: context.workspaceId,
+            userId: context.userId,
+            slug,
+          });
+        if (alreadyEnabled) {
+          return `${skill.slug} is already enabled.`;
+        }
+        return [
+          `Enabled ${skill.slug} — ${skill.displayName}.`,
+          skill.registryCapability === "executable"
+            ? "It ships executable scripts, which can now run in the sandbox."
+            : "",
+          "It takes effect on your NEXT turn; this turn's skill set was fixed before you started.",
+        ]
+          .filter(Boolean)
+          .join(" ");
+      } catch (error) {
+        if (error instanceof ContentError) {
+          logger.info("Agent skill enable rejected", {
+            slug,
+            workspaceId: context.workspaceId,
+            code: error.code,
+          });
+          return `Could not enable '${slug}': ${error.message}`;
+        }
+        throw error;
+      }
+    },
+    {
+      name: "enable_skill",
+      description:
+        "Switch on a skill that is installed in this workspace but currently off. Installed skills start off, so this is what makes one usable. Call it ONLY when the user has asked for that skill to be turned on or to be used — never on your own initiative to complete a task, because enabling accepts a third party's instructions, and their scripts, into this workspace.",
+      schema: z.object({
+        slug: z
+          .string()
+          .min(1)
+          .describe(
+            "The skill's catalog slug, or the author's name for it (e.g. 'pdf').",
+          ),
+      }),
+    },
+  );
+
+  return [searchSkills, installSkill, enableSkill];
+}
+
+/**
+ * Human approval for `enable_skill`, merged into the turn's `interruptOn`.
+ *
+ * Enabling is the moment a person accepts a third party's instructions — and,
+ * for an `executable` skill, their code — into the agent. Leaving that to the
+ * model alone would make "installed off by default" a speed bump rather than a
+ * decision: a model finishing a task is precisely the actor that would flip it
+ * on as a means to an end, and a skill's own description is untrusted text that
+ * can ask for exactly that. The prompt puts the choice back on the person, with
+ * the skill named.
+ */
+export function createSkillToolInterruptConfigs() {
+  return {
+    enable_skill: {
+      allowedDecisions: ["approve", "reject"] as Array<
+        "approve" | "edit" | "reject"
+      >,
+      description:
+        "Enable a third-party skill in this workspace. Its instructions will reach the agent on every turn, and if it ships scripts, those become runnable.",
+    },
+  };
 }

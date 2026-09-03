@@ -96,6 +96,8 @@ export type WorkspaceInstalledSkillItem = {
   configJson: Record<string, unknown>;
   enabledBy: string | null;
   enabledAt: string | null;
+  /** Registry entries only — see the contracts schema for why it is surfaced. */
+  registryCapability?: "prompt-only" | "executable";
   capabilities?: {
     required?: string[];
     optional?: string[];
