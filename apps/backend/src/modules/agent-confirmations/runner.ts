@@ -303,6 +303,61 @@ export class ToolConfirmationRunner {
     // never change how the action itself executes.
     const decision = input.decision === "reject" ? "reject" : "approve";
 
+    // A plain agent tool: no connector, MCP server or sandbox action behind it,
+    // so there is no external run record to look up and the resume is built
+    // from the confirmation alone. Without this the dispatch fell through to
+    // the connector branch, which looked for an action run that was never
+    // created and failed with "Confirmation request not found" — after the user
+    // had already approved.
+    if (input.confirmation?.execution.executor.kind === "agent_tool_call") {
+      const resume: ToolApprovalResume = {
+        decisions: [
+          resumeDecisionFromSandboxInput({
+            confirmation: input.confirmation,
+            decision,
+            editedArgs: input.editedArgs,
+            note:
+              input.note ??
+              (decision === "reject"
+                ? `User declined ${input.confirmation.action.toolName} in SourceWeft.`
+                : undefined),
+          }),
+        ],
+        sourceweft: {
+          confirmationId: input.confirmationId,
+          ...(input.confirmation.execution.sourceweft?.sourceUserMessageId
+            ? {
+                sourceUserMessageId:
+                  input.confirmation.execution.sourceweft.sourceUserMessageId,
+              }
+            : {}),
+          ...(input.confirmation.execution.sourceweft?.sourceAssistantMessageId
+            ? {
+                sourceAssistantMessageId:
+                  input.confirmation.execution.sourceweft
+                    .sourceAssistantMessageId,
+              }
+            : {}),
+          ...(hitlInterruptIdFromConfirmation(input.confirmation)
+            ? {
+                hitlInterruptId: hitlInterruptIdFromConfirmation(
+                  input.confirmation,
+                ),
+              }
+            : {}),
+        },
+      };
+      const status = resolvedConfirmationStatus(decision);
+      return {
+        confirmation: {
+          ...input.confirmation,
+          action: { ...input.confirmation.action, status },
+          status,
+        },
+        resume,
+      };
+    }
+
     if (input.confirmation?.domain === "sandbox") {
       const sandboxAction =
         decision === "approve"
@@ -321,8 +376,7 @@ export class ToolConfirmationRunner {
             note: input.note,
           }),
         ],
-        ...(hitlInterruptIdFromConfirmation(input.confirmation) ||
-        sandboxAction
+        ...(hitlInterruptIdFromConfirmation(input.confirmation) || sandboxAction
           ? {
               sourceweft: {
                 confirmationId: input.confirmationId,

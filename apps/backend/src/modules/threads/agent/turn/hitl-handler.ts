@@ -271,6 +271,91 @@ function createSandboxToolConfirmation(input: {
   );
 }
 
+/**
+ * Plain agent tools that still need a human decision.
+ *
+ * The three branches below cover tools that stand for something else — a
+ * sandbox runtime, an MCP server, a connector action — and each builds its
+ * confirmation from that thing's registry entry. A tool that is just a tool has
+ * no such registry to consult, so it used to fall through to the connector
+ * lookup, find nothing, and fail the turn with
+ * `AGENT_HITL_CONFIRMATION_UNSUPPORTED`.
+ *
+ * The map is deliberately an allowlist rather than a generic fallback: an
+ * interrupt on a tool nobody declared confirmable is still a bug worth failing
+ * on, and silently approving unknown tools is the wrong direction to be
+ * permissive in. The prompt text comes from the interrupt's own `description`,
+ * so each tool words its own question.
+ */
+const PLAIN_CONFIRMABLE_TOOLS: ReadonlyMap<
+  string,
+  { domain: string; label: string; subject: string; title: string }
+> = new Map([
+  [
+    "enable_skill",
+    {
+      domain: "skills",
+      label: "Enable skill",
+      subject: "Workspace skills",
+      title: "Enable a third-party skill",
+    },
+  ],
+]);
+
+function createPlainToolConfirmation(input: {
+  action: HitlActionRequest;
+  binding: HitlActionBinding;
+  reviewConfig?: HitlReviewConfig;
+}): ToolConfirmationRequest | null {
+  const spec = PLAIN_CONFIRMABLE_TOOLS.get(input.action.name);
+  if (!spec) {
+    return null;
+  }
+  return withHitlEditableArgs(
+    {
+      type: "tool_confirmation_request",
+      schemaVersion: 1,
+      id: input.binding.toolCallId,
+      domain: spec.domain,
+      subject: { label: spec.subject, provider: spec.domain },
+      action: {
+        type: input.action.name,
+        toolName: input.action.name,
+        label: spec.label,
+        ...(input.action.description
+          ? { description: input.action.description }
+          : {}),
+        riskLevel: "high",
+        status: "proposed",
+        requiresApproval: true,
+      },
+      preview: {
+        title: spec.title,
+        summary: input.action.description ?? spec.title,
+        requestJson: input.action.args,
+      },
+      // No "always allow": each of these accepts a different third party, so a
+      // standing grant would carry a decision made about one of them onto the
+      // next.
+      decisionOptions: [
+        { decision: "reject", label: "Reject" },
+        { decision: "approve", label: "Approve" },
+      ],
+      execution: {
+        providerStatus: "not_executed",
+        // Marks the confirmation as backed by no external run record, which is
+        // what lets `agent-confirmations/runner` resume it from the
+        // confirmation alone instead of looking one up.
+        executor: { kind: "agent_tool_call" },
+        sourceweft: sourceweftMetadataFromHitlBinding(input.binding),
+      },
+      status: "proposed",
+      userMessage: "Waiting for your confirmation.",
+    },
+    input.reviewConfig,
+  );
+}
+
 function isConnectorHitlActionAlreadyApproved(input: {
   action: HitlActionRequest;
   connectorContext: {
@@ -595,6 +680,15 @@ export async function createHitlConfirmation(input: {
   });
   if (sandboxConfirmation) {
     return sandboxConfirmation;
+  }
+
+  const plainConfirmation = createPlainToolConfirmation({
+    action: input.action,
+    binding: input.binding,
+    reviewConfig: input.reviewConfig,
+  });
+  if (plainConfirmation) {
+    return plainConfirmation;
   }
 
   const confirmation = input.action.name.startsWith("mcp__")
