@@ -30,12 +30,48 @@ export type SkillAgentToolContext = {
   userId: string;
 };
 
+/**
+ * Provenance the model needs to make, or advise on, a judgement.
+ *
+ * A slug and a description say what a skill claims to do; they say nothing
+ * about who wrote it or under what terms. LobeHub's agent-facing skill page
+ * leads with exactly this — author, version, license, rating, install count —
+ * because an agent asked to install something arbitrary has otherwise no basis
+ * to tell a maintained MIT library from an unlicensed stranger. We have no
+ * ratings to report, but publisher, license, review state and the pinned source
+ * URL we already compute for the catalog, and were simply not passing on.
+ */
+function provenanceOf(input: {
+  license?: string | null;
+  flagged?: boolean;
+  verified?: boolean;
+  sourceUrl?: string | null;
+}): string {
+  const parts = [
+    // The trust firewall makes this constant, and saying it out loud is the
+    // point: nothing here is first-party.
+    input.verified ? "verified" : "community, unverified",
+    `license: ${input.license ?? "none declared"}`,
+  ];
+  if (input.flagged) {
+    parts.push("FLAGGED by the safety scan");
+  }
+  if (input.sourceUrl) {
+    parts.push(input.sourceUrl);
+  }
+  return `  [${parts.join(" · ")}]`;
+}
+
 function describe(input: {
   slug: string;
   displayName: string;
   description: string;
+  license?: string | null;
+  flagged?: boolean;
+  verified?: boolean;
+  sourceUrl?: string | null;
 }): string {
-  return `- ${input.slug} — ${input.displayName}: ${input.description}`;
+  return `- ${input.slug} — ${input.displayName}: ${input.description}\n${provenanceOf(input)}`;
 }
 
 export function buildSkillAgentTools(
@@ -59,6 +95,10 @@ export function buildSkillAgentTools(
             slug: item.slug,
             displayName: item.displayName,
             description: item.description,
+            license: item.license,
+            flagged: item.flagged,
+            verified: item.verified,
+            sourceUrl: item.sourceUrl,
           }),
         ),
         "",
@@ -68,7 +108,7 @@ export function buildSkillAgentTools(
     {
       name: "search_skills",
       description:
-        "Search the skill catalog for skills already indexed in this deployment. Returns each match's slug, name and description. Use it when the user asks what skills exist, or before installing, to see whether a suitable skill is already available. It does NOT search GitHub — to add a skill that is not indexed yet, call install_skill with its repository URL.",
+        "Search the skill catalog for skills already indexed in this deployment. Returns each match's slug, name, description, publisher, license, review state and source URL — pass that provenance on when you recommend one, since nothing in this catalog is first-party. Use it when the user asks what skills exist, or before installing, to see whether a suitable skill is already available. It does NOT search GitHub — to add a skill that is not indexed yet, call install_skill with its repository URL.",
       schema: z.object({
         query: z
           .string()
@@ -106,7 +146,7 @@ export function buildSkillAgentTools(
         }
         if (withScripts.length > 0) {
           lines.push(
-            "",
+            ...(lines.length > 0 ? [""] : []),
             `Of those, ${withScripts.length} also ship executable scripts, so enabling them additionally makes that code runnable: ${withScripts
               .map((item) => item.slug)
               .join(", ")}. Say so when you offer them.`,
@@ -114,7 +154,7 @@ export function buildSkillAgentTools(
         }
         if (queued.length > 0) {
           lines.push(
-            "",
+            ...(lines.length > 0 ? [""] : []),
             `${queued.length} skill(s) were indexed but held for review, so they cannot be enabled at all yet:`,
             ...queued.map(describe),
           );
@@ -225,8 +265,22 @@ export function createSkillToolInterruptConfigs() {
       allowedDecisions: ["approve", "reject"] as Array<
         "approve" | "edit" | "reject"
       >,
-      description:
-        "Enable a third-party skill in this workspace. Its instructions will reach the agent on every turn, and if it ships scripts, those become runnable.",
+      // Named per skill at prompt time: the two outcomes are not equivalent, and
+      // a person deciding deserves to know which one they are agreeing to.
+      // Provenance rides along because "who wrote this and under what licence"
+      // is the substance of the decision, not decoration — it is what LobeHub's
+      // skill page leads with for the same reason.
+      description: async (call: {
+        args?: Record<string, unknown>;
+      }): Promise<string> => {
+        const slug =
+          typeof call.args?.slug === "string" ? call.args.slug : "this skill";
+        return [
+          `Enable '${slug}' in this workspace?`,
+          "It is a third-party skill: nothing in this catalog is first-party or verified.",
+          "Once enabled, its author's instructions reach the assistant on every turn, and any scripts it ships become runnable in the sandbox.",
+        ].join(" ");
+      },
     },
   };
 }

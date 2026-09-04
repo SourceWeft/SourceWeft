@@ -456,6 +456,9 @@ export class ContentSkillsService {
       capability: "prompt-only" | "executable";
       enabled: boolean;
       status: "indexed" | "queued";
+      license: string | null;
+      flagged: boolean;
+      sourceUrl: string | null;
     }> = [];
 
     // An already-indexed slug installs directly; anything else is a repo
@@ -496,8 +499,13 @@ export class ContentSkillsService {
       if (!row) {
         continue;
       }
-      const capability =
-        row.version.manifestJson.registry?.capability ?? "prompt-only";
+      const registry = row.version.manifestJson.registry;
+      const capability = registry?.capability ?? "prompt-only";
+      const provenance = {
+        license: registry?.license ?? null,
+        flagged: registry?.scan?.reviewRequired ?? false,
+        sourceUrl: registry?.sourceUrl ?? null,
+      };
       // A queued (draft) version is not selectable, so installing it would be a
       // dead reference — record it in the result and move on.
       if (row.version.status !== "published") {
@@ -508,6 +516,7 @@ export class ContentSkillsService {
           capability,
           enabled: false,
           status: "queued",
+          ...provenance,
         });
         continue;
       }
@@ -526,6 +535,7 @@ export class ContentSkillsService {
         capability,
         enabled: false,
         status: "indexed",
+        ...provenance,
       });
     }
 
