@@ -182,64 +182,32 @@ function getPendingUserQuestionItemsForVersion(
 }
 
 /**
- * Run-scoped pending question lookup, parallel to
- * {@link getToolConfirmationItemsForRun}. A question surfaces from the persisted
- * assistant message's tool calls (the ask-user handler emits the request as a
- * tool-call output, not a `liveConfirmations` payload), so there is no separate
- * live-signal path.
- */
-export function getUserQuestionItemsForRun(input: {
-  activeThreadRun: ActiveToolConfirmationRun | null | undefined;
-  assistantVersionById: ReadonlyMap<string, AssistantVersionIndexEntry>;
-}): UserQuestionItem[] {
-  const assistantMessageId = input.activeThreadRun?.assistantMessageId;
-  if (!assistantMessageId) {
-    return [];
-  }
-  const entry = input.assistantVersionById.get(assistantMessageId);
-  if (!entry) {
-    return [];
-  }
-  // NOT gated on `status === "waiting_for_approval"`, unlike the confirmation
-  // lookup this mirrors. An approval parks its run in that status because the
-  // answer flows back through the confirmations route, which resolves the
-  // confirmation and completes the run. A question resumes through the replay
-  // route instead — it opens a NEW run and never writes back to this one — so
-  // the parked run is recorded `completed` with
-  // `finishReason: "user_question_requested"`. Requiring the approval status
-  // here meant the question never rendered at all: the turn paused, the request
-  // was persisted on the assistant message, and the person saw a finished
-  // answer with no way to reply.
-  //
-  // The tool call itself is the authority on whether an answer is still
-  // outstanding — `getUserQuestionOutput` returns null once the output has been
-  // replaced by the answer transcript on resume — so the run status adds
-  // nothing beyond scoping to the active run's assistant message.
-  if (
-    input.activeThreadRun?.status !== "waiting_for_approval" &&
-    !isUserPausedFinishReason(entry.version.finishReason)
-  ) {
-    return [];
-  }
-  return getPendingUserQuestionItemsForVersion(entry.version);
-}
-
-/**
- * Message-scoped question lookup: the last assistant turn, parked on a question.
+ * The pending `askUser` question, read from the last assistant turn.
  *
- * {@link getUserQuestionItemsForRun} can only fire while a run is live, because
- * `activeThreadRun` is local stream state — it is null on a fresh page load. A
- * question outlives its run (answering it opens a NEW run through the replay
- * route), so on reload the run-scoped path has nothing to key off and the
- * question would silently disappear, leaving a turn nobody can answer or
- * continue. The persisted assistant message is the durable record, so that is
- * what this reads.
+ * This is deliberately the SINGLE source, with no run-scoped sibling to the
+ * confirmation lookup. Two sources is what makes the panel flicker: a question
+ * is raised mid-stream, so during one turn the run goes running →
+ * waiting_for_approval → completed, and each transition swapped which lookup
+ * produced the item. The panel unmounted on the empty render in between and
+ * took the answers already typed into it with it.
+ *
+ * The message is also the only durable record. `activeThreadRun` is local
+ * stream state, null on a fresh page load, while a question outlives its run:
+ * answering opens a NEW run through the replay route and never writes back, so
+ * the parked run is recorded `completed`. Keying off the run lost the question
+ * on reload entirely.
+ *
+ * No finish reason is required, because the tool call is the authority on
+ * whether an answer is outstanding — `getUserQuestionOutput` returns null once
+ * the output has been replaced by the answer transcript on resume — and
+ * requiring one would blank the panel for exactly the stretch of the stream
+ * where the question is visible but the turn has not parked yet.
  *
  * Only the LAST assistant turn is considered: an older parked question has been
  * superseded by whatever the thread did next, and re-offering it would resume
  * from a checkpoint the thread has already moved past.
  */
-export function getUserQuestionItemsForLatestTurn(input: {
+export function getPendingUserQuestionItems(input: {
   activeVersionByGroup?: Record<string, number>;
   messageGroups: VersionedMessageGroup[];
 }): UserQuestionItem[] {
@@ -255,10 +223,6 @@ export function getUserQuestionItemsForLatestTurn(input: {
     });
     if (!version) {
       continue;
-    }
-    if (!isUserPausedFinishReason(version.finishReason)) {
-      // The newest assistant turn finished normally — nothing is parked.
-      return [];
     }
     return getPendingUserQuestionItemsForVersion(version);
   }

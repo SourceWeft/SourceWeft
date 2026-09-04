@@ -13,7 +13,7 @@ import {
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
-  getUserQuestionItemsForRun,
+  getPendingUserQuestionItems as getPendingUserQuestionItemsForTurn,
   getVisibleToolConfirmationItems,
   hasLiveToolConfirmationSignalForRun,
   isExpiredToolConfirmationResponse,
@@ -1194,51 +1194,61 @@ function createQuestionVersion(
   } as MessageVersion;
 }
 
+function questionGroup(version: MessageVersion) {
+  return [
+    { id: "user:1", role: "user" as const, versions: [] },
+    { id: `assistant:${version.id}`, role: "assistant" as const, versions: [version] },
+  ] as never;
+}
+
 test("a parked askUser question surfaces even though its run row reads completed", () => {
   // The regression this pins: an askUser answer resumes through the REPLAY
   // route, which opens a new run and never writes back to the parked one, so
-  // the parked run is recorded `completed` with
-  // `finishReason: "user_question_requested"`. Gating the lookup on
-  // `waiting_for_approval` — correct for confirmations, which do get written
-  // back — meant the question panel never rendered: the turn paused and the
-  // person saw a finished answer with no way to reply.
+  // the parked run is recorded `completed`. Gating on `waiting_for_approval` —
+  // correct for confirmations, which do get written back — meant the question
+  // panel never rendered: the turn paused and the person saw a finished answer
+  // with no way to reply.
   const version = createQuestionVersion("assistant-q", {
     threadRunId: "run-q",
     threadRunStatus: "completed",
     finishReason: "user_question_requested",
   });
-  const items = getUserQuestionItemsForRun({
-    activeThreadRun: {
-      assistantMessageId: "assistant-q",
-      id: "run-q",
-      status: "completed",
-    },
-    assistantVersionById: createAssistantVersionIndex([
-      { groupId: "assistant:q", version },
-    ]),
+  const items = getPendingUserQuestionItemsForTurn({
+    messageGroups: questionGroup(version),
   });
 
   assert.equal(items.length, 1);
-  assert.equal(items[0]?.question.interruptId, "6efa9943acb25af12cbadf0c2c13ce70");
+  assert.equal(
+    items[0]?.question.interruptId,
+    "6efa9943acb25af12cbadf0c2c13ce70",
+  );
 });
 
-test("a genuinely completed turn exposes no question", () => {
-  const version = createQuestionVersion("assistant-done", {
-    threadRunId: "run-done",
-    threadRunStatus: "completed",
-    finishReason: "stop",
+test("a question surfaces mid-stream, before the turn has a finish reason", () => {
+  // The panel must not blink out of existence for the stretch between the
+  // question being asked and the run parking — it unmounts on an empty render
+  // and takes the answers already typed into it with it.
+  const version = createQuestionVersion("assistant-live", {
+    threadRunId: "run-live",
+    threadRunStatus: "running",
   });
+  assert.equal(
+    getPendingUserQuestionItemsForTurn({ messageGroups: questionGroup(version) })
+      .length,
+    1,
+  );
+});
+
+test("a turn with no outstanding question exposes none", () => {
+  const version = {
+    id: "assistant-done",
+    content: "done",
+    finishReason: "stop",
+    threadRun: { id: "run-done", status: "completed" },
+    toolCalls: [],
+  } as unknown as MessageVersion;
   assert.deepEqual(
-    getUserQuestionItemsForRun({
-      activeThreadRun: {
-        assistantMessageId: "assistant-done",
-        id: "run-done",
-        status: "completed",
-      },
-      assistantVersionById: createAssistantVersionIndex([
-        { groupId: "assistant:done", version },
-      ]),
-    }),
+    getPendingUserQuestionItemsForTurn({ messageGroups: questionGroup(version) }),
     [],
   );
 });

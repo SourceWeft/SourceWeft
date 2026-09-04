@@ -35,8 +35,7 @@ import {
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
-  getUserQuestionItemsForRun,
-  getUserQuestionItemsForLatestTurn,
+  getPendingUserQuestionItems,
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
   hasActivelyRunningToolWork,
@@ -356,22 +355,14 @@ export function ChatCanvas({
     ? liveConfirmationItems
     : toolConfirmationLookup.items;
   const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
-  const questionItems = useMemo(() => {
-    const forRun = getUserQuestionItemsForRun({
-      activeThreadRun,
-      assistantVersionById: assistantVersionById ?? new Map(),
-    });
-    if (forRun.length > 0) {
-      return forRun;
-    }
-    // `activeThreadRun` is local stream state, so it is null on a fresh page
-    // load — but a question outlives its run (answering opens a new one), so
-    // the persisted last assistant turn is what keeps it answerable.
-    return getUserQuestionItemsForLatestTurn({
-      activeVersionByGroup,
-      messageGroups,
-    });
-  }, [activeThreadRun, activeVersionByGroup, assistantVersionById, messageGroups]);
+  const questionItems = useMemo(
+    () =>
+      getPendingUserQuestionItems({
+        activeVersionByGroup,
+        messageGroups,
+      }),
+    [activeVersionByGroup, messageGroups],
+  );
   const pendingQuestionItems = useMemo(
     () =>
       questionItems.filter(
@@ -379,10 +370,12 @@ export function ChatCanvas({
       ),
     [questionItems, resolvedQuestionIds],
   );
-  useEffect(() => {
-    // The answered/cancelled set is scoped to a single parked run.
-    setResolvedQuestionIds(new Set());
-  }, [toolConfirmationRunKey]);
+  // Deliberately NOT reset when the active run changes. Answering a question
+  // IS what starts the next run, so keying the reset on the run key made the
+  // marker erase itself the instant it was set: the panel came straight back,
+  // blank, on top of an answer already on its way to the server. Question ids
+  // carry the interrupt id, so they are unique per question and a stale entry
+  // can never hide a later one.
   const derivedConfirmationResolutions = useMemo(
     () =>
       deriveTerminalToolConfirmationResolutions({
