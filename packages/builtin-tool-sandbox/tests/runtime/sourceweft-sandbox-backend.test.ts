@@ -335,6 +335,17 @@ function createProvider() {
       return { output: "", exitCode: 0, truncated: false };
     },
     async uploadFile(input) {
+      // Mirrors the real providers: a bridge file route is workspace-relative
+      // by construction (Cloudflare's is literally `/file/workspace/{rel}`), so
+      // an upload outside /workspace cannot be addressed at all. Without this,
+      // the fake accepted `/skills/...` uploads that every real provider
+      // rejects, and skill staging looked healthy in tests while failing in
+      // every sandbox.
+      if (!input.sandboxPath.startsWith("/workspace/")) {
+        throw new Error(
+          `SANDBOX_FILE_PATH_DENIED: ${input.sandboxPath} is outside the /workspace root.`,
+        );
+      }
       provider.uploadedFiles.push(input.sandboxPath);
       files.set(input.sandboxPath, input.content);
     },
@@ -1388,9 +1399,30 @@ test("skill staging stages bundles into /skills and admits /skills execute comma
     'python3 "/skills/ppt-deck/scripts/validate_pptx.py" /workspace/deck.pptx',
   );
   assert.equal(manager.skillScriptsStaged(), true);
-  // Upload rung staged the archive to the contract path and stamped it.
-  assert.ok(files.get("/skills/ppt-deck.staging/asset.zip"));
-  assert.ok(files.get("/skills/ppt-deck/.sourceweft-asset.json"));
+  // The archive is uploaded into the workspace — the only place a provider
+  // file route can address — and moved into the /skills contract path from
+  // inside the sandbox, where the shell has no such restriction.
+  assert.ok(
+    provider.uploadedFiles.some(
+      (path) => path.startsWith("/workspace/") && path.endsWith(".zip"),
+    ),
+    "archive must be uploaded under /workspace",
+  );
+  assert.ok(
+    provider.systemExecuted.some(
+      (command) =>
+        command.includes("mv ") &&
+        command.includes("/skills/ppt-deck.staging/asset.zip"),
+    ),
+    "archive must be moved into the /skills staging dir",
+  );
+  // The stamp goes through the shell for the same reason as the archive.
+  assert.ok(
+    provider.systemExecuted.some((command) =>
+      command.includes("/skills/ppt-deck/.sourceweft-asset.json"),
+    ),
+    "stamp must be written into the /skills asset dir",
+  );
   // Staging commands are host-issued (executeSystem), not model commands.
   assert.ok(
     provider.systemExecuted.some((command) =>

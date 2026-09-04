@@ -106,6 +106,17 @@ function shellQuoteSingle(value: string): string {
   return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
+/** `/a/b/c.zip` → `/a/b`. Both arguments here are engine-built absolute paths. */
+function dirNameOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash <= 0 ? "/" : path.slice(0, slash);
+}
+
+/** True when `path` is `root` itself or sits beneath it. */
+function isRootOrChild(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`);
+}
+
 function assetStamp(plan: RuntimeAssetPlan, rung: "fetch" | "upload") {
   return {
     name: plan.name,
@@ -200,21 +211,28 @@ async function hasValidStamp(input: {
   }
 }
 
+/**
+ * Written through the shell rather than the upload transport, because a
+ * provider's file route only addresses the workspace and an asset may install
+ * outside it — skill bundles stamp under `/skills/<name>/`. The payload is a
+ * few hundred bytes of engine-built JSON, so a quoted `printf` is a cheaper
+ * transport than the file API even where both would work.
+ */
 async function writeStamp(input: {
   session: RuntimeAssetSessionLike;
   plan: RuntimeAssetPlan;
   assetDir: string;
   rung: "fetch" | "upload";
 }): Promise<boolean> {
-  const [result] = await input.session.uploadFiles([
+  const stamp = JSON.stringify(assetStamp(input.plan, input.rung), null, 2);
+  const result = await input.session.execute(
     [
-      `${input.assetDir}/${STAMP_FILE}`,
-      new TextEncoder().encode(
-        JSON.stringify(assetStamp(input.plan, input.rung), null, 2),
-      ),
-    ],
-  ]);
-  return Boolean(result) && !result!.error;
+      "set -e",
+      `mkdir -p ${shellQuoteSingle(input.assetDir)}`,
+      `printf '%s' ${shellQuoteSingle(stamp)} > ${shellQuoteSingle(`${input.assetDir}/${STAMP_FILE}`)}`,
+    ].join(" && "),
+  );
+  return result.exitCode === 0;
 }
 
 /**
@@ -335,22 +353,44 @@ async function ensureRuntimeAsset(input: {
     try {
       const content = await plan.loadContent();
       if (content && content.byteLength > 0) {
+        // The upload transport can only address the workspace. A provider's
+        // file API is workspace-relative by construction — Cloudflare's bridge
+        // route is literally `/file/workspace/{relative}` — so an asset whose
+        // installDir sits outside it (skill bundles stage to the `/skills/…`
+        // contract path) cannot be written by upload at all: every skill bundle
+        // failed with SANDBOX_FILE_PATH_DENIED. The shell has no such limit,
+        // and already creates the staging directory a few lines up, so the
+        // archive lands in the workspace first and is moved into place from
+        // inside the sandbox.
+        const uploadPath = isRootOrChild(stagingDir, rootDir)
+          ? `${stagingDir}/asset.zip`
+          : `${rootDir}/${ASSETS_DIR}/.inbox/${plan.name}-${plan.version}.zip`;
         const prepare = await execute(
           [
             "set -e",
             `rm -rf ${shellQuoteSingle(stagingDir)}`,
             `mkdir -p ${shellQuoteSingle(stagingDir)}`,
+            `mkdir -p ${shellQuoteSingle(dirNameOf(uploadPath))}`,
           ].join(" && "),
           "upload-prepare",
         );
         if (prepare.exitCode !== 0) {
           throw new Error(`staging mkdir failed: ${prepare.output.slice(-200)}`);
         }
-        const [uploaded] = await session.uploadFiles([
-          [`${stagingDir}/asset.zip`, content],
-        ]);
+        const [uploaded] = await session.uploadFiles([[uploadPath, content]]);
         if (uploaded?.error) {
           throw new Error(`upload failed: ${uploaded.error}`);
+        }
+        if (uploadPath !== `${stagingDir}/asset.zip`) {
+          const relocate = await execute(
+            `set -e && mv ${shellQuoteSingle(uploadPath)} ${shellQuoteSingle(`${stagingDir}/asset.zip`)}`,
+            "upload-relocate",
+          );
+          if (relocate.exitCode !== 0) {
+            throw new Error(
+              `staging move failed: ${relocate.output.slice(-200)}`,
+            );
+          }
         }
         const result = await execute(
           unpackAndPromoteCommand({ plan, stagingDir, assetDir }),

@@ -35,12 +35,34 @@ function fakeSession(input: {
   const session: RuntimeAssetSessionLike = {
     rootDir: "/workspace",
     execute: async (command) => {
+      // The stamp is written through the shell (a provider's file route only
+      // addresses the workspace, and assets may install outside it), so the
+      // fake has to honour that redirect for `files` to stay a faithful view
+      // of the sandbox filesystem.
+      const stampWrite = /printf '%s' '(?<json>[\s\S]*)' > '(?<path>[^']*)'/u.exec(
+        command,
+      );
+      if (stampWrite?.groups) {
+        files.set(
+          stampWrite.groups.path!,
+          new TextEncoder().encode(stampWrite.groups.json!),
+        );
+        return { exitCode: 0, output: "" };
+      }
       executed.push(command);
       const next = results.shift() ?? { exitCode: 0, output: "" };
       return { exitCode: next.exitCode, output: next.output ?? "" };
     },
     uploadFiles: async (uploads) => {
       for (const [path, content] of uploads) {
+        // Mirrors every real provider: the file route is workspace-relative by
+        // construction, so an upload outside /workspace is unaddressable.
+        if (!path.startsWith("/workspace/")) {
+          return uploads.map(([uploadPath]) => ({
+            path: uploadPath,
+            error: `SANDBOX_FILE_PATH_DENIED: ${path} is outside the /workspace root.`,
+          }));
+        }
         files.set(path, content);
       }
       return uploads.map(([path]) => ({ path }));
