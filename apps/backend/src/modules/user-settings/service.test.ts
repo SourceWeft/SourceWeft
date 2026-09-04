@@ -71,3 +71,17 @@ test("updateUserSettingsRequestSchema rejects empty patches", () => {
     true,
   );
 });
+
+test("normalizeUserSettings handles a user with no stored settings", () => {
+  // The read path for every user who has never saved settings: the query finds
+  // no row, so `rows[0]?.settings` is undefined. `JSON.stringify(undefined)`
+  // returns undefined rather than a string, which used to throw inside
+  // `Buffer.byteLength` and 500 the whole settings endpoint.
+  assert.deepEqual(normalizeUserSettings(undefined), DEFAULT_USER_SETTINGS);
+  assert.deepEqual(normalizeUserSettings(null), DEFAULT_USER_SETTINGS);
+});
+
+test("normalizeUserSettings handles values with no JSON representation", () => {
+  assert.deepEqual(normalizeUserSettings(() => {}), DEFAULT_USER_SETTINGS);
+  assert.deepEqual(normalizeUserSettings(Symbol("x")), DEFAULT_USER_SETTINGS);
+});

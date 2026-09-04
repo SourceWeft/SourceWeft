@@ -9,8 +9,22 @@ export { DEFAULT_USER_SETTINGS };
 
 const MAX_JSON_BYTES = 16 * 1024;
 
+/**
+ * Byte size of `value` serialized as JSON, or 0 when it has no serialization.
+ *
+ * `JSON.stringify` returns the VALUE `undefined` — not a string — for
+ * `undefined`, a function or a symbol, and `Buffer.byteLength(undefined)`
+ * throws. That is the ordinary read path, not an exotic one: a user with no
+ * `user_settings` row yet reaches `normalizeUserSettings(undefined)`, so every
+ * settings fetch 500'd until the user had saved settings at least once.
+ *
+ * 0 is the honest answer for something with no JSON at all, and it lets such a
+ * value fall through to the schema parse below, which is already the thing that
+ * decides unusable input becomes the defaults.
+ */
 function jsonSize(value: unknown) {
-  return Buffer.byteLength(JSON.stringify(value), "utf8");
+  const serialized = JSON.stringify(value);
+  return serialized === undefined ? 0 : Buffer.byteLength(serialized, "utf8");
 }
 
 function hasSecretLikeKey(value: unknown): boolean {
