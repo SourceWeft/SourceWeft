@@ -1,4 +1,4 @@
-import { isUserPausedFinishReason } from "@sourceweft/contracts";
+import { USER_QUESTION_FINISH_REASON } from "@sourceweft/contracts";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import {
   shouldShowAssistantBottomLoading,
@@ -127,16 +127,18 @@ function resolveAssistantStatus(input: {
   ) {
     return "running";
   }
-  if (isUserPausedFinishReason(version.finishReason)) {
-    // Parked on the user (a question or an approval): the run row may already
-    // read "completed", but the turn is not over — reporting it as completed
-    // hides the very panel the person has to answer.
+  if (version.finishReason === USER_QUESTION_FINISH_REASON) {
+    // Parked on an askUser question. Deliberately NOT the approval reason: an
+    // approval parks its RUN in `waiting_for_approval`, which the branch above
+    // already catches, and once the person answers, that run is completed while
+    // the message keeps its `tool_confirmation_requested` reason forever —
+    // treating that as paused would leave the composer locked for good. A
+    // question's run is recorded `completed` the moment it parks (its answer
+    // opens a new run and never writes back), so the reason is the only signal
+    // it has.
     return "waiting_for_approval";
   }
-  if (
-    version.threadRun?.status === "completed" ||
-    version.finishReason
-  ) {
+  if (version.threadRun?.status === "completed" || version.finishReason) {
     return "completed";
   }
   return "idle";

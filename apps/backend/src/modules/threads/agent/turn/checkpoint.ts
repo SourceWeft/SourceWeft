@@ -85,11 +85,44 @@ export function checkpointHasPendingTasks(value: unknown) {
   return Array.isArray(record?.next) && record.next.length > 0;
 }
 
+/**
+ * The same config, reading the thread HEAD rather than a pinned checkpoint.
+ *
+ * A `continue` turn pins `checkpoint_id` to the PREVIOUS assistant turn's final
+ * checkpoint, because that is what it forks from (see the preparer's
+ * `latestAssistantCheckpoint`). An interrupt raised DURING this turn lives at
+ * the head instead, many checkpoints later, so asking the pinned checkpoint
+ * what is pending answers for a turn that has already finished: `next: []`.
+ *
+ * That is what made every tool approval after the first one in a thread fail
+ * with AGENT_HITL_TOOL_CALL_NOT_FOUND — the handler saw an interrupt on the
+ * stream, asked the graph what was pending, was told nothing, and concluded it
+ * had no checkpoint to bind the confirmation to. A thread's first approval
+ * worked only because a thread with no prior assistant message has no
+ * checkpoint to pin.
+ *
+ * `checkpoint_ns` is deliberately preserved: a subgraph's head is not the root
+ * graph's, and dropping the namespace would answer for the wrong graph.
+ */
+function headStateConfig(config: AgentRunnableConfig): AgentRunnableConfig {
+  const configurable = toObjectRecord(
+    (config as { configurable?: unknown }).configurable,
+  );
+  if (!configurable || !("checkpoint_id" in configurable)) {
+    return config;
+  }
+  const { checkpoint_id: _pinnedToThisTurnsBase, ...rest } = configurable;
+  return { ...config, configurable: rest } as AgentRunnableConfig;
+}
+
 export async function resolvePendingInterruptCheckpoint(input: {
   agent: Awaited<ReturnType<typeof createThreadAgent>>;
   config: AgentRunnableConfig;
 }) {
-  const state = await getAgentStateOrNull(input.agent, input.config);
+  const state = await getAgentStateOrNull(
+    input.agent,
+    headStateConfig(input.config),
+  );
   const checkpoint = checkpointRefFromConfig(
     (state as { config?: unknown } | null)?.config,
   );

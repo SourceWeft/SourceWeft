@@ -187,3 +187,48 @@ test("buildMessageRenderState keeps generated artifact blocks and activity tool 
     "tool_1",
   );
 });
+
+function assistantStatus(version: Partial<MessageVersion>) {
+  return buildMessageRenderState({
+    isAssistantStreaming: false,
+    role: "assistant",
+    version: { id: "m1", content: "", ...version } as MessageVersion,
+  }).status;
+}
+
+test("a resolved approval does not keep reporting as waiting", () => {
+  // The message keeps `finishReason: "tool_confirmation_requested"` forever,
+  // even after the person approves and the run completes. Treating that reason
+  // as "still paused" locked the composer for the rest of the thread — the next
+  // message just queued behind a turn that had already finished.
+  assert.equal(
+    assistantStatus({
+      finishReason: "tool_confirmation_requested",
+      threadRun: { id: "run-1", status: "completed" },
+    }),
+    "completed",
+  );
+});
+
+test("an approval still awaiting the person reports as waiting", () => {
+  assert.equal(
+    assistantStatus({
+      finishReason: "tool_confirmation_requested",
+      threadRun: { id: "run-1", status: "waiting_for_approval" },
+    }),
+    "waiting_for_approval",
+  );
+});
+
+test("a parked askUser question reports as waiting despite a completed run", () => {
+  // A question's run is recorded `completed` the moment it parks, because the
+  // answer resumes through the replay route and opens a new run. The finish
+  // reason is the only signal that the turn is not actually over.
+  assert.equal(
+    assistantStatus({
+      finishReason: "user_question_requested",
+      threadRun: { id: "run-1", status: "completed" },
+    }),
+    "waiting_for_approval",
+  );
+});
