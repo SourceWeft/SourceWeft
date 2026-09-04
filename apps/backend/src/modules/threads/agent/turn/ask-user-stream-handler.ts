@@ -33,7 +33,10 @@ import {
 
 type Agent = Awaited<ReturnType<typeof createThreadAgent>>;
 
-export const USER_QUESTION_FINISH_REASON = "user_question_requested";
+// Single source of truth with the web gates that must treat a parked question
+// as non-terminal; re-exported so existing importers keep their import path.
+import { USER_QUESTION_FINISH_REASON } from "@sourceweft/contracts";
+export { USER_QUESTION_FINISH_REASON };
 
 export type AskUserStreamHandlerResult =
   | { kind: "continue" }

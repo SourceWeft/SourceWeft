@@ -1,3 +1,4 @@
+import { isUserPausedFinishReason } from "@sourceweft/contracts";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import {
   shouldShowAssistantBottomLoading,
@@ -126,10 +127,15 @@ function resolveAssistantStatus(input: {
   ) {
     return "running";
   }
+  if (isUserPausedFinishReason(version.finishReason)) {
+    // Parked on the user (a question or an approval): the run row may already
+    // read "completed", but the turn is not over — reporting it as completed
+    // hides the very panel the person has to answer.
+    return "waiting_for_approval";
+  }
   if (
     version.threadRun?.status === "completed" ||
-    (version.finishReason &&
-      version.finishReason !== "tool_confirmation_requested")
+    version.finishReason
   ) {
     return "completed";
   }

@@ -1,3 +1,4 @@
+import { isUserPausedFinishReason } from "@sourceweft/contracts";
 import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
 import type { MessageVersion } from "./types";
 
@@ -96,8 +97,7 @@ function hasTerminalMessageVersionStatus(version: MessageVersion) {
 
 function hasTerminalMessageVersionFinishReason(version: MessageVersion) {
   return Boolean(
-    version.finishReason &&
-    version.finishReason !== "tool_confirmation_requested",
+    version.finishReason && !isUserPausedFinishReason(version.finishReason),
   );
 }
 

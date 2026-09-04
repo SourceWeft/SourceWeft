@@ -36,6 +36,7 @@ import {
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
   getUserQuestionItemsForRun,
+  getUserQuestionItemsForLatestTurn,
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
   hasActivelyRunningToolWork,
@@ -355,14 +356,22 @@ export function ChatCanvas({
     ? liveConfirmationItems
     : toolConfirmationLookup.items;
   const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
-  const questionItems = useMemo(
-    () =>
-      getUserQuestionItemsForRun({
-        activeThreadRun,
-        assistantVersionById: assistantVersionById ?? new Map(),
-      }),
-    [activeThreadRun, assistantVersionById],
-  );
+  const questionItems = useMemo(() => {
+    const forRun = getUserQuestionItemsForRun({
+      activeThreadRun,
+      assistantVersionById: assistantVersionById ?? new Map(),
+    });
+    if (forRun.length > 0) {
+      return forRun;
+    }
+    // `activeThreadRun` is local stream state, so it is null on a fresh page
+    // load — but a question outlives its run (answering opens a new one), so
+    // the persisted last assistant turn is what keeps it answerable.
+    return getUserQuestionItemsForLatestTurn({
+      activeVersionByGroup,
+      messageGroups,
+    });
+  }, [activeThreadRun, activeVersionByGroup, assistantVersionById, messageGroups]);
   const pendingQuestionItems = useMemo(
     () =>
       questionItems.filter(

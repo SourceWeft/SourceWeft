@@ -1,5 +1,6 @@
 import {
   agentQuestionRequestSchema,
+  isUserPausedFinishReason,
   isPendingToolConfirmation,
   toolConfirmationRequestSchema,
   type AgentQuestionRequest,
@@ -191,10 +192,7 @@ export function getUserQuestionItemsForRun(input: {
   activeThreadRun: ActiveToolConfirmationRun | null | undefined;
   assistantVersionById: ReadonlyMap<string, AssistantVersionIndexEntry>;
 }): UserQuestionItem[] {
-  if (input.activeThreadRun?.status !== "waiting_for_approval") {
-    return [];
-  }
-  const assistantMessageId = input.activeThreadRun.assistantMessageId;
+  const assistantMessageId = input.activeThreadRun?.assistantMessageId;
   if (!assistantMessageId) {
     return [];
   }
@@ -202,7 +200,69 @@ export function getUserQuestionItemsForRun(input: {
   if (!entry) {
     return [];
   }
+  // NOT gated on `status === "waiting_for_approval"`, unlike the confirmation
+  // lookup this mirrors. An approval parks its run in that status because the
+  // answer flows back through the confirmations route, which resolves the
+  // confirmation and completes the run. A question resumes through the replay
+  // route instead — it opens a NEW run and never writes back to this one — so
+  // the parked run is recorded `completed` with
+  // `finishReason: "user_question_requested"`. Requiring the approval status
+  // here meant the question never rendered at all: the turn paused, the request
+  // was persisted on the assistant message, and the person saw a finished
+  // answer with no way to reply.
+  //
+  // The tool call itself is the authority on whether an answer is still
+  // outstanding — `getUserQuestionOutput` returns null once the output has been
+  // replaced by the answer transcript on resume — so the run status adds
+  // nothing beyond scoping to the active run's assistant message.
+  if (
+    input.activeThreadRun?.status !== "waiting_for_approval" &&
+    !isUserPausedFinishReason(entry.version.finishReason)
+  ) {
+    return [];
+  }
   return getPendingUserQuestionItemsForVersion(entry.version);
+}
+
+/**
+ * Message-scoped question lookup: the last assistant turn, parked on a question.
+ *
+ * {@link getUserQuestionItemsForRun} can only fire while a run is live, because
+ * `activeThreadRun` is local stream state — it is null on a fresh page load. A
+ * question outlives its run (answering it opens a NEW run through the replay
+ * route), so on reload the run-scoped path has nothing to key off and the
+ * question would silently disappear, leaving a turn nobody can answer or
+ * continue. The persisted assistant message is the durable record, so that is
+ * what this reads.
+ *
+ * Only the LAST assistant turn is considered: an older parked question has been
+ * superseded by whatever the thread did next, and re-offering it would resume
+ * from a checkpoint the thread has already moved past.
+ */
+export function getUserQuestionItemsForLatestTurn(input: {
+  activeVersionByGroup?: Record<string, number>;
+  messageGroups: VersionedMessageGroup[];
+}): UserQuestionItem[] {
+  for (let index = input.messageGroups.length - 1; index >= 0; index -= 1) {
+    const group = input.messageGroups[index];
+    if (!group || group.role !== "assistant" || group.versions.length === 0) {
+      continue;
+    }
+    const version = getSelectedMessageVersion({
+      activeVersionByGroup: input.activeVersionByGroup,
+      group,
+      messageGroups: input.messageGroups,
+    });
+    if (!version) {
+      continue;
+    }
+    if (!isUserPausedFinishReason(version.finishReason)) {
+      // The newest assistant turn finished normally — nothing is parked.
+      return [];
+    }
+    return getPendingUserQuestionItemsForVersion(version);
+  }
+  return [];
 }
 
 function getPendingConfirmationItemsForVersion(

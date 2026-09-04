@@ -13,6 +13,7 @@ import {
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
+  getUserQuestionItemsForRun,
   getVisibleToolConfirmationItems,
   hasLiveToolConfirmationSignalForRun,
   isExpiredToolConfirmationResponse,
@@ -1159,5 +1160,85 @@ test("stale confirmation response errors are identified by backend error code", 
       code: "CONFIRMATION_ASSISTANT_MESSAGE_MISMATCH",
     }),
     false,
+  );
+});
+
+function createQuestionVersion(
+  id: string,
+  input: { threadRunId?: string; threadRunStatus?: string; finishReason?: string },
+): MessageVersion {
+  return {
+    id,
+    content: "我来帮你写。先确认几个关键信息。",
+    ...(input.finishReason ? { finishReason: input.finishReason } : {}),
+    threadRun: {
+      id: input.threadRunId ?? "run-q",
+      status: input.threadRunStatus ?? "completed",
+    },
+    toolCalls: [
+      {
+        id: "call_ask",
+        tool: "askUser",
+        status: "approval_requested",
+        input: {},
+        output: {
+          type: "user_question_request",
+          schemaVersion: 1,
+          id: "askq:6efa9943acb25af12cbadf0c2c13ce70:call_ask",
+          toolCallId: "call_ask",
+          interruptId: "6efa9943acb25af12cbadf0c2c13ce70",
+          questions: [{ question: "邮件的收件对象是谁？", type: "text" }],
+        },
+      },
+    ],
+  } as MessageVersion;
+}
+
+test("a parked askUser question surfaces even though its run row reads completed", () => {
+  // The regression this pins: an askUser answer resumes through the REPLAY
+  // route, which opens a new run and never writes back to the parked one, so
+  // the parked run is recorded `completed` with
+  // `finishReason: "user_question_requested"`. Gating the lookup on
+  // `waiting_for_approval` — correct for confirmations, which do get written
+  // back — meant the question panel never rendered: the turn paused and the
+  // person saw a finished answer with no way to reply.
+  const version = createQuestionVersion("assistant-q", {
+    threadRunId: "run-q",
+    threadRunStatus: "completed",
+    finishReason: "user_question_requested",
+  });
+  const items = getUserQuestionItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-q",
+      id: "run-q",
+      status: "completed",
+    },
+    assistantVersionById: createAssistantVersionIndex([
+      { groupId: "assistant:q", version },
+    ]),
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.question.interruptId, "6efa9943acb25af12cbadf0c2c13ce70");
+});
+
+test("a genuinely completed turn exposes no question", () => {
+  const version = createQuestionVersion("assistant-done", {
+    threadRunId: "run-done",
+    threadRunStatus: "completed",
+    finishReason: "stop",
+  });
+  assert.deepEqual(
+    getUserQuestionItemsForRun({
+      activeThreadRun: {
+        assistantMessageId: "assistant-done",
+        id: "run-done",
+        status: "completed",
+      },
+      assistantVersionById: createAssistantVersionIndex([
+        { groupId: "assistant:done", version },
+      ]),
+    }),
+    [],
   );
 });

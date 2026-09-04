@@ -11,6 +11,30 @@ import { z } from "zod";
  * `docs/architecture/proactive-ask-user.md`.
  */
 
+/**
+ * Finish reason a turn ends with when it parked on an `askUser` question.
+ *
+ * A parked turn is NOT a finished turn: the assistant is waiting on the person,
+ * exactly as it is for `tool_confirmation_requested`. Every gate that treats
+ * that reason as non-terminal has to treat this one the same way, which is why
+ * the two live side by side here rather than as a string literal per call site
+ * — the question renderer, the run-lifecycle state and the message render state
+ * each hard-coded only the confirmation reason, and a parked question therefore
+ * read as a completed turn with no question to answer.
+ */
+export const USER_QUESTION_FINISH_REASON = "user_question_requested";
+export const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
+
+/** True when a turn ended by parking on the user, rather than finishing. */
+export function isUserPausedFinishReason(
+  finishReason: string | null | undefined,
+): boolean {
+  return (
+    finishReason === USER_QUESTION_FINISH_REASON ||
+    finishReason === TOOL_CONFIRMATION_FINISH_REASON
+  );
+}
+
 export const agentQuestionChoiceSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
