@@ -119,6 +119,33 @@ function getStepDisplayTitle(toolStep?: ThinkingStepRecord) {
   return null;
 }
 
+/**
+ * The bundle-relative file a skill read is actually opening.
+ *
+ * Progressive disclosure means one skill is normally read several times in a
+ * turn: SKILL.md first, then whichever reference files it points at. Labelling
+ * every one of them "Load X skill instructions" made that look like the agent
+ * repeating itself — three identical rows for three different files — when it
+ * was working exactly as designed. The path is already in the tool input (it is
+ * how we derive the skill's name); only the file BODY is redacted, so naming
+ * the file leaks nothing and turns the repeats back into a legible sequence.
+ *
+ * SKILL.md returns null: it is the instructions, so the plain label is right.
+ */
+function getSkillBundleFileName(
+  input: Record<string, unknown> | undefined,
+): string | null {
+  const path = resolveFilesystemPath(input);
+  if (!path?.startsWith("/skills/")) {
+    return null;
+  }
+  const relative = path.slice("/skills/".length).split("/").slice(1).join("/");
+  if (!relative || relative === "SKILL.md") {
+    return null;
+  }
+  return relative;
+}
+
 export function getAssistantToolTitle(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
@@ -126,6 +153,12 @@ export function getAssistantToolTitle(
 ) {
   if (isRedactedSkillInstructionRead(toolCall)) {
     const skillDisplayName = getSkillInstructionDisplayName(toolCall.input);
+    const bundleFile = getSkillBundleFileName(toolCall.input);
+    if (skillDisplayName && bundleFile) {
+      return toolCall.status === "running"
+        ? `Reading ${bundleFile} from ${skillDisplayName}`
+        : `Read ${bundleFile} from ${skillDisplayName}`;
+    }
     if (skillDisplayName) {
       return toolCall.status === "running"
         ? `Loading ${skillDisplayName} skill instructions`
