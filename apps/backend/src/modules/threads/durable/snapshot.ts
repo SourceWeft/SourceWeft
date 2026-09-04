@@ -1,3 +1,4 @@
+import { isUserPausedFinishReason } from "@sourceweft/contracts";
 import { toObjectRecord } from "../../../shared/records";
 import type { ToolCallTrace } from "../turn/types";
 import type { ThinkingStepTrace } from "../turn/types";
@@ -412,7 +413,16 @@ export function resolveTerminalStatusFromFinishedSnapshot(
   ) {
     return "failed";
   }
-  if (finishReason && finishReason !== "tool_confirmation_requested") {
+  // A turn parked on the user is NOT finished, and neither pause reason may be
+  // read as terminal here. This is a backstop for runs whose worker died, so it
+  // judges a run by the snapshot it inherited — and a resume run inherits the
+  // parked turn's snapshot, finish reason included. Counting
+  // `user_question_requested` as terminal therefore completed the resume run
+  // within a third of a second of creating it, before its worker had run a
+  // single step: the SSE stream saw a terminal run, synthesized `finish`, and
+  // the browser stopped listening. The worker went on to write the real answer,
+  // which is why the turn only appeared after a manual reload.
+  if (finishReason && !isUserPausedFinishReason(finishReason)) {
     return "completed";
   }
   return null;

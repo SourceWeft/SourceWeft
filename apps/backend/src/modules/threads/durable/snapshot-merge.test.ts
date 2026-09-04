@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   mergeChatRunSnapshot,
   mergeCommittedArtifactRenderBlocks,
+  resolveTerminalStatusFromFinishedSnapshot,
 } from "./snapshot";
 
 const committedBlock = {
@@ -142,4 +143,44 @@ test("runner snapshots cannot overwrite host-only Agent tool state", () => {
 
   assert.equal(merged.assistantContent, "safe update");
   assert.deepEqual(merged.protectedAgentTools, protectedAgentTools);
+});
+
+test("a turn parked on the user is not a finished snapshot", () => {
+  // The backstop that completes runs whose worker died judges a run by the
+  // snapshot it inherited, and a resume run inherits the parked turn's
+  // snapshot — finish reason included. Reading either pause reason as terminal
+  // completed the resume run a third of a second after creating it, before its
+  // worker had run a step: the SSE stream saw a terminal run, synthesized
+  // `finish`, and the browser stopped listening while the worker went on to
+  // write the real answer.
+  for (const finishReason of [
+    "user_question_requested",
+    "tool_confirmation_requested",
+  ]) {
+    assert.equal(
+      resolveTerminalStatusFromFinishedSnapshot({
+        assistantMessage: {
+          metadata: { finishReason },
+        },
+      } as never),
+      null,
+      `${finishReason} must not read as terminal`,
+    );
+  }
+});
+
+test("a genuinely finished snapshot still resolves terminal", () => {
+  assert.equal(
+    resolveTerminalStatusFromFinishedSnapshot({
+      assistantMessage: { metadata: { finishReason: "stop" } },
+    } as never),
+    "completed",
+  );
+  assert.equal(
+    resolveTerminalStatusFromFinishedSnapshot({
+      assistantMessage: { metadata: { finishReason: "stop" } },
+      errorCode: "CHAT_RUN_FAILED",
+    } as never),
+    "failed",
+  );
 });
