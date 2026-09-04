@@ -44,6 +44,55 @@ function applyGrepMaxCount(params: {
   };
 }
 
+/**
+ * A mount backend that reports transport failures instead of throwing.
+ *
+ * Every result in this protocol carries an optional `error`, and every caller
+ * checks it — that is how a missing file or a denied path is reported. A mount
+ * backed by a remote service has a second failure mode the protocol never saw:
+ * the service itself being unreachable. The skills mount reads through the
+ * sandbox, so a provider hiccup ("sandbox provider container is not ready or
+ * has no network address") threw straight out of `ls` / `read_file`.
+ *
+ * Those tools run in parallel, and the rejection surfaced inside LangGraph's
+ * stream pump — a promise this side never holds — so it escaped as an
+ * unhandledRejection and failed the whole turn. The model saw nothing it could
+ * act on, even though the error says to retry. Reported as an `error` instead,
+ * it becomes an ordinary tool result the model can read and route around.
+ *
+ * Wrapping at construction covers every method the protocol has, including the
+ * ones added after this comment.
+ */
+function reportingFailures(backend: BackendProtocolV2): BackendProtocolV2 {
+  return new Proxy(backend, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]) => {
+        try {
+          const result = (value as (...a: unknown[]) => unknown).apply(
+            target,
+            args,
+          );
+          return result instanceof Promise
+            ? result.catch((error: unknown) => ({
+                error: errorText(error),
+              }))
+            : result;
+        } catch (error) {
+          return { error: errorText(error) };
+        }
+      };
+    },
+  }) as BackendProtocolV2;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
   private readonly mounts: MountedBackend[];
   private readonly defaultMount: MountedBackend;
@@ -68,10 +117,21 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
       capabilities.find((mount) => mount.root === SKILLS_MOUNT.root) ??
       SKILLS_MOUNT;
     this.mounts = [
-      { capability: knowledgeCapability, backend: input.knowledge },
-      { capability: workingCapability, backend: input.working },
+      {
+        capability: knowledgeCapability,
+        backend: reportingFailures(input.knowledge),
+      },
+      {
+        capability: workingCapability,
+        backend: reportingFailures(input.working),
+      },
       ...(input.skills
-        ? [{ capability: skillsCapability, backend: input.skills }]
+        ? [
+            {
+              capability: skillsCapability,
+              backend: reportingFailures(input.skills),
+            },
+          ]
         : []),
     ];
     this.defaultMount =

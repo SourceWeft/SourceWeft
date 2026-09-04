@@ -226,3 +226,54 @@ test("mounted backend routes upload and download by mount", async () => {
   assert.equal(uploads[2]!.error, "permission_denied");
   assert.deepEqual(calls, ["/workfiles/a.md:hello"]);
 });
+
+test("a mount whose service is unreachable reports an error instead of throwing", async () => {
+  // The skills mount reads through the sandbox. A provider hiccup used to throw
+  // straight out of ls/read_file; because those tools run in parallel, the
+  // rejection escaped as an unhandledRejection inside LangGraph's stream pump
+  // and failed the whole turn, giving the model nothing to act on.
+  const unreachable = "SANDBOX_NOT_READY_OR_UNHEALTHY: no network address.";
+  const dead = {
+    ls: async () => {
+      throw new Error(unreachable);
+    },
+    read: async () => {
+      throw new Error(unreachable);
+    },
+    readRaw: async () => {
+      throw new Error(unreachable);
+    },
+    grep: async () => {
+      throw new Error(unreachable);
+    },
+    glob: async () => {
+      throw new Error(unreachable);
+    },
+    write: async () => ({ error: "readonly" }),
+    edit: async () => ({ error: "readonly" }),
+  };
+  const healthy = {
+    ls: async () => ({ files: [] as FileInfo[] }),
+    read: async () => ({ content: "ok" }),
+    readRaw: async () => textData("ok"),
+    grep: async () => ({ matches: [] }),
+    glob: async () => ({ files: [] as FileInfo[] }),
+    write: async () => ({ error: "readonly" }),
+    edit: async () => ({ error: "readonly" }),
+  };
+  const backend = new MountedAgentFilesystemBackend({
+    knowledge: healthy as never,
+    working: healthy as never,
+    skills: dead as never,
+  });
+
+  const listed = await backend.ls("/skills");
+  assert.equal(listed.error, unreachable);
+  const read = await backend.read("/skills/a/SKILL.md");
+  assert.equal(read.error, unreachable);
+  const grepped = await backend.grep("x", "/skills");
+  assert.equal(grepped.error, unreachable);
+
+  // A healthy mount is untouched by the guard.
+  assert.equal((await backend.read("/kb/source.md")).content, "ok");
+});
