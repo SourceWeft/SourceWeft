@@ -1,6 +1,5 @@
 import {
   agentQuestionRequestSchema,
-  isUserPausedFinishReason,
   isPendingToolConfirmation,
   toolConfirmationRequestSchema,
   type AgentQuestionRequest,
