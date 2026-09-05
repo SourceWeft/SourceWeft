@@ -92,6 +92,9 @@ import type {
   StartThreadTurnResponse,
   StreamThreadRequest,
   StreamThreadResponse,
+  CompleteSourceUploadResponse,
+  CreateSourceUploadIntentRequest,
+  CreateSourceUploadIntentResponse,
   UploadSourceResponse,
   UpdateWorkspaceMcpInstallRequest,
   UpdateWorkspaceMcpInstallResponse,
@@ -281,6 +284,16 @@ export class ContentClient {
     );
   }
 
+  /**
+   * Uploads a file in one request. This is the upload method for API and SDK
+   * integrations, and the only one they need.
+   *
+   * One call, no negotiation: an integration never asks the deployment how it
+   * is configured before sending a file. `uploadSourceFromBrowser` exists
+   * alongside it for our own web client, which can be handed a presigned target
+   * the browser writes to directly — that is a first-party optimization, not a
+   * better version of this method.
+   */
   uploadSource(
     workspaceId: string,
     file: File,
@@ -296,6 +309,80 @@ export class ContentClient {
       `/v1/workspaces/${encode(workspaceId)}/sources/upload`,
       formData,
     );
+  }
+
+  createSourceUploadIntent(
+    workspaceId: string,
+    input: CreateSourceUploadIntentRequest,
+  ) {
+    return this.http.post<CreateSourceUploadIntentResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/upload-intent`,
+      input,
+    );
+  }
+
+  completeSourceUpload(workspaceId: string, sourceId: string) {
+    return this.http.post<CompleteSourceUploadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/upload-complete`,
+      {},
+    );
+  }
+
+  /**
+   * The web client's upload path. Not for API integrations — they call
+   * `uploadSource`, which sends the file in a single request.
+   *
+   * Only a browser needs this: it is the one caller that benefits from keeping
+   * a large file off the API process and out of a cross-continent round trip,
+   * and the only one for which the deployment's answer can differ. Which path
+   * runs is read from the server at call time rather than baked into the
+   * client, because a self-hosted install whose bucket has no CORS policy must
+   * keep working without rebuilding the frontend: it answers `proxy` and this
+   * falls through to `uploadSource`.
+   *
+   * Both paths return the same shape, so nothing downstream branches on which
+   * one ran. When the direct PUT fails the error surfaces as-is: the reserved
+   * source row is left to the server's sweep rather than cleaned up from here,
+   * because a client that just failed to upload is the one least able to
+   * guarantee a follow-up request lands.
+   */
+  async uploadSourceFromBrowser(
+    workspaceId: string,
+    file: File,
+    input: { parentSourceId?: string | null; signal?: AbortSignal } = {},
+  ): Promise<CompleteSourceUploadResponse> {
+    const intent = await this.createSourceUploadIntent(workspaceId, {
+      fileName: file.name || "upload.bin",
+      mimeType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      parentSourceId: input.parentSourceId ?? null,
+    });
+
+    // The deployment, not the caller, decides which path is available. A server
+    // that has not been given a CORS-configured bucket answers `proxy`, and the
+    // file goes through the API instead — same return shape either way, so the
+    // caller never branches on it.
+    if (intent.mode === "proxy") {
+      return this.uploadSource(workspaceId, file, {
+        parentSourceId: input.parentSourceId ?? null,
+      });
+    }
+
+    const response = await fetch(intent.uploadUrl, {
+      method: "PUT",
+      // Must match what the server signed, or the store rejects the write.
+      headers: { "Content-Type": intent.contentType },
+      body: file,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Upload failed with ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return this.completeSourceUpload(workspaceId, intent.sourceId);
   }
 
   getSource(workspaceId: string, sourceId: string) {

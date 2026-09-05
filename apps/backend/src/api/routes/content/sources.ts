@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   bulkDeleteSourcesRequestSchema,
   createSourceRequestSchema,
+  createSourceUploadIntentRequestSchema,
   createUrlSourceRequestSchema,
   indexSourceRequestSchema,
   listSourcesRequestSchema,
@@ -71,6 +72,53 @@ export function registerSourceRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result, 201);
+  });
+
+  // Direct upload, first leg: the bytes never reach this process. The client
+  // takes the presigned PUT from here straight to the object store, then calls
+  // the completion route below.
+  app.post("/sources/upload-intent", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = createSourceUploadIntentRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentSourceService.createSourceUploadIntent({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      fileName: parsed.data.fileName,
+      mimeType: parsed.data.mimeType,
+      sizeBytes: parsed.data.sizeBytes,
+      parentSourceId: parsed.data.parentSourceId ?? null,
+    });
+
+    return ApiResponse.success(c, result, 201);
+  });
+
+  // Direct upload, second leg: verifies what actually landed in the store and
+  // queues the parse. Idempotent — a retry after a lost response returns the
+  // already-queued source instead of enqueuing twice.
+  app.post("/sources/:id/upload-complete", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentSourceService.completeSourceUpload({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
   });
 
   app.get("/sources", async (c) => {

@@ -18,6 +18,11 @@ x-sourceweft-env: &sourceweft-env
   PUBLIC_S3_SECRET_ACCESS_KEY: ${PUBLIC_S3_SECRET_ACCESS_KEY:-}
   PUBLIC_S3_FORCE_PATH_STYLE: ${PUBLIC_S3_FORCE_PATH_STYLE:-true}
   PUBLIC_S3_BASE_URL: ${PUBLIC_S3_BASE_URL:-}
+  # proxy (default) sends uploads through the API and needs no bucket setup.
+  # direct hands the browser a presigned PUT — faster and keeps files out of the
+  # API process, but the bucket must carry a CORS policy allowing PUT from the
+  # web origin, so it stays opt-in.
+  SOURCE_UPLOAD_MODE: ${SOURCE_UPLOAD_MODE:-proxy}
   NOTION_BLOG_API_KEY: ${NOTION_BLOG_API_KEY:-}
   NOTION_BLOG_DATABASE_ID: ${NOTION_BLOG_DATABASE_ID:-}
   NOTION_BLOG_VERSION: ${NOTION_BLOG_VERSION:-2026-03-11}

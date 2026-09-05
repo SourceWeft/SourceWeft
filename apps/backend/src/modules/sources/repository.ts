@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import {
   chunkEmbeddings,
   chunks,
@@ -454,6 +454,35 @@ export async function findSourceRecord(input: {
     .limit(1);
 
   return row ? mapSource(row) : null;
+}
+
+/**
+ * File-upload sources that were reserved by an upload intent and never
+ * completed.
+ *
+ * `created` is the state `createSourceRecord` leaves a row in; the proxied
+ * upload path passes through it inside a single request, so only the direct
+ * path can leave one sitting there. Scoped to `file_upload` so a manually
+ * created source that a user simply has not filled in is never swept.
+ */
+export async function listStaleUploadingSourceRecords(input: {
+  olderThan: Date;
+  limit: number;
+}) {
+  const rows = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.status, "created"),
+        eq(sources.sourceType, "file_upload"),
+        lt(sources.updatedAt, input.olderThan),
+      ),
+    )
+    .orderBy(asc(sources.updatedAt))
+    .limit(input.limit);
+
+  return rows.map(mapSource);
 }
 
 export async function findSourceRecordByExternalUri(input: {

@@ -195,6 +195,59 @@ export const uploadSourceResponseSchema = z.object({
   status: sourceStatusResponseSchema,
 });
 
+/**
+ * The one upload ceiling, shared by the browser's pre-flight check and the
+ * server's enforcement.
+ *
+ * On the direct-upload path the client PUTs straight to the object store, so
+ * the browser-side check is a courtesy that stops a doomed transfer early — it
+ * is not a control. The server re-applies this same number to the size the
+ * store reports at completion, which is the only measurement that binds.
+ */
+export const SOURCE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+
+export const createSourceUploadIntentRequestSchema = z.object({
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().positive().max(SOURCE_UPLOAD_MAX_BYTES),
+  parentSourceId: z.string().nullish(),
+});
+
+/**
+ * The intent response is where the deployment tells the client which upload
+ * path it offers, rather than the client guessing from build-time config.
+ *
+ * That indirection is what keeps a self-hosted install zero-configuration: the
+ * bucket-side CORS policy a browser needs for a presigned PUT is an
+ * operator-only step, so a deployment that has not taken it answers `proxy` and
+ * the client transparently posts the file to the API instead.
+ */
+export const createSourceUploadIntentResponseSchema = z.discriminatedUnion(
+  "mode",
+  [
+    z.object({
+      mode: z.literal("direct"),
+      sourceId: z.string(),
+      /**
+       * The presigned PUT target. The client must send `Content-Type:
+       * contentType` verbatim — the header is part of what the server signed,
+       * so any other value is rejected by the store rather than stored.
+       */
+      uploadUrl: z.string(),
+      contentType: z.string(),
+      expiresAt: z.string(),
+    }),
+    z.object({
+      mode: z.literal("proxy"),
+    }),
+  ],
+);
+
+export const completeSourceUploadResponseSchema = z.object({
+  source: sourceSchema,
+  status: sourceStatusResponseSchema,
+});
+
 export const reparseSourceRequestSchema = z.object({
   chunkSize: z.number().int().positive().max(8192).optional(),
   forceRefresh: z.boolean().optional(),
@@ -373,6 +426,15 @@ export type BulkDeleteSourcesResponse = z.infer<
   typeof bulkDeleteSourcesResponseSchema
 >;
 export type UploadSourceResponse = z.infer<typeof uploadSourceResponseSchema>;
+export type CreateSourceUploadIntentRequest = z.infer<
+  typeof createSourceUploadIntentRequestSchema
+>;
+export type CreateSourceUploadIntentResponse = z.infer<
+  typeof createSourceUploadIntentResponseSchema
+>;
+export type CompleteSourceUploadResponse = z.infer<
+  typeof completeSourceUploadResponseSchema
+>;
 export type UpdateSourceRequest = z.infer<typeof updateSourceRequestSchema>;
 export type UpdateSourceResponse = z.infer<typeof updateSourceResponseSchema>;
 export type DeleteSourceResponse = z.infer<typeof deleteSourceResponseSchema>;

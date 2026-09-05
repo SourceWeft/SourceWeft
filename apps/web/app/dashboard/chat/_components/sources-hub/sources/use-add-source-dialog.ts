@@ -1,3 +1,4 @@
+import { SOURCE_UPLOAD_MAX_BYTES } from "@sourceweft/contracts/sources";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -7,8 +8,11 @@ export const addTabs = ["File", "URL", "Text"] as const;
 export type AddTab = (typeof addTabs)[number];
 
 export const MAX_FILES = 20;
-export const MAX_FILE_SIZE_MB = 50;
-export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+// The ceiling itself lives in contracts because the server enforces it against
+// what the object store reports; this check only spares the user a doomed
+// transfer, so the two must not be able to drift apart.
+export const MAX_FILE_SIZE_BYTES = SOURCE_UPLOAD_MAX_BYTES;
+export const MAX_FILE_SIZE_MB = Math.round(MAX_FILE_SIZE_BYTES / (1024 * 1024));
 
 export function useAddSourceDialogState() {
   const [isOpen, setIsOpen] = useState(false);

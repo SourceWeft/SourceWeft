@@ -1,4 +1,9 @@
+import {
+  SOURCE_UPLOAD_MAX_BYTES,
+  type CreateSourceUploadIntentResponse,
+} from "@sourceweft/contracts/sources";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import { ContentError } from "../content/errors";
 import { requireContentWorkspace } from "../workspace/guards";
 import { requireContentSource } from "./guards";
@@ -18,13 +23,18 @@ import {
   listSourceRecords,
   listSourceRecordsByIds,
   listSourceRecordsByTitles,
+  listStaleUploadingSourceRecords,
   updateSourceRecordAndInvalidateDocuments,
   updateSourceRecord,
 } from "./repository";
 import {
   buildSourceStorageKey,
+  deleteArtifactObject,
+  downloadSourceObject,
   getSourceObjectPreviewUrl,
   getSourceObjectDownloadUrl,
+  getSourceObjectUploadUrl,
+  headSourceObject,
   uploadSourceObject,
 } from "./storage";
 import { getSourceParser } from "./parsers";
@@ -41,6 +51,36 @@ import type { SourceRecord, SourceStatusDetail } from "../content/types";
 import { defaultParsingConfig } from "./parsing-config";
 
 const SOURCE_TREE_MAX_DEPTH = 64;
+
+/**
+ * Mirrors `PRESIGNED_UPLOAD_URL_TTL_SECONDS` in `./storage`. Kept as its own
+ * constant because this one is only ever reported to the client as a deadline —
+ * the value that actually expires the URL is the one the signer was given.
+ */
+const SOURCE_UPLOAD_URL_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long a reserved-but-unwritten upload may sit before the sweep gives up on
+ * it. Generous on purpose: a 50MB file on a slow uplink can legitimately take
+ * many minutes, and reclaiming a live upload is worse than keeping a dead row.
+ */
+export const STALE_SOURCE_UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
+
+/**
+ * The shape `getSourceStatusDetail` would have returned for a freshly queued
+ * source, for the window where the read races the write that created it.
+ */
+function buildQueuedStatusFallback(jobId: string | null): SourceStatusDetail {
+  return {
+    status: "queued",
+    progress: 10,
+    currentStep: "queued",
+    parsedPages: null,
+    totalPages: null,
+    error: null,
+    jobId,
+  };
+}
 
 function resolveUploadTitle(fileName: string) {
   const trimmed = fileName.trim();
@@ -501,6 +541,347 @@ export class ContentSourceService {
 
       throw error;
     }
+  }
+
+  /**
+   * First half of the direct upload: reserve the source row and hand back a
+   * presigned PUT so the bytes go straight to the object store.
+   *
+   * Everything that can be decided without the content happens here — support,
+   * parser availability, parent validity — so a doomed upload is refused before
+   * the client spends bandwidth on it. What cannot be decided here is the size
+   * and type of what actually lands; `completeSourceUpload` measures that.
+   *
+   * The row is created in `uploading` state on purpose. It is what makes an
+   * abandoned upload findable: no exception reaches the server when a client
+   * walks away mid-PUT, so the row, not a catch block, is the record that the
+   * sweep in `failStaleSourceUploads` later reconciles.
+   */
+  async createSourceUploadIntent(input: {
+    workspaceId: string;
+    userId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    parentSourceId?: string | null;
+  }): Promise<CreateSourceUploadIntentResponse> {
+    // Answered before any work: a deployment on the proxied path reserves
+    // nothing, so there is no row for a client that then posts the file to the
+    // multipart route instead.
+    if (config.sourceUpload.mode !== "direct") {
+      return { mode: "proxy" };
+    }
+
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    if (input.sizeBytes > SOURCE_UPLOAD_MAX_BYTES) {
+      throw new ContentError(
+        400,
+        "SOURCE_FILE_TOO_LARGE",
+        `File is ${input.sizeBytes} bytes, over the ${SOURCE_UPLOAD_MAX_BYTES} byte upload limit`,
+      );
+    }
+
+    const classification = requireSupportedSourceFile({
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+    });
+
+    const parser = getSourceParser(classification.mimeType);
+    if (!parser) {
+      throw new ContentError(
+        400,
+        "UNSUPPORTED_SOURCE_TYPE",
+        `Unsupported MIME type: ${classification.mimeType}`,
+      );
+    }
+
+    const parsingConfig = defaultParsingConfig();
+    await validateSourceParent({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      parentSourceId: input.parentSourceId,
+    });
+
+    const source = await createSourceRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      title: resolveUploadTitle(input.fileName),
+      contentText: "",
+      createdBy: input.userId,
+      sourceType: "file_upload",
+      parentSourceId: input.parentSourceId ?? null,
+      mimeType: classification.mimeType,
+      sizeBytes: input.sizeBytes,
+      parserVersion: parsingConfig.parserVersion,
+      parsingConfig,
+      metadata: {
+        fileName: input.fileName,
+        fileSize: input.sizeBytes,
+        mimeType: classification.mimeType,
+        originalMimeType: classification.originalMimeType,
+        sourceFileKind: classification.kind,
+        sourceFileExtension: classification.extension,
+        // Same value the proxied path records: `uploadMethod` distinguishes how
+        // the source was authored (manual entry vs API upload), not which
+        // transport carried the bytes.
+        uploadMethod: "api" as const,
+        progress: 0,
+        currentStep: "uploading",
+      },
+    });
+
+    const storageKey = buildSourceStorageKey({
+      workspaceId: workspace.id,
+      sourceId: source.id,
+      fileName: input.fileName,
+    });
+
+    // The key is persisted now rather than at completion so the sweep can find
+    // and delete a half-written object for a source the client abandoned.
+    await updateSourceRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceId: source.id,
+      storageBucket: config.s3.bucket,
+      storageKey,
+    });
+
+    const uploadUrl = await getSourceObjectUploadUrl({
+      key: storageKey,
+      contentType: classification.mimeType,
+    });
+
+    return {
+      mode: "direct" as const,
+      sourceId: source.id,
+      uploadUrl,
+      contentType: classification.mimeType,
+      expiresAt: new Date(Date.now() + SOURCE_UPLOAD_URL_TTL_MS).toISOString(),
+    };
+  }
+
+  /**
+   * Second half of the direct upload: verify what the store actually holds and
+   * only then queue the parse.
+   *
+   * The client's declared size and type from the intent are claims; the HEAD
+   * here is the measurement. Text-like kinds additionally get the same
+   * binary-content assertion the proxied path applies, which needs the bytes —
+   * those kinds are small, so reading them back costs little, while PDFs and
+   * media (the reason this path exists) are never pulled into the API process.
+   */
+  async completeSourceUpload(input: {
+    workspaceId: string;
+    sourceId: string;
+    userId: string;
+  }) {
+    const { source, workspace } = await requireContentSource(input);
+
+    if (source.sourceType !== "file_upload" || !source.storageKey) {
+      throw new ContentError(
+        400,
+        "SOURCE_UPLOAD_NOT_PENDING",
+        "Source was not created by a direct upload intent",
+      );
+    }
+
+    // Completing twice must not queue a second parse. Anything past `uploading`
+    // has already been through this method (or the proxied path).
+    if (source.metadata.currentStep !== "uploading") {
+      const existing = await getSourceStatusDetail({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+      });
+      return { source, status: existing ?? buildQueuedStatusFallback(null) };
+    }
+
+    const head = await headSourceObject({
+      bucket: source.storageBucket,
+      key: source.storageKey,
+    });
+
+    if (!head) {
+      throw new ContentError(
+        400,
+        "SOURCE_UPLOAD_MISSING",
+        "No uploaded object found for this source",
+      );
+    }
+
+    const byteLength = head.contentLength ?? 0;
+    if (byteLength <= 0) {
+      throw new ContentError(
+        400,
+        "SOURCE_UPLOAD_EMPTY",
+        "Uploaded object is empty",
+      );
+    }
+    if (byteLength > SOURCE_UPLOAD_MAX_BYTES) {
+      throw new ContentError(
+        400,
+        "SOURCE_FILE_TOO_LARGE",
+        `Uploaded object is ${byteLength} bytes, over the ${SOURCE_UPLOAD_MAX_BYTES} byte upload limit`,
+      );
+    }
+
+    const fileName = String(source.metadata.fileName || source.title);
+    const classification = requireSupportedSourceFile({
+      fileName,
+      mimeType: source.mimeType || head.contentType || "",
+    });
+
+    if (["text", "table", "json", "transcript"].includes(classification.kind)) {
+      const content = await downloadSourceObject({
+        bucket: source.storageBucket,
+        key: source.storageKey,
+      });
+      assertSourceContentCanBeParsed({ classification, content, fileName });
+    }
+
+    const parsingConfig = source.parsingConfig ?? defaultParsingConfig();
+
+    try {
+      const updatedSource = await updateSourceRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        // The store's number supersedes whatever the intent declared.
+        sizeBytes: byteLength,
+        status: "queued",
+        metadata: mergeStatusMetadata(source, {
+          ...source.metadata,
+          fileSize: byteLength,
+          progress: 5,
+          currentStep: "queued",
+        }),
+      });
+
+      if (!updatedSource) {
+        throw new ContentError(
+          500,
+          "SOURCE_UPLOAD_FAILED",
+          "Failed to queue uploaded source",
+        );
+      }
+
+      const revision = await createSourceRevisionRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: updatedSource.id,
+        storageBucket: source.storageBucket ?? config.s3.bucket,
+        storageKey: source.storageKey,
+        parserVersion: parsingConfig.parserVersion,
+      });
+
+      const job = await enqueueSourceParseJob({
+        sourceId: updatedSource.id,
+        sourceRevisionId: revision.id,
+        workspaceId: workspace.id,
+        teamId: workspace.organizationId,
+        userId: input.userId,
+        idempotencyKey: `source_parse_${updatedSource.id}_${revision.revisionNo}`,
+      });
+
+      const queuedSource = await updateSourceRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: updatedSource.id,
+        metadata: mergeStatusMetadata(updatedSource, {
+          progress: 10,
+          currentStep: "queued",
+          jobId: String(job.id),
+        }),
+      });
+
+      const status = await getSourceStatusDetail({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: updatedSource.id,
+      });
+
+      return {
+        source: queuedSource ?? updatedSource,
+        status: status ?? buildQueuedStatusFallback(String(job.id)),
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Source upload failed";
+      await updateSourceRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        status: "failed",
+        error: { message },
+        metadata: mergeStatusMetadata(source, {
+          progress: 100,
+          currentStep: "failed",
+          error: message,
+        }),
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Reconciles uploads that were reserved but never completed.
+   *
+   * This exists because the direct path has no catch block to fall into: when a
+   * client abandons a PUT, no request fails anywhere, so the reserved row is the
+   * only evidence. The sweep marks it failed — the same terminal state the
+   * proxied path writes — so the user sees an upload that did not work rather
+   * than a row stuck at 0%.
+   *
+   * Any object under the reserved key is deleted first. It can only be a
+   * partial or orphaned write: nothing ever queued a parse for it, so no
+   * revision, chunk, or embedding references it.
+   */
+  async failStaleSourceUploads(input?: { limit?: number }) {
+    const cutoff = new Date(Date.now() - STALE_SOURCE_UPLOAD_TIMEOUT_MS);
+    const stale = await listStaleUploadingSourceRecords({
+      olderThan: cutoff,
+      limit: input?.limit ?? 100,
+    });
+
+    let failed = 0;
+    for (const source of stale) {
+      try {
+        if (source.storageKey) {
+          await deleteArtifactObject({
+            bucket: source.storageBucket,
+            key: source.storageKey,
+          });
+        }
+
+        await updateSourceRecord({
+          teamId: source.teamId,
+          workspaceId: source.workspaceId,
+          sourceId: source.id,
+          status: "failed",
+          error: { message: "Upload was not completed" },
+          metadata: mergeStatusMetadata(source, {
+            progress: 100,
+            currentStep: "failed",
+            error: "Upload was not completed",
+          }),
+        });
+        failed += 1;
+      } catch (error) {
+        // One unreachable object must not stop the rest of the sweep; the next
+        // tick retries this row because it is still `created` and still stale.
+        logger.error("Failed to reclaim stale source upload", {
+          sourceId: source.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return { scanned: stale.length, failed };
   }
 
   async createSource(input: {

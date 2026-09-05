@@ -655,3 +655,72 @@ export function getSourceObjectPreviewUrl(input: {
     { expiresIn: PRESIGNED_URL_TTL_SECONDS },
   );
 }
+
+/**
+ * Shorter than the read TTL on purpose. A client that asked for an upload slot
+ * is expected to start the PUT immediately, and a leaked write URL grants far
+ * more than a leaked read URL: it is a blind write into one workspace-scoped
+ * key until it expires.
+ */
+const PRESIGNED_UPLOAD_URL_TTL_SECONDS = 10 * 60;
+
+/**
+ * The browser's write grant for the direct-to-object-store upload path.
+ *
+ * The key is always built server-side (`buildSourceStorageKey`) and signed into
+ * the URL, so the client can only write the one object the server chose for it.
+ * `ContentType` is signed too: the browser must send exactly the header the
+ * server classified, which keeps the stored object's type consistent with the
+ * source record without trusting anything the client says afterwards.
+ */
+export function getSourceObjectUploadUrl(input: {
+  key: string;
+  contentType: string;
+}) {
+  return getSignedUrl(
+    s3Client,
+    new PutObjectCommand({
+      Bucket: getConfiguredBucket(),
+      Key: input.key,
+      ContentType: input.contentType,
+    }),
+    { expiresIn: PRESIGNED_UPLOAD_URL_TTL_SECONDS },
+  );
+}
+
+/**
+ * What the store actually holds at `key`, or `null` when nothing does.
+ *
+ * This is the direct-upload path's only source of truth about size and type:
+ * the client PUTs straight to the store, so the size it declared at intent time
+ * is a claim, not a fact. A missing object is the ordinary "client never
+ * finished" case and reads as `null` rather than throwing.
+ */
+export async function headSourceObject(input: {
+  bucket?: string | null;
+  key: string;
+}): Promise<{
+  contentLength: number | null;
+  contentType: string | null;
+} | null> {
+  try {
+    const response = await s3Client.send(
+      new HeadObjectCommand({
+        Bucket: input.bucket || getConfiguredBucket(),
+        Key: input.key,
+      }),
+    );
+    return {
+      contentLength:
+        typeof response.ContentLength === "number"
+          ? response.ContentLength
+          : null,
+      contentType: response.ContentType ?? null,
+    };
+  } catch (error) {
+    if (isMissingObjectError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}

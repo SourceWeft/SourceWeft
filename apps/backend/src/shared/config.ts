@@ -248,6 +248,24 @@ function parseDocumentParseStrategy(
   return documentParseStrategies.has(normalized) ? normalized : fallback;
 }
 
+/**
+ * Which upload path the API offers clients.
+ *
+ * `proxy` is the default because it is the one that works against any
+ * S3-compatible store with no store-side setup at all. `direct` hands the
+ * browser a presigned PUT, which is faster and keeps the file out of the API
+ * process, but a browser cannot use it unless the bucket carries a CORS policy
+ * — a step a self-hosted or single-user deployment should never be forced into.
+ */
+const sourceUploadModes = new Set(["proxy", "direct"]);
+
+function parseSourceUploadMode(value: string | undefined): "proxy" | "direct" {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && sourceUploadModes.has(normalized)
+    ? (normalized as "proxy" | "direct")
+    : "proxy";
+}
+
 function parsePdf2MarkdownOutput(value: string | undefined, fallback: string) {
   if (!value) {
     return fallback;
@@ -644,6 +662,9 @@ export const config = {
       process.env.BLOG_ASSET_MAX_BYTES,
       15 * 1024 * 1024,
     ),
+  },
+  sourceUpload: {
+    mode: parseSourceUploadMode(process.env.SOURCE_UPLOAD_MODE),
   },
   documentParsing: {
     strategy: parseDocumentParseStrategy(

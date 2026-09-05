@@ -1120,9 +1120,11 @@ export function useSources(input: {
 
     try {
       for (const file of addSourceDialog.files) {
-        const result = await contentClient.uploadSource(workspaceId, file, {
-          parentSourceId: addSourceDialog.parentSourceId,
-        });
+        const result = await contentClient.uploadSourceFromBrowser(
+          workspaceId,
+          file,
+          { parentSourceId: addSourceDialog.parentSourceId },
+        );
         createdSourceIds.push(result.source.id);
         processed += 1;
         addSourceDialog.setUploadProgress(

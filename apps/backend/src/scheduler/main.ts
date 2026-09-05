@@ -8,6 +8,7 @@ import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
+import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
@@ -38,6 +39,9 @@ async function tick() {
     jobs.push(durableChatRunService.expireWaitingApprovals());
     jobs.push(agentSandboxService.cleanupExpiredSandboxes());
     jobs.push(agentSandboxService.cleanupStaleSandboxOperations());
+    // Direct uploads have no request to fail when a client walks away, so the
+    // reserved rows are reconciled here instead of in a catch block.
+    jobs.push(contentSourceService.failStaleSourceUploads());
 
     if (jobs.length === 0) {
       return;
