@@ -19,6 +19,7 @@ export class OpenAICompatibleRerankTransport implements RerankTransport {
       `${input.target.baseUrl.replace(/\/+$/, "")}/rerank`,
       {
         method: "POST",
+        signal: input.options?.signal,
         headers: {
           "Content-Type": "application/json",
           ...input.target.defaultHeaders,

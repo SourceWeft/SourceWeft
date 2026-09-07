@@ -23,6 +23,30 @@ const updateSourceStatusForLatestRevision = vi.fn();
 const createSourceDocumentChunksAndEmbeddings = vi.fn();
 const withBilledModelGateway = vi.fn();
 const requireDefaultModelGatewayProfile = vi.fn();
+const pinnedConfig = {
+  versionId: "prepared-version",
+  providers: {},
+  modelRoutes: {},
+};
+let embedResult: {
+  embeddings: number[][];
+  provider: string;
+  providerModel: string;
+  routeDecision: null;
+  usage: { totalTokens: number };
+};
+const identity = {
+  version: 1,
+  revision: "test-definition",
+  profileId: "global:embedding:test",
+  profileAlias: "default-embedding",
+  provider: "test",
+  providerKind: "openai-compatible",
+  baseUrl: "http://test.internal",
+  providerModel: "test-embed",
+  requestedDimensions: 2,
+  providerRouting: null,
+};
 const ensureModelConfigAvailable = vi.fn();
 const recordGatewayOperationEvent = vi.fn();
 
@@ -51,6 +75,20 @@ vi.mock("../../shared/model-gateway/index", () => ({
     withBilledModelGateway(...args),
 }));
 
+vi.mock(
+  "../../shared/model-gateway/embedding-identity",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../shared/model-gateway/embedding-identity")
+    >()),
+    prepareEmbeddingProfile: async () => ({
+      profile: await requireDefaultModelGatewayProfile(),
+      routedConfig: pinnedConfig,
+      identity,
+    }),
+  }),
+);
+
 vi.mock("../content/model-gateway-audit", () => ({
   recordGatewayOperationEvent: (...args: unknown[]) =>
     recordGatewayOperationEvent(...args),
@@ -62,6 +100,7 @@ const { SourceIndexingService } = await import("./indexing-service");
 type Captured = {
   scopeInput?: Record<string, any>;
   embedOptions?: Record<string, any>;
+  embedPayload?: unknown;
 };
 
 let captured: Captured;
@@ -73,6 +112,13 @@ let billing: {
 beforeEach(() => {
   vi.clearAllMocks();
   captured = {};
+  embedResult = {
+    embeddings: [[0.1, 0.2]],
+    provider: "test",
+    providerModel: "test-embed",
+    routeDecision: null,
+    usage: { totalTokens: 5 },
+  };
 
   requireContentSource.mockResolvedValue({ workspace, source });
   listSourceRevisionRecords.mockResolvedValue([]);
@@ -89,7 +135,7 @@ beforeEach(() => {
     profileAlias: "default-embedding",
     modelAlias: "test-embed",
     vectorStrategy: "exact",
-    requestedDimensions: 1024,
+    requestedDimensions: 2,
     annIndexName: null,
   });
 
@@ -98,14 +144,10 @@ beforeEach(() => {
       captured.scopeInput = input;
       return run({
         embeddings: {
-          embedBatch: async (_payload: unknown, options: any) => {
+          embedBatch: async (payload: unknown, options: any) => {
             captured.embedOptions = options;
-            return {
-              embeddings: [[0.1, 0.2]],
-              provider: "test",
-              routeDecision: null,
-              usage: { totalTokens: 5 },
-            };
+            captured.embedPayload = payload;
+            return embedResult;
           },
         },
       });
@@ -135,6 +177,14 @@ test("embedBatch runs through the billed wrapper as a covered ingestion call", a
   expect(withBilledModelGateway).toHaveBeenCalledTimes(1);
   expect(captured.scopeInput?.billing).toBe(billing);
   expect(captured.scopeInput?.gatewayConfigId).toBe("gw_1");
+  expect(captured.scopeInput?.routedConfig).toBe(pinnedConfig);
+  expect(captured.embedPayload).toMatchObject({
+    model: "default-embedding",
+    profileAlias: "default-embedding",
+  });
+  expect(createSourceDocumentChunksAndEmbeddings).toHaveBeenCalledWith(
+    expect.objectContaining({ embeddingIdentity: identity }),
+  );
   expect(captured.scopeInput?.context).toMatchObject({
     teamId: TEAM_ID,
     workspaceId: WORKSPACE_ID,
@@ -224,4 +274,21 @@ test("no embedding call is made when the profile disables vectors", async () => 
 
   expect(withBilledModelGateway).not.toHaveBeenCalled();
   expect(billing.meterIngestion).toHaveBeenCalledTimes(1);
+});
+
+test("a result from a different actual model cannot write vectors or bill ingestion", async () => {
+  embedResult.providerModel = "different-model";
+  await expect(
+    makeService().indexSource({
+      workspaceId: WORKSPACE_ID,
+      sourceId: SOURCE_ID,
+      userId: USER_ID,
+      chunks,
+    }),
+  ).rejects.toThrow(/different Provider or model/);
+  expect(createSourceDocumentChunksAndEmbeddings).not.toHaveBeenCalled();
+  expect(billing.meterIngestion).not.toHaveBeenCalled();
+  expect(recordGatewayOperationEvent).toHaveBeenCalledWith(
+    expect.objectContaining({ success: false }),
+  );
 });

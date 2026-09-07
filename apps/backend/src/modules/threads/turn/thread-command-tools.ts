@@ -60,10 +60,14 @@ export function mergeCommandTools(
 ): StreamThreadEventInput["tools"] {
   let next = tools;
   const isToolCommand = command?.kind === "tool";
+  const successCriteria = command?.workflow?.successCriteria;
   for (const toolName of command?.workflow?.defaultTools ?? []) {
     if (!isToolDenied(tools, toolName)) {
       next = enableToolSelection(next, toolName, {
-        directInvoke: isToolCommand,
+        directInvoke:
+          isToolCommand ||
+          (successCriteria?.kind !== "none" &&
+            successCriteria?.toolName === toolName),
       });
     }
   }
@@ -82,9 +86,14 @@ export function mergeSelectedSkillRuntimeTools(
   runtime: SelectedSkillRuntimeContract,
 ): StreamThreadEventInput["tools"] {
   let next = tools;
+  const successCriteria = runtime.successCriteria;
   for (const toolName of runtime.defaultTools) {
     if (!isToolDenied(tools, toolName)) {
-      next = enableToolSelection(next, toolName);
+      next = enableToolSelection(next, toolName, {
+        directInvoke:
+          successCriteria?.kind !== "none" &&
+          successCriteria?.toolName === toolName,
+      });
     }
   }
   return next;
@@ -102,7 +111,7 @@ export function mergeInvocationTools(
   }
   return isToolDenied(tools, invocation.toolName)
     ? tools
-    : enableToolSelection(tools, invocation.toolName);
+    : enableToolSelection(tools, invocation.toolName, { directInvoke: true });
 }
 
 export function enableToolSelection(

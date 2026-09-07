@@ -16,6 +16,8 @@ export type GatewayErrorCode =
   | "TIMEOUT"
   | "RATE_LIMIT"
   | "AUTH"
+  /** Deployment configuration has no usable target; retrying cannot repair it. */
+  | "CONFIGURATION"
   | "BAD_REQUEST"
   | "UPSTREAM"
   | "POLICY"
@@ -203,6 +205,9 @@ export interface ObserveGenerationError {
   latencyMs?: number;
   errorCode?: string;
   errorMessage?: string;
+  providerFields?: Record<string, unknown>;
+  observation?: ModelCallObservation;
+  usage?: UsageInfo;
   providerResponse?: Record<string, unknown>;
   providerStatusCode?: number;
   providerRequestId?: string;
@@ -301,6 +306,8 @@ export interface GatewayProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey?: string;
+  /** Host-owned GLOBAL opt-in for a credential-free openai-compatible service. */
+  allowUnauthenticated?: boolean;
   apiKeyHeaderName?: string;
   apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
@@ -820,6 +827,7 @@ export interface ResolvedGatewayProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey?: string;
+  allowUnauthenticated?: boolean;
   apiKeyHeaderName?: string;
   apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
@@ -894,6 +902,8 @@ export interface ResolvedRequestTarget {
   providerModel: string;
   baseUrl: string;
   apiKey?: string;
+  /** Only GLOBAL targets may inherit this deployment-owned opt-in. */
+  allowUnauthenticated?: boolean;
   apiKeyHeaderName?: string;
   apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;

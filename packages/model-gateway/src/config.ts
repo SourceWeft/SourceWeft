@@ -1,5 +1,9 @@
 import { ModelGatewayError } from "./errors";
 import {
+  assertUnauthenticatedProviderConfig,
+  hasConfiguredCredentialHeaders,
+} from "./auth-headers";
+import {
   defaultTargetHealthRegistry,
   orderByTargetHealth,
 } from "./target-health";
@@ -78,40 +82,46 @@ function normalizeProviderConfigs(
     },
   };
 
-  const normalizedEntries = Object.entries(providers).map(([name, provider]) => {
-    if (!provider?.baseUrl) {
-      throw new ModelGatewayError({
-        code: "BAD_REQUEST",
-        message: `Provider '${name}' is missing baseUrl`,
-        retryable: false,
-      });
-    }
+  const normalizedEntries = Object.entries(providers).map(
+    ([name, provider]) => {
+      if (!provider?.baseUrl) {
+        throw new ModelGatewayError({
+          code: "BAD_REQUEST",
+          message: `Provider '${name}' is missing baseUrl`,
+          retryable: false,
+        });
+      }
 
-    const baseUrl = normalizeBaseUrl(provider.baseUrl);
-    ensureBaseUrlAllowed(baseUrl, allowedBaseUrls);
+      const baseUrl = normalizeBaseUrl(provider.baseUrl);
+      ensureBaseUrlAllowed(baseUrl, allowedBaseUrls);
+      assertUnauthenticatedProviderConfig(provider);
 
-    return [
-      name,
-      {
+      return [
         name,
-        kind: provider.kind,
-        baseUrl,
-        apiKey: provider.apiKey,
-        apiKeyHeaderName: provider.apiKeyHeaderName,
-        apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
-        defaultHeaders: provider.defaultHeaders ?? {},
-        supports: provider.supports ?? [],
-        enabled: provider.enabled ?? true,
-        byokEnabled: provider.byokEnabled ?? provider.enabled ?? true,
-        ...(provider.timeoutMs !== undefined
-          ? { timeoutMs: provider.timeoutMs }
-          : {}),
-        ...(provider.maxRetries !== undefined
-          ? { maxRetries: provider.maxRetries }
-          : {}),
-      },
-    ] as const;
-  });
+        {
+          name,
+          kind: provider.kind,
+          baseUrl,
+          apiKey: provider.apiKey,
+          ...(provider.allowUnauthenticated
+            ? { allowUnauthenticated: true }
+            : {}),
+          apiKeyHeaderName: provider.apiKeyHeaderName,
+          apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
+          defaultHeaders: provider.defaultHeaders ?? {},
+          supports: provider.supports ?? [],
+          enabled: provider.enabled ?? true,
+          byokEnabled: provider.byokEnabled ?? provider.enabled ?? true,
+          ...(provider.timeoutMs !== undefined
+            ? { timeoutMs: provider.timeoutMs }
+            : {}),
+          ...(provider.maxRetries !== undefined
+            ? { maxRetries: provider.maxRetries }
+            : {}),
+        },
+      ] as const;
+    },
+  );
 
   return Object.fromEntries(normalizedEntries);
 }
@@ -166,7 +176,8 @@ function normalizeRoutes(
         alias,
         {
           alias,
-          strategy: route.strategy ?? config.routingStrategyDefault ?? "priority",
+          strategy:
+            route.strategy ?? config.routingStrategyDefault ?? "priority",
           targets: route.targets.map((target, index) => ({
             provider: target.provider,
             model: target.model,
@@ -198,7 +209,8 @@ export function resolveModelGatewayConfig(
 
   const providers = normalizeProviderConfigs(config);
   const routes = normalizeRoutes(config);
-  const defaultProvider = providers[DEFAULT_PROVIDER_NAME] ?? Object.values(providers)[0];
+  const defaultProvider =
+    providers[DEFAULT_PROVIDER_NAME] ?? Object.values(providers)[0];
 
   for (const route of Object.values(routes)) {
     for (const target of route.targets) {
@@ -278,9 +290,12 @@ async function maybeResolveByokApiKey(
     const resolved = await config.resolveApiKeyRef({
       provider: execution.byok.provider,
       apiKeyRef: execution.byok.apiKeyRef,
-      metadata: "metadata" in execution && execution.metadata && typeof execution.metadata === "object"
-        ? (execution.metadata as Record<string, unknown>)
-        : undefined,
+      metadata:
+        "metadata" in execution &&
+        execution.metadata &&
+        typeof execution.metadata === "object"
+          ? (execution.metadata as Record<string, unknown>)
+          : undefined,
     });
     if (resolved) {
       return resolved;
@@ -338,7 +353,11 @@ async function resolveCustomByokProvider(
     return null;
   }
 
-  return normalizeCustomByokProvider(providerName, customProvider, config.allowedBaseUrls);
+  return normalizeCustomByokProvider(
+    providerName,
+    customProvider,
+    config.allowedBaseUrls,
+  );
 }
 
 function resolveInlineByokProvider(input: {
@@ -510,14 +529,15 @@ export async function resolveRequestCandidates(
       configuredProvider,
       apiKey: resolvedApiKey,
     });
-    const customProvider = configuredProvider || inlineProvider
-      ? null
-      : await resolveCustomByokProvider(
-        config,
-        execution,
-        providerName,
-        resolvedApiKey,
-      );
+    const customProvider =
+      configuredProvider || inlineProvider
+        ? null
+        : await resolveCustomByokProvider(
+            config,
+            execution,
+            providerName,
+            resolvedApiKey,
+          );
     const provider = inlineProvider ?? configuredProvider ?? customProvider;
 
     if (!provider || !provider.byokEnabled) {
@@ -528,7 +548,21 @@ export async function resolveRequestCandidates(
       });
     }
 
-    const apiKey = inlineProvider?.apiKey ?? customProvider?.apiKey ?? resolvedApiKey;
+    // System credential headers are not BYOK metadata. An inline endpoint
+    // supplies its own headers and never inherits these configured defaults.
+    if (
+      provider === configuredProvider &&
+      hasConfiguredCredentialHeaders(provider)
+    ) {
+      throw new ModelGatewayError({
+        code: "POLICY",
+        message: "BYOK cannot reuse a System Provider's credential headers",
+        retryable: false,
+      });
+    }
+
+    const apiKey =
+      inlineProvider?.apiKey ?? customProvider?.apiKey ?? resolvedApiKey;
     if (!apiKey) {
       throw new ModelGatewayError({
         code: "AUTH",
@@ -537,31 +571,33 @@ export async function resolveRequestCandidates(
       });
     }
 
-    return [{
-      provider: provider.name,
-      providerKind: provider.kind,
-      providerModel: execution.model,
-      baseUrl: provider.baseUrl,
-      apiKey,
-      apiKeyHeaderName: provider.apiKeyHeaderName,
-      apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
-      defaultHeaders: provider.defaultHeaders,
-      supports: provider.supports,
-      ...(provider.timeoutMs !== undefined
-        ? { timeoutMs: provider.timeoutMs }
-        : {}),
-      ...(provider.maxRetries !== undefined
-        ? { maxRetries: provider.maxRetries }
-        : {}),
-      routeDecision: {
-        alias: `${provider.name}:${execution.model}`,
-        mode,
-        strategy: "priority",
+    return [
+      {
         provider: provider.name,
         providerKind: provider.kind,
+        providerModel: execution.model,
+        baseUrl: provider.baseUrl,
+        apiKey,
+        apiKeyHeaderName: provider.apiKeyHeaderName,
+        apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
+        defaultHeaders: provider.defaultHeaders,
+        supports: provider.supports,
+        ...(provider.timeoutMs !== undefined
+          ? { timeoutMs: provider.timeoutMs }
+          : {}),
+        ...(provider.maxRetries !== undefined
+          ? { maxRetries: provider.maxRetries }
+          : {}),
+        routeDecision: {
+          alias: `${provider.name}:${execution.model}`,
+          mode,
+          strategy: "priority",
+          provider: provider.name,
+          providerKind: provider.kind,
+        },
+        requestMetadata: config.requestMetadata,
       },
-      requestMetadata: config.requestMetadata,
-    }];
+    ];
   }
 
   const routeKey = execution.profileAlias ?? execution.model;
@@ -576,31 +612,46 @@ export async function resolveRequestCandidates(
         retryable: false,
       });
     }
-    return [{
-      provider: provider.name,
-      providerKind: provider.kind,
-      providerModel: execution.model,
-      baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey,
-      apiKeyHeaderName: provider.apiKeyHeaderName,
-      apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
-      defaultHeaders: provider.defaultHeaders,
-      supports: provider.supports,
-      ...(provider.timeoutMs !== undefined
-        ? { timeoutMs: provider.timeoutMs }
-        : {}),
-      ...(provider.maxRetries !== undefined
-        ? { maxRetries: provider.maxRetries }
-        : {}),
-      routeDecision: {
-        alias: routeKey,
-        mode,
-        strategy: "priority",
+    if (
+      !provider.enabled ||
+      (execution.providerHint && execution.providerHint !== provider.name)
+    ) {
+      throw new ModelGatewayError({
+        code: "CONFIGURATION",
+        message: `No globally ready route target is configured for alias '${routeKey}'`,
+        retryable: false,
+      });
+    }
+    return [
+      {
         provider: provider.name,
         providerKind: provider.kind,
+        providerModel: execution.model,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        ...(provider.allowUnauthenticated
+          ? { allowUnauthenticated: true }
+          : {}),
+        apiKeyHeaderName: provider.apiKeyHeaderName,
+        apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
+        defaultHeaders: provider.defaultHeaders,
+        supports: provider.supports,
+        ...(provider.timeoutMs !== undefined
+          ? { timeoutMs: provider.timeoutMs }
+          : {}),
+        ...(provider.maxRetries !== undefined
+          ? { maxRetries: provider.maxRetries }
+          : {}),
+        routeDecision: {
+          alias: routeKey,
+          mode,
+          strategy: "priority",
+          provider: provider.name,
+          providerKind: provider.kind,
+        },
+        requestMetadata: config.requestMetadata,
       },
-      requestMetadata: config.requestMetadata,
-    }];
+    ];
   }
 
   const candidates = route.targets.filter((target) => {
@@ -619,7 +670,7 @@ export async function resolveRequestCandidates(
 
   if (candidates.length === 0) {
     throw new ModelGatewayError({
-      code: "AUTH",
+      code: "CONFIGURATION",
       message: `No globally ready route target is configured for alias '${routeKey}'`,
       retryable: false,
       metadata: {
@@ -652,6 +703,7 @@ export async function resolveRequestCandidates(
       providerModel: selected.model,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
+      ...(provider.allowUnauthenticated ? { allowUnauthenticated: true } : {}),
       apiKeyHeaderName: provider.apiKeyHeaderName,
       apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,

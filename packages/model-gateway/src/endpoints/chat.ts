@@ -1,3 +1,4 @@
+import { resolveRequestOptions } from "../request-options";
 import { resolveRequestCandidates } from "../config";
 import {
   isAdministrativeGatewayCode,
@@ -59,25 +60,6 @@ function selectSurfacedStreamError(
 export class ModelGatewayChatEndpoint {
   constructor(private readonly config: ResolvedModelGatewayConfig) {}
 
-  /**
-   * Composed fresh per attempt, not per request: the timeout budget belongs to
-   * one target's try. Reusing one composed signal across failover attempts
-   * would hand attempt two an already-spent (or nearly spent) budget.
-   */
-  private resolveRequestOptions(options?: RequestOptions): RequestOptions {
-    const timeoutMs = options?.timeoutMs ?? this.config.timeoutMs;
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = options?.signal
-      ? AbortSignal.any([options.signal, timeoutSignal])
-      : timeoutSignal;
-    return {
-      ...options,
-      timeoutMs,
-      maxRetries: options?.maxRetries ?? this.config.maxRetries,
-      signal,
-    };
-  }
-
   async complete(
     input: ChatCompleteInput,
     options?: RequestOptions,
@@ -88,7 +70,11 @@ export class ModelGatewayChatEndpoint {
       operation: "chat.complete",
       callerSignal: options?.signal,
       attempt: async (target) => {
-        const requestOptions = this.resolveRequestOptions(options);
+        const requestOptions = resolveRequestOptions(
+          this.config,
+          target,
+          options,
+        );
         const generation = createGenerationObservation({
           operation: "chat.complete",
           payload: input,
@@ -224,7 +210,7 @@ export class ModelGatewayChatEndpoint {
     ChatStreamEvent,
     "done" | { failedWith: GatewayErrorData }
   > {
-    const requestOptions = this.resolveRequestOptions(options);
+    const requestOptions = resolveRequestOptions(this.config, target, options);
     const generation = createGenerationObservation({
       operation: "chat.stream",
       payload: input,
@@ -234,6 +220,10 @@ export class ModelGatewayChatEndpoint {
     await emitGenerationStart(this.config, generation.start);
     let completed = false;
     let yielded = false;
+    let finalMetadata: Extract<
+      ChatStreamEvent,
+      { type: "metadata" }
+    >["metadata"] = {};
 
     try {
       for await (const event of runBridgeChatStream({
@@ -243,6 +233,13 @@ export class ModelGatewayChatEndpoint {
         options: {
           ...requestOptions,
           suppressLangChainObservation: true,
+        },
+        onFinalMetadata: (metadata) => {
+          finalMetadata = metadata;
+          if (metadata.observation) {
+            metadata.observation.traceId = generation.start.traceId;
+            metadata.observation.spanId = generation.spanId;
+          }
         },
       })) {
         if (event.type === "metadata") {
@@ -315,6 +312,9 @@ export class ModelGatewayChatEndpoint {
             errorMessage: surfaced.message,
             providerStatusCode: surfaced.statusCode,
             providerRequestId: surfaced.requestId,
+            usage: finalMetadata.usage,
+            observation: finalMetadata.observation,
+            providerFields: finalMetadata.providerFields,
             attributes: generation.start.attributes,
           });
           if (
@@ -350,6 +350,23 @@ export class ModelGatewayChatEndpoint {
         yielded = true;
         yield eventToYield;
       }
+    } catch (error) {
+      if (!completed) {
+        completed = true;
+        await emitGenerationError(this.config, {
+          ...buildGenerationErrorEvent({
+            traceId: generation.start.traceId,
+            spanId: generation.spanId,
+            startedAtMs: generation.startedAtMs,
+            error,
+            attributes: generation.start.attributes,
+          }),
+          usage: finalMetadata.usage,
+          observation: finalMetadata.observation,
+          providerFields: finalMetadata.providerFields,
+        });
+      }
+      throw error;
     } finally {
       if (!completed) {
         await emitGenerationError(this.config, {
@@ -361,6 +378,9 @@ export class ModelGatewayChatEndpoint {
           errorMessage: yielded
             ? "Chat stream cancelled before completion"
             : "Chat stream ended without metadata",
+          usage: finalMetadata.usage,
+          observation: finalMetadata.observation,
+          providerFields: finalMetadata.providerFields,
           attributes: generation.start.attributes,
         });
       }

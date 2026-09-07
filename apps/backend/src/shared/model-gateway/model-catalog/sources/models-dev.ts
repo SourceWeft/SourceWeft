@@ -1,5 +1,4 @@
 import { config } from "../../../config";
-import { logger } from "../../../logger";
 import {
   canonicalModelId,
   canonicalProviderKey,
@@ -27,8 +26,6 @@ type ModelsDevModel = {
     output_audio?: number;
   };
 };
-
-type ModelsDevApi = Record<string, { models?: Record<string, ModelsDevModel> }>;
 
 const EFFORT_ALIASES: Record<string, ReasoningEffort> = {
   minimal: "minimal",
@@ -118,37 +115,33 @@ function normalizeModel(
 
 /**
  * Fetch models.dev's api.json and adapt every provider/model entry into the
- * neutral shape. Network/parse failure logs and returns [] so the registry
- * degrades to its other sources rather than throwing on the preheat path.
+ * neutral shape. An empty valid object is distinct from a failed source.
  */
 export async function loadModelsDevModels(): Promise<NormalizedModelInfo[]> {
-  try {
-    const response = await fetch(config.modelsDevApiUrl);
-    if (!response.ok) {
-      logger.warn("models.dev catalog fetch failed", {
-        status: response.status,
-      });
-      return [];
-    }
-    const payload = (await response.json()) as ModelsDevApi;
-    const out: NormalizedModelInfo[] = [];
-    for (const [providerKey, provider] of Object.entries(payload)) {
-      if (!provider || typeof provider !== "object") continue;
-      for (const [modelId, model] of Object.entries(provider.models ?? {})) {
-        // One malformed entry must not drop the whole (6000+ model) source.
-        if (!model || typeof model !== "object") continue;
-        try {
-          out.push(normalizeModel(modelId, model, providerKey));
-        } catch {
-          // skip a bad entry
-        }
-      }
-    }
-    return out;
-  } catch (error) {
-    logger.warn("models.dev catalog load errored", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
+  const response = await fetch(config.modelsDevApiUrl);
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Failed to fetch models.dev catalog: ${response.status}`);
   }
+  const payload: unknown = await response.json();
+  if (!isRecord(payload))
+    throw new Error("models.dev catalog must be an object of providers");
+  const out: NormalizedModelInfo[] = [];
+  for (const [providerKey, provider] of Object.entries(payload)) {
+    if (
+      !isRecord(provider) ||
+      (provider.models !== undefined && !isRecord(provider.models))
+    )
+      throw new Error("models.dev catalog contains an invalid provider entry");
+    for (const [modelId, model] of Object.entries(provider.models ?? {})) {
+      if (!isRecord(model))
+        throw new Error("models.dev catalog contains an invalid model entry");
+      out.push(normalizeModel(modelId, model as ModelsDevModel, providerKey));
+    }
+  }
+  return out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

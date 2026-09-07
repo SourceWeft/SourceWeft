@@ -7,8 +7,8 @@ import type { RetrievalPipelineStage as PackageRetrievalPipelineStage } from "..
 import type { EmbeddingProfile } from "../data-access";
 
 /**
- * Recall/precision knobs. Every field is optional; unset fields fall back to
- * the DEFAULT_* constants, so existing callers keep their current behaviour.
+ * Recall/precision knobs and explicit failure policy. BM25 failures abort by
+ * default; allow_vector permits hybrid retrieval to continue with an audit.
  */
 export type RetrievalTuning = {
   vectorTopK?: number;
@@ -16,6 +16,7 @@ export type RetrievalTuning = {
   rrfK?: number;
   fusionLimit?: number;
   rerankTopN?: number;
+  bm25FailurePolicy?: "fail" | "allow_vector";
 };
 
 /** Same shape with every value resolved, carried on the pipeline state. */

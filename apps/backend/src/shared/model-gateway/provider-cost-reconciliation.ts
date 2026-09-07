@@ -11,6 +11,7 @@ import { config } from "../config";
 import { logger } from "../logger";
 import { enqueueWithAudit } from "../queue";
 import { decryptSecret } from "../secrets";
+import { createLlmFetch, llmEndpointPolicy } from "./network";
 
 export const RECONCILE_PROVIDER_COST_JOB = "reconcile-provider-cost";
 
@@ -169,7 +170,7 @@ async function reconcileProviderCost(
     baseUrl: target.gateway.baseUrl,
     apiKey: apiKey || undefined,
     requestId: payload.providerRequestId,
-    fetch: globalThis.fetch,
+    fetch: createLlmFetch(llmEndpointPolicy([target.gateway.baseUrl])),
   });
 
   if (payload.actorUserId && payload.originalBillingIdempotencyKey) {

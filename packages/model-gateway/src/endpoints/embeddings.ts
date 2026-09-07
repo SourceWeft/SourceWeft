@@ -1,4 +1,6 @@
+import { resolveRequestOptions } from "../request-options";
 import { normalizeGatewayError } from "../errors";
+import type { ModelCallObservation } from "../observation/types";
 import {
   runBridgeEmbedding,
   runBridgeEmbeddingBatch,
@@ -34,7 +36,12 @@ export class ModelGatewayEmbeddingsEndpoint {
       payload: input,
       operation: "embeddings.embed",
       callerSignal: options?.signal,
-      attempt: (target) => this.embedWithTarget(input, options, target),
+      attempt: (target) =>
+        this.embedWithTarget(
+          input,
+          resolveRequestOptions(this.config, target, options),
+          target,
+        ),
     });
   }
 
@@ -50,12 +57,19 @@ export class ModelGatewayEmbeddingsEndpoint {
       target,
     });
     await emitGenerationStart(this.config, generation.start);
+    let finalObservation: ModelCallObservation | undefined;
+    const onFinalObservation = (observation: ModelCallObservation) => {
+      observation.traceId = generation.start.traceId;
+      observation.spanId = generation.spanId;
+      finalObservation = observation;
+    };
     try {
       const result = await runBridgeEmbedding({
         config: this.config,
         target,
         payload: input,
         options,
+        onFinalObservation,
       });
       await emitGenerationEnd(this.config, {
         traceId: generation.start.traceId,
@@ -78,16 +92,17 @@ export class ModelGatewayEmbeddingsEndpoint {
       });
       return result;
     } catch (error) {
-      await emitGenerationError(
-        this.config,
-        buildGenerationErrorEvent({
+      await emitGenerationError(this.config, {
+        ...buildGenerationErrorEvent({
           traceId: generation.start.traceId,
           spanId: generation.spanId,
           startedAtMs: generation.startedAtMs,
           error,
           attributes: generation.start.attributes,
         }),
-      );
+        usage: finalObservation?.usage,
+        observation: finalObservation,
+      });
       throw normalizeGatewayError(error);
     }
   }
@@ -101,7 +116,12 @@ export class ModelGatewayEmbeddingsEndpoint {
       payload: input,
       operation: "embeddings.embedBatch",
       callerSignal: options?.signal,
-      attempt: (target) => this.embedBatchWithTarget(input, options, target),
+      attempt: (target) =>
+        this.embedBatchWithTarget(
+          input,
+          resolveRequestOptions(this.config, target, options),
+          target,
+        ),
     });
   }
 
@@ -117,12 +137,19 @@ export class ModelGatewayEmbeddingsEndpoint {
       target,
     });
     await emitGenerationStart(this.config, generation.start);
+    let finalObservation: ModelCallObservation | undefined;
+    const onFinalObservation = (observation: ModelCallObservation) => {
+      observation.traceId = generation.start.traceId;
+      observation.spanId = generation.spanId;
+      finalObservation = observation;
+    };
     try {
       const result = await runBridgeEmbeddingBatch({
         config: this.config,
         target,
         payload: input,
         options,
+        onFinalObservation,
       });
       await emitGenerationEnd(this.config, {
         traceId: generation.start.traceId,
@@ -145,16 +172,17 @@ export class ModelGatewayEmbeddingsEndpoint {
       });
       return result;
     } catch (error) {
-      await emitGenerationError(
-        this.config,
-        buildGenerationErrorEvent({
+      await emitGenerationError(this.config, {
+        ...buildGenerationErrorEvent({
           traceId: generation.start.traceId,
           spanId: generation.spanId,
           startedAtMs: generation.startedAtMs,
           error,
           attributes: generation.start.attributes,
         }),
-      );
+        usage: finalObservation?.usage,
+        observation: finalObservation,
+      });
       throw normalizeGatewayError(error);
     }
   }

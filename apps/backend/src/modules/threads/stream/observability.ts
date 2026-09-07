@@ -101,6 +101,8 @@ export function toObservationError(error: unknown) {
   if (error instanceof ContentError) {
     return error;
   }
+  const modelError = toContentError(error);
+  if (modelError.code === "MODEL_CONFIGURATION_ERROR") return modelError;
   const terminationUnknown = findAgentToolTerminationUnknownReason(error);
   if (terminationUnknown) {
     return new ContentError(
@@ -144,7 +146,7 @@ export function toObservationError(error: unknown) {
       sanitizeClientErrorMessage(displayMessage),
     );
   }
-  return toContentError(error);
+  return modelError;
 }
 
 export function buildAgentRunSpanMetadata(

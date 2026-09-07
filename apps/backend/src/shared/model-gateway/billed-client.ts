@@ -40,6 +40,8 @@ import { enqueueProviderCostReconciliation } from "./provider-cost-reconciliatio
 import type { ThinkingConfig } from "@sourceweft/model-gateway";
 import { logger } from "../logger";
 import { resolveChatThinkingWithDefaults } from "./thinking-defaults";
+import type { RoutedGatewayConfig } from "./types";
+import { usageStorage, type UsageSlot } from "./billing/usage-capture";
 
 /**
  * Per-call options for a billed gateway call.
@@ -231,6 +233,8 @@ export type OpenBilledModelGatewayInput = {
   billing: ContentBillingPort;
   context: ModelUsageContext;
   gatewayConfigId?: string | null;
+  /** Trusted snapshot prepared with the embedding profile; never user input. */
+  routedConfig?: RoutedGatewayConfig;
   /** Injected for tests; production uses the real metering funnel. */
   meterUsage?: MeterUsageFn;
 };
@@ -289,7 +293,10 @@ async function openBilledGateway(
     scheduleReconciliation: enqueueProviderCostReconciliation,
   });
 
-  const raw = await getRawModelGatewayClient(input.gatewayConfigId);
+  const raw = await getRawModelGatewayClient(
+    input.gatewayConfigId,
+    input.routedConfig,
+  );
 
   async function settled<
     R extends {
@@ -405,41 +412,54 @@ async function* billedStream(
   options: BilledRequestOptions,
 ): AsyncIterable<ChatStreamEvent> {
   const { billingOptions, requestOptions } = splitOptions(options);
-  let usage: UsageInfo | undefined;
-  let observation: ModelCallObservation | undefined;
-  let settled = false;
-  let inFlightError: unknown;
-
-  const enrichedInput = await enrichChatThinking(chatInput, options);
+  const slot: UsageSlot = {};
+  let failed = false;
+  let iterator: AsyncIterator<ChatStreamEvent> | undefined;
   try {
-    for await (const event of raw.chat.stream(enrichedInput, {
-      ...requestOptions,
-      metadata: buildRequestMetadata(context, billingOptions),
-    })) {
-      // Providers report cumulative usage, so the last report wins rather than
-      // accumulating across chunks.
-      if (event.type === "metadata" && event.metadata.usage) {
-        usage = event.metadata.usage;
-      }
-      if (event.type === "metadata" && event.metadata.observation) {
-        observation = event.metadata.observation;
+    const enrichedInput = await enrichChatThinking(chatInput, options);
+    const stream = usageStorage.run(slot, () =>
+      raw.chat.stream(enrichedInput, {
+        ...requestOptions,
+        metadata: buildRequestMetadata(context, billingOptions),
+      }),
+    );
+    iterator = usageStorage.run(slot, () => stream[Symbol.asyncIterator]());
+    while (true) {
+      const next = await usageStorage.run(slot, () => iterator!.next());
+      if (next.done) break;
+      const event = next.value;
+      if (event.type === "metadata") {
+        if (event.metadata.usage) slot.usage = event.metadata.usage;
+        if (event.metadata.observation)
+          slot.observation = event.metadata.observation;
       }
       yield event;
     }
   } catch (error) {
-    inFlightError = error;
+    failed = true;
     throw error;
   } finally {
-    if (!settled) {
-      settled = true;
-      try {
-        await scope.settle({ options: billingOptions, usage, observation });
-      } catch (settleError) {
-        // Never let a settlement failure mask the error that ended the stream.
-        if (!inFlightError) {
-          throw settleError;
-        }
-      }
+    let closeFailed = false;
+    let closeError: unknown;
+    try {
+      if (iterator?.return)
+        await usageStorage.run(slot, () => iterator!.return!());
+    } catch (error) {
+      closeFailed = true;
+      closeError = error;
     }
+    try {
+      await scope.settle({
+        options: billingOptions,
+        usage: slot.usage,
+        observation: slot.observation,
+      });
+    } catch (error) {
+      if (!failed && !closeFailed) throw error;
+      logger.warn("Settlement failed while closing gateway stream", {
+        operation: billingOptions.operation,
+      });
+    }
+    if (closeFailed && !failed) throw closeError;
   }
 }

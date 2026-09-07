@@ -14,7 +14,7 @@ export const reviewDeckVisualsAgentTool = defineAgentTool({
   name: "review_deck_visuals",
   domain: "artifact",
   capabilities: ["artifact"],
-  requirements: { modelKind: "vision" },
+  requirements: { modelKind: "vision", sandbox: true },
   activation: {
     default: "off",
     userControl: "none",

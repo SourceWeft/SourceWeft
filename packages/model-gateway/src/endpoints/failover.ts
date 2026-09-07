@@ -64,6 +64,7 @@ export async function runWithTargetFailover<T>(input: {
   while (index < candidates.length) {
     const target = candidates[index]!;
     try {
+      input.callerSignal?.throwIfAborted();
       const result = await input.attempt(target);
       input.config.targetHealth.markSuccess(target);
       return result;

@@ -6,7 +6,22 @@ import { createSourceWeftToolCallContextMiddleware } from "../middleware/tool-ca
 const hostMocks = vi.hoisted(() => ({
   deleteArtifactObjectsByPrefix: vi.fn(async () => undefined),
   publishCurrentRunArtifact: vi.fn(),
+  readAuthorizedArtifactRecord: vi.fn(),
 }));
+
+vi.mock(
+  "../../../artifacts/authorized-version-service",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../artifacts/authorized-version-service")
+      >();
+    return {
+      ...actual,
+      readAuthorizedArtifactRecord: hostMocks.readAuthorizedArtifactRecord,
+    };
+  },
+);
 
 vi.mock("../../../sources/storage", async (importOriginal) => {
   const actual =
@@ -120,6 +135,40 @@ beforeEach(() => {
   hostMocks.deleteArtifactObjectsByPrefix.mockReset();
   hostMocks.deleteArtifactObjectsByPrefix.mockResolvedValue(undefined);
   hostMocks.publishCurrentRunArtifact.mockReset();
+  hostMocks.readAuthorizedArtifactRecord.mockReset();
+});
+
+test("artifact pre-reads use the host actor and refuse another tenant or workspace", async () => {
+  const services = createHostServices();
+  const query = {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+  };
+  hostMocks.readAuthorizedArtifactRecord.mockResolvedValue(null);
+
+  assert.equal(await services.artifacts.findArtifact(query), null);
+  assert.deepEqual(hostMocks.readAuthorizedArtifactRecord.mock.calls, [
+    [
+      {
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        artifactId: "artifact-1",
+      },
+    ],
+  ]);
+  assert.equal(
+    await services.artifacts.findArtifact({ ...query, teamId: "other-team" }),
+    null,
+  );
+  assert.equal(
+    await services.artifacts.findArtifact({
+      ...query,
+      workspaceId: "other-workspace",
+    }),
+    null,
+  );
+  assert.equal(hostMocks.readAuthorizedArtifactRecord.mock.calls.length, 1);
 });
 
 test("cleanupPreallocatedArtifact requires an active root tool context", async () => {

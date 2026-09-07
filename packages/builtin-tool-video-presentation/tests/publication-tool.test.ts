@@ -603,6 +603,34 @@ test("publisher never cleans up when a retry rejects after an unknown first resp
   });
 });
 
+test("an artifact_in_progress rejection uses the existing video in-progress result and never reports publication success", async () => {
+  const harness = createUnknownPublicationHarness({
+    publishCommitted: async () => ({
+      ok: false,
+      reason: "artifact_in_progress",
+    }),
+  });
+
+  const output = await harness.invoke();
+  assert.deepEqual(output, {
+    status: "blocked",
+    code: "VIDEO_PUBLICATION_IN_PROGRESS",
+    message: "Publication was rejected: artifact_in_progress.",
+    diagnostics: [],
+  });
+  assert.equal("artifactId" in (output as Record<string, unknown>), false);
+  assert.equal(
+    "artifactVersionId" in (output as Record<string, unknown>),
+    false,
+  );
+  assert.deepEqual(harness.counts(), {
+    deletedObjects: 2,
+    cleanedPreallocations: 1,
+    unknowns: 0,
+    publishCalls: 1,
+  });
+});
+
 test("publisher reports invalid draft input without leaking parser details", async () => {
   const harness = createUnknownPublicationHarness({
     publishCommitted: async () => {

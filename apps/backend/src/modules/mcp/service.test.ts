@@ -38,8 +38,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../shared/config", () => ({
   config: {
+    endpointAddressChecksEnabled: true,
     market: { enabled: true },
     modelGatewayEncryptionSecret: "test-encryption-secret",
+    mcpAllowedInternalOrigins: ["https://mcp.internal"],
     mcpOAuth: {
       redirectUrl: "https://test.local/v1/mcp/oauth/callback",
       clientName: "SourceWeft",
@@ -121,6 +123,7 @@ import {
   stripLangChainMcpToolPrefix,
 } from "./service";
 import { assertSafeMcpEndpoint } from "./security";
+import { config } from "../../shared/config";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
@@ -660,17 +663,14 @@ test("testInstall preserves existing tool metadata instead of clobbering it", as
   });
 });
 
-test("development MCP checks allow fake-IP DNS while production stays fail-closed", async () => {
-  const originalNodeEnv = process.env.NODE_ENV;
+test("MCP prechecks receive the configured address mode and deployment origins", async () => {
+  const originalChecks = config.endpointAddressChecksEnabled;
   const endpointCheck = vi.mocked(assertSafeMcpEndpoint);
   try {
-    for (const [nodeEnv, allowed] of [
-      ["development", true],
-      ["production", false],
-    ] as const) {
-      process.env.NODE_ENV = nodeEnv;
+    for (const enforceAddressChecks of [false, true]) {
+      config.endpointAddressChecksEnabled = enforceAddressChecks;
       resetMcpServiceMocks();
-      const install = mcpInstall({ id: `mcp_${nodeEnv}` });
+      const install = mcpInstall({ id: `mcp_${enforceAddressChecks}` });
       mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
       mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
       mocks.updateWorkspaceMcpInstall.mockResolvedValue(install);
@@ -682,20 +682,16 @@ test("development MCP checks allow fake-IP DNS while production stays fail-close
       });
 
       assert.deepEqual(endpointCheck.mock.calls[0]?.[1], {
-        allowLocalhost: allowed,
-        allowPrivateNetwork: allowed,
+        enforceAddressChecks,
+        allowedInternalOrigins: ["https://mcp.internal"],
       });
     }
   } finally {
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
+    config.endpointAddressChecksEnabled = originalChecks;
   }
 });
 
-test("all backend dev entrypoints explicitly select development endpoint policy", () => {
+test("all backend dev entrypoints explicitly select development runtime mode", () => {
   const packageJson = JSON.parse(
     readFileSync(
       fileURLToPath(new URL("../../../package.json", import.meta.url)),

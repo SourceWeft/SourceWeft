@@ -15,7 +15,10 @@ import {
   findCurrentReadyArtifactVersionRecord,
   findReadyArtifactVersionRecord,
 } from "./repository";
-import { readAuthorizedCurrentArtifactVersion } from "./authorized-version-service";
+import {
+  readAuthorizedArtifactRecord,
+  readAuthorizedCurrentArtifactVersion,
+} from "./authorized-version-service";
 
 let teamId: string;
 let workspaceId: string;
@@ -239,6 +242,32 @@ test("the application reader reapplies live workspace and row visibility", async
 
   // Access is checked for each invocation, so a user removed after turn setup
   // cannot keep reading through the host service.
+  await db
+    .delete(workspaceMemberships)
+    .where(eq(workspaceMemberships.userId, creatorUserId));
+  assert.equal(await readAs(creatorUserId), null);
+});
+
+test("the republish reader hides private payloads and reapplies revoked access", async () => {
+  const created = await createReadyVideo();
+  const readAs = (userId: string, selectedWorkspaceId = workspaceId) =>
+    readAuthorizedArtifactRecord({
+      workspaceId: selectedWorkspaceId,
+      userId,
+      artifactId: created.artifactId,
+    });
+
+  assert.deepEqual((await readAs(viewerUserId))?.payloadJson, created.payload);
+  assert.equal(await readAs(randomUUID()), null);
+  assert.equal(await readAs(creatorUserId, randomUUID()), null);
+
+  await db
+    .update(artifacts)
+    .set({ visibility: "private" })
+    .where(eq(artifacts.id, created.artifactId));
+  assert.equal(await readAs(viewerUserId), null);
+  assert.deepEqual((await readAs(creatorUserId))?.payloadJson, created.payload);
+
   await db
     .delete(workspaceMemberships)
     .where(eq(workspaceMemberships.userId, creatorUserId));

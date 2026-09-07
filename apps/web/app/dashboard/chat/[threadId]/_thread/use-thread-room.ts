@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
+import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import { contentClient } from "../../../../../lib/sdk";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import type { ArtifactOutputReconcileTarget } from "./artifact-output-reconcile";
@@ -165,6 +166,7 @@ type UseThreadRoomInput = {
   setActiveThreadRun: (
     updater: (current: ActiveThreadRun | null) => ActiveThreadRun | null,
   ) => void;
+  setLatestRunFailure: (failure: ThreadRunFailureSummary | null) => void;
   clearRunIfCurrent: (durableRunKey: string) => void;
   appendNewerMessages: () => Promise<void>;
   reconcileCommittedArtifactOutputs: (
@@ -191,6 +193,7 @@ export function useThreadRoom({
   attachedRunKeyRef,
   isStreamingRef,
   setActiveThreadRun,
+  setLatestRunFailure,
   clearRunIfCurrent,
   appendNewerMessages,
   reconcileCommittedArtifactOutputs,
@@ -204,6 +207,7 @@ export function useThreadRoom({
     attachedRunKeyRef,
     isStreamingRef,
     setActiveThreadRun,
+    setLatestRunFailure,
     clearRunIfCurrent,
     appendNewerMessages,
     reconcileCommittedArtifactOutputs,
@@ -215,6 +219,7 @@ export function useThreadRoom({
     attachedRunKeyRef,
     isStreamingRef,
     setActiveThreadRun,
+    setLatestRunFailure,
     clearRunIfCurrent,
     appendNewerMessages,
     reconcileCommittedArtifactOutputs,
@@ -304,12 +309,14 @@ export function useThreadRoom({
     const reconcileRun = async () => {
       const seq = ++reconcileSeq;
       let summary: RoomActiveRun | null;
+      let latestFailure: ThreadRunFailureSummary | null;
       try {
         const result = await contentClient.getActiveThreadRun(
           workspaceId,
           threadId,
         );
         summary = (result.threadRun as RoomActiveRun | null) ?? null;
+        latestFailure = summary ? null : (result.latestFailure ?? null);
       } catch {
         return;
       }
@@ -319,6 +326,7 @@ export function useThreadRoom({
         return;
       }
       const deps = latestRef.current;
+      deps.setLatestRunFailure(latestFailure);
       if (!summary) {
         // No active run server-side. Clear the local run unless THIS tab drives
         // its token stream (streaming or attached) — that lifecycle clears it

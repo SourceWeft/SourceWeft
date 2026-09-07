@@ -1,3 +1,5 @@
+import { GatewayCaller } from "../adapters/gateway-caller";
+import { awaitWithSignal } from "../request-options";
 import { getRerankTransport } from "../adapters/registry";
 import { normalizeGatewayError } from "../errors";
 import type {
@@ -23,14 +25,17 @@ export async function runBridgeRerank(input: {
     });
 
     if (injected?.rerank) {
+      const rerank = injected.rerank.bind(injected);
       const docs = input.payload.documents.map((document) => ({
         pageContent:
           typeof document === "string" ? document : JSON.stringify(document),
         metadata: typeof document === "string" ? undefined : document,
       }));
-      const rawResults = await injected.rerank(docs, input.payload.query, {
-        topN: input.payload.topN,
-      });
+      const rawResults = await awaitWithSignal(input.options?.signal, () =>
+        rerank(docs, input.payload.query, {
+          topN: input.payload.topN,
+        }),
+      );
       const results = rawResults.map((item) => ({
         index: item.index,
         relevanceScore: item.relevanceScore,
@@ -56,12 +61,17 @@ export async function runBridgeRerank(input: {
       };
     }
 
-    return getRerankTransport(input.target.providerKind).execute({
-      target: input.target,
-      payload: input.payload,
-      options: input.options,
-      fetch: input.config.fetch,
-    });
+    return await awaitWithSignal(input.options?.signal, () =>
+      new GatewayCaller(input.options).call(async () => {
+        input.options?.signal?.throwIfAborted();
+        return getRerankTransport(input.target.providerKind).execute({
+          target: input.target,
+          payload: input.payload,
+          options: input.options,
+          fetch: input.config.fetch,
+        });
+      }),
+    );
   } catch (error) {
     throw normalizeGatewayError(error);
   }

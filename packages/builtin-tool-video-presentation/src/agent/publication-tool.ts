@@ -531,7 +531,10 @@ export function createPublishVideoPresentationTool(input: {
             .catch(() => undefined);
         }
         return completeBlocked({
-          code: `VIDEO_PUBLICATION_${committed.reason.toUpperCase()}`,
+          code:
+            committed.reason === "artifact_in_progress"
+              ? "VIDEO_PUBLICATION_IN_PROGRESS"
+              : `VIDEO_PUBLICATION_${committed.reason.toUpperCase()}`,
           message: `Publication was rejected: ${committed.reason}.`,
         });
       };

@@ -8,6 +8,7 @@ import type {
   StartTraceInput,
 } from "../../llm-observability";
 import { closeQueue } from "../../../shared/queue";
+import { ContentError } from "../../content/errors";
 import {
   buildAgentRunSpanMetadata,
   buildAgentRunSpanOutput,
@@ -2053,6 +2054,45 @@ test("external Stop preserves termination_unknown instead of claiming cancellati
   assert.equal(persistedCode, AGENT_TOOL_TERMINATION_UNKNOWN_CODE);
   assert.notEqual(errorEvent?.code, "CLIENT_CANCELLED");
 });
+
+for (const code of ["CHAT_RUN_STALE", "CHAT_RUN_OWNERSHIP_LOST"]) {
+  test(`durable ${code} abort retains its reason when the model stream throws AbortError`, async () => {
+    const controller = new AbortController();
+    let persistedCode: string | undefined;
+    const service = new ContentThreadStreamService(
+      createTurnService() as unknown as ConstructorParameters<
+        typeof ContentThreadStreamService
+      >[0],
+      async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+        controller.abort(new ContentError(409, code, "worker cannot continue"));
+        throw new DOMException("provider aborted", "AbortError");
+      },
+      async () => null,
+      async (input) => {
+        persistedCode = input.contentError.code;
+        return createAssistantMessageRecord({
+          id: "stopped-worker-message",
+          content: input.contentError.message,
+        });
+      },
+      createBillingPort(),
+    );
+    const events: Record<string, unknown>[] = [];
+    for await (const event of service.streamThreadEvents(
+      {
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        userId: "user-1",
+        content: "query",
+      },
+      { abortSignal: controller.signal },
+    ))
+      events.push(parseSseData(event));
+    assert.equal(events.find((event) => event.type === "error")?.code, code);
+    assert.equal(persistedCode, code);
+    assert.equal(events.at(-1)?.type, "finish");
+  });
+}
 
 test("streamThreadEvents preserves preflight billing on persisted errors", async () => {
   let errorPrepared: PreparedThreadTurn | undefined;

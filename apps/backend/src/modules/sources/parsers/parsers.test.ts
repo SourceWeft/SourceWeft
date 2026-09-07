@@ -1,12 +1,28 @@
-process.env.S3_BUCKET = process.env.S3_BUCKET || "test-bucket";
-process.env.PDF2MARKDOWN_API_KEY =
-  process.env.PDF2MARKDOWN_API_KEY || "test-pdf2markdown-key";
-process.env.MODEL_GATEWAY_ENCRYPTION_SECRET =
-  process.env.MODEL_GATEWAY_ENCRYPTION_SECRET || "test-encryption-secret";
-process.env.DOCUMENT_PARSE_STRATEGY = "explicit";
-process.env.DOCUMENT_PARSE_PROVIDER = "langchain";
+import { afterAll, test, vi } from "vitest";
 
-import { test, vi } from "vitest";
+const originalParserEnvironment = vi.hoisted(() => {
+  const names = [
+    "S3_BUCKET",
+    "PDF2MARKDOWN_API_KEY",
+    "MODEL_GATEWAY_ENCRYPTION_SECRET",
+    "DOCUMENT_PARSE_STRATEGY",
+    "DOCUMENT_PARSE_PROVIDER",
+  ] as const;
+  const original = names.map((name) => [name, process.env[name]] as const);
+  process.env.S3_BUCKET ||= "test-bucket";
+  process.env.PDF2MARKDOWN_API_KEY ||= "test-pdf2markdown-key";
+  process.env.MODEL_GATEWAY_ENCRYPTION_SECRET ||= "test-encryption-secret";
+  process.env.DOCUMENT_PARSE_STRATEGY = "explicit";
+  process.env.DOCUMENT_PARSE_PROVIDER = "langchain";
+  return original;
+});
+
+afterAll(() => {
+  for (const [name, value] of originalParserEnvironment) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
 import assert from "node:assert/strict";
 import { estimateAsrPageCount, formatAsrTranscriptMarkdown } from "./audio";
 import { WebFetchSourceParser } from "./web-fetch";

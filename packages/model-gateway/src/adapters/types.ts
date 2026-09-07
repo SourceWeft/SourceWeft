@@ -17,13 +17,18 @@ import type {
   TtsSpeechResult,
 } from "../types";
 
+/** Host transport, supplied by the bridge rather than by model input. */
+export type AdapterRequestOptions = RequestOptions & {
+  fetch?: typeof globalThis.fetch;
+};
+
 export interface ChatAdapter {
   readonly kind: ProviderKind;
 
   createModel(
     target: ResolvedRequestTarget,
     input: ChatCompleteInput,
-    options?: RequestOptions,
+    options?: AdapterRequestOptions,
   ): BaseChatModel;
 }
 
@@ -33,7 +38,7 @@ export interface EmbeddingsAdapter {
   createModel(
     target: ResolvedRequestTarget,
     input: EmbedInput | EmbedBatchInput,
-    options?: RequestOptions,
+    options?: AdapterRequestOptions,
   ): EmbeddingsInterface;
 }
 

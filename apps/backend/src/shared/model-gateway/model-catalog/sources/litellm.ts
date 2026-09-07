@@ -1,5 +1,4 @@
 import { config } from "../../../config";
-import { logger } from "../../../logger";
 import {
   deriveSupportedEfforts,
   fetchLiteLLMPricing,
@@ -136,44 +135,36 @@ export const testExports = { parseImageSizeKey, toTier };
 
 /**
  * Fetch the BerriAI LiteLLM dataset and adapt each entry into the neutral
- * shape. Network/parse failure logs and returns [] so the registry degrades to
- * its other sources.
+ * shape. Network or malformed-source failure rejects the entire refresh.
  */
 export async function loadLiteLLMModels(): Promise<NormalizedModelInfo[]> {
-  try {
-    const data = await fetchLiteLLMPricing(config.litellmPricingUrl);
-    const out: NormalizedModelInfo[] = [];
-    for (const [key, entry] of Object.entries(data)) {
-      if (!entry || typeof entry !== "object") {
-        continue;
-      }
-      // A `{quality}/{WxH}/{model}` tier entry → fold into the base model's
-      // imageTiers (registry unions tiers across variants) rather than becoming
-      // its own model.
-      const sizeKey = parseImageSizeKey(key);
-      const tier = sizeKey ? toTier(entry, sizeKey.quality, sizeKey.size) : null;
-      if (sizeKey && tier) {
-        out.push({
-          id: canonicalModelId(sizeKey.baseId),
-          provider: canonicalProviderKey(entry.litellm_provider),
-          modality: "image",
-          reasoning: false,
-          reasoningEfforts: [],
-          toolCall: false,
-          structuredOutput: false,
-          vision: false,
-          pricing: { imageTiers: [tier] },
-          sources: ["litellm"],
-        });
-        continue;
-      }
-      out.push(normalizeEntry(key, entry));
+  const data = await fetchLiteLLMPricing(config.litellmPricingUrl);
+  const out: NormalizedModelInfo[] = [];
+  for (const [key, entry] of Object.entries(data)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("LiteLLM catalog contains an invalid model entry");
     }
-    return out;
-  } catch (error) {
-    logger.warn("LiteLLM catalog load errored", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
+    // A `{quality}/{WxH}/{model}` tier entry → fold into the base model's
+    // imageTiers (registry unions tiers across variants) rather than becoming
+    // its own model.
+    const sizeKey = parseImageSizeKey(key);
+    const tier = sizeKey ? toTier(entry, sizeKey.quality, sizeKey.size) : null;
+    if (sizeKey && tier) {
+      out.push({
+        id: canonicalModelId(sizeKey.baseId),
+        provider: canonicalProviderKey(entry.litellm_provider),
+        modality: "image",
+        reasoning: false,
+        reasoningEfforts: [],
+        toolCall: false,
+        structuredOutput: false,
+        vision: false,
+        pricing: { imageTiers: [tier] },
+        sources: ["litellm"],
+      });
+      continue;
+    }
+    out.push(normalizeEntry(key, entry));
   }
+  return out;
 }

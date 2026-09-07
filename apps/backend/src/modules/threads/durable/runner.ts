@@ -5,7 +5,10 @@ import type {
 import { buildErrorTurnBilling } from "../turn/error-turn-billing";
 import { type MeterConsumeResponse } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
-import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import {
+  sanitizeClientErrorMessage,
+  toContentError,
+} from "../../content/model-gateway-error";
 import type { MessageRenderBlock, PreparedThreadTurn } from "../turn/types";
 import { createThreadStreamErrorMessage } from "../stream/error";
 import { toSseData } from "../stream/helpers";
@@ -47,7 +50,11 @@ import type {
   DurableRunRequestSnapshot,
 } from "./types";
 import { toObjectRecord } from "../../../shared/records";
-import { parseSsePayload } from "./run-state";
+import {
+  isTerminalRunStatus,
+  parseSsePayload,
+  synthesizeTerminalRunEvents,
+} from "./run-state";
 
 type TerminalRunStatus = Extract<
   ChatThreadRunStatus,
@@ -86,28 +93,58 @@ function requestWithDurableMessageOverrides(input: {
   };
 }
 
-function durableUserMessageIdFallback(input: {
-  request: DurableRunRequestSnapshot;
+async function resolvePersistedTerminalMessageIds(input: {
   run: ChatThreadRunRecord;
+  assistantMessageId: string | null;
+  findMessage?: typeof findMessageRecord;
 }) {
-  if (input.run.userMessageId) {
-    return input.run.userMessageId;
+  const findMessage = input.findMessage ?? findMessageRecord;
+  const findCandidate = (messageId: string) =>
+    findMessage({
+      teamId: input.run.teamId,
+      workspaceId: input.run.workspaceId,
+      messageId,
+    });
+  // Existing run references are already protected by database foreign keys.
+  // Preparation can persist a user message before onPrepared binds it to the
+  // run; a deterministic name is only a lookup candidate, never evidence that
+  // the row exists.
+  let userMessageId = input.run.userMessageId;
+  if (!userMessageId && ["send", "edit"].includes(input.run.mode)) {
+    const candidate = await findCandidate(
+      stableDurableUserMessageId(input.run.id),
+    );
+    if (
+      candidate?.teamId === input.run.teamId &&
+      candidate.workspaceId === input.run.workspaceId &&
+      candidate.threadId === input.run.threadId &&
+      candidate.role === "user" &&
+      candidate.createdBy === input.run.userId
+    ) {
+      userMessageId = candidate.id;
+    }
   }
-  if (input.run.mode !== "send" && input.run.mode !== "edit") {
-    return null;
+  let assistantMessageId = input.run.assistantMessageId;
+  if (!assistantMessageId && input.assistantMessageId) {
+    const candidate = await findCandidate(input.assistantMessageId);
+    if (
+      candidate?.teamId === input.run.teamId &&
+      candidate.workspaceId === input.run.workspaceId &&
+      candidate.threadId === input.run.threadId &&
+      candidate.role === "assistant"
+    ) {
+      assistantMessageId = candidate.id;
+    }
   }
-  const request = input.request as DurableRunRequestSnapshot & {
-    userMessageIdOverride?: unknown;
-  };
-  return typeof request.userMessageIdOverride === "string"
-    ? request.userMessageIdOverride
-    : stableDurableUserMessageId(input.run.id);
+  return { userMessageId, assistantMessageId };
 }
 
 function toDurableRunContentError(error: unknown) {
   if (error instanceof ContentError) {
     return error;
   }
+  const modelError = toContentError(error);
+  if (modelError.code === "MODEL_CONFIGURATION_ERROR") return modelError;
   if (isSandboxExecuteToolCallIdRequiredError(error)) {
     return sandboxExecuteToolCallIdRequiredContentError();
   }
@@ -1299,101 +1336,147 @@ async function createDurableErrorMessage(input: {
 export async function persistTerminalFailure(input: {
   run: ChatThreadRunRecord;
   status: Extract<TerminalRunStatus, "failed" | "cancelled">;
-  userMessageId?: string | null;
   assistantMessageId: string | null;
   snapshot: ChatRunSnapshot;
   contentError: ContentError;
   appendRunEvent: DurableChatRunServiceAppendRunEvent;
   finishRun: DurableChatRunServiceFinishRun;
+  findRunById?: typeof findChatThreadRunById;
+  findMessage?: typeof findMessageRecord;
 }) {
-  const terminalRun = {
-    ...input.run,
-    status: input.status,
-    userMessageId: input.userMessageId ?? input.run.userMessageId,
-    assistantMessageId: input.assistantMessageId,
-  };
-  const snapshot = input.snapshot.assistantMessage
-    ? {
-        ...input.snapshot,
-        assistantMessage: {
-          ...input.snapshot.assistantMessage,
-          metadata: {
-            ...input.snapshot.assistantMessage.metadata,
-            isError: input.status === "failed",
-            isCancelled: input.status === "cancelled",
-            error: input.contentError.message,
-            errorCode: input.contentError.code,
-            ...buildThreadRunMetadata(terminalRun),
+  const findRun = input.findRunById ?? findChatThreadRunById;
+  const readCurrent = () =>
+    findRun({
+      runId: input.run.id,
+      teamId: input.run.teamId,
+      workspaceId: input.run.workspaceId,
+    });
+  let finished: ChatThreadRunRecord | null = null;
+  try {
+    const current = await readCurrent();
+    if (current && isTerminalRunStatus(current.status)) return current;
+    const run = current ?? input.run;
+    const messageIds = await resolvePersistedTerminalMessageIds({
+      run,
+      assistantMessageId: input.assistantMessageId,
+      findMessage: input.findMessage,
+    });
+    const terminalRun = {
+      ...run,
+      status: input.status,
+      ...messageIds,
+    };
+    const snapshot = input.snapshot.assistantMessage
+      ? {
+          ...input.snapshot,
+          assistantMessage: {
+            ...input.snapshot.assistantMessage,
+            metadata: {
+              ...input.snapshot.assistantMessage.metadata,
+              isError: input.status === "failed",
+              isCancelled: input.status === "cancelled",
+              error: input.contentError.message,
+              errorCode: input.contentError.code,
+              ...buildThreadRunMetadata(terminalRun),
+            },
           },
-        },
-      }
-    : input.snapshot;
-  const clientErrorMessage = sanitizeClientErrorMessage(
-    input.contentError.message,
-  );
-  const errorPayload = toSseData({
-    type: "error",
-    code: input.contentError.code,
-    error: clientErrorMessage,
-    ...(terminalRun.userMessageId
-      ? { userMessageId: terminalRun.userMessageId }
-      : {}),
-    ...(input.assistantMessageId
-      ? { messageId: input.assistantMessageId }
-      : {}),
-  });
-  await input.appendRunEvent({
-    run: input.run,
-    payload: errorPayload,
-    snapshot,
-  });
-  await input.appendRunEvent({
-    run: input.run,
-    payload: toSseData({ type: "finish" }),
-    snapshot,
-  });
-  if (input.assistantMessageId) {
-    const currentMessage = await findMessageRecord({
-      teamId: input.run.teamId,
-      workspaceId: input.run.workspaceId,
-      messageId: input.assistantMessageId,
-    });
-    await updateMessageRecord({
-      teamId: input.run.teamId,
-      workspaceId: input.run.workspaceId,
-      threadId: input.run.threadId,
-      messageId: input.assistantMessageId,
-      content: appendAssistantContinuationContent({
-        existingContent:
-          snapshot.assistantMessage?.content ?? currentMessage?.content,
-        nextContent:
-          typeof snapshot.assistantContent === "string"
-            ? snapshot.assistantContent
-            : clientErrorMessage,
-      }),
-      metadata: {
-        ...(currentMessage?.metadata ??
-          snapshot.assistantMessage?.metadata ??
-          {}),
-        isError: input.status === "failed",
-        isCancelled: input.status === "cancelled",
-        error: input.contentError.message,
-        errorCode: input.contentError.code,
-        ...buildThreadRunMetadata(terminalRun),
-      },
-    });
-  }
-  return (
-    (await input.finishRun({
-      run: input.run,
+        }
+      : input.snapshot;
+    const clientErrorMessage = sanitizeClientErrorMessage(
+      input.contentError.message,
+    );
+    finished = await input.finishRun({
+      run,
       status: input.status,
       userMessageId: terminalRun.userMessageId,
-      assistantMessageId: input.assistantMessageId,
+      assistantMessageId: messageIds.assistantMessageId,
       snapshot,
       errorCode: input.contentError.code,
       errorMessage: input.contentError.message,
-    })) ?? input.run
-  );
+    });
+    if (!finished) {
+      return (await readCurrent()) ?? run;
+    }
+    const errorPayload = toSseData({
+      type: "error",
+      code: input.contentError.code,
+      error: clientErrorMessage,
+      ...(terminalRun.userMessageId
+        ? { userMessageId: terminalRun.userMessageId }
+        : {}),
+      ...(messageIds.assistantMessageId
+        ? { messageId: messageIds.assistantMessageId }
+        : {}),
+    });
+    if (messageIds.assistantMessageId) {
+      const currentMessage = await findMessageRecord({
+        teamId: input.run.teamId,
+        workspaceId: input.run.workspaceId,
+        messageId: messageIds.assistantMessageId,
+      });
+      await updateMessageRecord({
+        teamId: input.run.teamId,
+        workspaceId: input.run.workspaceId,
+        threadId: input.run.threadId,
+        messageId: messageIds.assistantMessageId,
+        content: appendAssistantContinuationContent({
+          existingContent:
+            snapshot.assistantMessage?.content ?? currentMessage?.content,
+          nextContent:
+            typeof snapshot.assistantContent === "string"
+              ? snapshot.assistantContent
+              : clientErrorMessage,
+        }),
+        metadata: {
+          ...(currentMessage?.metadata ??
+            snapshot.assistantMessage?.metadata ??
+            {}),
+          isError: input.status === "failed",
+          isCancelled: input.status === "cancelled",
+          error: input.contentError.message,
+          errorCode: input.contentError.code,
+          ...buildThreadRunMetadata(terminalRun),
+        },
+      });
+    }
+    await input.appendRunEvent({
+      run: finished,
+      payload: errorPayload,
+      snapshot,
+    });
+    await input.appendRunEvent({
+      run: finished,
+      payload: toSseData({ type: "finish" }),
+      snapshot,
+    });
+    return finished;
+  } catch (terminalError) {
+    logger.error("Failed to persist or deliver terminal chat run failure", {
+      runId: input.run.id,
+      originalErrorCode: input.contentError.code,
+      originalError: input.contentError.message,
+      error:
+        terminalError instanceof Error
+          ? terminalError.message
+          : String(terminalError),
+    });
+    // A failed notification (or lease release after commit) must not replace
+    // the committed outcome. Attach reconstructs its terminal events from DB.
+    if (finished) return finished;
+    try {
+      const current = await readCurrent();
+      if (current && isTerminalRunStatus(current.status)) return current;
+    } catch (readError) {
+      logger.error("Failed to read chat run after terminal persistence error", {
+        runId: input.run.id,
+        error:
+          readError instanceof Error ? readError.message : String(readError),
+      });
+    }
+    // The processor boundary can retry the same terminal operation; it must
+    // receive the original failure, never a SQL/Redis wrapper in its place.
+    throw input.contentError;
+  }
 }
 
 export async function processThreadChatRunJob(
@@ -1459,21 +1542,34 @@ export async function processThreadChatRunJob(
     });
   };
 
-  const heartbeat = async () => {
-    run = (await durableChatRunService.heartbeat(run)) ?? run;
+  const applyRunProgress = async (updated: ChatThreadRunRecord | null) => {
+    if (!updated || updated.status !== "running") {
+      const reason =
+        (await durableChatRunService.getRunStopError(run)) ??
+        new ContentError(
+          409,
+          "CHAT_RUN_OWNERSHIP_LOST",
+          "The worker no longer owns a running chat run",
+        );
+      abortTurn(reason);
+      throw reason;
+    }
+    run = updated;
   };
+  const heartbeat = async () =>
+    applyRunProgress(await durableChatRunService.heartbeat(run));
 
   const flushPendingTextDelta = async () => {
     if (!pendingTextDeltaPayload) {
       return;
     }
 
+    await heartbeat();
     await durableChatRunService.appendRunEvent({
       run,
       payload: serializeSsePayload(pendingTextDeltaPayload),
       snapshot,
     });
-    await heartbeat();
     pendingTextDeltaPayload = null;
     pendingTextDeltaStartedAt = 0;
   };
@@ -1503,12 +1599,12 @@ export async function processThreadChatRunJob(
     }
 
     await flushPendingTextDelta();
+    await heartbeat();
     await durableChatRunService.appendRunEvent({
       run,
       payload: event,
       snapshot,
     });
-    await heartbeat();
   };
 
   // Interrupt the in-flight turn the moment a cancel arrives, rather than only
@@ -1517,19 +1613,34 @@ export async function processThreadChatRunJob(
   // Stop that raced our subscribe, or a dropped message). The poll runs on its
   // own timer so it still fires while a long tool blocks the event loop.
   const abortController = new AbortController();
-  const abortTurn = (reason: string) => {
+  const abortTurn = (reason: ContentError) => {
     if (abortController.signal.aborted) {
       return;
     }
-    logger.info("Aborting chat run turn on cancel", { runId: run.id, reason });
-    abortController.abort();
+    logger.info("Stopping chat run worker", {
+      runId: run.id,
+      reason: reason.code,
+    });
+    abortController.abort(reason);
+  };
+  const checkRunOwnership = async () => {
+    const error = await durableChatRunService.getRunStopError(run);
+    if (error) {
+      abortTurn(error);
+      throw error;
+    }
   };
   // The subscription is an optimization over the poll below; a Redis hiccup at
   // subscribe time must not fail the run, so degrade to poll-only.
   let unsubscribeCancel: () => Promise<void> = async () => {};
   try {
-    unsubscribeCancel = await chatRunStreamManager.subscribeCancel(run.id, () =>
-      abortTurn("stop-signal"),
+    unsubscribeCancel = await chatRunStreamManager.subscribeCancel(
+      run.id,
+      () => {
+        void checkRunOwnership().catch((error) =>
+          abortTurn(toDurableRunContentError(error)),
+        );
+      },
     );
   } catch (error) {
     logger.warn("Chat run cancel subscription failed; relying on status poll", {
@@ -1538,18 +1649,14 @@ export async function processThreadChatRunJob(
     });
   }
   const cancelPoll = setInterval(() => {
-    void durableChatRunService
-      .shouldCancel(run)
-      .then((cancelled) => {
-        if (cancelled) {
-          abortTurn("status-poll");
-        }
-      })
-      .catch(() => {});
+    void checkRunOwnership().catch((error) =>
+      abortTurn(toDurableRunContentError(error)),
+    );
   }, CHAT_RUN_CANCEL_POLL_MS);
   cancelPoll.unref?.();
 
   try {
+    await checkRunOwnership();
     const stream = createThreadRunStream({
       streamService,
       request,
@@ -1557,14 +1664,16 @@ export async function processThreadChatRunJob(
         shouldCancel: () => durableChatRunService.shouldCancel(run),
         abortSignal: abortController.signal,
         onPrepared: async (prepared) => {
+          await checkRunOwnership();
           prepared.threadRunId = run.id;
-          run =
-            (await updateChatThreadRunProgress({
+          await applyRunProgress(
+            await updateChatThreadRunProgress({
               runId: run.id,
               teamId: run.teamId,
               workspaceId: run.workspaceId,
               userMessageId: prepared.userMessage.id,
-            })) ?? run;
+            }),
+          );
           const placeholder = await createAssistantPlaceholder({
             run,
             prepared,
@@ -1582,8 +1691,8 @@ export async function processThreadChatRunJob(
             assistantMessage: placeholder,
             renderBlocks: existingRenderBlocks,
           };
-          run =
-            (await updateChatThreadRunProgress({
+          await applyRunProgress(
+            await updateChatThreadRunProgress({
               runId: run.id,
               teamId: run.teamId,
               workspaceId: run.workspaceId,
@@ -1593,7 +1702,8 @@ export async function processThreadChatRunJob(
                 placeholderId: placeholder.id,
               }),
               snapshotJson: snapshot,
-            })) ?? run;
+            }),
+          );
           return {
             assistantMessageId: placeholder.id,
             assistantMetadata: buildThreadRunMetadata(run),
@@ -1629,6 +1739,7 @@ export async function processThreadChatRunJob(
     });
 
     for await (const event of stream) {
+      abortController.signal.throwIfAborted();
       const payload = parseSsePayload(event);
       snapshot = updateSnapshotFromPayload(snapshot, payload);
       if (payload?.type === "error") {
@@ -1643,6 +1754,9 @@ export async function processThreadChatRunJob(
         await maybeFlushAssistantSnapshot(true);
         assistantMessagePersisted = true;
       }
+      // SSE terminal events describe a committed durable outcome. Hold them
+      // until the terminal CAS below; a concurrent cancellation may win it.
+      if (payload?.type === "finish" || payload?.type === "error") continue;
       await appendEventWithTextDeltaCoalescing(event, payload);
       await maybeFlushAssistantSnapshot(false);
     }
@@ -1727,7 +1841,6 @@ export async function processThreadChatRunJob(
         finalRun = await persistTerminalFailure({
           run: latest ?? run,
           status: "cancelled",
-          userMessageId: durableUserMessageIdFallback({ run, request }),
           assistantMessageId,
           snapshot: {
             ...finalSnapshot,
@@ -1758,6 +1871,24 @@ export async function processThreadChatRunJob(
         latest: null,
         run,
       });
+    }
+
+    // A stale-recovery/publication/cancellation winner owns the final status.
+    // Never report this worker's speculative completed status after losing CAS.
+    if (isTerminalRunStatus(finalRun.status)) {
+      terminalStatus = finalRun.status as TerminalRunStatus;
+      terminalErrorCode = finalRun.errorCode;
+      terminalErrorMessage = finalRun.errorMessage;
+    }
+    if (finished) {
+      const terminalEvents = isWaitingForApproval
+        ? [toSseData({ type: "finish" })]
+        : synthesizeTerminalRunEvents({ run: finished, sawErrorEvent: false });
+      for (const event of terminalEvents)
+        await durableChatRunService.appendRunEvent({
+          run: finished,
+          payload: event,
+        });
     }
 
     if (assistantMessageId) {
@@ -1816,6 +1947,55 @@ export async function processThreadChatRunJob(
       ...(terminalErrorMessage ? { errorMessage: terminalErrorMessage } : {}),
     };
   } catch (error) {
+    const contentError = toDurableRunContentError(
+      abortController.signal.aborted ? abortController.signal.reason : error,
+    );
+    let current: ChatThreadRunRecord | null;
+    try {
+      current = await findChatThreadRunById({
+        runId: run.id,
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+      });
+    } catch (readError) {
+      logger.error("Failed to read chat run while handling worker failure", {
+        runId: run.id,
+        originalErrorCode: contentError.code,
+        originalError: contentError.message,
+        error:
+          readError instanceof Error ? readError.message : String(readError),
+      });
+      throw contentError;
+    }
+    if (current && isTerminalRunStatus(current.status)) {
+      // Another transaction (or our commit followed by failed Redis delivery)
+      // already decided the outcome. Attach reconstructs terminal SSE from DB.
+      logger.warn("Chat worker stopped after durable terminal commit", {
+        runId: current.id,
+        status: current.status,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        status: current.status as TerminalRunStatus,
+        runId: current.id,
+        assistantMessageId: current.assistantMessageId,
+        ...(current.errorCode ? { errorCode: current.errorCode } : {}),
+        ...(current.errorMessage ? { errorMessage: current.errorMessage } : {}),
+      };
+    }
+    if (
+      !current ||
+      (current.status !== "running" && current.status !== "cancel_requested")
+    ) {
+      return {
+        status:
+          current?.status === "waiting_for_approval"
+            ? "waiting_for_approval"
+            : "skipped",
+        runId: run.id,
+        assistantMessageId: current?.assistantMessageId ?? assistantMessageId,
+      };
+    }
     await flushPendingTextDelta().catch((flushError: unknown) => {
       logger.warn("Failed to flush pending thread run text delta after error", {
         runId: run.id,
@@ -1836,7 +2016,6 @@ export async function processThreadChatRunJob(
             : String(snapshotError),
       });
     });
-    const contentError = toDurableRunContentError(error);
     const status =
       contentError.code === "CLIENT_CANCELLED" ? "cancelled" : "failed";
     snapshot = {
@@ -1847,7 +2026,6 @@ export async function processThreadChatRunJob(
     finalRun = await persistTerminalFailure({
       run,
       status,
-      userMessageId: durableUserMessageIdFallback({ run, request }),
       assistantMessageId,
       snapshot,
       contentError,
@@ -1857,11 +2035,13 @@ export async function processThreadChatRunJob(
       finishRun: durableChatRunService.finishRun.bind(durableChatRunService),
     });
     return {
-      status,
+      status: isTerminalRunStatus(finalRun.status)
+        ? (finalRun.status as TerminalRunStatus)
+        : status,
       runId: run.id,
-      assistantMessageId,
-      errorCode: contentError.code,
-      errorMessage: contentError.message,
+      assistantMessageId: finalRun.assistantMessageId,
+      ...(finalRun.errorCode ? { errorCode: finalRun.errorCode } : {}),
+      ...(finalRun.errorMessage ? { errorMessage: finalRun.errorMessage } : {}),
     };
   } finally {
     clearInterval(cancelPoll);
@@ -1871,7 +2051,7 @@ export async function processThreadChatRunJob(
 
 export const testExports = {
   buildSnapshotMetadata,
-  durableUserMessageIdFallback,
+  resolvePersistedTerminalMessageIds,
   requestWithDurableMessageOverrides,
   resolveFinalRunAfterFinish,
   resolvePreparedAssistantMessageId,

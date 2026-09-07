@@ -2,7 +2,29 @@ import type { AgentToolAuthorizedArtifactVersion } from "@sourceweft/contracts/a
 import { artifactTypeSchema } from "@sourceweft/contracts/artifacts";
 import { workspaceService } from "../workspace";
 import { canViewContent } from "../workspace/content-visibility";
-import { findCurrentReadyArtifactVersionRecord } from "./repository";
+import {
+  findArtifactRecord,
+  findCurrentReadyArtifactVersionRecord,
+} from "./repository";
+
+/** Actor identity comes from the host; unavailable and private rows look alike. */
+export async function readAuthorizedArtifactRecord(input: {
+  workspaceId: string;
+  userId: string;
+  artifactId: string;
+}) {
+  const access = await workspaceService.resolveAccess({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+  });
+  if (!access || access.role === null) return null;
+  const artifact = await findArtifactRecord({
+    teamId: access.organizationId,
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+  });
+  return artifact && canViewContent(input.userId, artifact) ? artifact : null;
+}
 
 function objectPayload(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

@@ -9,7 +9,6 @@ import {
   type RerankGateway,
 } from "@sourceweft/builtin-retrieval";
 import {
-  findDefaultEmbeddingProfile,
   listSourceChunksByProfile,
   searchChunksByBm25,
   searchChunksByVectorAnn,
@@ -21,7 +20,6 @@ import {
   createRetrievalHits,
 } from "../../../sources/retrieval-repository";
 import {
-  requireDefaultModelGatewayProfile,
   resolveModelGatewayProfile,
   withBilledModelGateway,
   type BilledModelGateway,
@@ -30,16 +28,30 @@ import type { ContentBillingPort } from "../../../content/billing-port";
 import { recordGatewayOperationEvent } from "../../../content/model-gateway-audit";
 import { toContentError } from "../../../content/model-gateway-error";
 import { planRetrievalStrategy } from "../../../sources/retrieval-planner";
+import {
+  prepareEmbeddingProfile,
+  validateEmbeddingResult,
+} from "../../../../shared/model-gateway/embedding-identity";
+
+type PreparedEmbedding = Awaited<ReturnType<typeof prepareEmbeddingProfile>>;
 
 // ── Wiring: backend implementations of package interfaces ────────────────────
 
-function createDataAccess(): RetrievalDataAccess {
+function createDataAccess(prepared: PreparedEmbedding): RetrievalDataAccess {
   return {
-    findDefaultEmbeddingProfile,
+    findDefaultEmbeddingProfile: async () => prepared.profile,
     listSourceChunksByProfile,
     searchChunksByBm25,
-    searchChunksByVectorAnn,
-    searchChunksByVectorExact,
+    searchChunksByVectorAnn: (input) =>
+      searchChunksByVectorAnn({
+        ...input,
+        embeddingIdentity: prepared.identity,
+      }),
+    searchChunksByVectorExact: (input) =>
+      searchChunksByVectorExact({
+        ...input,
+        embeddingIdentity: prepared.identity,
+      }),
     listDocumentChunkStats,
     listDocumentChunksForDocument,
     listDocumentChunksInRange,
@@ -50,13 +62,15 @@ function createDataAccess(): RetrievalDataAccess {
 
 function createEmbeddingGateway(
   gateway: BilledModelGateway,
+  prepared: PreparedEmbedding,
 ): RetrievalEmbeddingGateway {
   return {
     embed: async (input) => {
-      const profile = await requireDefaultModelGatewayProfile("embedding");
+      const profile = prepared.profile;
       const result = await gateway.embeddings.embed(
         {
-          model: input.modelAlias || profile.modelAlias,
+          model: profile.profileAlias,
+          profileAlias: profile.profileAlias,
           text: input.queryText,
           dimensions: input.dimensions || undefined,
           executionMode: "GLOBAL",
@@ -69,6 +83,7 @@ function createEmbeddingGateway(
           modelAlias: profile.modelAlias,
         },
       );
+      validateEmbeddingResult(prepared.identity, result, [result.embedding]);
       return result.embedding;
     },
   };
@@ -208,9 +223,11 @@ export async function runToolRetrieval(input: {
     // customer, but their cost is now recorded against the generation rather
     // than being invisible. Declaring the intent is what makes that a decision
     // rather than an omission.
+    const preparedEmbedding = await prepareEmbeddingProfile();
     const result = await withBilledModelGateway(
       {
         billing: input.billing,
+        routedConfig: preparedEmbedding.routedConfig,
         context: {
           teamId: input.prepared.workspace.organizationId,
           workspaceId: input.prepared.workspace.id,
@@ -221,8 +238,7 @@ export async function runToolRetrieval(input: {
             coveredBy: "model_kind_not_user_billed",
           },
           scopeKind: "thread-turn",
-          scopeId:
-            input.traceContext?.traceId ?? input.prepared.userMessage.id,
+          scopeId: input.traceContext?.traceId ?? input.prepared.userMessage.id,
           threadId: input.prepared.thread.id,
           messageId: input.prepared.userMessage.id,
         },
@@ -250,8 +266,11 @@ export async function runToolRetrieval(input: {
             idempotencyKey: input.prepared.llmIdempotencyKey,
           },
           {
-            dataAccess: createDataAccess(),
-            embeddingGateway: createEmbeddingGateway(gateway),
+            dataAccess: createDataAccess(preparedEmbedding),
+            embeddingGateway: createEmbeddingGateway(
+              gateway,
+              preparedEmbedding,
+            ),
             rerankGateway,
             planStrategy: planRetrievalStrategy,
           },

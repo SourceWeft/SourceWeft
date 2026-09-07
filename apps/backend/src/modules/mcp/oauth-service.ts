@@ -15,10 +15,7 @@ import {
 import { requireMcpWorkspace } from "./permissions";
 import { findWorkspaceMcpInstall } from "./repository";
 import { assertSafeMcpEndpoint } from "./security";
-
-function isDevelopment() {
-  return process.env.NODE_ENV === "development";
-}
+import { createMcpRequestScope } from "./network";
 
 /**
  * The OAuth flow fetches URLs the tool-execution path never touches — the
@@ -31,8 +28,8 @@ function isDevelopment() {
  */
 async function assertSafeOAuthUrl(value: string) {
   await assertSafeMcpEndpoint(value, {
-    allowLocalhost: isDevelopment(),
-    allowPrivateNetwork: isDevelopment(),
+    enforceAddressChecks: config.endpointAddressChecksEnabled,
+    allowedInternalOrigins: config.mcpAllowedInternalOrigins,
   });
 }
 
@@ -43,15 +40,23 @@ async function assertSafeOAuthUrl(value: string) {
  * is attacker-influenced (it comes from the endpoint's own metadata), so it is
  * SSRF-validated before anything fetches from it.
  */
-async function discoverIssuer(endpointUrl: string): Promise<string> {
+async function discoverIssuer(
+  endpointUrl: string,
+  requests: ReturnType<typeof createMcpRequestScope>,
+): Promise<string> {
   try {
-    const metadata = await discoverOAuthProtectedResourceMetadata(endpointUrl);
+    const metadata = await discoverOAuthProtectedResourceMetadata(
+      endpointUrl,
+      undefined,
+      requests.fetch,
+    );
     const issuer = metadata?.authorization_servers?.[0];
     if (issuer) {
       await assertSafeOAuthUrl(issuer);
       return issuer;
     }
   } catch (error) {
+    requests.throwIfDenied();
     if (error instanceof McpError) {
       // The declared issuer failed SSRF validation — refuse, don't fall back.
       throw error;
@@ -87,8 +92,7 @@ export async function startMcpOAuthAuthorization(input: {
   userId: string;
   installId: string;
 }): Promise<
-  | { status: "redirect"; authorizationUrl: string }
-  | { status: "connected" }
+  { status: "redirect"; authorizationUrl: string } | { status: "connected" }
 > {
   const { workspace } = await requireMcpWorkspace({
     workspaceId: input.workspaceId,
@@ -111,7 +115,11 @@ export async function startMcpOAuthAuthorization(input: {
     );
   }
   if (!install.endpointUrl) {
-    throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
+    throw new McpError(
+      400,
+      "MCP_ENDPOINT_REQUIRED",
+      "MCP endpoint is required",
+    );
   }
   // Execution-time SSRF re-check, mirroring the tool path: the stored endpoint
   // may have been repointed (DNS or re-install) since install time.
@@ -127,25 +135,38 @@ export async function startMcpOAuthAuthorization(input: {
     return { status: "connected" };
   }
 
-  const issuer = await discoverIssuer(install.endpointUrl);
-  let authorizationUrl: string | null = null;
-  const provider = buildProvider(scope, issuer, (url) => {
-    authorizationUrl = url.toString();
-  });
+  const requests = createMcpRequestScope();
+  try {
+    const issuer = await discoverIssuer(install.endpointUrl, requests);
+    let authorizationUrl: string | null = null;
+    const provider = buildProvider(scope, issuer, (url) => {
+      authorizationUrl = url.toString();
+    });
 
-  const result = await auth(provider, { serverUrl: install.endpointUrl });
-  if (result === "AUTHORIZED") {
-    // The SDK found still-valid tokens and skipped the redirect.
-    return { status: "connected" };
+    const result = await auth(provider, {
+      serverUrl: install.endpointUrl,
+      fetchFn: requests.fetch,
+    });
+    requests.throwIfDenied();
+    if (result === "AUTHORIZED") {
+      // The SDK found still-valid tokens and skipped the redirect.
+      return { status: "connected" };
+    }
+    if (!authorizationUrl) {
+      throw new McpError(
+        502,
+        "MCP_OAUTH_NO_REDIRECT",
+        "Authorization server did not produce a redirect URL",
+      );
+    }
+    await assertSafeOAuthUrl(authorizationUrl);
+    return { status: "redirect", authorizationUrl };
+  } catch (error) {
+    requests.throwIfDenied();
+    throw error;
+  } finally {
+    await requests.close();
   }
-  if (!authorizationUrl) {
-    throw new McpError(
-      502,
-      "MCP_OAUTH_NO_REDIRECT",
-      "Authorization server did not produce a redirect URL",
-    );
-  }
-  return { status: "redirect", authorizationUrl };
 }
 
 /**
@@ -176,28 +197,39 @@ export async function completeMcpOAuthCallback(input: {
   }
   await assertSafeOAuthUrl(install.endpointUrl);
 
-  const issuer = session.issuer ?? (await discoverIssuer(install.endpointUrl));
-  if (session.issuer) {
-    // A stored issuer is validated again at use time for the same reason.
-    await assertSafeOAuthUrl(session.issuer);
+  const requests = createMcpRequestScope();
+  try {
+    const issuer =
+      session.issuer ?? (await discoverIssuer(install.endpointUrl, requests));
+    if (session.issuer) {
+      // A stored issuer is validated again at use time for the same reason.
+      await assertSafeOAuthUrl(session.issuer);
+    }
+    const provider = buildProvider(scope, issuer);
+    const result = await auth(provider, {
+      serverUrl: install.endpointUrl,
+      authorizationCode: input.code,
+      fetchFn: requests.fetch,
+    });
+    requests.throwIfDenied();
+    if (result !== "AUTHORIZED") {
+      throw new McpError(
+        502,
+        "MCP_OAUTH_EXCHANGE_FAILED",
+        "Token exchange did not complete",
+      );
+    }
+    await clearMcpOAuthTransient(scope);
+    // Credential status is now derived per-user (from this user's token-bearing
+    // OAuth session), NOT written install-level: flipping the shared install flag
+    // to "configured" here would make every other member appear connected. The
+    // token we just stored is what a per-user overlay reads to report "configured"
+    // for this user only.
+    return { workspaceId: scope.workspaceId, installId: scope.installId };
+  } catch (error) {
+    requests.throwIfDenied();
+    throw error;
+  } finally {
+    await requests.close();
   }
-  const provider = buildProvider(scope, issuer);
-  const result = await auth(provider, {
-    serverUrl: install.endpointUrl,
-    authorizationCode: input.code,
-  });
-  if (result !== "AUTHORIZED") {
-    throw new McpError(
-      502,
-      "MCP_OAUTH_EXCHANGE_FAILED",
-      "Token exchange did not complete",
-    );
-  }
-  await clearMcpOAuthTransient(scope);
-  // Credential status is now derived per-user (from this user's token-bearing
-  // OAuth session), NOT written install-level: flipping the shared install flag
-  // to "configured" here would make every other member appear connected. The
-  // token we just stored is what a per-user overlay reads to report "configured"
-  // for this user only.
-  return { workspaceId: scope.workspaceId, installId: scope.installId };
 }

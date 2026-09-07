@@ -1,3 +1,4 @@
+import { sdkRetryOptions } from "./gateway-caller";
 import { ChatOpenAI } from "@langchain/openai";
 import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
 import type { ChatAdapter } from "./types";
@@ -28,13 +29,15 @@ export class CloudflareAIGChatAdapter implements ChatAdapter {
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: options?.maxRetries ?? 2,
+      ...sdkRetryOptions(options),
       timeout: options?.timeoutMs,
       apiKey: target.apiKey,
       configuration: {
+        ignoreEnvironmentHeaders: true,
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
-        fetch: captureProviderResponseFetch(),
+        fetch: captureProviderResponseFetch(options?.fetch),
+        adminAPIKey: null,
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

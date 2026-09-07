@@ -11,25 +11,11 @@ export default defineConfig({
   },
   format: ["esm"],
   minify: false,
-  noExternal: [
-    /^@sourceweft\/agent-tool-registry(\/.*)?$/,
-    /^@sourceweft\/builtin-connector-notion(\/.*)?$/,
-    /^@sourceweft\/builtin-document-parsers(\/.*)?$/,
-    /^@sourceweft\/builtin-retrieval(\/.*)?$/,
-    /^@sourceweft\/builtin-tool-generate-image(\/.*)?$/,
-    /^@sourceweft\/builtin-tool-video-presentation(\/.*)?$/,
-    /^@sourceweft\/builtin-tool-publish-artifact(\/.*)?$/,
-    /^@sourceweft\/builtin-tool-web-search(\/.*)?$/,
-    /^@sourceweft\/builtin-vfs(\/.*)?$/,
-    /^@sourceweft\/capability-contracts(\/.*)?$/,
-    /^@sourceweft\/capability-runtime(\/.*)?$/,
-    /^@sourceweft\/contracts(\/.*)?$/,
-    /^@sourceweft\/credits-core(\/.*)?$/,
-    /^@sourceweft\/market-contracts(\/.*)?$/,
-    /^@sourceweft\/market-sdk(\/.*)?$/,
-    /^@sourceweft\/model-gateway(\/.*)?$/,
-    /^@sourceweft\/sandbox-provider-daytona(\/.*)?$/,
-  ],
+  // Workspace packages export TypeScript source. Bundle their static imports
+  // (including the builtin capability map) for the plain Node dist entrypoints.
+  // The backend's declared third-party runtime dependencies stay external so
+  // Node loads SDKs and their package-relative/native assets in place.
+  noExternal: [/^@sourceweft\//],
   outDir: "dist",
   platform: "node",
   shims: false,

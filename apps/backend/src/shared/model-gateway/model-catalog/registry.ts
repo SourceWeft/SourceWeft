@@ -31,7 +31,10 @@ function indexEntry(index: ModelIndex, info: NormalizedModelInfo): void {
   index.byId.set(cid, mergeModelInfo(index.byId.get(cid), info));
   const bare = bareModelName(info.id);
   if (bare) {
-    index.byBareName.set(bare, mergeModelInfo(index.byBareName.get(bare), info));
+    index.byBareName.set(
+      bare,
+      mergeModelInfo(index.byBareName.get(bare), info),
+    );
   }
 }
 
@@ -54,7 +57,8 @@ const DEFAULT_SOURCES: ModelCatalogSources = {
  *
  * Preload, never fetch on resolve: call {@link refresh} at startup / active
  * sync; {@link resolve} only reads the in-memory indexes. Merge precedence
- * (lowest → highest): LiteLLM (fallback) < models.dev (primary) < overrides.
+ * (lowest → highest): LiteLLM < models.dev < overrides. Both remote sources
+ * are required when this registry is loaded; failure never changes that policy.
  */
 export class ModelCatalogRegistry {
   // Global (provider-agnostic) union — every source, every provider merged.
@@ -71,7 +75,9 @@ export class ModelCatalogRegistry {
   private inflight: Promise<void> | null = null;
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly sources: ModelCatalogSources = DEFAULT_SOURCES) {}
+  constructor(
+    private readonly sources: ModelCatalogSources = DEFAULT_SOURCES,
+  ) {}
 
   isReady() {
     return this.ready;
@@ -87,6 +93,9 @@ export class ModelCatalogRegistry {
       return;
     }
     this.autoRefreshTimer = setInterval(() => {
+      // A timer must not introduce network dependencies before a caller needs
+      // this registry (e.g. a private deployment with static, disabled catalogs).
+      if (!this.ready) return;
       void this.refresh().catch((error) => {
         logger.warn("Model catalog periodic refresh failed", {
           error: error instanceof Error ? error.message : String(error),
@@ -138,10 +147,12 @@ export class ModelCatalogRegistry {
         indexEntry(bucket, info);
       }
     }
+    // Overrides can fail too. Build every component before publishing any part.
+    const overrides = this.sources.overrides();
     this.global = global;
     this.litellm = litellmIndex;
     this.byProvider = byProvider;
-    this.overrides = this.sources.overrides();
+    this.overrides = overrides;
     this.ready = true;
     logger.info("Model catalog registry refreshed", {
       models: global.byId.size,
@@ -192,16 +203,17 @@ export class ModelCatalogRegistry {
     // bucket that matches supplies the price; a shared model id is thus never
     // priced from an arbitrary other provider's entry.
     const providerKeys: string[] = [];
-    for (const key of [canonicalProviderKey(provider), providerFromId(modelId)]) {
+    for (const key of [
+      canonicalProviderKey(provider),
+      providerFromId(modelId),
+    ]) {
       if (key && !providerKeys.includes(key)) {
         providerKeys.push(key);
       }
     }
     for (const key of providerKeys) {
       const bucket = this.byProvider.get(key);
-      const providerBase = bucket
-        ? this.lookupInIndex(bucket, modelId)
-        : null;
+      const providerBase = bucket ? this.lookupInIndex(bucket, modelId) : null;
       if (providerBase) {
         // Global as capability gap-filler underneath the provider-authoritative
         // entry (provider wins every scalar field, including price).

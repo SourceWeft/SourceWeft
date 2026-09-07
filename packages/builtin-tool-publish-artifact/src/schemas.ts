@@ -46,16 +46,12 @@ export const PublishArtifactInputSchema = z
     artifactType: PublishArtifactTypeSchema.describe(
       "File artifact type to publish. Supported: slides for PPTX decks, file for generic downloadable files.",
     ),
-    title: z
-      .string()
-      .min(1)
-      .describe("Artifact title for metadata."),
+    title: z.string().min(1).describe("Artifact title for metadata."),
     description: z.string().optional(),
     source: ArtifactSourceSchema,
-    previewImage: PreviewImageInputSchema.optional()
-      .describe(
-        "Required preview image for slides artifacts, usually PREVIEW_IMAGE_PATH from final PPTX visual QA.",
-      ),
+    previewImage: PreviewImageInputSchema.optional().describe(
+      "Required preview image for slides artifacts, usually PREVIEW_IMAGE_PATH from final PPTX visual QA.",
+    ),
     qa: QaSummarySchema.optional(),
     republishArtifactId: z
       .string()
@@ -127,23 +123,22 @@ export const PublishArtifactToolInputSchema = z.object({
     .describe(
       "File artifact type to publish. Use slides for PPTX decks or file for generic downloadable files.",
     ),
-  title: z
-    .string()
-    .optional()
-    .describe("Artifact title for metadata."),
+  title: z.string().optional().describe("Artifact title for metadata."),
   description: z.string().optional(),
-  source: ToolSourceSchema.optional()
-    .describe(
-      "Structured source object, for example { kind: 'sandbox_path', path: '/workspace/Presentation.pptx' } or { kind: 'work_file', path: '/workfiles/deck.pptx' }.",
-    ),
-  sourceKind: z.unknown().optional()
+  source: ToolSourceSchema.optional().describe(
+    "Structured source object, for example { kind: 'sandbox_path', path: '/workspace/Presentation.pptx' } or { kind: 'work_file', path: '/workfiles/deck.pptx' }.",
+  ),
+  sourceKind: z
+    .unknown()
+    .optional()
     .describe("Flat source kind fallback: sandbox_path or work_file."),
-  sourcePath: z.unknown().optional()
+  sourcePath: z
+    .unknown()
+    .optional()
     .describe("Flat source path fallback, for example /workspace/output.zip."),
-  previewImage: ToolPreviewImageSchema.optional()
-    .describe(
-      "Required for slides. Use PREVIEW_IMAGE_PATH from final PPTX visual QA, for example { source: { kind: 'sandbox_path', path: '/workspace/qa/preview.jpg' }, altText: 'First slide preview' }.",
-    ),
+  previewImage: ToolPreviewImageSchema.optional().describe(
+    "Required for slides. Use PREVIEW_IMAGE_PATH from final PPTX visual QA, for example { source: { kind: 'sandbox_path', path: '/workspace/qa/preview.jpg' }, altText: 'First slide preview' }.",
+  ),
   qa: ToolQaSchema.optional(),
   republishArtifactId: z
     .string()
@@ -161,6 +156,7 @@ export const PublishSlidesArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("presentation_artifact_result"),
   status: z.literal("ready"),
+  reused: z.boolean(),
   artifactId: z.string(),
   artifact_id: z.string(),
   artifactType: z.literal("slides"),
@@ -183,6 +179,7 @@ export const PublishFileArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("file_artifact_result"),
   status: z.literal("ready"),
+  reused: z.boolean(),
   artifactId: z.string(),
   artifact_id: z.string(),
   artifactType: z.literal("file"),
@@ -203,6 +200,7 @@ export const PublishImageArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("generated_image"),
   status: z.literal("ready"),
+  reused: z.boolean(),
   artifactId: z.string(),
   artifact_id: z.string(),
   artifactType: z.literal("image"),
@@ -230,6 +228,7 @@ export type PublishArtifactSuccessOutput = z.infer<
 export const ARTIFACT_PUBLISH_ERROR_CODES = [
   "PUBLISH_INPUT_INVALID",
   "ARTIFACT_REPUBLISH_INVALID",
+  "ARTIFACT_STATE_CONFLICT",
   "ARTIFACT_TYPE_UNSUPPORTED",
   "ARTIFACT_SOURCE_UNAVAILABLE",
   "ARTIFACT_SOURCE_NOT_FOUND",
@@ -266,6 +265,7 @@ export type PptxOutputErrorCode = ArtifactPublishErrorCode;
  * retry, so those stay recoverable.
  */
 const UNRECOVERABLE_ARTIFACT_PUBLISH_ERROR_CODES = new Set<string>([
+  "ARTIFACT_STATE_CONFLICT",
   "ARTIFACT_STORAGE_UNAVAILABLE",
   "ARTIFACT_RECORD_UNAVAILABLE",
   "SANDBOX_UNAVAILABLE",
@@ -291,8 +291,7 @@ export type PublishArtifactErrorOutput = z.infer<
 >;
 
 export type PublishArtifactOutput =
-  | PublishArtifactSuccessOutput
-  | PublishArtifactErrorOutput;
+  PublishArtifactSuccessOutput | PublishArtifactErrorOutput;
 
 export class PptxOutputError extends Error {
   readonly code: ArtifactPublishErrorCode;

@@ -1,3 +1,4 @@
+import { sdkRetryOptions } from "./gateway-caller";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import type { ProviderRoutingConfig } from "../types";
@@ -51,13 +52,15 @@ export class OpenRouterChatAdapter implements ChatAdapter {
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: options?.maxRetries ?? 2,
+      ...sdkRetryOptions(options),
       timeout: options?.timeoutMs,
       apiKey: target.apiKey,
       configuration: {
+        ignoreEnvironmentHeaders: true,
         baseURL: target.baseUrl,
         defaultHeaders: target.defaultHeaders,
-        fetch: captureProviderResponseFetch(),
+        fetch: captureProviderResponseFetch(options?.fetch),
+        adminAPIKey: null,
       },
       modelKwargs: {
         ...(mergeOpenRouterProviderRouting(

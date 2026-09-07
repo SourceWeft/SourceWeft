@@ -24,6 +24,7 @@ export interface ModelCallIdentity {
   requestedProviderModel: string;
   resolvedProviderModel?: string;
   providerRequestId?: string;
+  providerRequestIds?: string[];
   routerName?: string;
   fallbackModel?: string;
   fallbackLevel?: number;
@@ -49,6 +50,7 @@ export interface ModelCallDiagnostic {
   code: string;
   field?: string;
   message: string;
+  omittedCount?: number;
 }
 
 export interface ModelCallObservation {

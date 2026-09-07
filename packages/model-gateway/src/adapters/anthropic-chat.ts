@@ -1,3 +1,4 @@
+import { sdkRetryOptions } from "./gateway-caller";
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { ChatAdapter } from "./types";
 
@@ -13,9 +14,15 @@ export class AnthropicChatAdapter implements ChatAdapter {
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: options?.maxRetries ?? 2,
+      ...sdkRetryOptions(options),
       apiKey: target.apiKey,
       anthropicApiUrl: target.baseUrl,
+      clientOptions: {
+        timeout: options?.timeoutMs,
+        fetch: options?.fetch,
+        authToken: null,
+        defaultHeaders: target.defaultHeaders,
+      },
       maxTokens: input.maxTokens,
       streaming: input.stream ?? false,
     });

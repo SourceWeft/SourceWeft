@@ -1,5 +1,6 @@
 import { logger } from "../logger";
 import { config } from "../config";
+import { createLlmFetch, llmEndpointPolicy } from "./network";
 import { OPENROUTER_APP_TITLE } from "./attribution";
 import type { ModelGatewayProfileKind } from "./types";
 import { modelCatalog } from "./model-catalog/registry";
@@ -257,7 +258,9 @@ async function discoverOpenRouterCatalog(input: {
   gateway: CatalogDiscoveryGateway;
   kinds?: Set<CatalogModelKind>;
 }) {
-  const response = await fetch(config.openrouterModelsApiUrl, {
+  const response = await createLlmFetch(
+    llmEndpointPolicy([input.gateway.baseUrl, config.openrouterModelsApiUrl]),
+  )(config.openrouterModelsApiUrl, {
     headers: {
       "User-Agent": "sourceweft-model-gateway/1.0",
       "HTTP-Referer": config.openrouterAppReferer,
@@ -266,6 +269,7 @@ async function discoverOpenRouterCatalog(input: {
     },
   });
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(
       `Failed to load OpenRouter model catalog: ${response.status}`,
     );
@@ -385,16 +389,16 @@ async function discoverOrcaRouterCatalog(input: {
   kinds?: Set<CatalogModelKind>;
   resolve: CapabilityResolver;
 }) {
-  const response = await fetch(
-    `${normalizeBaseUrl(input.gateway.baseUrl)}/models`,
-    {
-      headers: {
-        ...(input.gateway.defaultHeaders ?? {}),
-        ...buildAuthHeaders(input.gateway),
-      },
+  const response = await createLlmFetch(
+    llmEndpointPolicy([input.gateway.baseUrl]),
+  )(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
+    headers: {
+      ...(input.gateway.defaultHeaders ?? {}),
+      ...buildAuthHeaders(input.gateway),
     },
-  );
+  });
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(
       `Failed to load OrcaRouter model catalog: ${response.status}`,
     );
@@ -537,16 +541,16 @@ async function discoverOpenAICompatibleCatalog(input: {
   kinds?: Set<CatalogModelKind>;
   resolve: CapabilityResolver;
 }) {
-  const response = await fetch(
-    `${normalizeBaseUrl(input.gateway.baseUrl)}/models`,
-    {
-      headers: {
-        ...(input.gateway.defaultHeaders ?? {}),
-        ...buildAuthHeaders(input.gateway),
-      },
+  const response = await createLlmFetch(
+    llmEndpointPolicy([input.gateway.baseUrl]),
+  )(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
+    headers: {
+      ...(input.gateway.defaultHeaders ?? {}),
+      ...buildAuthHeaders(input.gateway),
     },
-  );
+  });
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`Failed to load model catalog: ${response.status}`);
   }
 
@@ -605,6 +609,7 @@ export async function discoverGatewayCatalog(input: {
 }
 
 export async function discoverByokModelCandidates(input: {
+  fetch: typeof globalThis.fetch;
   providerKind: string;
   providerName: string;
   baseUrl: string;
@@ -624,13 +629,17 @@ export async function discoverByokModelCandidates(input: {
     defaultHeaders: input.defaultHeaders,
     supports: ["chat", "embeddings", "rerank", "asr", "image", "tool_calling"],
   };
-  const response = await fetch(`${normalizeBaseUrl(gateway.baseUrl)}/models`, {
-    headers: {
-      ...(gateway.defaultHeaders ?? {}),
-      ...buildAuthHeaders(gateway),
+  const response = await input.fetch(
+    `${normalizeBaseUrl(gateway.baseUrl)}/models`,
+    {
+      headers: {
+        ...(gateway.defaultHeaders ?? {}),
+        ...buildAuthHeaders(gateway),
+      },
     },
-  });
+  );
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`Failed to load BYOK model catalog: ${response.status}`);
   }
 

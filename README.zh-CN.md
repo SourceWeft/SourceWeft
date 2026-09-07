@@ -69,6 +69,8 @@ SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Emb
 
 如果你想直接使用已发布的容器镜像运行 SourceWeft，使用 Docker Compose。
 
+源码开发与镜像构建默认使用 Node 22.23.2，同时支持 Node 24；详见[运行版本说明](apps/backend/docs/node-runtime.md)。
+
 ```bash
 git clone https://github.com/SourceWeft/SourceWeft.git
 cd SourceWeft

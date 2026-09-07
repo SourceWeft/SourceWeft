@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
+import { MessageChannel } from "node:worker_threads";
 import {
   AIMessage,
   SystemMessage,
@@ -18,6 +19,23 @@ import { createInterpreterReadTools } from "../src/read-tools";
 
 function limits(overrides: Partial<InterpreterLimits> = {}): InterpreterLimits {
   return { ...DEFAULT_INTERPRETER_LIMITS, ...overrides };
+}
+
+function pendingHostOperation(t: TestContext) {
+  const { port1, port2 } = new MessageChannel();
+  let settle!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    settle = resolve;
+    // A pending backend operation owns an I/O handle. A bare never-settling
+    // Promise does not, so Node can exit before the gate's unref'ed deadline.
+    port1.once("message", resolve);
+  });
+  t.after(() => {
+    port1.close();
+    port2.close();
+    settle();
+  });
+  return () => pending;
 }
 
 function backendWithCalls(calls: string[]): BackendProtocolV2 {
@@ -121,66 +139,81 @@ test("only the explicit read allowlist is bridged", () => {
   );
 });
 
-test("execution gate enforces per-turn eval limit and process queue timeout", async () => {
-  const configuredLimits = limits({
-    maxConcurrentEvals: 1,
-    maxEvalsPerTurn: 1,
-    evalQueueTimeoutMs: 10,
-  });
-  const gate = createInterpreterExecutionGate(configuredLimits);
-  const release = await gate.acquireEval("turn-a");
+test(
+  "execution gate enforces per-turn eval limit and process queue timeout",
+  { timeout: 1_000 },
+  async (t) => {
+    const configuredLimits = limits({
+      maxConcurrentEvals: 1,
+      maxEvalsPerTurn: 1,
+      evalQueueTimeoutMs: 10,
+    });
+    const gate = createInterpreterExecutionGate(configuredLimits);
+    const release = await gate.acquireEval("turn-a");
+    void pendingHostOperation(t)().finally(release);
 
-  await assert.rejects(
-    gate.acquireEval("turn-a"),
-    (error) => error instanceof InterpreterError && error.code === "EVAL_LIMIT",
-  );
-  await assert.rejects(
-    gate.acquireEval("turn-b"),
-    (error) => error instanceof InterpreterError && error.code === "BUSY",
-  );
-  release();
-});
+    await assert.rejects(
+      gate.acquireEval("turn-a"),
+      (error) =>
+        error instanceof InterpreterError && error.code === "EVAL_LIMIT",
+    );
+    await assert.rejects(
+      gate.acquireEval("turn-b"),
+      (error) => error instanceof InterpreterError && error.code === "BUSY",
+    );
+    release();
+  },
+);
 
-test("execution gate enforces per-turn PTC budget and timeout", async () => {
-  const configuredLimits = limits({
-    maxPtcCallsPerEval: 1,
-    maxPtcCallsPerTurn: 1,
-    ptcCallTimeoutMs: 10,
-  });
-  const gate = createInterpreterExecutionGate(configuredLimits);
+test(
+  "execution gate enforces per-turn PTC budget and timeout",
+  { timeout: 1_000 },
+  async (t) => {
+    const configuredLimits = limits({
+      maxPtcCallsPerEval: 1,
+      maxPtcCallsPerTurn: 1,
+      ptcCallTimeoutMs: 10,
+    });
+    const gate = createInterpreterExecutionGate(configuredLimits);
 
-  await assert.rejects(
-    gate.runPtc("turn-timeout", () => new Promise(() => undefined)),
-    (error) =>
-      error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
-  );
-  await assert.rejects(
-    gate.runPtc("turn-timeout", async () => "late"),
-    (error) => error instanceof InterpreterError && error.code === "PTC_LIMIT",
-  );
-});
+    await assert.rejects(
+      gate.runPtc("turn-timeout", pendingHostOperation(t)),
+      (error) =>
+        error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
+    );
+    await assert.rejects(
+      gate.runPtc("turn-timeout", async () => "late"),
+      (error) =>
+        error instanceof InterpreterError && error.code === "PTC_LIMIT",
+    );
+  },
+);
 
-test("PTC timeout includes time waiting for a concurrency slot", async () => {
-  const configuredLimits = limits({
-    maxConcurrentPtcPerTurn: 1,
-    maxPtcCallsPerEval: 2,
-    maxPtcCallsPerTurn: 2,
-    ptcCallTimeoutMs: 10,
-  });
-  const gate = createInterpreterExecutionGate(configuredLimits);
-  const firstTimeout = assert.rejects(
-    gate.runPtc("turn-queue-timeout", () => new Promise(() => undefined)),
-    (error) =>
-      error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
-  );
-  const queuedTimeout = assert.rejects(
-    gate.runPtc("turn-queue-timeout", async () => "must not run"),
-    (error) =>
-      error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
-  );
+test(
+  "PTC timeout includes time waiting for a concurrency slot",
+  { timeout: 1_000 },
+  async (t) => {
+    const configuredLimits = limits({
+      maxConcurrentPtcPerTurn: 1,
+      maxPtcCallsPerEval: 2,
+      maxPtcCallsPerTurn: 2,
+      ptcCallTimeoutMs: 10,
+    });
+    const gate = createInterpreterExecutionGate(configuredLimits);
+    const firstTimeout = assert.rejects(
+      gate.runPtc("turn-queue-timeout", pendingHostOperation(t)),
+      (error) =>
+        error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
+    );
+    const queuedTimeout = assert.rejects(
+      gate.runPtc("turn-queue-timeout", async () => "must not run"),
+      (error) =>
+        error instanceof InterpreterError && error.code === "PTC_TIMEOUT",
+    );
 
-  await Promise.all([firstTimeout, queuedTimeout]);
-});
+    await Promise.all([firstTimeout, queuedTimeout]);
+  },
+);
 
 test("interpreter guard rejects oversized code and caps model-visible output", async () => {
   const configuredLimits = limits({ maxCodeChars: 5, maxResultChars: 32 });

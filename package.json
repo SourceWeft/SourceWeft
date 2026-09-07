@@ -12,7 +12,7 @@
     "dev:desktop": "turbo run dev --filter=@sourceweft/desktop",
     "dev:mobile": "turbo run dev --filter=@sourceweft/mobile",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=2",
     "check-types": "turbo run check-types",
     "clean:web-cache": "node scripts/clean-web-cache.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
@@ -26,6 +26,8 @@
   "packageManager": "pnpm@10.19.0",
   "pnpm": {
     "overrides": {
+      "@google/generative-ai": "0.24.1",
+      "openai": "6.49.0",
       "fast-uri": "^3.1.5",
       "axios": "^1.19.0",
       "protobufjs@8": "^8.4.1",
@@ -70,9 +72,14 @@
       "sharp",
       "spawn-sync",
       "tesseract.js"
-    ]
+    ],
+    "patchedDependencies": {
+      "@google/generative-ai@0.24.1": "patches/@google__generative-ai@0.24.1.patch",
+      "@langchain/google-genai@2.2.0": "patches/@langchain__google-genai@2.2.0.patch",
+      "openai@6.49.0": "patches/openai@6.49.0.patch"
+    }
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.13.0 || ^24.0.0"
   }
 }

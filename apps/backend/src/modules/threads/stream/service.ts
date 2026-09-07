@@ -130,6 +130,9 @@ async function throwIfClientCancelled(
   shouldCancel: ThreadStreamRunOptions["shouldCancel"],
   abortSignal?: AbortSignal,
 ) {
+  if (abortSignal?.aborted && abortSignal.reason instanceof ContentError) {
+    throw abortSignal.reason;
+  }
   if (abortSignal?.aborted || (await shouldCancel?.())) {
     throw new ContentError(499, "CLIENT_CANCELLED", "Chat run was cancelled");
   }
@@ -501,14 +504,10 @@ class ContentThreadStreamService {
             // Aborting the agent stream surfaces as an AbortError here, which
             // `toDurableRunContentError` would otherwise record as a failure.
             // When the abort was a cancel, report it as one.
-            if (
-              !findAgentToolTerminationUnknownReason(error) &&
-              (options.abortSignal?.aborted || (await options.shouldCancel?.()))
-            ) {
-              throw new ContentError(
-                499,
-                "CLIENT_CANCELLED",
-                "Chat run was cancelled",
+            if (!findAgentToolTerminationUnknownReason(error)) {
+              await throwIfClientCancelled(
+                options.shouldCancel,
+                options.abortSignal,
               );
             }
             throw error;

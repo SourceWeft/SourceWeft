@@ -1,0 +1,148 @@
+diff --git a/dist/generative-ai.d.ts b/dist/generative-ai.d.ts
+index c60cda15f27354022b081eafe65cbaae181fe98f..40a69d3f20f5501514f230df8ec29a292c1dfc28 100644
+--- a/dist/generative-ai.d.ts
++++ b/dist/generative-ai.d.ts
+@@ -1173,6 +1173,8 @@ export declare interface PromptFeedback {
+  * @public
+  */
+ export declare interface RequestOptions {
++    /** Fetch implementation used for model requests. */
++    fetch?: typeof globalThis.fetch;
+     /**
+      * Request timeout in milliseconds.
+      */
+diff --git a/dist/index.js b/dist/index.js
+index 2fe925f220bfdf87321c022705c5bff0de8b6e05..ddd2b606c976ba65f3db08281f69bc3235ec37b8 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -387,7 +387,7 @@ async function constructModelRequest(model, task, apiKey, stream, body, requestO
+ }
+ async function makeModelRequest(model, task, apiKey, stream, body, requestOptions = {}, 
+ // Allows this to be stubbed for tests
+-fetchFn = fetch) {
++fetchFn = requestOptions.fetch ?? fetch) {
+     const { url, fetchOptions } = await constructModelRequest(model, task, apiKey, stream, body, requestOptions);
+     return makeRequest(url, fetchOptions, fetchFn);
+ }
+@@ -415,6 +415,7 @@ function handleResponseError(e, url) {
+         err = new GoogleGenerativeAIError(`Error fetching from ${url.toString()}: ${e.message}`);
+         err.stack = e.stack;
+     }
++    if (err !== e) err.cause = e;
+     throw err;
+ }
+ async function handleResponseNotOk(response, url) {
+@@ -446,9 +447,13 @@ function buildFetchOptions(requestOptions) {
+             setTimeout(() => controller.abort(), requestOptions.timeout);
+         }
+         if (requestOptions === null || requestOptions === void 0 ? void 0 : requestOptions.signal) {
+-            requestOptions.signal.addEventListener("abort", () => {
+-                controller.abort();
+-            });
++            if (requestOptions.signal.aborted) {
++                controller.abort(requestOptions.signal.reason);
++            } else {
++                requestOptions.signal.addEventListener("abort", () => {
++                    controller.abort(requestOptions.signal.reason);
++                }, { once: true });
++            }
+         }
+         fetchOptions.signal = controller.signal;
+     }
+@@ -685,9 +690,13 @@ function processStream(response) {
+     const inputStream = response.body.pipeThrough(new TextDecoderStream("utf8", { fatal: true }));
+     const responseStream = getResponseStream(inputStream);
+     const [stream1, stream2] = responseStream.tee();
++    const responsePromise = getResponsePromise(stream2);
++    // Stream-only consumers still receive the same failure through stream1.
++    // Keep the returned aggregate promise rejecting without an unhandled rejection.
++    responsePromise.catch(() => {});
+     return {
+         stream: generateResponseSequence(stream1),
+-        response: getResponsePromise(stream2),
++        response: responsePromise,
+     };
+ }
+ async function getResponsePromise(stream) {
+@@ -762,6 +771,7 @@ function getResponseStream(inputStream) {
+                     else {
+                         err = new GoogleGenerativeAIError("Error reading from the stream");
+                     }
++                    err.cause = e;
+                     throw err;
+                 });
+             }
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 6aec979baf268a17a0596c56971f65608bb2c95f..cbeba230b984793bd53cfb703f9e458ce4cfb79a 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -385,7 +385,7 @@ async function constructModelRequest(model, task, apiKey, stream, body, requestO
+ }
+ async function makeModelRequest(model, task, apiKey, stream, body, requestOptions = {}, 
+ // Allows this to be stubbed for tests
+-fetchFn = fetch) {
++fetchFn = requestOptions.fetch ?? fetch) {
+     const { url, fetchOptions } = await constructModelRequest(model, task, apiKey, stream, body, requestOptions);
+     return makeRequest(url, fetchOptions, fetchFn);
+ }
+@@ -413,6 +413,7 @@ function handleResponseError(e, url) {
+         err = new GoogleGenerativeAIError(`Error fetching from ${url.toString()}: ${e.message}`);
+         err.stack = e.stack;
+     }
++    if (err !== e) err.cause = e;
+     throw err;
+ }
+ async function handleResponseNotOk(response, url) {
+@@ -444,9 +445,13 @@ function buildFetchOptions(requestOptions) {
+             setTimeout(() => controller.abort(), requestOptions.timeout);
+         }
+         if (requestOptions === null || requestOptions === void 0 ? void 0 : requestOptions.signal) {
+-            requestOptions.signal.addEventListener("abort", () => {
+-                controller.abort();
+-            });
++            if (requestOptions.signal.aborted) {
++                controller.abort(requestOptions.signal.reason);
++            } else {
++                requestOptions.signal.addEventListener("abort", () => {
++                    controller.abort(requestOptions.signal.reason);
++                }, { once: true });
++            }
+         }
+         fetchOptions.signal = controller.signal;
+     }
+@@ -683,9 +688,13 @@ function processStream(response) {
+     const inputStream = response.body.pipeThrough(new TextDecoderStream("utf8", { fatal: true }));
+     const responseStream = getResponseStream(inputStream);
+     const [stream1, stream2] = responseStream.tee();
++    const responsePromise = getResponsePromise(stream2);
++    // Stream-only consumers still receive the same failure through stream1.
++    // Keep the returned aggregate promise rejecting without an unhandled rejection.
++    responsePromise.catch(() => {});
+     return {
+         stream: generateResponseSequence(stream1),
+-        response: getResponsePromise(stream2),
++        response: responsePromise,
+     };
+ }
+ async function getResponsePromise(stream) {
+@@ -760,6 +769,7 @@ function getResponseStream(inputStream) {
+                     else {
+                         err = new GoogleGenerativeAIError("Error reading from the stream");
+                     }
++                    err.cause = e;
+                     throw err;
+                 });
+             }
+diff --git a/dist/types/requests.d.ts b/dist/types/requests.d.ts
+index a5cd23534391e5cf744d58464fbc886b278a522e..68aaa297c291d3dcc1fffe664522ef4f5444565a 100644
+--- a/dist/types/requests.d.ts
++++ b/dist/types/requests.d.ts
+@@ -167,6 +167,8 @@ export interface BatchEmbedContentsRequest {
+  * @public
+  */
+ export interface RequestOptions {
++    /** Fetch implementation used for model requests. */
++    fetch?: typeof globalThis.fetch;
+     /**
+      * Request timeout in milliseconds.
+      */

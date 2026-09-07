@@ -121,12 +121,11 @@ test("OpenRouter catalog discovery sends attribution headers", async () => {
   });
 
   assert.equal(fetchMock.mock.calls.length, 1);
-  const init = fetchMock.mock.calls[0]?.[1];
-  const headers = init?.headers as Record<string, string>;
+  const headers = (fetchMock.mock.calls[0]?.[0] as Request).headers;
 
-  assert.equal(headers["X-OpenRouter-Title"], "SourceWeft");
-  assert.equal(headers["X-Title"], "SourceWeft");
-  assert.equal(headers["HTTP-Referer"], "https://sourceweft.com");
+  assert.equal(headers.get("X-OpenRouter-Title"), "SourceWeft");
+  assert.equal(headers.get("X-Title"), "SourceWeft");
+  assert.equal(headers.get("HTTP-Referer"), "https://sourceweft.com");
 });
 
 test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", async () => {
@@ -244,9 +243,9 @@ test("OrcaRouter catalog discovery classifies modalities and stamps reasoning", 
 
   // Hits the gateway's own /models with bearer auth (not the OpenRouter URL).
   assert.equal(fetchMock.mock.calls.length, 1);
-  assert.equal(fetchMock.mock.calls[0]?.[0], "https://api.orcarouter.ai/v1/models");
-  const headers = (fetchMock.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>;
-  assert.equal(headers.Authorization, "Bearer sk-orca-test");
+  const request = fetchMock.mock.calls[0]?.[0] as Request;
+  assert.equal(request.url, "https://api.orcarouter.ai/v1/models");
+  assert.equal(request.headers.get("Authorization"), "Bearer sk-orca-test");
 
   const byId = (id: string, kind: string) =>
     candidates.find((c) => c.modelId === id && c.kind === kind);
@@ -331,9 +330,8 @@ test("OpenAI-compatible catalog discovery supports custom API key headers", asyn
   });
 
   assert.equal(fetchMock.mock.calls.length, 1);
-  const init = fetchMock.mock.calls[0]?.[1];
-  const headers = init?.headers as Record<string, string>;
+  const headers = (fetchMock.mock.calls[0]?.[0] as Request).headers;
 
-  assert.equal(headers["cf-aig-authorization"], "Bearer cf-token");
-  assert.equal(headers.Authorization, undefined);
+  assert.equal(headers.get("cf-aig-authorization"), "Bearer cf-token");
+  assert.equal(headers.get("Authorization"), null);
 });

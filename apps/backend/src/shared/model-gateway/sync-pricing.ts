@@ -10,6 +10,8 @@ import { logger } from "../logger";
 import { modelCatalog } from "./model-catalog/registry";
 import type { NormalizedModelInfo } from "./model-catalog/types";
 import { mergeOwnedProfileConfig } from "./profile-config-priority";
+import { loadRoutedGatewayConfig } from "./runtime";
+import { lockEmbeddingConfiguration } from "./embedding-identity";
 
 function toRouteKey(kind: string, alias: string) {
   return `${kind}:${alias}`;
@@ -32,19 +34,9 @@ interface PrimaryRouteTarget {
   targetProviderName: string;
 }
 
-async function loadPrimaryRouteTargetByKindAndAlias(): Promise<
-  Map<string, PrimaryRouteTarget>
-> {
-  const [activeVersion] = await db
-    .select({ id: modelGatewayConfigVersions.id })
-    .from(modelGatewayConfigVersions)
-    .where(eq(modelGatewayConfigVersions.isActive, true))
-    .limit(1);
-
-  if (!activeVersion) {
-    return new Map();
-  }
-
+async function loadPrimaryRouteTargetByKindAndAlias(
+  configVersionId: string,
+): Promise<Map<string, PrimaryRouteTarget>> {
   const routeRows = await db
     .select({
       routeKind: modelGatewayRoutes.routeKind,
@@ -56,7 +48,7 @@ async function loadPrimaryRouteTargetByKindAndAlias(): Promise<
     .from(modelGatewayRoutes)
     .where(
       and(
-        eq(modelGatewayRoutes.configVersionId, activeVersion.id),
+        eq(modelGatewayRoutes.configVersionId, configVersionId),
         eq(modelGatewayRoutes.isActive, true),
       ),
     );
@@ -173,6 +165,10 @@ function shouldSkipLiteLLMAutoMatch(
   pricing: ModelPricingConfig | undefined,
 ): boolean {
   return isExternallyManagedPricing(pricing) && !pricing?.litellm_key;
+}
+
+export function requiresCatalogPricing(configJson: Record<string, unknown>) {
+  return !shouldSkipLiteLLMAutoMatch(configJson as ModelPricingConfig);
 }
 
 const PRICING_SYNC_CONFIG_KEYS = new Set<string>([
@@ -325,9 +321,14 @@ function buildSyncUpdatesFromInfo(input: {
 }
 
 export async function syncModelPricing(): Promise<void> {
-  await modelCatalog.ensureReady();
+  const routed = await loadRoutedGatewayConfig();
+  if (
+    !routed ||
+    !Object.values(routed.providers).some((provider) => provider.globalReady)
+  )
+    return;
   const primaryRouteTargetByKindAndAlias =
-    await loadPrimaryRouteTargetByKindAndAlias();
+    await loadPrimaryRouteTargetByKindAndAlias(routed.versionId);
 
   const profiles = await db
     .select({
@@ -349,6 +350,11 @@ export async function syncModelPricing(): Promise<void> {
     const primaryRouteTarget = primaryRouteTargetByKindAndAlias.get(
       toRouteKey(profile.kind, profile.profileAlias),
     );
+    if (
+      !primaryRouteTarget ||
+      !routed.providers[primaryRouteTarget.targetProviderName]?.globalReady
+    )
+      continue;
     const existingConfigJson =
       profile.configJson && typeof profile.configJson === "object"
         ? (profile.configJson as Record<string, unknown>)
@@ -383,72 +389,98 @@ export async function syncModelPricing(): Promise<void> {
     // Resolve capabilities + pricing from the normalized catalog by the alias's
     // primary target (or the alias itself). One source, models.dev-primary.
     const target = primaryRouteTarget?.targetModel ?? profile.modelAlias;
+    await modelCatalog.ensureReady();
     const info = modelCatalog.resolve(target, {
       // Serving provider from the primary route, so a shared model id is priced
       // from that provider's bucket, not an arbitrary same-id entry.
       provider: primaryRouteTarget?.targetProviderName,
     });
 
-    if (info) {
-      matched++;
-      const now = new Date();
-      const nextConfigJson = mergeModelPricingSyncConfig({
-        existingConfigJson,
-        pricingLocked,
-        updates: buildSyncUpdatesFromInfo({ info, now, pricingLocked }),
-      });
-
-      if (!configJsonEqual(existingConfigJson, nextConfigJson)) {
-        await db
-          .update(modelGatewayProfiles)
-          .set({ configJson: nextConfigJson, updatedAt: now })
-          .where(eq(modelGatewayProfiles.id, profile.id));
-        updated++;
-        logger.info("Updated model pricing", {
-          kind: profile.kind,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          target,
-          inputCost: nextConfigJson.input_cost_per_token,
-          outputCost: nextConfigJson.output_cost_per_token,
-        });
+    await db.transaction(async (tx) => {
+      // Match configuration sync's lock order. Never write a stale profile JSON
+      // over a new embedding definition or a newly pinned manual price.
+      await lockEmbeddingConfiguration(tx);
+      const [version] = await tx
+        .select({ id: modelGatewayConfigVersions.id })
+        .from(modelGatewayConfigVersions)
+        .where(eq(modelGatewayConfigVersions.isActive, true))
+        .limit(1);
+      if (version?.id !== routed.versionId) {
+        throw new Error(
+          "Model gateway configuration changed during pricing sync; retry against the active version",
+        );
       }
-    } else {
-      unmatched++;
-      if (!pricingLocked && existingPricing?.price_source !== "unknown") {
+      const [current] = await tx
+        .select()
+        .from(modelGatewayProfiles)
+        .where(eq(modelGatewayProfiles.id, profile.id))
+        .for("update");
+      if (!current?.isActive) return;
+      const existingConfigJson = current.configJson ?? {};
+      const existingPricing = existingConfigJson as ModelPricingConfig;
+      const pricingLocked = isExternallyManagedPricing(existingPricing);
+      if (shouldSkipLiteLLMAutoMatch(existingPricing)) return;
+      if (info) {
+        matched++;
         const now = new Date();
-        const unknownPricing: ModelPricing = {
-          input_cost_per_token: null,
-          output_cost_per_token: null,
-          cache_read_input_token_cost: null,
-          cache_creation_input_token_cost: null,
-          output_cost_per_reasoning_token: null,
-          input_cost_per_image_token: null,
-          output_cost_per_image_token: null,
-          input_cost_per_audio_token: null,
-          output_cost_per_audio_token: null,
-          input_cost_per_image: null,
-          output_cost_per_image: null,
-          price_source: "unknown",
-          litellm_key: null,
-          price_updated_at: now.toISOString(),
-        };
         const nextConfigJson = mergeModelPricingSyncConfig({
           existingConfigJson,
-          updates: unknownPricing as unknown as Record<string, unknown>,
+          pricingLocked,
+          updates: buildSyncUpdatesFromInfo({ info, now, pricingLocked }),
         });
-        await db
-          .update(modelGatewayProfiles)
-          .set({ configJson: nextConfigJson, updatedAt: now })
-          .where(eq(modelGatewayProfiles.id, profile.id));
-        logger.warn("No catalog price match found, marked as unknown", {
-          kind: profile.kind,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          target,
-        });
+
+        if (!configJsonEqual(existingConfigJson, nextConfigJson)) {
+          await tx
+            .update(modelGatewayProfiles)
+            .set({ configJson: nextConfigJson, updatedAt: now })
+            .where(eq(modelGatewayProfiles.id, profile.id));
+          updated++;
+          logger.info("Updated model pricing", {
+            kind: profile.kind,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+            target,
+            inputCost: nextConfigJson.input_cost_per_token,
+            outputCost: nextConfigJson.output_cost_per_token,
+          });
+        }
+      } else {
+        unmatched++;
+        if (!pricingLocked && existingPricing?.price_source !== "unknown") {
+          const now = new Date();
+          const unknownPricing: ModelPricing = {
+            input_cost_per_token: null,
+            output_cost_per_token: null,
+            cache_read_input_token_cost: null,
+            cache_creation_input_token_cost: null,
+            output_cost_per_reasoning_token: null,
+            input_cost_per_image_token: null,
+            output_cost_per_image_token: null,
+            input_cost_per_audio_token: null,
+            output_cost_per_audio_token: null,
+            input_cost_per_image: null,
+            output_cost_per_image: null,
+            price_source: "unknown",
+            litellm_key: null,
+            price_updated_at: now.toISOString(),
+          };
+          const nextConfigJson = mergeModelPricingSyncConfig({
+            existingConfigJson,
+            updates: unknownPricing as unknown as Record<string, unknown>,
+          });
+          await tx
+            .update(modelGatewayProfiles)
+            .set({ configJson: nextConfigJson, updatedAt: now })
+            .where(eq(modelGatewayProfiles.id, profile.id));
+          logger.warn("No catalog price match found, marked as unknown", {
+            kind: profile.kind,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+            target,
+          });
+        }
       }
-    }
+    });
   }
 
   logger.info("Model pricing sync completed", {

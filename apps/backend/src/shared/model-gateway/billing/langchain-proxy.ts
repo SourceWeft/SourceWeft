@@ -1,16 +1,14 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
-import type {
-  LangChainModelExecutionConfig,
-  ModelCallObservation,
-  ObserveGenerationEnd,
-  ObserveSink,
-  UsageInfo,
-} from "@sourceweft/model-gateway";
+import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import { logger } from "../../logger";
 import type { ModelCallBillingOptions, ModelUsageContext } from "./context";
 import type { BillingScope } from "./scope";
 import { createRawAgentChatModel } from "../internal/raw";
+import {
+  createUsageCaptureSink,
+  usageStorage,
+  type UsageSlot,
+} from "./usage-capture";
 
 /**
  * Entry points through which the agent runtime can drive a chat model.
@@ -65,44 +63,6 @@ const STREAMING_ENTRY_POINTS = new Set([
 
 const warnedUnknownEntryPoints = new Set<string>();
 
-type UsageSlot = {
-  usage?: UsageInfo;
-  observation?: ModelCallObservation;
-};
-
-/**
- * One capture slot per in-flight model call.
- *
- * A single shared slot is not enough: the agent runtime can drive one model
- * concurrently, and a call reports its usage before it finishes resolving, so
- * two overlapping calls would otherwise settle against whichever usage was
- * written last. Async context binds each report to the call that caused it.
- */
-const usageStorage = new AsyncLocalStorage<UsageSlot>();
-
-/**
- * Per-model observe sink used purely as a usage transport.
- *
- * Safe here — and only here — because `createRawAgentChatModel` builds a fresh
- * gateway config per invocation rather than reusing the process-wide cached
- * client, so this cannot leak one team's usage into another's. The sink carries
- * no control: it only fills the current call's slot, and the proxy decides.
- */
-function createUsageCaptureSink(): ObserveSink {
-  return {
-    onGenerationEnd(generation: ObserveGenerationEnd) {
-      if (!generation.usage) {
-        return;
-      }
-      const slot = usageStorage.getStore();
-      if (slot) {
-        slot.usage = generation.usage;
-        slot.observation = generation.observation;
-      }
-    },
-  };
-}
-
 export async function createBilledAgentChatModel(input: {
   modelAlias: string;
   execution?: LangChainModelExecutionConfig;
@@ -142,13 +102,24 @@ function wrapBilledModel<T extends object>(
 ): T {
   async function settleAfter(operation: string, run: () => Promise<unknown>) {
     const slot: UsageSlot = {};
-    const result = await usageStorage.run(slot, run);
-    await scope.settle({
-      options: { ...billing, operation },
-      usage: slot.usage,
-      observation: slot.observation,
-    });
-    return result;
+    let failed = false;
+    try {
+      return await usageStorage.run(slot, run);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      try {
+        await scope.settle({
+          options: { ...billing, operation },
+          usage: slot.usage,
+          observation: slot.observation,
+        });
+      } catch (error) {
+        if (!failed) throw error;
+        logger.warn("Settlement failed after model error", { operation });
+      }
+    }
   }
 
   return new Proxy(model, {
@@ -178,16 +149,32 @@ function wrapBilledModel<T extends object>(
       if (STREAMING_ENTRY_POINTS.has(prop)) {
         return async (...args: unknown[]) => {
           const slot: UsageSlot = {};
-          const stream = (await usageStorage.run(slot, async () =>
-            value.apply(target, args),
-          )) as AsyncIterable<unknown>;
-          return billedModelStream(
-            stream,
-            slot,
-            scope,
-            billing,
-            `chat.${prop}`,
-          );
+          let stream: AsyncIterable<unknown>;
+          try {
+            stream = await usageStorage.run(slot, async () =>
+              value.apply(target, args),
+            );
+            return billedModelStream(
+              stream,
+              slot,
+              scope,
+              billing,
+              `chat.${prop}`,
+            );
+          } catch (error) {
+            try {
+              await scope.settle({
+                options: { ...billing, operation: `chat.${prop}` },
+                usage: slot.usage,
+                observation: slot.observation,
+              });
+            } catch {
+              logger.warn("Settlement failed after stream creation error", {
+                operation: `chat.${prop}`,
+              });
+            }
+            throw error;
+          }
         };
       }
 
@@ -236,41 +223,76 @@ const IGNORED_ENTRY_POINTS = new Set([
   "lc_kwargs",
 ]);
 
-async function* billedModelStream(
+function billedModelStream(
   stream: AsyncIterable<unknown>,
   slot: UsageSlot,
   scope: BillingScope,
   billing: Omit<ModelCallBillingOptions, "operation">,
   operation: string,
-) {
-  let inFlightError: unknown;
-  const iterator = stream[Symbol.asyncIterator]();
-  try {
-    while (true) {
-      // Each resumption is driven from the consumer's async context, so the
-      // slot has to be re-entered per step for usage reported mid-stream to
-      // land on this call rather than whatever else is in flight.
-      const next = await usageStorage.run(slot, () => iterator.next());
-      if (next.done) {
-        break;
+): AsyncIterableIterator<unknown> {
+  const iterator = usageStorage.run(slot, () => stream[Symbol.asyncIterator]());
+  let failed = false;
+  let finalization: Promise<void> | undefined;
+  const finish = () =>
+    (finalization ??= (async () => {
+      let closeFailed = false;
+      let closeError: unknown;
+      try {
+        if (iterator.return)
+          await usageStorage.run(slot, () => iterator.return!());
+      } catch (error) {
+        closeFailed = true;
+        closeError = error;
       }
-      yield next.value;
-    }
-  } catch (error) {
-    inFlightError = error;
-    throw error;
-  } finally {
-    await iterator.return?.();
+      try {
+        await scope.settle({
+          options: { ...billing, operation },
+          usage: slot.usage,
+          observation: slot.observation,
+        });
+      } catch (error) {
+        if (!failed && !closeFailed) throw error;
+        logger.warn("Settlement failed while closing model stream", {
+          operation,
+        });
+      }
+      if (closeFailed && !failed) throw closeError;
+    })());
+  const consume = (async function* () {
     try {
-      await scope.settle({
-        options: { ...billing, operation },
-        usage: slot.usage,
-        observation: slot.observation,
-      });
-    } catch (settleError) {
-      if (!inFlightError) {
-        throw settleError;
+      while (true) {
+        const next = await usageStorage.run(slot, () => iterator.next());
+        if (next.done) return;
+        yield next.value;
       }
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      await finish();
     }
-  }
+  })();
+  // The upstream stream is already open. Async-generator return before first
+  // next skips its body/finally, so its owner must finalize that path explicitly.
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    next: (value) => consume.next(value),
+    async return(value) {
+      try {
+        return await consume.return(value);
+      } finally {
+        await finish();
+      }
+    },
+    async throw(error) {
+      failed = true;
+      try {
+        return await consume.throw(error);
+      } finally {
+        await finish();
+      }
+    },
+  };
 }

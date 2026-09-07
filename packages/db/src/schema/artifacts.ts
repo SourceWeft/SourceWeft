@@ -73,10 +73,13 @@ export const artifacts = pgTable(
      * lifted out of `payload_json` so it can be indexed. Nullable: most writes
      * do not ask for idempotency, and the column carries no meaning for them.
      *
-     * Deliberately NOT unique. A unique constraint here would have to ignore
-     * status, and a two-phase writer whose `open` is retried would then collide
-     * with its own in-flight `pending` row. De-duplication is a lookup before
-     * the write in the artifact writer instead.
+     * Deliberately NOT unique: the same key may belong to separate private
+     * creators or visibility scopes, and failed attempts may be retried.
+     * Generic and current-run writers take the same transaction advisory lock
+     * over (team, workspace, artifact type, request key), then recheck current
+     * visibility and status before creating. Retried open reuses its pending
+     * row; single-stage publish rejects an in-progress row. The writer's early
+     * lookup is only an optimization, never the concurrency guarantee.
      */
     requestKey: text("request_key"),
     title: text("title"),

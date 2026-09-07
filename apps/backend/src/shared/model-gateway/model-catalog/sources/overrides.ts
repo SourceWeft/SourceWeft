@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { logger } from "../../../logger";
 import { resolveBackendRuntimePath } from "../../../runtime-paths";
 import { canonicalModelId, type ModelInfoOverride } from "../types";
 
@@ -9,33 +8,42 @@ export type ModelOverrideMap = Record<string, ModelInfoOverride>;
 function parseOverrideFile(filePath: string): ModelOverrideMap {
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.entries(parsed).every(
+        ([key, value]) =>
+          key.trim() &&
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value),
+      )
+    ) {
       return parsed as ModelOverrideMap;
     }
-    logger.warn("Model overrides file is not a JSON object; ignoring", {
-      path: filePath,
-    });
-  } catch (error) {
-    logger.warn("Failed to read model overrides file", {
-      path: filePath,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  } catch {
+    // Do not include JSON parser excerpts: an operator may paste a credential.
+    throw new Error(`Unable to read a valid model overrides file: ${filePath}`);
   }
-  return {};
+  throw new Error(
+    `Model overrides must be an object of model entries: ${filePath}`,
+  );
 }
 
 // In-repo overrides (apps/backend/config/model-overrides.json). Optional.
 function loadRepoOverrides(): ModelOverrideMap {
+  let filePath: string;
   try {
-    return parseOverrideFile(
-      resolveBackendRuntimePath({
-        candidates: ["config/model-overrides.json"],
-        label: "model overrides",
-      }),
-    );
+    filePath = resolveBackendRuntimePath({
+      candidates: ["config/model-overrides.json"],
+      label: "model overrides",
+    });
   } catch {
+    // The repository file is optional. Once found, malformed contents fail.
     return {};
   }
+  return parseOverrideFile(filePath);
 }
 
 // Optional external overrides layered on top (e.g. private SaaS additions).
@@ -44,10 +52,7 @@ function loadEnvOverrides(): ModelOverrideMap {
   if (!configured) return {};
   const resolved = path.resolve(configured);
   if (!existsSync(resolved)) {
-    logger.warn("MODEL_OVERRIDES_PATH does not exist; ignoring", {
-      path: resolved,
-    });
-    return {};
+    throw new Error("Configured MODEL_OVERRIDES_PATH does not exist");
   }
   return parseOverrideFile(resolved);
 }

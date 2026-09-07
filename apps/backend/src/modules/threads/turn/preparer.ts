@@ -1409,6 +1409,7 @@ export async function prepareThreadTurn(
   const selectedSkillRuntime = resolveSelectedSkillRuntimeContract({
     selectedSkills: enabledSkills,
     command: resolvedCommand,
+    invokedSkillIds,
     skillRuntimeWorkflows,
   });
   const toolsWithCommand = mergeCommandTools(toolsWithMarkers, resolvedCommand);

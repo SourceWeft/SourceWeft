@@ -117,7 +117,7 @@ test("terminal attach fallback does not duplicate prior error event", () => {
   assert.deepEqual(events, [{ type: "finish" }]);
 });
 
-test("terminal attach fallback keeps stale run recovery silent", () => {
+test("terminal attach reports the persisted stale failure before finish", () => {
   const events = synthesizeTerminalRunEvents({
     run: createRun({
       status: "failed",
@@ -127,7 +127,16 @@ test("terminal attach fallback keeps stale run recovery silent", () => {
     sawErrorEvent: false,
   }).map(parseSseData);
 
-  assert.deepEqual(events, [{ type: "finish" }]);
+  assert.deepEqual(events, [
+    {
+      type: "error",
+      code: "CHAT_RUN_STALE",
+      error: "Chat run failed",
+      userMessageId: "user-message-1",
+      messageId: "assistant-message-1",
+    },
+    { type: "finish" },
+  ]);
 });
 
 test("snapshot metadata replaces render blocks with snapshot blocks", () => {
@@ -191,6 +200,7 @@ test("stale active run recovery preserves terminal assistant metadata", async ()
       return {
         ...run,
         status: "failed",
+        snapshotJson: input.snapshotJson ?? {},
         errorCode: input.errorCode ?? null,
         errorMessage: input.errorMessage ?? null,
       };
@@ -204,8 +214,7 @@ test("stale active run recovery preserves terminal assistant metadata", async ()
       });
       assistantUpdateContent = projection.content;
       assistantUpdateContentJson = projection.contentJson as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       return null;
     },
   });
@@ -949,6 +958,13 @@ test("attach state fails stale running run and synthesizes terminal events", asy
   assert.deepEqual(failCalls, [staleRun]);
   assert.equal(result.run.status, "failed");
   assert.deepEqual(result.terminalEvents?.map(parseSseData), [
+    {
+      type: "error",
+      code: "CHAT_RUN_STALE",
+      error: "Chat run failed",
+      userMessageId: "user-message-1",
+      messageId: "assistant-message-1",
+    },
     { type: "finish" },
   ]);
 });

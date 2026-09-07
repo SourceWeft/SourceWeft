@@ -20,6 +20,7 @@ function skillRuntimeTools(skill: EnabledSkillDescriptor) {
 export function resolveSelectedSkillRuntimeContract(input: {
   selectedSkills: readonly EnabledSkillDescriptor[];
   command: ResolvedThreadCommand | null;
+  invokedSkillIds?: readonly string[];
   skillRuntimeWorkflows?: ReadonlyMap<string, CapabilityCommandWorkflow>;
 }): SelectedSkillRuntimeContract {
   const defaultTools = new Set<string>();
@@ -52,9 +53,13 @@ export function resolveSelectedSkillRuntimeContract(input: {
       defaultTools.add(toolName);
     }
     Object.assign(permissionOverrides, workflow.permissionOverrides);
-    // A default skill expands the ordinary chat surface. Only an explicitly
-    // selected non-default skill may turn that surface into a strict workflow.
-    if (skill.defaultEnabled !== true) {
+    // Default skills expand ordinary chat unless the user explicitly invoked
+    // one. Invocation chips and slash commands keep their declared output
+    // requirement even when that skill is also enabled by default.
+    if (
+      skill.defaultEnabled !== true ||
+      input.invokedSkillIds?.includes(skill.workspaceSkillId)
+    ) {
       mergeToolPolicy(workflow.toolPolicy);
       skillSuccessCriteria.push(workflow.successCriteria);
     }

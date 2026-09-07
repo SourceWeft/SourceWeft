@@ -1,4 +1,6 @@
 import { ContentError } from "../../content/errors";
+import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import { requireContentWorkspace } from "../../workspace/guards";
 import {
   enqueueThreadChatRunJob,
@@ -14,6 +16,7 @@ import type { StreamThreadEventInput } from "../turn/types";
 import {
   createChatThreadRun,
   findActiveChatThreadRun,
+  findLatestChatThreadRunSummary,
   findChatThreadRunById,
   findChatThreadRunByIdempotencyKey,
   listExpiredApprovalWaitingRuns,
@@ -51,6 +54,7 @@ import {
   parseSsePayload,
   shouldCompleteApprovalRunWithoutPendingConfirmations,
   toTerminalJobStatus,
+  toRunStopError,
 } from "./run-state";
 import {
   buildStoppedRunFallback,
@@ -153,6 +157,36 @@ async function resolveRedeliveredActiveRun(
 }
 
 export class DurableChatRunService {
+  async findLatestMessageLessFailure(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }): Promise<ThreadRunFailureSummary | null> {
+    const workspace = await requireContentWorkspace(input);
+    const scope = {
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      userId: input.userId,
+    };
+    const run = await findLatestChatThreadRunSummary(scope);
+    if (
+      !run ||
+      run.status !== "failed" ||
+      run.assistantMessageId ||
+      !(await isRunThreadViewable(scope, run))
+    )
+      return null;
+    return {
+      id: run.id,
+      idempotencyKey: run.idempotencyKey,
+      errorCode: run.errorCode ?? "CHAT_RUN_FAILED",
+      errorMessage: sanitizeClientErrorMessage(
+        run.errorMessage ?? "Chat run failed",
+      ),
+    };
+  }
+
   async findRun(input: {
     workspaceId: string;
     threadId: string;
@@ -495,14 +529,18 @@ export class DurableChatRunService {
   }
 
   async shouldCancel(run: ChatThreadRunRecord) {
+    const error = await this.getRunStopError(run);
+    if (error && error.code !== CLIENT_CANCELLED_CODE) throw error;
+    return Boolean(error);
+  }
+
+  async getRunStopError(run: ChatThreadRunRecord) {
     const current = await findChatThreadRunById({
       runId: run.id,
       teamId: run.teamId,
       workspaceId: run.workspaceId,
     });
-    return (
-      current?.status === "cancel_requested" || current?.status === "cancelled"
-    );
+    return toRunStopError(current);
   }
 
   async heartbeat(run: ChatThreadRunRecord) {
@@ -609,17 +647,12 @@ export class DurableChatRunService {
       errorCode: input.errorCode,
       errorMessage: input.errorMessage,
     });
-    if (input.status === "failed" || input.status === "cancelled") {
+    if (
+      finished &&
+      (input.status === "failed" || input.status === "cancelled")
+    ) {
       await releaseSandboxLeaseForTerminalRun(
-        finished ?? {
-          ...input.run,
-          status: input.status,
-          userMessageId: input.userMessageId ?? input.run.userMessageId,
-          assistantMessageId:
-            input.assistantMessageId ?? input.run.assistantMessageId,
-          errorCode: input.errorCode ?? null,
-          errorMessage: input.errorMessage ?? null,
-        },
+        finished,
         `chat_run_${input.status}`,
       );
     }

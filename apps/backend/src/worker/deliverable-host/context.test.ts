@@ -67,6 +67,7 @@ vi.mock("../../modules/artifacts/repository", () => ({
   createReadyArtifactRecord: vi.fn(),
   findArtifactRecord: vi.fn(),
   findArtifactRecordByRequestKey: vi.fn(),
+  findArtifactWriteReferences: vi.fn(),
   markArtifactFailed: vi.fn(),
   markArtifactReady: vi.fn(),
   markArtifactRunning: vi.fn(),

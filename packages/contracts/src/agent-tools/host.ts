@@ -266,6 +266,7 @@ export type AgentToolCurrentRunArtifactPublicationServices = {
         readonly ok: false;
         readonly reason:
           | "artifact_not_found"
+          | "artifact_in_progress"
           | "forbidden"
           | "message_unavailable"
           | "run_inactive"

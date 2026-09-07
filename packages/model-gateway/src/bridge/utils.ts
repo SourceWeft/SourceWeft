@@ -1,4 +1,16 @@
+import {
+  closeStreamIterator,
+  openStreamIterator,
+  type StreamIterator,
+} from "./stream-iterator";
+import {
+  awaitWithSignal,
+  fetchWithRequestSignal,
+  resolveRequestDefaults,
+  resolveRequestOptions,
+} from "../request-options";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import { Runnable, RunnableBinding } from "@langchain/core/runnables";
 import {
   AIMessage,
   HumanMessage,
@@ -67,6 +79,7 @@ import {
   type ProviderResponseCapture,
 } from "../observation/response-capture";
 import { toRecord } from "../utils/object";
+import { isUnauthenticatedSystemTarget } from "../auth-headers";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
@@ -135,6 +148,10 @@ export function createChatModel(input: {
   payload: ChatCompleteInput;
   options?: RequestOptions;
 }): LangChainChatModelLike {
+  input = {
+    ...input,
+    options: resolveRequestDefaults(input.config, input.target, input.options),
+  };
   const decorated = decorateProviderChatRequest({
     target: input.target,
     payload: input.payload,
@@ -145,12 +162,31 @@ export function createChatModel(input: {
     options: input.options,
     config: input.config,
   });
+  if (
+    !injected &&
+    input.config.fetch !== globalThis.fetch &&
+    !input.target.apiKey?.trim() &&
+    !isUnauthenticatedSystemTarget(input.target)
+  ) {
+    throw new ModelGatewayError({
+      code: "POLICY",
+      message:
+        "This SDK adapter requires an explicit credential; unauthenticated model transport is not configured",
+      retryable: false,
+    });
+  }
   const model =
     injected ??
     getChatAdapter(input.target.providerKind).createModel(
       decorated.target,
       decorated.payload,
-      input.options,
+      {
+        ...input.options,
+        fetch: fetchWithRequestSignal(
+          input.config.fetch,
+          input.options?.signal,
+        ),
+      },
     );
 
   const boundModel =
@@ -521,17 +557,14 @@ function createObservedLangChainChatModel(input: {
       options: input.options,
       target: input.target,
     });
-    await emitGenerationStart(input.config, generation.start);
     const responseCapture = createProviderResponseCapture();
-    const underlying = await runWithProviderResponseCapture(
-      responseCapture,
-      () => input.model.stream(messages, callOptions),
-    );
     return observeStream({
       config: input.config,
       generation,
       routeDecision: input.target.routeDecision,
-      stream: underlying,
+      open: (signal) =>
+        input.model.stream(messages, { ...callOptions, signal }),
+      signal: (callOptions as { signal?: AbortSignal } | undefined)?.signal,
       responseCapture,
       target: input.target,
       modelAlias: input.payload.model,
@@ -586,102 +619,130 @@ async function* observeStream(input: {
   config: ResolvedModelGatewayConfig;
   generation: ReturnType<typeof createGenerationObservation>;
   routeDecision: unknown;
-  stream: AsyncIterable<unknown>;
+  open(signal: AbortSignal): Promise<AsyncIterable<unknown>>;
+  signal?: AbortSignal;
   responseCapture: ProviderResponseCapture;
   target: ResolvedRequestTarget;
   modelAlias: string;
 }) {
-  let completed = false;
-  let usage = undefined;
-  let observation = undefined;
+  let drained = false;
+  let failed = false;
+  let failure: unknown;
+  let observation: ReturnType<typeof normalizeModelCallObservation> | undefined;
   let finishReason: string | undefined;
   let reasoning: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
   let outputText = "";
-
-  try {
-    const iterator = input.stream[Symbol.asyncIterator]();
-    while (true) {
-      const next = await runWithProviderResponseCapture(
-        input.responseCapture,
-        () => iterator.next(),
-      );
-      if (next.done) {
-        break;
-      }
-      const chunk = next.value;
-      const responseMetadata = extractResponseMetadata(
-        chunk as { response_metadata?: unknown },
-      );
-      const nextObservation = normalizeModelCallObservation({
+  let lastChunk: unknown;
+  let iterator: StreamIterator<unknown> | undefined;
+  const captureObservation = () => {
+    if (!lastChunk && !input.responseCapture.headers) return;
+    const responseMetadata = lastChunk
+      ? extractResponseMetadata(lastChunk as { response_metadata?: unknown })
+      : undefined;
+    observation = mergeModelCallObservations(
+      observation,
+      normalizeModelCallObservation({
         modelAlias: input.modelAlias,
         context: {
           target: input.target,
           modality: "chat",
-          rawResponse: chunk,
+          rawResponse: lastChunk,
           sdkUsage:
-            (chunk as { usage_metadata?: unknown }).usage_metadata ??
+            lastChunk &&
             extractUsage({
-              raw: chunk,
-              usageMetadata: (chunk as { usage_metadata?: unknown })
+              raw: lastChunk,
+              usageMetadata: (lastChunk as { usage_metadata?: unknown })
                 .usage_metadata,
               responseMetadata,
             }),
           responseMetadata,
           responseHeaders: input.responseCapture.headers,
         },
+      }),
+    );
+    observation.traceId = input.generation.start.traceId;
+    observation.spanId = input.generation.spanId;
+  };
+
+  await emitGenerationStart(input.config, input.generation.start);
+  try {
+    try {
+      iterator = await openStreamIterator({
+        open: input.open,
+        signal: input.signal,
+        capture: input.responseCapture,
+        logger: input.config.logger,
       });
-      observation = mergeModelCallObservations(observation, nextObservation);
-      usage = observation.usage ?? usage;
-      finishReason = extractFinishReason(responseMetadata) ?? finishReason;
-      const nextReasoning = extractReasoning(
-        chunk as Parameters<typeof extractReasoning>[0],
-      );
-      reasoning = appendText(reasoning, nextReasoning);
-      providerFields = cloneRecord(responseMetadata) ?? providerFields;
-      const content = (chunk as { content?: unknown }).content;
-      if (typeof content === "string") outputText += content;
-      yield chunk;
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) break;
+        lastChunk = next.value;
+        const responseMetadata = extractResponseMetadata(
+          lastChunk as { response_metadata?: unknown },
+        );
+        captureObservation();
+        finishReason = extractFinishReason(responseMetadata) ?? finishReason;
+        reasoning = appendText(
+          reasoning,
+          extractReasoning(lastChunk as Parameters<typeof extractReasoning>[0]),
+        );
+        providerFields = cloneRecord(responseMetadata) ?? providerFields;
+        const content = (lastChunk as { content?: unknown }).content;
+        if (typeof content === "string") outputText += content;
+        yield lastChunk;
+      }
+      drained = true;
+    } catch (error) {
+      failed = true;
+      failure = error;
+      throw error;
+    } finally {
+      await closeStreamIterator(iterator, input.config.logger, failed);
     }
-    completed = true;
-    if (observation) {
-      observation.traceId = input.generation.start.traceId;
-      observation.spanId = input.generation.spanId;
-    }
-    await emitGenerationEnd(input.config, {
-      traceId: input.generation.start.traceId,
-      spanId: input.generation.spanId,
-      endedAt: new Date().toISOString(),
-      latencyMs: Date.now() - input.generation.startedAtMs,
-      output: {
-        finishReason,
-        reasoning,
-        routeDecision: input.routeDecision,
-      },
-      outputText: outputText || undefined,
-      finishReason,
-      reasoningText: reasoning,
-      providerFields,
-      observation,
-      usage,
-      rawCaptureMode: "sdk_metadata",
-      providerResponse: toProviderResponse(providerFields),
-      attributes: input.generation.start.attributes,
-    });
   } catch (error) {
-    if (!completed) {
-      await emitGenerationError(
-        input.config,
-        buildGenerationErrorEvent({
+    failed = true;
+    failure = error;
+    throw error;
+  } finally {
+    captureObservation();
+    if (drained && !failed) {
+      await emitGenerationEnd(input.config, {
+        traceId: input.generation.start.traceId,
+        spanId: input.generation.spanId,
+        endedAt: new Date().toISOString(),
+        latencyMs: Date.now() - input.generation.startedAtMs,
+        output: { finishReason, reasoning, routeDecision: input.routeDecision },
+        outputText: outputText || undefined,
+        finishReason,
+        reasoningText: reasoning,
+        providerFields,
+        observation,
+        usage: observation?.usage,
+        rawCaptureMode: "sdk_metadata",
+        providerResponse: toProviderResponse(providerFields),
+        attributes: input.generation.start.attributes,
+      });
+    } else {
+      await emitGenerationError(input.config, {
+        ...buildGenerationErrorEvent({
           traceId: input.generation.start.traceId,
           spanId: input.generation.spanId,
           startedAtMs: input.generation.startedAtMs,
-          error,
+          error: failure,
           attributes: input.generation.start.attributes,
         }),
-      );
+        ...(!failed
+          ? {
+              errorCode: "CANCELLED",
+              errorMessage: "Chat stream cancelled before completion",
+            }
+          : {}),
+        observation,
+        usage: observation?.usage,
+        providerFields,
+      });
     }
-    throw error;
   }
 }
 
@@ -842,18 +903,36 @@ export function createEmbeddingsModel(input: {
   payload: EmbedInput | EmbedBatchInput;
   options?: RequestOptions;
 }): LangChainEmbeddingsLike {
-  return (
-    input.config.langchainFactories?.createEmbeddingsModel?.({
-      target: input.target,
-      payload: input.payload,
-      options: input.options,
-      config: input.config,
-    }) ??
-    getEmbeddingsAdapter(input.target.providerKind).createModel(
-      input.target,
-      input.payload,
-      input.options,
-    )
+  input = {
+    ...input,
+    options: resolveRequestDefaults(input.config, input.target, input.options),
+  };
+  const injected = input.config.langchainFactories?.createEmbeddingsModel?.({
+    target: input.target,
+    payload: input.payload,
+    options: input.options,
+    config: input.config,
+  });
+  if (injected) return injected;
+  if (
+    input.config.fetch !== globalThis.fetch &&
+    !input.target.apiKey?.trim() &&
+    !isUnauthenticatedSystemTarget(input.target)
+  ) {
+    throw new ModelGatewayError({
+      code: "POLICY",
+      message:
+        "This SDK adapter requires an explicit credential; unauthenticated model transport is not configured",
+      retryable: false,
+    });
+  }
+  return getEmbeddingsAdapter(input.target.providerKind).createModel(
+    input.target,
+    input.payload,
+    {
+      ...input.options,
+      fetch: fetchWithRequestSignal(input.config.fetch, input.options?.signal),
+    },
   );
 }
 
@@ -909,26 +988,17 @@ export async function createLangChainChatModel(input: {
     payload.fallbackPolicy === "none"
       ? resolvedCandidates.slice(0, 1)
       : resolvedCandidates;
-  if (candidates.length === 1) {
-    const model = createChatModel({
-      config: resolvedConfig,
-      target: candidates[0]!,
-      payload,
-    });
-    return model as unknown as BaseLanguageModel;
-  }
-
   return createFailoverLangChainChatModel({
     config: resolvedConfig,
     candidates,
-    buildModel: (target) =>
-      createChatModel({ config: resolvedConfig, target, payload }),
+    buildModel: (target, options) =>
+      createChatModel({ config: resolvedConfig, target, payload, options }),
   }) as unknown as BaseLanguageModel;
 }
 
 /**
- * LangChain-facing counterpart of `runWithTargetFailover`: one model per
- * candidate target, built lazily, with the same failover policy — move to the
+ * LangChain-facing counterpart of `runWithTargetFailover`: one fresh model per
+ * target attempt, with the same failover policy — move to the
  * next target only on a failoverable error, never after the caller aborted,
  * and for streams only while no chunk has reached the consumer.
  *
@@ -940,11 +1010,14 @@ export async function createLangChainChatModel(input: {
 function createFailoverLangChainChatModel(input: {
   config: ResolvedModelGatewayConfig;
   candidates: ResolvedRequestTarget[];
-  buildModel: (target: ResolvedRequestTarget) => LangChainChatModelLike;
+  buildModel: (
+    target: ResolvedRequestTarget,
+    options?: RequestOptions,
+  ) => LangChainChatModelLike;
 }): LangChainChatModelLike {
-  const models: LangChainChatModelLike[] = [];
-  const getModel = (index: number) =>
-    (models[index] ??= input.buildModel(input.candidates[index]!));
+  // Keep a model for capability/property inspection only. Executions build a
+  // fresh model so request overrides and timeout signals never persist between calls.
+  const primaryModel = input.buildModel(input.candidates[0]!);
 
   const callerAborted = (options?: Record<string, unknown>) =>
     Boolean((options as { signal?: AbortSignal } | undefined)?.signal?.aborted);
@@ -974,14 +1047,25 @@ function createFailoverLangChainChatModel(input: {
   async function runWithFailover<T>(
     operation: string,
     options: Record<string, unknown> | undefined,
-    run: (model: LangChainChatModelLike) => Promise<T>,
+    run: (
+      model: LangChainChatModelLike,
+      options: Record<string, unknown>,
+    ) => Promise<T>,
   ): Promise<T> {
     const attempts: TargetAttemptError[] = [];
     let index = 0;
     while (index < input.candidates.length) {
       const target = input.candidates[index]!;
       try {
-        const result = await run(getModel(index));
+        const requestOptions = resolveRequestOptions(
+          input.config,
+          target,
+          options as RequestOptions,
+        );
+        const callOptions = { ...options, signal: requestOptions.signal };
+        const result = await awaitWithSignal(requestOptions.signal, () =>
+          run(input.buildModel(target, requestOptions), callOptions),
+        );
         input.config.targetHealth.markSuccess(target);
         return result;
       } catch (error) {
@@ -1054,17 +1138,43 @@ function createFailoverLangChainChatModel(input: {
     for (let index = 0; index < input.candidates.length; index++) {
       const target = input.candidates[index]!;
       const isLast = index === input.candidates.length - 1;
-      let iterator: AsyncIterator<unknown>;
-      let first: IteratorResult<unknown>;
+      let iterator: StreamIterator<unknown> | undefined;
+      let yielded = false;
+      let failed = false;
+      const requestOptions = resolveRequestOptions(
+        input.config,
+        target,
+        options as RequestOptions,
+      );
       try {
-        const stream = await getModel(index).stream(messages, options);
-        iterator = stream[Symbol.asyncIterator]();
-        // The failover window closes at the first chunk: until it arrives the
-        // consumer has seen nothing, so retrying on the next target is
-        // invisible. After it, the attempt is committed — a mid-stream failure
-        // ends the stream rather than replaying half an answer elsewhere.
-        first = await iterator.next();
+        try {
+          iterator = await openStreamIterator({
+            open: (signal) =>
+              input
+                .buildModel(target, { ...requestOptions, signal })
+                .stream(messages, { ...options, signal }),
+            signal: requestOptions.signal,
+            logger: input.config.logger,
+          });
+          for (;;) {
+            const next = await iterator.next();
+            if (next.done) {
+              if (!yielded) input.config.targetHealth.markSuccess(target);
+              return;
+            }
+            // Once any chunk is visible, a later error must not replay it.
+            if (!yielded) input.config.targetHealth.markSuccess(target);
+            yielded = true;
+            yield next.value;
+          }
+        } catch (error) {
+          failed = true;
+          throw error;
+        } finally {
+          await closeStreamIterator(iterator, input.config.logger, failed);
+        }
       } catch (error) {
+        if (yielded) throw error;
         attempts.push({
           provider: target.provider,
           providerModel: target.providerModel,
@@ -1102,40 +1212,28 @@ function createFailoverLangChainChatModel(input: {
         logFailover("chat.stream", index, error, index + 1);
         continue;
       }
-      input.config.targetHealth.markSuccess(target);
-      if (first.done) {
-        return;
-      }
-      yield first.value;
-      for (;;) {
-        const next = await iterator.next();
-        if (next.done) {
-          return;
-        }
-        yield next.value;
-      }
     }
   }
 
   const facade: LangChainChatModelLike = {
     getName: () =>
-      getModel(0).getName?.() ?? input.candidates[0]!.providerModel,
+      primaryModel.getName?.() ?? input.candidates[0]!.providerModel,
     invoke: (messages, options) =>
-      runWithFailover("chat.complete", options, (model) =>
-        model.invoke(messages, options),
+      runWithFailover("chat.complete", options, (model, callOptions) =>
+        model.invoke(messages, callOptions),
       ),
     stream: async (messages, options) => streamWithFailover(messages, options),
     bindTools: (tools, kwargs) =>
       createFailoverLangChainChatModel({
         ...input,
-        buildModel: (target) => {
-          const model = input.buildModel(target);
+        buildModel: (target, options) => {
+          const model = input.buildModel(target, options);
           return model.bindTools ? model.bindTools(tools, kwargs) : model;
         },
       }),
     withStructuredOutput: (schema, config) => ({
       invoke: (structuredInput, options) =>
-        runWithFailover("chat.complete", options, (model) => {
+        runWithFailover("chat.complete", options, (model, callOptions) => {
           if (typeof model.withStructuredOutput !== "function") {
             throw new ModelGatewayError({
               code: "BAD_REQUEST",
@@ -1145,15 +1243,35 @@ function createFailoverLangChainChatModel(input: {
           }
           return model
             .withStructuredOutput(schema, config)
-            .invoke(structuredInput, options);
+            .invoke(structuredInput, callOptions);
         }),
     }),
   };
 
   // Same pass-through contract as the observation shim: unknown properties
   // fall through to the primary model with `this` bound to the real instance.
-  return new Proxy(getModel(0), {
-    get(target, prop) {
+  return new Proxy(primaryModel, {
+    get(target, prop, receiver) {
+      if (prop === "withConfig") {
+        // ChatOpenAI's override clones a raw SDK model. The public Runnable
+        // binding preserves config/callback merging and keeps calls on this facade.
+        return (config: Parameters<typeof Runnable.prototype.withConfig>[0]) =>
+          preserveConfiguredChatBindings(
+            Runnable.prototype.withConfig.call(
+              receiver,
+              config,
+            ) as RunnableBinding<unknown, unknown>,
+          );
+      }
+      if (prop === "batch") {
+        // Runnable owns scheduling, concurrency and returnExceptions; each item
+        // must invoke this facade to receive its own target budget.
+        return Runnable.prototype.batch.bind(receiver);
+      }
+      if (prop === "bind") {
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(receiver) : value;
+      }
       if (typeof prop === "string" && prop in facade) {
         // Only advertise withStructuredOutput when the primary model does —
         // mirroring the observation shim's conditional surface.
@@ -1168,4 +1286,43 @@ function createFailoverLangChainChatModel(input: {
       return typeof value === "function" ? value.bind(target) : value;
     },
   }) as LangChainChatModelLike;
+}
+
+/** Retain the existing chat composition surface on SDK-owned config bindings. */
+function preserveConfiguredChatBindings(
+  binding: RunnableBinding<unknown, unknown>,
+): RunnableBinding<unknown, unknown> {
+  const sdkWithConfig = binding.withConfig.bind(binding);
+  Object.assign(binding, {
+    withConfig: (config: Parameters<typeof binding.withConfig>[0]) =>
+      preserveConfiguredChatBindings(sdkWithConfig(config) as typeof binding),
+    bindTools: (tools: unknown[], kwargs?: Record<string, unknown>) => {
+      const model = binding.bound as unknown as LangChainChatModelLike;
+      const bound = model.bindTools ? model.bindTools(tools, kwargs) : model;
+      return preserveConfiguredChatBindings(
+        new RunnableBinding({
+          bound: bound as unknown as Runnable,
+          config: binding.config,
+          kwargs: binding.kwargs,
+          configFactories: binding.configFactories,
+        }),
+      );
+    },
+  });
+  const model = binding.bound as unknown as LangChainChatModelLike;
+  if (typeof model.withStructuredOutput === "function") {
+    const withStructuredOutput = model.withStructuredOutput.bind(model);
+    Object.assign(binding, {
+      withStructuredOutput: (
+        ...args: Parameters<typeof withStructuredOutput>
+      ) =>
+        new RunnableBinding({
+          bound: withStructuredOutput(...args) as unknown as Runnable,
+          config: binding.config,
+          kwargs: binding.kwargs,
+          configFactories: binding.configFactories,
+        }),
+    });
+  }
+  return binding;
 }

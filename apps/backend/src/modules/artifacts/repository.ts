@@ -5,12 +5,112 @@ import {
   artifactVersions,
   chatThreadRuns,
   db,
+  threads,
 } from "@sourceweft/db";
-import { visibleContentWhere } from "../workspace/content-visibility";
+import {
+  visibleContentWhere,
+  type ContentVisibility,
+} from "../workspace/content-visibility";
+import {
+  ARTIFACT_WRITE_ERROR_CODES,
+  ArtifactError,
+} from "@sourceweft/contracts/artifact-errors";
+import {
+  lockArtifactRequestKey,
+  type ArtifactWriteTransaction,
+} from "./idempotency-lock";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type ArtifactStatus = ArtifactRow["status"];
 type ArtifactType = ArtifactRow["artifactType"];
+
+async function lockPublicationVisibility(
+  tx: ArtifactWriteTransaction,
+  input: { teamId: string; workspaceId: string; threadId: string },
+): Promise<ContentVisibility> {
+  const [thread] = await tx
+    .select({ visibility: threads.visibility })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.id, input.threadId),
+        eq(threads.teamId, input.teamId),
+        eq(threads.workspaceId, input.workspaceId),
+      ),
+    )
+    .for("share")
+    .limit(1);
+  if (!thread)
+    throw new ArtifactError({
+      code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+      message: "Artifact publication thread is no longer available",
+    });
+  return thread.visibility === "private" ? "private" : "workspace";
+}
+
+/** Shared by generic and current-run publication, under the same request lock. */
+export async function findArtifactRecordByRequestKeyWithExecutor(
+  tx: ArtifactWriteTransaction,
+  input: {
+    teamId: string;
+    workspaceId: string;
+    artifactType: ArtifactType;
+    requestKey?: string | null;
+    userId: string;
+    visibility: ContentVisibility;
+    statuses: readonly ArtifactStatus[];
+  },
+) {
+  if (
+    input.requestKey === undefined ||
+    input.requestKey === null ||
+    input.statuses.length === 0
+  )
+    return null;
+  const [row] = await tx
+    .select()
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.artifactType, input.artifactType),
+        eq(artifacts.requestKey, input.requestKey),
+        eq(artifacts.visibility, input.visibility),
+        visibleContentWhere({ userId: input.userId }, artifacts),
+        inArray(artifacts.status, [...input.statuses]),
+      ),
+    )
+    .orderBy(desc(artifacts.createdAt))
+    .for("update")
+    .limit(1);
+  return row ?? null;
+}
+
+async function currentVersionId(
+  tx: ArtifactWriteTransaction,
+  row: ArtifactRow,
+) {
+  if (row.status !== "ready") return null;
+  const [version] = await tx
+    .select({ id: artifactVersions.id })
+    .from(artifactVersions)
+    .where(
+      and(
+        eq(artifactVersions.artifactId, row.id),
+        eq(artifactVersions.teamId, row.teamId),
+        eq(artifactVersions.workspaceId, row.workspaceId),
+        eq(artifactVersions.versionNo, row.currentVersionNo),
+      ),
+    )
+    .limit(1);
+  if (!version)
+    throw new ArtifactError({
+      code: ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
+      message: "Ready artifact has no committed current version",
+    });
+  return version.id;
+}
 
 function mapArtifact(row: ArtifactRow) {
   return {
@@ -68,13 +168,31 @@ export async function createReadyArtifactRecord(input: {
   /** Idempotency token, when the caller asked for "the artifact for this request". */
   requestKey?: string | null;
 }) {
-  const versionId = randomUUID();
-  const now = new Date();
-
   // The row and its first version are one fact, not two. Written separately, a
   // failure between them leaves a status=ready artifact with zero versions —
   // readable by the API, unopenable by any version-based reader.
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    await lockArtifactRequestKey(tx, input);
+    const visibility = await lockPublicationVisibility(tx, input);
+    const existing = await findArtifactRecordByRequestKeyWithExecutor(tx, {
+      ...input,
+      visibility,
+      statuses: ["pending", "running", "ready"],
+    });
+    if (existing) {
+      if (existing.status !== "ready")
+        throw new ArtifactError({
+          code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+          message: "An artifact for this request is still in progress",
+        });
+      return {
+        artifactId: existing.id,
+        versionId: (await currentVersionId(tx, existing))!,
+        reused: true,
+      };
+    }
+    const versionId = randomUUID();
+    const now = new Date();
     await tx.insert(artifacts).values({
       id: input.artifactId,
       teamId: input.teamId,
@@ -96,7 +214,7 @@ export async function createReadyArtifactRecord(input: {
       // Artifacts inherit their thread's visibility: private thread → private
       // artifact, anything else → workspace-visible. There is no independent
       // per-artifact toggle; the thread is the source of truth.
-      visibility: sql`coalesce((select case when t.visibility = 'private' then 'private' else 'workspace' end from threads t where t.id = ${input.threadId}), 'workspace')`,
+      visibility,
       createdBy: input.userId,
       completedAt: now,
     });
@@ -110,12 +228,8 @@ export async function createReadyArtifactRecord(input: {
       contentJson: input.payload,
       createdBy: input.userId,
     });
+    return { artifactId: input.artifactId, versionId, reused: false };
   });
-
-  return {
-    artifactId: input.artifactId,
-    versionId,
-  };
 }
 
 /**
@@ -135,24 +249,35 @@ export async function createPendingArtifactRecord(input: {
   /** Idempotency token, when the caller asked for "the artifact for this request". */
   requestKey?: string | null;
 }) {
-  await db.insert(artifacts).values({
-    id: input.artifactId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    threadId: input.threadId,
-    artifactType: input.artifactType,
-    status: "pending",
-    // No version has been published yet; markArtifactReady moves it to 1.
-    currentVersionNo: 0,
-    requestKey: input.requestKey ?? null,
-    title: input.title,
-    promptText: input.prompt,
-    payloadJson: input.payload,
-    // Artifacts inherit their thread's visibility: private thread → private
-    // artifact, anything else → workspace-visible. There is no independent
-    // per-artifact toggle; the thread is the source of truth.
-    visibility: sql`coalesce((select case when t.visibility = 'private' then 'private' else 'workspace' end from threads t where t.id = ${input.threadId}), 'workspace')`,
-    createdBy: input.userId,
+  return db.transaction(async (tx) => {
+    await lockArtifactRequestKey(tx, input);
+    const visibility = await lockPublicationVisibility(tx, input);
+    const existing = await findArtifactRecordByRequestKeyWithExecutor(tx, {
+      ...input,
+      visibility,
+      statuses: ["pending", "running", "ready"],
+    });
+    if (existing) return { artifactId: existing.id, reused: true };
+    await tx.insert(artifacts).values({
+      id: input.artifactId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      threadId: input.threadId,
+      artifactType: input.artifactType,
+      status: "pending",
+      // No version has been published yet; markArtifactReady moves it to 1.
+      currentVersionNo: 0,
+      requestKey: input.requestKey ?? null,
+      title: input.title,
+      promptText: input.prompt,
+      payloadJson: input.payload,
+      // Artifacts inherit their thread's visibility: private thread → private
+      // artifact, anything else → workspace-visible. There is no independent
+      // per-artifact toggle; the thread is the source of truth.
+      visibility,
+      createdBy: input.userId,
+    });
+    return { artifactId: input.artifactId, reused: false };
   });
 }
 
@@ -226,13 +351,15 @@ export async function findReusableArtifactRecord(input: {
  * thread-scoped: "the artifact for this request" is the same artifact whichever
  * thread asks again.
  *
- * Callers must run this *before* uploading any bytes — a de-duplicated publish
- * that still wrote its objects has left orphans in the bucket for an artifact
- * it did not create.
+ * This preflight avoids unnecessary uploads. Both creation paths repeat the
+ * same lookup under the request lock, so a miss is never permission to insert
+ * without rechecking. Visibility follows the destination thread and viewer.
  */
 export async function findArtifactRecordByRequestKey(input: {
   teamId: string;
   workspaceId: string;
+  threadId: string;
+  userId: string;
   artifactType: ArtifactType;
   requestKey: string;
   statuses: readonly ArtifactStatus[];
@@ -240,34 +367,59 @@ export async function findArtifactRecordByRequestKey(input: {
   if (input.statuses.length === 0) {
     return null;
   }
-  const [row] = await db
-    .select()
-    .from(artifacts)
-    .where(
-      and(
-        eq(artifacts.teamId, input.teamId),
-        eq(artifacts.workspaceId, input.workspaceId),
-        eq(artifacts.artifactType, input.artifactType),
-        eq(artifacts.requestKey, input.requestKey),
-        inArray(artifacts.status, [...input.statuses]),
-      ),
-    )
-    .orderBy(desc(artifacts.createdAt))
-    .limit(1);
+  return db.transaction(async (tx) => {
+    await lockArtifactRequestKey(tx, input);
+    const visibility = await lockPublicationVisibility(tx, input);
+    const row = await findArtifactRecordByRequestKeyWithExecutor(tx, {
+      ...input,
+      visibility,
+    });
+    if (!row) return null;
+    return {
+      ...mapArtifact(row),
+      latestVersionId: await currentVersionId(tx, row),
+    };
+  });
+}
 
-  if (!row) {
-    return null;
-  }
-  const [latestVersion] = await db
-    .select({ id: artifactVersions.id })
-    .from(artifactVersions)
-    .where(eq(artifactVersions.artifactId, row.id))
-    .orderBy(desc(artifactVersions.versionNo))
-    .limit(1);
-
+/**
+ * Read-only evidence for an uncertain write outcome. Absence is not proof of
+ * rollback: another transaction may still be committing, and old versions may
+ * reference objects outside their JSON. Callers must retain ambiguous objects.
+ */
+export async function findArtifactWriteReferences(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactId: string;
+  keys: readonly string[];
+}) {
+  const keys = [...new Set(input.keys)];
+  const result = await db.execute<{
+    currentVersionNo: number;
+    hasVersions: boolean;
+    referencedKeys: string[];
+  }>(sql`
+    select a.current_version_no as "currentVersionNo",
+      exists (select 1 from artifact_versions av where av.artifact_id = a.id and av.team_id = ${input.teamId} and av.workspace_id = ${input.workspaceId}) as "hasVersions",
+      array(
+      select candidate.key from unnest(${sql.param(keys)}::text[]) as candidate(key)
+      where candidate.key = a.storage_key or candidate.key = a.preview_storage_key
+        or jsonb_path_exists(a.payload_json, '$.** ? (@ == $key)', jsonb_build_object('key', candidate.key))
+        or exists (
+          select 1 from artifact_versions av
+          where av.artifact_id = a.id and av.team_id = ${input.teamId} and av.workspace_id = ${input.workspaceId}
+            and jsonb_path_exists(av.content_json, '$.** ? (@ == $key)', jsonb_build_object('key', candidate.key))
+        )
+    ) as "referencedKeys"
+    from artifacts a where a.id = ${input.artifactId} and a.team_id = ${input.teamId} and a.workspace_id = ${input.workspaceId}
+    limit 1
+  `);
+  const row = result.rows[0];
   return {
-    ...mapArtifact(row),
-    latestVersionId: latestVersion?.id ?? null,
+    artifactExists: Boolean(row),
+    currentVersionNo: row?.currentVersionNo ?? null,
+    referencedKeys: row?.referencedKeys ?? [],
+    hasVersions: row?.hasVersions ?? false,
   };
 }
 
@@ -358,12 +510,14 @@ export async function markArtifactReady(input: {
           eq(artifacts.id, input.artifactId),
           eq(artifacts.teamId, input.teamId),
           eq(artifacts.workspaceId, input.workspaceId),
+          visibleContentWhere({ userId: input.userId }, artifacts),
         ),
       )
       .limit(1)
       // Take the row lock before deciding what to carry forward, so a
       // concurrent publisher cannot swap storage pointers underneath us.
       .for("update");
+    if (!current) return null;
 
     // Compare-and-swap on status, matching markArtifactRunning/markArtifactFailed.
     // Without it two concurrent completions of the same artifact both race to
@@ -394,6 +548,7 @@ export async function markArtifactReady(input: {
             eq(artifacts.id, input.artifactId),
             eq(artifacts.teamId, input.teamId),
             eq(artifacts.workspaceId, input.workspaceId),
+            visibleContentWhere({ userId: input.userId }, artifacts),
             input.expectedStatuses && input.expectedStatuses.length > 0
               ? or(
                   ...input.expectedStatuses.map((status) =>

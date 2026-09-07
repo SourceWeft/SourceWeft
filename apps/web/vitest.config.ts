@@ -14,6 +14,9 @@ export default defineConfig({
       reporter: ["text", "json", "html"],
     },
     environment: "node",
+    // Share the machine with the backend and package suites under Turbo instead
+    // of each suite independently claiming all available CPUs.
+    maxWorkers: 2,
     include: ["**/*.{test,spec}.{ts,tsx}"],
     passWithNoTests: true,
   },

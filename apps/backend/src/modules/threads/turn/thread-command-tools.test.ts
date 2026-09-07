@@ -82,11 +82,12 @@ function imageSkillCommand(): ResolvedThreadCommand {
   };
 }
 
-test("mergeCommandTools enables image skill without direct generate mode", () => {
+test("mergeCommandTools marks the image skill's required output as direct generation", () => {
   const tools = mergeCommandTools(undefined, imageSkillCommand());
 
   assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
     enabled: true,
+    mode: "generate",
   });
   assert.equal(
     resolveToolPermissions({ command: imageSkillCommand(), tools })[
@@ -187,7 +188,7 @@ test("mergeInvocationTools enables fixed capability tool choices", () => {
   } satisfies ResolvedThreadInvocation;
 
   assert.deepEqual(mergeInvocationTools(undefined, invocation), {
-    [AGENT_TOOL_NAMES.generateImage]: { enabled: true },
+    [AGENT_TOOL_NAMES.generateImage]: { enabled: true, mode: "generate" },
   });
 
   assert.deepEqual(

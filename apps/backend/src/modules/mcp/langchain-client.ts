@@ -1,11 +1,12 @@
-import {
-  MultiServerMCPClient,
-  type ClientConfig,
-} from "@langchain/mcp-adapters";
+import { loadMcpTools } from "@langchain/mcp-adapters";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { McpError } from "./errors";
 import type { WorkspaceMcpInstallRecord } from "./types";
 import { createHash } from "node:crypto";
+import { createMcpRequestScope } from "./network";
 
 const MAX_MCP_TOOL_NAME_LENGTH = 64;
 
@@ -108,21 +109,94 @@ export function createLangChainMcpClient(input: {
       "MCP endpoint is required",
     );
   }
-  const config: ClientConfig = {
-    throwOnLoadError: true,
-    prefixToolNameWithServerName: true,
-    additionalToolNamePrefix: "mcp",
-    useStandardContentBlocks: true,
-    onConnectionError: "throw",
-    mcpServers: {
-      [langChainMcpServerKey(input.install)]: {
-        transport,
-        url: input.install.endpointUrl,
-        headers: input.headers,
-        ...(input.authProvider ? { authProvider: input.authProvider } : {}),
-        automaticSSEFallback: automaticSSEFallbackFor(input.install.transport),
-      },
+  const requests = createMcpRequestScope();
+  const endpoint = input.install.endpointUrl;
+  let client: Client | undefined;
+  let closed = false;
+  let pending: ReturnType<typeof loadMcpTools> | undefined;
+
+  async function connect(kind: "http" | "sse", url: string) {
+    if (closed) throw new Error("MCP client is closed");
+    requests.throwIfDenied();
+    const next = new Client({ name: "sourceweft", version: "1" });
+    client = next;
+    const options = {
+      fetch: requests.fetch,
+      requestInit: { headers: input.headers },
+      ...(input.authProvider ? { authProvider: input.authProvider } : {}),
+    };
+    try {
+      await next.connect(
+        kind === "http"
+          ? new StreamableHTTPClientTransport(new URL(url), options)
+          : new SSEClientTransport(new URL(url), options),
+      );
+      const tools = await loadMcpTools(
+        langChainMcpServerKey(input.install),
+        next,
+        {
+          throwOnLoadError: true,
+          prefixToolNameWithServerName: true,
+          additionalToolNamePrefix: "mcp",
+          useStandardContentBlocks: true,
+        },
+      );
+      if (closed) throw new Error("MCP client closed during discovery");
+      requests.throwIfDenied();
+      return tools;
+    } catch (error) {
+      await next.close();
+      requests.throwIfDenied();
+      throw error;
+    }
+  }
+
+  async function initialize() {
+    try {
+      return await connect(transport, endpoint);
+    } catch (error) {
+      requests.throwIfDenied();
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? error.code
+          : undefined;
+      if (
+        transport !== "http" ||
+        !automaticSSEFallbackFor(input.install.transport) ||
+        typeof code !== "number" ||
+        code < 400 ||
+        code >= 500
+      )
+        throw error;
+      // Preserve only the manifest's explicit legacy HTTP/SSE compatibility.
+      try {
+        return await connect("sse", endpoint);
+      } catch (sseError) {
+        requests.throwIfDenied();
+        const alternate = new URL(endpoint);
+        if (!alternate.pathname.endsWith("/mcp")) throw sseError;
+        alternate.pathname = `${alternate.pathname.slice(0, -4)}/sse`;
+        return connect("sse", alternate.toString());
+      }
+    }
+  }
+
+  return {
+    getTools() {
+      if (closed) return Promise.reject(new Error("MCP client is closed"));
+      return (pending ??= initialize().catch(async (error) => {
+        closed = true;
+        await requests.close();
+        throw error;
+      }));
+    },
+    async close() {
+      closed = true;
+      try {
+        await client?.close();
+      } finally {
+        await requests.close();
+      }
     },
   };
-  return new MultiServerMCPClient(config);
 }

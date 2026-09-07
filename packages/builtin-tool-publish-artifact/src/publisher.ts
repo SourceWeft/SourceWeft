@@ -58,6 +58,7 @@ import {
 export type PublishedArtifactRecord = {
   readonly artifactId: string;
   readonly versionId: string;
+  readonly reused: boolean;
 };
 
 /** @deprecated Use {@link PublishedArtifactRecord}; kept as an alias. */
@@ -152,7 +153,6 @@ export type PreparedPreviewImage = {
   readonly contentType: string;
   readonly fileName: string;
 };
-
 
 function previewImageFileNameForContentType(contentType: string) {
   return `preview${extensionForMimeType(contentType, ".jpg")}`;
@@ -286,13 +286,13 @@ export async function publishArtifact(
   });
   throwArtifactPublicationAbortReason(input.signal);
   const previewImage = parsed.previewImage
-    ? (await readPreviewImage({
+    ? ((await readPreviewImage({
         previewImage: parsed.previewImage,
         publishInput: parsed,
         services: input.services,
         sourceAdapters: input.sourceAdapters,
         ...(input.signal ? { signal: input.signal } : {}),
-      })) ?? undefined
+      })) ?? undefined)
     : undefined;
   throwArtifactPublicationAbortReason(input.signal);
 
@@ -423,34 +423,34 @@ export async function publishPreparedArtifact(
         });
   };
   const record = await publishRecord({
-      artifactType: preparedArtifact.artifactType,
-      title: input.descriptor.title,
-      prompt: input.descriptor.description ?? input.descriptor.title,
-      payload: {
-        ...preparedArtifact.payload,
-        toolCallId: input.toolCallId,
+    artifactType: preparedArtifact.artifactType,
+    title: input.descriptor.title,
+    prompt: input.descriptor.description ?? input.descriptor.title,
+    payload: {
+      ...preparedArtifact.payload,
+      toolCallId: input.toolCallId,
+    },
+    attachments: [
+      {
+        fileName: preparedArtifact.fileName,
+        contentType: preparedArtifact.contentType,
+        bytes: input.source.bytes,
+        role: "primary",
       },
-      attachments: [
-        {
-          fileName: preparedArtifact.fileName,
-          contentType: preparedArtifact.contentType,
-          bytes: input.source.bytes,
-          role: "primary",
-        },
-      ],
-      ...(input.previewImage
-        ? {
-            preview: {
-              bytes: input.previewImage.bytes,
-              contentType: input.previewImage.contentType,
-              fileName: input.previewImage.fileName,
-              altText: input.previewImage.altText,
-            },
-          }
-        : {}),
-      ...(input.requestKey
-        ? { idempotency: { requestKey: input.requestKey } }
-        : {}),
+    ],
+    ...(input.previewImage
+      ? {
+          preview: {
+            bytes: input.previewImage.bytes,
+            contentType: input.previewImage.contentType,
+            fileName: input.previewImage.fileName,
+            altText: input.previewImage.altText,
+          },
+        }
+      : {}),
+    ...(input.requestKey
+      ? { idempotency: { requestKey: input.requestKey } }
+      : {}),
   });
   const artifactId = record.artifactId;
 
@@ -464,6 +464,7 @@ export async function publishPreparedArtifact(
   });
   const output = preparedArtifact.toOutput({
     artifactId,
+    reused: record.reused,
     artifactUrl,
     downloadUrl,
     title: input.descriptor.title,

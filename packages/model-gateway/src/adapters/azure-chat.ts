@@ -1,3 +1,4 @@
+import { sdkRetryOptions } from "./gateway-caller";
 import { AzureChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 
@@ -13,9 +14,15 @@ export class AzureChatAdapter implements ChatAdapter {
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: options?.maxRetries ?? 2,
+      ...sdkRetryOptions(options),
+      timeout: options?.timeoutMs,
       azureOpenAIApiKey: target.apiKey,
       azureOpenAIEndpoint: target.baseUrl,
+      configuration: {
+        fetch: options?.fetch,
+        adminAPIKey: null,
+        ignoreEnvironmentHeaders: true,
+      },
       deploymentName: target.providerModel,
       maxTokens: input.maxTokens,
       streaming: input.stream ?? false,

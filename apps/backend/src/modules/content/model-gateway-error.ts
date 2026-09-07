@@ -9,11 +9,14 @@ const RETRYABLE_CONTENT_ERROR_CODES = new Set([
 
 function toRecord(value: unknown) {
   return value && typeof value === "object"
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
-function findGatewayError(error: unknown, seen = new Set<unknown>()): ModelGatewayError | null {
+function findGatewayError(
+  error: unknown,
+  seen = new Set<unknown>(),
+): ModelGatewayError | null {
   if (!error || seen.has(error)) {
     return null;
   }
@@ -41,7 +44,10 @@ function findGatewayError(error: unknown, seen = new Set<unknown>()): ModelGatew
   return null;
 }
 
-function findGatewayErrorData(error: unknown, seen = new Set<unknown>()): {
+function findGatewayErrorData(
+  error: unknown,
+  seen = new Set<unknown>(),
+): {
   code?: unknown;
   message?: unknown;
   provider?: unknown;
@@ -63,7 +69,10 @@ function findGatewayErrorData(error: unknown, seen = new Set<unknown>()): {
     return record;
   }
 
-  return findGatewayErrorData(record.cause, seen) ?? findGatewayErrorData(record.error, seen);
+  return (
+    findGatewayErrorData(record.cause, seen) ??
+    findGatewayErrorData(record.error, seen)
+  );
 }
 
 function contentErrorFromGatewayCode(input: {
@@ -90,7 +99,25 @@ function contentErrorFromGatewayCode(input: {
   }
 
   if (input.code === "TIMEOUT") {
-    return new ContentError(504, "MODEL_TIMEOUT", "LLM request timed out", metadata);
+    return new ContentError(
+      504,
+      "MODEL_TIMEOUT",
+      "LLM request timed out",
+      metadata,
+    );
+  }
+
+  if (input.code === "CONFIGURATION") {
+    return new ContentError(
+      503,
+      "MODEL_CONFIGURATION_ERROR",
+      "No model is available for this request. Ask an administrator to check the model provider and route configuration.",
+      {
+        ...metadata,
+        details: { ...metadata.details, retryable: false },
+        recoverable: false,
+      },
+    );
   }
 
   if (input.code === "AUTH") {
@@ -118,7 +145,9 @@ function gatewayContentErrorMetadata(input: {
       ...(typeof input.retryable === "boolean"
         ? { retryable: input.retryable }
         : {}),
-      ...(typeof input.provider === "string" ? { provider: input.provider } : {}),
+      ...(typeof input.provider === "string"
+        ? { provider: input.provider }
+        : {}),
       ...(typeof input.requestId === "string"
         ? { requestId: input.requestId }
         : {}),
@@ -131,6 +160,9 @@ function gatewayContentErrorMetadata(input: {
 
 export function sanitizeClientErrorMessage(value: string) {
   const text = value.trim();
+  if (/^Failed query:/i.test(text)) {
+    return "The request could not be saved. Please try again.";
+  }
   if (
     /Error invoking tool/i.test(text) ||
     /Received tool input did not match expected schema/i.test(text) ||
@@ -162,7 +194,10 @@ export function toContentError(error: unknown): ContentError {
   }
 
   const gatewayData = findGatewayErrorData(error);
-  if (typeof gatewayData?.code === "string" && typeof gatewayData.message === "string") {
+  if (
+    typeof gatewayData?.code === "string" &&
+    typeof gatewayData.message === "string"
+  ) {
     return contentErrorFromGatewayCode({
       code: gatewayData.code,
       message: gatewayData.message,

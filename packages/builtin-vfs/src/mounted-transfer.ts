@@ -17,6 +17,36 @@ type UploadBatchItem = DownloadBatchItem & {
   readonly content: Uint8Array;
 };
 
+function isFileError(value: unknown): value is FileOperationError | null {
+  return (
+    value === null ||
+    value === "file_not_found" ||
+    value === "permission_denied" ||
+    value === "is_directory" ||
+    value === "invalid_path"
+  );
+}
+
+function validResponse(
+  value: unknown,
+  path: string,
+): value is FileUploadResponse {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "path" in value &&
+    value.path === path &&
+    "error" in value &&
+    isFileError(value.error),
+  );
+}
+
+function transferError(error: unknown): FileOperationError {
+  return fileOperationErrorFromMessage(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 export function downloadError(
   path: string,
   error: FileOperationError,
@@ -68,15 +98,37 @@ export async function downloadMountedFiles(input: {
     }
 
     if (backend.downloadFiles) {
-      const responses = await backend.downloadFiles(
-        batch.map((item) => item.path),
-      );
+      let responses: FileDownloadResponse[];
+      try {
+        responses = await backend.downloadFiles(batch.map((item) => item.path));
+      } catch (error) {
+        for (const item of batch) {
+          results[item.index] = downloadError(
+            item.originalPath,
+            transferError(error),
+          );
+        }
+        continue;
+      }
       batch.forEach((item, batchIndex) => {
-        const response = responses[batchIndex];
+        const response =
+          Array.isArray(responses) && responses.length === batch.length
+            ? responses[batchIndex]
+            : undefined;
+        if (
+          !validResponse(response, item.path) ||
+          (response.error === null && !(response.content instanceof Uint8Array))
+        ) {
+          results[item.index] = downloadError(
+            item.originalPath,
+            "invalid_path",
+          );
+          return;
+        }
         results[item.index] = {
           path: item.originalPath,
           content: response?.content ?? null,
-          error: response?.error ?? "file_not_found",
+          error: response.error,
         };
       });
       continue;
@@ -134,14 +186,30 @@ export async function uploadMountedFiles(input: {
   const decoder = new TextDecoder();
   for (const [backend, batch] of batches) {
     if (backend.uploadFiles) {
-      const responses = await backend.uploadFiles(
-        batch.map((item) => [item.path, item.content]),
-      );
+      let responses: FileUploadResponse[];
+      try {
+        responses = await backend.uploadFiles(
+          batch.map((item) => [item.path, item.content]),
+        );
+      } catch (error) {
+        for (const item of batch) {
+          results[item.index] = uploadError(
+            item.originalPath,
+            transferError(error),
+          );
+        }
+        continue;
+      }
       batch.forEach((item, batchIndex) => {
-        const response = responses[batchIndex];
+        const response =
+          Array.isArray(responses) && responses.length === batch.length
+            ? responses[batchIndex]
+            : undefined;
         results[item.index] = {
           path: item.originalPath,
-          error: response?.error ?? null,
+          error: validResponse(response, item.path)
+            ? response.error
+            : "invalid_path",
         };
       });
       continue;

@@ -1,3 +1,4 @@
+import { resolveRequestOptions } from "../request-options";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeRerank } from "../bridge/rerank";
 import { runWithTargetFailover } from "./failover";
@@ -29,10 +30,15 @@ export class ModelGatewayRerankEndpoint {
       operation: "rerank.rank",
       callerSignal: options?.signal,
       attempt: async (target) => {
+        const requestOptions = resolveRequestOptions(
+          this.config,
+          target,
+          options,
+        );
         const generation = createGenerationObservation({
           operation: "rerank.rank",
           payload: input,
-          options,
+          options: requestOptions,
           target,
         });
         await emitGenerationStart(this.config, generation.start);
@@ -41,7 +47,7 @@ export class ModelGatewayRerankEndpoint {
             config: this.config,
             target,
             payload: input,
-            options,
+            options: requestOptions,
           });
           if (result.observation) {
             result.observation.traceId = generation.start.traceId;

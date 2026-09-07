@@ -1,8 +1,10 @@
 import { config } from "../../shared/config";
+import { sanitizeCustomHeaders } from "../../shared/security/public-endpoint";
 import {
-  sanitizeCustomHeaders,
-  validatePublicHttpsEndpoint,
-} from "../../shared/security/public-endpoint";
+  createLlmFetch,
+  loadLlmEndpointPolicy,
+  validateLlmEndpoint,
+} from "../../shared/model-gateway/network";
 import {
   decryptTeamSecret,
   encryptTeamSecret,
@@ -190,6 +192,7 @@ export class ContentByokService {
 
     try {
       const items = await discoverByokModelCandidates({
+        fetch: createLlmFetch(await loadLlmEndpointPolicy()),
         providerKind: credential.providerKind,
         providerName: credential.providerName,
         baseUrl,
@@ -403,7 +406,7 @@ export class ContentByokService {
 
 async function validateByokEndpoint(input: string) {
   try {
-    return await validatePublicHttpsEndpoint(input);
+    return await validateLlmEndpoint(input);
   } catch (error) {
     throw new ContentError(
       400,

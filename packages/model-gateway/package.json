@@ -11,14 +11,14 @@
   },
   "scripts": {
     "check-types": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test --test-concurrency=2 tests/*.test.ts",
     "test:integration": "tsx --test tests/integration/*.integration.test.ts"
   },
   "dependencies": {
     "@langchain/anthropic": "^1.5.5",
     "@langchain/core": "^1.2.9",
     "@langchain/deepseek": "^1.1.7",
-    "@langchain/google-genai": "^2.2.0",
+    "@langchain/google-genai": "2.2.0",
     "@langchain/openai": "1.5.5",
     "eventsource-parser": "^3.1.1",
     "jsonrepair": "^3.15.0",

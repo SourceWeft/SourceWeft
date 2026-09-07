@@ -1,3 +1,9 @@
+import { awaitWithSignal } from "../request-options";
+import {
+  closeStreamIterator,
+  openStreamIterator,
+  type StreamIterator,
+} from "./stream-iterator";
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import {
   ModelGatewayError,
@@ -243,9 +249,8 @@ export async function runBridgeChatComplete(input: {
       // `method`/`strict` come from the caller only (capability plays no part in
       // the dispatch — chat.complete pins no fallback method, preserving its
       // long-standing behavior).
-      const executed = await runWithProviderResponseCapture(
-        responseCapture,
-        () =>
+      const executed = await awaitWithSignal(input.options?.signal, () =>
+        runWithProviderResponseCapture(responseCapture, () =>
           executeStructuredOutput({
             model,
             schema,
@@ -259,12 +264,15 @@ export async function runBridgeChatComplete(input: {
             ...(input.options !== undefined ? { options: input.options } : {}),
             logger: input.config.logger,
           }),
+        ),
       );
       rawMessage = executed.rawMessage;
       structuredOutput = executed.parsed;
     } else {
-      rawMessage = (await runWithProviderResponseCapture(responseCapture, () =>
-        model.invoke(messages, langChainInvokeOptions(input.options)),
+      rawMessage = (await awaitWithSignal(input.options?.signal, () =>
+        runWithProviderResponseCapture(responseCapture, () =>
+          model.invoke(messages, langChainInvokeOptions(input.options)),
+        ),
       )) as AIMessage;
     }
     const responseMetadata = extractResponseMetadata(rawMessage);
@@ -309,12 +317,53 @@ export async function runBridgeChatComplete(input: {
   }
 }
 
+type ChatStreamMetadata = Extract<
+  ChatStreamEvent,
+  { type: "metadata" }
+>["metadata"];
+
 export async function* runBridgeChatStream(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
   payload: ChatCompleteInput;
   options?: RequestOptions;
+  onFinalMetadata?: (metadata: ChatStreamMetadata) => void;
 }): AsyncGenerator<ChatStreamEvent> {
+  const responseCapture = createProviderResponseCapture();
+  const metadata: ChatStreamMetadata = {
+    routeDecision: input.target.routeDecision,
+    traceId: input.options?.traceId,
+  };
+  let iterator: StreamIterator<AIMessageChunk> | undefined;
+  let lastChunk: AIMessageChunk | undefined;
+  let failed = false;
+  let failure: unknown;
+  let drained = false;
+  const captureObservation = () => {
+    if (!lastChunk && !responseCapture.headers) return;
+    const responseMetadata = lastChunk && extractResponseMetadata(lastChunk);
+    metadata.observation = mergeModelCallObservations(
+      metadata.observation,
+      normalizeModelCallObservation({
+        modelAlias: input.payload.model,
+        context: {
+          target: input.target,
+          modality: "chat",
+          rawResponse: lastChunk,
+          sdkUsage:
+            lastChunk &&
+            extractUsage({
+              raw: lastChunk,
+              usageMetadata: lastChunk.usage_metadata,
+              responseMetadata,
+            }),
+          responseMetadata,
+          responseHeaders: responseCapture.headers,
+        },
+      }),
+    );
+    metadata.usage = metadata.observation.usage ?? metadata.usage;
+  };
   try {
     if (input.payload.structuredOutput) {
       throw new ModelGatewayError({
@@ -323,84 +372,60 @@ export async function* runBridgeChatStream(input: {
         retryable: false,
       });
     }
-    const payload = input.payload.stream
-      ? input.payload
-      : {
-          ...input.payload,
-          stream: true,
-        };
-
-    const model = createChatModel({
-      ...input,
-      payload,
+    const payload = { ...input.payload, stream: true };
+    const model = createChatModel({ ...input, payload });
+    iterator = await openStreamIterator({
+      open: (signal) =>
+        model.stream(toLangChainMessages(payload.messages), {
+          signal,
+        }) as Promise<AsyncIterable<AIMessageChunk>>,
+      signal: input.options?.signal,
+      capture: responseCapture,
+      logger: input.config.logger,
     });
-    const responseCapture = createProviderResponseCapture();
-    const stream = await runWithProviderResponseCapture(responseCapture, () =>
-      model.stream(
-        toLangChainMessages(payload.messages),
-        langChainInvokeOptions(input.options),
-      ),
-    );
-    let usage = undefined;
-    let observation = undefined;
-    let finishReason: string | undefined;
-    let reasoning: string | undefined;
-    let providerFields: Record<string, unknown> | undefined;
-
-    const iterator = (stream as AsyncIterable<AIMessageChunk>)[
-      Symbol.asyncIterator
-    ]();
     while (true) {
-      const next = await runWithProviderResponseCapture(responseCapture, () =>
-        iterator.next(),
+      const next = await iterator.next();
+      if (next.done) break;
+      lastChunk = next.value;
+      const responseMetadata = extractResponseMetadata(lastChunk);
+      captureObservation();
+      metadata.finishReason =
+        extractFinishReason(responseMetadata) ?? metadata.finishReason;
+      metadata.reasoning = appendText(
+        metadata.reasoning,
+        extractReasoning(lastChunk),
       );
-      if (next.done) {
-        break;
-      }
-      const chunk = next.value;
-      const responseMetadata = extractResponseMetadata(chunk);
-      const nextObservation = normalizeModelCallObservation({
-        modelAlias: payload.model,
-        context: {
-          target: input.target,
-          modality: "chat",
-          rawResponse: chunk,
-          sdkUsage:
-            chunk.usage_metadata ??
-            extractUsage({
-              raw: chunk,
-              usageMetadata: chunk.usage_metadata,
-              responseMetadata,
-            }),
-          responseMetadata,
-          responseHeaders: responseCapture.headers,
-        },
-      });
-      observation = mergeModelCallObservations(observation, nextObservation);
-      usage = observation.usage ?? usage;
-      finishReason = extractFinishReason(responseMetadata) ?? finishReason;
-      reasoning = appendText(reasoning, extractReasoning(chunk));
-      providerFields = cloneRecord(responseMetadata) ?? providerFields;
-
-      yield { type: "chunk", chunk };
+      metadata.providerFields =
+        cloneRecord(responseMetadata) ?? metadata.providerFields;
+      yield { type: "chunk", chunk: lastChunk };
     }
-
-    yield {
-      type: "metadata",
-      metadata: {
-        usage,
-        observation,
-        finishReason,
-        reasoning,
-        providerFields,
-        routeDecision: input.target.routeDecision,
-        traceId: input.options?.traceId,
-      },
-    };
+    drained = true;
   } catch (error) {
-    yield {
-      type: "error",
-      error: toGatewayErrorData(error),
-    };
+    failed = true;
+    failure = error;
+  } finally {
+    // Run return before publishing terminal usage. SDK cleanup can supply
+    // response headers and must execute in the same capture scope as next().
+    let cleanupFailure: unknown;
+    let cleanupFailed = false;
+    try {
+      await closeStreamIterator(iterator, input.config.logger, failed);
+    } catch (error) {
+      cleanupFailed = true;
+      cleanupFailure = error;
+    }
+    captureObservation();
+    input.onFinalMetadata?.(metadata);
+    if (cleanupFailed) {
+      // Do not yield another event from an iterator the consumer has returned.
+      if (!drained && !failed) throw cleanupFailure;
+      failed = true;
+      failure = cleanupFailure;
+    }
+  }
+  if (failed) {
+    yield { type: "error", error: toGatewayErrorData(failure) };
+  } else {
+    yield { type: "metadata", metadata };
   }
 }

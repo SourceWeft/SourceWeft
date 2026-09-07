@@ -1,19 +1,6 @@
 import assert from "node:assert/strict";
-import { test, vi } from "vitest";
+import { test } from "vitest";
 import type { WorkspaceMcpInstallRecord } from "./types";
-
-const mocks = vi.hoisted(() => ({
-  constructorSpy: vi.fn(),
-}));
-
-vi.mock("@langchain/mcp-adapters", () => ({
-  MultiServerMCPClient: class {
-    constructor(config: unknown) {
-      mocks.constructorSpy(config);
-    }
-  },
-}));
-
 import {
   createLangChainMcpClient,
   langChainMcpServerKey,
@@ -55,32 +42,6 @@ function install(
   };
 }
 
-test("createLangChainMcpClient configures streamable HTTP MCP servers", () => {
-  mocks.constructorSpy.mockClear();
-
-  const record = install({ marketIdentifier: "github" });
-  createLangChainMcpClient({
-    install: record,
-    headers: { Authorization: "Bearer secret" },
-  });
-
-  assert.deepEqual(mocks.constructorSpy.mock.calls[0]?.[0], {
-    throwOnLoadError: true,
-    prefixToolNameWithServerName: true,
-    additionalToolNamePrefix: "mcp",
-    useStandardContentBlocks: true,
-    onConnectionError: "throw",
-    mcpServers: {
-      [langChainMcpServerKey(record)]: {
-        transport: "http",
-        url: "https://mcp.example.com/mcp",
-        headers: { Authorization: "Bearer secret" },
-        automaticSSEFallback: false,
-      },
-    },
-  });
-});
-
 test("langChainMcpToolName is provider-safe, bounded, and collision-resistant", () => {
   const record = install({
     id: "install-with-a-stable-suffix",
@@ -104,62 +65,6 @@ test("langChainMcpToolName is provider-safe, bounded, and collision-resistant", 
   );
 });
 
-test("createLangChainMcpClient enables SSE fallback for http_sse_compat manifests", () => {
-  mocks.constructorSpy.mockClear();
-
-  const record = install({
-    marketIdentifier: "legacy",
-    transport: "http_sse_compat",
-  });
-  createLangChainMcpClient({ install: record });
-
-  const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
-    mcpServers: Record<string, Record<string, unknown>>;
-  };
-  const server = config.mcpServers[langChainMcpServerKey(record)];
-  assert.ok(server);
-  assert.equal(server.transport, "http");
-  assert.equal(server.automaticSSEFallback, true);
-});
-
-test("createLangChainMcpClient does not enable SSE fallback for streamable_http", () => {
-  mocks.constructorSpy.mockClear();
-
-  const record = install({
-    marketIdentifier: "streamable",
-    transport: "streamable_http",
-  });
-  createLangChainMcpClient({ install: record });
-
-  const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
-    mcpServers: Record<string, Record<string, unknown>>;
-  };
-  const server = config.mcpServers[langChainMcpServerKey(record)];
-  assert.ok(server);
-  assert.equal(server.transport, "http");
-  assert.equal(server.automaticSSEFallback, false);
-});
-
-test("createLangChainMcpClient configures SSE MCP servers and falls back to install id", () => {
-  mocks.constructorSpy.mockClear();
-
-  const record = install({
-    id: "mcp_install_sse",
-    marketIdentifier: null,
-    transport: "sse",
-    endpointUrl: "https://mcp.example.com/sse",
-  });
-  createLangChainMcpClient({ install: record });
-
-  const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
-    mcpServers: Record<string, Record<string, unknown>>;
-  };
-  const server = config.mcpServers[langChainMcpServerKey(record)];
-  assert.ok(server);
-  assert.equal(server.transport, "sse");
-  assert.equal(server.url, "https://mcp.example.com/sse");
-});
-
 test("langChainMcpServerKey disambiguates identifiers that sanitize alike", () => {
   // `io.github.a/b` and `io.github.a.b` both collapse to `io_github_a_b`; the
   // install-id suffix must keep their server keys distinct so their tool names
@@ -178,8 +83,6 @@ test("langChainMcpServerKey disambiguates identifiers that sanitize alike", () =
 });
 
 test("createLangChainMcpClient rejects missing endpointUrl before construction", () => {
-  mocks.constructorSpy.mockClear();
-
   assert.throws(
     () =>
       createLangChainMcpClient({
@@ -187,12 +90,9 @@ test("createLangChainMcpClient rejects missing endpointUrl before construction",
       }),
     /MCP endpoint is required/,
   );
-  assert.equal(mocks.constructorSpy.mock.calls.length, 0);
 });
 
 test("createLangChainMcpClient rejects hosted stdio before construction", () => {
-  mocks.constructorSpy.mockClear();
-
   assert.throws(
     () =>
       createLangChainMcpClient({
@@ -205,5 +105,4 @@ test("createLangChainMcpClient rejects hosted stdio before construction", () => 
       }),
     /Hosted backend does not support stdio MCP transport/,
   );
-  assert.equal(mocks.constructorSpy.mock.calls.length, 0);
 });

@@ -175,7 +175,10 @@ test("loadGlobalModelGatewayConfig rejects mixing inline target fields with targ
     ],
   };
 
-  await assert.rejects(loadConfig(config), /both 'targets' and inline target fields/);
+  await assert.rejects(
+    loadConfig(config),
+    /both 'targets' and inline target fields/,
+  );
 });
 
 test("loadGlobalModelGatewayConfig rejects multiple targets without explicit pricing", async () => {
@@ -199,11 +202,18 @@ test("loadGlobalModelGatewayConfig rejects multiple targets without explicit pri
     isActive: true,
     targets: [
       { gatewaySlug: "test", providerName: "Test", targetModel: "test-chat" },
-      { gatewaySlug: "backup", providerName: "Backup", targetModel: "backup/test-chat" },
+      {
+        gatewaySlug: "backup",
+        providerName: "Backup",
+        targetModel: "backup/test-chat",
+      },
     ],
   };
 
-  await assert.rejects(loadConfig(config), /must set an explicit 'pricing' block/);
+  await assert.rejects(
+    loadConfig(config),
+    /must set an explicit 'pricing' block/,
+  );
 });
 
 test("loadGlobalModelGatewayConfig rejects a repeated target within one alias", async () => {
@@ -231,7 +241,11 @@ test("loadGlobalModelGatewayConfig rejects multi-target embedding profiles", asy
     isDefault: true,
     isActive: true,
     targets: [
-      { gatewaySlug: "test", providerName: "Test", targetModel: "test-embedding" },
+      {
+        gatewaySlug: "test",
+        providerName: "Test",
+        targetModel: "test-embedding",
+      },
     ],
   };
 
@@ -525,23 +539,20 @@ test("loadGlobalModelGatewayConfig resolves provider base URL env override", asy
       loaded?.gateways[0]?.baseUrlEnv,
       "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
     );
-    assert.deepEqual(
-      loaded?.sourceJson._resolvedGateways,
-      [
-        {
-          baseUrl: "https://proxy.example.com/deepinfra",
-          baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
-          activation: {
-            configured: true,
-            enabled: true,
-            env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
-            globalReady: true,
-            source: "default",
-          },
-          slug: "test",
+    assert.deepEqual(loaded?.sourceJson._resolvedGateways, [
+      {
+        baseUrl: "https://proxy.example.com/deepinfra",
+        baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+        activation: {
+          configured: true,
+          enabled: true,
+          env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
+          globalReady: true,
+          source: "default",
         },
-      ],
-    );
+        slug: "test",
+      },
+    ]);
   } finally {
     if (original === undefined) {
       delete process.env.SOURCEWEFT_TEST_DEEPINFRA_API_BASE;
@@ -611,9 +622,11 @@ test("loadGlobalModelGatewayConfig version hash changes with base URL env overri
   const original = process.env.SOURCEWEFT_TEST_HASH_API_BASE;
 
   try {
-    process.env.SOURCEWEFT_TEST_HASH_API_BASE = "https://gateway-one.example.com/v1";
+    process.env.SOURCEWEFT_TEST_HASH_API_BASE =
+      "https://gateway-one.example.com/v1";
     const first = await loadConfig(config);
-    process.env.SOURCEWEFT_TEST_HASH_API_BASE = "https://gateway-two.example.com/v1";
+    process.env.SOURCEWEFT_TEST_HASH_API_BASE =
+      "https://gateway-two.example.com/v1";
     const second = await loadConfig(config);
 
     assert.notEqual(first?.versionHash, second?.versionHash);
@@ -670,6 +683,22 @@ test("gateway activation and credential presence change the safe config hash", a
     else process.env[enabledEnv] = originalEnabled;
     if (originalKey === undefined) delete process.env[keyEnv];
     else process.env[keyEnv] = originalKey;
+  }
+});
+
+test("BYOK network permission does not change global activation or its config hash", async () => {
+  const previous = process.env.LLM_ALLOWED_INTERNAL_ORIGINS;
+  try {
+    const input = baseConfig();
+    process.env.LLM_ALLOWED_INTERNAL_ORIGINS = "[]";
+    const first = await loadConfig(input);
+    process.env.LLM_ALLOWED_INTERNAL_ORIGINS = '["http://127.0.0.1:11434"]';
+    const second = await loadConfig(input);
+    assert.equal(first?.versionHash, second?.versionHash);
+    assert.deepEqual(first?.gateways, second?.gateways);
+  } finally {
+    if (previous === undefined) delete process.env.LLM_ALLOWED_INTERNAL_ORIGINS;
+    else process.env.LLM_ALLOWED_INTERNAL_ORIGINS = previous;
   }
 });
 
@@ -807,5 +836,131 @@ test("the shipped OrcaRouter key does not activate the Provider", async () => {
     else process.env.ORCAROUTER_ENABLED = originalEnabled;
     if (originalKey === undefined) delete process.env.ORCAROUTER_API_KEY;
     else process.env.ORCAROUTER_API_KEY = originalKey;
+  }
+});
+
+test.each([
+  null,
+  "",
+  "   ",
+  123,
+  false,
+  {},
+  [],
+  "INVALID-KEY",
+  "INVALID KEY",
+  "lowercase_key",
+  "9INVALID_KEY",
+  "KEY=value",
+  "INVALID\nKEY",
+])(
+  "an explicitly malformed apiKeyEnv is rejected instead of enabling credential-free access: %j",
+  async (apiKeyEnv) => {
+    const config = baseConfig();
+    config.gateways[0]!.apiKeyEnv = apiKeyEnv;
+    await assert.rejects(
+      loadConfig(config),
+      /Invalid global model gateway config field: gateways\[0\]\.apiKeyEnv/,
+    );
+  },
+);
+
+test("an omitted apiKeyEnv and a valid declared key retain separate readiness and activation semantics", async () => {
+  const enabledName = "SOURCEWEFT_TEST_NOAUTH_CONFIG_ENABLED";
+  const keyName = "SOURCEWEFT_TEST_NOAUTH_CONFIG_KEY";
+  const names = [enabledName, keyName, "OPENAI_API_KEY"];
+  const previous = new Map(names.map((name) => [name, process.env[name]]));
+  const config = baseConfig();
+  config.gateways[0]!.activation = { env: enabledName, default: true };
+  try {
+    delete process.env[enabledName];
+    delete process.env[keyName];
+    process.env.OPENAI_API_KEY = "ambient-key-is-not-this-provider-credential";
+
+    const omitted = (await loadConfig(config))?.gateways[0];
+    assert.equal(omitted?.apiKeyEnv, undefined);
+    assert.equal(omitted?.apiKey, undefined);
+    assert.deepEqual(omitted?.activation, {
+      env: enabledName,
+      source: "default",
+      enabled: true,
+      configured: true,
+      globalReady: true,
+    });
+
+    config.gateways[0]!.apiKeyEnv = `  ${keyName}\t`;
+    const missingDeclaredKey = (await loadConfig(config))?.gateways[0];
+    assert.equal(missingDeclaredKey?.apiKeyEnv, keyName);
+    assert.equal(missingDeclaredKey?.apiKey, undefined);
+    assert.equal(missingDeclaredKey?.activation.enabled, true);
+    assert.equal(missingDeclaredKey?.activation.configured, false);
+    assert.equal(missingDeclaredKey?.activation.globalReady, false);
+
+    process.env[keyName] = "declared-local-key";
+    const configured = (await loadConfig(config))?.gateways[0];
+    assert.equal(configured?.apiKey, "declared-local-key");
+    assert.equal(configured?.activation.enabled, true);
+    assert.equal(configured?.activation.configured, true);
+    assert.equal(configured?.activation.globalReady, true);
+
+    process.env[enabledName] = "false";
+    const disabled = (await loadConfig(config))?.gateways[0];
+    assert.equal(disabled?.activation.enabled, false);
+    assert.equal(disabled?.activation.configured, true);
+    assert.equal(disabled?.activation.globalReady, false);
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("undeclared OpenAI environment credentials and headers cannot change local System config or its safe hash", async () => {
+  const enabledName = "SOURCEWEFT_TEST_NOAUTH_HASH_ENABLED";
+  const ambient: Record<string, string> = {
+    OPENAI_API_KEY: "ambient-api-key",
+    OPENAI_ADMIN_KEY: "ambient-admin-key",
+    OPENAI_ORGANIZATION: "ambient-lc-organization",
+    OPENAI_ORG_ID: "ambient-sdk-organization",
+    OPENAI_PROJECT_ID: "ambient-project",
+    OPENAI_BASE_URL: "https://ambient-provider.example/v1",
+    OPENAI_CUSTOM_HEADERS:
+      "Authorization: Bearer ambient-header-key\nX-Ambient-Secret: ambient-secret",
+  };
+  const previous = new Map(
+    [enabledName, ...Object.keys(ambient)].map((name) => [
+      name,
+      process.env[name],
+    ]),
+  );
+  const config = baseConfig();
+  config.gateways[0]!.activation = { env: enabledName, default: true };
+  config.gateways[0]!.baseUrl = "http://127.0.0.1:11434/v1";
+  try {
+    for (const name of previous.keys()) delete process.env[name];
+    const withoutAmbient = await loadConfig(config);
+    for (const [name, value] of Object.entries(ambient))
+      process.env[name] = value;
+    const withAmbient = await loadConfig(config);
+
+    assert.ok(withoutAmbient);
+    assert.ok(withAmbient);
+    assert.equal(withAmbient.versionHash, withoutAmbient.versionHash);
+    assert.deepEqual(withAmbient.gateways, withoutAmbient.gateways);
+    assert.equal(withAmbient.gateways[0]?.apiKey, undefined);
+    assert.equal(withAmbient.gateways[0]?.activation.globalReady, true);
+    assert.equal(withAmbient.gateways[0]?.baseUrl, "http://127.0.0.1:11434/v1");
+    const safeConfiguration = JSON.stringify({
+      hash: withAmbient.versionHash,
+      gateways: withAmbient.gateways,
+    });
+    for (const value of Object.values(ambient))
+      assert.equal(safeConfiguration.includes(value), false);
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });

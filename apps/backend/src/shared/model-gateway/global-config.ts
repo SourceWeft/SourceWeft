@@ -380,10 +380,7 @@ function parseGatewayActivation(
     );
   }
   const activation = entry.activation as Record<string, unknown>;
-  const env = asEnvName(
-    activation.env,
-    `gateways[${index}].activation.env`,
-  );
+  const env = asEnvName(activation.env, `gateways[${index}].activation.env`);
   if (typeof activation.default !== "boolean") {
     throw new Error(
       `Invalid global model gateway config field: gateways[${index}].activation.default`,
@@ -815,9 +812,9 @@ function parseGatewayEntry(
     `gateways[${index}].baseUrlEnv`,
   );
   const apiKeyEnv =
-    typeof entry.apiKeyEnv === "string" && entry.apiKeyEnv.trim().length > 0
-      ? entry.apiKeyEnv.trim()
-      : undefined;
+    entry.apiKeyEnv === undefined
+      ? undefined
+      : asEnvName(entry.apiKeyEnv, `gateways[${index}].apiKeyEnv`);
   const apiKeyHeaderName =
     typeof entry.apiKeyHeaderName === "string" &&
     entry.apiKeyHeaderName.trim().length > 0
@@ -1258,10 +1255,9 @@ function parseEmbeddingProfileEntry(
   };
 }
 
-function assertSingleDefault<T extends { isDefault: boolean; isActive: boolean }>(
-  items: T[],
-  field: string,
-) {
+function assertSingleDefault<
+  T extends { isDefault: boolean; isActive: boolean },
+>(items: T[], field: string) {
   const defaultCount = items.filter(
     (item) => item.isDefault && item.isActive,
   ).length;

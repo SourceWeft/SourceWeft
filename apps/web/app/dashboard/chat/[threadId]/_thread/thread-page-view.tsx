@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { ChatCanvas } from "../../_components/chat-canvas";
+import { ChatErrorNotice } from "../../_components/chat-canvas/chat-error-notice";
 import { selectedModelCapabilities } from "../../_components/model-catalog-utils";
 import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-skeleton";
 import type { ChatUiState } from "../../_components/chat-ui-state";
@@ -124,6 +125,7 @@ export function DashboardChatThreadPageView({
   loadAvailableSkills,
   loadOlderThreadMessages,
   loadThreadMessages,
+  latestRunFailure,
   loadSourceMentions,
   messageGroups,
   olderMessagesCursor,
@@ -258,6 +260,16 @@ export function DashboardChatThreadPageView({
           sourcesVisible={sourcesVisible}
           threadTitle={threadTitle}
         />
+
+        {latestRunFailure && !activeThreadRun && !isStreaming && (
+          <div className="shrink-0 px-4 pt-3">
+            <ChatErrorNotice
+              title="Message could not be started"
+              message={latestRunFailure.errorMessage}
+              code={latestRunFailure.errorCode}
+            />
+          </div>
+        )}
 
         {chatUiState.status === "model-error" ? (
           <ModelCatalogErrorState />

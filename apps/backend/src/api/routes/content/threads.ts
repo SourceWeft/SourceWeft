@@ -466,14 +466,18 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const run = await durableChatRunService.findActiveRun({
+    const input = {
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
-    });
+    };
+    const run = await durableChatRunService.findActiveRun(input);
 
     return ApiResponse.success(c, {
       threadRun: run ? presentThreadRunSummary(run) : null,
+      latestFailure: run
+        ? null
+        : await durableChatRunService.findLatestMessageLessFailure(input),
     });
   });
 

@@ -126,7 +126,8 @@ export const generateImageTurnPreflight: AgentToolTurnPreflight = {
   // The placeholder the client draws before any pixels exist has to be the
   // right shape, and the shape was decided at preflight.
   readProgressSeed: (state) => {
-    const intent = (state as GenerateImageTurnState | undefined)?.artifactIntent;
+    const intent = (state as GenerateImageTurnState | undefined)
+      ?.artifactIntent;
     if (intent?.kind !== "image") {
       return null;
     }
@@ -144,8 +145,21 @@ export const generateImageTurnPreflight: AgentToolTurnPreflight = {
     // A turn pinned to some *other* tool is not an image turn, however the
     // options record reads.
     const claimsTurn = !(
-      input.command?.kind === "tool" && input.command.toolName !== input.toolName
+      input.command?.kind === "tool" &&
+      input.command.toolName !== input.toolName
     );
+    // Skill defaults and image controls make the tool available; they do not
+    // require plain-text turns to have an image model. Direct invocations carry
+    // mode="generate", while an explicit model/profile keeps its existing
+    // required-model behavior.
+    const requiresImageModel =
+      claimsTurn &&
+      (selection?.mode === "generate" ||
+        selection?.execution?.executionMode === "BYOK" ||
+        (input.command?.kind === "tool" &&
+          input.command.toolName === input.toolName) ||
+        input.requestedProfileAlias !== undefined ||
+        Boolean(selection?.modelAlias));
     const { decision, imageProfile } = await resolveGenerateImageIntentDecision<
       never,
       AgentToolModelProfileView
@@ -162,7 +176,7 @@ export const generateImageTurnPreflight: AgentToolTurnPreflight = {
           modelKind: input.modelKind,
           requestedProfileAlias: input.requestedProfileAlias,
           threadProfileAlias: input.threadProfileAlias,
-          explicit: request.explicit,
+          explicit: requiresImageModel,
           hasByokExecution: request.hasByokExecution === true,
           ...(request.byokExecution
             ? { byokExecution: request.byokExecution }
@@ -175,8 +189,17 @@ export const generateImageTurnPreflight: AgentToolTurnPreflight = {
       artifactIntent: decision,
       imageProfile,
     };
+    // The host builds its required bindings from this turn's effective
+    // selection. Keep that selection consistent with the optional capability's
+    // preflight result; the original controls and diagnostics remain in state.
+    const effectiveSelection =
+      !requiresImageModel &&
+      decision.kind === "image" &&
+      !decision.shouldInjectTool
+        ? { ...selection, enabled: false }
+        : selection;
     return {
-      ...(selection ? { selection } : {}),
+      ...(effectiveSelection ? { selection: effectiveSelection } : {}),
       state,
       messageMetadata: { artifactIntent: decision },
     };

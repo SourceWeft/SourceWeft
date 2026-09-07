@@ -1,3 +1,4 @@
+import { resolveRequestOptions } from "../request-options";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeImageGeneration } from "../bridge/images";
 import { runWithTargetFailover } from "./failover";
@@ -29,7 +30,12 @@ export class ModelGatewayImagesEndpoint {
       payload: input,
       operation: "images.generate",
       callerSignal: options?.signal,
-      attempt: (target) => this.generateWithTarget(input, options, target),
+      attempt: (target) =>
+        this.generateWithTarget(
+          input,
+          resolveRequestOptions(this.config, target, options),
+          target,
+        ),
     });
   }
 

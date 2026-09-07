@@ -25,7 +25,8 @@ import { artifactWriter } from "./writer";
  *
  * Pass `idempotency.requestKey` when a retry of the same request should return
  * the same artifact instead of producing another one; `reused: true` in the
- * result says that is what happened, and no bytes were uploaded.
+ * result says no new artifact/version was created. Concurrent attempts may
+ * upload bytes before the locked recheck; their unused objects are cleaned up.
  */
 export function publishArtifact(input: {
   readonly context: ArtifactWriteContext;

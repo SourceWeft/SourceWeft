@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { toast } from "sonner";
+import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import {
   useStreamingAssistantTransientState,
@@ -60,6 +61,39 @@ export function useThreadMessages({
   workspaceId,
 }: UseThreadMessagesInput) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
+  const [failureState, setFailureState] = useState<{
+    workspaceId: string | null;
+    threadId: string;
+    failure: ThreadRunFailureSummary | null;
+  } | null>(null);
+  const setLatestRunFailure = useCallback(
+    (failure: ThreadRunFailureSummary | null) => {
+      setFailureState({ workspaceId, threadId, failure });
+    },
+    [workspaceId, threadId],
+  );
+  const scopedFailure =
+    failureState?.workspaceId === workspaceId &&
+    failureState.threadId === threadId
+      ? failureState.failure
+      : null;
+  // A live stream can already render its local error message before any
+  // assistant row exists. Show the server summary once, including after reload.
+  const latestRunFailure =
+    scopedFailure &&
+    !messages.some((message) => {
+      const run = message.metadata.threadRun;
+      return (
+        message.role === "assistant" &&
+        message.metadata.isError === true &&
+        run !== null &&
+        typeof run === "object" &&
+        "idempotencyKey" in run &&
+        run.idempotencyKey === scopedFailure.idempotencyKey
+      );
+    })
+      ? scopedFailure
+      : null;
   const { mergeStreamingAssistantIntoMessages, setStreamingAssistantSnapshot } =
     useStreamingAssistantTransientState();
   const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(
@@ -132,6 +166,7 @@ export function useThreadMessages({
       loadedThreadMessagesKeyRef.current = null;
       newestMessageCursorRef.current = null;
       setMessages([]);
+      setLatestRunFailure(null);
       setStreamingAssistantSnapshot(null);
       clearTerminalLocalRunState();
       setOlderMessagesCursor(null);
@@ -161,6 +196,10 @@ export function useThreadMessages({
         if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
           return;
         }
+
+        setLatestRunFailure(
+          activeRun ? null : (activeRunResult.latestFailure ?? null),
+        );
 
         loadedThreadMessagesKeyRef.current = threadMessagesKey;
         // Watermark from the raw server page (the newest 80), never from
@@ -239,6 +278,7 @@ export function useThreadMessages({
     attachedRunKeyRef,
     clearTerminalLocalRunState,
     setActiveThreadRun,
+    setLatestRunFailure,
     setStreamingAssistantSnapshot,
     streamThreadActionRef,
     threadId,
@@ -371,6 +411,8 @@ export function useThreadMessages({
     loadThreadMessages,
     mergeStreamingAssistantIntoMessages,
     messages,
+    latestRunFailure,
+    setLatestRunFailure,
     olderMessagesCursor,
     reconcileCommittedArtifactOutputs,
     setMessages,

@@ -6,9 +6,12 @@ import { recordGatewayOperationEvent } from "../content/model-gateway-audit";
 import { requireContentSource } from "./guards";
 import {
   ensureModelConfigAvailable,
-  requireDefaultModelGatewayProfile,
   withBilledModelGateway,
 } from "../../shared/model-gateway/index";
+import {
+  prepareEmbeddingProfile,
+  validateEmbeddingResult,
+} from "../../shared/model-gateway/embedding-identity";
 import { chunkSourceContent } from "./chunker";
 import { planRetrievalStrategy } from "./retrieval-planner";
 import {
@@ -31,22 +34,6 @@ type StaleIndexingResult = {
     annIndexUsed: null;
   };
 };
-
-async function requireDefaultEmbeddingProfile() {
-  try {
-    const profile = await requireDefaultModelGatewayProfile("embedding");
-    return {
-      ...profile,
-      kind: "embedding" as const,
-    };
-  } catch {
-    throw new ContentError(
-      500,
-      "EMBEDDING_PROFILE_NOT_CONFIGURED",
-      "Default embedding profile is not configured",
-    );
-  }
-}
 
 export class SourceIndexingService {
   constructor(private readonly billing: ContentBillingPort) {}
@@ -93,7 +80,11 @@ export class SourceIndexingService {
     const { workspace, source } = await requireContentSource(input);
 
     await ensureModelConfigAvailable();
-    const profile = await requireDefaultEmbeddingProfile();
+    const preparedEmbedding = await prepareEmbeddingProfile();
+    const profile = {
+      ...preparedEmbedding.profile,
+      kind: "embedding" as const,
+    };
     const planner = planRetrievalStrategy(profile);
     const chunkSpecs =
       input.chunks ??
@@ -107,7 +98,8 @@ export class SourceIndexingService {
       sourceRevisions.find((revision) => revision.isLatest) ??
       sourceRevisions[0] ??
       null;
-    const sourceRevisionId = input.sourceRevisionId ?? latestRevision?.id ?? null;
+    const sourceRevisionId =
+      input.sourceRevisionId ?? latestRevision?.id ?? null;
 
     if (sourceRevisionId) {
       const isCurrentRevision = await isLatestSourceRevision({
@@ -118,7 +110,11 @@ export class SourceIndexingService {
       });
 
       if (!isCurrentRevision) {
-        return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+        return this.handleStaleRevision(
+          source,
+          chunkSpecs.length,
+          input.staleMode,
+        );
       }
     }
 
@@ -144,7 +140,11 @@ export class SourceIndexingService {
           parsedTokens,
         });
     if (!processingSource) {
-      return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+      return this.handleStaleRevision(
+        source,
+        chunkSpecs.length,
+        input.staleMode,
+      );
     }
 
     let embeddings: number[][] = [];
@@ -164,6 +164,7 @@ export class SourceIndexingService {
           {
             billing: this.billing,
             gatewayConfigId: profile.gatewayConfigId,
+            routedConfig: preparedEmbedding.routedConfig,
             context: {
               teamId: workspace.organizationId,
               workspaceId: workspace.id,
@@ -182,7 +183,8 @@ export class SourceIndexingService {
           (gateway) =>
             gateway.embeddings.embedBatch(
               {
-                model: profile.modelAlias,
+                model: profile.profileAlias,
+                profileAlias: profile.profileAlias,
                 texts: chunkSpecs.map((chunk) => chunk.text),
                 dimensions: planner.requestedDimensions ?? undefined,
                 metadata: {
@@ -200,11 +202,20 @@ export class SourceIndexingService {
                 profileAlias: profile.profileAlias,
                 modelAlias: profile.modelAlias,
                 idempotencyKey:
-                  input.idempotencyKey || `source-index:${source.id}:embeddings`,
+                  input.idempotencyKey ||
+                  `source-index:${source.id}:embeddings`,
                 traceId: source.id,
               },
             ),
         )
+          .then((result) => {
+            validateEmbeddingResult(
+              preparedEmbedding.identity,
+              result,
+              result.embeddings,
+            );
+            return result;
+          })
           .catch(async (error: unknown) => {
             const contentError = toContentError(error);
             await recordGatewayOperationEvent({
@@ -237,7 +248,10 @@ export class SourceIndexingService {
           modelKind: "embedding",
           modelAlias: profile.modelAlias,
           provider: result.provider,
-          routeDecision: result.routeDecision as unknown as Record<string, unknown> | null,
+          routeDecision: result.routeDecision as unknown as Record<
+            string,
+            unknown
+          > | null,
           usage: result.usage,
           traceId: source.id,
           success: true,
@@ -260,6 +274,7 @@ export class SourceIndexingService {
         sourceTitle: source.title,
         sourceContentText: source.contentText,
         embeddingProfileId: profile.id,
+        embeddingIdentity: preparedEmbedding.identity,
         modelAlias: profile.modelAlias,
         embeddings,
         requireEmbeddings:
@@ -273,7 +288,11 @@ export class SourceIndexingService {
       });
 
       if (!writeResult) {
-        return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+        return this.handleStaleRevision(
+          source,
+          chunkSpecs.length,
+          input.staleMode,
+        );
       }
 
       if (sourceRevisionId) {
@@ -285,7 +304,11 @@ export class SourceIndexingService {
         });
 
         if (!isCurrentRevision) {
-          return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+          return this.handleStaleRevision(
+            source,
+            chunkSpecs.length,
+            input.staleMode,
+          );
         }
       }
 
@@ -301,15 +324,17 @@ export class SourceIndexingService {
         input.userId,
       );
 
-      const updatedSource = writeResult.source ?? (await updateSourceStatus({
-        sourceId: source.id,
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        status: "indexed",
-        indexedAt: new Date(),
-        estimatedPages,
-        parsedTokens,
-      }));
+      const updatedSource =
+        writeResult.source ??
+        (await updateSourceStatus({
+          sourceId: source.id,
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          status: "indexed",
+          indexedAt: new Date(),
+          estimatedPages,
+          parsedTokens,
+        }));
 
       return {
         source: updatedSource,
@@ -331,7 +356,11 @@ export class SourceIndexingService {
         });
 
         if (!isCurrentRevision) {
-          return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+          return this.handleStaleRevision(
+            source,
+            chunkSpecs.length,
+            input.staleMode,
+          );
         }
       }
 
@@ -347,7 +376,11 @@ export class SourceIndexingService {
         });
 
         if (!failedSource) {
-          return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
+          return this.handleStaleRevision(
+            source,
+            chunkSpecs.length,
+            input.staleMode,
+          );
         }
       } else {
         await updateSourceStatus({

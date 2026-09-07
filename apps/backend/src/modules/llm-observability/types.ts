@@ -99,6 +99,7 @@ export type UsageLike = {
   totalTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  reasoningTokens?: number;
 };
 
 export type StartGenerationInput = WriterOptions &
@@ -159,6 +160,10 @@ export type RecordGenerationErrorInput = WriterOptions & {
   error?: unknown;
   errorCode?: string | null;
   errorMessage?: string | null;
+  usage?: UsageLike | null;
+  observation?: ModelCallObservation | null;
+  providerFields?: unknown;
+  providerCostUsd?: number | null;
   providerResponse?: unknown;
   providerStatusCode?: number | null;
   providerRequestId?: string | null;

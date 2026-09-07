@@ -2,6 +2,10 @@
 .github
 .DS_Store
 
+# Local review reports, screenshots, and browser snapshots are not runtime input.
+/output/
+/.playwright-cli/
+
 node_modules
 **/node_modules
 .pnpm-store

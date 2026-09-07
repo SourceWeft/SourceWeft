@@ -84,6 +84,9 @@ The sandbox provider is an operator detail; users should think in terms of an is
 
 Use Docker Compose when you want to run SourceWeft from the published container image.
 
+Source development and image builds default to Node 22.23.2, with Node 24 also
+supported. See the [runtime policy](apps/backend/docs/node-runtime.md).
+
 ```bash
 git clone https://github.com/SourceWeft/SourceWeft.git
 cd SourceWeft

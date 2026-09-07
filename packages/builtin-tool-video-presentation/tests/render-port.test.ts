@@ -424,18 +424,26 @@ test("download timeout waits for trusted download cleanup before returning", asy
   const sandbox: AgentToolSandboxServices = {
     ...base.sandbox,
     async downloadCurrentFile(input) {
-      await new Promise<void>((resolve) => {
-        input.signal?.addEventListener(
-          "abort",
-          () => {
-            cleanupStarted();
-            resolve();
-          },
-          { once: true },
-        );
-      });
-      await release;
-      throw input.signal?.reason ?? new Error("download aborted");
+      // A real download keeps its socket alive while the production deadline
+      // is unref'ed. This finite handle gives the promise-only fake the same
+      // lifetime, including the cleanup period after cancellation.
+      const activeDownload = setTimeout(() => {}, 1_000);
+      try {
+        await new Promise<void>((resolve) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              cleanupStarted();
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        await release;
+        throw input.signal?.reason ?? new Error("download aborted");
+      } finally {
+        clearTimeout(activeDownload);
+      }
     },
   };
   const session = await createSandboxVideoPresentationRenderPort({

@@ -1,4 +1,7 @@
-export { retrievalAgentToolDefs, searchSourcesAgentTool } from "./agent-tool-defs";
+export {
+  retrievalAgentToolDefs,
+  searchSourcesAgentTool,
+} from "./agent-tool-defs";
 
 export const builtinRetrievalCapability = {
   id: "sourceweft/retrieval",
@@ -61,9 +64,14 @@ export {
 } from "./data-access";
 export { createRetrievalPipeline } from "./pipeline/builder";
 export { runRetrieval } from "./run-retrieval";
-export { createInitialRetrievalState, requirePreparedRetrievalState } from "./pipeline/state";
+export {
+  createInitialRetrievalState,
+  requirePreparedRetrievalState,
+} from "./pipeline/state";
 export type {
   RetrievalInput,
+  RetrievalDegradation,
+  RetrievalTuning,
   RetrievalPipelineState,
   PreparedRetrievalPipelineState,
 } from "./pipeline/types";

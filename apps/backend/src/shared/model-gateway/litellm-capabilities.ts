@@ -103,9 +103,14 @@ export async function fetchLiteLLMPricing(
 ): Promise<LiteLLMData> {
   const response = await fetch(pricingUrl);
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`Failed to fetch LiteLLM pricing: ${response.statusText}`);
   }
-  return response.json() as Promise<LiteLLMData>;
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("LiteLLM pricing must be an object of model entries");
+  }
+  return payload as LiteLLMData;
 }
 
 function normalizeLiteLLMProvider(value: string | null | undefined) {

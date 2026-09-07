@@ -9,6 +9,7 @@ import { createCapabilityAgentToolHostServices } from "./host-services";
 import { loadCapabilityAgentToolModule } from "./module-loader";
 import { normalizeFactoryResult } from "./normalize";
 import { createCapabilityAgentToolTurnContext } from "./turn-context";
+import { logger } from "../../../../shared/logger";
 import type {
   AgentTurnTool,
   CapabilityAgentToolsForTurn,
@@ -148,7 +149,76 @@ export async function createCapabilityAgentToolsForTurn(
   const services = createCapabilityAgentToolHostServices(input, {
     webProvider: await createDefaultWebProvider(),
   });
-  const context = createCapabilityAgentToolTurnContext(input);
+  const baseContext = createCapabilityAgentToolTurnContext(input);
+  const unavailableSandboxTools = new Set<string>();
+  if (!input.sandboxRuntime) {
+    const invokedSkillIds = new Set(input.prepared.invokedSkillIds);
+    const invokedSkillNames = new Set(
+      input.prepared.enabledSkills
+        .filter((skill) => invokedSkillIds.has(skill.workspaceSkillId))
+        .map((skill) => skill.name),
+    );
+    const explicitTools = new Set([
+      ...(input.prepared.command?.workflow?.defaultTools ?? []),
+      ...(input.prepared.command?.toolName
+        ? [input.prepared.command.toolName]
+        : []),
+      ...(input.prepared.invocation?.kind === "fixed_tool_choice" &&
+      input.prepared.invocation.target === "capability_tool"
+        ? [input.prepared.invocation.toolName]
+        : []),
+      ...records.flatMap((record) =>
+        record.manifest.contributes.skills
+          .filter((skill) => invokedSkillNames.has(skill.id))
+          .flatMap((skill) => skill.runtime?.tools ?? []),
+      ),
+    ]);
+    for (const toolName of toolOwners.keys()) {
+      if (
+        getAgentToolDefinition(toolName)?.requirements?.sandbox !== true ||
+        !baseContext.shouldBindAgentTool(toolName) ||
+        baseContext.isToolDenied(toolName)
+      ) {
+        continue;
+      }
+      if (explicitTools.has(toolName)) {
+        throw new ContentError(
+          503,
+          "SANDBOX_RUNTIME_UNAVAILABLE",
+          `Tool '${toolName}' requires sandbox execution, which is unavailable for this turn.`,
+          { recoverable: false, details: { toolName } },
+        );
+      }
+      unavailableSandboxTools.add(toolName);
+      logger.info("Optional tool unavailable for this turn", {
+        toolName,
+        reason: "SANDBOX_RUNTIME_UNAVAILABLE",
+      });
+    }
+  }
+  const runtimeTools = { ...input.prepared.runtimeTools };
+  for (const toolName of unavailableSandboxTools) {
+    const runtimeTool = runtimeTools[toolName];
+    if (runtimeTool) {
+      runtimeTools[toolName] = {
+        ...runtimeTool,
+        enabled: false,
+        permission: "deny",
+        shouldBind: false,
+        selection: { ...runtimeTool.selection, enabled: false },
+      };
+    }
+  }
+  const context = {
+    ...baseContext,
+    runtimeTools,
+    isToolDenied: (toolName: string) =>
+      unavailableSandboxTools.has(toolName) ||
+      baseContext.isToolDenied(toolName),
+    shouldBindAgentTool: (toolName: string) =>
+      !unavailableSandboxTools.has(toolName) &&
+      baseContext.shouldBindAgentTool(toolName),
+  };
   const tools: AgentTurnTool[] = [];
   const artifactTools: AgentTurnTool[] = [];
   const retrievalTools: AgentTurnTool[] = [];

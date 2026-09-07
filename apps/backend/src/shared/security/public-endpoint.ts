@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import * as dns from "node:dns/promises";
 
 type DnsLookupResult = {
@@ -25,95 +25,44 @@ const BLOCKED_CUSTOM_HEADER_NAMES = new Set([
   "transfer-encoding",
 ]);
 
-function parseIpv4(value: string) {
-  const parts = value.split(".").map((part) => Number.parseInt(part, 10));
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
-    return null;
-  }
-
-  return parts as [number, number, number, number];
+// BlockList compares addresses, including IPv4-mapped IPv6, rather than their
+// spelling. Keep the existing IPv4 exclusions; 240/4 was covered by a >= 224.
+const nonPublicAddresses = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.168.0.0", 16],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+] as const) {
+  nonPublicAddresses.addSubnet(network, prefix, "ipv4");
 }
-
-function isPublicIpv4(value: string) {
-  const parts = parseIpv4(value);
-  if (!parts) {
-    return false;
-  }
-
-  const [a, b, c, d] = parts;
-  if (a === 0 || a === 10 || a === 127) {
-    return false;
-  }
-  if (a === 100 && b >= 64 && b <= 127) {
-    return false;
-  }
-  if (a === 169 && b === 254) {
-    return false;
-  }
-  if (a === 172 && b >= 16 && b <= 31) {
-    return false;
-  }
-  if (a === 192 && b === 168) {
-    return false;
-  }
-  if (a === 192 && b === 0 && c === 0) {
-    return false;
-  }
-  if (a === 192 && b === 0 && c === 2) {
-    return false;
-  }
-  if (a === 198 && (b === 18 || b === 19)) {
-    return false;
-  }
-  if (a === 198 && b === 51 && c === 100) {
-    return false;
-  }
-  if (a === 203 && b === 0 && c === 113) {
-    return false;
-  }
-  if (a >= 224) {
-    return false;
-  }
-
-  return !(a === 255 && b === 255 && c === 255 && d === 255);
-}
-
-function normalizeIpv6(value: string) {
-  return value.toLowerCase();
-}
-
-function isPublicIpv6(value: string) {
-  const normalized = normalizeIpv6(value);
-  if (
-    normalized === "::" ||
-    normalized === "::1" ||
-    normalized.startsWith("fe80:") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("ff")
-  ) {
-    return false;
-  }
-
-  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  const mappedIpv4Address = mappedIpv4?.[1];
-  if (mappedIpv4Address) {
-    return isPublicIpv4(mappedIpv4Address);
-  }
-
-  return true;
+for (const [network, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8],
+] as const) {
+  nonPublicAddresses.addSubnet(network, prefix, "ipv6");
 }
 
 export function isPublicIpAddress(value: string) {
   const family = isIP(value);
   if (family === 4) {
-    return isPublicIpv4(value);
+    return !nonPublicAddresses.check(value, "ipv4");
   }
   if (family === 6) {
-    return isPublicIpv6(value);
+    return !nonPublicAddresses.check(value, "ipv6");
   }
   return false;
 }

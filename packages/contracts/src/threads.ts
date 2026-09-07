@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/** A failed run whose error cannot be rendered from a persisted assistant message. */
+export type ThreadRunFailureSummary = {
+  id: string;
+  idempotencyKey: string;
+  errorCode: string;
+  errorMessage: string;
+};
+
 export const threadSchema = z.object({
   id: z.string(),
   teamId: z.string(),

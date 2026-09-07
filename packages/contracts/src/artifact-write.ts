@@ -105,7 +105,8 @@ export type ArtifactPublishResult = {
   readonly versionId: string;
   /**
    * True when an idempotency key resolved to an artifact that already existed,
-   * so this call produced no new artifact, no new version and no new bytes.
+   * so this call produced no new artifact or version. Objects uploaded before
+   * losing a concurrent creation race have been cleaned up.
    */
   readonly reused: boolean;
 };
@@ -183,7 +184,11 @@ export function validateArtifactPublishSpec(
     });
   }
   if (!spec.title || spec.title.trim().length === 0) {
-    issues.push({ code: invalid, field: "title", message: "title is required" });
+    issues.push({
+      code: invalid,
+      field: "title",
+      message: "title is required",
+    });
   }
   if (
     !spec.payload ||

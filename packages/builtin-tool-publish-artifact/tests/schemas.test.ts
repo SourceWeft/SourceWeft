@@ -154,6 +154,7 @@ test("PublishArtifactInputSchema rejects unsupported public artifact types", () 
 test("PublishArtifactOutputSchema requires a slides artifact URL", () => {
   const parsed = PublishArtifactOutputSchema.parse({
     ok: true,
+    reused: false,
     type: "presentation_artifact_result",
     status: "ready",
     artifactId: "artifact-1",
@@ -185,6 +186,7 @@ test("PublishArtifactOutputSchema requires a slides artifact URL", () => {
 test("PublishArtifactOutputSchema accepts a generic file artifact URL", () => {
   const parsed = PublishArtifactOutputSchema.parse({
     ok: true,
+    reused: false,
     type: "file_artifact_result",
     status: "ready",
     artifactId: "artifact-1",

@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { assertPublicHostname } from "../../shared/security/public-endpoint";
+import {
+  EndpointPolicyError,
+  validateEndpointUrl,
+} from "../../shared/security/endpoint-policy";
 import { McpError } from "./errors";
 
 type DnsLookupResult = { address: string; family: number };
@@ -56,9 +59,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function hashJson(value: unknown) {
-  return createHash("sha256")
-    .update(canonicalJson(value))
-    .digest("hex");
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
 /**
@@ -105,86 +106,38 @@ export function redactMcpSecrets(value: unknown): unknown {
   return output;
 }
 
-function hostnameWithoutIpv6Brackets(value: string) {
-  return value.startsWith("[") && value.endsWith("]")
-    ? value.slice(1, -1)
-    : value;
-}
-
-function isLocalhostName(hostname: string) {
-  const normalized = hostnameWithoutIpv6Brackets(hostname.toLowerCase());
-  return (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
-    normalized === "::1" ||
-    normalized.endsWith(".localhost")
-  );
-}
-
 export async function assertSafeMcpEndpoint(
   value: string,
   input: {
-    allowLocalhost: boolean;
-    /**
-     * Skip the resolved-address (SSRF) check. Development-only: dev machines
-     * commonly sit behind fake-IP VPN/proxy DNS (Clash/Surge resolve every host
-     * into 198.18.0.0/15), which would otherwise block every remote endpoint.
-     * Production always keeps the check.
-     */
-    allowPrivateNetwork?: boolean;
+    enforceAddressChecks: boolean;
+    allowedInternalOrigins?: readonly string[];
     lookup?: DnsLookup;
   },
 ) {
-  let url: URL;
   try {
-    url = new URL(value);
-  } catch {
-    throw new McpError(400, "MCP_ENDPOINT_INVALID", "MCP endpoint URL is invalid");
-  }
-
-  if (url.username || url.password) {
-    throw new McpError(
-      400,
-      "MCP_ENDPOINT_UNSAFE",
-      "MCP endpoint must not include credentials",
+    const url = await validateEndpointUrl(
+      value,
+      {
+        enforceAddressChecks: input.enforceAddressChecks,
+        allowedInternalOrigins: input.allowedInternalOrigins ?? [],
+      },
+      input.lookup,
     );
-  }
-
-  const hostname = url.hostname.toLowerCase();
-  const localhostAllowed = input.allowLocalhost && isLocalhostName(hostname);
-
-  if (url.protocol !== "https:") {
-    if (url.protocol === "http:" && localhostAllowed) {
-      return url.toString();
-    }
-    throw new McpError(
-      400,
-      "MCP_ENDPOINT_UNSAFE",
-      "MCP endpoint must use https. Local http is only allowed in development.",
-    );
-  }
-
-  if (localhostAllowed) {
     return url.toString();
-  }
-
-  // Resolve DNS and reject any endpoint that maps to a private, link-local,
-  // loopback, or cloud-metadata address. This closes the DNS-rebinding hole the
-  // previous literal-IP-only check left open. Reuses the shared SSRF guard.
-  if (input.allowPrivateNetwork) {
-    return url.toString();
-  }
-  try {
-    await assertPublicHostname(hostname, input.lookup);
-  } catch {
+  } catch (error) {
+    const reason = error instanceof EndpointPolicyError ? error.reason : "host";
     throw new McpError(
       400,
-      "MCP_ENDPOINT_BLOCKED",
-      "MCP endpoint points to a local, private, link-local, or metadata address",
+      reason === "url"
+        ? "MCP_ENDPOINT_INVALID"
+        : reason === "host"
+          ? "MCP_ENDPOINT_BLOCKED"
+          : "MCP_ENDPOINT_UNSAFE",
+      error instanceof EndpointPolicyError
+        ? error.message
+        : "MCP endpoint could not resolve to an allowed address",
     );
   }
-
-  return url.toString();
 }
 
 export function sanitizeHeaderName(value: string) {
@@ -193,7 +146,11 @@ export function sanitizeHeaderName(value: string) {
     throw new McpError(400, "MCP_HEADER_INVALID", "MCP header name is invalid");
   }
   if (BLOCKED_HEADER_NAMES.has(normalized)) {
-    throw new McpError(400, "MCP_HEADER_BLOCKED", "MCP header name is not allowed");
+    throw new McpError(
+      400,
+      "MCP_HEADER_BLOCKED",
+      "MCP header name is not allowed",
+    );
   }
   return value.trim();
 }

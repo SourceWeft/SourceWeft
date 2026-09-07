@@ -34,6 +34,7 @@ import {
   withAssistantThreadRunMetadata,
 } from "./assistant-message-metadata";
 import { fenceProtectedOperationsForTerminal } from "./protected-agent-tool-state";
+import { isStaleActiveRun } from "./run-state";
 
 const ACTIVE_RUN_STATUSES: ChatThreadRunStatus[] = [
   "queued",
@@ -326,6 +327,37 @@ export async function findActiveChatThreadRun(input: {
     .limit(1);
 
   return row ? mapRun(row) : null;
+}
+
+/** Summary only: never load a previous run's request or large snapshot for polling. */
+export async function findLatestChatThreadRunSummary(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+}) {
+  const [row] = await db
+    .select({
+      id: chatThreadRuns.id,
+      idempotencyKey: chatThreadRuns.idempotencyKey,
+      userId: chatThreadRuns.userId,
+      status: chatThreadRuns.status,
+      assistantMessageId: chatThreadRuns.assistantMessageId,
+      errorCode: chatThreadRuns.errorCode,
+      errorMessage: chatThreadRuns.errorMessage,
+    })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+        eq(chatThreadRuns.threadId, input.threadId),
+      ),
+    )
+    // Select the latest run BEFORE testing its status. A later success or
+    // active run must suppress an older preparation failure.
+    .orderBy(desc(chatThreadRuns.createdAt), desc(chatThreadRuns.id))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function listExpiredApprovalWaitingRuns(input: {
@@ -1011,6 +1043,8 @@ export async function finishChatThreadRun(input: {
   protectedOperationTerminalReason?: string;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /** Recovery must recheck liveness after acquiring the run row lock. */
+  staleAt?: Date;
 }) {
   const allowedSourceStatuses: ChatThreadRunStatus[] =
     input.status === "completed"
@@ -1019,6 +1053,12 @@ export async function finishChatThreadRun(input: {
   const row = await db.transaction(async (tx) => {
     const context = await lockRunSnapshotContext(tx, input);
     if (!context || !allowedSourceStatuses.includes(context.runRow.status)) {
+      return null;
+    }
+    if (
+      input.staleAt &&
+      !isStaleActiveRun(mapRun(context.runRow), input.staleAt.getTime())
+    ) {
       return null;
     }
     const now = new Date();

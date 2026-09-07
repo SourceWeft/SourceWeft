@@ -27,6 +27,7 @@ import { MODEL_CAPABILITY_DB } from "./model-capability-db";
 import { resolveCustomByokProvider } from "./byok-provider-resolver";
 
 import { OPENROUTER_APP_TITLE } from "./attribution";
+import { createLlmFetch, llmEndpointPolicy } from "./network";
 
 type ActiveConfigVersionRow = typeof modelGatewayConfigVersions.$inferSelect;
 
@@ -195,8 +196,10 @@ export async function resolveByokProviderRuntime(input: {
   };
 }
 
-export async function findActiveConfigVersionRow(): Promise<ActiveConfigVersionRow | null> {
-  const [row] = await db
+export async function findActiveConfigVersionRow(
+  reader: Pick<typeof db, "select"> = db,
+): Promise<ActiveConfigVersionRow | null> {
+  const [row] = await reader
     .select()
     .from(modelGatewayConfigVersions)
     .where(eq(modelGatewayConfigVersions.isActive, true))
@@ -205,18 +208,20 @@ export async function findActiveConfigVersionRow(): Promise<ActiveConfigVersionR
   return row ?? null;
 }
 
-export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | null> {
-  const activeVersion = await findActiveConfigVersionRow();
+export async function loadRoutedGatewayConfig(
+  reader: Pick<typeof db, "select"> = db,
+): Promise<RoutedGatewayConfig | null> {
+  const activeVersion = await findActiveConfigVersionRow(reader);
   if (!activeVersion) {
     return null;
   }
 
-  const providerRows = await db
+  const providerRows = await reader
     .select()
     .from(modelGatewayProviderConfigs)
     .where(eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id));
 
-  const routeRows = await db
+  const routeRows = await reader
     .select()
     .from(modelGatewayRoutes)
     .where(
@@ -242,7 +247,7 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
   );
 
   const gatewayRows = gatewayIds.length
-    ? (await db.select().from(modelGatewayConfigs)).filter((row) =>
+    ? (await reader.select().from(modelGatewayConfigs)).filter((row) =>
         gatewayIds.includes(row.id),
       )
     : [];
@@ -442,6 +447,13 @@ export function buildRoutedModelGatewayConfig(
   configInput: RoutedGatewayConfig,
 ): ModelGatewayConfig {
   return {
+    fetch: createLlmFetch(
+      llmEndpointPolicy(
+        Object.values(configInput.providers).map(
+          (provider) => provider.baseUrl,
+        ),
+      ),
+    ),
     providers: Object.fromEntries(
       Object.entries(configInput.providers).map(([name, provider]) => [
         name,
@@ -449,6 +461,13 @@ export function buildRoutedModelGatewayConfig(
           kind: provider.kind,
           baseUrl: provider.baseUrl,
           apiKey: provider.apiKey,
+          // A deployment with no declared global credential can explicitly
+          // use the SDK's no-auth path. GLOBAL readiness and BYOK stay separate.
+          allowUnauthenticated:
+            provider.kind === "openai-compatible" &&
+            !provider.requiresGlobalApiKey &&
+            !provider.hasGlobalApiKey &&
+            !provider.apiKey,
           apiKeyHeaderName: provider.apiKeyHeaderName,
           apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
           defaultHeaders: provider.defaultHeaders,

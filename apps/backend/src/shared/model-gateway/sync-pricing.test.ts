@@ -21,6 +21,8 @@ vi.mock("../logger", () => ({
   },
 }));
 
+vi.mock("./runtime", () => ({ loadRoutedGatewayConfig: vi.fn() }));
+
 let syncPricing: typeof import("./sync-pricing");
 
 beforeAll(async () => {

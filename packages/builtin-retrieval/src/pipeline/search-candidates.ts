@@ -1,7 +1,8 @@
-import {
-  type RetrievalCandidate,
-} from "../index";
-import type { RetrievalDataAccess, RetrievalEmbeddingGateway } from "../data-access";
+import { type RetrievalCandidate } from "../index";
+import type {
+  RetrievalDataAccess,
+  RetrievalEmbeddingGateway,
+} from "../data-access";
 import { requirePreparedRetrievalState } from "./state";
 import type { RetrievalPipelineStage, RetrievalPipelineState } from "./types";
 
@@ -65,28 +66,41 @@ export function createSearchCandidatesStage(deps: {
         embeddingLatencyMs = Date.now() - embedStartedAt;
       }
 
-      const bm25StartedAt = Date.now();
-      let bm25Candidates: readonly RetrievalCandidate[] = [];
-      try {
-        bm25Candidates = await deps.dataAccess.searchChunksByBm25({
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          queryText: input.queryText,
-          topK: state.tuning.bm25TopK,
-          sourceIds: retrievalSourceIds,
-        });
-      } catch (error) {
-        // Vector search may still produce results, so the run continues — but
-        // the failure is recorded rather than swallowed, otherwise a broken
-        // BM25 index degrades recall invisibly.
-        const reason = error instanceof Error ? error.message : String(error);
-        state.degradations.push({ stage: "bm25-search", reason });
-        deps.logger?.warn?.("retrieval.bm25.failed", {
-          workspaceId: input.workspaceId,
-          threadId: input.threadId,
-          reason,
-        });
+      const degradations = [...state.degradations];
+      async function searchBm25(branchSourceIds: string[], stage: string) {
+        try {
+          return await deps.dataAccess.searchChunksByBm25({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            queryText: input.queryText,
+            topK: state.tuning.bm25TopK,
+            sourceIds: branchSourceIds,
+          });
+        } catch (error) {
+          // A BM25-only run has no surviving channel, even when hybrid
+          // degradation was explicitly allowed by its caller.
+          if (
+            planner.strategy === "bm25_only" ||
+            state.tuning.bm25FailurePolicy !== "allow_vector"
+          ) {
+            throw error;
+          }
+          const reason = error instanceof Error ? error.message : String(error);
+          degradations.push({ stage, reason });
+          deps.logger?.warn?.("retrieval.bm25.failed", {
+            workspaceId: input.workspaceId,
+            threadId: input.threadId,
+            stage,
+            reason,
+          });
+          return [];
+        }
       }
+      const bm25StartedAt = Date.now();
+      const bm25Candidates = await searchBm25(
+        retrievalSourceIds,
+        "bm25-search",
+      );
       const bm25LatencyMs = Date.now() - bm25StartedAt;
 
       const vectorStartedAt = Date.now();
@@ -116,19 +130,7 @@ export function createSearchCandidatesStage(deps: {
       const shouldRunAnchorBranch =
         sourceIds.length > 0 && anchorSourceIds.length > 0;
       const anchorBm25Candidates = shouldRunAnchorBranch
-        ? await (async () => {
-            try {
-              return await deps.dataAccess.searchChunksByBm25({
-                teamId: input.teamId,
-                workspaceId: input.workspaceId,
-                queryText: input.queryText,
-                topK: state.tuning.bm25TopK,
-                sourceIds: anchorSourceIds,
-              });
-            } catch {
-              return [];
-            }
-          })()
+        ? await searchBm25(anchorSourceIds, "anchor-bm25-search")
         : [];
       const anchorVectorCandidates =
         shouldRunAnchorBranch && planner.strategy !== "bm25_only"
@@ -154,6 +156,7 @@ export function createSearchCandidatesStage(deps: {
 
       return {
         ...state,
+        degradations,
         queryEmbedding,
         candidates: {
           ...state.candidates,

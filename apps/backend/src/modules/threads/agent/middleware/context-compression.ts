@@ -364,13 +364,15 @@ export function sanitizeSourceWeftSummaryResponse<T>(response: T): T {
  * Preserve the billed model's complete runtime identity while sanitizing only
  * the summary response that Deep Agents will persist in checkpoint state.
  */
-export function createSourceWeftSummaryModel(model: BaseLanguageModel) {
+export function createSourceWeftSummaryModel(
+  model: BaseLanguageModel,
+  beforeSummary?: () => void,
+) {
   return new Proxy(model, {
     get(target, property) {
       const value = Reflect.get(target, property, target);
       if (property === "invoke" && typeof value === "function") {
         return async (...args: unknown[]) => {
-          const response = await Promise.resolve(value.apply(target, args));
           const messages = args[0];
           const firstContent = Array.isArray(messages)
             ? (messages[0] as { content?: unknown } | undefined)?.content
@@ -379,10 +381,16 @@ export function createSourceWeftSummaryModel(model: BaseLanguageModel) {
           // summary call cannot bypass sanitation. The middleware adapter
           // restores the original runtime model before normal generation.
           // Only the dedicated summary invocation may rewrite citations.
-          return typeof firstContent === "string" &&
+          const isSummary =
+            typeof firstContent === "string" &&
             firstContent.startsWith(
               "You are SourceWeft's conversation memory compressor.",
-            )
+            );
+          if (isSummary) {
+            beforeSummary?.();
+          }
+          const response = await Promise.resolve(value.apply(target, args));
+          return isSummary
             ? sanitizeSourceWeftSummaryResponse(response)
             : response;
         };
@@ -400,18 +408,19 @@ export function createSourceWeftSummarizationMiddleware(input: {
   const budget = resolveSourceWeftContextCompressionBudget(
     input.chatProfileConfig,
   );
-  const summaryModel = createSourceWeftSummaryModel(input.model);
-  const middleware = createSummarizationMiddleware({
-    backend: input.backend,
-    model: summaryModel,
-    trigger: [
-      { type: "tokens", value: budget.summarizationTriggerTokens },
-      { type: "messages", value: budget.summaryMessageTrigger },
-    ],
-    keep: { type: "messages", value: budget.recentMessagesToKeep },
-    summaryPrompt: SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
-    historyPathPrefix: budget.historyPathPrefix,
-  });
+  const nativeMiddleware = (model: BaseLanguageModel, keep: number) =>
+    createSummarizationMiddleware({
+      backend: input.backend,
+      model,
+      trigger: [
+        { type: "tokens", value: budget.summarizationTriggerTokens },
+        { type: "messages", value: budget.summaryMessageTrigger },
+      ],
+      keep: { type: "messages", value: keep },
+      summaryPrompt: SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
+      historyPathPrefix: budget.historyPathPrefix,
+    });
+  const middleware = nativeMiddleware(input.model, budget.recentMessagesToKeep);
   const wrapModelCall = middleware.wrapModelCall;
   if (typeof wrapModelCall !== "function") {
     throw new Error(
@@ -425,6 +434,54 @@ export function createSourceWeftSummarizationMiddleware(input: {
       request: Parameters<typeof wrapModelCall>[0],
       handler: Parameters<typeof wrapModelCall>[1],
     ) => {
+      const currentTurnStart = latestHumanMessageIndex(request.messages);
+      if (currentTurnStart >= 0) {
+        groupCompleteToolExchanges(
+          request.messages.slice(currentTurnStart),
+          true,
+        );
+      }
+      // The normal agent request carries policy separately in systemMessage.
+      // If a caller embeds system messages in history, leave that protected
+      // suffix intact as well; native cutoff indexes still refer to original state.
+      const firstSystem = request.messages.findIndex(
+        (message) => message._getType() === "system",
+      );
+      const protectedStarts = [currentTurnStart, firstSystem].filter(
+        (index) => index >= 0,
+      );
+      const protectedStart =
+        protectedStarts.length > 0
+          ? Math.min(...protectedStarts)
+          : request.messages.length;
+      const previousSummary = toObjectRecord(request.state._summarizationEvent);
+      const keep = Math.max(
+        budget.recentMessagesToKeep,
+        request.messages.length -
+          protectedStart +
+          // If only a previous summary precedes the protected turn, there is
+          // no new old history to compress. Keep that summary as well.
+          (previousSummary?.cutoffIndex === protectedStart ? 1 : 0),
+      );
+      let summaryInvoked = false;
+      let failedGeneration: { error: unknown } | undefined;
+      const summaryModel = createSourceWeftSummaryModel(input.model, () => {
+        // Deep Agents retries a failed post-summary generation by summarizing
+        // the entire conversation. That would discard the protected current
+        // turn. Preserve its original error instead of another model call.
+        if (failedGeneration) {
+          throw failedGeneration.error;
+        }
+        summaryInvoked = true;
+      });
+      // keep is per invocation, so concurrent requests cannot shrink each
+      // other's protected window. History/session state remains native.
+      const scopedWrap = nativeMiddleware(summaryModel, keep).wrapModelCall;
+      if (typeof scopedWrap !== "function") {
+        throw new Error(
+          "Deep Agents SummarizationMiddleware is missing wrapModelCall.",
+        );
+      }
       const originalMessages = new WeakMap<object, BaseMessage>();
       const sanitizedMessages = request.messages.map((message) => {
         const sanitized = sanitizeSourceWeftSummaryMessage(message);
@@ -434,7 +491,7 @@ export function createSourceWeftSummarizationMiddleware(input: {
         return sanitized;
       });
 
-      return wrapModelCall(
+      return scopedWrap(
         {
           ...request,
           // Deep Agents writes the messages it summarizes to the backend
@@ -445,20 +502,39 @@ export function createSourceWeftSummarizationMiddleware(input: {
           // scoped wrapper here ensures summary sanitation is actually active.
           model: summaryModel,
         },
-        (forwardedRequest) =>
+        async (forwardedRequest) => {
           // Preserve any runtime model binding/settings for the real agent
           // generation. Only Deep Agents' internal summary call uses the
           // scoped wrapper above.
-          handler({
-            ...forwardedRequest,
-            // Messages retained for the actual agent call remain current-turn
-            // evidence. Restore their original citation markers by identity;
-            // generated summary messages have no mapping and stay sanitized.
-            messages: forwardedRequest.messages.map(
-              (message) => originalMessages.get(message) ?? message,
-            ),
-            model: request.model,
-          }),
+          const restoredMessages = forwardedRequest.messages.map(
+            (message) => originalMessages.get(message) ?? message,
+          );
+          const boundary = latestHumanMessageIndex(restoredMessages);
+          const previousMessages = restoredMessages.slice(
+            0,
+            boundary >= 0 ? boundary : restoredMessages.length,
+          );
+          const currentMessages =
+            boundary >= 0 ? restoredMessages.slice(boundary) : [];
+          try {
+            return await handler({
+              ...forwardedRequest,
+              // Messages retained for the actual agent call remain current-turn
+              // evidence. Restore their original citation markers by identity;
+              // generated summary messages have no mapping and stay sanitized.
+              messages: [
+                ...groupCompleteToolExchanges(previousMessages, false).flat(),
+                ...groupCompleteToolExchanges(currentMessages, true).flat(),
+              ],
+              model: request.model,
+            });
+          } catch (error) {
+            if (summaryInvoked) {
+              failedGeneration = { error };
+            }
+            throw error;
+          }
+        },
       );
     },
   };
@@ -572,54 +648,86 @@ export function fallbackSourceWeftMessagesToRecentWindow(
 
   const currentTurnStart = latestHumanMessageIndex(conversationMessages);
   const protectedSuffix =
-    currentTurnStart >= 0
-      ? conversationMessages.slice(currentTurnStart)
-      : conversationMessages.slice(-budget.recentMessagesToKeep);
+    currentTurnStart >= 0 ? conversationMessages.slice(currentTurnStart) : [];
   const previousMessages =
     currentTurnStart >= 0
       ? conversationMessages.slice(0, currentTurnStart)
-      : conversationMessages.slice(0, -budget.recentMessagesToKeep);
-  const recentPrefix = previousMessages.slice(-budget.recentMessagesToKeep);
-  const nextMessages = [...systemMessages, ...recentPrefix, ...protectedSuffix];
-  messages.splice(0, messages.length, ...nextMessages);
-
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (!ToolMessage.isInstance(message)) {
-      continue;
+      : conversationMessages;
+  // Never repair a current turn by discarding its evidence or inventing results.
+  // Malformed older history can be removed, but an incomplete current exchange
+  // must be resolved by its caller before sending it to a model.
+  const protectedGroups = groupCompleteToolExchanges(protectedSuffix, true);
+  const previousGroups = groupCompleteToolExchanges(previousMessages, false);
+  const recentGroups: BaseMessage[][] = [];
+  let kept = 0;
+  for (let index = previousGroups.length - 1; index >= 0; index -= 1) {
+    const group = previousGroups[index]!;
+    if (kept + group.length > budget.recentMessagesToKeep) {
+      break;
     }
-    const aiMessage = findMatchingAIMessage(messages.slice(0, index), message);
-    if (!aiMessage) {
-      continue;
-    }
-    if (
-      aiMessage.tool_calls?.some(
-        (toolCall) => toolCall.id === message.tool_call_id,
-      )
-    ) {
-      continue;
-    }
-    messages.splice(index, 1);
-    index -= 1;
+    recentGroups.unshift(group);
+    kept += group.length;
   }
+  const recentPrefix = recentGroups.flat();
+  const nextMessages = [
+    ...systemMessages,
+    ...recentPrefix,
+    ...protectedGroups.flat(),
+  ];
+  messages.splice(0, messages.length, ...nextMessages);
 }
 
-function findMatchingAIMessage(
-  previousMessages: BaseMessage[],
-  toolMessage: ToolMessage,
+/** A tool exchange is an assistant call plus all of its contiguous results. */
+function groupCompleteToolExchanges(
+  messages: BaseMessage[],
+  protectCurrentTurn: boolean,
 ) {
-  for (let index = previousMessages.length - 1; index >= 0; index -= 1) {
-    const message = previousMessages[index];
-    if (
-      AIMessage.isInstance(message) &&
-      message.tool_calls?.some(
-        (toolCall) => toolCall.id === toolMessage.tool_call_id,
-      )
-    ) {
-      return message;
+  const groups: BaseMessage[][] = [];
+  const invalidHistory = () => {
+    if (protectCurrentTurn) {
+      throw new ContentError(
+        400,
+        "INVALID_TOOL_HISTORY",
+        "The current turn contains incomplete or unmatched tool messages.",
+      );
     }
+  };
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    if (ToolMessage.isInstance(message)) {
+      invalidHistory();
+      continue;
+    }
+    if (!AIMessage.isInstance(message) || !message.tool_calls?.length) {
+      groups.push([message]);
+      continue;
+    }
+    const callIds = new Set(message.tool_calls.map((call) => call.id));
+    const resultIds = new Set<string>();
+    const group: BaseMessage[] = [message];
+    let valid =
+      !callIds.has(undefined) &&
+      !callIds.has("") &&
+      callIds.size === message.tool_calls.length;
+    while (ToolMessage.isInstance(messages[index + 1])) {
+      const result = messages[++index] as ToolMessage;
+      if (!callIds.has(result.tool_call_id)) {
+        invalidHistory();
+        continue;
+      }
+      if (resultIds.has(result.tool_call_id)) {
+        valid = false;
+      }
+      resultIds.add(result.tool_call_id);
+      group.push(result);
+    }
+    if (!valid || resultIds.size !== callIds.size) {
+      invalidHistory();
+      continue;
+    }
+    groups.push(group);
   }
-  return null;
+  return groups;
 }
 
 function triggerReasons(input: {

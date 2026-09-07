@@ -25,7 +25,7 @@ import {
 } from "./runtime";
 import type { ModelGatewayProfileKind } from "./types";
 import { encryptSecret } from "../secrets";
-import { syncModelPricing } from "./sync-pricing";
+import { requiresCatalogPricing, syncModelPricing } from "./sync-pricing";
 import { resolveBackendRuntimePath } from "../runtime-paths";
 import {
   discoverGatewayCatalog,
@@ -37,10 +37,13 @@ import {
   withProtectedProfileConfigFields,
   type ProtectedProfileConfigField,
 } from "./profile-config-priority";
+import {
+  MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID,
+  prepareEmbeddingDefinitionsForSync,
+  type EmbeddingIndexIdentity,
+} from "./embedding-identity";
 
 let modelConfigSyncPromise: Promise<void> | null = null;
-
-const MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID = 7_344_001;
 
 function assertUniqueProfiles(
   kind: ModelGatewayProfileKind,
@@ -238,6 +241,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   gatewayConfigId: string,
   now: Date,
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  embeddingDefinition?: EmbeddingIndexIdentity,
 ) {
   const [primaryTarget] = entry.targets;
   if (!primaryTarget) {
@@ -291,7 +295,9 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     vectorStrategy: entry.vectorStrategy ?? "auto",
     isDefault: entry.isDefault,
     isActive: entry.isActive,
-    configJson: mergedConfigJson,
+    configJson: embeddingDefinition
+      ? { ...mergedConfigJson, embeddingDefinition }
+      : mergedConfigJson,
     updatedAt: now,
   };
 
@@ -304,7 +310,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   }
 
   await tx.insert(modelGatewayProfiles).values({
-    id: entry.profileId ?? randomUUID(),
+    id: embeddingDefinition?.profileId ?? entry.profileId ?? randomUUID(),
     ...setPayload,
     createdAt: now,
   });
@@ -534,11 +540,20 @@ async function deactivateCatalogProfilesForGateway(input: {
 
 async function loadDynamicCatalogProfiles(input: {
   gateways: GlobalGatewayEntry[];
+  pricingCatalogRequired: boolean;
 }) {
   // Preload the normalized model catalog (models.dev + LiteLLM + overrides) so
   // discovery resolves capabilities from memory — no per-model fetch. OpenRouter
   // is the only provider-self path; every other gateway reads the catalog.
-  await modelCatalog.refresh();
+  const registryRequired =
+    input.pricingCatalogRequired ||
+    input.gateways.some(
+      (gateway) =>
+        gateway.modelCatalog?.enabled && gateway.providerKind !== "openrouter",
+    );
+  if (registryRequired) {
+    await modelCatalog.refresh();
+  }
   const entries: ReturnType<typeof toDynamicProfileEntry>[] = [];
   const successfulCatalogs: Array<{
     gatewaySlug: string;
@@ -581,6 +596,28 @@ async function loadDynamicCatalogProfiles(input: {
         kinds.add(candidate.kind);
         bySource.set(candidate.providerCatalogSource, kinds);
       }
+      // An empty valid response still completes discovery and retires old
+      // entries. It must not be confused with an unavailable catalog.
+      if (bySource.size === 0)
+        bySource.set(
+          gateway.providerKind === "openrouter"
+            ? "openrouter-models"
+            : gateway.modelCatalog?.format === "orcarouter"
+              ? "orcarouter-models"
+              : `${gateway.providerKind}-models`,
+          new Set(
+            catalog.kinds ?? [
+              "chat",
+              "vision",
+              "embedding",
+              "rerank",
+              "asr",
+              "tts",
+              "image",
+              "video",
+            ],
+          ),
+        );
       for (const [source, kinds] of bySource.entries()) {
         successfulCatalogs.push({
           gatewaySlug: gateway.slug,
@@ -605,6 +642,7 @@ async function loadDynamicCatalogProfiles(input: {
 
   return {
     entries,
+    registryLoaded: registryRequired,
     successfulCatalogs,
     disabledCatalogs,
   };
@@ -632,6 +670,7 @@ async function syncProfileKind(input: {
   kind: ModelGatewayProfileKind;
   now: Date;
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
+  embeddingDefinitions?: Map<string, EmbeddingIndexIdentity>;
 }) {
   for (const entry of input.entries) {
     const resolveGatewayConfigId = (gatewaySlug: string) => {
@@ -659,6 +698,7 @@ async function syncProfileKind(input: {
       resolveGatewayConfigId(primaryTarget.gatewaySlug),
       input.now,
       input.tx,
+      input.embeddingDefinitions?.get(entry.profileAlias),
     );
 
     for (const target of entry.targets) {
@@ -693,7 +733,7 @@ export function buildRouteConstraintsJson(input: {
     : {};
 }
 
-async function syncGlobalModelGatewayConfigFromFile(
+export async function syncGlobalModelGatewayConfigFromFile(
   configPath: string,
   options?: { syncPricing?: boolean },
 ) {
@@ -718,7 +758,44 @@ async function syncGlobalModelGatewayConfigFromFile(
     gateways: loaded.gateways.filter(
       (gateway) => gateway.activation.globalReady,
     ),
+    pricingCatalogRequired:
+      options?.syncPricing !== false &&
+      [
+        ...loaded.chatProfiles,
+        ...loaded.embeddingProfiles,
+        ...loaded.rerankProfiles,
+        ...loaded.imageProfiles,
+        ...loaded.visionProfiles,
+        ...loaded.ttsProfiles,
+        ...loaded.asrProfiles,
+      ].some(
+        (profile) =>
+          profile.isActive &&
+          profile.targets.some((target) =>
+            loaded.gateways.some(
+              (gateway) =>
+                gateway.slug === target.gatewaySlug &&
+                gateway.activation.globalReady,
+            ),
+          ) &&
+          requiresCatalogPricing(
+            buildProfilePricingConfigJson(profile.pricing, new Date()),
+          ),
+      ),
   });
+  if (
+    options?.syncPricing !== false &&
+    !dynamicCatalog.registryLoaded &&
+    dynamicCatalog.entries.some((profile) =>
+      requiresCatalogPricing(
+        buildProfilePricingConfigJson(profile.pricing, new Date()),
+      ),
+    )
+  ) {
+    // Provider catalogs can reveal unpriced dynamic models only after fetch.
+    // Their auto-pricing source must also succeed before activating the version.
+    await modelCatalog.refresh();
+  }
   const dynamicByKind = groupDynamicProfilesByKind({
     entries: dynamicCatalog.entries,
   });
@@ -797,6 +874,10 @@ async function syncGlobalModelGatewayConfigFromFile(
     await tx.execute(
       sql`select pg_advisory_xact_lock(${MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID})`,
     );
+    const embeddingDefinitions = await prepareEmbeddingDefinitionsForSync(tx, {
+      profiles: embeddingProfilesToSync,
+      gateways: loaded.gateways,
+    });
 
     await tx
       .update(modelGatewayConfigVersions)
@@ -995,11 +1076,24 @@ async function syncGlobalModelGatewayConfigFromFile(
       now,
       tx,
     });
+    // The guarded empty-index default switch is allowed regardless of entry
+    // order. Clear the old default within this transaction before any new one
+    // can hit the unique default-per-kind index.
+    await tx
+      .update(modelGatewayProfiles)
+      .set({ isDefault: false, updatedAt: now })
+      .where(
+        and(
+          eq(modelGatewayProfiles.kind, "embedding"),
+          eq(modelGatewayProfiles.isDefault, true),
+        ),
+      );
     await syncProfileKind({
       configVersionId,
       entries: embeddingProfilesToSync,
       gatewayIdBySlug,
       kind: "embedding",
+      embeddingDefinitions,
       now,
       tx,
     });

@@ -10,6 +10,10 @@ import { db, llmGenerations } from "@sourceweft/db";
 import { endGeneration, recordGenerationError, startGeneration } from ".";
 import { logger } from "../../shared/logger";
 import { workspaceService } from "../workspace";
+import {
+  captureGenerationUsage,
+  resetCapturedUsage,
+} from "../../shared/model-gateway/billing/usage-capture";
 
 // Adapter from model-gateway observation events to backend llm-observability persistence.
 const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
@@ -193,7 +197,7 @@ export type GenerationCostResolver = (input: {
 
 async function resolveGenerationCost(
   resolveCost: GenerationCostResolver | undefined,
-  generation: ObserveGenerationEnd,
+  generation: ObserveGenerationEnd | ObserveGenerationError,
 ): Promise<{ providerCostUsd: number | null; costSource: string } | null> {
   if (!resolveCost) {
     return null;
@@ -224,7 +228,7 @@ async function resolveGenerationCost(
       gatewayConfigId,
       modelKind,
       profileAlias,
-      usage: generation.usage,
+      usage: generation.usage ?? generation.observation?.usage,
       executionMode: readAttributeString(attributes, "executionMode"),
     });
   } catch (error) {
@@ -243,6 +247,7 @@ export function createLlmObservabilitySink(options?: {
 }): ObserveSink {
   return {
     async onGenerationStart(generation: ObserveGenerationStart) {
+      resetCapturedUsage();
       const context = extractGenerationContext(generation);
       if (!generation.traceId || !context.teamId || !context.workspaceId) {
         return;
@@ -301,6 +306,7 @@ export function createLlmObservabilitySink(options?: {
       });
     },
     async onGenerationEnd(generation: ObserveGenerationEnd) {
+      captureGenerationUsage(generation);
       const scope = await resolveGenerationScope(generation);
       if (!generation.traceId || !scope) {
         return;
@@ -335,10 +341,17 @@ export function createLlmObservabilitySink(options?: {
       });
     },
     async onGenerationError(generation: ObserveGenerationError) {
+      captureGenerationUsage(generation);
       const scope = await resolveGenerationScope(generation);
       if (!generation.traceId || !scope) {
         return;
       }
+      const cost =
+        generation.usage !== undefined ||
+        generation.observation?.usage !== undefined ||
+        typeof generation.observation?.cost?.effectiveUsd === "number"
+          ? await resolveGenerationCost(options?.resolveCost, generation)
+          : null;
       await recordGenerationError({
         traceId: generation.traceId,
         teamId: scope.teamId,
@@ -346,12 +359,19 @@ export function createLlmObservabilitySink(options?: {
         spanId: generation.spanId,
         errorCode: generation.errorCode,
         errorMessage: generation.errorMessage,
+        usage: generation.usage,
+        observation: generation.observation,
+        providerFields: generation.providerFields,
+        providerCostUsd: cost?.providerCostUsd ?? null,
         providerResponse: readRecord(generation.providerResponse),
         providerStatusCode: generation.providerStatusCode,
         providerRequestId: generation.providerRequestId,
         rawCaptureError: generation.rawCaptureError,
         latencyMs: generation.latencyMs,
-        metadata: buildEventAttributes(generation.attributes ?? {}),
+        metadata: {
+          ...buildEventAttributes(generation.attributes ?? {}),
+          ...(cost ? { costSource: cost.costSource } : {}),
+        },
         endedAt: new Date(generation.endedAt),
       });
     },

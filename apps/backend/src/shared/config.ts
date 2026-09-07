@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { parseBooleanEnv as parseBoolean } from "./env";
+import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
 import type {
   BillingMode,
@@ -228,12 +229,16 @@ function parseDocumentParseProvider(
   value: string | undefined,
   fallback: string,
 ) {
-  if (!value) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
     return fallback;
   }
-
-  const normalized = value.trim().toLowerCase();
-  return documentParseProviders.has(normalized) ? normalized : fallback;
+  if (documentParseProviders.has(normalized)) {
+    return normalized;
+  }
+  throw new Error(
+    `DOCUMENT_PARSE_PROVIDER must be one of: ${[...documentParseProviders].join(", ")}.`,
+  );
 }
 
 function parseDocumentParseStrategy(
@@ -736,6 +741,17 @@ export const config = {
     // become a DB-backed role without touching the endpoints.
     adminUserIds: parseCsv(process.env.MARKET_ADMIN_USER_IDS),
   },
+  // Only the explicit local development mode relaxes endpoint address policy.
+  // Test, production and an omitted NODE_ENV retain the same strict checks.
+  endpointAddressChecksEnabled: process.env.NODE_ENV !== "development",
+  mcpAllowedInternalOrigins: parseAllowedInternalOrigins(
+    "MCP_ALLOWED_INTERNAL_ORIGINS",
+    process.env.MCP_ALLOWED_INTERNAL_ORIGINS,
+  ),
+  llmAllowedInternalOrigins: parseAllowedInternalOrigins(
+    "LLM_ALLOWED_INTERNAL_ORIGINS",
+    process.env.LLM_ALLOWED_INTERNAL_ORIGINS,
+  ),
   mcpOAuth: {
     // Callback our backend exposes for the MCP OAuth authorization-code flow. It
     // must be registered with any confidential (non-DCR) provider's OAuth app;

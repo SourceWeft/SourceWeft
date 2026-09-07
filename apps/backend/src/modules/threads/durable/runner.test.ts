@@ -44,17 +44,17 @@ function parseSseData(value: string) {
   >;
 }
 
-test("terminal failure persistence appends error and finish before marking run terminal", async () => {
+test("terminal failure commits the run before emitting error and finish", async () => {
   const order: string[] = [];
   const appendedPayloads: string[] = [];
   let finishedUserMessageId: string | null | undefined;
-  const run = createRun();
+  const run = createRun({ assistantMessageId: null });
 
   await persistTerminalFailure({
     run,
     status: "failed",
-    userMessageId: "user-message-override",
-    assistantMessageId: "assistant-message-1",
+    assistantMessageId: null,
+    findRunById: async () => run,
     snapshot: {
       errorCode: "CHAT_RUN_FAILED",
       errorMessage: "Model failed",
@@ -71,18 +71,42 @@ test("terminal failure persistence appends error and finish before marking run t
     },
   });
 
-  assert.deepEqual(order, ["append:error", "append:finish", "finish-run"]);
-  assert.equal(finishedUserMessageId, "user-message-override");
+  assert.deepEqual(order, ["finish-run", "append:error", "append:finish"]);
+  assert.equal(finishedUserMessageId, "user-message-1");
   assert.deepEqual(appendedPayloads.map(parseSseData), [
     {
       type: "error",
       code: "CHAT_RUN_FAILED",
       error: "Model failed",
-      userMessageId: "user-message-override",
-      messageId: "assistant-message-1",
+      userMessageId: "user-message-1",
     },
     { type: "finish" },
   ]);
+});
+
+test("a failed terminal CAS returns the durable winner without emitting speculative failure", async () => {
+  const run = createRun({ assistantMessageId: null });
+  const completed = { ...run, status: "completed" as const };
+  let appended = 0;
+  let reads = 0;
+  const result = await persistTerminalFailure({
+    run,
+    status: "failed",
+    assistantMessageId: null,
+    snapshot: {},
+    contentError: new ContentError(
+      500,
+      "CHAT_RUN_FAILED",
+      "late worker failure",
+    ),
+    finishRun: async () => null,
+    findRunById: async () => (++reads === 1 ? run : completed),
+    appendRunEvent: async () => {
+      appended += 1;
+    },
+  });
+  assert.equal(result, completed);
+  assert.equal(appended, 0);
 });
 
 test("durable send and edit runs use stable internal message ids", () => {
@@ -121,43 +145,98 @@ test("durable send and edit runs use stable internal message ids", () => {
   );
 });
 
-test("durable failure fallback derives stable user message ids for send and edit only", () => {
-  const send = createRun({ id: "run-send", mode: "send", userMessageId: null });
-  const edit = createRun({ id: "run-edit", mode: "edit", userMessageId: null });
-  const resume = createRun({
-    id: "run-resume",
-    mode: "resume",
-    userMessageId: null,
-  });
-
-  assert.equal(
-    testExports.durableUserMessageIdFallback({
-      run: send,
-      request: testExports.requestWithDurableMessageOverrides({
-        run: send,
-        request: { content: "hello" } as never,
-      }),
+test("terminal message resolution keeps database-bound references without candidate lookups", async () => {
+  const run = createRun();
+  assert.deepEqual(
+    await testExports.resolvePersistedTerminalMessageIds({
+      run,
+      assistantMessageId: "untrusted-id",
+      findMessage: async () => {
+        throw new Error("bound references need no lookup");
+      },
     }),
-    "run-user-run-send",
-  );
-  assert.equal(
-    testExports.durableUserMessageIdFallback({
-      run: edit,
-      request: testExports.requestWithDurableMessageOverrides({
-        run: edit,
-        request: { content: "edited" } as never,
-      }),
-    }),
-    "run-user-run-edit",
-  );
-  assert.equal(
-    testExports.durableUserMessageIdFallback({
-      run: resume,
-      request: { mode: "resume" } as never,
-    }),
-    null,
+    {
+      userMessageId: run.userMessageId,
+      assistantMessageId: run.assistantMessageId,
+    },
   );
 });
+
+for (const mode of ["send", "edit", "resume", "refresh"] as const) {
+  test(`terminal ${mode} failure never invents a user message reference`, async () => {
+    const run = createRun({
+      mode,
+      userMessageId: null,
+      assistantMessageId: null,
+    });
+    const lookedUp: string[] = [];
+    const ids = await testExports.resolvePersistedTerminalMessageIds({
+      run,
+      assistantMessageId: null,
+      findMessage: async ({ messageId }) => {
+        lookedUp.push(messageId);
+        return null;
+      },
+    });
+    assert.deepEqual(ids, { userMessageId: null, assistantMessageId: null });
+    assert.deepEqual(
+      lookedUp,
+      ["send", "edit"].includes(mode) ? ["run-user-run-1"] : [],
+    );
+  });
+}
+
+for (const invalidField of [
+  "teamId",
+  "workspaceId",
+  "threadId",
+  "role",
+  "createdBy",
+] as const) {
+  test(`an unbound user message with a mismatched ${invalidField} is not adopted`, async () => {
+    const run = createRun({ userMessageId: null, assistantMessageId: null });
+    const candidate = {
+      id: "run-user-run-1",
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      threadId: run.threadId,
+      role: "user",
+      createdBy: run.userId,
+      [invalidField]: "other",
+    };
+    const ids = await testExports.resolvePersistedTerminalMessageIds({
+      run,
+      assistantMessageId: null,
+      findMessage: async () => candidate as never,
+    });
+    assert.equal(ids.userMessageId, null);
+  });
+}
+
+for (const invalidField of [
+  "teamId",
+  "workspaceId",
+  "threadId",
+  "role",
+] as const) {
+  test(`an assistant candidate with a mismatched ${invalidField} is not adopted`, async () => {
+    const run = createRun({ assistantMessageId: null });
+    const candidate = {
+      id: "candidate-assistant",
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      threadId: run.threadId,
+      role: "assistant",
+      [invalidField]: "other",
+    };
+    const ids = await testExports.resolvePersistedTerminalMessageIds({
+      run,
+      assistantMessageId: candidate.id,
+      findMessage: async () => candidate as never,
+    });
+    assert.equal(ids.assistantMessageId, null);
+  });
+}
 
 test("durable runner classifies LangChain sandbox execute approval errors", () => {
   const error = new Error("MiddlewareError", {
@@ -402,17 +481,21 @@ test("run snapshots update streaming reasoning deltas in one trace part", () => 
 
   assert.deepEqual(
     (
-      (snapshot as {
-        reasoningSegments?: Array<{ id: string; text: string }>;
-      }).reasoningSegments ?? []
+      (
+        snapshot as {
+          reasoningSegments?: Array<{ id: string; text: string }>;
+        }
+      ).reasoningSegments ?? []
     ).map((segment) => `${segment.id}:${segment.text}`),
     ["model-reasoning-1:The user wants TEST"],
   );
   assert.deepEqual(
     (
-      (snapshot as {
-        traceParts?: Array<{ kind: string; order: number; text?: string }>;
-      }).traceParts ?? []
+      (
+        snapshot as {
+          traceParts?: Array<{ kind: string; order: number; text?: string }>;
+        }
+      ).traceParts ?? []
     ).map((part) => `${part.order}:${part.kind}:${part.text ?? ""}`),
     ["0:reasoning:The user wants TEST"],
   );
@@ -445,18 +528,21 @@ test("run snapshots keep append-only trace events by sequence", () => {
       sequence: 2,
     },
   });
-  const afterToolSnapshot = testExports.updateSnapshotFromPayload(toolSnapshot, {
-    type: "reasoning",
-    reasoning: "after",
-    segment: {
-      id: "model-reasoning-1",
-      text: "after",
-      sequence: 3,
-      phase: "after_tool",
-      toolCallId: "search-page",
-      tool: "search_notion_pages",
+  const afterToolSnapshot = testExports.updateSnapshotFromPayload(
+    toolSnapshot,
+    {
+      type: "reasoning",
+      reasoning: "after",
+      segment: {
+        id: "model-reasoning-1",
+        text: "after",
+        sequence: 3,
+        phase: "after_tool",
+        toolCallId: "search-page",
+        tool: "search_notion_pages",
+      },
     },
-  });
+  );
 
   assert.deepEqual(
     (
@@ -629,10 +715,13 @@ test("run snapshots preserve streamed text render blocks", () => {
       delta: "First",
     },
   );
-  const appendedSnapshot = testExports.updateSnapshotFromPayload(deltaSnapshot, {
-    type: "text-delta",
-    delta: " second",
-  });
+  const appendedSnapshot = testExports.updateSnapshotFromPayload(
+    deltaSnapshot,
+    {
+      type: "text-delta",
+      delta: " second",
+    },
+  );
   const replacedSnapshot = testExports.updateSnapshotFromPayload(
     appendedSnapshot,
     {
@@ -666,15 +755,21 @@ test("run snapshots preserve text segmentation on text replace", () => {
       delta: "Found pages.",
     },
   );
-  const toolSnapshot = testExports.updateSnapshotFromPayload(firstTextSnapshot, {
-    type: "tool-call-start",
-    id: "create-page",
-    tool: "create_notion_page",
-  });
-  const secondTextSnapshot = testExports.updateSnapshotFromPayload(toolSnapshot, {
-    type: "text-delta",
-    delta: "Creation rejected.",
-  });
+  const toolSnapshot = testExports.updateSnapshotFromPayload(
+    firstTextSnapshot,
+    {
+      type: "tool-call-start",
+      id: "create-page",
+      tool: "create_notion_page",
+    },
+  );
+  const secondTextSnapshot = testExports.updateSnapshotFromPayload(
+    toolSnapshot,
+    {
+      type: "text-delta",
+      delta: "Creation rejected.",
+    },
+  );
   const replacedSnapshot = testExports.updateSnapshotFromPayload(
     secondTextSnapshot,
     {
@@ -893,4 +988,43 @@ test("final run resolution preserves externally terminalized cancellation", () =
 
   assert.equal(resolved.status, "cancelled");
   assert.equal(resolved.errorCode, "CLIENT_CANCELLED");
+});
+
+test("early durable preparation preserves safe configuration failures", async () => {
+  const { ModelGatewayError } =
+    await import("../../../shared/model-gateway/errors");
+  const { toContentError } = await import("../../content/model-gateway-error");
+  const gatewayError = new ModelGatewayError({
+    code: "CONFIGURATION",
+    message: "No ready target: private-provider private-secret",
+  });
+  for (const source of [
+    gatewayError,
+    new Error("MiddlewareError", { cause: gatewayError }),
+    {
+      error: {
+        code: "CONFIGURATION",
+        message: gatewayError.message,
+        retryable: false,
+      },
+    },
+  ]) {
+    const mapped = toContentError(source);
+    const durable = testExports.toDurableRunContentError(source);
+    assert.equal(durable.code, "MODEL_CONFIGURATION_ERROR");
+    assert.equal(durable.statusCode, 503);
+    assert.equal(durable.message, mapped.message);
+    assert.doesNotMatch(durable.message, /private-provider|private-secret/);
+  }
+  const existing = new ContentError(
+    403,
+    "THREAD_FORBIDDEN",
+    "Thread access denied",
+  );
+  assert.equal(testExports.toDurableRunContentError(existing), existing);
+  assert.equal(
+    testExports.toDurableRunContentError(new Error("Failed query: unavailable"))
+      .code,
+    "CHAT_RUN_FAILED",
+  );
 });

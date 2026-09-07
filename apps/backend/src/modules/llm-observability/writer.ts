@@ -443,8 +443,18 @@ export async function startGeneration(input: StartGenerationInput) {
   return result ?? { id, generationId: id, spanId };
 }
 
-export async function endGeneration(input: EndGenerationInput) {
-  const endedAt = input.endedAt ?? new Date();
+function generationMeasurementColumns(
+  input: Pick<
+    EndGenerationInput,
+    | "usage"
+    | "observation"
+    | "providerCostUsd"
+    | "metadata"
+    | "inputTokens"
+    | "outputTokens"
+    | "totalTokens"
+  >,
+) {
   const observation = input.observation ?? undefined;
   const observationUsage = observation?.usage;
   const observationCost = observation?.cost;
@@ -461,6 +471,61 @@ export async function endGeneration(input: EndGenerationInput) {
         : hostCostSource?.startsWith("missing")
           ? { source: "missing", status: "missing" }
           : undefined;
+  return {
+    usageJson: usage,
+    inputTokens:
+      input.inputTokens ??
+      observationUsage?.inputTokens ??
+      input.usage?.inputTokens ??
+      null,
+    outputTokens:
+      input.outputTokens ??
+      observationUsage?.outputTokens ??
+      input.usage?.outputTokens ??
+      null,
+    totalTokens:
+      input.totalTokens ??
+      observationUsage?.totalTokens ??
+      input.usage?.totalTokens ??
+      null,
+    reasoningTokens:
+      observationUsage?.reasoningTokens ?? input.usage?.reasoningTokens ?? null,
+    cacheReadTokens:
+      observationUsage?.cacheReadTokens ?? input.usage?.cacheReadTokens ?? null,
+    cacheWriteTokens:
+      observationUsage?.cacheWriteTokens ??
+      input.usage?.cacheWriteTokens ??
+      null,
+    resolvedProviderModel: observation?.identity.resolvedProviderModel ?? null,
+    providerCostUsd: toNumeric(
+      observationCost?.effectiveUsd ?? input.providerCostUsd,
+    ),
+    providerCostInlineUsd: toNumeric(observationCost?.inlineUsd),
+    providerCostSettledUsd: toNumeric(observationCost?.settledUsd),
+    providerCostSource:
+      observationCost?.source ?? fallbackCostClassification?.source ?? null,
+    providerCostStatus:
+      observationCost?.status ?? fallbackCostClassification?.status ?? null,
+    costCurrency:
+      observationCost?.currency ??
+      (input.providerCostUsd !== null && input.providerCostUsd !== undefined
+        ? "USD"
+        : null),
+    normalizationJson: observation
+      ? toJsonRecord({
+          provenance: observation.provenance,
+          diagnostics: observation.diagnostics,
+          ...(observation.identity.providerRequestIds
+            ? { providerRequestIds: observation.identity.providerRequestIds }
+            : {}),
+        })
+      : null,
+  };
+}
+
+export async function endGeneration(input: EndGenerationInput) {
+  const endedAt = input.endedAt ?? new Date();
+  const observation = input.observation ?? undefined;
   await safelyWrite("endGeneration", input.strict, async () => {
     const [startedAt, existingMetadata] = await Promise.all([
       findGenerationStart(input),
@@ -484,47 +549,7 @@ export async function endGeneration(input: EndGenerationInput) {
           input.providerFields,
           input.payloadMode,
         ),
-        usageJson: usage,
-        inputTokens:
-          input.inputTokens ??
-          observationUsage?.inputTokens ??
-          input.usage?.inputTokens ??
-          null,
-        outputTokens:
-          input.outputTokens ??
-          observationUsage?.outputTokens ??
-          input.usage?.outputTokens ??
-          null,
-        totalTokens:
-          input.totalTokens ??
-          observationUsage?.totalTokens ??
-          input.usage?.totalTokens ??
-          null,
-        reasoningTokens: observationUsage?.reasoningTokens ?? null,
-        cacheReadTokens: observationUsage?.cacheReadTokens ?? null,
-        cacheWriteTokens: observationUsage?.cacheWriteTokens ?? null,
-        resolvedProviderModel:
-          observation?.identity.resolvedProviderModel ?? null,
-        providerCostUsd: toNumeric(
-          observationCost?.effectiveUsd ?? input.providerCostUsd,
-        ),
-        providerCostInlineUsd: toNumeric(observationCost?.inlineUsd),
-        providerCostSettledUsd: toNumeric(observationCost?.settledUsd),
-        providerCostSource:
-          observationCost?.source ?? fallbackCostClassification?.source ?? null,
-        providerCostStatus:
-          observationCost?.status ?? fallbackCostClassification?.status ?? null,
-        costCurrency:
-          observationCost?.currency ??
-          (input.providerCostUsd !== null && input.providerCostUsd !== undefined
-            ? "USD"
-            : null),
-        normalizationJson: observation
-          ? toJsonRecord({
-              provenance: observation.provenance,
-              diagnostics: observation.diagnostics,
-            })
-          : null,
+        ...generationMeasurementColumns(input),
         providerResponseJson: policyRecord(
           input.providerResponse,
           input.payloadMode,
@@ -573,6 +598,26 @@ export async function recordGenerationError(input: RecordGenerationErrorInput) {
           endedAt,
           latencyMs: input.latencyMs,
         }),
+        ...(input.usage !== undefined ||
+        input.observation !== undefined ||
+        input.providerCostUsd != null
+          ? generationMeasurementColumns(input)
+          : {}),
+        ...(input.providerFields !== undefined
+          ? {
+              providerFieldsJson: policyRecord(
+                input.providerFields,
+                input.payloadMode,
+              ),
+            }
+          : {}),
+        ...(input.observation?.providerResponseHeaders
+          ? {
+              providerResponseHeadersJson: redactHeaders(
+                input.observation.providerResponseHeaders,
+              ),
+            }
+          : {}),
         errorCode: input.errorCode ?? serialized.code ?? null,
         errorMessage: input.errorMessage ?? serialized.message,
         providerResponseJson: policyRecord(
@@ -580,7 +625,10 @@ export async function recordGenerationError(input: RecordGenerationErrorInput) {
           input.payloadMode,
         ),
         providerStatusCode: input.providerStatusCode ?? null,
-        providerRequestId: input.providerRequestId ?? null,
+        providerRequestId:
+          input.providerRequestId ??
+          input.observation?.identity.providerRequestId ??
+          null,
         rawCaptureError: input.rawCaptureError ?? null,
         metadataJson: mergeMetadata(existingMetadata, input.metadata),
       })

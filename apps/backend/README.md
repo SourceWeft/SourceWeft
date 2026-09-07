@@ -2,6 +2,10 @@
 
 This directory contains the backend runtime for SourceWeft.
 
+The default development and Docker runtime is Node **22.23.2**; Node **24** is
+also supported. Root/backend engines accept `^22.13.0 || ^24.0.0`, and CI tests
+22.23.2 and 24.18.0. See [Node runtime policy](docs/node-runtime.md).
+
 Queue backend: BullMQ + Redis (skeleton only, minimal implementation).
 
 Billing MVP (`pages + credits`) is backed by PostgreSQL tables managed by Drizzle.
@@ -40,6 +44,22 @@ Auth and workspace MVP notes:
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.
 
 Environment template: `apps/backend/.env.example`.
+
+For production/test access to internal MCP/OAuth services, configure
+`MCP_ALLOWED_INTERNAL_ORIGINS`. See [MCP network and authentication setup](docs/mcp-network.md).
+Backend dev commands use `NODE_ENV=development` and skip endpoint address
+restrictions, including proxy fake-IP checks. TLS and credential protections remain active.
+
+Under strict address policy, System Provider endpoint declarations
+grant network permission; extra BYOK origins use `LLM_ALLOWED_INTERNAL_ORIGINS`.
+See [LLM network setup and adapter limits](docs/llm-network.md), including the
+native Gemini patches and unauthenticated local System OpenAI-compatible models.
+Embedding configuration changes follow [index identity protection](docs/embedding-index-safety.md).
+Embedding usage observation retains known batch usage without changing billing.
+Artifact reuse, conflicts and object cleanup follow
+[publication safety](docs/artifact-write-safety.md).
+Catalog refresh, retrieval failures and model request limits follow
+[failure and request-option semantics](docs/model-failure-semantics.md).
 
 Sandbox developer notes live in
 `src/modules/content/agent/sandbox/README.md`. They describe the provider-neutral

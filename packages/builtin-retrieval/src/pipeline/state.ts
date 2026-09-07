@@ -22,6 +22,7 @@ export function resolveRetrievalTuning(
     rrfK: tuning?.rrfK ?? DEFAULT_RRF_K,
     fusionLimit: tuning?.fusionLimit ?? DEFAULT_FUSION_LIMIT,
     rerankTopN: tuning?.rerankTopN ?? DEFAULT_RERANK_TOP_N,
+    bm25FailurePolicy: tuning?.bm25FailurePolicy ?? "fail",
   };
 }
 

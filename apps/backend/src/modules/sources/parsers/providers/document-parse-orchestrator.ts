@@ -20,8 +20,7 @@ function getConfiguredStrategy() {
 }
 
 function getConfiguredProviderId() {
-  return (process.env.DOCUMENT_PARSE_PROVIDER?.trim() ||
-    config.documentParsing.provider) as DocumentParseProviderId;
+  return config.documentParsing.provider as DocumentParseProviderId;
 }
 
 function ensureSupported(

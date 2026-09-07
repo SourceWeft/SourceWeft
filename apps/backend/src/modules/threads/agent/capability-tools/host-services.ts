@@ -8,10 +8,12 @@ import { AGENT_TOOL_HOST_LIMITS } from "@sourceweft/contracts/agent-tools";
 import {
   createPendingArtifactRecord,
   createReadyArtifactRecord,
-  findArtifactRecord,
   findReusableArtifactRecord,
 } from "../../../artifacts/repository";
-import { readAuthorizedCurrentArtifactVersion } from "../../../artifacts/authorized-version-service";
+import {
+  readAuthorizedArtifactRecord,
+  readAuthorizedCurrentArtifactVersion,
+} from "../../../artifacts/authorized-version-service";
 import { currentRunArtifactPublicationService } from "../../../artifacts/current-run-publication";
 import {
   completeArtifact,
@@ -377,7 +379,18 @@ export function createCapabilityAgentToolHostServices(
             artifactType as ReadyArtifactRecordInput["artifactType"],
         });
       },
-      findArtifact: findArtifactRecord,
+      findArtifact: (input) => {
+        if (
+          input.teamId !== prepared.workspace.organizationId ||
+          input.workspaceId !== prepared.workspace.id
+        )
+          return Promise.resolve(null);
+        return readAuthorizedArtifactRecord({
+          workspaceId: prepared.workspace.id,
+          userId: prepared.userId,
+          artifactId: input.artifactId,
+        });
+      },
       /**
        * Reuse lookup. Which type, which statuses and what makes a row a match
        * are the caller's query, not the host's knowledge.

@@ -8,6 +8,7 @@ import {
   ARTIFACT_WRITE_ERROR_CODES,
   ArtifactError,
   toArtifactError,
+  isArtifactError,
 } from "@sourceweft/contracts/artifact-errors";
 import {
   artifactErrorFromIssues,
@@ -19,10 +20,12 @@ import {
 } from "@sourceweft/contracts/artifact-write";
 import { artifactTypeSchema } from "@sourceweft/contracts/artifacts";
 import { artifactStorage } from "../sources/storage";
+import { logger } from "../../shared/logger";
 import {
   createPendingArtifactRecord,
   createReadyArtifactRecord,
   findArtifactRecordByRequestKey,
+  findArtifactWriteReferences,
   markArtifactFailed,
   markArtifactReady,
 } from "./repository";
@@ -56,6 +59,7 @@ export type ArtifactWriterDeps = {
     readonly markReady: typeof markArtifactReady;
     readonly markFailed: typeof markArtifactFailed;
     readonly findByRequestKey: typeof findArtifactRecordByRequestKey;
+    readonly findWriteReferences: typeof findArtifactWriteReferences;
   };
   readonly newArtifactId?: () => string;
 };
@@ -65,7 +69,8 @@ export type PublishArtifactResult = {
   readonly versionId: string;
   /**
    * True when an idempotency key resolved to an artifact that already existed,
-   * so this call produced no new artifact, no new version and no new bytes.
+   * so this call produced no new artifact or version. Any objects uploaded
+   * before losing a concurrent creation race have been cleaned up.
    * Callers that report "created" to a user need to tell the two apart.
    */
   readonly reused: boolean;
@@ -165,10 +170,8 @@ export class ArtifactWriter {
    * that had already written its bytes would leave objects in the bucket for an
    * artifact this call did not create and nothing will ever reference.
    *
-   * A miss followed by two concurrent inserts can still produce two rows — the
-   * column is deliberately not unique (see the schema comment), so this narrows
-   * the window rather than closing it. That is strictly better than the
-   * previous behaviour, where the field was accepted and ignored outright.
+   * The repository repeats this check under the shared request-key lock before
+   * inserting. This fast check saves uploads; the locked check supplies safety.
    */
   private async findReusable(input: {
     readonly context: ArtifactWriteContext;
@@ -183,6 +186,8 @@ export class ArtifactWriter {
       return await this.deps.repository.findByRequestKey({
         teamId: input.context.teamId,
         workspaceId: input.context.workspaceId,
+        threadId: input.context.threadId,
+        userId: input.context.userId,
         artifactType: this.assertKnownArtifactType(input.spec.artifactType),
         requestKey,
         statuses: input.statuses,
@@ -201,15 +206,70 @@ export class ArtifactWriter {
   }
 
   private async cleanupStorageKeys(keys: readonly string[]) {
+    const uniqueKeys = [...new Set(keys)];
     const results = await Promise.allSettled(
-      [...new Set(keys)].map((key) => this.deps.storage.delete({ key })),
+      uniqueKeys.map((key) => this.deps.storage.delete({ key })),
     );
     const failed = results.filter((result) => result.status === "rejected");
     if (failed.length > 0) {
+      logger.warn("Artifact object cleanup failed", {
+        failedKeys: uniqueKeys.filter(
+          (_, index) => results[index]?.status === "rejected",
+        ),
+      });
       throw new ArtifactError({
         code: ARTIFACT_WRITE_ERROR_CODES.storageUnavailable,
         message: `failed to clean up ${failed.length} uncommitted artifact object(s)`,
       });
+    }
+  }
+
+  private async cleanupAfterFailure(keys: readonly string[], primary: unknown) {
+    try {
+      await this.cleanupStorageKeys(keys);
+    } catch {
+      // cleanupStorageKeys already logged the exact failed keys. Preserve the
+      // conflict/cancellation/upload failure that determines the caller's action.
+      logger.warn(
+        "Artifact cleanup failed while preserving the primary error",
+        {
+          code: isArtifactError(primary) ? primary.code : undefined,
+        },
+      );
+    }
+  }
+
+  private async inspectUncertainCommit(
+    artifactId: string,
+    context: ArtifactWriteContext,
+    keys: readonly string[],
+  ) {
+    if (keys.length === 0) return;
+    try {
+      const references = await this.deps.repository.findWriteReferences({
+        artifactId,
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        keys,
+      });
+      // A missing row/key is not proof of rollback: the original transaction
+      // may still be finishing, and historical primary pointers are not stored.
+      logger.warn("Uncertain artifact commit; retaining attempted objects", {
+        artifactId,
+        workspaceId: context.workspaceId,
+        attemptedStorageKeys: keys,
+        ...references,
+      });
+    } catch (error) {
+      logger.warn(
+        "Artifact commit verification failed; retaining attempted objects",
+        {
+          artifactId,
+          workspaceId: context.workspaceId,
+          attemptedStorageKeys: keys,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
   }
 
@@ -302,7 +362,7 @@ export class ArtifactWriter {
         };
       }
     } catch (error) {
-      await this.cleanupStorageKeys(attemptedStorageKeys);
+      await this.cleanupAfterFailure(attemptedStorageKeys, error);
       throwArtifactWriteAbortReason(input.signal);
       throw toArtifactError(
         error,
@@ -359,12 +419,13 @@ export class ArtifactWriter {
     try {
       throwArtifactWriteAbortReason(input.signal);
     } catch (error) {
-      await this.cleanupStorageKeys(prepared.attemptedStorageKeys);
+      await this.cleanupAfterFailure(prepared.attemptedStorageKeys, error);
       throw error;
     }
 
+    let record: Awaited<ReturnType<typeof createReadyArtifactRecord>>;
     try {
-      const record = await this.deps.repository.createReady({
+      record = await this.deps.repository.createReady({
         artifactId,
         artifactType: this.assertKnownArtifactType(input.spec.artifactType),
         requestKey: this.requestKeyOf(input.spec),
@@ -380,13 +441,30 @@ export class ArtifactWriter {
         previewStorageKey: prepared.previewStorageKey,
         previewMetadata: prepared.previewMetadata,
       });
-      return { artifactId, versionId: record.versionId, reused: false };
     } catch (error) {
+      if (
+        isArtifactError(error) &&
+        error.code === ARTIFACT_WRITE_ERROR_CODES.stateConflict
+      )
+        await this.cleanupAfterFailure(prepared.attemptedStorageKeys, error);
+      else
+        await this.inspectUncertainCommit(
+          artifactId,
+          input.context,
+          prepared.attemptedStorageKeys,
+        );
       throw toArtifactError(
         error,
         ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
       );
     }
+    if (record.reused)
+      await this.cleanupStorageKeys(prepared.attemptedStorageKeys);
+    return {
+      artifactId: record.artifactId,
+      versionId: record.versionId,
+      reused: record.reused,
+    };
   }
 
   /**
@@ -424,7 +502,7 @@ export class ArtifactWriter {
     const artifactType = this.assertKnownArtifactType(input.spec.artifactType);
 
     try {
-      await this.deps.repository.createPending({
+      const record = await this.deps.repository.createPending({
         artifactId,
         artifactType,
         requestKey: this.requestKeyOf(input.spec),
@@ -436,13 +514,13 @@ export class ArtifactWriter {
         prompt: input.spec.prompt ?? input.spec.title,
         payload: input.spec.payload,
       });
+      return { artifactId: record.artifactId, reused: record.reused };
     } catch (error) {
       throw toArtifactError(
         error,
         ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
       );
     }
-    return { artifactId, reused: false };
   }
 
   /**
@@ -518,7 +596,7 @@ export class ArtifactWriter {
     try {
       throwArtifactWriteAbortReason(input.signal);
     } catch (error) {
-      await this.cleanupStorageKeys(prepared.attemptedStorageKeys);
+      await this.cleanupAfterFailure(prepared.attemptedStorageKeys, error);
       throw error;
     }
 
@@ -549,6 +627,17 @@ export class ArtifactWriter {
           : {}),
       });
     } catch (error) {
+      if (
+        isArtifactError(error) &&
+        error.code === ARTIFACT_WRITE_ERROR_CODES.stateConflict
+      )
+        await this.cleanupAfterFailure(prepared.attemptedStorageKeys, error);
+      else
+        await this.inspectUncertainCommit(
+          input.artifactId,
+          input.context,
+          prepared.attemptedStorageKeys,
+        );
       throw toArtifactError(
         error,
         ARTIFACT_WRITE_ERROR_CODES.recordUnavailable,
@@ -556,10 +645,12 @@ export class ArtifactWriter {
     }
 
     if (!record) {
-      throw new ArtifactError({
+      const conflict = new ArtifactError({
         code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
-        message: `artifact ${input.artifactId} was already completed by another writer`,
+        message: `artifact ${input.artifactId} is no longer writable by this operation`,
       });
+      await this.cleanupAfterFailure(prepared.attemptedStorageKeys, conflict);
+      throw conflict;
     }
     return {
       artifactId: record.artifactId,
@@ -619,6 +710,7 @@ export function createArtifactWriter(
       markReady: markArtifactReady,
       markFailed: markArtifactFailed,
       findByRequestKey: findArtifactRecordByRequestKey,
+      findWriteReferences: findArtifactWriteReferences,
     },
     ...(overrides.newArtifactId
       ? { newArtifactId: overrides.newArtifactId }

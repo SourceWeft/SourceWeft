@@ -12,10 +12,7 @@ import {
   sanitizeHeaders,
 } from "./security";
 
-function assertMcpError(
-  operation: () => unknown,
-  code: string,
-) {
+function assertMcpError(operation: () => unknown, code: string) {
   assert.throws(
     operation,
     (error) => error instanceof McpError && error.code === code,
@@ -44,7 +41,8 @@ function stubLookup(mapping: Record<string, string>) {
 test("assertSafeMcpEndpoint allows public https MCP endpoints", async () => {
   assert.equal(
     await assertSafeMcpEndpoint("https://mcp.example.com/sse", {
-      allowLocalhost: false,
+      enforceAddressChecks: true,
+      allowedInternalOrigins: [],
       lookup: stubLookup({}),
     }),
     "https://mcp.example.com/sse",
@@ -54,14 +52,16 @@ test("assertSafeMcpEndpoint allows public https MCP endpoints", async () => {
 test("assertSafeMcpEndpoint allows local http only when explicitly enabled", async () => {
   assert.equal(
     await assertSafeMcpEndpoint("http://localhost:8787/mcp", {
-      allowLocalhost: true,
+      enforceAddressChecks: true,
+      allowedInternalOrigins: ["http://localhost:8787"],
     }),
     "http://localhost:8787/mcp",
   );
   await assertMcpRejects(
     () =>
       assertSafeMcpEndpoint("http://mcp.example.com/mcp", {
-        allowLocalhost: true,
+        enforceAddressChecks: true,
+        allowedInternalOrigins: ["http://localhost:8787"],
         lookup: stubLookup({}),
       }),
     "MCP_ENDPOINT_UNSAFE",
@@ -72,7 +72,8 @@ test("assertSafeMcpEndpoint rejects credentialed and non-web URLs", async () => 
   await assertMcpRejects(
     () =>
       assertSafeMcpEndpoint("https://user:pass@mcp.example.com/mcp", {
-        allowLocalhost: false,
+        enforceAddressChecks: true,
+        allowedInternalOrigins: [],
         lookup: stubLookup({}),
       }),
     "MCP_ENDPOINT_UNSAFE",
@@ -80,7 +81,8 @@ test("assertSafeMcpEndpoint rejects credentialed and non-web URLs", async () => 
   await assertMcpRejects(
     () =>
       assertSafeMcpEndpoint("file:///tmp/server", {
-        allowLocalhost: false,
+        enforceAddressChecks: true,
+        allowedInternalOrigins: [],
       }),
     "MCP_ENDPOINT_UNSAFE",
   );
@@ -100,11 +102,17 @@ test("assertSafeMcpEndpoint blocks localhost, private, and link-local literal IP
     "https://[::1]/mcp",
     "https://[fc00::1]/mcp",
     "https://[fe80::1]/mcp",
+    "https://[fe90::1]/mcp",
+    "https://[febf::1]/mcp",
+    "https://[::ffff:127.0.0.1]/mcp",
+    "https://[::ffff:7f00:1]/mcp",
+    "https://[0:0:0:0:0:ffff:a00:1]/mcp",
   ]) {
     await assertMcpRejects(
       () =>
         assertSafeMcpEndpoint(endpoint, {
-          allowLocalhost: false,
+          enforceAddressChecks: true,
+          allowedInternalOrigins: [],
         }),
       "MCP_ENDPOINT_BLOCKED",
     );
@@ -125,7 +133,12 @@ test("assertSafeMcpEndpoint blocks DNS rebinding to private and metadata address
     "https://metadata.google.internal/computeMetadata/v1",
   ]) {
     await assertMcpRejects(
-      () => assertSafeMcpEndpoint(endpoint, { allowLocalhost: false, lookup }),
+      () =>
+        assertSafeMcpEndpoint(endpoint, {
+          enforceAddressChecks: true,
+          allowedInternalOrigins: [],
+          lookup,
+        }),
       "MCP_ENDPOINT_BLOCKED",
     );
   }
@@ -180,7 +193,9 @@ test("redactErrorMessage masks secrets embedded in free-text errors", () => {
   );
   assert.ok(!jwt.includes("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"));
 
-  const gh = redactErrorMessage("bad credential ghp_0123456789abcdefghijABCDEFabcdef0123");
+  const gh = redactErrorMessage(
+    "bad credential ghp_0123456789abcdefghijABCDEFabcdef0123",
+  );
   assert.ok(!gh.includes("ghp_0123456789abcdefghijABCDEFabcdef0123"));
 
   // Ordinary error text is left intact.
@@ -236,8 +251,14 @@ test("resolveCredentialEnvRef refuses references outside the MCP_CRED_ namespace
   // token — which would ship the encryption root to their server on connect.
   process.env.MCP_SECURITY_TEST_FORBIDDEN = "infra-secret";
   try {
-    assert.equal(resolveCredentialEnvRef("env:MCP_SECURITY_TEST_FORBIDDEN"), "");
-    assert.equal(resolveCredentialEnvRef("env:MODEL_GATEWAY_ENCRYPTION_SECRET"), "");
+    assert.equal(
+      resolveCredentialEnvRef("env:MCP_SECURITY_TEST_FORBIDDEN"),
+      "",
+    );
+    assert.equal(
+      resolveCredentialEnvRef("env:MODEL_GATEWAY_ENCRYPTION_SECRET"),
+      "",
+    );
     assert.equal(resolveCredentialEnvRef("env:DATABASE_URL"), "");
     assert.equal(resolveCredentialEnvRef("env:PATH"), "");
   } finally {

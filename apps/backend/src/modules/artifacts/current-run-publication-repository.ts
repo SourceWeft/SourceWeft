@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   artifacts,
   artifactVersions,
@@ -10,10 +10,9 @@ import {
 } from "@sourceweft/db";
 import type { CommittedArtifactToolResult } from "@sourceweft/contracts/agent-tools";
 import type { MessageRenderBlock, ToolCallTrace } from "../threads/turn/types";
-import {
-  canViewContent,
-  visibleContentWhere,
-} from "../workspace/content-visibility";
+import { canViewContent } from "../workspace/content-visibility";
+import { lockArtifactRequestKey } from "./idempotency-lock";
+import { findArtifactRecordByRequestKeyWithExecutor } from "./repository";
 import {
   lockWorkspaceAccessRowsWithExecutor,
   resolveWorkspaceAccessRecordWithExecutor,
@@ -82,6 +81,7 @@ export type CurrentRunArtifactPublicationInput = {
 };
 
 export type CurrentRunArtifactPublicationRejection =
+  | "artifact_in_progress"
   | "artifact_not_found"
   | "forbidden"
   | "message_unavailable"
@@ -377,20 +377,16 @@ export async function commitCurrentRunArtifactPublication(
   const failpoint = dependencies.failpoint ?? (() => undefined);
   const newArtifactId = dependencies.newArtifactId ?? randomUUID;
   const newVersionId = dependencies.newVersionId ?? randomUUID;
-  const lockKey = [
-    input.context.teamId,
-    input.context.workspaceId,
-    input.artifact.artifactType,
-    input.artifact.semanticRequestKey,
-  ].join("\u001f");
-
   try {
     return await db.transaction(async (tx) => {
       // This lock is first for every create/republish path. It serializes the
       // semantic request before either reuse lookup or any durable write.
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
-      );
+      await lockArtifactRequestKey(tx, {
+        teamId: input.context.teamId,
+        workspaceId: input.context.workspaceId,
+        artifactType: input.artifact.artifactType,
+        requestKey: input.artifact.semanticRequestKey,
+      });
 
       const [runRow] = await tx
         .select()
@@ -585,40 +581,25 @@ export async function commitCurrentRunArtifactPublication(
         }
         await failpoint("after_version_write");
       } else {
-        const [existingArtifact] = await tx
-          .select({
-            artifactId: artifacts.id,
-            currentVersionNo: artifacts.currentVersionNo,
-          })
-          .from(artifacts)
-          .where(
-            and(
-              eq(artifacts.teamId, input.context.teamId),
-              eq(artifacts.workspaceId, input.context.workspaceId),
-              eq(
-                artifacts.artifactType,
-                input.artifact.artifactType as ArtifactType,
-              ),
-              eq(artifacts.status, "ready"),
-              gt(artifacts.currentVersionNo, 0),
-              eq(artifacts.requestKey, input.artifact.semanticRequestKey),
-              eq(artifacts.visibility, publicationVisibility),
-              visibleContentWhere(
-                { userId: input.context.actorUserId },
-                artifacts,
-              ),
-            ),
-          )
-          .orderBy(desc(artifacts.createdAt))
-          .for("update")
-          .limit(1);
+        const existingArtifact =
+          await findArtifactRecordByRequestKeyWithExecutor(tx, {
+            teamId: input.context.teamId,
+            workspaceId: input.context.workspaceId,
+            artifactType: input.artifact.artifactType as ArtifactType,
+            requestKey: input.artifact.semanticRequestKey,
+            userId: input.context.actorUserId,
+            visibility: publicationVisibility,
+            statuses: ["pending", "running", "ready"],
+          });
         if (existingArtifact) {
+          if (existingArtifact.status !== "ready")
+            return { ok: false, reason: "artifact_in_progress" };
           const [existingVersion] = await tx
             .select({ id: artifactVersions.id })
             .from(artifactVersions)
             .where(
               and(
-                eq(artifactVersions.artifactId, existingArtifact.artifactId),
+                eq(artifactVersions.artifactId, existingArtifact.id),
                 eq(artifactVersions.teamId, input.context.teamId),
                 eq(artifactVersions.workspaceId, input.context.workspaceId),
                 eq(
@@ -630,10 +611,10 @@ export async function commitCurrentRunArtifactPublication(
             .limit(1);
           if (!existingVersion) {
             throw new Error(
-              `ARTIFACT_CURRENT_VERSION_MISSING: artifact ${existingArtifact.artifactId} points to version ${existingArtifact.currentVersionNo}`,
+              `ARTIFACT_CURRENT_VERSION_MISSING: artifact ${existingArtifact.id} points to version ${existingArtifact.currentVersionNo}`,
             );
           }
-          artifactId = existingArtifact.artifactId;
+          artifactId = existingArtifact.id;
           artifactVersionId = existingVersion.id;
           versionNo = existingArtifact.currentVersionNo;
           reused = true;

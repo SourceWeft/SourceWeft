@@ -44,6 +44,8 @@ export type AgentToolCapability =
 export type AgentToolRequirements = {
   provider?: "web";
   modelKind?: "image" | "tts" | "vision";
+  /** The tool needs the turn's trusted sandbox host service to bind. */
+  sandbox?: true;
 };
 
 export type AgentToolActivation = {

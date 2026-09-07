@@ -11,6 +11,10 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     passWithNoTests: false,
     pool: "forks",
+    // Turbo runs workspace suites together. Bound this suite's forks so
+    // parallel full-schema migrations do not starve each other or the Web suite.
+    // Two-connection races inside a test retain their explicit barriers.
+    maxWorkers: 2,
     // The default 5s timeout measures wall-clock, which for this fork-parallel,
     // import-heavy suite includes time a test's fork spends starved of CPU. A
     // handful of legitimately heavy tests (whole-tree AST scans, real

@@ -21,22 +21,26 @@ jobs:
           version: 10.19.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.19.0
+          node-version: 22.23.2
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            turbo-${{ runner.os }}-
+            turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-node22.23.2-
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm check-types
 
   test:
-    name: Tests
+    name: Tests (Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.23.2", "24.18.0"]
     needs: lint-and-type
     runs-on: ubuntu-latest
     services:
@@ -74,16 +78,16 @@ jobs:
           version: 10.19.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.19.0
+          node-version: ${{ matrix.node }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            turbo-${{ runner.os }}-
+            turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-node${{ matrix.node }}-
       - run: pnpm install --frozen-lockfile
       # DB-backed suites query real tables; the service container starts from
       # a bare image, so the schema has to be applied first.
@@ -99,8 +103,9 @@ jobs:
       # builtin-*) were previously never executed in CI, so breakage there
       # stayed invisible until someone ran them by hand.
       - name: Run tests
-        run: pnpm test
+        run: pnpm test --force
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://sourceweft:sourceweft@localhost:5432/sourceweft
           REDIS_URL: redis://localhost:6379/0
           BETTER_AUTH_SECRET: ci-test-secret-at-least-32-chars
@@ -114,13 +119,60 @@ jobs:
     name: Docker Build
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
+        env:
+          POSTGRES_USER: sourceweft
+          POSTGRES_PASSWORD: sourceweft
+          POSTGRES_DB: sourceweft_ci_startup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Require native amd64 runner
+        run: test "$(uname -m)" = x86_64
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64
+          load: true
           push: false
           tags: sourceweft:pr-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Check production image entrypoints
+        run: node scripts/ci/verify-docker-startup.mjs sourceweft:pr-test
+        env:
+          DATABASE_URL: postgresql://sourceweft:sourceweft@127.0.0.1:5432/sourceweft_ci_startup
+          REDIS_URL: redis://127.0.0.1:6379/0
+      - name: Upload image startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-startup-${{ github.sha }}
+          path: output/ci/docker-startup/
+          if-no-files-found: ignore
+          retention-days: 7

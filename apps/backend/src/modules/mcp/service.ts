@@ -8,6 +8,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { InterruptOnConfig } from "langchain";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
+import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
@@ -65,10 +66,6 @@ import type {
   WorkspaceMcpToolRecord,
 } from "./types";
 
-function isDevelopment() {
-  return process.env.NODE_ENV === "development";
-}
-
 async function assertWebTransport(manifest: MarketMcpManifest) {
   if (manifest.transport === "stdio") {
     return;
@@ -81,8 +78,8 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
     );
   }
   await assertSafeMcpEndpoint(manifest.endpointUrl, {
-    allowLocalhost: isDevelopment(),
-    allowPrivateNetwork: isDevelopment(),
+    enforceAddressChecks: config.endpointAddressChecksEnabled,
+    allowedInternalOrigins: config.mcpAllowedInternalOrigins,
   });
 }
 
@@ -97,8 +94,9 @@ export async function mcpEndpointRequiresAuth(
 ): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
+  const requests = createMcpRequestScope();
   try {
-    const response = await fetch(endpointUrl, {
+    const response = await requests.fetch(endpointUrl, {
       method: "POST",
       // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
       // could bounce the probe to an internal/metadata address (blind SSRF). A
@@ -120,8 +118,10 @@ export async function mcpEndpointRequiresAuth(
       }),
       signal: controller.signal,
     });
+    await response.body?.cancel();
     return response.status === 401;
   } catch (error) {
+    requests.throwIfDenied();
     throw new McpError(
       502,
       "MCP_AUTH_PROBE_FAILED",
@@ -132,6 +132,7 @@ export async function mcpEndpointRequiresAuth(
     );
   } finally {
     clearTimeout(timer);
+    await requests.close();
   }
 }
 
@@ -1039,8 +1040,8 @@ export class McpService {
       );
     }
     await assertSafeMcpEndpoint(install.endpointUrl, {
-      allowLocalhost: isDevelopment(),
-      allowPrivateNetwork: isDevelopment(),
+      enforceAddressChecks: config.endpointAddressChecksEnabled,
+      allowedInternalOrigins: config.mcpAllowedInternalOrigins,
     });
 
     // Same auth split as buildLangChainToolsForTurn: an oauth install tests
@@ -1227,8 +1228,8 @@ export class McpService {
         if (install.endpointUrl) {
           try {
             await assertSafeMcpEndpoint(install.endpointUrl, {
-              allowLocalhost: isDevelopment(),
-              allowPrivateNetwork: isDevelopment(),
+              enforceAddressChecks: config.endpointAddressChecksEnabled,
+              allowedInternalOrigins: config.mcpAllowedInternalOrigins,
             });
           } catch (error) {
             if (error instanceof McpError) {

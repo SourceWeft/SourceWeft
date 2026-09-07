@@ -1,14 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=20.19.0
+ARG NODE_VERSION=22.23.2
 
 FROM node:${NODE_VERSION}-alpine AS base
 ENV PNPM_HOME=/pnpm
+# Compose starts pnpm as sourceweft. Share the package-manager cache prepared
+# during the root build so startup does not download pnpm again.
+ENV COREPACK_HOME=/pnpm/corepack
 ENV PATH="${PNPM_HOME}:${PATH}"
 WORKDIR /app
 RUN apk add --no-cache libc6-compat libstdc++ \
   && corepack enable \
-  && corepack prepare pnpm@10.19.0 --activate
+  && corepack prepare pnpm@10.19.0 --activate \
+  && chmod -R a+rX "${COREPACK_HOME}"
 
 # ── Prune ────────────────────────────────────────────────────────────
 # turbo prune generates out/json/ (package.json manifests) and

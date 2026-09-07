@@ -6,6 +6,7 @@ import {
   citations,
   db,
   documents,
+  modelGatewayProfiles,
   sourceRevisions,
   sources,
 } from "@sourceweft/db";
@@ -26,6 +27,13 @@ import {
   mapSourceRevision,
 } from "./mappers";
 import { deriveStatusDetail } from "./status-detail";
+import { lockSourceForWrite } from "./source-write-lock";
+import {
+  assertEmbeddingIdentityCurrent,
+  EmbeddingIdentityError,
+  validateEmbeddingResult,
+  type EmbeddingIndexIdentity,
+} from "../../shared/model-gateway/embedding-identity";
 export {
   createSourceRevisionRecord,
   findLatestSourceRevisionRecord,
@@ -1013,49 +1021,100 @@ export async function getSourceStatusDetail(input: {
   return deriveStatusDetail(source);
 }
 
-export async function createSourceDocumentChunksAndEmbeddings(input: {
-  teamId: string;
-  workspaceId: string;
-  sourceId: string;
-  sourceRevisionId: string | null;
-  sourceTitle: string;
-  sourceContentText: string;
-  embeddingProfileId: string;
-  modelAlias: string;
-  embeddings: number[][];
-  requireEmbeddings: boolean;
-  requestedDimensions: number | null;
-  chunks: readonly ChunkSpec[];
-  parsingConfig?: ParsingConfig | null;
-  markSourceIndexed?: boolean;
-  estimatedPages?: number | null;
-  parsedTokens?: number | null;
-}) {
+class StaleSourceIndexWrite extends Error {}
+
+export async function createSourceDocumentChunksAndEmbeddings(
+  input: {
+    teamId: string;
+    workspaceId: string;
+    sourceId: string;
+    sourceRevisionId: string | null;
+    sourceTitle: string;
+    sourceContentText: string;
+    embeddingProfileId: string;
+    embeddingIdentity: EmbeddingIndexIdentity;
+    modelAlias: string;
+    embeddings: number[][];
+    requireEmbeddings: boolean;
+    requestedDimensions: number | null;
+    chunks: readonly ChunkSpec[];
+    parsingConfig?: ParsingConfig | null;
+    markSourceIndexed?: boolean;
+    estimatedPages?: number | null;
+    parsedTokens?: number | null;
+  },
+  dependencies: {
+    /** Transaction barriers for deterministic database concurrency tests. */
+    onStage?: (
+      stage: "source_locked" | "before_source_status",
+    ) => Promise<void>;
+  } = {},
+) {
   const normalizedText = input.sourceContentText.trim();
   const baseTitle = input.sourceTitle.trim() || "Untitled Source";
   const segments = input.chunks;
 
-  const now = new Date();
-
-  return db.transaction(async (tx) => {
-    if (input.sourceRevisionId) {
-      const [latestRevision] = await tx
-        .select({ id: sourceRevisions.id })
-        .from(sourceRevisions)
-        .where(
-          and(
-            eq(sourceRevisions.id, input.sourceRevisionId),
-            eq(sourceRevisions.teamId, input.teamId),
-            eq(sourceRevisions.workspaceId, input.workspaceId),
-            eq(sourceRevisions.sourceId, input.sourceId),
-            eq(sourceRevisions.isLatest, true),
-          ),
-        )
-        .limit(1);
-
-      if (!latestRevision) {
-        return null;
+  const write = db.transaction(async (tx) => {
+    if (input.embeddingIdentity.profileId !== input.embeddingProfileId) {
+      throw new EmbeddingIdentityError(
+        "Embedding profile does not match the generation identity",
+      );
+    }
+    await assertEmbeddingIdentityCurrent(tx, input.embeddingIdentity);
+    if (input.embeddings.length > 0) {
+      const dim = validateEmbeddingResult(
+        input.embeddingIdentity,
+        {
+          provider: input.embeddingIdentity.provider,
+          providerModel: input.embeddingIdentity.providerModel,
+        },
+        input.embeddings,
+      );
+      if (input.embeddingIdentity.requestedDimensions === null) {
+        // Serialize first writes for unknown dimensions across different sources.
+        // Lock order: configuration -> profile -> source, with no network I/O.
+        await tx
+          .select({ id: modelGatewayProfiles.id })
+          .from(modelGatewayProfiles)
+          .where(eq(modelGatewayProfiles.id, input.embeddingProfileId))
+          .for("update");
+        const [mismatch] = await tx
+          .select({ dim: chunkEmbeddings.dim })
+          .from(chunkEmbeddings)
+          .where(
+            and(
+              eq(chunkEmbeddings.embeddingProfileId, input.embeddingProfileId),
+              ne(chunkEmbeddings.dim, dim),
+            ),
+          )
+          .limit(1);
+        if (mismatch)
+          throw new EmbeddingIdentityError(
+            "Embedding dimensions differ from existing vectors for this profile",
+          );
       }
+    }
+    if (!(await lockSourceForWrite(tx, input))) {
+      return null;
+    }
+    await dependencies.onStage?.("source_locked");
+    const now = new Date();
+    const [latestRevision] = await tx
+      .select({ id: sourceRevisions.id })
+      .from(sourceRevisions)
+      .where(
+        and(
+          eq(sourceRevisions.teamId, input.teamId),
+          eq(sourceRevisions.workspaceId, input.workspaceId),
+          eq(sourceRevisions.sourceId, input.sourceId),
+          eq(sourceRevisions.isLatest, true),
+        ),
+      )
+      .limit(1);
+
+    // A revision-less job is stale too if a revision appeared while it queued.
+    if ((latestRevision?.id ?? null) !== input.sourceRevisionId) {
+      return null;
     }
 
     await tx.execute(sql`
@@ -1085,6 +1144,9 @@ export async function createSourceDocumentChunksAndEmbeddings(input: {
       charCount: normalizedText.length,
       status: "ready",
       documentMetadata: {
+        ...(input.embeddings.length > 0
+          ? { embeddingIdentity: input.embeddingIdentity }
+          : {}),
         requestedDimensions: input.requestedDimensions,
         chunkCount: segments.length,
         chunkSize: input.parsingConfig?.chunkSize ?? null,
@@ -1146,6 +1208,7 @@ export async function createSourceDocumentChunksAndEmbeddings(input: {
 
     let source: SourceRecord | null = null;
     if (input.markSourceIndexed) {
+      await dependencies.onStage?.("before_source_status");
       const [row] = await tx
         .update(sources)
         .set({
@@ -1176,7 +1239,8 @@ export async function createSourceDocumentChunksAndEmbeddings(input: {
         .returning();
 
       if (!row) {
-        return null;
+        // Returning normally here would commit the deletes and inserts above.
+        throw new StaleSourceIndexWrite();
       }
 
       source = mapSource(row);
@@ -1188,5 +1252,11 @@ export async function createSourceDocumentChunksAndEmbeddings(input: {
       chunkCount: segments.length,
       source,
     };
+  });
+  return write.catch((error: unknown) => {
+    if (error instanceof StaleSourceIndexWrite) {
+      return null;
+    }
+    throw error;
   });
 }

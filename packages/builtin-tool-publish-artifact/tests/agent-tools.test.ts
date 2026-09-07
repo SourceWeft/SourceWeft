@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import {
+  ArtifactError,
+  ARTIFACT_WRITE_ERROR_CODES,
+} from "@sourceweft/contracts/artifact-errors";
 import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { downloadPptxFromSandbox } from "../src/sandbox-output";
 import {
@@ -11,6 +15,10 @@ import {
   type PublishArtifactInput,
   PptxOutputError,
 } from "../src";
+import {
+  PublishArtifactErrorOutputSchema,
+  PublishArtifactOutputSchema,
+} from "../src/schemas";
 
 function validPptxBuffer() {
   return Buffer.from(
@@ -38,10 +46,11 @@ function services(input?: {
     >;
   };
 }) {
-  const defaultDownload = vi.fn(async ({ sandboxPath }: { sandboxPath: string }) =>
-    /\.(?:jpe?g|png|webp)$/iu.test(sandboxPath)
-      ? Buffer.from("preview-bytes")
-      : validPptxBuffer(),
+  const defaultDownload = vi.fn(
+    async ({ sandboxPath }: { sandboxPath: string }) =>
+      /\.(?:jpe?g|png|webp)$/iu.test(sandboxPath)
+        ? Buffer.from("preview-bytes")
+        : validPptxBuffer(),
   );
   // The host offers one function. The per-type mocks below are the test's own
   // view of it: `publishArtifact` routes on the artifact type in the spec, so
@@ -92,8 +101,9 @@ function services(input?: {
     storage: {
       buildArtifactStorageKey: vi
         .fn()
-        .mockImplementation((input: { fileName: string }) =>
-          `artifacts/workspace-1/artifact-1/${input.fileName}`,
+        .mockImplementation(
+          (input: { fileName: string }) =>
+            `artifacts/workspace-1/artifact-1/${input.fileName}`,
         ),
       getBucketName: vi.fn().mockReturnValue("content"),
       upload: vi.fn().mockResolvedValue(undefined),
@@ -152,6 +162,137 @@ function createPublisherTool(mockedServices = services()) {
   return publisher;
 }
 
+test("publish_artifact returns a shared writer conflict through the tool schema without making it recoverable", async () => {
+  const mockedServices = services();
+  const conflict = new ArtifactError({
+    code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+    message: "The same artifact request is still running.",
+  });
+  mockedServices.artifacts.publishArtifact.mockRejectedValueOnce(conflict);
+  const publisher = createPublisherTool(mockedServices);
+  const output = PublishArtifactErrorOutputSchema.parse(
+    JSON.parse(
+      String(
+        await publisher.invoke({
+          artifactType: "file",
+          title: "Pending export",
+          source: { kind: "sandbox_path", path: "/workspace/output.txt" },
+        }),
+      ),
+    ),
+  );
+
+  assert.deepEqual(output, {
+    ok: false,
+    type: "presentation_artifact_error",
+    status: "failed",
+    code: "ARTIFACT_STATE_CONFLICT",
+    message: conflict.message,
+    recoverable: false,
+  });
+  assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 1);
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
+});
+
+test("unknown shared artifact failures still propagate instead of becoming a declared publisher error", async () => {
+  const mockedServices = services();
+  const unexpected = new ArtifactError({
+    code: "UNDECLARED_TEST_FAILURE",
+    category: "infrastructure",
+    message: "Unrecognized writer failure",
+  });
+  mockedServices.artifacts.publishArtifact.mockRejectedValueOnce(unexpected);
+  const publisher = createPublisherTool(mockedServices);
+  await assert.rejects(
+    publisher.invoke({
+      artifactType: "file",
+      title: "Export",
+      source: { kind: "sandbox_path", path: "/workspace/output.txt" },
+    }),
+    (error) => error === unexpected,
+  );
+});
+
+test.each(["slides", "file"] as const)(
+  "publish_artifact %s reuse returns the winning artifact and valid reused output",
+  async (artifactType) => {
+    const mockedServices = services();
+    mockedServices.artifacts.publishArtifact.mockResolvedValueOnce({
+      artifactId: "artifact-winner",
+      versionId: "version-winner",
+      reused: true,
+    });
+    const publisher = createPublisherTool(mockedServices);
+    const output = PublishArtifactOutputSchema.parse(
+      JSON.parse(
+        String(
+          await publisher.invoke({
+            artifactType,
+            title: "Repeated publication",
+            source: {
+              kind: "sandbox_path",
+              path:
+                artifactType === "slides"
+                  ? "/workspace/deck.pptx"
+                  : "/workspace/output.txt",
+            },
+            ...(artifactType === "slides"
+              ? { previewImage: previewImage() }
+              : {}),
+          }),
+        ),
+      ),
+    );
+
+    assert.equal(output.reused, true);
+    assert.equal(output.artifactId, "artifact-winner");
+    assert.equal(output.artifact_id, "artifact-winner");
+    assert.match(output.artifactUrl, /artifact-winner/);
+    assert.equal(output.artifact_url, output.artifactUrl);
+    assert.equal(mockedServices.artifacts.publishArtifact.mock.calls.length, 1);
+  },
+);
+
+test("publishPreparedArtifact preserves winner identity, version and reuse when given a losing preallocated id", async () => {
+  const mockedServices = services();
+  const winner = {
+    artifactId: "artifact-winner",
+    versionId: "version-winner",
+    reused: true,
+  };
+  mockedServices.artifacts.publishArtifact.mockResolvedValueOnce(winner);
+  const result = await publishPreparedArtifact({
+    context,
+    artifactId: "artifact-loser",
+    requestKey: "same-logical-request",
+    descriptor: { artifactType: "image", title: "Image" },
+    source: {
+      bytes: Buffer.from("png-bytes"),
+      mimeType: "image/png",
+      path: "generated-image.png",
+    },
+    services: mockedServices,
+  });
+
+  const output = PublishArtifactOutputSchema.parse(result.output);
+  assert.equal(output.artifactType, "image");
+  assert.equal(output.reused, true);
+  assert.equal(output.artifactId, "artifact-winner");
+  assert.equal(result.artifactId, "artifact-winner");
+  assert.deepEqual(result.record, winner);
+  assert.match(output.artifactUrl, /artifact-winner/);
+  assert.doesNotMatch(output.artifactUrl, /artifact-loser/);
+  assert.equal(
+    mockedServices.artifacts.publishArtifact.mock.calls[0]?.[0].spec
+      .idempotency &&
+      (
+        mockedServices.artifacts.publishArtifact.mock.calls[0]?.[0].spec
+          .idempotency as { requestKey: string }
+      ).requestKey,
+    "same-logical-request",
+  );
+});
+
 test("publish_artifact aborts its sandbox download and never enters the writer", async () => {
   const controller = new AbortController();
   const abortReason = new DOMException("user stopped", "AbortError");
@@ -166,7 +307,9 @@ test("publish_artifact aborts its sandbox download and never enters the writer",
       downloadStarted();
       assert.ok(input.signal);
       await new Promise<void>((resolve) =>
-        input.signal!.addEventListener("abort", () => resolve(), { once: true }),
+        input.signal!.addEventListener("abort", () => resolve(), {
+          once: true,
+        }),
       );
       throw input.signal.reason;
     },
@@ -544,7 +687,10 @@ test("publish_artifact tool returns recoverable error when file artifacts includ
 
   assert.equal(output.ok, false);
   assert.equal(output.code, "PUBLISH_INPUT_INVALID");
-  assert.match(output.message, /previewImage is only supported for slides artifacts/u);
+  assert.match(
+    output.message,
+    /previewImage is only supported for slides artifacts/u,
+  );
   assert.equal(output.recoverable, true);
 });
 
@@ -621,7 +767,8 @@ test("publish_artifact tool returns recoverable error for missing sandbox files"
     type: "presentation_artifact_error",
     status: "failed",
     code: "ARTIFACT_SOURCE_NOT_FOUND",
-    message: "sandbox download failed for /workspace/missing.pptx: No such file",
+    message:
+      "sandbox download failed for /workspace/missing.pptx: No such file",
     recoverable: true,
   });
 });
@@ -1041,16 +1188,14 @@ test("publishPreparedArtifact forwards the host signal through republish", async
   const mockedServices = services();
   const controller = new AbortController();
   let observedSignal: AbortSignal | undefined;
-  const republishArtifact = vi.fn(
-    async (input: { signal?: AbortSignal }) => {
-      observedSignal = input.signal;
-      return {
-        artifactId: "artifact-1",
-        versionId: "version-2",
-        reused: false,
-      };
-    },
-  );
+  const republishArtifact = vi.fn(async (input: { signal?: AbortSignal }) => {
+    observedSignal = input.signal;
+    return {
+      artifactId: "artifact-1",
+      versionId: "version-2",
+      reused: false,
+    };
+  });
 
   const result = await publishPreparedArtifact({
     context,
@@ -1159,11 +1304,11 @@ test("publishArtifactFromSource fails clearly for missing sandbox files", async 
         services: mockedServices,
         input: {
           ...slidesInput({
-          title: "Missing",
-          source: {
-            kind: "sandbox_path",
-            path: "/workspace/missing.pptx",
-          },
+            title: "Missing",
+            source: {
+              kind: "sandbox_path",
+              path: "/workspace/missing.pptx",
+            },
           }),
         },
       }),
@@ -1182,11 +1327,11 @@ test("publishArtifactFromSource rejects non-pptx paths", async () => {
         services: services(),
         input: {
           ...slidesInput({
-          title: "Wrong Extension",
-          source: {
-            kind: "sandbox_path",
-            path: "/workspace/deck.pdf",
-          },
+            title: "Wrong Extension",
+            source: {
+              kind: "sandbox_path",
+              path: "/workspace/deck.pdf",
+            },
           }),
         },
       }),
@@ -1206,11 +1351,11 @@ test("publishArtifactFromSource rejects invalid OOXML PPTX files", async () => {
         }),
         input: {
           ...slidesInput({
-          title: "Invalid",
-          source: {
-            kind: "sandbox_path",
-            path: "/workspace/invalid.pptx",
-          },
+            title: "Invalid",
+            source: {
+              kind: "sandbox_path",
+              path: "/workspace/invalid.pptx",
+            },
           }),
         },
       }),

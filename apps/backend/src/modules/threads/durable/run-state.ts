@@ -1,5 +1,5 @@
 import { ContentError } from "../../content/errors";
-import { isActiveChatRunStatus } from "./repository";
+import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
 import type { ChatThreadRunRecord, ChatThreadRunStatus } from "./types";
 import {
   getSnapshotRecord,
@@ -12,7 +12,6 @@ import {
   CLIENT_CANCELLED_MESSAGE,
   ORPHANED_QUEUED_RUN_GRACE_MS,
   STALE_ACTIVE_RUN_TIMEOUT_MS,
-  STALE_CHAT_RUN_CODE,
 } from "./run-constants";
 
 export function isTerminalRunStatus(status: ChatThreadRunRecord["status"]) {
@@ -83,6 +82,26 @@ export function toTerminalRunError(run: ChatThreadRunRecord) {
   return null;
 }
 
+/** A claimed worker may execute only while its durable run remains running. */
+export function toRunStopError(run: ChatThreadRunRecord | null) {
+  if (run?.status === "running") return null;
+  if (run?.status === "cancel_requested")
+    return new ContentError(
+      499,
+      CLIENT_CANCELLED_CODE,
+      CLIENT_CANCELLED_MESSAGE,
+    );
+  if (run) {
+    const terminalError = toTerminalRunError(run);
+    if (terminalError) return terminalError;
+  }
+  return new ContentError(
+    409,
+    "CHAT_RUN_OWNERSHIP_LOST",
+    "The worker no longer owns a running chat run",
+  );
+}
+
 function parseRunTimestamp(value: string | null) {
   if (!value) {
     return null;
@@ -92,10 +111,7 @@ function parseRunTimestamp(value: string | null) {
 }
 
 export function isStaleActiveRun(run: ChatThreadRunRecord, nowMs = Date.now()) {
-  if (!isActiveChatRunStatus(run.status)) {
-    return false;
-  }
-  if (run.status === "waiting_for_approval") {
+  if (!["queued", "running", "cancel_requested"].includes(run.status)) {
     return false;
   }
 
@@ -148,16 +164,13 @@ export function synthesizeTerminalRunEvents(input: {
   sawErrorEvent: boolean;
 }) {
   const events: string[] = [];
-  const terminalError =
-    input.run.errorCode === STALE_CHAT_RUN_CODE
-      ? null
-      : toTerminalRunError(input.run);
+  const terminalError = toTerminalRunError(input.run);
   if (terminalError && !input.sawErrorEvent) {
     events.push(
       `data: ${JSON.stringify({
         type: "error",
         code: terminalError.code,
-        error: terminalError.message,
+        error: sanitizeClientErrorMessage(terminalError.message),
         ...(input.run.userMessageId
           ? { userMessageId: input.run.userMessageId }
           : {}),

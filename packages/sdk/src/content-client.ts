@@ -1,4 +1,5 @@
 import type {
+  ThreadRunFailureSummary,
   AddByokModelRequest,
   AddByokModelResponse,
   BulkDeleteSourcesRequest,
@@ -523,6 +524,7 @@ export class ContentClient {
 
   getActiveThreadRun(workspaceId: string, threadId: string) {
     return this.http.get<{
+      latestFailure?: ThreadRunFailureSummary | null;
       threadRun: {
         id: string;
         idempotencyKey: string;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { handlerForArtifactType } from "../src/artifact-type-handlers";
-import { PptxOutputError } from "../src/schemas";
+import { PptxOutputError, PublishArtifactOutputSchema } from "../src/schemas";
 
 function validPptxBuffer() {
   return Buffer.from(
@@ -35,6 +35,7 @@ test("slides type handler validates PPTX package and preserves frontend output p
 
   const output = prepared.toOutput({
     artifactId: "artifact-1",
+    reused: false,
     artifactUrl: "/artifact-preview?artifactId=artifact-1",
     downloadUrl: "/api/artifact-file?artifactId=artifact-1&download=1",
     title: "Clean Deck",
@@ -106,6 +107,7 @@ test("file type handler accepts arbitrary non-empty files", () => {
 
   const output = prepared.toOutput({
     artifactId: "artifact-1",
+    reused: false,
     artifactUrl: "/artifact-preview?artifactId=artifact-1",
     downloadUrl: "/api/artifact-file?artifactId=artifact-1&download=1",
     title: "Data Export",
@@ -126,10 +128,16 @@ test("file type handler infers common artifact MIME types", () => {
   assert.ok(handler);
 
   const cases = [
-    ["/workspace/output/deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    [
+      "/workspace/output/deck.pptx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
     ["/workspace/output/report.pdf", "application/pdf"],
     ["/workspace/output/archive.zip", "application/zip"],
-    ["/workspace/output/report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    [
+      "/workspace/output/report.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ],
     ["/workspace/output/table.csv", "text/csv"],
   ] as const;
 
@@ -213,8 +221,7 @@ test("file type handler rejects empty files", () => {
         },
       }),
     (error) =>
-      error instanceof PptxOutputError &&
-      error.code === "ARTIFACT_FILE_EMPTY",
+      error instanceof PptxOutputError && error.code === "ARTIFACT_FILE_EMPTY",
   );
 });
 
@@ -273,6 +280,7 @@ test("image type handler accepts generated image bytes", () => {
 
   const output = prepared.toOutput({
     artifactId: "artifact-1",
+    reused: false,
     artifactUrl: "/artifact-preview?artifactId=artifact-1",
     downloadUrl: "/api/artifact-file?artifactId=artifact-1&download=1",
     title: "Generated Image",
@@ -288,3 +296,52 @@ test("image type handler accepts generated image bytes", () => {
 test("handler registry returns null for unsupported artifact types", () => {
   assert.equal(handlerForArtifactType("pdf"), null);
 });
+
+test.each(["slides", "file", "image"] as const)(
+  "%s outputs preserve the mandatory boolean reuse flag",
+  (artifactType) => {
+    const handler = handlerForArtifactType(artifactType);
+    assert.ok(handler);
+    const path =
+      artifactType === "slides"
+        ? "/workspace/deck.pptx"
+        : artifactType === "image"
+          ? "/workspace/image.png"
+          : "/workspace/output.txt";
+    const prepared = handler.prepare({
+      publishInput: { artifactType, title: "Shared result" },
+      source: {
+        bytes:
+          artifactType === "slides"
+            ? validPptxBuffer()
+            : Buffer.from("content"),
+        path,
+        ...(artifactType === "image" ? { mimeType: "image/png" } : {}),
+      },
+    });
+    for (const reused of [false, true]) {
+      const output = prepared.toOutput({
+        artifactId: "artifact-winner",
+        artifactUrl: "/artifact-preview?artifactId=artifact-winner",
+        downloadUrl: "/api/artifact-file?artifactId=artifact-winner&download=1",
+        title: "Shared result",
+        reused,
+      });
+      const parsed = PublishArtifactOutputSchema.parse(output);
+      assert.equal(parsed.reused, reused);
+      assert.equal(parsed.artifactId, "artifact-winner");
+      const { reused: omitted, ...withoutReuse } = output;
+      assert.equal(
+        PublishArtifactOutputSchema.safeParse(withoutReuse).success,
+        false,
+      );
+      assert.equal(
+        PublishArtifactOutputSchema.safeParse({
+          ...output,
+          reused: String(omitted),
+        }).success,
+        false,
+      );
+    }
+  },
+);

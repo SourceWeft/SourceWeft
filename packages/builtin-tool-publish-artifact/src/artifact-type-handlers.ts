@@ -42,6 +42,7 @@ export type ArtifactTypeHandlerResult = {
   readonly payload: Record<string, unknown>;
   readonly toOutput: (input: {
     readonly artifactId: string;
+    readonly reused: boolean;
     readonly artifactUrl: string;
     readonly downloadUrl: string;
     readonly title: string;
@@ -55,7 +56,6 @@ export type ArtifactTypeHandler = {
     readonly source: ArtifactBytes;
   }) => ArtifactTypeHandlerResult;
 };
-
 
 const slidesTypeHandler: ArtifactTypeHandler = {
   artifactType: "slides",
@@ -118,6 +118,7 @@ const slidesTypeHandler: ArtifactTypeHandler = {
           type: "presentation_artifact_result",
           status: "ready",
           artifactId: outputInput.artifactId,
+          reused: outputInput.reused,
           artifact_id: outputInput.artifactId,
           artifactType: "slides",
           title: outputInput.title,
@@ -180,6 +181,7 @@ const fileTypeHandler: ArtifactTypeHandler = {
           type: "file_artifact_result",
           status: "ready",
           artifactId: outputInput.artifactId,
+          reused: outputInput.reused,
           artifact_id: outputInput.artifactId,
           artifactType: "file",
           title: outputInput.title,
@@ -248,6 +250,7 @@ const imageTypeHandler: ArtifactTypeHandler = {
           type: "generated_image",
           status: "ready",
           artifactId: outputInput.artifactId,
+          reused: outputInput.reused,
           artifact_id: outputInput.artifactId,
           artifactType: "image",
           title: outputInput.title,
@@ -290,5 +293,7 @@ export function handlerForArtifactType(
   artifactType: string,
   handlers: readonly ArtifactTypeHandler[] = artifactTypeHandlers,
 ) {
-  return handlers.find((handler) => handler.artifactType === artifactType) ?? null;
+  return (
+    handlers.find((handler) => handler.artifactType === artifactType) ?? null
+  );
 }

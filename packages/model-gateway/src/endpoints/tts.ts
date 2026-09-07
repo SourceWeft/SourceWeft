@@ -1,3 +1,4 @@
+import { resolveRequestOptions } from "../request-options";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeTtsSpeech } from "../bridge/tts";
 import { runWithTargetFailover } from "./failover";
@@ -29,7 +30,12 @@ export class ModelGatewayTtsEndpoint {
       payload: input,
       operation: "tts.speech",
       callerSignal: options?.signal,
-      attempt: (target) => this.speechWithTarget(input, options, target),
+      attempt: (target) =>
+        this.speechWithTarget(
+          input,
+          resolveRequestOptions(this.config, target, options),
+          target,
+        ),
     });
   }
 

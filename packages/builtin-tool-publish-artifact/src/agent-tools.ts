@@ -5,10 +5,13 @@ import type {
   AgentToolTurnContext,
 } from "@sourceweft/contracts/agent-tools";
 import { resolveAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
+import { isArtifactError } from "@sourceweft/contracts/artifact-errors";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
 import { publishArtifact, type PublishArtifactServices } from "./publisher";
 import {
   ArtifactPublishError,
+  ARTIFACT_PUBLISH_ERROR_CODES,
+  type ArtifactPublishErrorCode,
   isRecoverableArtifactPublishErrorCode,
   PublishArtifactInputSchema,
   PublishArtifactToolInputSchema,
@@ -57,10 +60,10 @@ function hasRequiredContext(input: CapabilityAgentToolFactoryInput) {
   const ctx = input.context;
   return Boolean(
     ctx?.teamId &&
-      ctx.workspaceId &&
-      ctx.threadId &&
-      ctx.userId &&
-      ctx.userMessageId,
+    ctx.workspaceId &&
+    ctx.threadId &&
+    ctx.userId &&
+    ctx.userMessageId,
   );
 }
 
@@ -110,7 +113,11 @@ function langchainToolCallIdFromRuntime(runtime: ToolRuntime) {
     : undefined;
 }
 
-function toPublishErrorOutput(error: PptxOutputError) {
+function toPublishErrorOutput(error: {
+  code: string;
+  message: string;
+  details?: string;
+}) {
   return {
     ok: false as const,
     type: "presentation_artifact_error" as const,
@@ -119,7 +126,9 @@ function toPublishErrorOutput(error: PptxOutputError) {
     message: error.details ?? error.message,
     // Infrastructure failures are reported as unrecoverable so the agent stops
     // retrying instead of hammering a dependency that is down.
-    recoverable: isRecoverableArtifactPublishErrorCode(error.code),
+    recoverable: isRecoverableArtifactPublishErrorCode(
+      error.code as ArtifactPublishErrorCode,
+    ),
   };
 }
 
@@ -330,8 +339,8 @@ export function createCapabilityAgentTools(
     Boolean(services?.artifacts) &&
     Boolean(
       services?.sandbox?.downloadCurrentFile ||
-        services?.filesystem?.readRaw ||
-        services?.filesystem?.downloadFiles,
+      services?.filesystem?.readRaw ||
+      services?.filesystem?.downloadFiles,
     );
 
   if (!shouldBind) {
@@ -427,12 +436,17 @@ export function createCapabilityAgentTools(
           if (signal?.aborted) {
             throw (
               signal.reason ??
-              new DOMException("Artifact publication was aborted.", "AbortError")
+              new DOMException(
+                "Artifact publication was aborted.",
+                "AbortError",
+              )
             );
           }
           if (
             error instanceof PptxOutputError ||
-            error instanceof ArtifactPublishError
+            error instanceof ArtifactPublishError ||
+            (isArtifactError(error) &&
+              ARTIFACT_PUBLISH_ERROR_CODES.some((code) => code === error.code))
           ) {
             const output = toPublishErrorOutput(error);
             log.warn("publish_artifact failure", {

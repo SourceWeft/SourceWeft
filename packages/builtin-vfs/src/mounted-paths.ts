@@ -54,6 +54,9 @@ export function fileOperationErrorFromMessage(
     return "is_directory";
   }
   if (
+    normalized.includes("eacces") ||
+    normalized.includes("eperm") ||
+    normalized.includes("permission denied") ||
     normalized.includes("erofs") ||
     normalized.includes("read-only") ||
     normalized.includes("not allowed")

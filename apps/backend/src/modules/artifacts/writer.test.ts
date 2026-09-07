@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
-import { ARTIFACT_WRITE_ERROR_CODES } from "@sourceweft/contracts/artifact-errors";
+import {
+  ARTIFACT_WRITE_ERROR_CODES,
+  ArtifactError,
+} from "@sourceweft/contracts/artifact-errors";
 import {
   primaryArtifactAttachment,
   type ArtifactPublishSpec,
@@ -24,17 +27,30 @@ vi.mock("../sources/storage", () => ({
     buildArtifactStorageKey: () => "unused",
     getBucketName: () => "unused",
     upload: async () => {},
+    delete: async () => {},
   },
 }));
+const diagnostics = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
+vi.mock("../../shared/logger", () => ({ logger: diagnostics }));
 vi.mock("./repository", () => ({
   createReadyArtifactRecord: async () => ({
     artifactId: "unused",
     versionId: "unused",
+    reused: false,
   }),
-  createPendingArtifactRecord: async () => {},
+  createPendingArtifactRecord: async () => ({
+    artifactId: "unused",
+    reused: false,
+  }),
   markArtifactReady: async () => null,
   markArtifactFailed: async () => false,
   findArtifactRecordByRequestKey: async () => null,
+  findArtifactWriteReferences: async () => ({
+    artifactExists: false,
+    currentVersionNo: null,
+    hasVersions: false,
+    referencedKeys: [],
+  }),
 }));
 
 const { createArtifactWriter } = await import("./writer");
@@ -55,6 +71,23 @@ let markReadyResult: { artifactId: string; versionId: string } | null = {
 };
 let currentVersionNo = 1;
 let uploadError: Error | null = null;
+let deleteError: Error | null = null;
+let createReadyError: Error | null = null;
+let markReadyError: Error | null = null;
+let readyWinner: {
+  artifactId: string;
+  versionId: string;
+  reused: boolean;
+} | null = null;
+let pendingWinner: { artifactId: string; reused: boolean } | null = null;
+let referenceError: Error | null = null;
+let writeReferences = {
+  artifactExists: false,
+  currentVersionNo: null as number | null,
+  hasVersions: false,
+  referencedKeys: [] as string[],
+};
+const referenceLookups: Array<Record<string, unknown>> = [];
 let onUpload:
   | ((input: { key: string; signal?: AbortSignal }) => void | Promise<void>)
   | null = null;
@@ -94,6 +127,7 @@ const storage = {
   },
   delete: async (input: { key: string }) => {
     deletedKeys.push(input.key);
+    if (deleteError) throw deleteError;
   },
   // The writer never reads objects back; present only because the port
   // requires it, so a stub that fails loudly is better than a plausible one.
@@ -105,13 +139,24 @@ const storage = {
 const repository = {
   createReady: async (input: Record<string, unknown>) => {
     created.push(input);
-    return { artifactId: input.artifactId as string, versionId: "version-1" };
+    if (createReadyError) throw createReadyError;
+    return (
+      readyWinner ?? {
+        artifactId: input.artifactId as string,
+        versionId: "version-1",
+        reused: false,
+      }
+    );
   },
   createPending: async (input: Record<string, unknown>) => {
     pending.push(input);
+    return (
+      pendingWinner ?? { artifactId: input.artifactId as string, reused: false }
+    );
   },
   markReady: async (input: Record<string, unknown>) => {
     completed.push(input);
+    if (markReadyError) throw markReadyError;
     if (markReadyResult) currentVersionNo += 1;
     return markReadyResult;
   },
@@ -122,6 +167,11 @@ const repository = {
   findByRequestKey: async (input: Record<string, unknown>) => {
     requestKeyLookups.push(input);
     return reusableRecord;
+  },
+  findWriteReferences: async (input: Record<string, unknown>) => {
+    referenceLookups.push(input);
+    if (referenceError) throw referenceError;
+    return writeReferences;
   },
 } as unknown as ArtifactWriterDeps["repository"];
 
@@ -140,7 +190,9 @@ function makeWriter() {
   });
 }
 
-function spec(overrides: Partial<ArtifactPublishSpec> = {}): ArtifactPublishSpec {
+function spec(
+  overrides: Partial<ArtifactPublishSpec> = {},
+): ArtifactPublishSpec {
   return {
     artifactType: "image",
     title: "A cat",
@@ -159,6 +211,21 @@ beforeEach(() => {
   markReadyResult = { artifactId: "artifact-1", versionId: "version-2" };
   currentVersionNo = 1;
   uploadError = null;
+  deleteError = null;
+  createReadyError = null;
+  markReadyError = null;
+  readyWinner = null;
+  pendingWinner = null;
+  referenceError = null;
+  writeReferences = {
+    artifactExists: false,
+    currentVersionNo: null,
+    hasVersions: false,
+    referencedKeys: [],
+  };
+  referenceLookups.length = 0;
+  diagnostics.warn.mockClear();
+  diagnostics.error.mockClear();
   onUpload = null;
   reusableRecord = null;
   requestKeyLookups.length = 0;
@@ -808,3 +875,364 @@ test("an unknown artifact type is a validation error, not an infrastructure one"
   assert.deepEqual(created, []);
   assert.deepEqual(pending, []);
 });
+
+/* ========================================================================== */
+/* 9. Definite failure cleanup and uncertain commit retention                 */
+/* ========================================================================== */
+
+function writeWithFiles() {
+  return spec({
+    ...IDEMPOTENT,
+    attachments: [
+      {
+        fileName: "attempt-primary.png",
+        contentType: "image/png",
+        bytes: new Uint8Array(4),
+        role: "primary",
+      },
+      {
+        fileName: "attempt-extra.png",
+        contentType: "image/png",
+        bytes: new Uint8Array(2),
+      },
+    ],
+    preview: {
+      fileName: "attempt-preview.jpg",
+      contentType: "image/jpeg",
+      bytes: new Uint8Array(3),
+    },
+  });
+}
+
+function attemptedKeys(artifactId = "artifact-1") {
+  return [
+    "attempt-primary.png",
+    "attempt-extra.png",
+    "attempt-preview.jpg",
+  ].map((name) => `workspaces/workspace-1/artifacts/${artifactId}/${name}`);
+}
+
+function assertCleanupDiagnostics(keys: string[]) {
+  const metadata = [
+    ...diagnostics.warn.mock.calls,
+    ...diagnostics.error.mock.calls,
+  ]
+    .flat()
+    .filter((value): value is { failedKeys: string[] } =>
+      Boolean(
+        value && typeof value === "object" && Array.isArray(value.failedKeys),
+      ),
+    );
+  assert.ok(
+    metadata.some((value) =>
+      keys.every((key) => value.failedKeys.includes(key)),
+    ),
+    "cleanup diagnostics must identify the failed keys",
+  );
+}
+
+test("a definite completion CAS loss deletes only this attempt's objects, never the stored preview", async () => {
+  markReadyResult = null;
+  const winnerPreview =
+    "workspaces/workspace-1/artifacts/artifact-1/winner-preview.jpg";
+  await assert.rejects(
+    makeWriter().completeArtifact({
+      artifactId: "artifact-1",
+      context: CONTEXT,
+      spec: writeWithFiles(),
+      expectedVersionNo: 1,
+      storedPreview: {
+        storageKey: winnerPreview,
+        metadata: { role: "existing" },
+      },
+    }),
+    (error: Error & { code?: string }) =>
+      error.code === ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+  );
+  assert.deepEqual(deletedKeys, attemptedKeys());
+  assert.equal(deletedKeys.includes(winnerPreview), false);
+  assert.equal(currentVersionNo, 1);
+  assert.deepEqual(
+    referenceLookups,
+    [],
+    "a definite CAS refusal does not need uncertain-commit reconciliation",
+  );
+});
+
+test("cleanup failure cannot replace a definite completion conflict and records failed keys", async () => {
+  markReadyResult = null;
+  deleteError = new Error("object delete denied");
+  await assert.rejects(
+    makeWriter().completeArtifact({
+      artifactId: "artifact-1",
+      context: CONTEXT,
+      spec: writeWithFiles(),
+    }),
+    (error: Error & { code?: string; recoverable?: boolean }) => {
+      assert.equal(error.code, ARTIFACT_WRITE_ERROR_CODES.stateConflict);
+      assert.equal(error.recoverable, false);
+      return true;
+    },
+  );
+  assert.deepEqual(deletedKeys, attemptedKeys());
+  assertCleanupDiagnostics(attemptedKeys());
+});
+
+test("a payload-only CAS loss does not delete a caller-owned stored preview", async () => {
+  markReadyResult = null;
+  await assert.rejects(
+    makeWriter().completeArtifact({
+      artifactId: "artifact-1",
+      context: CONTEXT,
+      spec: spec(),
+      storedPreview: { storageKey: "already-uploaded-preview", metadata: {} },
+    }),
+    (error: Error & { code?: string }) =>
+      error.code === ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+  );
+  assert.deepEqual(uploads, []);
+  assert.deepEqual(deletedKeys, []);
+});
+
+test("a locked publish conflict cleans its attempted bytes and preserves the original conflict", async () => {
+  const conflict = new ArtifactError({
+    code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+    message: "same request is still running",
+  });
+  createReadyError = conflict;
+  await assert.rejects(
+    makeWriter().publishArtifact({ context: CONTEXT, spec: writeWithFiles() }),
+    (error) => error === conflict,
+  );
+  assert.deepEqual(deletedKeys, attemptedKeys());
+  assert.deepEqual(referenceLookups, []);
+});
+
+test.each([
+  ["publish", "referenced"],
+  ["publish", "not_found"],
+  ["publish", "read_failed"],
+  ["complete", "referenced"],
+  ["complete", "not_found"],
+  ["complete", "read_failed"],
+] as const)(
+  "%s with an unknown database outcome retains objects when reconciliation is %s",
+  async (lifecycle, referenceOutcome) => {
+    const commitError = new Error("database commit response lost");
+    if (lifecycle === "publish") createReadyError = commitError;
+    else markReadyError = commitError;
+    if (referenceOutcome === "referenced") {
+      writeReferences = {
+        artifactExists: true,
+        currentVersionNo: 2,
+        hasVersions: true,
+        referencedKeys: attemptedKeys(),
+      };
+    } else if (referenceOutcome === "read_failed") {
+      referenceError = new Error("database reference lookup unavailable");
+    }
+    const writer = makeWriter();
+    await assert.rejects(
+      lifecycle === "publish"
+        ? writer.publishArtifact({ context: CONTEXT, spec: writeWithFiles() })
+        : writer.completeArtifact({
+            artifactId: "artifact-1",
+            context: CONTEXT,
+            spec: writeWithFiles(),
+            expectedVersionNo: 1,
+          }),
+      (error: Error & { code?: string; cause?: unknown }) => {
+        assert.equal(error.code, ARTIFACT_WRITE_ERROR_CODES.recordUnavailable);
+        assert.equal(error.message, commitError.message);
+        assert.strictEqual(error.cause, commitError);
+        return true;
+      },
+    );
+    assert.deepEqual(
+      uploads.map((upload) => upload.key),
+      attemptedKeys(),
+    );
+    assert.deepEqual(
+      deletedKeys,
+      [],
+      "even an empty read cannot prove the original transaction rolled back",
+    );
+    assert.deepEqual(referenceLookups, [
+      {
+        artifactId: "artifact-1",
+        teamId: CONTEXT.teamId,
+        workspaceId: CONTEXT.workspaceId,
+        keys: attemptedKeys(),
+      },
+    ]);
+  },
+);
+
+test("a publish race loser cleans its own upload and returns the actual committed winner", async () => {
+  readyWinner = {
+    artifactId: "artifact-winner",
+    versionId: "winner-version",
+    reused: true,
+  };
+  const result = await makeWriter().publishArtifact({
+    artifactId: "artifact-loser",
+    context: CONTEXT,
+    spec: writeWithFiles(),
+  });
+  assert.deepEqual(result, readyWinner);
+  assert.equal(created[0]?.artifactId, "artifact-loser");
+  assert.deepEqual(deletedKeys, attemptedKeys("artifact-loser"));
+  assert.ok(deletedKeys.every((key) => !key.includes("artifact-winner")));
+  assert.equal(referenceLookups.length, 0);
+});
+
+test("a reused publication does not report success if its unique uploaded objects could not be cleaned", async () => {
+  readyWinner = {
+    artifactId: "artifact-winner",
+    versionId: "winner-version",
+    reused: true,
+  };
+  deleteError = new Error("cleanup was refused");
+  await assert.rejects(
+    makeWriter().publishArtifact({
+      artifactId: "artifact-loser",
+      context: CONTEXT,
+      spec: writeWithFiles(),
+    }),
+    (error: Error & { code?: string; recoverable?: boolean }) => {
+      assert.equal(error.code, ARTIFACT_WRITE_ERROR_CODES.storageUnavailable);
+      assert.equal(error.recoverable, false);
+      return true;
+    },
+  );
+  assert.deepEqual(deletedKeys, attemptedKeys("artifact-loser"));
+  assertCleanupDiagnostics(attemptedKeys("artifact-loser"));
+});
+
+test("a race winner keeps all successfully committed objects", async () => {
+  const result = await makeWriter().publishArtifact({
+    context: CONTEXT,
+    spec: writeWithFiles(),
+  });
+  assert.equal(result.reused, false);
+  assert.deepEqual(
+    uploads.map((upload) => upload.key),
+    attemptedKeys(),
+  );
+  assert.deepEqual(deletedKeys, []);
+  assert.deepEqual(referenceLookups, []);
+});
+
+test("open returns the repository's reused pending winner instead of its preallocated loser id", async () => {
+  pendingWinner = { artifactId: "pending-winner", reused: true };
+  const result = await makeWriter().openArtifact({
+    artifactId: "pending-loser",
+    context: CONTEXT,
+    spec: spec(IDEMPOTENT),
+  });
+  assert.deepEqual(result, pendingWinner);
+  assert.equal(pending[0]?.artifactId, "pending-loser");
+  assert.deepEqual(uploads, []);
+  assert.deepEqual(deletedKeys, []);
+});
+
+test("fast reuse lookups carry actor and thread identity for private visibility checks", async () => {
+  const writer = makeWriter();
+  await writer.publishArtifact({ context: CONTEXT, spec: spec(IDEMPOTENT) });
+  await writer.openArtifact({ context: CONTEXT, spec: spec(IDEMPOTENT) });
+  assert.equal(requestKeyLookups.length, 2);
+  for (const lookup of requestKeyLookups) {
+    assert.equal(lookup.userId, CONTEXT.userId);
+    assert.equal(lookup.threadId, CONTEXT.threadId);
+    assert.equal(lookup.teamId, CONTEXT.teamId);
+    assert.equal(lookup.workspaceId, CONTEXT.workspaceId);
+  }
+});
+
+test("upload failure remains primary when cleanup also fails", async () => {
+  uploadError = new Error("the upload was refused");
+  deleteError = new Error("cleanup was refused");
+  await assert.rejects(
+    makeWriter().publishArtifact({ context: CONTEXT, spec: writeWithFiles() }),
+    (error: Error & { code?: string; cause?: unknown }) => {
+      assert.equal(error.code, ARTIFACT_WRITE_ERROR_CODES.storageUnavailable);
+      assert.strictEqual(error.cause, uploadError);
+      return true;
+    },
+  );
+  assert.deepEqual(deletedKeys, [attemptedKeys()[0]]);
+  assert.deepEqual(created, []);
+  assertCleanupDiagnostics([attemptedKeys()[0]!]);
+});
+
+test("an upload-time abort remains primary when cleanup also fails", async () => {
+  const controller = new AbortController();
+  const abortReason = new DOMException(
+    "user stopped publication",
+    "AbortError",
+  );
+  deleteError = new Error("cleanup was refused");
+  onUpload = () => {
+    controller.abort(abortReason);
+  };
+  await assert.rejects(
+    makeWriter().publishArtifact({
+      context: CONTEXT,
+      spec: writeWithFiles(),
+      signal: controller.signal,
+    }),
+    (error) => error === abortReason,
+  );
+  assert.deepEqual(deletedKeys, [attemptedKeys()[0]]);
+  assert.deepEqual(created, []);
+  assertCleanupDiagnostics([attemptedKeys()[0]!]);
+});
+
+test.each(["publish", "complete"] as const)(
+  "%s preserves a pre-commit abort even if cleanup fails",
+  async (lifecycle) => {
+    const controller = new AbortController();
+    const abortReason = new DOMException("stop before commit", "AbortError");
+    deleteError = new Error("cleanup was refused");
+    // Primary bucket lookup is after the last upload's abort check. This makes
+    // cancellation win after preparation but before the repository call.
+    const writer = createArtifactWriter({
+      storage: {
+        ...storage,
+        getBucketName: () => {
+          controller.abort(abortReason);
+          return "content-bucket";
+        },
+      },
+      repository,
+      newArtifactId: () => "artifact-1",
+    });
+    const input = {
+      context: CONTEXT,
+      signal: controller.signal,
+      spec: spec({
+        attachments: [
+          {
+            fileName: "prepared.png",
+            contentType: "image/png",
+            bytes: new Uint8Array(4),
+            role: "primary",
+          },
+        ],
+      }),
+    };
+    await assert.rejects(
+      lifecycle === "publish"
+        ? writer.publishArtifact(input)
+        : writer.completeArtifact({ ...input, artifactId: "artifact-1" }),
+      (error) => error === abortReason,
+    );
+    assert.equal(uploads.length, 1);
+    assert.deepEqual(created, []);
+    assert.deepEqual(completed, []);
+    assert.deepEqual(deletedKeys, [
+      "workspaces/workspace-1/artifacts/artifact-1/prepared.png",
+    ]);
+    assertCleanupDiagnostics(deletedKeys);
+  },
+);

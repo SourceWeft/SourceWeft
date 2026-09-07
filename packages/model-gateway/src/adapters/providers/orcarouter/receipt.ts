@@ -23,11 +23,13 @@ export async function reconcileOrcaRouterCost(
     signal: context.signal,
   });
   if (response.status === 404) {
+    await response.body?.cancel();
     throw new ProviderReceiptPendingError(
       `Provider receipt '${context.requestId}' is not settled yet`,
     );
   }
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(
       `Failed to load OrcaRouter receipt '${context.requestId}': ${response.status}`,
     );

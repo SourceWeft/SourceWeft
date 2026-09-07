@@ -60,33 +60,38 @@ function applyGrepMaxCount(params: {
  * act on, even though the error says to retry. Reported as an `error` instead,
  * it becomes an ordinary tool result the model can read and route around.
  *
- * Wrapping at construction covers every method the protocol has, including the
- * ones added after this comment.
+ * Only single-result methods share this error shape. Batch methods retain
+ * their array contract and are handled per file by mounted-transfer.
  */
 function reportingFailures(backend: BackendProtocolV2): BackendProtocolV2 {
-  return new Proxy(backend, {
-    get(target, property, receiver) {
-      const value = Reflect.get(target, property, receiver);
-      if (typeof value !== "function") {
-        return value;
-      }
-      return (...args: unknown[]) => {
-        try {
-          const result = (value as (...a: unknown[]) => unknown).apply(
-            target,
-            args,
-          );
-          return result instanceof Promise
-            ? result.catch((error: unknown) => ({
-                error: errorText(error),
-              }))
-            : result;
-        } catch (error) {
-          return { error: errorText(error) };
-        }
-      };
-    },
-  }) as BackendProtocolV2;
+  return {
+    ls: (...args) => reportFailure(() => backend.ls(...args)),
+    read: (...args) => reportFailure(() => backend.read(...args)),
+    readRaw: (...args) => reportFailure(() => backend.readRaw(...args)),
+    grep: (...args) => reportFailure(() => backend.grep(...args)),
+    glob: (...args) => reportFailure(() => backend.glob(...args)),
+    write: (...args) => reportFailure(() => backend.write(...args)),
+    edit: (...args) => reportFailure(() => backend.edit(...args)),
+    ...(backend.delete
+      ? { delete: (path: string) => reportFailure(() => backend.delete!(path)) }
+      : {}),
+    ...(backend.uploadFiles
+      ? { uploadFiles: backend.uploadFiles.bind(backend) }
+      : {}),
+    ...(backend.downloadFiles
+      ? { downloadFiles: backend.downloadFiles.bind(backend) }
+      : {}),
+  };
+}
+
+async function reportFailure<T>(
+  run: () => T | Promise<T>,
+): Promise<T | { error: string }> {
+  try {
+    return await run();
+  } catch (error) {
+    return { error: errorText(error) };
+  }
 }
 
 function errorText(error: unknown): string {

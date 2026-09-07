@@ -1,4 +1,4 @@
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { cpSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,16 +8,12 @@ const backendRoot = path.resolve(
 );
 
 const assetPairs = [
-  ["src/shared/mail/templates", "dist/shared/mail/templates"],
+  ["src/modules/mail/templates", "dist/modules/mail/templates"],
 ];
 
 for (const [source, destination] of assetPairs) {
   const sourcePath = path.join(backendRoot, source);
   const destinationPath = path.join(backendRoot, destination);
   rmSync(destinationPath, { force: true, recursive: true });
-  if (!existsSync(sourcePath)) {
-    console.warn(`copy-runtime-assets: skipping missing ${source}`);
-    continue;
-  }
   cpSync(sourcePath, destinationPath, { recursive: true });
 }

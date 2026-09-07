@@ -161,6 +161,17 @@ export function normalizeGatewayError(error: unknown): ModelGatewayError {
     return error;
   }
 
+  // SDKs wrap custom-fetch errors in connection errors. A host policy refusal
+  // must retain its meaning, rather than triggering provider failover.
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (isRecord(cause) && !seen.has(cause)) {
+    seen.add(cause);
+    cause = cause.cause;
+    if (ModelGatewayError.isInstance(cause) && cause.code === "POLICY")
+      return cause;
+  }
+
   if (
     isRecord(error) &&
     (error.name === "AbortError" || error.name === "TimeoutError") &&
@@ -179,7 +190,11 @@ export function normalizeGatewayError(error: unknown): ModelGatewayError {
   // 402 or 400 would fall through to the generic branch below and be labelled
   // a retryable UPSTREAM fault — misclassifying both retry and failover.
   const statusCode = extractStatusCode(error);
-  if (statusCode !== undefined && isRecord(error) && typeof error.message === "string") {
+  if (
+    statusCode !== undefined &&
+    isRecord(error) &&
+    typeof error.message === "string"
+  ) {
     return new ModelGatewayError({
       code: mapStatusCodeToErrorCode(statusCode),
       message: error.message,
@@ -292,6 +307,7 @@ const SURFACED_ERROR_RANK: Record<GatewayErrorCode, number> = {
   STRUCTURED_OUTPUT: 7,
   BAD_REQUEST: 6,
   POLICY: 6,
+  CONFIGURATION: 6,
   UPSTREAM: 5,
   TIMEOUT: 4,
   RATE_LIMIT: 3,

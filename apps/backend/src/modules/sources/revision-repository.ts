@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db, sourceRevisions } from "@sourceweft/db";
 import { mapSourceRevision } from "./mappers";
+import { lockSourceForWrite } from "./source-write-lock";
 
 export async function listSourceRevisionRecords(input: {
   teamId: string;
@@ -78,6 +79,9 @@ export async function createSourceRevisionRecord(input: {
   externalUpdatedAt?: Date | null;
 }) {
   return db.transaction(async (tx) => {
+    if (!(await lockSourceForWrite(tx, input))) {
+      throw new Error("Cannot create revision for a missing source");
+    }
     const [latest] = await tx
       .select({ revisionNo: sourceRevisions.revisionNo })
       .from(sourceRevisions)
@@ -128,4 +132,3 @@ export async function createSourceRevisionRecord(input: {
     return mapSourceRevision(row);
   });
 }
-

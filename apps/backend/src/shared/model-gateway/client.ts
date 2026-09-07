@@ -14,9 +14,11 @@ import {
   getOrCreateRoutedGatewayClient,
   loadRoutedGatewayConfig,
 } from "./runtime";
-import type { ModelGatewayProfileKind } from "./types";
+import type { ModelGatewayProfileKind, RoutedGatewayConfig } from "./types";
 
-async function findDefaultModelGatewayProfileRow(kind: ModelGatewayProfileKind) {
+async function findDefaultModelGatewayProfileRow(
+  kind: ModelGatewayProfileKind,
+) {
   const [row] = await db
     .select()
     .from(modelGatewayProfiles)
@@ -87,8 +89,11 @@ export async function ensureModelConfigAvailable() {
   );
 }
 
-export async function getModelGatewayClient(gatewayConfigId?: string | null) {
-  const routedConfig = await loadRoutedGatewayConfig();
+export async function getModelGatewayClient(
+  gatewayConfigId?: string | null,
+  snapshot?: RoutedGatewayConfig,
+) {
+  const routedConfig = snapshot ?? (await loadRoutedGatewayConfig());
   if (!routedConfig) {
     throw new Error("Global model gateway configuration is not synchronized");
   }
@@ -195,10 +200,9 @@ export async function resolveModelGatewayProfile(input: {
         ? `${input.kind} model gateway profile '${requestedProfileAlias}' is not configured`
         : requestedModelAlias
           ? `${input.kind} model gateway model '${requestedModelAlias}' is not configured`
-        : `Default ${input.kind} model gateway profile is not configured`,
+          : `Default ${input.kind} model gateway profile is not configured`,
     );
   }
 
   return row ? mapModelGatewayProfile(row) : null;
 }
-

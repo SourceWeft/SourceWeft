@@ -1,3 +1,4 @@
+import { resolveRequestOptions } from "../request-options";
 import { normalizeGatewayError } from "../errors";
 import { runBridgeAsrTranscription } from "../bridge/asr";
 import { runWithTargetFailover } from "./failover";
@@ -29,7 +30,12 @@ export class ModelGatewayAsrEndpoint {
       payload: input,
       operation: "asr.transcribe",
       callerSignal: options?.signal,
-      attempt: (target) => this.transcribeWithTarget(input, options, target),
+      attempt: (target) =>
+        this.transcribeWithTarget(
+          input,
+          resolveRequestOptions(this.config, target, options),
+          target,
+        ),
     });
   }
 

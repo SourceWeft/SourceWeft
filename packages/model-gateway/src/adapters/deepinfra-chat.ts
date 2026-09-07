@@ -1,3 +1,4 @@
+import { sdkRetryOptions } from "./gateway-caller";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import { captureProviderResponseFetch } from "../observation/response-capture";
@@ -18,12 +19,15 @@ export class DeepInfraChatAdapter implements ChatAdapter {
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: options?.maxRetries ?? 2,
+      ...sdkRetryOptions(options),
+      timeout: options?.timeoutMs,
       apiKey: target.apiKey,
       configuration: {
+        ignoreEnvironmentHeaders: true,
         baseURL: resolveOpenAICompatibleBaseUrl(target.baseUrl),
         defaultHeaders: target.defaultHeaders,
-        fetch: captureProviderResponseFetch(),
+        fetch: captureProviderResponseFetch(options?.fetch),
+        adminAPIKey: null,
       },
       __includeRawResponse: true,
       maxTokens: input.maxTokens,

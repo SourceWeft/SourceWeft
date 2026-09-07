@@ -33,6 +33,7 @@ test("tuning falls back to the package defaults when unset", () => {
     rrfK: DEFAULT_RRF_K,
     fusionLimit: DEFAULT_FUSION_LIMIT,
     rerankTopN: DEFAULT_RERANK_TOP_N,
+    bm25FailurePolicy: "fail",
   });
 });
 
@@ -57,5 +58,8 @@ test("initial state resolves tuning once from the input", () => {
 });
 
 test("initial state starts with no recorded degradations", () => {
-  assert.deepEqual(createInitialRetrievalState(inputFixture()).degradations, []);
+  assert.deepEqual(
+    createInitialRetrievalState(inputFixture()).degradations,
+    [],
+  );
 });
