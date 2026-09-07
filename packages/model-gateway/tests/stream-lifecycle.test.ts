@@ -490,6 +490,10 @@ for (const entry of ["endpoint", "langchain"] as const) {
     `${entry}: a stalled iterator return cannot hide the original request timeout`,
     { timeout: 5_000 },
     async (t) => {
+      // The fixture has no socket. AbortSignal.timeout is unref'ed, so Node 22
+      // can otherwise exit before the request deadline starts cleanup.
+      const keepAlive = setInterval(() => {}, 1_000);
+      t.after(() => clearInterval(keepAlive));
       let releaseClose!: () => void;
       const closeBlocked = new Promise<void>((resolve) => {
         releaseClose = resolve;
