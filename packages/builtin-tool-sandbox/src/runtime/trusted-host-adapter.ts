@@ -27,6 +27,8 @@ import type {
 
 const CANONICAL_PATH_MARKER = "SOURCEWEFT_CANONICAL_PATH=";
 const FILE_STAT_MARKER = "SOURCEWEFT_FILE=";
+// stat -c prints backslash escapes literally; its field delimiters must be tabs.
+const STAT_FIELDS_FORMAT = "%s\t%Y\t%i\t%n";
 const MANIFEST_BEGIN = "SOURCEWEFT_MANIFEST_BEGIN";
 const MANIFEST_END = "SOURCEWEFT_MANIFEST_END";
 const SYMLINK_MARKER = "SOURCEWEFT_SYMLINK=";
@@ -376,7 +378,7 @@ export function createTrustedSandboxHostAdapter(input: {
         'link=$(find -P "$root" -type l -print -quit)',
         `if [ -n "$link" ]; then printf '${SYMLINK_MARKER}%s\\n' "$link"; exit 73; fi`,
         `printf '${MANIFEST_BEGIN}\\n'`,
-        `find -P "$root" -type f -exec stat -c '%s\\t%Y\\t%i\\t%n' -- {} \\;`,
+        `find -P "$root" -type f -exec stat -c '${STAT_FIELDS_FORMAT}' -- {} \\;`,
         `printf '${MANIFEST_END}\\n'`,
       ].join("; "),
       manifestInput.options,
@@ -428,7 +430,7 @@ export function createTrustedSandboxHostAdapter(input: {
         `target=${shellQuote(path)}`,
         '[ -f "$target" ]',
         `[ ! -L "$target" ]`,
-        `stat -c '${FILE_STAT_MARKER}%s\\t%Y\\t%i\\t%n' -- "$target"`,
+        `stat -c '${FILE_STAT_MARKER}${STAT_FIELDS_FORMAT}' -- "$target"`,
       ].join("; "),
       options,
     );
@@ -482,9 +484,14 @@ export function createTrustedSandboxHostAdapter(input: {
     current: CurrentSession;
     signal?: AbortSignal;
     timeoutMs?: number;
-    operation: (options: Required<
-      Pick<SystemRunOptions, "current" | "executionId" | "signal" | "timeoutMs">
-    >) => Promise<T>;
+    operation: (
+      options: Required<
+        Pick<
+          SystemRunOptions,
+          "current" | "executionId" | "signal" | "timeoutMs"
+        >
+      >,
+    ) => Promise<T>;
   }) => {
     const timeoutMs = operationTimeoutMs(
       operationInput.timeoutMs,
@@ -714,7 +721,8 @@ export function createTrustedSandboxHostAdapter(input: {
           );
           await assertPinnedGeneration(current);
           if (
-            new Set(canonicalFiles.map((file) => file.path)).size !== files.length
+            new Set(canonicalFiles.map((file) => file.path)).size !==
+            files.length
           ) {
             throw new Error(
               "SANDBOX_HOST_UPLOAD_PATH_CONFLICT: upload paths resolve to the same canonical target.",

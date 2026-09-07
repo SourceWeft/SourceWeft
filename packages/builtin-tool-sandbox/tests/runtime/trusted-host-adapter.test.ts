@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "node:test";
+import { promisify } from "node:util";
 import { createSandboxRuntimeForTurn } from "../../src/runtime/runtime";
 import type {
   SandboxCancellationResult,
@@ -36,7 +41,13 @@ type ManifestReply = {
   truncated?: boolean;
 };
 
-function createHarness() {
+function createHarness(
+  options: {
+    workspaceRoot?: string;
+    executeSystem?: NonNullable<SandboxProvider["executeSystem"]>;
+  } = {},
+) {
+  const workspaceRoot = options.workspaceRoot ?? "/workspace";
   const files = new Map<string, Buffer>([
     ["/workspace/project/a.txt", Buffer.from("abc")],
     ["/workspace/project/b.bin", Buffer.from([4, 5])],
@@ -101,11 +112,11 @@ function createHarness() {
   const provider: SandboxProvider = {
     id: "fake",
     pathPolicy: {
-      workspaceRoot: "/workspace",
-      defaultCwd: "/workspace",
-      prepareTargetRoots: ["/workspace"],
-      collectSourceRoots: ["/workspace"],
-      readWriteRoots: ["/workspace"],
+      workspaceRoot,
+      defaultCwd: workspaceRoot,
+      prepareTargetRoots: [workspaceRoot],
+      collectSourceRoots: [workspaceRoot],
+      readWriteRoots: [workspaceRoot],
     },
     async createSandbox() {
       return { id: "provider-sandbox-new" };
@@ -122,6 +133,7 @@ function createHarness() {
       return { output: "model-ok", exitCode: 0, truncated: false };
     },
     async executeSystem(input) {
+      if (options.executeSystem) return options.executeSystem(input);
       if (input.command.includes("SOURCEWEFT_CANONICAL_PATH=")) {
         const target = canonicalTarget(input.command);
         return {
@@ -420,6 +432,45 @@ describe("trusted sandbox host adapter", () => {
       /SANDBOX_HOST_DOWNLOAD_TOO_LARGE/u,
     );
   });
+
+  test(
+    "downloads a real Linux file through the emitted stat command",
+    {
+      skip: process.platform !== "linux",
+    },
+    async (t) => {
+      const workspaceRoot = await mkdtemp(
+        join(tmpdir(), "sourceweft-file-stat-"),
+      );
+      t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+      const file = join(workspaceRoot, "deck with spaces.bin");
+      const bytes = Buffer.from([0x50, 0x4b, 0x00, 0xff]);
+      await writeFile(file, bytes);
+      const execute = promisify(execFile);
+      const harness = createHarness({
+        workspaceRoot,
+        executeSystem: async (input) => {
+          const result = await execute("sh", ["-c", input.command], {
+            timeout: input.timeoutMs,
+            signal: input.signal,
+            maxBuffer: input.maxOutputChars,
+          });
+          return {
+            output: result.stdout + result.stderr,
+            exitCode: 0,
+            truncated: false,
+          };
+        },
+      });
+      harness.setDownloadHandler((input) => readFile(input.sandboxPath));
+      assert.deepEqual(
+        await harness.runtime.trustedHost.downloadCurrentFile({
+          sandboxPath: file,
+        }),
+        new Uint8Array(bytes),
+      );
+    },
+  );
 
   test("download cancellation waits for physical sandbox termination", async () => {
     const harness = createHarness();
