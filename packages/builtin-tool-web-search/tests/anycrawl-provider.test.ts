@@ -270,7 +270,9 @@ test("AnyCrawlWebProvider fetch only accepts the first 5 URLs", async () => {
   ]);
 });
 
-test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default", async () => {
+test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default", async (t) => {
+  // These assertions check the configured budget, independent of elapsed wall time.
+  t.mock.method(Date, "now", () => 1_000);
   const provider = new AnyCrawlWebProvider("test-key");
   const observedInputs: Array<{
     url: string;
@@ -314,8 +316,8 @@ test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default",
   assert.equal(observedInputs[0]?.max_age, undefined);
 });
 
-test("createDefaultWebProvider forwards fetch timeout options", async () => {
-  process.env.ANYCRAWL_API_KEY = "test-key";
+test("AnyCrawlWebProvider forwards configured fetch timeout", async (t) => {
+  t.mock.method(Date, "now", () => 1_000);
   const provider = new AnyCrawlWebProvider("test-key", {
     fetchTimeoutMs: 60_000,
   });
