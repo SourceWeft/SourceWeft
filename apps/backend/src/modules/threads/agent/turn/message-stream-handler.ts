@@ -42,6 +42,7 @@ export async function* handleMessagesStreamChunk(input: {
 
   const messageChunk = payload[0];
   const messageMetadata = payload[1];
+  if (isInternalModelMessage(messageMetadata)) return;
   const messageToolCalls = extractToolCallsFromMessage(messageChunk);
   rememberObservedToolCalls(runtime.observedToolCallsById, messageToolCalls);
   const promotedToolStreams = promotePendingToolStreamsFromToolCalls({
@@ -149,6 +150,21 @@ export async function* handleMessagesStreamChunk(input: {
       delta,
     };
   }
+}
+
+export function isInternalModelMessage(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const record = metadata as Record<string, unknown>;
+  return (
+    record.sourceweftInternalModel === true ||
+    (Array.isArray(record.tags) &&
+      record.tags.some(
+        (tag) =>
+          tag === "sourceweft:internal-model" ||
+          tag === "langsmith:nostream" ||
+          tag === "nostream",
+      ))
+  );
 }
 
 export function appendPromotedToolRenderBlock(input: {

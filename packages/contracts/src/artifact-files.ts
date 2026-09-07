@@ -35,8 +35,7 @@ const DEFAULT_STORAGE_SEGMENT_MAX_LENGTH = 80;
  * (Windows reserved set, POSIX separators, and `%` because these names also end
  * up inside URL paths and storage keys).
  */
-const FILE_NAME_HOSTILE_PATTERN =
-  /[\u0000-\u001f\u007f<>:"/\\|?*%]+/g;
+const FILE_NAME_HOSTILE_PATTERN = /[\u0000-\u001f\u007f<>:"/\\|?*%]+/g;
 
 /** Everything that is not safe as a bare ASCII path segment. */
 const NON_ASCII_SEGMENT_PATTERN = /[^A-Za-z0-9._-]+/g;
@@ -233,6 +232,32 @@ export function extensionForMimeType(
   return EXTENSION_BY_MIME_TYPE.get(normalizeMimeType(mimeType)) ?? fallback;
 }
 
+/** Identify raster bytes independently of the provider's MIME or file suffix. */
+export function sniffImageMimeType(bytes: Uint8Array): string | null {
+  const tag = (offset: number, length: number) =>
+    String.fromCharCode(...bytes.subarray(offset, offset + length));
+  if (
+    bytes.length >= 8 &&
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every(
+      (byte, index) => bytes[index] === byte,
+    )
+  )
+    return "image/png";
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(tag(0, 6)))
+    return "image/gif";
+  if (bytes.length >= 12 && tag(0, 4) === "RIFF" && tag(8, 4) === "WEBP")
+    return "image/webp";
+  return null;
+}
+
 /**
  * The audio container a byte buffer actually is, read from its magic bytes — or
  * null when it is not an audio container we can identify unambiguously.
@@ -312,7 +337,9 @@ export function isArtifactImageMimeType(value: string | undefined | null) {
   return ARTIFACT_IMAGE_MIME_TYPES.has(normalizeMimeType(value));
 }
 
-export function isArtifactPreviewImageMimeType(value: string | undefined | null) {
+export function isArtifactPreviewImageMimeType(
+  value: string | undefined | null,
+) {
   return ARTIFACT_PREVIEW_IMAGE_MIME_TYPES.has(normalizeMimeType(value));
 }
 

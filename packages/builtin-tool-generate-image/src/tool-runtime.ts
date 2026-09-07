@@ -19,6 +19,7 @@ import { buildArtifactPreviewUrl } from "./artifact-urls";
 import {
   ARTIFACT_LIMITS,
   isArtifactImageMimeType,
+  sniffImageMimeType,
 } from "@sourceweft/contracts/artifact-files";
 import { ArtifactError } from "@sourceweft/contracts/artifact-errors";
 import {
@@ -221,9 +222,10 @@ async function decodeGeneratedImage(
 ) {
   throwImageToolAbortReason(signal);
   if (image.b64Json) {
+    const body = Buffer.from(image.b64Json, "base64");
     return {
-      body: Buffer.from(image.b64Json, "base64"),
-      mimeType: image.mimeType ?? "image/png",
+      body,
+      mimeType: sniffImageMimeType(body) ?? "application/octet-stream",
     };
   }
 
@@ -236,19 +238,11 @@ async function decodeGeneratedImage(
   if (!response.ok) {
     throw new Error(`Failed to download generated image: ${response.status}`);
   }
-  const contentType = response.headers
-    .get("content-type")
-    ?.split(";")[0]
-    ?.trim();
   const body = Buffer.from(await response.arrayBuffer());
   throwImageToolAbortReason(signal);
   return {
     body,
-    mimeType:
-      image.mimeType ??
-      (contentType && contentType.startsWith("image/")
-        ? contentType
-        : "image/png"),
+    mimeType: sniffImageMimeType(body) ?? "application/octet-stream",
   };
 }
 

@@ -323,11 +323,115 @@ test("review_deck_visuals never downgrades unconfirmed sandbox termination", asy
   assert.ok(review);
 
   await assert.rejects(
-    review.invoke(
-      { imagePaths: ["/workspace/slide-1.png"] },
-      { toolCall: { id: "review-call-termination-unknown" } } as never,
-    ),
+    review.invoke({ imagePaths: ["/workspace/slide-1.png"] }, {
+      toolCall: { id: "review-call-termination-unknown" },
+    } as never),
     (error: unknown) => error === terminationUnknown,
   );
   assert.equal(visionCalls, 0);
+});
+
+test("PPT review forwards resolved BYOK execution and explicitly disables thinking for JSON review", async () => {
+  const calls: Array<{
+    request: Record<string, unknown>;
+    options: Record<string, unknown>;
+  }> = [];
+  const execution = {
+    executionMode: "BYOK",
+    providerModel: "private-vision",
+    credentialId: "credential-1",
+    byokModelId: "model-1",
+    byok: { provider: "custom", apiKey: "owned-key" },
+  };
+  const factory = createCapabilityAgentTools({
+    context: {
+      turnState: {
+        [REVIEW_DECK_VISUALS_TOOL_NAME]: {
+          visionProfile: {
+            gatewayConfigId: "",
+            profileAlias: "byok:vision:model-1",
+            modelAlias: "private-vision",
+          },
+          execution,
+        },
+      },
+    },
+    services: {
+      sandbox: {
+        allowedReadRoots: ["/workspace"],
+        downloadCurrentFile: async () => Buffer.from("image"),
+      },
+      modelGateway: {
+        getClient: async () => ({
+          chat: {
+            complete: async (
+              request: Record<string, unknown>,
+              options: Record<string, unknown>,
+            ) => {
+              calls.push({ request, options });
+              return {
+                raw: {
+                  content: JSON.stringify({
+                    verdicts: [{ slideNumber: 1, ok: true, issues: [] }],
+                  }),
+                },
+              };
+            },
+          },
+        }),
+      },
+    },
+  } as never);
+  const result = JSON.parse(
+    (await factory.tools[0]!.tool.invoke({
+      imagePaths: ["/workspace/slide-1.jpg"],
+    })) as string,
+  );
+  assert.equal(result.passed, true);
+  assert.deepEqual(calls[0]!.request.thinking, { mode: "off" });
+  assert.deepEqual(calls[0]!.options.llm, {
+    ...execution,
+    thinking: { mode: "off" },
+  });
+});
+
+test("PPT review cannot pass when the judge omits requested slides", async () => {
+  const factory = createCapabilityAgentTools({
+    context: {
+      turnState: {
+        [REVIEW_DECK_VISUALS_TOOL_NAME]: {
+          visionProfile: {
+            gatewayConfigId: "global",
+            profileAlias: "vision",
+            modelAlias: "vision",
+          },
+        },
+      },
+    },
+    services: {
+      sandbox: {
+        allowedReadRoots: ["/workspace"],
+        downloadCurrentFile: async () => Buffer.from("image"),
+      },
+      modelGateway: {
+        getClient: async () => ({
+          chat: {
+            complete: async () => ({
+              raw: {
+                content:
+                  '{"verdicts":[{"slideNumber":1,"ok":true,"issues":[]}]}',
+              },
+            }),
+          },
+        }),
+      },
+    },
+  } as never);
+  const result = JSON.parse(
+    (await factory.tools[0]!.tool.invoke({
+      imagePaths: ["/workspace/slide-1.jpg", "/workspace/slide-2.jpg"],
+    })) as string,
+  );
+  assert.equal(result.passed, false);
+  assert.equal(result.skipped, true);
 });

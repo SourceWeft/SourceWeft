@@ -52,7 +52,10 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
-import { findArtifactRecord } from "../../../artifacts/repository";
+import {
+  findArtifactRecord,
+  listArtifactSummaryRecords,
+} from "../../../artifacts/repository";
 import { artifactStorage } from "../../../sources/storage";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
@@ -407,6 +410,21 @@ export async function buildRuntimePromptContext(
     ? () => sandboxRuntime.buildRuntimePrompt()
     : undefined;
 
+  // Operational locators must survive history/tool-output compression. Read
+  // only artifacts this user can see in this thread, not the whole workspace.
+  const publishedArtifacts =
+    artifactTools.length > 0
+      ? (
+          await listArtifactSummaryRecords({
+            teamId: prepared.workspace.organizationId,
+            workspaceId: prepared.workspace.id,
+            threadId: prepared.thread.id,
+            viewerUserId: prepared.userId,
+            limit: 20,
+          })
+        ).items.filter((artifact) => artifact.status === "ready")
+      : [];
+
   const runtimePrompt = buildAgentRuntimeContext({
     availableWebTools: webTools.map((tool) => tool.name),
     availableArtifactTools: artifactTools.map((tool) => tool.name),
@@ -423,6 +441,7 @@ export async function buildRuntimePromptContext(
     timezone: prepared.timezone,
     selectedSources: visibleSources,
     selectedSourcesOmitted,
+    publishedArtifacts,
   });
 
   return {

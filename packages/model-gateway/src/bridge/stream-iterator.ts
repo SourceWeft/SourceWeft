@@ -75,11 +75,31 @@ export async function closeStreamIterator(
   logger: ResolvedModelGatewayConfig["logger"],
   hasPrimaryError: boolean,
 ): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await iterator?.close();
+    if (!iterator) return;
+    // Abort has already reached the SDK. An iterator whose return() ignores
+    // cancellation must not keep a timed-out/user-stopped turn alive forever.
+    await Promise.race([
+      iterator.close(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new DOMException(
+                "Model stream cleanup exceeded 1000ms after cancellation",
+                "TimeoutError",
+              ),
+            ),
+          1_000,
+        );
+      }),
+    ]);
   } catch (error) {
     if (!hasPrimaryError) throw error;
     // Cleanup must not change failover/error classification of the request.
     logger.warn?.("model-gateway.stream.cleanup.failed");
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }

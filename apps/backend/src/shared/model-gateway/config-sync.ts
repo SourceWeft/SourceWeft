@@ -400,7 +400,7 @@ function groupDynamicProfilesByKind(input: {
   return grouped;
 }
 
-async function deactivateMissingStaticProfiles(input: {
+async function deactivateMissingProfiles(input: {
   aliases: Set<string>;
   kind: ModelGatewayProfileKind;
   now: Date;
@@ -421,113 +421,7 @@ async function deactivateMissingStaticProfiles(input: {
     );
 
   const staleIds = rows
-    .filter((row) => {
-      if (input.aliases.has(row.profileAlias)) {
-        return false;
-      }
-      const configJson =
-        row.configJson && typeof row.configJson === "object"
-          ? (row.configJson as Record<string, unknown>)
-          : {};
-      return typeof configJson.providerCatalogSource !== "string";
-    })
-    .map((row) => row.id);
-
-  for (const id of staleIds) {
-    await input.tx
-      .update(modelGatewayProfiles)
-      .set({ isActive: false, isDefault: false, updatedAt: input.now })
-      .where(eq(modelGatewayProfiles.id, id));
-  }
-}
-
-async function deactivateMissingCatalogProfiles(input: {
-  aliases: Set<string>;
-  gatewayConfigId: string;
-  gatewaySlug: string;
-  kind: ModelGatewayProfileKind;
-  source: string;
-  now: Date;
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
-}) {
-  const rows = await input.tx
-    .select({
-      id: modelGatewayProfiles.id,
-      profileAlias: modelGatewayProfiles.profileAlias,
-      configJson: modelGatewayProfiles.configJson,
-    })
-    .from(modelGatewayProfiles)
-    .where(
-      and(
-        eq(modelGatewayProfiles.gatewayConfigId, input.gatewayConfigId),
-        eq(modelGatewayProfiles.kind, input.kind),
-        eq(modelGatewayProfiles.isActive, true),
-      ),
-    );
-
-  const staleIds = rows
-    .filter((row) => {
-      const configJson =
-        row.configJson && typeof row.configJson === "object"
-          ? (row.configJson as Record<string, unknown>)
-          : {};
-      return (
-        configJson.providerCatalogSource === input.source &&
-        (configJson.providerCatalogGatewaySlug === input.gatewaySlug ||
-          configJson.providerCatalogGatewaySlug === undefined) &&
-        !input.aliases.has(row.profileAlias)
-      );
-    })
-    .map((row) => row.id);
-
-  for (const id of staleIds) {
-    await input.tx
-      .update(modelGatewayProfiles)
-      .set({ isActive: false, isDefault: false, updatedAt: input.now })
-      .where(eq(modelGatewayProfiles.id, id));
-  }
-}
-
-async function deactivateCatalogProfilesForGateway(input: {
-  gatewayConfigId: string;
-  gatewaySlug: string;
-  kinds?: Set<ModelGatewayProfileKind>;
-  now: Date;
-  sources: string[];
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
-}) {
-  const rows = await input.tx
-    .select({
-      id: modelGatewayProfiles.id,
-      kind: modelGatewayProfiles.kind,
-      configJson: modelGatewayProfiles.configJson,
-    })
-    .from(modelGatewayProfiles)
-    .where(
-      and(
-        eq(modelGatewayProfiles.gatewayConfigId, input.gatewayConfigId),
-        eq(modelGatewayProfiles.isActive, true),
-      ),
-    );
-
-  const sourceSet = new Set(input.sources);
-  const staleIds = rows
-    .filter((row) => {
-      if (input.kinds && !input.kinds.has(row.kind)) {
-        return false;
-      }
-      const configJson =
-        row.configJson && typeof row.configJson === "object"
-          ? (row.configJson as Record<string, unknown>)
-          : {};
-      return (
-        typeof configJson.providerCatalogSource === "string" &&
-        (configJson.providerCatalogGatewaySlug === input.gatewaySlug ||
-          configJson.providerCatalogGatewaySlug === undefined) &&
-        (sourceSet.size === 0 ||
-          sourceSet.has(configJson.providerCatalogSource))
-      );
-    })
+    .filter((row) => !input.aliases.has(row.profileAlias))
     .map((row) => row.id);
 
   for (const id of staleIds) {
@@ -555,26 +449,9 @@ async function loadDynamicCatalogProfiles(input: {
     await modelCatalog.refresh();
   }
   const entries: ReturnType<typeof toDynamicProfileEntry>[] = [];
-  const successfulCatalogs: Array<{
-    gatewaySlug: string;
-    source: string;
-    kinds: Set<ModelGatewayProfileKind>;
-    aliases: Set<string>;
-  }> = [];
-  const disabledCatalogs: Array<{
-    gatewaySlug: string;
-    sources: string[];
-    kinds?: Set<ModelGatewayProfileKind>;
-  }> = [];
-
   for (const gateway of input.gateways) {
     const catalog = gateway.modelCatalog;
     if (!catalog?.enabled) {
-      disabledCatalogs.push({
-        gatewaySlug: gateway.slug,
-        sources: [`${gateway.providerKind}-models`],
-        kinds: catalog?.kinds ? new Set(catalog.kinds) : undefined,
-      });
       continue;
     }
 
@@ -587,49 +464,6 @@ async function loadDynamicCatalogProfiles(input: {
         toDynamicProfileEntry({ gateway, candidate }),
       );
       entries.push(...profiles);
-
-      const bySource = new Map<string, Set<ModelGatewayProfileKind>>();
-      for (const candidate of candidates) {
-        const kinds =
-          bySource.get(candidate.providerCatalogSource) ??
-          new Set<ModelGatewayProfileKind>();
-        kinds.add(candidate.kind);
-        bySource.set(candidate.providerCatalogSource, kinds);
-      }
-      // An empty valid response still completes discovery and retires old
-      // entries. It must not be confused with an unavailable catalog.
-      if (bySource.size === 0)
-        bySource.set(
-          gateway.providerKind === "openrouter"
-            ? "openrouter-models"
-            : gateway.modelCatalog?.format === "orcarouter"
-              ? "orcarouter-models"
-              : `${gateway.providerKind}-models`,
-          new Set(
-            catalog.kinds ?? [
-              "chat",
-              "vision",
-              "embedding",
-              "rerank",
-              "asr",
-              "tts",
-              "image",
-              "video",
-            ],
-          ),
-        );
-      for (const [source, kinds] of bySource.entries()) {
-        successfulCatalogs.push({
-          gatewaySlug: gateway.slug,
-          source,
-          kinds,
-          aliases: new Set(
-            profiles
-              .filter((profile) => profile.providerCatalogSource === source)
-              .map((profile) => profile.profileAlias),
-          ),
-        });
-      }
     } catch (error) {
       throw new Error(
         `Failed to discover model catalog for globally ready gateway '${gateway.slug}' (${gateway.providerName}): ${
@@ -643,8 +477,6 @@ async function loadDynamicCatalogProfiles(input: {
   return {
     entries,
     registryLoaded: registryRequired,
-    successfulCatalogs,
-    disabledCatalogs,
   };
 }
 
@@ -1114,93 +946,56 @@ export async function syncGlobalModelGatewayConfigFromFile(
       tx,
     });
 
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.chatProfiles.map((entry) => entry.profileAlias)),
+    await deactivateMissingProfiles({
+      aliases: new Set(chatProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "chat",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.imageProfiles.map((entry) => entry.profileAlias)),
+    await deactivateMissingProfiles({
+      aliases: new Set(imageProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "image",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(
-        loaded.visionProfiles.map((entry) => entry.profileAlias),
-      ),
+    await deactivateMissingProfiles({
+      aliases: new Set(visionProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "vision",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(
-        loaded.rerankProfiles.map((entry) => entry.profileAlias),
-      ),
+    await deactivateMissingProfiles({
+      aliases: new Set(rerankProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "rerank",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.asrProfiles.map((entry) => entry.profileAlias)),
+    await deactivateMissingProfiles({
+      aliases: new Set(asrProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "asr",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
+    await deactivateMissingProfiles({
       aliases: new Set(
-        loaded.embeddingProfiles.map((entry) => entry.profileAlias),
+        embeddingProfilesToSync.map((entry) => entry.profileAlias),
       ),
       kind: "embedding",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set(loaded.ttsProfiles.map((entry) => entry.profileAlias)),
+    await deactivateMissingProfiles({
+      aliases: new Set(ttsProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "tts",
       now,
       tx,
     });
-    await deactivateMissingStaticProfiles({
-      aliases: new Set<string>(),
+    await deactivateMissingProfiles({
+      aliases: new Set(videoProfilesToSync.map((entry) => entry.profileAlias)),
       kind: "video",
       now,
       tx,
     });
-
-    for (const catalog of dynamicCatalog.successfulCatalogs) {
-      const gatewayConfigId = gatewayIdBySlug.get(catalog.gatewaySlug);
-      if (!gatewayConfigId) {
-        continue;
-      }
-      for (const kind of catalog.kinds) {
-        await deactivateMissingCatalogProfiles({
-          aliases: catalog.aliases,
-          gatewayConfigId,
-          gatewaySlug: catalog.gatewaySlug,
-          kind,
-          now,
-          source: catalog.source,
-          tx,
-        });
-      }
-    }
-
-    for (const catalog of dynamicCatalog.disabledCatalogs) {
-      const gatewayConfigId = gatewayIdBySlug.get(catalog.gatewaySlug);
-      if (!gatewayConfigId) {
-        continue;
-      }
-      await deactivateCatalogProfilesForGateway({
-        gatewayConfigId,
-        gatewaySlug: catalog.gatewaySlug,
-        kinds: catalog.kinds,
-        now,
-        sources: catalog.sources,
-        tx,
-      });
-    }
 
     await tx
       .delete(modelGatewayProviderConfigs)

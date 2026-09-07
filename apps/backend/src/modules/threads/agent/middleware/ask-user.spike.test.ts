@@ -49,6 +49,16 @@ import {
 import { createTurnRuntime } from "../turn/turn-runtime";
 import type { DeepAgentTurnEvent } from "../turn/events";
 import { commandResumeFromToolApprovalResume } from "../turn/hitl-handler";
+import { createSourceWeftSummarizationMiddleware } from "./context-compression";
+import {
+  checkpointRefFromConfig,
+  getAgentHeadStateOrNull,
+  resolveAgentBaseConfig,
+} from "../turn/checkpoint";
+import {
+  interruptsToLegacyUpdatesPayload,
+  type V3RunStream,
+} from "../turn/v3-protocol";
 
 /** Emits a scripted sequence of AI messages, one per model turn. */
 class ScriptedChatModel extends BaseChatModel {
@@ -118,6 +128,115 @@ function findAskUserInterrupt(chunks: unknown[]) {
 
 const CONFIG = () => ({ configurable: { thread_id: `t_${Math.random()}` } });
 
+test("v3 continuation persists the new head and resumes a question beyond a pinned prior turn", async () => {
+  const agent = buildAgent(
+    [
+      { content: "First turn finished" },
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "continued-question",
+            name: ASK_USER_TOOL_NAME,
+            args: { questions: [{ question: "Which format?", type: "text" }] },
+          },
+        ],
+      },
+      { content: "Resumed with PDF" },
+    ],
+    [
+      createSourceWeftSummarizationMiddleware({
+        model: new ScriptedChatModel([{ content: "old history summary" }]),
+        backend: new StateBackend(),
+        chatProfileConfig: { contextLength: 100_000 },
+      }),
+    ],
+  );
+  const config = CONFIG();
+  const first = (await agent.streamEvents(
+    { messages: [{ role: "user", content: "first" }] },
+    { ...config, version: "v3" } as never,
+  )) as unknown as V3RunStream;
+  for await (const _event of first) {
+    /* drain the actual v3 stream */
+  }
+  type Snapshot = { config: unknown; values: { messages: BaseMessage[] } };
+  const previous = checkpointRefFromConfig(
+    ((await agent.getState(config)) as Snapshot).config,
+  )!;
+  const pinned = {
+    configurable: {
+      ...config.configurable,
+      checkpoint_id: previous.checkpointId,
+    },
+  };
+  const second = (await agent.streamEvents(
+    { messages: [{ role: "user", content: "ask me" }] },
+    { ...pinned, version: "v3" } as never,
+  )) as unknown as V3RunStream;
+  for await (const _event of second) {
+    /* drain before reading the new head */
+  }
+  assert.equal(second.interrupted, true);
+  const head = (await getAgentHeadStateOrNull(
+    agent as never,
+    pinned,
+  )) as Snapshot | null;
+  const current = checkpointRefFromConfig(head?.config)!;
+  assert.notEqual(current.checkpointId, previous.checkpointId);
+  const handler = handleAskUserStreamChunk({
+    agent: agent as never,
+    beforeInputCheckpoint: previous,
+    finalCheckpoint: current,
+    payload: interruptsToLegacyUpdatesPayload(second.interrupts),
+    runConfig: pinned,
+    runtime: createTurnRuntime({ prepared: {} as never }),
+    threadId: config.configurable.thread_id,
+    workspaceId: "w",
+    userId: "u",
+  });
+  let parked:
+    Extract<DeepAgentTurnEvent, { type: "done" }>["outcome"] | undefined;
+  for await (const event of handler)
+    if (event.type === "done") parked = event.outcome;
+  assert.ok(parked?.agentCheckpoint?.resume);
+  assert.equal(
+    parked.agentCheckpoint.resume.checkpointId,
+    current.checkpointId,
+  );
+  const resumedConfig = resolveAgentBaseConfig({
+    agentMode: "replay",
+    agentBaseCheckpoint: parked.agentCheckpoint.resume,
+    agentRunThreadId: config.configurable.thread_id,
+  });
+  const resumed = (await agent.streamEvents(
+    new Command({
+      resume: commandResumeFromToolApprovalResume({
+        decisions: [],
+        askUser: {
+          status: "answered",
+          answers: ["PDF"],
+          interruptId: second.interrupts[0]?.interruptId,
+        },
+      }),
+    }),
+    { ...resumedConfig, version: "v3" } as never,
+  )) as unknown as V3RunStream;
+  for await (const _event of resumed) {
+    /* drain to persist the completed turn */
+  }
+  assert.equal(resumed.interrupted, false);
+  const final = (await getAgentHeadStateOrNull(
+    agent as never,
+    resumedConfig,
+  )) as Snapshot | null;
+  assert.equal(final?.values.messages.at(-1)?.content, "Resumed with PDF");
+  assert.notEqual(
+    checkpointRefFromConfig(final?.config)?.checkpointId,
+    current.checkpointId,
+  );
+});
+
 test("askUser interrupts from the tool body and resumes with an answer", async () => {
   const agent = buildAgent([
     {
@@ -144,10 +263,13 @@ test("askUser interrupts from the tool body and resumes with an answer", async (
 
   // 1. First pass pauses on the ask_user interrupt.
   const first = await drain(
-    (await agent.stream({ messages: [{ role: "user", content: "export it" }] }, {
-      ...config,
-      streamMode: "values",
-    })) as AsyncGenerator<unknown>,
+    (await agent.stream(
+      { messages: [{ role: "user", content: "export it" }] },
+      {
+        ...config,
+        streamMode: "values",
+      },
+    )) as AsyncGenerator<unknown>,
   );
   const value = findAskUserInterrupt(first) as
     | { type: string; questions: AskUserQuestion[]; toolCallId: string }
@@ -202,10 +324,13 @@ test("interrupt survives the observability + retry middleware stack (fix #2)", a
   );
   const config = CONFIG();
   const first = await drain(
-    (await agent.stream({ messages: [{ role: "user", content: "go" }] }, {
-      ...config,
-      streamMode: "values",
-    })) as AsyncGenerator<unknown>,
+    (await agent.stream(
+      { messages: [{ role: "user", content: "go" }] },
+      {
+        ...config,
+        streamMode: "values",
+      },
+    )) as AsyncGenerator<unknown>,
   );
   // The pause must still surface — not be swallowed or logged as a tool failure.
   assert.ok(
@@ -342,10 +467,13 @@ test("askUser pauses + resumes under the full stable production middleware set",
   const config = CONFIG();
 
   const first = await drain(
-    (await agent.stream({ messages: [{ role: "user", content: "deploy" }] }, {
-      ...config,
-      streamMode: "values",
-    })) as AsyncGenerator<unknown>,
+    (await agent.stream(
+      { messages: [{ role: "user", content: "deploy" }] },
+      {
+        ...config,
+        streamMode: "values",
+      },
+    )) as AsyncGenerator<unknown>,
   );
   assert.ok(
     findAskUserInterrupt(first),
@@ -383,10 +511,13 @@ test("cancelled resume drives the run to a clean terminal state (no dangling)", 
   const config = CONFIG();
 
   await drain(
-    (await agent.stream({ messages: [{ role: "user", content: "deploy" }] }, {
-      ...config,
-      streamMode: "values",
-    })) as AsyncGenerator<unknown>,
+    (await agent.stream(
+      { messages: [{ role: "user", content: "deploy" }] },
+      {
+        ...config,
+        streamMode: "values",
+      },
+    )) as AsyncGenerator<unknown>,
   );
 
   const resumed = await drain(
@@ -417,7 +548,9 @@ test("cancelled resume drives the run to a clean terminal state (no dangling)", 
 
 test("payloadHasAskUserInterrupt discriminates the interrupt shape", () => {
   assert.equal(
-    payloadHasAskUserInterrupt({ __interrupt__: [{ value: { type: "ask_user" } }] }),
+    payloadHasAskUserInterrupt({
+      __interrupt__: [{ value: { type: "ask_user" } }],
+    }),
     true,
   );
   // an approval-shaped HITL interrupt must NOT be claimed by the ask-user branch
@@ -468,8 +601,13 @@ test("parseAskUserAnswer enforces exact answer count", () => {
   assert.match(String(badMsg.content), /error: askUser answer count mismatch/);
 
   // cancelled -> success with placeholder answers, turn can continue
-  const cancelled = parseAskUserAnswer({ status: "cancelled" }, questions, "call_y");
-  const cancelMsg = (cancelled.update as { messages: ToolMessage[] }).messages[0];
+  const cancelled = parseAskUserAnswer(
+    { status: "cancelled" },
+    questions,
+    "call_y",
+  );
+  const cancelMsg = (cancelled.update as { messages: ToolMessage[] })
+    .messages[0];
   assert.ok(cancelMsg);
   assert.equal(cancelMsg.status, "success");
   assert.match(String(cancelMsg.content), /A: \(cancelled\)/);

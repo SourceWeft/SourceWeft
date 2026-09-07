@@ -56,7 +56,14 @@ function cloneRecord<T extends Record<string, unknown> | undefined>(
 }
 
 export function langChainInvokeOptions(options?: RequestOptions) {
-  return options?.signal ? { signal: options.signal } : undefined;
+  // chat.complete returns a value to its caller. When called from a tool or
+  // middleware, inherited graph callbacks must not publish that private result
+  // into the enclosing agent's user-facing message stream.
+  return {
+    ...(options?.signal ? { signal: options.signal } : {}),
+    tags: ["langsmith:nostream", "sourceweft:internal-model"],
+    metadata: { sourceweftInternalModel: true },
+  };
 }
 
 function extractRawResponseUsage(value: unknown): unknown {

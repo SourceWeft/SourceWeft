@@ -19,6 +19,7 @@ import {
 } from "../../turn/render-blocks";
 import {
   checkpointRefFromConfig,
+  getAgentHeadStateOrNull,
   getAgentStateOrNull,
   resolveAgentBaseConfig,
   resolveHitlInterruptCheckpoint,
@@ -472,7 +473,7 @@ export async function* invokeDeepAgentTurn(input: {
       finalCheckpoint =
         checkpointRefFromConfig(
           (
-            (await getAgentStateOrNull(
+            (await getAgentHeadStateOrNull(
               agent,
               runConfig as AgentRunnableConfig,
             )) as { config?: unknown } | null

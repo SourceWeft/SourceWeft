@@ -388,6 +388,19 @@ export function createSourceWeftSummaryModel(
             );
           if (isSummary) {
             beforeSummary?.();
+            const invocation = toObjectRecord(args[1]) ?? {};
+            args[1] = {
+              ...invocation,
+              tags: [
+                ...(Array.isArray(invocation.tags) ? invocation.tags : []),
+                "langsmith:nostream",
+                "sourceweft:internal-model",
+              ],
+              metadata: {
+                ...toObjectRecord(invocation.metadata),
+                sourceweftInternalModel: true,
+              },
+            };
           }
           const response = await Promise.resolve(value.apply(target, args));
           return isSummary

@@ -142,8 +142,15 @@ function createImageToolHarness(
     readonly deliverVia?: "b64" | "url";
   } = {},
 ) {
-  const generatedBytes = options.bytes ?? Buffer.from("generated-png");
   const mimeType = options.mimeType ?? "image/png";
+  const signatures: Record<string, Buffer> = {
+    "image/png": Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    "image/jpeg": Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    "image/webp": Buffer.from("RIFF0000WEBP"),
+    "image/gif": Buffer.from("GIF89a"),
+  };
+  const generatedBytes =
+    options.bytes ?? signatures[mimeType] ?? Buffer.from("unknown-format");
   const imagePayload =
     options.deliverVia === "url"
       ? { url: "https://images.test/generated", mimeType }
@@ -388,7 +395,7 @@ test("the published payload reproduces the row the old publisher wrote", async (
   );
 });
 
-test("the attachment file name follows the provider's real mime type", async () => {
+test("the attachment file name follows the image bytes", async () => {
   for (const [mimeType, expected] of [
     ["image/png", "Launch-Image.png"],
     ["image/jpeg", "Launch-Image.jpg"],
@@ -405,6 +412,36 @@ test("the attachment file name follows the provider's real mime type", async () 
     assert.equal(spec.payload.fileName, expected);
     assert.equal(spec.payload.mimeType, mimeType);
   }
+});
+
+test("JPEG bytes override a wrong PNG declaration for inline and downloaded images", async () => {
+  for (const deliverVia of ["b64", "url"] as const) {
+    const harness = createImageToolHarness({
+      bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      mimeType: "image/png",
+      deliverVia,
+    });
+    await harness.invoke({
+      prompt: "Draw a launch image",
+      title: "Launch Image",
+    });
+    const spec = harness.published[0]!.spec;
+    assert.equal(spec.attachments?.[0]?.contentType, "image/jpeg");
+    assert.equal(spec.attachments?.[0]?.fileName, "Launch-Image.jpg");
+    assert.equal(spec.payload.mimeType, "image/jpeg");
+  }
+});
+
+test("unrecognized bytes cannot be published by claiming an image MIME", async () => {
+  const harness = createImageToolHarness({
+    bytes: Buffer.from("not an image"),
+    mimeType: "image/png",
+  });
+  await assert.rejects(
+    harness.invoke({ prompt: "draw", title: "Image" }),
+    /ARTIFACT_SOURCE_INVALID/,
+  );
+  assert.deepEqual(harness.published, []);
 });
 
 test("image content rules keep their original error codes", async () => {

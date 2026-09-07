@@ -348,6 +348,92 @@ describe.sequential("catalog sync atomicity in PostgreSQL", () => {
     );
   });
 
+  test("disabling a catalog retires imported models even when its discovery source differs from provider kind", async () => {
+    const before = await snapshot();
+    const dynamic = before.profiles.find(
+      (row) => row.configJson.targetModel === "catalog-chat-original",
+    )!;
+    await db
+      .update(modelGatewayProfiles)
+      .set({
+        configJson: {
+          ...dynamic.configJson,
+          providerCatalogSource: "custom-format-models",
+        },
+      })
+      .where(eq(modelGatewayProfiles.id, dynamic.id));
+    raw.gateways[0]!.modelCatalog.enabled = false;
+    await sync();
+    const current = await snapshot();
+    assert.equal(
+      current.profiles.find((row) => row.id === dynamic.id)?.isActive,
+      false,
+    );
+    assert.equal(
+      current.routes.some((row) => row.targetModel === "catalog-chat-original"),
+      false,
+    );
+    assert.equal(vi.mocked(globalThis.fetch).mock.calls.length, 0);
+    assert.ok(
+      current.profiles.find(
+        (row) => row.profileAlias === raw.chatProfiles[0]!.profileAlias,
+      )?.isActive,
+    );
+  });
+
+  test("a catalog model promoted to an explicit profile survives disabling discovery", async () => {
+    const before = await snapshot();
+    const dynamic = before.profiles.find(
+      (row) => row.configJson.targetModel === "catalog-chat-original",
+    )!;
+    raw.chatProfiles.push({
+      ...raw.chatProfiles[0]!,
+      profileAlias: dynamic.profileAlias,
+      modelAlias: dynamic.modelAlias,
+      targetModel: "catalog-chat-original",
+      isDefault: false,
+    });
+    raw.gateways[0]!.modelCatalog.enabled = false;
+    await sync();
+    const current = await snapshot();
+    assert.equal(
+      current.profiles.find((row) => row.id === dynamic.id)?.isActive,
+      true,
+    );
+    assert.ok(
+      current.routes.some((row) => row.targetModel === "catalog-chat-original"),
+    );
+  });
+
+  test("removing a Provider retires its imported profiles without relying on a disabled-catalog entry", async () => {
+    const before = await snapshot();
+    const dynamic = before.profiles.find(
+      (row) => row.configJson.targetModel === "catalog-chat-original",
+    )!;
+    const remainingSlug = randomUUID();
+    raw.gateways = [
+      {
+        ...raw.gateways[0]!,
+        slug: remainingSlug,
+        modelCatalog: { enabled: false, kinds: ["chat"] },
+      },
+    ];
+    raw.chatProfiles[0]!.gatewaySlug = remainingSlug;
+    raw.embeddingProfiles[0]!.gatewaySlug = remainingSlug;
+    await sync();
+    const current = await snapshot();
+    assert.equal(
+      current.profiles.find((row) => row.id === dynamic.id)?.isActive,
+      false,
+    );
+    assert.equal(
+      current.routes.some((row) => row.targetModel === "catalog-chat-original"),
+      false,
+    );
+    assert.equal(vi.mocked(globalThis.fetch).mock.calls.length, 0);
+    assert.equal(current.profiles.filter((row) => row.isActive).length, 2);
+  });
+
   test("an empty valid catalog disables stale dynamic models while keeping the explicit default embedding", async () => {
     const before = await snapshot();
     const oldDynamic = before.profiles.find(

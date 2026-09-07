@@ -187,8 +187,7 @@ function imageFromRecord(
       normalizeMimeType(record.mime_type) ??
       normalizeMimeType(record.mimeType) ??
       normalizeMimeType(imageUrl?.mime_type) ??
-      normalizeMimeType(image?.mime_type) ??
-      (b64Json ? "image/png" : undefined),
+      normalizeMimeType(image?.mime_type),
     revisedPrompt:
       typeof record.revised_prompt === "string"
         ? record.revised_prompt

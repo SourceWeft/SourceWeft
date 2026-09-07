@@ -484,3 +484,60 @@ for (const entry of ["endpoint", "langchain"] as const) {
     assert.equal(state.errors[0]!.usage?.totalTokens, 4);
   });
 }
+
+for (const entry of ["endpoint", "langchain"] as const) {
+  test(
+    `${entry}: a stalled iterator return cannot hide the original request timeout`,
+    { timeout: 5_000 },
+    async (t) => {
+      let releaseClose!: () => void;
+      const closeBlocked = new Promise<void>((resolve) => {
+        releaseClose = resolve;
+      });
+      t.after(() => releaseClose());
+      const { config, state } = settings({
+        observed: true,
+        targets: 1,
+        model: () => ({
+          getName: () => "stalled-close",
+          invoke: async () => {
+            throw new Error("unexpected invoke");
+          },
+          stream: async () =>
+            ({
+              [Symbol.asyncIterator]() {
+                return {
+                  next: () => new Promise<IteratorResult<unknown>>(() => {}),
+                  return: async () => {
+                    state.closes++;
+                    await closeBlocked;
+                    return { done: true as const, value: undefined };
+                  },
+                };
+              },
+            }) as never,
+        }),
+      });
+      config.timeoutMs = 20;
+      const iterator = await open(config, entry);
+      if (entry === "endpoint") {
+        const result = await iterator.next();
+        assert.equal((result.value as { type?: string }).type, "error");
+        assert.equal(
+          (result.value as { error?: { code?: string } }).error?.code,
+          "TIMEOUT",
+        );
+        await iterator.return!();
+      } else {
+        await assert.rejects(
+          iterator.next(),
+          (error: Error & { code?: string }) =>
+            error.name === "TimeoutError" || error.code === "TIMEOUT",
+        );
+      }
+      assert.equal(state.closes, 1);
+      assert.ok(state.warnings.includes("model-gateway.stream.cleanup.failed"));
+      assert.equal(state.opens.includes("backup"), false);
+    },
+  );
+}

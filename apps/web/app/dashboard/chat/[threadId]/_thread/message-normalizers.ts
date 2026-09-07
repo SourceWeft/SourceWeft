@@ -370,6 +370,9 @@ function hasActiveThreadRunStatus(metadata: Record<string, unknown>) {
 
 function dropStaleActiveThreadRunMessages(messages: ChatMessageItem[]) {
   const terminalThreadRuns = new Set<string>();
+  const persistedTerminalRuns = new Set<string>();
+  const isTemporary = (id: string) =>
+    /^(?:temp|pending)-assistant(?:-|$)/.test(id);
   for (const message of messages) {
     if (
       message.role !== "assistant" ||
@@ -379,6 +382,7 @@ function dropStaleActiveThreadRunMessages(messages: ChatMessageItem[]) {
     }
     for (const identity of getThreadRunIdentities(message.metadata)) {
       terminalThreadRuns.add(identity);
+      if (!isTemporary(message.id)) persistedTerminalRuns.add(identity);
     }
   }
 
@@ -387,6 +391,15 @@ function dropStaleActiveThreadRunMessages(messages: ChatMessageItem[]) {
   }
 
   return messages.filter((message) => {
+    if (
+      message.role === "assistant" &&
+      isTemporary(message.id) &&
+      getThreadRunIdentities(message.metadata).some((identity) =>
+        persistedTerminalRuns.has(identity),
+      )
+    ) {
+      return false;
+    }
     if (
       message.role !== "assistant" ||
       isTerminalMessageMetadata(message.metadata) ||

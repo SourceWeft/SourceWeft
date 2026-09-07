@@ -1017,6 +1017,7 @@ export async function listArtifactRecords(input: {
 export async function listArtifactSummaryRecords(input: {
   teamId: string;
   workspaceId: string;
+  threadId?: string;
   cursor?: { createdAt: Date; id: string } | null;
   limit?: number;
   viewerUserId?: string;
@@ -1025,6 +1026,7 @@ export async function listArtifactSummaryRecords(input: {
     eq(artifacts.teamId, input.teamId),
     eq(artifacts.workspaceId, input.workspaceId),
     ne(artifacts.status, "failed"),
+    input.threadId ? eq(artifacts.threadId, input.threadId) : undefined,
     input.viewerUserId
       ? visibleContentWhere(
           { userId: input.viewerUserId },

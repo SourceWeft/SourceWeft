@@ -514,7 +514,15 @@ export function useThreadStreamAction({
       };
 
       const commitStreamingAssistantMessage = () => {
-        const committedMessage = streamingAssistantMessage;
+        // A queued snapshot updater can still hold the optimistic id after
+        // the server has assigned one. Commit under the authoritative id so
+        // the subsequent server page cannot create a second reply/version.
+        const committedMessage = streamingAssistantMessage
+          ? {
+              ...streamingAssistantMessage,
+              id: persistedAssistantMessageId ?? streamingAssistantMessage.id,
+            }
+          : null;
         if (!committedMessage) {
           setStreamingAssistantSnapshot(null);
           return;

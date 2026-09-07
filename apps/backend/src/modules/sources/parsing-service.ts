@@ -282,7 +282,7 @@ export class SourceParsingService {
       const parseInput = {
         fileName: source.metadata.fileName || source.title,
         mimeType: source.mimeType,
-        fileSize: source.sizeBytes ?? fileBuffer.length,
+        fileSize: fileBuffer.byteLength,
         content: fileBuffer,
         config: parsingConfig,
         sourceId: input.sourceId,
@@ -341,7 +341,13 @@ export class SourceParsingService {
           ? providerOutcome.document
           : await parser.parse(parseInput);
 
-      await this.completeParsedSource({ input, source, parsed, parsingConfig });
+      await this.completeParsedSource({
+        input,
+        source,
+        parsed,
+        parsingConfig,
+        originalSizeBytes: fileBuffer.byteLength,
+      });
     } catch (error) {
       logger.error("Source parse failed", {
         ...buildSourceParseLogContext({ job: input, source }),
@@ -501,6 +507,7 @@ export class SourceParsingService {
         source,
         parsed: outcome.document,
         parsingConfig: input.parsingConfig,
+        originalSizeBytes: fileBuffer.byteLength,
       });
     } catch (error) {
       logger.error("Source parse poll failed", {
@@ -523,6 +530,7 @@ export class SourceParsingService {
     source: SourceRecord;
     parsed: ParsedDocument;
     parsingConfig: ParsingConfig;
+    originalSizeBytes?: number;
   }) {
     if (!(await this.isCurrentRevision(input.input))) {
       return;
@@ -546,7 +554,9 @@ export class SourceParsingService {
       title: normalizeContentTitle(input.parsed.title, input.source.title),
       contentText: input.parsed.content,
       contentHash,
-      sizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
+      sizeBytes:
+        input.originalSizeBytes ??
+        Buffer.byteLength(input.parsed.content, "utf8"),
       parserVersion: input.parsingConfig.parserVersion,
       parsingConfig: input.parsingConfig,
       estimatedPages: parsedPages || input.source.estimatedPages,
@@ -555,6 +565,7 @@ export class SourceParsingService {
         ...(input.source.metadata ?? {}),
         ...input.parsed.metadata,
         ...imagePageMetadata,
+        parsedTextSizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
         parsedPages,
         totalPages: billablePages || parsedPages,
         progress: 60,

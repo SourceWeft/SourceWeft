@@ -108,21 +108,38 @@ function headStateConfig(config: AgentRunnableConfig): AgentRunnableConfig {
   const configurable = toObjectRecord(
     (config as { configurable?: unknown }).configurable,
   );
-  if (!configurable || !("checkpoint_id" in configurable)) {
+  if (!configurable) {
     return config;
   }
-  const { checkpoint_id: _pinnedToThisTurnsBase, ...rest } = configurable;
+  const {
+    checkpoint_id: _pinnedToThisTurnsBase,
+    checkpoint_map: checkpointMap,
+    ...rest
+  } = configurable;
+  const pins = toObjectRecord(checkpointMap);
+  const namespace =
+    typeof rest.checkpoint_ns === "string" ? rest.checkpoint_ns : "";
+  if (!("checkpoint_id" in configurable) && !pins?.[namespace]) return config;
+  if (pins) {
+    const remaining = { ...pins };
+    delete remaining[namespace];
+    if (Object.keys(remaining).length) rest.checkpoint_map = remaining;
+  }
   return { ...config, configurable: rest } as AgentRunnableConfig;
+}
+
+export async function getAgentHeadStateOrNull(
+  agent: Awaited<ReturnType<typeof createThreadAgent>>,
+  config: AgentRunnableConfig,
+) {
+  return getAgentStateOrNull(agent, headStateConfig(config));
 }
 
 export async function resolvePendingInterruptCheckpoint(input: {
   agent: Awaited<ReturnType<typeof createThreadAgent>>;
   config: AgentRunnableConfig;
 }) {
-  const state = await getAgentStateOrNull(
-    input.agent,
-    headStateConfig(input.config),
-  );
+  const state = await getAgentHeadStateOrNull(input.agent, input.config);
   const checkpoint = checkpointRefFromConfig(
     (state as { config?: unknown } | null)?.config,
   );

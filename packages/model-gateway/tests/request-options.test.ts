@@ -727,6 +727,16 @@ test(
   async (t) => {
     let requests = 0;
     let closed = 0;
+    const providerDeadline = new AbortController();
+    // Control only the deadline, retaining the actual HTTP transport. A 100ms
+    // wall-clock budget can expire before connect on a loaded host and would
+    // never exercise cancellation of an in-flight request.
+    const realTimeout = AbortSignal.timeout;
+    t.mock.method(AbortSignal, "timeout", (milliseconds: number) =>
+      milliseconds === 100
+        ? providerDeadline.signal
+        : realTimeout(milliseconds),
+    );
     let receivedEmbedding!: () => void;
     let closedBothRequests!: () => void;
     const embeddingReceived = new Promise<void>((resolve) => {
@@ -737,6 +747,11 @@ test(
     });
     const server = createServer((req) => {
       requests++;
+      if (req.url === "/v1/chat/completions") {
+        providerDeadline.abort(
+          new DOMException("Provider deadline", "TimeoutError"),
+        );
+      }
       if (req.url === "/v1/embeddings") receivedEmbedding();
       req.on("close", () => {
         closed++;

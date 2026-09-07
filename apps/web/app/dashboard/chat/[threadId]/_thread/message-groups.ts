@@ -6,6 +6,7 @@ import type {
 } from "../../_components/chat-canvas";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import {
+  dropStaleActiveThreadRunMessages,
   resolveCitationMetadata,
   resolveModelReasoningFromMetadata,
   resolveModelReasoningSegmentsFromMetadata,
@@ -258,7 +259,7 @@ function buildVersionedMessageGroups(
   messages: ChatMessageItem[],
 ): VersionedMessageGroup[] {
   const messagesById = new Map<string, ChatMessageItem>();
-  for (const message of messages) {
+  for (const message of dropStaleActiveThreadRunMessages(messages)) {
     messagesById.set(message.id, message);
   }
 
@@ -329,6 +330,7 @@ function buildVersionedMessageGroups(
     }
 
     if (rootMessage.role === "user") {
+      if (turns.some((turn) => turn.userRootId === rootMessage.id)) continue;
       turns.push({
         turnId: `turn:${rootMessage.id}`,
         userRootId: rootMessage.id,
@@ -347,11 +349,25 @@ function buildVersionedMessageGroups(
       sourceUserMessageId && messageById.has(sourceUserMessageId)
         ? resolveRootId(messageById.get(sourceUserMessageId)!)
         : null;
-    const sourceTurn = sourceUserRootId
+    let sourceTurn = sourceUserRootId
       ? [...turns]
           .reverse()
           .find((turn) => turn.userRootId === sourceUserRootId)
       : null;
+    // Client placeholders can predate the server-created prompt. A known
+    // prompt association wins over insertion/time order, including clock skew.
+    if (!sourceTurn && sourceUserRootId) {
+      const sourceUser = messageById.get(sourceUserRootId);
+      if (sourceUser?.role === "user") {
+        sourceTurn = {
+          turnId: `turn:${sourceUserRootId}`,
+          userRootId: sourceUserRootId,
+          assistantRootId: null,
+          createdAt: sourceUser.createdAt,
+        };
+        turns.push(sourceTurn);
+      }
+    }
     if (sourceTurn) {
       const existingAssistant = sourceTurn.assistantRootId
         ? messageById.get(sourceTurn.assistantRootId)
@@ -389,6 +405,10 @@ function buildVersionedMessageGroups(
   const userRootToTurnId = new Map<string, string>();
   const assistantRootToTurnId = new Map<string, string>();
   const turnOrder = new Map<string, number>();
+  turns.sort(
+    (left, right) =>
+      new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+  );
   turns.forEach((turn, index) => {
     turnOrder.set(turn.turnId, index);
     if (turn.userRootId) {

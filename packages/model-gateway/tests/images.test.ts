@@ -91,11 +91,16 @@ test("images.generate sends DeepInfra image requests through OpenAI-compatible U
     },
   });
 
-  await gateway.images.generate({
+  const result = await gateway.images.generate({
     model: "image-default",
     prompt: "draw a small icon",
     aspectRatio: "1:1",
   });
+  assert.equal(
+    result.images[0]?.mimeType,
+    undefined,
+    "base64 is not a PNG declaration",
+  );
 
   assert.equal(
     requests[0]?.url,

@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 import zipfile
@@ -201,22 +202,125 @@ def check_charts(zf: zipfile.ZipFile, members: set[str], errors: list[str]) -> N
                 errors.append(f"{member}: relationship {rid} target missing: {target}")
 
 
+# DrawingML uses EMUs. A 0.01-inch tolerance avoids rounding-only failures.
+BOUNDS_TOLERANCE = 9144
+IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def compose(left: tuple, right: tuple) -> tuple:
+    a, b, c, d, e, f = left
+    g, h, i, j, k, l = right
+    return (a*g+c*h, b*g+d*h, a*i+c*j, b*i+d*j, a*k+c*l+e, b*k+d*l+f)
+
+
+def point(matrix: tuple, x: float, y: float) -> tuple[float, float]:
+    a, b, c, d, e, f = matrix
+    return a*x+c*y+e, b*x+d*y+f
+
+
+def translate(x: float, y: float) -> tuple:
+    return (1, 0, 0, 1, x, y)
+
+
+def rotation(xfrm: ET.Element, x: float, y: float, w: float, h: float) -> tuple:
+    angle = math.radians(float(xfrm.get("rot", "0")) / 60000)
+    if not math.isfinite(angle):
+        raise ValueError("invalid rotation")
+    sx = -1 if xfrm.get("flipH") in ("1", "true") else 1
+    sy = -1 if xfrm.get("flipV") in ("1", "true") else 1
+    matrix = (math.cos(angle)*sx, math.sin(angle)*sx, -math.sin(angle)*sy, math.cos(angle)*sy, 0, 0)
+    return compose(translate(x+w/2, y+h/2), compose(matrix, translate(-x-w/2, -y-h/2)))
+
+
+def geometry(xfrm: ET.Element) -> tuple[float, float, float, float]:
+    off, ext = xfrm.find("a:off", NS), xfrm.find("a:ext", NS)
+    if off is None or ext is None:
+        raise ValueError("transform is missing offset or extent")
+    values = tuple(float(node.attrib[key]) for node, key in ((off,"x"),(off,"y"),(ext,"cx"),(ext,"cy")))
+    if not all(math.isfinite(value) for value in values) or values[2] < 0 or values[3] < 0:
+        raise ValueError("invalid transform dimensions")
+    return values
+
+
+def check_slide_bounds(zf: zipfile.ZipFile, members: set[str], errors: list[str]) -> None:
+    if PRESENTATION not in members:
+        return
+    size = read_xml(zf, PRESENTATION).find("p:sldSz", NS)
+    if size is None:
+        errors.append("presentation.xml is missing its slide dimensions")
+        return
+    width, height = int(size.get("cx", "0")), int(size.get("cy", "0"))
+    if width <= 0 or height <= 0:
+        errors.append("presentation.xml has invalid slide dimensions")
+        return
+
+    def visit(tree: ET.Element, parent: tuple, slide_path: str) -> None:
+        for shape in tree:
+            kind = local(shape.tag)
+            if kind == "grpSp":
+                xfrm = shape.find("p:grpSpPr/a:xfrm", NS)
+                if xfrm is None:
+                    visit(shape, parent, slide_path)
+                    continue
+                try:
+                    x, y, w, h = geometry(xfrm)
+                    child_off, child_ext = xfrm.find("a:chOff", NS), xfrm.find("a:chExt", NS)
+                    if child_off is None or child_ext is None:
+                        raise ValueError("group transform is missing child coordinates")
+                    cx, cy = float(child_off.get("x", "0")), float(child_off.get("y", "0"))
+                    cw, ch = float(child_ext.get("cx", "0")), float(child_ext.get("cy", "0"))
+                    if not all(math.isfinite(value) for value in (cx, cy, cw, ch)) or cw <= 0 or ch <= 0:
+                        raise ValueError("group transform has invalid child extents")
+                    scaling = (w/cw, 0, 0, h/ch, 0, 0)
+                    matrix = compose(rotation(xfrm, x, y, w, h), compose(translate(x,y), compose(scaling, translate(-cx,-cy))))
+                    visit(shape, compose(parent, matrix), slide_path)
+                except (ValueError, KeyError, OverflowError) as exc:
+                    errors.append(f"{slide_path}: {exc}")
+                continue
+            # Background/bleed geometry is allowed outside the canvas. Check
+            # text-bearing shapes and data frames, not decorative empty shapes.
+            if kind not in ("sp", "graphicFrame"):
+                continue
+            if kind == "sp" and not any((node.text or "").strip() for node in shape.findall(".//a:t", NS)):
+                continue
+            xfrm = shape.find("p:spPr/a:xfrm", NS) if kind == "sp" else shape.find("p:xfrm", NS)
+            if xfrm is None:
+                continue  # Placeholder coordinates can be inherited from a layout.
+            name_node = shape.find(".//p:cNvPr", NS)
+            name = name_node.get("name", kind) if name_node is not None else kind
+            try:
+                x, y, w, h = geometry(xfrm)
+                matrix = compose(parent, rotation(xfrm, x, y, w, h))
+                corners = [point(matrix, px, py) for px, py in ((x,y),(x+w,y),(x+w,y+h),(x,y+h))]
+                if any(px < -BOUNDS_TOLERANCE or py < -BOUNDS_TOLERANCE or px > width+BOUNDS_TOLERANCE or py > height+BOUNDS_TOLERANCE for px, py in corners):
+                    errors.append(f"{slide_path}: {name!r} text/data extends outside slide bounds ({width/914400:g} x {height/914400:g} inches)")
+            except (ValueError, KeyError, OverflowError) as exc:
+                errors.append(f"{slide_path}: {name!r}: {exc}")
+
+    for slide_path in sorted(members):
+        if re.fullmatch(r"ppt/slides/slide\d+\.xml", slide_path):
+            tree = read_xml(zf, slide_path).find("p:cSld/p:spTree", NS)
+            if tree is not None:
+                visit(tree, IDENTITY, slide_path)
+
+
 def package_issues(path: Path) -> list[str]:
     errors: list[str] = []
     with load_zip(path) as zf:
         members = list_members(zf)
         check_package(zf, members, errors)
         check_charts(zf, members, errors)
+        check_slide_bounds(zf, members, errors)
     return errors
 
 
 def baseline_suppress(current: list[str], original: list[str]) -> list[str]:
     original_set = set(original)
-    return [item for item in current if item not in original_set]
+    return [item for item in current if "text/data extends outside slide bounds" in item or item not in original_set]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate PPTX package and chart structure")
+    parser = argparse.ArgumentParser(description="Validate PPTX package, chart structure and text/data slide bounds")
     parser.add_argument("path", help="Path to a .pptx file")
     parser.add_argument(
         "--original",

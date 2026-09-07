@@ -917,3 +917,90 @@ test("empty renderBlocks metadata stays empty for interrupted assistant content"
   assert.deepEqual(version?.renderBlocks, []);
   assert.equal(version?.isTextInterrupted, true);
 });
+
+test("completed local and persisted replies for one run do not become separate versions or swap turns", () => {
+  const user1 = createMessage({
+    id: "user-1",
+    role: "user",
+    createdAt: new Date(100).toISOString(),
+  });
+  const answer1 = createMessage({
+    id: "answer-1",
+    role: "assistant",
+    content: "first reply",
+    createdAt: new Date(101).toISOString(),
+    metadata: { userMessageId: "user-1" },
+  });
+  const user2 = createMessage({
+    id: "user-2",
+    role: "user",
+    createdAt: new Date(300).toISOString(),
+  });
+  const run = {
+    id: "run-2",
+    idempotencyKey: "sourceweft-web-run:2",
+    assistantMessageId: "answer-2",
+    status: "completed",
+  };
+  const temp = createMessage({
+    id: "temp-assistant-2",
+    role: "assistant",
+    content: "second reply",
+    createdAt: new Date(250).toISOString(),
+    metadata: { userMessageId: "user-2", threadRun: run },
+  });
+  const persisted = createMessage({
+    ...temp,
+    id: "answer-2",
+    createdAt: new Date(301).toISOString(),
+  });
+  const groups = buildVersionedMessageGroups([
+    user1,
+    answer1,
+    temp,
+    user2,
+    persisted,
+  ]);
+  assert.deepEqual(
+    groups.map((group) => [
+      group.role,
+      group.versions.map((version) => version.id),
+    ]),
+    [
+      ["user", ["user-1"]],
+      ["assistant", ["answer-1"]],
+      ["user", ["user-2"]],
+      ["assistant", ["answer-2"]],
+    ],
+  );
+});
+
+test("explicit prompt association is respected before its later server timestamp even without persisted reply", () => {
+  const user1 = createMessage({
+    id: "user-1",
+    role: "user",
+    createdAt: new Date(100).toISOString(),
+  });
+  const answer1 = createMessage({
+    id: "answer-1",
+    role: "assistant",
+    createdAt: new Date(101).toISOString(),
+    metadata: { userMessageId: "user-1" },
+  });
+  const user2 = createMessage({
+    id: "user-2",
+    role: "user",
+    createdAt: new Date(300).toISOString(),
+  });
+  const temp = createMessage({
+    id: "temp-assistant-2",
+    role: "assistant",
+    createdAt: new Date(50).toISOString(),
+    metadata: { userMessageId: "user-2" },
+  });
+  const groups = buildVersionedMessageGroups([temp, user1, answer1, user2]);
+  assert.deepEqual(
+    groups.map((group) => group.turnId),
+    ["turn:user-1", "turn:user-1", "turn:user-2", "turn:user-2"],
+  );
+});

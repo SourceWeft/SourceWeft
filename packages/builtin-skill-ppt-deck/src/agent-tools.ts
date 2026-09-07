@@ -138,6 +138,7 @@ export function createCapabilityAgentTools(
       throwDeckReviewAbortReason(signal);
       if (!visionProfile) {
         return JSON.stringify({
+          passed: false,
           skipped: true,
           reason: "no_vision_profile",
         });
@@ -177,6 +178,7 @@ export function createCapabilityAgentTools(
       throwDeckReviewAbortReason(signal);
       if (images.length === 0) {
         return JSON.stringify({
+          passed: false,
           skipped: true,
           reason: "no_readable_images",
           rejectedPaths,
@@ -220,6 +222,7 @@ export function createCapabilityAgentTools(
                 },
               ],
               temperature: 0,
+              thinking: { mode: "off" },
               maxTokens: JUDGE_MAX_TOKENS,
               metadata: {
                 feature: REVIEW_DECK_VISUALS_BILLING_FEATURE,
@@ -233,6 +236,9 @@ export function createCapabilityAgentTools(
               profileAlias: visionProfile.profileAlias,
               modelAlias: visionProfile.modelAlias,
               idempotencyKey: `${toolCallId}:${offset}`,
+              llm: state?.execution
+                ? { ...state.execution, thinking: { mode: "off" } }
+                : undefined,
               ...(signal ? { signal } : {}),
               ...(context.traceId ? { traceId: context.traceId } : {}),
             },
@@ -243,7 +249,16 @@ export function createCapabilityAgentTools(
               ? result.raw.content
               : JSON.stringify(result.raw.content);
           const parsed = parseDeckVisualQaVerdicts(raw);
-          if (!parsed) {
+          const expectedSlides = new Set(
+            batch.map((image) => image.slideNumber),
+          );
+          if (
+            !parsed ||
+            parsed.length !== batch.length ||
+            new Set(parsed.map((verdict) => verdict.slideNumber)).size !==
+              batch.length ||
+            parsed.some((verdict) => !expectedSlides.has(verdict.slideNumber))
+          ) {
             failedBatches += 1;
             logger?.warn?.("ppt_deck_visual_qa_unparseable_verdict", {
               slideNumbers: batch.map((image) => image.slideNumber),
@@ -263,12 +278,18 @@ export function createCapabilityAgentTools(
 
       if (verdicts.length === 0) {
         return JSON.stringify({
+          passed: false,
           skipped: true,
           reason: "judge_unavailable",
           rejectedPaths,
         });
       }
       return JSON.stringify({
+        passed:
+          failedBatches === 0 &&
+          rejectedPaths.length === 0 &&
+          verdicts.length === args.imagePaths.length &&
+          summarizeDeckVerdicts(verdicts).severeCount === 0,
         verdicts,
         deckFindings: aggregateDeckFindings(verdicts),
         summary: {

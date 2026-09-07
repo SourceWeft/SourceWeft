@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, test, vi } from "vitest";
 
 /**
@@ -27,6 +29,7 @@ type FakeDbState = {
   selectedShapes: Array<Record<string, unknown> | undefined>;
   /** Rows returned by the bounded gallery query. */
   summaryRows: Array<Record<string, unknown>>;
+  whereConditions: SQL[];
 };
 
 const state: FakeDbState = {
@@ -37,6 +40,7 @@ const state: FakeDbState = {
   ops: [],
   selectedShapes: [],
   summaryRows: [],
+  whereConditions: [],
 };
 
 function tableNameOf(table: unknown) {
@@ -55,9 +59,13 @@ function tableNameOf(table: unknown) {
 function makeClient(staged: Write[]) {
   const thenableSelect = (rows: unknown[]) => {
     const builder: Record<string, unknown> = {};
-    for (const method of ["from", "where", "orderBy", "limit", "for"]) {
+    for (const method of ["from", "orderBy", "limit", "for"]) {
       builder[method] = () => builder;
     }
+    builder.where = (condition: SQL) => {
+      state.whereConditions.push(condition);
+      return builder;
+    };
     builder.then = (resolve: (value: unknown) => unknown) => resolve(rows);
     return builder;
   };
@@ -167,6 +175,7 @@ beforeEach(() => {
   state.ops = [];
   state.selectedShapes = [];
   state.summaryRows = [];
+  state.whereConditions = [];
 });
 
 test("createReadyArtifactRecord commits the artifact and its first version together", async () => {
@@ -313,6 +322,31 @@ test("artifact summary query selects bounded fields without payload or raw stora
   assert.equal(result.nextCursor, null);
 });
 
+test("thread artifact locators retain tenant, thread and viewer visibility filters", async () => {
+  await listArtifactSummaryRecords({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    viewerUserId: "viewer-1",
+    limit: 20,
+  });
+
+  const query = new PgDialect().sqlToQuery(state.whereConditions[0]!);
+  for (const value of ["team-1", "workspace-1", "thread-1", "viewer-1"]) {
+    assert.ok(query.params.includes(value), `missing scope: ${value}`);
+  }
+  for (const column of [
+    "team_id",
+    "workspace_id",
+    "thread_id",
+    "visibility",
+    "created_by",
+  ]) {
+    assert.ok(query.sql.includes(`"${column}"`), `missing filter: ${column}`);
+  }
+  assert.match(query.sql, /\bor\b/);
+});
+
 test("artifact summary query keeps limit-plus-one cursor pagination", async () => {
   state.summaryRows = [
     {
@@ -355,7 +389,10 @@ test("artifact summary query keeps limit-plus-one cursor pagination", async () =
     limit: 1,
   });
 
-  assert.deepEqual(result.items.map((item) => item.id), ["newer"]);
+  assert.deepEqual(
+    result.items.map((item) => item.id),
+    ["newer"],
+  );
   assert.ok(result.nextCursor);
   assert.deepEqual(
     JSON.parse(Buffer.from(result.nextCursor, "base64url").toString("utf8")),

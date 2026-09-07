@@ -149,6 +149,11 @@ only read this SKILL.md:
   `txt(DATA.key)` into drawing calls.
 - Prefer QA-safe fonts for body text: Arial, Calibri, Cambria, Times New Roman,
   Courier New, plus Microsoft YaHei for Chinese. Do not default to Aptos.
+- Read the actual slide dimensions before laying out content: PptxGenJS
+  `LAYOUT_16x9` is 10 × 5.625 inches; `LAYOUT_WIDE` is 13.333 × 7.5.
+  Do not mix coordinates between layouts. Keep all text and data inside the
+  chosen slide, including total bands and footers; File QA rejects text/data
+  elements that cross the slide boundary.
 
 ## Design Guardrails
 
@@ -227,8 +232,11 @@ missing promised visuals, repeated layouts):
 - Severe issues: fix the deck builder, then rerun generation + QA once.
 - Minor issues and deck findings: fix them if a repair round is happening
   anyway; otherwise note them in the publish `qa` summary.
-- `{skipped, reason}`: visual QA is unavailable; record the reason in the
-  publish `qa` summary and proceed.
+- `passed: false` or `{skipped, reason}`: visual QA did not pass. Record the
+  actual reason in the publish `qa` summary, set `visualChecked: false`, and
+  never claim that visual review passed or that there is no overflow. Missing
+  or failed batches are incomplete review, not approval. File QA must still
+  pass before publishing; fix any known clipped or overlapping content first.
 
 The slides preview image is the first slide image rendered from the final PPTX
 during final QA. Always provide the printed `PREVIEW_IMAGE_PATH` to the
