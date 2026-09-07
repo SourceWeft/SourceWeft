@@ -67,6 +67,8 @@ import {
 import { DelegateToolCard } from "./delegate-tool-card";
 import { isDelegateToolName } from "./delegate-tool-card-state";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
+import { isUserQuestionTool } from "./user-question-display";
+import { UserQuestionToolCard } from "./user-question-tool-card";
 import type {
   ThinkingStepRecord,
   ToolCallRecord,
@@ -264,6 +266,9 @@ export type AssistantToolCardProps = {
 };
 
 export function AssistantToolCard(props: AssistantToolCardProps) {
+  if (isUserQuestionTool(props.toolCall.tool)) {
+    return <UserQuestionToolCard {...props} />;
+  }
   if (isDelegateToolName(props.toolCall.tool)) {
     return <DelegateToolCard toolCall={props.toolCall} />;
   }

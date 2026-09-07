@@ -10,6 +10,10 @@ import type {
   ToolConfirmationResolution,
 } from "./types";
 import { getRecordValue } from "../../../../../lib/records";
+import {
+  getUserQuestionDisplay,
+  isUserQuestionTool,
+} from "./user-question-display";
 
 function formatToolName(toolName: string) {
   return toolName
@@ -151,6 +155,9 @@ export function getAssistantToolTitle(
   toolStep?: ThinkingStepRecord,
   confirmationResolution?: ToolConfirmationResolution | null,
 ) {
+  if (isUserQuestionTool(toolCall.tool)) {
+    return getUserQuestionDisplay(toolCall).title;
+  }
   if (isRedactedSkillInstructionRead(toolCall)) {
     const skillDisplayName = getSkillInstructionDisplayName(toolCall.input);
     const bundleFile = getSkillBundleFileName(toolCall.input);
