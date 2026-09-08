@@ -1,3 +1,14 @@
+Portions of this software are licensed as follows:
+
+* All content under the "enterprise/" directory, if that directory exists, is
+  excluded from the Apache License 2.0 grant below and is governed by the
+  separate license provided in "enterprise/LICENSE". If no separate license is
+  provided, no license to that content is granted by this file.
+* All other content is available under the Apache License 2.0 below, unless
+  otherwise expressly identified. Third-party components retain their original
+  licenses and copyright notices.
+
+---
 
                                  Apache License
                            Version 2.0, January 2004

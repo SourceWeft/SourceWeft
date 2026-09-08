@@ -126,3 +126,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 ## License
 
 [Apache License 2.0](LICENSE)
+
+Content under `enterprise/`, if present, is excluded and governed by its separate license. See [LICENSE](LICENSE) for the scope.

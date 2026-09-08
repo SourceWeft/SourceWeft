@@ -106,3 +106,5 @@ Bug 报告、功能建议、代码和设计——都欢迎。
 ## 许可证
 
 [Apache License 2.0](LICENSE)
+
+`enterprise/` 目录（如存在）不适用上述许可，按其独立许可证授权。具体范围见 [LICENSE](LICENSE)。
