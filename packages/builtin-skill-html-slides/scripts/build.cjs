@@ -227,6 +227,10 @@ for (const name of themes) {
   builtStyles.push(sheet.toString());
 }
 builtStyles.push(
+  // A generated artifact owns its entire document, including inside an iframe.
+  // Reveal's embedded mode does not add reveal-full-page to <html>, so its
+  // percentage-height viewport otherwise collapses with the document body.
+  `html,body{width:100%;height:100%;overflow:hidden}`,
   `.reveal{color:var(--text-1);font-family:var(--font-sans)}.reveal .slides>section{box-sizing:border-box;height:100%;padding:40px 56px;flex-direction:column;justify-content:center;text-align:left;background:var(--bg);color:var(--text-1);font-size:24px;line-height:1.45;font-family:var(--font-sans)}.reveal p{margin:0 0 16px}.reveal ul,.reveal ol{margin-top:0}.reveal .slides>section:not(.present) [data-anim],.fragment:not(.visible)[data-anim]{animation:none!important}.sw-fullscreen{position:fixed;right:16px;top:12px;z-index:100;font:14px var(--font-sans);padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-2)}.sw-capture *{transition:none!important;animation-play-state:paused!important;animation-delay:var(--sw-capture-delay)!important}.sw-capture .sw-fullscreen,.sw-capture .controls,.sw-capture .progress,.sw-capture .slide-number{display:none!important}`,
 );
 const style = H.element(

@@ -25,6 +25,16 @@ The behavior runner checks 16:9 and 4:3 in Chromium 147.0.7727.15, Firefox 148.0
 
 A real browser run of the shared React viewer additionally checked a non-Reveal producer, rejected a forged parent-window state message, verified next-page synchronization, entered/exited native fullscreen, copied source, downloaded the original HTML, and exercised a no-protocol page. Evidence and the disposable harness live under `output/playwright/` and the publisher's browser fixtures.
 
+## Delivery E2E — 2026-09-08
+
+A fixed three-page Chinese presentation passed the real delivery path: skill build and final-file QA → `publish_artifact` invocation → migrated isolated PostgreSQL and the configured R2 object store → the application's Next.js share page → browser download. The test supplied local fixture bytes through the sandbox file port; it did not run a provider sandbox or a model-generated conversation.
+
+The browser run checked source preview, all three thumbnail images, next-page and fragment controls, thumbnail page jumps, overview, and native fullscreen entry/exit. The downloaded 1,106,546-byte HTML matched the published and QA bytes: `sha256:150bd412a819fb4440f5f1535d954957dc96d559637db895a52f6278f58f5960`. Publication of a second version retained the first version's exact bytes; stale writes, stale shared-version URLs, and unauthenticated private-file reads were rejected.
+
+This E2E found a real embedding defect: Reveal's embedded mode does not set the full-page document height, so the generated document collapsed to zero height inside the viewer iframe. The skill builder now supplies explicit document dimensions. The shared viewer remains independent of Reveal. The behavior runner now checks sandboxed iframe dimensions, resizing and navigation in all three engines and both aspect ratios, in addition to its standalone and revision checks. All seven behavior cases passed, and the two skill catalog/bundle tests passed. The catalog test executes effect registration instead of asserting one JavaScript quote style.
+
+The application screenshots were captured with Playwright CLI Chromium 152.0.7977.82 at 1440×1000. The pinned runtime regression still uses Chromium 147.0.7727.15, Firefox 148.0.2 and WebKit 26.4. Next.js used file polling for this isolated development process after native file watching hit macOS `EMFILE`; the compiler and application code were unchanged. Evidence, screenshots and the downloaded HTML are under `output/playwright/html-e2e/`. No paid model visual review was invoked.
+
 ## Remaining release checks
 
 - Rebuild and verify the changed Daytona/Cloudflare sandbox images before enabling these generating skills in a deployment. Docker build definitions and runtime pins were updated, but new sandbox images were not deployed in this task.

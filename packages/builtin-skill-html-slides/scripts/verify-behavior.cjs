@@ -26,6 +26,99 @@ function build(input, output, ratio) {
   );
   if (r.status !== 0) throw new Error(r.stderr || r.stdout);
 }
+async function verifyEmbedded(browser, file, viewport, engine) {
+  const context = await browser.newContext({
+    viewport,
+    offline: engine === "chromium",
+  });
+  const unexpectedRequests = [];
+  const failures = [];
+  try {
+    const hostUrl = "https://artifact.test/viewer";
+    const fileUrl = "https://artifact.test/deck.html";
+    await context.route("**/*", async (route) => {
+      const url = route.request().url();
+      if (url === hostUrl) {
+        await route.fulfill({
+          contentType: "text/html",
+          body: '<!doctype html><html><body style="margin:0"><header style="height:80px">Viewer controls</header><iframe title="Presentation" sandbox="allow-scripts" style="display:block;border:0;width:100vw;height:calc(100vh - 160px)" src="/deck.html"></iframe><footer style="height:80px">Viewer pages</footer></body></html>',
+        });
+      } else if (url === fileUrl) {
+        await route.fulfill({
+          contentType: "text/html",
+          body: fs.readFileSync(file),
+        });
+      } else {
+        unexpectedRequests.push(url);
+        await route.abort();
+      }
+    });
+    const page = await context.newPage();
+    page.on("pageerror", (error) => failures.push(error.message));
+    await page.goto(hostUrl);
+    const frame = page.frames().find((frame) => frame.url() === fileUrl);
+    assert.ok(frame);
+    await frame.evaluate(() => window.__sourceweftPresentationQA.ready);
+    await frame.evaluate(() => document.fonts.ready);
+    async function assertVisibleCanvas() {
+      const dimensions = await frame.evaluate(() => {
+        const root = document.querySelector(".reveal").getBoundingClientRect();
+        const slide = document
+          .querySelector("section.present")
+          .getBoundingClientRect();
+        return {
+          height: root.height,
+          viewportHeight: innerHeight,
+          slide: {
+            x: slide.x,
+            y: slide.y,
+            width: slide.width,
+            height: slide.height,
+          },
+          viewportWidth: innerWidth,
+        };
+      });
+      assert.ok(
+        dimensions.height >= dimensions.viewportHeight - 1,
+        "Embedded viewport must fill the iframe",
+      );
+      assert.ok(
+        dimensions.slide.width > dimensions.viewportWidth * 0.5,
+        "Embedded slides must remain legible",
+      );
+      assert.ok(
+        dimensions.slide.x >= -1 && dimensions.slide.y >= -1,
+        "Embedded slides must be inside the visible viewport",
+      );
+      assert.ok(
+        dimensions.slide.y + dimensions.slide.height <=
+          dimensions.viewportHeight + 1,
+        "Embedded slide must not be clipped",
+      );
+    }
+    await assertVisibleCanvas();
+    await page.setViewportSize({
+      width: viewport.width - 200,
+      height: viewport.height + 100,
+    });
+    await frame.waitForFunction(
+      () =>
+        Math.abs(
+          document.querySelector(".reveal").clientHeight - innerHeight,
+        ) <= 1,
+    );
+    await frame.evaluate(() => window.__sourceweftPresentationQA.deck.slide(2));
+    await assertVisibleCanvas();
+    assert.equal(
+      await frame.locator("section.present h2").textContent(),
+      "原始第三页",
+    );
+    assert.deepEqual(unexpectedRequests, []);
+    assert.deepEqual(failures, []);
+  } finally {
+    await context.close();
+  }
+}
 (async () => {
   const results = [];
   for (const ratio of ["16:9", "4:3"]) {
@@ -41,6 +134,12 @@ function build(input, output, ratio) {
         { engine },
       );
       try {
+        await verifyEmbedded(
+          session.browser,
+          file,
+          { width: 1440, height: 1000 },
+          engine,
+        );
         await session.page.evaluate(
           () => window.__sourceweftPresentationQA.ready,
         );
@@ -87,6 +186,7 @@ function build(input, output, ratio) {
           ratio,
           networkMode: session.networkMode,
           passed: true,
+          embeddedChecked: true,
         });
       } finally {
         await session.close();

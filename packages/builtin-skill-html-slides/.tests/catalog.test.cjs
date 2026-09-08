@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const catalog = JSON.parse(
   fs.readFileSync(path.join(root, "runtime/catalog.json"), "utf8"),
@@ -22,12 +23,20 @@ test("all upstream themes, layouts, animations and FX are present under stable n
         fs.existsSync(path.join(root, "runtime", folder, id + "." + ext)),
       );
   }
-  for (const name of catalog.effects)
-    assert.ok(
-      fs
-        .readFileSync(path.join(root, "runtime/fx", name + ".js"), "utf8")
-        .includes("window.HPX['" + name + "']"),
+  const registration = { window: {} };
+  vm.createContext(registration);
+  for (const name of catalog.effects) {
+    const filename = path.join(root, "runtime/fx", name + ".js");
+    vm.runInContext(fs.readFileSync(filename, "utf8"), registration, {
+      filename,
+      timeout: 1000,
+    });
+    assert.equal(
+      typeof registration.window.HPX?.[name],
+      "function",
+      `Effect must register under its catalog name: ${name}`,
     );
+  }
 });
 test("skill output and bounded text bundle are independent from its viewer", () => {
   const manifest = JSON.parse(
