@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/html",
+  "kind": "skill",
+  "name": "HTML",
+  "description": "Create and revise self-contained HTML pages, reports, landing pages, and local interactive visualizations with responsive layout and viewport quality checks.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "html",
+      "visibility": "restricted",
+      "defaultEnabled": true,
+      "listing": "listed",
+      "categories": ["create"],
+      "runtime": {
+        "tools": [
+          "prepare_sandbox_workspace",
+          "execute",
+          "generate_image",
+          "review_html_visuals",
+          "publish_artifact"
+        ],
+        "output": {
+          "kind": "artifact",
+          "artifactType": "html",
+          "publisherTool": "publish_artifact"
+        }
+      }
+    }
+  ]
+}

@@ -197,6 +197,7 @@ export async function* handleToolStartStreamChunk(input: {
   {
     const step = buildArtifactGenerationStep({
       phase: "generating",
+      toolInput: normalizedInput,
       toolCallId,
       toolName,
     });
@@ -476,6 +477,7 @@ export async function* handleToolEndStreamChunk(input: {
       error: outputError,
       latencyMs,
       phase: completionPhase,
+      toolInput: nextToolCall.input,
       toolCallId,
       toolName,
     });

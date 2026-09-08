@@ -17,9 +17,11 @@ type LoadState =
 
 export function ArtifactPreviewPageClient({
   artifactId,
+  artifactVersionId,
   workspaceId,
 }: {
   artifactId: string | null;
+  artifactVersionId?: string | null;
   workspaceId: string | null;
 }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -39,7 +41,11 @@ export function ArtifactPreviewPageClient({
 
       setState({ status: "loading" });
       try {
-        const result = await contentClient.getArtifact(workspaceId, artifactId);
+        const result = await contentClient.getArtifact(
+          workspaceId,
+          artifactId,
+          artifactVersionId ?? undefined,
+        );
         if (!cancelled) {
           setState({ artifact: result.artifact, status: "ready" });
         }
@@ -60,7 +66,7 @@ export function ArtifactPreviewPageClient({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, workspaceId]);
+  }, [artifactId, artifactVersionId, workspaceId]);
 
   const handleClose = useCallback(() => {
     if (window.history.length > 1) {

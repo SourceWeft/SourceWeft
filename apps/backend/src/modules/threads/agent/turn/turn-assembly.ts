@@ -52,11 +52,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
-import {
-  findArtifactRecord,
-  listArtifactSummaryRecords,
-} from "../../../artifacts/repository";
-import { artifactStorage } from "../../../sources/storage";
+import { listArtifactSummaryRecords } from "../../../artifacts/repository";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
 import { buildRequiredSandboxRuntimeAssetPlans } from "../../../../shared/sandbox-assets/plans";
@@ -590,20 +586,35 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
           artifacts: {
             // Workspace-scoped on purpose: an artifactId arriving from tool
             // input can only reach rows this turn's workspace could already see.
-            readPrimaryBytes: async ({ artifactId }) => {
-              const record = await findArtifactRecord({
-                teamId: prepared.workspace.organizationId,
-                workspaceId: prepared.workspace.id,
-                artifactId,
-              });
-              if (!record || record.status !== "ready" || !record.storageKey) {
-                return null;
+            readPrimaryBytes: async ({ artifactId, artifactVersionId }) => {
+              try {
+                const { contentArtifactsService } =
+                  await import("../../../artifacts");
+                const file = await contentArtifactsService.getArtifactFile({
+                  workspaceId: prepared.workspace.id,
+                  userId: prepared.userId,
+                  artifactId,
+                  artifactVersionId,
+                });
+                return {
+                  bytes: file.body,
+                  fileName: file.fileName,
+                  ...("artifactVersionId" in file
+                    ? {
+                        artifactVersionId: file.artifactVersionId,
+                        versionNo: file.versionNo,
+                        contentDigest: file.contentDigest,
+                      }
+                    : {}),
+                };
+              } catch (error) {
+                if (
+                  error instanceof ContentError &&
+                  (error.statusCode === 404 || error.statusCode === 403)
+                )
+                  return null;
+                throw error;
               }
-              const download = await artifactStorage.download({
-                key: record.storageKey,
-                bucket: record.storageBucket,
-              });
-              return download ? { bytes: download.body } : null;
             },
           },
           ...(skillAssets ? { skillAssets } : {}),

@@ -1,0 +1,17 @@
+{
+  "name": "@sourceweft/builtin-skill-html-slides",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "node --test .tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "@sourceweft/typescript-config": "workspace:*",
+    "typescript": "5.9.2"
+  }
+}

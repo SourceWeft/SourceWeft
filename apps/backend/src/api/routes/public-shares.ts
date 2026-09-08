@@ -1,4 +1,8 @@
-import type { Hono } from "hono";
+import {
+  artifactExecutionCsp,
+  inertArtifactCsp,
+} from "@sourceweft/contracts/artifact-execution";
+import type { Context, Hono } from "hono";
 import { contentArtifactsService } from "../../modules/artifacts";
 import { sharingService } from "../../modules/sharing";
 import { config } from "../../shared/config";
@@ -16,10 +20,24 @@ import { requireRouteParam } from "./content/helpers";
  * is what makes it safe to serve arbitrary AI-generated markup on the main
  * domain (best for SEO) without a separate origin.
  */
+function requestedVersion(c: Context) {
+  const values = c.req.queries("artifactVersionId");
+  if (!values) return undefined;
+  if (
+    values.length !== 1 ||
+    !values[0]?.trim() ||
+    values[0] !== values[0].trim()
+  )
+    throw ApiError.validation({
+      artifactVersionId: ["Expected one non-empty version identifier"],
+    });
+  return values[0];
+}
+
 const SANDBOX_CSP = [
-  "sandbox allow-scripts allow-forms allow-popups allow-modals",
+  "sandbox",
   "default-src 'none'",
-  "script-src 'unsafe-inline' 'unsafe-eval' blob:",
+  "script-src 'none'",
   "style-src 'unsafe-inline'",
   "img-src data: blob:",
   "media-src data: blob:",
@@ -239,16 +257,26 @@ export function registerPublicShareRoutes(app: Hono) {
       throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
     }
 
-    const file = await contentArtifactsService.getSharedArtifactFile(
-      resolved.artifact,
-    );
+    const versionId = requestedVersion(c);
+    const file = versionId
+      ? await contentArtifactsService.getSharedVersionFile(
+          resolved.artifact,
+          versionId,
+          { kind: "file" },
+        )
+      : await contentArtifactsService.getSharedArtifactFile(resolved.artifact);
 
     c.header("Content-Type", file.contentType);
     c.header(
       "Content-Disposition",
       `${c.req.query("download") === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
     );
-    c.header("Content-Security-Policy", SANDBOX_CSP);
+    c.header(
+      "Content-Security-Policy",
+      file.executionPolicy
+        ? artifactExecutionCsp(file.executionPolicy, [config.auth.webBaseUrl])
+        : SANDBOX_CSP,
+    );
     c.header("X-Content-Type-Options", "nosniff");
     // Framing is controlled by the CSP `frame-ancestors` above (our web origin
     // only). No `X-Frame-Options`: SAMEORIGIN would block our own cross-origin
@@ -271,9 +299,16 @@ export function registerPublicShareRoutes(app: Hono) {
       throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
     }
 
-    const preview = await contentArtifactsService.getSharedArtifactPreview(
-      resolved.artifact,
-    );
+    const versionId = requestedVersion(c);
+    const preview = versionId
+      ? await contentArtifactsService.getSharedVersionFile(
+          resolved.artifact,
+          versionId,
+          { kind: "previewImage" },
+        )
+      : await contentArtifactsService.getSharedArtifactPreview(
+          resolved.artifact,
+        );
     if (!preview) {
       throw new ApiError(404, "PREVIEW_NOT_FOUND", "No preview image");
     }
@@ -297,11 +332,23 @@ export function registerPublicShareRoutes(app: Hono) {
       throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
     }
 
-    const asset = await contentArtifactsService.getSharedArtifactAsset(
-      resolved.artifact,
-      requireRouteParam(c, "fileName"),
-    );
+    const versionId = requestedVersion(c);
+    const fileName = requireRouteParam(c, "fileName");
+    const asset = versionId
+      ? await contentArtifactsService.getSharedVersionFile(
+          resolved.artifact,
+          versionId,
+          { kind: "asset", fileName },
+        )
+      : await contentArtifactsService.getSharedArtifactAsset(
+          resolved.artifact,
+          fileName,
+        );
 
+    c.header(
+      "Content-Security-Policy",
+      inertArtifactCsp([config.auth.webBaseUrl]),
+    );
     c.header("Content-Type", asset.contentType);
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Referrer-Policy", "no-referrer");

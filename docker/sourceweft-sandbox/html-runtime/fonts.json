@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "5e35378e6bda803962ee6fd257e444a7d459660d",
+  "files": [
+    {
+      "family": "Inter",
+      "path": "inter/Inter-Italic[opsz,wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf",
+      "sha256": "acd98e64795781b2058f07b18475e0ecee2a0fe2b42a49e2f9e37d0d6bf66ce6",
+      "bytes": 906596
+    },
+    {
+      "family": "Inter",
+      "path": "inter/Inter[opsz,wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "bytes": 876576
+    },
+    {
+      "family": "Inter",
+      "path": "inter/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/inter/OFL.txt",
+      "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+      "bytes": 4377
+    },
+    {
+      "family": "Noto Sans SC",
+      "path": "notosanssc/NotoSansSC[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "bytes": 17772300
+    },
+    {
+      "family": "Noto Sans SC",
+      "path": "notosanssc/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notosanssc/OFL.txt",
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "bytes": 4388
+    },
+    {
+      "family": "Noto Serif SC",
+      "path": "notoserifsc/NotoSerifSC[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
+      "sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9",
+      "bytes": 25125512
+    },
+    {
+      "family": "Noto Serif SC",
+      "path": "notoserifsc/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoserifsc/OFL.txt",
+      "sha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6",
+      "bytes": 4350
+    },
+    {
+      "family": "JetBrains Mono",
+      "path": "jetbrainsmono/JetBrainsMono-Italic[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/jetbrainsmono/JetBrainsMono-Italic%5Bwght%5D.ttf",
+      "sha256": "85ae2a5cd3f56baf1ce1c21a851322c58e3d8fbe8e8ad4a4d090a820dd7fe558",
+      "bytes": 191556
+    },
+    {
+      "family": "JetBrains Mono",
+      "path": "jetbrainsmono/JetBrainsMono[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf",
+      "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+      "bytes": 187208
+    },
+    {
+      "family": "JetBrains Mono",
+      "path": "jetbrainsmono/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/jetbrainsmono/OFL.txt",
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+      "bytes": 4399
+    },
+    {
+      "family": "Playfair Display",
+      "path": "playfairdisplay/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/playfairdisplay/OFL.txt",
+      "sha256": "566be814f8e96e93dfa16101331557eb6b5467e9e03f627c0910fe93ca12300e",
+      "bytes": 4449
+    },
+    {
+      "family": "Playfair Display",
+      "path": "playfairdisplay/PlayfairDisplay-Italic[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/playfairdisplay/PlayfairDisplay-Italic%5Bwght%5D.ttf",
+      "sha256": "a5e26dc5e2e77fb2803a0bf02fd4f81ee136ec8dea863ccdb0c59a263b21378b",
+      "bytes": 278688
+    },
+    {
+      "family": "Playfair Display",
+      "path": "playfairdisplay/PlayfairDisplay[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf",
+      "sha256": "c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6",
+      "bytes": 300724
+    },
+    {
+      "family": "Space Grotesk",
+      "path": "spacegrotesk/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/spacegrotesk/OFL.txt",
+      "sha256": "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+      "bytes": 4495
+    },
+    {
+      "family": "Space Grotesk",
+      "path": "spacegrotesk/SpaceGrotesk[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf",
+      "sha256": "acad6de1fc93436f5c0f1f4137751ef04f1aea3063e7036535970ffcfbd79f72",
+      "bytes": 136676
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Bold.ttf",
+      "sha256": "ac27abd6450a64dd94467580a02fe6235156d5b92f2926ebbc8e7489df64e0be",
+      "bytes": 137784
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-BoldItalic.ttf",
+      "sha256": "af4e05a761e98c1adf064c48a6352c9bec1a6ad70982cd2a544149323391f98e",
+      "bytes": 144512
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-ExtraLight.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-ExtraLight.ttf",
+      "sha256": "826b765bd5173b97d521053330a66277edc224f8cc5f1e0035df1d995d5f003c",
+      "bytes": 135980
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-ExtraLightItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-ExtraLightItalic.ttf",
+      "sha256": "8ae22766094bd04c2808a3c9dec812dcf061786c26ebd25eea211ae685eb2c39",
+      "bytes": 144672
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Italic.ttf",
+      "sha256": "3362fc791b0652193328b862c1c5f23a789bc7288b1617fa63302f88689a2a34",
+      "bytes": 143920
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Light.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Light.ttf",
+      "sha256": "780bcf65509d72a35ec114b57bcbe220dc6b77d8ea2e9b25e294be3c570c5025",
+      "bytes": 135216
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-LightItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-LightItalic.ttf",
+      "sha256": "2bb4dd18abb03cb8a0a1ae69a0a10b194e02027b817c7b13126ef4724a7f5c73",
+      "bytes": 143432
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Medium.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Medium.ttf",
+      "sha256": "a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755",
+      "bytes": 136704
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-MediumItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-MediumItalic.ttf",
+      "sha256": "de6e0f805a15a2a1538be5d1074741298a07ffcba6fa1f4cd93983ff73155a7d",
+      "bytes": 144004
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Regular.ttf",
+      "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+      "bytes": 135580
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-SemiBold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-SemiBold.ttf",
+      "sha256": "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46",
+      "bytes": 140216
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-SemiBoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-SemiBoldItalic.ttf",
+      "sha256": "391ef0e273eb52571eccaab6a6dbddeec48e1d282cb7bf153043512b797ed6f0",
+      "bytes": 147368
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-Thin.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-Thin.ttf",
+      "sha256": "c44c820c14b4f1b818344e5f5dc189cee98b1d5e56b4e80055496c228f3cc7ea",
+      "bytes": 137900
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/IBMPlexMono-ThinItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/IBMPlexMono-ThinItalic.ttf",
+      "sha256": "3782f01f12b444c62be712676646c552fc23443e8fd02d5b5619c6c4b975516d",
+      "bytes": 146100
+    },
+    {
+      "family": "IBM Plex Mono",
+      "path": "ibmplexmono/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/ibmplexmono/OFL.txt",
+      "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
+      "bytes": 4456
+    },
+    {
+      "family": "Archivo Black",
+      "path": "archivoblack/ArchivoBlack-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/archivoblack/ArchivoBlack-Regular.ttf",
+      "sha256": "dd9a89a019b4849f66ab75455fe7bdf931311042cbb0f0f97acc061539703180",
+      "bytes": 90988
+    },
+    {
+      "family": "Archivo Black",
+      "path": "archivoblack/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/archivoblack/OFL.txt",
+      "sha256": "3173acd82f8c6159b5b1037b539fcbd4edff68e65c2ea8b9412b5a5ca97b08ff",
+      "bytes": 4492
+    },
+    {
+      "family": "Noto Emoji",
+      "path": "notoemoji/NotoEmoji[wght].ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf",
+      "sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
+      "bytes": 1982596
+    },
+    {
+      "family": "Noto Emoji",
+      "path": "notoemoji/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoemoji/OFL.txt",
+      "sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b",
+      "bytes": 4330
+    }
+  ],
+  "defaultFamilies": ["Inter", "Noto Sans SC", "Noto Emoji"],
+  "fallbackFamilies": ["Noto Sans SC", "Noto Emoji"]
+}

@@ -1,3 +1,6 @@
+import { HTML_ARTIFACT_TYPE } from "@sourceweft/contracts/html-artifact";
+import { htmlArtifactPreview } from "./html-artifact-preview";
+import { PublishedArtifactBlock } from "./published-artifact-block";
 /**
  * `publish_artifact`'s artifact UI, for both surfaces at once.
  *
@@ -16,9 +19,9 @@ import { slidesPreview } from "./slides-preview";
 export const publishArtifactArtifactUi: ArtifactUiModule = {
   id: "publish-artifact",
   renderAs: "pptx",
-  artifactTypes: [SLIDES_ARTIFACT_TYPE],
-  Block: PublishedPresentationArtifactBlock,
-  preview: slidesPreview,
+  artifactTypes: [SLIDES_ARTIFACT_TYPE, HTML_ARTIFACT_TYPE],
+  Block: PublishedArtifactBlock,
+  preview: (context) => htmlArtifactPreview(context) ?? slidesPreview(context),
 };
 
 export {

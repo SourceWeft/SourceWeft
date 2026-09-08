@@ -251,3 +251,58 @@ test("artifact file proxy preserves exact-version media 304 responses", async ()
   assert.equal(response.status, 304);
   assert.equal(response.headers.get("etag"), '"sha256-video"');
 });
+
+test("registered HTML execution survives the proxy with exact bytes and version", async () => {
+  const html = "<!doctype html><html><body>final</body></html>";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL) => {
+      assert.equal(url.searchParams.get("artifactVersionId"), "version-2");
+      return new Response(html, {
+        headers: {
+          "content-type": "text/html",
+          "x-sourceweft-artifact-execution": "sandboxed-html",
+        },
+      });
+    }),
+  );
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost/api/artifact-file?workspaceId=w&artifactId=a&artifactVersionId=version-2",
+    ),
+  );
+  assert.equal(response.status, 200);
+  assert.match(
+    response.headers.get("content-security-policy") ?? "",
+    /sandbox allow-scripts/,
+  );
+  assert.match(
+    response.headers.get("content-security-policy") ?? "",
+    /connect-src 'none'/,
+  );
+  assert.doesNotMatch(
+    response.headers.get("content-security-policy") ?? "",
+    /allow-same-origin/,
+  );
+  assert.equal(await response.text(), html);
+});
+
+test("an empty or ambiguous version never falls through to the current file", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const { GET } = await import("./route");
+  for (const suffix of [
+    "artifactVersionId=",
+    "artifactVersionId=v1&artifactVersionId=v2",
+  ]) {
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/artifact-file?workspaceId=w&artifactId=a&" +
+          suffix,
+      ),
+    );
+    assert.equal(response.status, 400);
+  }
+  assert.equal(fetchMock.mock.calls.length, 0);
+});

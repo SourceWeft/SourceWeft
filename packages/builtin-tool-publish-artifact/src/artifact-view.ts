@@ -1,3 +1,8 @@
+import {
+  HTML_ARTIFACT_TYPE,
+  HTML_ARTIFACT_RENDERER,
+  htmlArtifactPayloadSchema,
+} from "@sourceweft/contracts/html-artifact";
 import { sanitizeArtifactFileBase } from "@sourceweft/contracts/artifact-files";
 import type {
   ArtifactViewHandler,
@@ -48,6 +53,32 @@ export const slidesArtifactViewHandler: ArtifactViewHandler = {
   canPreviewInline: () => true,
 };
 
+export const htmlArtifactViewHandler: ArtifactViewHandler = {
+  artifactType: HTML_ARTIFACT_TYPE,
+  executionPolicy: "sandboxed-html",
+  resolveContentType: () => "text/html",
+  resolveRenderer: () => HTML_ARTIFACT_RENDERER,
+  canPreviewInline: () => true,
+  resolveFileName: ({ artifact }) =>
+    htmlArtifactPayloadSchema.parse(artifact.payloadJson).fileName,
+  buildPublicPayload: ({ artifact }) => {
+    const parsed = htmlArtifactPayloadSchema.safeParse(artifact.payloadJson);
+    if (!parsed.success) return null;
+    const { fileName, byteLength, contentDigest, metadata, validation } =
+      parsed.data;
+    return {
+      schemaVersion: 1,
+      fileName,
+      mimeType: "text/html",
+      byteLength,
+      contentDigest,
+      metadata,
+      validation,
+    };
+  },
+};
+
 export const createArtifactViewHandlers: CreateArtifactViewHandlers = () => [
   slidesArtifactViewHandler,
+  htmlArtifactViewHandler,
 ];

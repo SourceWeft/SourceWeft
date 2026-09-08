@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Code</title>
+<link rel="stylesheet" href="../../assets/fonts.css">
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" id="theme-link" href="../../assets/themes/tokyo-night.css">
+<link rel="stylesheet" href="../../assets/animations/animations.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/tokyo-night-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/javascript.min.js"></script>
+<script>addEventListener('DOMContentLoaded',()=>{hljs.registerLanguage('javascript',window.hljsLangJavascript||window.hljs.getLanguage('javascript'));document.querySelectorAll('pre code').forEach(el=>hljs.highlightElement(el))})</script>
+</head><body class="single">
+<div class="deck"><section class="slide is-active" data-title="Code">
+  <p class="kicker">Snippet · 运行时核心</p>
+  <h2 class="h2">一个播放器，管理整个演示</h2>
+<pre class="card mt-m" style="padding:24px;white-space:pre-wrap;overflow-wrap:anywhere"><code class="language-javascript">const deck = new Reveal({
+  width: 1280, height: 720
+});
+await deck.initialize();
+deck.on('slidechanged', ({ currentSlide }) =&gt; {
+  console.log(currentSlide.dataset.slideId);
+});
+deck.next();</code></pre>
+</section></div>
+<script src="../../assets/runtime.js"></script>
+</body></html>

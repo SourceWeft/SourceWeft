@@ -2,6 +2,7 @@ import { ArtifactPreviewPageClient } from "./artifact-preview-page-client";
 
 type ArtifactPreviewSearchParams = {
   artifactId?: string | string[];
+  artifactVersionId?: string | string[];
   workspaceId?: string | string[];
 };
 
@@ -18,6 +19,7 @@ export default async function ArtifactPreviewPage({
   return (
     <ArtifactPreviewPageClient
       artifactId={firstValue(params.artifactId) ?? null}
+      artifactVersionId={firstValue(params.artifactVersionId) ?? null}
       workspaceId={firstValue(params.workspaceId) ?? null}
     />
   );

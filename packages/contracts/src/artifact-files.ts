@@ -376,6 +376,8 @@ const MEGABYTE = 1024 * 1024;
  * fails the publish, because the artifact itself is the deliverable.
  */
 export const ARTIFACT_LIMITS = {
+  /** Self-contained HTML must fit the existing storage read boundary. */
+  htmlBytes: 25 * MEGABYTE,
   /** Any published `file` artifact. Exceeding this fails the publish. */
   fileBytes: 100 * MEGABYTE,
   /** A published `.pptx` deck. Exceeding this fails the publish. */

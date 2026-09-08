@@ -689,7 +689,7 @@ test("publish_artifact tool returns recoverable error when file artifacts includ
   assert.equal(output.code, "PUBLISH_INPUT_INVALID");
   assert.match(
     output.message,
-    /previewImage is only supported for slides artifacts/u,
+    /previewImage is only supported for slides and html artifacts/u,
   );
   assert.equal(output.recoverable, true);
 });

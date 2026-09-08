@@ -1,3 +1,4 @@
+import { htmlTypeHandler } from "./html/type-handler";
 import {
   ARTIFACT_LIMITS,
   ARTIFACT_MIME_TYPES,
@@ -21,6 +22,8 @@ export type ArtifactPublishDescriptor = {
   readonly title: string;
   readonly description?: string;
   readonly previewImage?: unknown;
+  readonly expectedContentDigest?: string;
+  readonly expectedVersionNo?: number;
   readonly source?: unknown;
   /** Set when this publish is an edit landing as a new version of an existing artifact. */
   readonly republishArtifactId?: string;
@@ -36,6 +39,9 @@ export type ArtifactBytes = Omit<ArtifactSourceBytes, "source"> & {
 
 export type ArtifactTypeHandlerResult = {
   readonly artifactType: PublishArtifactSuccessOutput["artifactType"];
+  readonly immutableFileUrls?: boolean;
+  readonly contentAddressedRequests?: boolean;
+  readonly requiredAssets?: readonly string[];
   readonly byteLength: number;
   readonly contentType: string;
   readonly fileName: string;
@@ -273,18 +279,21 @@ const imageTypeHandler: ArtifactTypeHandler = {
  * generic artifact-row primitives without spelling out type names themselves.
  */
 export const PUBLISH_ARTIFACT_TYPES = {
+  html: "html",
   slides: "slides",
   file: "file",
   image: "image",
 } as const;
 
 export const artifactTypeHandlers = [
+  htmlTypeHandler,
   slidesTypeHandler,
   fileTypeHandler,
   imageTypeHandler,
 ] as const;
 
 export const artifactSourceTypeHandlers = [
+  htmlTypeHandler,
   slidesTypeHandler,
   fileTypeHandler,
 ] as const;

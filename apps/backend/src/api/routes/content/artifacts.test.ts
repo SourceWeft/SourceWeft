@@ -3,7 +3,12 @@ import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
 import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
 
+vi.mock("../../../shared/config", () => ({
+  config: { auth: { webBaseUrl: "https://web.example" } },
+}));
+
 const mocks = vi.hoisted(() => ({
+  getArtifactFile: vi.fn(),
   getArtifactVersionMedia: vi.fn(),
   getArtifactVersionMediaBytes: vi.fn(),
   getSessionUserId: vi.fn(),
@@ -19,6 +24,7 @@ vi.mock("../../middleware/auth-session", () => ({
 
 vi.mock("../../../modules/artifacts", () => ({
   contentArtifactsService: {
+    getArtifactFile: mocks.getArtifactFile,
     getArtifactVersionMedia: mocks.getArtifactVersionMedia,
     getArtifactVersionMediaBytes: mocks.getArtifactVersionMediaBytes,
     listArtifacts: mocks.listArtifacts,
@@ -193,4 +199,36 @@ test("artifact version media route preserves 304 without a response body", async
   assert.equal(response.status, 304);
   assert.equal(response.headers.get("etag"), '"sha256-video"');
   assert.equal(await response.text(), "");
+});
+
+test("HTML file responses bind the requested version and carry the registered sandbox policy", async () => {
+  mocks.getArtifactFile.mockResolvedValue({
+    body: Buffer.from("<html>verified</html>"),
+    contentType: "text/html",
+    fileName: "index.html",
+    executionPolicy: "sandboxed-html",
+    renderer: "html-document",
+  });
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace-1/artifacts/artifact-1/file?artifactVersionId=version-1",
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    mocks.getArtifactFile.mock.calls[0]?.[0].artifactVersionId,
+    "version-1",
+  );
+  assert.match(
+    response.headers.get("content-security-policy") ?? "",
+    /sandbox allow-scripts/,
+  );
+  assert.doesNotMatch(
+    response.headers.get("content-security-policy") ?? "",
+    /allow-same-origin/,
+  );
+  assert.equal(
+    response.headers.get("x-sourceweft-artifact-execution"),
+    "sandboxed-html",
+  );
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(await response.text(), "<html>verified</html>");
 });

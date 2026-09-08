@@ -173,7 +173,7 @@ export function SharedArtifactViewer({
       >
         <span className="truncate text-sm font-medium">{title}</span>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          {hasVisual ? (
+          {hasVisual && !capability?.blocksDefaultFullscreen ? (
             <button
               className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={enterFullscreen}

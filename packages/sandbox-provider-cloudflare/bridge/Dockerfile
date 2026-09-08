@@ -29,6 +29,8 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 ENV SOURCEWEFT_REMOTION_BROWSER=/opt/chrome-headless-shell/chrome-headless-shell-linux64/chrome-headless-shell
 ENV SOURCEWEFT_PNPM_STORE=/opt/sourceweft-pnpm-store
+ENV SOURCEWEFT_HTML_RUNTIME=/opt/sourceweft-html
+ENV SOURCEWEFT_HTML_FONTS=/opt/sourceweft-html-fonts
 ENV NODE_PATH=/usr/local/lib/node_modules
 ENV PATH="${PNPM_HOME}:${VIRTUAL_ENV}/bin:${PATH}"
 
@@ -37,6 +39,7 @@ ENV PATH="${PNPM_HOME}:${VIRTUAL_ENV}/bin:${PATH}"
 RUN ln -sf /proc/mounts /etc/mtab
 
 # ── Base provisioning (shared with the Daytona sandbox image) ───────────────
+COPY html-runtime /opt/sourceweft-html
 COPY install-base.sh /tmp/install-base.sh
 RUN chmod +x /tmp/install-base.sh && /tmp/install-base.sh && rm /tmp/install-base.sh
 

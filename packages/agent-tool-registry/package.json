@@ -24,7 +24,9 @@
     "@sourceweft/builtin-vfs": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/sandbox-provider-cloudflare": "workspace:*",
-    "@sourceweft/sandbox-provider-daytona": "workspace:*"
+    "@sourceweft/sandbox-provider-daytona": "workspace:*",
+    "@sourceweft/builtin-skill-html": "workspace:*",
+    "@sourceweft/builtin-skill-html-slides": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

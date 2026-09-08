@@ -118,7 +118,7 @@ test("PublishArtifactInputSchema rejects preview images for file artifacts", () 
           },
         },
       }),
-    /previewImage is only supported for slides artifacts/u,
+    /previewImage is only supported for slides and html artifacts/u,
   );
 });
 

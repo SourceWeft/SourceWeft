@@ -24,7 +24,7 @@ test("the capability registers a slides view handler", async () => {
   const handlers = await createArtifactViewHandlers();
   assert.deepEqual(
     handlers.map((handler) => handler.artifactType),
-    ["slides"],
+    ["slides", "html"],
   );
 });
 

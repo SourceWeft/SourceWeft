@@ -1,3 +1,5 @@
+import type { ArtifactResource } from "@sourceweft/contracts/artifact-urls";
+import { projectArtifactVersionFiles } from "../artifacts/version-files";
 import type { PublicSharedArtifact, ShareLink } from "@sourceweft/contracts";
 import { compactArtifactText } from "@sourceweft/contracts/artifact-files";
 import { config } from "../../shared/config";
@@ -296,6 +298,61 @@ export class SharingService {
       return null;
     }
 
+    const fileVersion =
+      await contentArtifactsService.getSharedCurrentVersionFiles(artifact);
+    if (fileVersion) {
+      const versionQuery = `artifactVersionId=${encodeURIComponent(fileVersion.versionId)}`;
+      const url = (resource: ArtifactResource): string | null => {
+        switch (resource.kind) {
+          case "file":
+            return `${publicRawUrl(token)}?${versionQuery}`;
+          case "download":
+            return `${publicRawUrl(token)}?download=1&${versionQuery}`;
+          case "previewImage":
+            return `${publicPreviewUrl(token)}?${versionQuery}`;
+          case "asset":
+            return `${publicShareAssetUrl(token, resource.fileName)}?${versionQuery}`;
+          case "sourceJson":
+            return null;
+        }
+      };
+      const files =
+        projectArtifactVersionFiles({
+          filesJson: fileVersion.filesJson,
+          url,
+        }) ?? [];
+      const payload =
+        await contentArtifactsService.buildSharedArtifactPublicPayload(
+          { ...artifact, payloadJson: fileVersion.contentJson },
+          (fileName) => url({ kind: "asset", fileName })!,
+        );
+      const primary = files.find((file) => file.role === "primary");
+      return {
+        token,
+        artifactType: artifact.artifactType,
+        title: artifact.title,
+        fileUrl: primary?.url ?? null,
+        downloadUrl: primary?.downloadUrl ?? null,
+        inlinePreviewable:
+          await contentArtifactsService.isSharedArtifactInlineRenderable(
+            artifact,
+          ),
+        payload: payload
+          ? {
+              ...payload,
+              artifactVersionId: fileVersion.versionId,
+              versionNo: fileVersion.versionNo,
+              versionFiles: files,
+            }
+          : null,
+        previewImageUrl:
+          files.find((file) => file.role === "preview")?.url ?? null,
+        description: null,
+        viewCount: share.viewCount,
+        noindex: share.noindex,
+        createdAt: share.createdAt.toISOString(),
+      };
+    }
     const exactMedia =
       await contentArtifactsService.getSharedCurrentArtifactVersionMedia(
         artifact,

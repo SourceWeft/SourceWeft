@@ -1,8 +1,10 @@
 import { z } from "zod";
+import type { ArtifactExecutionPolicy } from "./artifact-execution";
 
 /** Shared with the artifacts table in @sourceweft/db. */
 export const artifactTypeSchema = z.enum([
   "file",
+  "html",
   "report",
   "slides",
   "mindmap",
@@ -100,6 +102,8 @@ export type ArtifactVersionMedia = {
 
 export type ArtifactViewHandler = {
   readonly artifactType: string;
+  /** Trusted file policy supplied by the registered format, never by the producer. */
+  readonly executionPolicy?: ArtifactExecutionPolicy;
   /** Resolve browser-playable media from this exact payload version. */
   readonly resolveVersionMedia?: (input: {
     readonly artifact: ArtifactViewRecord;

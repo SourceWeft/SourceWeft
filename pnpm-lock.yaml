@@ -627,6 +627,12 @@ importers:
       '@sourceweft/builtin-retrieval':
         specifier: workspace:*
         version: link:../builtin-retrieval
+      '@sourceweft/builtin-skill-html':
+        specifier: workspace:*
+        version: link:../builtin-skill-html
+      '@sourceweft/builtin-skill-html-slides':
+        specifier: workspace:*
+        version: link:../builtin-skill-html-slides
       '@sourceweft/builtin-skill-ppt-deck':
         specifier: workspace:*
         version: link:../builtin-skill-ppt-deck
@@ -776,6 +782,24 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  packages/builtin-skill-html:
+    devDependencies:
+      '@sourceweft/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/builtin-skill-html-slides:
+    devDependencies:
+      '@sourceweft/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/builtin-skill-image-generate:
     devDependencies:
       '@sourceweft/capability-contracts':
@@ -918,6 +942,9 @@ importers:
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@sourceweft/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
       '@sourceweft/ui-web':
         specifier: workspace:*
         version: link:../ui
@@ -933,6 +960,15 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.8)
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
+      postcss:
+        specifier: 8.5.26
+        version: 8.5.26
+      postcss-value-parser:
+        specifier: 4.2.0
+        version: 4.2.0
       pptxgenjs:
         specifier: ^3.12.0
         version: 3.12.0
@@ -955,9 +991,21 @@ importers:
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
+      '@types/react-dom':
+        specifier: 19.2.4
+        version: 19.2.4(@types/react@19.2.18)
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      playwright:
+        specifier: 1.59.1
+        version: 1.59.1
       react:
         specifier: ^19.2.8
         version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
@@ -18291,15 +18339,13 @@ snapshots:
     dependencies:
       find-up: 3.0.0
 
-  playwright-core@1.59.1:
-    optional: true
+  playwright-core@1.59.1: {}
 
   playwright@1.59.1:
     dependencies:
       playwright-core: 1.59.1
     optionalDependencies:
       fsevents: 2.3.2
-    optional: true
 
   plimit-lit@1.6.1:
     dependencies:

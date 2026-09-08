@@ -198,8 +198,11 @@ npm install -g \
     react-dom \
     react-icons \
     sharp \
-    playwright
-npx playwright install --with-deps chromium
+    playwright@1.59.1 \
+    parse5@7.3.0 \
+    postcss@8.5.26 \
+    postcss-value-parser@4.2.0
+playwright install --with-deps chromium
 chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}"
 npm cache clean --force
 
@@ -226,3 +229,8 @@ fi
 mkdir -p /workspace/input /workspace/work /workspace/output /skills "${PNPM_HOME}"
 
 echo "SourceWeft sandbox base provisioning complete."
+
+# HTML generation uses the image's immutable resource tooling. No per-task install.
+python3 -m pip install --no-cache-dir -r /opt/sourceweft-html/requirements.txt
+python3 /opt/sourceweft-html/install_fonts.py /opt/sourceweft-html/fonts.json /opt/sourceweft-html-fonts
+chmod -R a+rX /opt/sourceweft-html /opt/sourceweft-html-fonts

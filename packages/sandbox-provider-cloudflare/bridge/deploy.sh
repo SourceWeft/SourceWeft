@@ -70,11 +70,13 @@ fi
 echo "==> Injecting SourceWeft custom image (Dockerfile + install-base.sh)"
 cp "$SCRIPT_DIR/Dockerfile" "$BRIDGE_DIR/Dockerfile"
 cp "$REPO_ROOT/docker/sourceweft-sandbox/install-base.sh" "$BRIDGE_DIR/install-base.sh"
+cp -R "$REPO_ROOT/docker/sourceweft-sandbox/html-runtime" "$BRIDGE_DIR/"
 # The stock template may ship a restrictive .dockerignore (e.g. `*` + !Dockerfile);
 # make sure our COPYd script is not excluded from the build context.
 if [ -f "$BRIDGE_DIR/.dockerignore" ]; then
   grep -qxF '!install-base.sh' "$BRIDGE_DIR/.dockerignore" \
     || printf '\n!install-base.sh\n' >> "$BRIDGE_DIR/.dockerignore"
+  printf '\n!html-runtime/\n!html-runtime/**\n' >> "$BRIDGE_DIR/.dockerignore"
 fi
 
 echo "==> Deploying"

@@ -55,6 +55,7 @@ export function resolveArtifactPageUrl(input: {
 
   return resolveArtifactPageUrlFromArtifact({
     artifactId: artifact.id,
+    artifactVersionId: artifact.artifactVersionId,
     fallbackUrl: artifact.previewUrl,
     workspaceId,
   });
@@ -71,6 +72,7 @@ export function resolveArtifactProxyFileUrl(input: {
 
   return resolveArtifactProxyFileUrlFromArtifact({
     artifactId: artifact.id,
+    artifactVersionId: artifact.artifactVersionId,
     fallbackUrl: artifact.previewUrl,
     workspaceId,
   });
@@ -83,6 +85,7 @@ export function resolveArtifactPreviewImageProxyUrl(input: {
   const { artifact, workspaceId } = input;
   return resolveArtifactPreviewImageUrlFromArtifact({
     artifactId: artifact.id,
+    artifactVersionId: artifact.artifactVersionId,
     previewMetadataJson: artifact.previewMetadataJson,
     previewStorageKey: artifact.previewStorageKey,
     workspaceId,
@@ -100,6 +103,7 @@ export function resolveArtifactDownloadUrl(input: {
 
   return resolveArtifactProxyFileUrlFromArtifact({
     artifactId: artifact.id,
+    artifactVersionId: artifact.artifactVersionId,
     download: true,
     fallbackUrl: artifact.previewUrl,
     workspaceId,
