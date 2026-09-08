@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode } from "react";
 import {
   Sheet,
@@ -13,6 +13,8 @@ import type { ChatHubMode } from "./chat-hub-context";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
 import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
+import { isEmbedMode } from "../../../../lib/thread-embed-params";
+import { SubagentPanel } from "../[threadId]/_thread/subagent-panel";
 
 function HubSlot() {
   const context = useChatHubContext();
@@ -20,6 +22,15 @@ function HubSlot() {
 
   if (!registration) {
     return null;
+  }
+
+  if (registration.subagentPanel) {
+    return (
+      <SubagentPanel
+        className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 border-l border-border/70 animate-in slide-in-from-right-4 duration-200"
+        panel={registration.subagentPanel}
+      />
+    );
   }
 
   if (registration.previewArtifact) {
@@ -127,25 +138,59 @@ function MobileHubDrawer() {
   );
 }
 
-function ChatHubScaffold({
+function ChatHubBody({
   children,
-  mode,
+  embed,
 }: {
   children: ReactNode;
-  mode: ChatHubMode;
+  embed: boolean;
 }) {
-  const { sourcesVisible, workspaceId, workspaceName } =
-    useDashboardChatState();
+  const { sourcesVisible } = useDashboardChatState();
+  const context = useChatHubContext();
   const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
   const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
 
-  return (
-    <ChatHubProvider initialValue={{ mode, workspaceId, workspaceName }}>
+  // An embedded thread (the document inside a sub-agent panel) is just the
+  // conversation: no hub beside it, no drawer over it.
+  if (embed) {
+    return (
       <div className="flex h-full min-h-0 w-full overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
-        {sourcesVisible && isPersistentLayout ? <HubSlot /> : null}
+      </div>
+    );
+  }
+
+  // A sub-agent panel takes the right-hand slot even while the hub is hidden;
+  // otherwise the slot follows the hub toggle as before.
+  const slotVisible =
+    isPersistentLayout &&
+    (sourcesVisible || Boolean(context?.registration.subagentPanel));
+
+  return (
+    <>
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+        {slotVisible ? <HubSlot /> : null}
       </div>
       {!isDesktopPanel ? <MobileHubDrawer /> : null}
+    </>
+  );
+}
+
+function ChatHubScaffold({
+  children,
+  embed,
+  mode,
+}: {
+  children: ReactNode;
+  embed: boolean;
+  mode: ChatHubMode;
+}) {
+  const { workspaceId, workspaceName } = useDashboardChatState();
+
+  return (
+    <ChatHubProvider initialValue={{ mode, workspaceId, workspaceName }}>
+      <ChatHubBody embed={embed}>{children}</ChatHubBody>
     </ChatHubProvider>
   );
 }
@@ -156,7 +201,13 @@ export default function ChatWorkspaceShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const mode: ChatHubMode = pathname?.endsWith("/chat") ? "new" : "thread";
+  const embed = isEmbedMode(searchParams);
 
-  return <ChatHubScaffold mode={mode}>{children}</ChatHubScaffold>;
+  return (
+    <ChatHubScaffold embed={embed} mode={mode}>
+      {children}
+    </ChatHubScaffold>
+  );
 }

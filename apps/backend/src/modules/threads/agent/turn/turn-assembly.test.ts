@@ -318,6 +318,7 @@ function createPreparedTurn(
     initialTitle: "Test",
     failurePersistence: "persist-error-turn",
     mcpInstallIds: [],
+    persona: null,
   } as unknown as PreparedThreadTurn;
 }
 

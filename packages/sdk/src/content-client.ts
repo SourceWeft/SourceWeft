@@ -90,6 +90,10 @@ import type {
   SourceStatusResponse,
   ListThreadsResponse,
   ListPersonasResponse,
+  CreatePersonaRequest,
+  UpdatePersonaRequest,
+  PersonaResponse,
+  DeletePersonaResponse,
   ListChildThreadsResponse,
   StartThreadTurnRequest,
   StartThreadTurnResponse,
@@ -606,6 +610,30 @@ export class ContentClient {
   listPersonas(workspaceId: string) {
     return this.http.get<ListPersonasResponse>(
       `/v1/workspaces/${encode(workspaceId)}/personas`,
+    );
+  }
+
+  createPersona(workspaceId: string, input: CreatePersonaRequest) {
+    return this.http.post<PersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas`,
+      input,
+    );
+  }
+
+  updatePersona(
+    workspaceId: string,
+    personaId: string,
+    input: UpdatePersonaRequest,
+  ) {
+    return this.http.patch<PersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas/${encode(personaId)}`,
+      input,
+    );
+  }
+
+  deletePersona(workspaceId: string, personaId: string) {
+    return this.http.delete<DeletePersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas/${encode(personaId)}`,
     );
   }
 

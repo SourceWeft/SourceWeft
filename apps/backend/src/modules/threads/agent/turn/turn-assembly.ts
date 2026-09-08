@@ -61,7 +61,7 @@ import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
 import { createExploreSubagent } from "../subagents/explore";
 import { createPlanSubagent } from "../subagents/plan";
-import { filterToolsForPersona, findPersona } from "../personas";
+import { filterToolsForPersona } from "../personas";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -669,7 +669,7 @@ export async function buildThreadAgentAssembly(
   // A persona-owned thread binds only the persona's allowlisted tools. The
   // permissions already deny registry tools it may not use; this pass also drops
   // connector, MCP, and sandbox tools, which are bound under their own names.
-  const persona = findPersona(prepared.thread.personaId);
+  const persona = prepared.persona ?? null;
   const boundTools = filterToolsForPersona(
     persona,
     filterCommandPolicyTools(prepared, [

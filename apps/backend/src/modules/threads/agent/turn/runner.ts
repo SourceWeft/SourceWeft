@@ -48,6 +48,13 @@ import {
   resolveToolProducer,
 } from "./subagent-namespace";
 import {
+  attachChildThreadToTaskOutput,
+  createSubagentProjector,
+  readTaskReport,
+  seedChildCheckpointWith,
+  TASK_TOOL_NAME,
+} from "./subagent-projection";
+import {
   adaptMessagesEvent,
   adaptToolArgDelta,
   adaptToolsEvent,
@@ -205,6 +212,14 @@ export async function* invokeDeepAgentTurn(input: {
   // Declare variables that need to be accessible in finally and after try/finally
   let mcpToolRuntime!: ToolCollection["mcpToolRuntime"];
   let agent!: ThreadAgentAssembly["agent"];
+  // Projects each `task` delegate's run into a child thread (persistence only;
+  // see subagent-projection.ts). The seed closure reads `agent` lazily: the
+  // graph exists by the time any delegate finishes.
+  const projector = createSubagentProjector({
+    prepared: input.prepared,
+    toolTraces: toolCallsById,
+    seedCheckpoint: (seed) => seedChildCheckpointWith(agent)(seed),
+  });
   let beforeAssistantCheckpoint: AgentCheckpointRef | null = null;
   let beforeInputCheckpoint: AgentCheckpointRef | null = null;
   let finalCheckpoint: AgentCheckpointRef | null = null;
@@ -342,9 +357,13 @@ export async function* invokeDeepAgentTurn(input: {
         // cards. Every other sub-agent event (model text, reasoning, checkpoints,
         // interrupts) is dropped here so a delegate can never pollute the main
         // answer or the parent's bookkeeping. Main-agent events (depth < 2) always
-        // pass through.
+        // pass through. A delegate's model events are folded into its child-thread
+        // projection before being dropped — persistence only, never a client event.
         const subagentEvent = isSubagentNamespace(namespace);
         if (subagentEvent && method !== "tools") {
+          if (method === "messages") {
+            projector.observeMessages(namespace, data);
+          }
           continue;
         }
 
@@ -389,6 +408,40 @@ export async function* invokeDeepAgentTurn(input: {
         const legacyToolPayload = adaptToolsEvent(data, toolNameByCallId);
         if (!legacyToolPayload) {
           continue;
+        }
+        // Child-thread projection of `task` delegates. A delegate's own tool
+        // events feed its transcript; the parent's `task` call opens the child
+        // thread on start and, on finish, persists the transcript and tags the
+        // result with the child thread id (the only visible trace of projection,
+        // riding on the existing tool-result payload).
+        if (subagentEvent) {
+          projector.observeTool(namespace, legacyToolPayload);
+        } else if (legacyToolPayload.name === TASK_TOOL_NAME) {
+          const taskCallId = String(legacyToolPayload.toolCallId);
+          if (legacyToolPayload.event === "on_tool_start") {
+            projector.startTask({
+              taskCallId,
+              namespace,
+              input: legacyToolPayload.input,
+            });
+          } else if (
+            legacyToolPayload.event === "on_tool_end" ||
+            legacyToolPayload.event === "on_tool_error"
+          ) {
+            const finished = legacyToolPayload.event === "on_tool_end";
+            const childThreadId = await projector.finishTask({
+              taskCallId,
+              report: finished
+                ? readTaskReport(legacyToolPayload.output)
+                : null,
+            });
+            if (childThreadId && finished) {
+              legacyToolPayload.output = attachChildThreadToTaskOutput(
+                legacyToolPayload.output,
+                childThreadId,
+              );
+            }
+          }
         }
         const producer = subagentEvent
           ? resolveToolProducer(namespace, {
@@ -538,6 +591,18 @@ export async function* invokeDeepAgentTurn(input: {
   } catch (error) {
     throw error;
   } finally {
+    // Projection writes are best-effort but must land before the turn ends,
+    // so a child thread is complete by the time the parent's finish is sent.
+    try {
+      await projector.flush();
+    } catch (error) {
+      logger.warn("Failed to flush sub-agent thread projection", {
+        workspaceId: input.prepared.workspace.id,
+        threadId: input.prepared.thread.id,
+        userId: input.prepared.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     try {
       await mcpToolRuntime?.close();
     } catch (error) {

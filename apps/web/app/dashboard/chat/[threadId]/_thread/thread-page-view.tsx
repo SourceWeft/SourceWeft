@@ -161,6 +161,10 @@ export function DashboardChatThreadPageView({
   parentThread,
   openParentThread,
   openThreadInNewWindow,
+  embedMode,
+  subagentPanel,
+  subagentChildren,
+  openSubagent,
   thinkingSettings,
   toolConfirmationInterventionSignal,
   toggleSourcesVisible,
@@ -198,6 +202,7 @@ export function DashboardChatThreadPageView({
       onSourceLoad: handleLibrarySourcesLoad,
       onSourceMerge: handleLibrarySourcesMerge,
       previewArtifact,
+      subagentPanel,
       threadCitations,
       threadId,
       workfilesRefreshKey,
@@ -230,6 +235,7 @@ export function DashboardChatThreadPageView({
       scrollToMessage,
       handleSkillSelectionChange,
       setPreviewArtifact,
+      subagentPanel,
       threadCitations,
       threadId,
       workfilesRefreshKey,
@@ -243,11 +249,13 @@ export function DashboardChatThreadPageView({
     <div className="flex h-full min-h-0 w-full overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ThreadHeader
+          activeSubagentId={subagentPanel?.threadId ?? null}
           availableModels={availableModels}
           byokCredentials={byokCredentials}
           byokModels={byokModels}
           byokProviders={byokProviders}
           byokSelections={selectedByokModels}
+          embedMode={embedMode}
           isModelCatalogLoading={chatUiState.status === "model-loading"}
           isPersistentLayout={isPersistentLayout}
           onAddByokModel={setByokModelConfig}
@@ -258,12 +266,14 @@ export function DashboardChatThreadPageView({
           }}
           onOpenInNewWindow={openThreadInNewWindow}
           onOpenParentThread={openParentThread}
+          onOpenSubagent={openSubagent}
           onToggleSources={toggleSourcesVisible}
           parentThread={parentThread}
           presenceSlot={<ThreadPresenceAvatars viewers={presentViewers} />}
           selectedModels={selectedModels}
           setSelectedModels={setSelectedModels}
           sourcesVisible={sourcesVisible}
+          subagentChildren={subagentChildren}
           threadTitle={threadTitle}
         />
 
@@ -359,9 +369,11 @@ export function DashboardChatThreadPageView({
 
       <ThreadSidePanels
         isDesktopPanel={isDesktopPanel}
+        isPersistentLayout={isPersistentLayout}
         onArtifactPreviewClose={() => setPreviewArtifact(null)}
         previewArtifact={previewArtifact}
         sourcesVisible={sourcesVisible}
+        subagentPanel={subagentPanel}
         workspaceId={workspaceId}
       />
 

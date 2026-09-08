@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { authClient } from "../../../../../lib/auth-client";
 import {
@@ -91,6 +92,13 @@ import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
 import { BREAKPOINTS, useMediaQuery } from "../../../../../lib/use-media-query";
 import { findChatItem } from "../../../_components/dashboard-chat-items";
+import {
+  isEmbedMode,
+  joinPathAndQuery,
+  readAgentParam,
+  withAgentParam,
+} from "../../../../../lib/thread-embed-params";
+import type { ChatHubSubagentPanel } from "../../_components/chat-hub-context";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
@@ -152,6 +160,80 @@ export function useThreadPageController({
   const openThreadInNewWindow = useCallback(() => {
     window.open(`/dashboard/chat/${threadId}`, "_blank", "noopener,noreferrer");
   }, [threadId]);
+
+  const searchParams = useSearchParams();
+  // Framed inside a sub-agent panel: show the conversation alone and never
+  // open panels of our own (a panel inside a panel would recurse).
+  const embedMode = isEmbedMode(searchParams);
+  // The URL names which sub-agent conversation is open beside this thread, so
+  // the panel survives a reload and can be linked to; local state only mirrors
+  // it so switching feels immediate.
+  const agentParam = readAgentParam(searchParams);
+  const [openSubagentId, setOpenSubagentId] = useState<string | null>(
+    () => agentParam,
+  );
+  useEffect(() => {
+    setOpenSubagentId(agentParam);
+  }, [agentParam]);
+  const subagentChildren = useMemo(
+    () =>
+      (chatItem?.children ?? []).map((child) => ({
+        id: child.id,
+        title: child.title,
+      })),
+    [chatItem?.children],
+  );
+  const syncAgentParam = useCallback(
+    (agentId: string | null) => {
+      router.replace(
+        joinPathAndQuery(
+          `/dashboard/chat/${threadId}`,
+          withAgentParam(searchParams, agentId),
+        ),
+        { scroll: false },
+      );
+    },
+    [router, searchParams, threadId],
+  );
+  const openSubagent = useCallback(
+    (agentId: string) => {
+      if (embedMode) {
+        return;
+      }
+      setOpenSubagentId(agentId);
+      syncAgentParam(agentId);
+    },
+    [embedMode, syncAgentParam],
+  );
+  const closeSubagent = useCallback(() => {
+    setOpenSubagentId(null);
+    syncAgentParam(null);
+  }, [syncAgentParam]);
+  const openSubagentInNewWindow = useCallback((agentId: string) => {
+    window.open(`/dashboard/chat/${agentId}`, "_blank", "noopener,noreferrer");
+  }, []);
+  const subagentPanel = useMemo<ChatHubSubagentPanel | null>(() => {
+    if (embedMode || !openSubagentId) {
+      return null;
+    }
+    return {
+      threadId: openSubagentId,
+      title:
+        subagentChildren.find((child) => child.id === openSubagentId)?.title ??
+        "Sub-agent",
+      siblings: subagentChildren,
+      onSelect: openSubagent,
+      onClose: closeSubagent,
+      onOpenInNewWindow: openSubagentInNewWindow,
+    };
+  }, [
+    closeSubagent,
+    embedMode,
+    openSubagent,
+    openSubagentId,
+    openSubagentInNewWindow,
+    subagentChildren,
+  ]);
 
   const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
   const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
@@ -1319,6 +1401,10 @@ export function useThreadPageController({
     parentThread,
     openParentThread,
     openThreadInNewWindow,
+    embedMode,
+    subagentPanel,
+    subagentChildren,
+    openSubagent,
     thinkingSettings,
     toolConfirmationInterventionSignal,
     toggleSourcesVisible,

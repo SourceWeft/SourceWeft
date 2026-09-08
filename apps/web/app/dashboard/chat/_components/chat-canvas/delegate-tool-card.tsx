@@ -1,6 +1,7 @@
 "use client";
 
-import { Bot, ChevronDown, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Bot, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
 import {
   Task,
   TaskContent,
@@ -18,11 +19,45 @@ const STATUS_LABEL: Record<ToolCallRecord["status"], string> = {
   error: "Failed",
 };
 
+const LINK_CLASS =
+  "inline-flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline";
+
+/**
+ * Where a finished delegate's run lives on its own: the child thread the
+ * server projected it into. A thread is its own route, so "open" navigates and
+ * "new window" is just that route in a fresh window.
+ */
+export function DelegateThreadLinks({
+  childThreadId,
+}: {
+  childThreadId: string;
+}) {
+  const href = `/dashboard/chat/${encodeURIComponent(childThreadId)}`;
+  return (
+    <div className="flex flex-wrap items-center gap-3 pl-1">
+      <Link className={LINK_CLASS} href={href} title="Open sub-agent thread">
+        <Bot className="size-3.5" />
+        <span>Open sub-agent thread</span>
+      </Link>
+      <button
+        className={LINK_CLASS}
+        onClick={() => window.open(href, "_blank", "noopener,noreferrer")}
+        title="Open in new window"
+        type="button"
+      >
+        <ExternalLink className="size-3.5" />
+        <span>New window</span>
+      </button>
+    </div>
+  );
+}
+
 /**
  * Renders a `task` tool call as a sub-agent delegation card, driven entirely by
  * the tool call already on the main stream (args + result). The child's live
  * internal steps are not streamed (that would require fragile subgraph
- * streaming); the delegate, its brief, and its returned report are.
+ * streaming); the delegate, its brief, its returned report — and, once the run
+ * has been projected, a link to the child thread it can be continued in — are.
  */
 export function DelegateToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
   const view = parseDelegateToolCall(toolCall);
@@ -43,6 +78,11 @@ export function DelegateToolCard({ toolCall }: { toolCall: ToolCallRecord }) {
         </div>
       </TaskTrigger>
       <TaskContent>
+        {view.childThreadId ? (
+          <TaskItem>
+            <DelegateThreadLinks childThreadId={view.childThreadId} />
+          </TaskItem>
+        ) : null}
         {view.prompt.length > 0 ? <TaskItem>{view.prompt}</TaskItem> : null}
         {view.report ? (
           <TaskItem>

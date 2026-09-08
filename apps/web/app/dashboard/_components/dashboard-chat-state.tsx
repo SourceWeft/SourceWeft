@@ -36,6 +36,7 @@ import {
   mapThreadToChatItem,
   removeChatItem,
 } from "./dashboard-chat-items";
+import { subscribeDashboardChatChildRefresh } from "./dashboard-chat-children-refresh";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
@@ -745,6 +746,37 @@ export function DashboardChatStateProvider({
     },
     [activeChatId, workspaceId],
   );
+
+  // A running turn projects each `task` delegate into a child thread; fetch
+  // the child as it lands and nest it under its parent wherever that is
+  // listed. Re-dispatches replace the earlier copy, so this is idempotent.
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    return subscribeDashboardChatChildRefresh((detail) => {
+      const childThreadId = detail?.childThreadId;
+      if (!childThreadId) {
+        return;
+      }
+      void contentClient
+        .getThread(workspaceId, childThreadId)
+        .then((result) => {
+          const item = mapThreadToChatItem(result.thread);
+          if (!item.parentThreadId) {
+            return;
+          }
+          setPrivateChats((value) => insertChildChatItem(value, item) ?? value);
+          setSharedChats((value) => insertChildChatItem(value, item) ?? value);
+          setArchivedChats(
+            (value) => insertChildChatItem(value, item) ?? value,
+          );
+        })
+        .catch(() => {
+          // The list refreshes on the next load; a missed nudge is harmless.
+        });
+    });
+  }, [workspaceId]);
 
   const createChat = useCallback(
     async (input?: {

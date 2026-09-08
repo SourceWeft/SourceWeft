@@ -38,7 +38,16 @@ import {
   validateThreadModelSettings,
 } from "./model-settings";
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
-import { findPersona, listPersonas as listPersonaSpecs } from "./agent";
+import {
+  createWorkspacePersona,
+  deleteWorkspacePersona,
+  listWorkspacePersonas,
+  PERSONA_AVAILABLE_TOOLS,
+  presentPersona,
+  resolvePersona,
+  updateWorkspacePersona,
+  type PersonaOverrides,
+} from "./agent";
 import {
   listThreadModelCatalog,
   listThreadModelSelectorCatalog,
@@ -260,25 +269,101 @@ class ContentThreadService {
   }
 
   async listPersonas(input: { workspaceId: string; userId: string }) {
-    await requireContentWorkspace({
+    const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
     });
 
+    const items = await listWorkspacePersonas({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
     return {
-      items: listPersonaSpecs().map((persona) => ({
-        slug: persona.slug,
-        name: persona.name,
-        description: persona.description,
-        systemPrompt: persona.systemPrompt,
-        avatar: persona.avatar ?? null,
-        trust: persona.trust,
-        modelSettings: persona.modelSettings ?? null,
-        toolAllowlist: persona.toolAllowlist
-          ? [...persona.toolAllowlist]
-          : null,
-      })),
+      items: items.map(presentPersona),
+      availableTools: [...PERSONA_AVAILABLE_TOOLS],
     };
+  }
+
+  async createPersona(input: {
+    workspaceId: string;
+    userId: string;
+    /** A built-in slug or a workspace persona id to clone. */
+    sourceId: string;
+    overrides?: PersonaOverrides;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const persona = await createWorkspacePersona({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      sourceId: input.sourceId,
+      overrides: input.overrides,
+    });
+
+    return { persona: presentPersona(persona) };
+  }
+
+  async updatePersona(input: {
+    workspaceId: string;
+    userId: string;
+    personaId: string;
+    patch: PersonaOverrides;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    await requirePersonaAuthorship({
+      workspace,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      personaId: input.personaId,
+    });
+
+    const persona = await updateWorkspacePersona({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      personaId: input.personaId,
+      patch: input.patch,
+    });
+    if (!persona) {
+      throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
+    }
+
+    return { persona: presentPersona(persona) };
+  }
+
+  async deletePersona(input: {
+    workspaceId: string;
+    userId: string;
+    personaId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    await requirePersonaAuthorship({
+      workspace,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      personaId: input.personaId,
+    });
+
+    const deleted = await deleteWorkspacePersona({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      personaId: input.personaId,
+    });
+    if (!deleted) {
+      throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
+    }
+
+    return { deleted: true as const, personaId: input.personaId };
   }
 
   async getThread(input: {
@@ -559,13 +644,24 @@ class ContentThreadService {
     chatPreferences?: Partial<ThreadChatPreferences>;
     /** Nest the new thread one level under an existing, visible thread. */
     parentThreadId?: string | null;
-    /** The persona that owns the thread; built-in slugs only for now. */
+    /** The persona that owns the thread: a built-in slug or a workspace persona id. */
     personaId?: string | null;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
     });
+
+    const persona = input.personaId
+      ? await resolvePersona({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          personaId: input.personaId,
+        })
+      : null;
+    if (input.personaId && !persona) {
+      throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
+    }
 
     const parent = input.parentThreadId
       ? await findThreadRecord({
@@ -587,11 +683,6 @@ class ContentThreadService {
         "THREAD_NESTING_TOO_DEEP",
         "A sub-agent conversation cannot be nested under another one",
       );
-    }
-
-    const persona = input.personaId ? findPersona(input.personaId) : null;
-    if (input.personaId && !persona) {
-      throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
     }
 
     // The persona's preferred model seeds the thread's settings so the normal
@@ -1017,6 +1108,49 @@ class ContentThreadService {
       fileName: image.fileName,
     };
   }
+}
+
+/**
+ * Who may change or remove a workspace persona: its creator, or a workspace
+ * admin (the same content-plane standing `deleteThread` consults). Built-ins
+ * are code and have no author, so they are refused outright — clone instead.
+ */
+async function requirePersonaAuthorship(input: {
+  workspace: { id: string; organizationId: string };
+  workspaceId: string;
+  userId: string;
+  personaId: string;
+}) {
+  const existing = await resolvePersona({
+    teamId: input.workspace.organizationId,
+    workspaceId: input.workspace.id,
+    personaId: input.personaId,
+  });
+  if (!existing) {
+    throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
+  }
+  if (existing.trust === "system") {
+    throw new ContentError(
+      400,
+      "PERSONA_READ_ONLY",
+      "Built-in agents cannot be changed; start a copy instead",
+    );
+  }
+  if (existing.createdBy === input.userId) {
+    return existing;
+  }
+  const access = await workspaceService.resolveAccess({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+  });
+  if (!access || !workspaceService.canAdministerContent(access)) {
+    throw new ContentError(
+      403,
+      "PERSONA_FORBIDDEN",
+      "Only the agent's creator or a workspace admin can change it",
+    );
+  }
+  return existing;
 }
 
 export const contentThreadService = new ContentThreadService();

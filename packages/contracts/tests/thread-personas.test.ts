@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { listPersonasResponseSchema, personaSchema } from "../src/personas";
+import {
+  createPersonaRequestSchema,
+  listPersonasResponseSchema,
+  personaSchema,
+  updatePersonaRequestSchema,
+} from "../src/personas";
 import {
   createThreadRequestSchema,
   listThreadsResponseSchema,
@@ -86,6 +91,7 @@ test("creating a thread may name a parent and a persona, but never blank ones", 
 
 test("a persona is shaped like a deepagents SubAgent declaration", () => {
   const persona = personaSchema.parse({
+    id: "explore",
     slug: "explore",
     name: "Explore",
     description: "Read-only investigation delegate.",
@@ -96,12 +102,37 @@ test("a persona is shaped like a deepagents SubAgent declaration", () => {
     toolAllowlist: ["search_sources"],
   });
   assert.deepEqual(persona.toolAllowlist, ["search_sources"]);
+  // Authoring metadata is absent on a built-in and defaults rather than fails.
+  assert.equal(persona.filesystemPolicy, "default");
+  assert.equal(persona.clonedFrom, null);
   assert.equal(
     personaSchema.safeParse({ ...persona, trust: "builtin" }).success,
     false,
   );
+  const listed = listPersonasResponseSchema.parse({ items: [persona] });
+  assert.equal(listed.items.length, 1);
+  assert.deepEqual(listed.availableTools, []);
+});
+
+test("a workspace persona is always created from a source and edited in parts", () => {
+  const created = createPersonaRequestSchema.parse({
+    sourceId: " explore ",
+    name: "  Verifier ",
+    toolAllowlist: ["search_sources"],
+  });
+  assert.equal(created.sourceId, "explore");
+  assert.equal(created.name, "Verifier");
   assert.equal(
-    listPersonasResponseSchema.parse({ items: [persona] }).items.length,
-    1,
+    createPersonaRequestSchema.safeParse({ name: "No source" }).success,
+    false,
+  );
+  assert.equal(updatePersonaRequestSchema.safeParse({}).success, false);
+  assert.deepEqual(updatePersonaRequestSchema.parse({ toolAllowlist: null }), {
+    toolAllowlist: null,
+  });
+  assert.equal(
+    updatePersonaRequestSchema.safeParse({ filesystemPolicy: "sandbox" })
+      .success,
+    false,
   );
 });

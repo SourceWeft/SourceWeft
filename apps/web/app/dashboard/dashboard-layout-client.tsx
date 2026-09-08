@@ -10,6 +10,7 @@ import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { authClient } from "../../lib/auth-client";
+import { isEmbedMode } from "../../lib/thread-embed-params";
 import { DashboardShellRouteSkeleton } from "../_components/route-loading-skeleton";
 
 const SESSION_CONFIRM_ATTEMPTS = 3;
@@ -34,9 +35,9 @@ function hasActiveSessionResult(result: unknown) {
   const sessionResult = result as SessionResult | undefined;
   return Boolean(
     sessionResult?.data?.session ||
-      sessionResult?.data?.user ||
-      sessionResult?.session ||
-      sessionResult?.user,
+    sessionResult?.data?.user ||
+    sessionResult?.session ||
+    sessionResult?.user,
   );
 }
 
@@ -54,6 +55,9 @@ export function DashboardLayoutClient({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // An embedded thread (framed inside a sub-agent panel) shows only the
+  // conversation: the sidebar and mobile nav belong to the framing page.
+  const embedMode = isEmbedMode(searchParams);
   const mountedRef = useRef(false);
   const redirectToRef = useRef("/dashboard");
   const sessionConfirmingRef = useRef(false);
@@ -118,7 +122,11 @@ export function DashboardLayoutClient({
       setSessionConfirming(true);
 
       try {
-        for (let attempt = 0; attempt < SESSION_CONFIRM_ATTEMPTS; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < SESSION_CONFIRM_ATTEMPTS;
+          attempt += 1
+        ) {
           const session = await authClient.getSession({
             query: {
               disableCookieCache: true,
@@ -160,13 +168,7 @@ export function DashboardLayoutClient({
     }
 
     void confirmSessionOrRedirect();
-  }, [
-    hasSession,
-    isPending,
-    redirecting,
-    refetch,
-    router,
-  ]);
+  }, [hasSession, isPending, redirecting, refetch, router]);
 
   if (
     sessionConfirming ||
@@ -181,11 +183,21 @@ export function DashboardLayoutClient({
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
           <div className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
-            <DashboardSidebar />
-            <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-              <DashboardMobileContent>{children}</DashboardMobileContent>
+            {embedMode ? null : <DashboardSidebar />}
+            <main
+              className={
+                embedMode
+                  ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
+                  : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+              }
+            >
+              {embedMode ? (
+                children
+              ) : (
+                <DashboardMobileContent>{children}</DashboardMobileContent>
+              )}
             </main>
-            <DashboardMobileBottomNav />
+            {embedMode ? null : <DashboardMobileBottomNav />}
           </div>
         </DashboardMobileNavProvider>
       </DashboardChatStateProvider>

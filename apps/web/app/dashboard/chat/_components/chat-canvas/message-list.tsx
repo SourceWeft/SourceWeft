@@ -83,6 +83,7 @@ import {
   isDelegateToolName,
   parseDelegateToolCall,
 } from "./delegate-tool-card-state";
+import { DelegateThreadLinks } from "./delegate-tool-card";
 import { formatCompactDuration } from "./duration-format";
 import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
@@ -787,6 +788,11 @@ function AssistantMessageBody({
                       </TaskTrigger>
                       <TaskContent>
                         <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
+                          {view?.childThreadId ? (
+                            <DelegateThreadLinks
+                              childThreadId={view.childThreadId}
+                            />
+                          ) : null}
                           {view?.prompt ? (
                             <section className="space-y-1">
                               <span className="block pl-1 font-medium text-[11px] text-muted-foreground/50 tracking-wide">

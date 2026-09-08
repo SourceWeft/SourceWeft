@@ -188,11 +188,19 @@ export {
 } from "./middleware/tool-execution-timeout";
 
 // Personas are referenced from the threads root (service, turn preparer): the
-// chat-able roster and the tool-allowlist helpers the turn applies.
+// chat-able roster (built-in and workspace-authored), the authoring surface,
+// and the tool-allowlist helpers the turn applies.
 export {
   applyPersonaToolAllowlist,
+  createWorkspacePersona,
+  deleteWorkspacePersona,
   filterToolsForPersona,
   findPersona,
   listPersonas,
+  listWorkspacePersonas,
+  PERSONA_AVAILABLE_TOOLS,
+  presentPersona,
+  resolvePersona,
+  updateWorkspacePersona,
 } from "./personas";
-export type { PersonaSpec } from "./personas";
+export type { PersonaOverrides, PersonaSpec } from "./personas";

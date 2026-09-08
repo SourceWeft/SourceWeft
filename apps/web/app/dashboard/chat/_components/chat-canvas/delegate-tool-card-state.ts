@@ -14,6 +14,11 @@ export interface DelegateToolView {
   prompt: string;
   /** The delegate's returned report, or null while running / when absent. */
   report: string | null;
+  /**
+   * The child thread the server projected this delegate's run into, once the
+   * call finished; null while running or when the run was not projected.
+   */
+  childThreadId: string | null;
   status: ToolCallRecord["status"];
 }
 
@@ -35,21 +40,30 @@ export function parseDelegateToolCall(
     subagentType,
     prompt,
     report: extractReport(toolCall.output),
+    childThreadId: readDelegateChildThreadId(toolCall.output),
     status: toolCall.status,
   };
 }
 
 /**
- * Best-effort readable report from the tool output.
- *
- * deepagents' `task` tool returns a LangGraph `Command`, not a plain string, so
- * the raw output reaching the client is
- * `{ update: { messages: [ToolMessage], ... }, lg_name: "Command" }`. The actual
- * report prose (markdown) lives at `update.messages[last].kwargs.content`. We
- * unwrap that here instead of dumping the whole Command wrapper as JSON. The
- * plain-string branch still covers the rare no-tool-call fallback path, and an
- * error/partial result falls through to `null` rather than leaking the wrapper.
+ * The child thread a finished delegate was projected into. The server tags the
+ * `task` result under a namespaced `sourceweft.childThreadId` key so no new
+ * event or field was needed; a result without the tag is simply not openable.
  */
+export function readDelegateChildThreadId(output: unknown): string | null {
+  if (output == null || typeof output !== "object") {
+    return null;
+  }
+  const marker = (output as Record<string, unknown>).sourceweft;
+  if (marker == null || typeof marker !== "object") {
+    return null;
+  }
+  const childThreadId = (marker as Record<string, unknown>).childThreadId;
+  return typeof childThreadId === "string" && childThreadId.length > 0
+    ? childThreadId
+    : null;
+}
+
 /**
  * Short task label for the delegate header chip (LobeChat-style pill): the
  * first non-empty line of the brief, trimmed to its first sentence and capped.
@@ -72,6 +86,18 @@ export function getDelegateChipTitle(prompt: string): string | null {
   return title;
 }
 
+/**
+ * Best-effort readable report from the tool output.
+ *
+ * Under v3 the `task` tool's result reaches the client as the delegate's plain
+ * report string, or — once the server has projected the run into a child
+ * thread — as `{ report, sourceweft: { childThreadId } }`. The legacy raw shape
+ * is deepagents' serialized LangGraph `Command`
+ * (`{ update: { messages: [ToolMessage] }, lg_name: "Command" }`), whose report
+ * prose lives at `update.messages[last].kwargs.content`. All three are handled
+ * here so the card never dumps a wrapper as JSON; an error/partial result falls
+ * through to `null`.
+ */
 export function extractReport(output: unknown): string | null {
   if (output == null) {
     return null;
@@ -84,6 +110,9 @@ export function extractReport(output: unknown): string | null {
     const commandContent = extractCommandReportContent(record);
     if (commandContent) {
       return commandContent;
+    }
+    if (typeof record.report === "string" && record.report.length > 0) {
+      return record.report;
     }
     if (typeof record.summary === "string" && record.summary.length > 0) {
       return record.summary;

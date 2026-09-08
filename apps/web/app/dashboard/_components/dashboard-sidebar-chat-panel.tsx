@@ -8,6 +8,7 @@ import {
   Gauge,
   Lock,
   MoreHorizontal,
+  PanelRightOpen,
   PanelsTopLeft,
   PenSquare,
   Share2,
@@ -62,6 +63,7 @@ import {
 } from "./dashboard-shortcuts";
 import { flattenChatItems } from "./dashboard-chat-items";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import { DashboardPersonaManager } from "./dashboard-persona-manager";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -459,28 +461,31 @@ function WorkspaceSwitcher({
  * where the thread goes, the dialog only chooses who drives it.
  */
 function PersonaPickerDialog({
+  onManage,
   onOpenChange,
   onPick,
   open,
   parentTitle,
+  refreshToken,
   workspaceId,
 }: {
+  /** Opens the persona manager; the picker refetches when it closes. */
+  onManage: () => void;
   onOpenChange: (open: boolean) => void;
   onPick: (personaId: string) => Promise<void>;
   open: boolean;
   parentTitle: string | null;
+  /** Bumped whenever a persona was created, edited, or removed. */
+  refreshToken: number;
   workspaceId: string | null;
 }) {
   const [personas, setPersonas] = useState<Persona[] | null>(null);
-  const [loadedForWorkspace, setLoadedForWorkspace] = useState<string | null>(
-    null,
-  );
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [pickingSlug, setPickingSlug] = useState<string | null>(null);
 
-  // Personas are fetched the first time the picker opens for a workspace and
-  // reused until the workspace changes.
+  // Personas are fetched whenever the picker opens, so an agent authored in
+  // the manager a moment ago is already listed.
   const loadPersonas = useCallback(async () => {
     if (!workspaceId) {
       return;
@@ -490,7 +495,6 @@ function PersonaPickerDialog({
     try {
       const result = await contentClient.listPersonas(workspaceId);
       setPersonas(result.items);
-      setLoadedForWorkspace(workspaceId);
     } catch {
       setHasError(true);
     } finally {
@@ -499,16 +503,17 @@ function PersonaPickerDialog({
   }, [workspaceId]);
 
   useEffect(() => {
-    if (open && workspaceId && loadedForWorkspace !== workspaceId) {
+    if (open && workspaceId) {
       void loadPersonas();
     }
-  }, [loadPersonas, loadedForWorkspace, open, workspaceId]);
+    // refreshToken is a deliberate dependency: it forces a refetch after edits.
+  }, [loadPersonas, open, refreshToken, workspaceId]);
 
   const handlePick = async (persona: Persona) => {
     if (pickingSlug) return;
-    setPickingSlug(persona.slug);
+    setPickingSlug(persona.id);
     try {
-      await onPick(persona.slug);
+      await onPick(persona.id);
       onOpenChange(false);
     } catch {
       toast.error("Could not start the agent chat.");
@@ -516,6 +521,38 @@ function PersonaPickerDialog({
       setPickingSlug(null);
     }
   };
+
+  const builtIn = personas?.filter((persona) => persona.trust === "system");
+  const custom = personas?.filter((persona) => persona.trust !== "system");
+
+  const renderPersona = (persona: Persona) => (
+    <button
+      key={persona.id}
+      className="flex w-full items-start gap-2.5 rounded-md border border-border px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+      disabled={pickingSlug !== null}
+      onClick={() => void handlePick(persona)}
+      type="button"
+    >
+      <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <span className="truncate">
+            {pickingSlug === persona.id
+              ? `Starting ${persona.name}...`
+              : persona.name}
+          </span>
+          {persona.trust !== "system" ? (
+            <span className="shrink-0 rounded-sm border border-border px-1.5 py-px text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+              Custom
+            </span>
+          ) : null}
+        </span>
+        <span className="line-clamp-2 block text-xs text-muted-foreground">
+          {persona.description}
+        </span>
+      </span>
+    </button>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -530,8 +567,8 @@ function PersonaPickerDialog({
               : "Pick the agent that will own this conversation. You can keep talking to it in its own thread."}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-1.5">
-          {isLoading ? (
+        <div className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto">
+          {isLoading && !personas ? (
             <p className="text-xs text-muted-foreground">Loading agents...</p>
           ) : null}
           {hasError ? (
@@ -539,28 +576,20 @@ function PersonaPickerDialog({
               Could not load agents. Close and try again.
             </p>
           ) : null}
-          {personas?.map((persona) => (
-            <button
-              key={persona.slug}
-              className="flex w-full items-start gap-2.5 rounded-md border border-border px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-              disabled={pickingSlug !== null}
-              onClick={() => void handlePick(persona)}
-              type="button"
-            >
-              <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">
-                  {pickingSlug === persona.slug
-                    ? `Starting ${persona.name}...`
-                    : persona.name}
-                </span>
-                <span className="line-clamp-2 block text-xs text-muted-foreground">
-                  {persona.description}
-                </span>
-              </span>
-            </button>
-          ))}
+          {builtIn?.map(renderPersona)}
+          {custom && custom.length > 0 ? (
+            <p className="mt-2 px-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Your agents
+            </p>
+          ) : null}
+          {custom?.map(renderPersona)}
         </div>
+        <DialogFooter className="sm:justify-start">
+          <Button onClick={onManage} size="sm" type="button" variant="ghost">
+            <PenSquare className="size-3.5" />
+            Manage agents...
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -590,6 +619,7 @@ function ChatListRow({
   onArchive,
   onDelete,
   onOpenInNewWindow,
+  onOpenInPanel,
   onSetVisibility,
   onOpen,
   onPrefetch,
@@ -603,6 +633,8 @@ function ChatListRow({
   onArchive: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
+  /** Opens a nested conversation beside its parent (parent id, child id). */
+  onOpenInPanel?: (parentId: string, childId: string) => void;
   onSetVisibility?: (
     id: string,
     visibility: "private" | "workspace",
@@ -614,6 +646,7 @@ function ChatListRow({
   const status = item.status || "ready";
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt);
   const shared = isSharedChat(item);
+  const parentThreadId = item.parentThreadId;
 
   const handleToggleVisibility = async () => {
     if (!onSetVisibility) return;
@@ -739,6 +772,14 @@ function ChatListRow({
                 <span>Add sub-agent...</span>
               </DropdownMenuItem>
             ) : null}
+            {nested && onOpenInPanel && parentThreadId ? (
+              <DropdownMenuItem
+                onSelect={() => onOpenInPanel(parentThreadId, item.id)}
+              >
+                <PanelRightOpen className="size-4" />
+                <span>Open beside parent</span>
+              </DropdownMenuItem>
+            ) : null}
             {onOpenInNewWindow ? (
               <DropdownMenuItem onSelect={() => onOpenInNewWindow(item.id)}>
                 <ExternalLink className="size-4" />
@@ -777,6 +818,7 @@ function ChatSection({
   onClear,
   onDelete,
   onOpenInNewWindow,
+  onOpenInPanel,
   onSetVisibility,
   onOpen,
   onPrefetch,
@@ -793,6 +835,8 @@ function ChatSection({
   onClear?: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
+  /** Opens a nested conversation beside its parent (parent id, child id). */
+  onOpenInPanel?: (parentId: string, childId: string) => void;
   onSetVisibility?: (
     id: string,
     visibility: "private" | "workspace",
@@ -888,6 +932,7 @@ function ChatSection({
                   onArchive={onArchive}
                   onDelete={onDelete}
                   onOpenInNewWindow={onOpenInNewWindow}
+                  onOpenInPanel={onOpenInPanel}
                   onSetVisibility={onSetVisibility}
                   onOpen={onOpen}
                   onPrefetch={onPrefetch}
@@ -930,6 +975,7 @@ export function DashboardSidebarChatPanel({
   onOpenUsage,
   onOpenChat,
   onOpenChatInNewWindow,
+  onOpenChatInPanel,
   onPrefetchChat,
   onCreateWorkspace,
   onRenameWorkspace,
@@ -964,6 +1010,8 @@ export function DashboardSidebarChatPanel({
   onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
   onOpenChatInNewWindow: (id: string) => void;
+  /** Opens a nested conversation beside its parent (parent id, child id). */
+  onOpenChatInPanel: (parentId: string, childId: string) => void;
   onPrefetchChat?: (id: string) => void;
   onCreateWorkspace: (name: string) => Promise<void>;
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
@@ -983,6 +1031,10 @@ export function DashboardSidebarChatPanel({
   } | null>(null);
   const openSubagentPicker = (id: string, title: string) =>
     setPersonaPicker({ parentThreadId: id, parentTitle: title });
+  // The manager opens on top of the picker; when it closes, the picker
+  // refetches so a freshly authored agent is immediately selectable.
+  const [personaManagerOpen, setPersonaManagerOpen] = useState(false);
+  const [personaRefreshToken, setPersonaRefreshToken] = useState(0);
 
   const weekAgo = Date.now() - ONE_WEEK_MS;
   const seenIds = new Set<string>();
@@ -1065,6 +1117,7 @@ export function DashboardSidebarChatPanel({
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
           onOpenInNewWindow={onOpenChatInNewWindow}
+          onOpenInPanel={onOpenChatInPanel}
           onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
@@ -1081,6 +1134,7 @@ export function DashboardSidebarChatPanel({
           onClear={onClearPrivateChats}
           onDelete={onDeleteChat}
           onOpenInNewWindow={onOpenChatInNewWindow}
+          onOpenInPanel={onOpenChatInPanel}
           onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
@@ -1101,6 +1155,7 @@ export function DashboardSidebarChatPanel({
       </SidebarContent>
 
       <PersonaPickerDialog
+        onManage={() => setPersonaManagerOpen(true)}
         onOpenChange={(open) => {
           if (!open) setPersonaPicker(null);
         }}
@@ -1112,6 +1167,13 @@ export function DashboardSidebarChatPanel({
         }
         open={personaPicker !== null}
         parentTitle={personaPicker?.parentTitle ?? null}
+        refreshToken={personaRefreshToken}
+        workspaceId={workspaceId}
+      />
+      <DashboardPersonaManager
+        onChanged={() => setPersonaRefreshToken((value) => value + 1)}
+        onOpenChange={setPersonaManagerOpen}
+        open={personaManagerOpen}
         workspaceId={workspaceId}
       />
 

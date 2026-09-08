@@ -250,6 +250,15 @@ export function DashboardSidebar() {
     window.open(`/dashboard/chat/${id}`, "_blank", "noopener,noreferrer");
   };
 
+  // A nested conversation opens beside its parent: the parent's page with the
+  // child named in the URL, which the thread page turns into the side panel.
+  const handleOpenChatInPanel = (parentId: string, childId: string) => {
+    setOpenMobile(false);
+    router.push(
+      `/dashboard/chat/${parentId}?agent=${encodeURIComponent(childId)}`,
+    );
+  };
+
   const handleRenameWorkspace = async (workspaceId: string, name: string) => {
     const workspace = await renameWorkspace(workspaceId, name);
     if (!workspace) {
@@ -376,6 +385,7 @@ export function DashboardSidebar() {
           }
           onOpenChat={onOpenChat}
           onOpenChatInNewWindow={handleOpenChatInNewWindow}
+          onOpenChatInPanel={handleOpenChatInPanel}
           onPrefetchChat={handlePrefetchChat}
           onRenameWorkspace={handleRenameWorkspace}
           hasMorePrivateChats={hasMorePrivateChats}

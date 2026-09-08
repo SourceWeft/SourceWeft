@@ -25,6 +25,23 @@ import type { SourceItem } from "./source-types";
 
 export type ChatHubMode = "new" | "thread";
 
+/**
+ * A sub-agent conversation opened beside its parent thread. The panel frames
+ * the child's own route in embed mode, so the parent page never has to host a
+ * second thread controller.
+ */
+export type ChatHubSubagentPanel = {
+  /** The child thread shown in the panel. */
+  threadId: string;
+  /** Fallback title until the sidebar knows the child. */
+  title: string;
+  /** Every sub-agent conversation under the parent, for the switcher. */
+  siblings: { id: string; title: string }[];
+  onSelect: (threadId: string) => void;
+  onClose: () => void;
+  onOpenInNewWindow: (threadId: string) => void;
+};
+
 export type ChatHubRegistration = {
   mode: ChatHubMode;
   workspaceId: string | null;
@@ -61,6 +78,11 @@ export type ChatHubRegistration = {
   onArtifactPreviewClose: () => void;
   onSourceLoad: (sources: SourceItem[]) => void;
   onSourceMerge: (sources: SourceItem[]) => void;
+  /**
+   * Takes the right-hand slot over sources and artifact previews when set.
+   * Optional: only a thread page ever opens one.
+   */
+  subagentPanel?: ChatHubSubagentPanel | null;
 };
 
 type ChatHubContextValue = {
@@ -117,6 +139,7 @@ function buildDefaultRegistration(): ChatHubRegistration {
     onArtifactPreviewClose: NOOP_ON_ARTIFACT_PREVIEW_CLOSE,
     onSourceLoad: NOOP_ON_SOURCE_LOAD,
     onSourceMerge: NOOP_ON_SOURCE_MERGE,
+    subagentPanel: null,
   };
 }
 
