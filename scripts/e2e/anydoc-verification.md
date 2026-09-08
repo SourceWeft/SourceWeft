@@ -1,5 +1,7 @@
 # AnyDoc verification — 2026-09-08
 
+Historical run: its record/chapter/document-unit billing expectations were corrected later. See [the page/text billing verification](anydoc-billing-verification.md) for the current rule and actual ledger checks.
+
 ## Live environment and scope
 
 Executed from the dedicated `codex/anydoc-inprocess` worktree using API 3101,

@@ -140,7 +140,12 @@ export const pdf2MarkdownProvider: DocumentParseProvider = {
       content: extracted.content,
       pages: extracted.pages,
       metadata: {
-        pageCount: extracted.pageCount ?? result.page_count,
+        pageCount: result.page_count ?? extracted.pageCount,
+        // Explicit unknown prevents synthetic logical page 1 from becoming physical.
+        pageCountSource:
+          (result.page_count ?? extracted.pageCount) !== undefined
+            ? "ocr"
+            : "unknown",
         documentParseProviderResolved: "pdf2markdown",
         documentParseProvider: "pdf2markdown",
         documentParseBackend: "pdf2markdown",

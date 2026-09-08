@@ -1,7 +1,6 @@
 import type { Format, NeedsOcrError } from "@firecrawl/anydoc";
 import { buildParsedDocument } from "./build-parsed-document";
 import { ParserContentError } from "./errors";
-import { readAnydocBillingMetadata } from "./anydoc-billing-metadata";
 import { readPdfPageCount } from "./pdf-page-count";
 import type { ParsedDocument, ParseInput } from "./types";
 
@@ -63,13 +62,11 @@ export async function parseWithAnydoc(
     expectedFormat === "pdf"
       ? await readPdfPageCount(input.content)
       : undefined;
-  const billingMetadata = await readAnydocBillingMetadata(input);
   return buildParsedDocument({
     parseInput: input,
     content,
     pages: [],
     metadata: {
-      ...billingMetadata,
       documentParseBackend: "anydoc",
       parserEngine: "anydoc",
       parserEngineVersion: "0.2.4",

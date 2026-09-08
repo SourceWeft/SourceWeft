@@ -1,3 +1,8 @@
+import {
+  estimateSourceTokens,
+  resolveBillingPages,
+  resolvePhysicalPageCount,
+} from "./billing-pages";
 import { createHash } from "node:crypto";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
@@ -48,10 +53,6 @@ import {
   buildSourceParseLogContext,
 } from "./parse-diagnostics";
 
-function estimateTokens(text: string) {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
 function computeContentHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -66,23 +67,12 @@ function mergeStatusMetadata(
   };
 }
 
-function resolveParsedPageCount(input: {
-  mimeType?: string | null;
-  parsed: ParsedDocument;
-}) {
-  if (input.mimeType && isSupportedImageMimeType(input.mimeType)) {
-    return 1;
-  }
-
-  return input.parsed.metadata.pageCount ?? input.parsed.pages.length;
-}
-
 // Provenance belongs to one parse, while upload/user metadata survives reparses.
 function withoutParseMetadata(metadata: SourceRecord["metadata"]) {
   return Object.fromEntries(
     Object.entries(metadata ?? {}).filter(
       ([key]) =>
-        !/^(documentParse|provider|parserEngine|pdfClassification|pdfBitmap)/.test(
+        !/^(ingestionBilling|documentParse|provider|parserEngine|pdfClassification|pdfBitmap)/.test(
           key,
         ) &&
         ![
@@ -639,30 +629,23 @@ export class SourceParsingService {
     }
 
     const contentHash = computeContentHash(input.parsed.content);
-    const parsedTokens = estimateTokens(input.parsed.content);
-    const parsedPages = resolveParsedPageCount({
+    const parsedTokens = estimateSourceTokens(input.parsed.content);
+    const physicalPageCount = resolvePhysicalPageCount({
       mimeType: input.source.mimeType,
-      parsed: input.parsed,
+      metadata: input.parsed.metadata,
     });
-    const declaredBillingPages = input.parsed.metadata.billingPageCount;
-    if (
-      Object.hasOwn(input.parsed.metadata, "billingPageCount") &&
-      (typeof declaredBillingPages !== "number" ||
-        !Number.isSafeInteger(declaredBillingPages) ||
-        declaredBillingPages <= 0)
-    ) {
-      throw new ContentError(
-        422,
-        "INVALID_BILLING_PAGE_COUNT",
-        "Parser billingPageCount must be a positive safe integer",
-      );
-    }
-    const billablePages =
-      typeof declaredBillingPages === "number"
-        ? declaredBillingPages
-        : parsedPages;
+    const parsedPages = physicalPageCount ?? 0;
+    const billablePages = resolveBillingPages({
+      physicalPageCount,
+      contentText: input.parsed.content,
+    });
+    const billingMetadata = {
+      ingestionBillingPages: billablePages,
+      ingestionBillingBasis:
+        physicalPageCount === undefined ? "text-equivalent" : "physical-pages",
+    };
     const imagePageMetadata = isImageSourceMimeType(input.source.mimeType)
-      ? { pageCount: parsedPages }
+      ? { pageCount: 1, pageCountSource: "image" }
       : {};
     const parsedSource = await updateSourceRecordForLatestRevision({
       teamId: input.input.teamId,
@@ -677,15 +660,16 @@ export class SourceParsingService {
         Buffer.byteLength(input.parsed.content, "utf8"),
       parserVersion: input.parsingConfig.parserVersion,
       parsingConfig: input.parsingConfig,
-      estimatedPages: billablePages || input.source.estimatedPages,
+      estimatedPages: billablePages,
       parsedTokens,
       metadata: {
         ...withoutParseMetadata(input.source.metadata),
         ...input.parsed.metadata,
         ...imagePageMetadata,
+        ...billingMetadata,
         parsedTextSizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
         parsedPages,
-        totalPages: billablePages || parsedPages,
+        totalPages: parsedPages,
         progress: 60,
         currentStep: "chunking",
         error: null,
@@ -702,7 +686,7 @@ export class SourceParsingService {
       userId: input.input.userId,
       sourceRevisionId: input.input.sourceRevisionId,
       estimatedPages: billablePages,
-      parsedPages: billablePages || parsedPages,
+      parsedPages,
       parsedTokens,
       idempotencyKey: input.input.idempotencyKey,
       chunks: input.parsed.chunks,
@@ -723,7 +707,7 @@ export class SourceParsingService {
       sourceRevisionId: input.input.sourceRevisionId,
       metadata: mergeStatusMetadata(result.source, {
         parsedPages,
-        totalPages: billablePages || parsedPages,
+        totalPages: parsedPages,
         progress: 100,
         currentStep: "completed",
         error: null,

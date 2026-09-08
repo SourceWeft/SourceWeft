@@ -79,7 +79,6 @@ for (const [extension, [path, expected]] of Object.entries(nativeCases)) {
     assert.equal(parsed.metadata.documentParseBackend, "anydoc");
     assert.ok(parsed.chunks.length > 0);
     assert.deepEqual(parsed.pages, []);
-    if (entry.format !== "pdf")
-      assert.ok(Number(parsed.metadata.billingPageCount) > 0);
+    assert.equal(parsed.metadata.billingPageCount, undefined);
   });
 }

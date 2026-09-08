@@ -81,6 +81,7 @@ beforeEach(() => {
   fixtures.resume
     .mockReset()
     .mockResolvedValue({ kind: "completed", document: fixtures.parsed });
+  fixtures.parsed.content = "hello";
   fixtures.parsed.metadata = {};
   fixtures.parsed.pages = [{ content: "hello" }];
   fixtures.index
@@ -272,48 +273,27 @@ test("fresh local parse clears old OCR diagnostics and preserves upload metadata
   assert.equal(metadata.userTitleProvided, true);
 });
 
-test("Office billing units override stale estimates without inventing physical pages", async () => {
+test("Office parsing bills actual text equivalents and ignores old document units", async () => {
   fixtures.source.mimeType =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  fixtures.source.estimatedPages = 10;
+  fixtures.source.estimatedPages = 99;
+  fixtures.parsed.content = "x".repeat(12001);
   fixtures.parsed.pages = [];
   fixtures.parsed.metadata = {
     billingPageCount: 1,
-    billingPageCountSource: "legacy_docx",
     pageLocationAvailable: false,
   };
   await service().processSourceParseJob(job);
   const metadata = contentUpdate().metadata as Record<string, unknown>;
   assert.equal(metadata.parsedPages, 0);
   assert.equal(metadata.pageCount, undefined);
-  assert.equal(metadata.totalPages, 1);
-  assert.equal(metadata.billingPageCount, 1);
-  assert.equal(contentUpdate().estimatedPages, 1);
-  assert.equal(fixtures.index.mock.calls[0]?.[0].parsedPages, 1);
-  assert.equal(fixtures.index.mock.calls[0]?.[0].estimatedPages, 1);
+  assert.equal(metadata.totalPages, 0);
+  assert.equal(metadata.ingestionBillingPages, 4);
+  assert.equal(metadata.ingestionBillingBasis, "text-equivalent");
+  assert.equal(contentUpdate().estimatedPages, 4);
+  assert.equal(fixtures.index.mock.calls[0]?.[0].parsedPages, 0);
+  assert.equal(fixtures.index.mock.calls[0]?.[0].parsedTokens, 3001);
 });
-
-for (const value of [
-  0,
-  -1,
-  1.5,
-  NaN,
-  Infinity,
-  Number.MAX_SAFE_INTEGER + 1,
-  "1",
-  null,
-  undefined,
-]) {
-  test(`invalid declared billingPageCount ${String(value)} fails rather than estimating`, async () => {
-    fixtures.parsed.metadata = { billingPageCount: value };
-    fixtures.source.estimatedPages = 10;
-    await assert.rejects(
-      service().processSourceParseJob({ ...job, isFinalAttempt: false }),
-      /positive safe integer/,
-    );
-    assert.equal(fixtures.index.mock.calls.length, 0);
-  });
-}
 
 for (const patch of [
   { attempt: -1 },

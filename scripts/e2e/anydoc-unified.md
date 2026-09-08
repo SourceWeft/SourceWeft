@@ -102,3 +102,11 @@ The runner triggers only the selected known successful fixture, waits at most
 Check the built worker log for the corresponding source-parse job. This is
 additional production-artifact evidence, not a replacement for browser upload
 and retrieval coverage.
+
+## Page and text billing
+
+All documents use verified physical pages when available; otherwise the existing
+1000-estimated-token standard page rule applies (ceil(content.length / 4) tokens,
+minimum one page). Do not use CSV rows, EPUB chapters or a fixed document unit
+as manifest billing expectations. See [the real ledger verification](anydoc-billing-verification.md)
+for long-file and idempotent page-consumption tests.

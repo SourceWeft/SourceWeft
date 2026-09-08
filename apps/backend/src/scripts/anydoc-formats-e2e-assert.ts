@@ -9,6 +9,12 @@ const required = (name: string) => {
   return value;
 };
 const mode = process.argv[2] || "assert";
+const artifactSubdir = process.env.E2E_ARTIFACT_SUBDIR || "anydoc-formats";
+assert.match(
+  artifactSubdir,
+  /^[a-z0-9-]+$/,
+  "Artifact subdirectory must be a simple local name",
+);
 assert.ok(
   ["assert", "cleanup", "reparse"].includes(mode),
   "Expected assert, cleanup or reparse",
@@ -200,7 +206,7 @@ const report = {
   results,
 };
 const directory = new URL(
-  "../../../../output/playwright/anydoc-formats/",
+  `../../../../output/playwright/${artifactSubdir}/`,
   import.meta.url,
 );
 await mkdir(directory, { recursive: true });

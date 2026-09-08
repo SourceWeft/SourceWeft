@@ -199,112 +199,62 @@ test("importing legacy parser entry does not load AnyDoc or its native bindings"
   assert.match(output, /legacy-without-anydoc/);
 });
 
-for (const [name, mime, count, source] of [
-  ["sample.csv", "text/csv", 2, "csv-records"],
-  ["sample.csv", "application/csv", 2, "csv-records"],
-  ["sample.epub", "application/epub+zip", 1, "epub-chapters"],
+for (const [name, mime] of [
+  [
+    "sample.docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ],
+  [
+    "sample.pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ],
+  ["sample.csv", "text/csv"],
+  ["sample.csv", "application/csv"],
+  ["sample.epub", "application/epub+zip"],
 ] as const) {
-  test(`AnyDoc ${mime} preserves legacy billing count without making page claims`, async () => {
-    const input = await fixture(name, mime);
-    const result = await parseWithAnydoc(input);
-    assert.equal(result.metadata.billingPageCount, count);
-    assert.equal(result.metadata.billingPageCountSource, source);
+  test(`AnyDoc ${mime} leaves unpaginated content for central text billing`, async () => {
+    const result = await parseWithAnydoc(await fixture(name, mime));
+    assert.equal(result.metadata.billingPageCount, undefined);
+    assert.equal(result.metadata.billingPageCountSource, undefined);
     assert.equal(result.metadata.pageCount, undefined);
     assert.deepEqual(result.pages, []);
   });
 }
 
-test("DOCX and PPTX retain one document billing unit without a physical page count", async () => {
-  for (const [name, mime] of [
-    [
-      "sample.docx",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ],
-    [
-      "sample.pptx",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ],
-  ]) {
-    const result = await parseWithAnydoc(await fixture(name!, mime!));
-    assert.equal(result.metadata.billingPageCount, 1);
-    assert.equal(result.metadata.billingPageCountSource, "document");
-    assert.equal(result.metadata.pageCount, undefined);
-  }
-});
-
-test("header-only CSV is rejected instead of indexing headers and estimating billing", async () => {
+test("header-only CSV can index real native output without legacy record-count rejection", async () => {
   for (const mimeType of ["text/csv", "application/csv"]) {
-    for (const csv of ["name,value", "name,value\n\n"]) {
-      const input = {
-        ...(await fixture("sample.csv", mimeType)),
-        content: Buffer.from(csv),
-        fileSize: Buffer.byteLength(csv),
-      };
-      await assert.rejects(
-        () => parseWithAnydoc(input),
-        (error: unknown) => {
-          assert.ok(error instanceof Error && "code" in error);
-          assert.equal(error.code, "ANYDOC_NO_INDEXABLE_RECORDS");
-          return true;
-        },
-      );
-    }
+    const content = Buffer.from("name,value\n");
+    const result = await parseWithAnydoc({
+      ...(await fixture("sample.csv", mimeType)),
+      content,
+      fileSize: content.length,
+    });
+    assert.ok(result.content.includes("name"));
+    assert.ok(result.content.includes("value"));
+    assert.equal(result.metadata.billingPageCount, undefined);
   }
 });
 
-test("CSV empty fields and blank records retain the existing record-count semantics", async () => {
-  for (const [csv, count] of [
-    ["name,value\n,\n", 1],
-    ["name,value\nalpha,1\n\nbeta,2\n", 3],
-  ] as const) {
-    const input = {
-      ...(await fixture("sample.csv", "text/csv")),
-      content: Buffer.from(csv),
-      fileSize: Buffer.byteLength(csv),
-    };
-    const result = await parseWithAnydoc(input);
-    // Legacy documents contain column labels even when all field values are empty.
-    assert.equal(result.metadata.billingPageCount, count);
-  }
-});
-
-test("EPUB with zero legacy billable chapters fails instead of estimating", async () => {
-  const input = await fixture(
-    "legacy-zero-chapters.epub",
-    "application/epub+zip",
-  );
-  await assert.rejects(
-    () => parseWithAnydoc(input),
-    (error: unknown) => {
-      assert.ok(error instanceof Error && "code" in error);
-      assert.equal(error.code, "ANYDOC_NO_INDEXABLE_RECORDS");
-      return true;
-    },
-  );
-});
-
-test("CSV accounting preserves quoted multiline and duplicate-header record semantics", async () => {
-  for (const [csv, expected] of [
-    ['name,value\n"two\nlines",1\nbeta,2\n', 2],
-    ["name,name\nalpha,beta\ngamma,delta\n", 2],
-    ["name,value\r\nalpha,1\r\nbeta,2\r\n", 2],
-  ] as const) {
-    const input = {
-      ...(await fixture("sample.csv", "text/csv")),
-      content: Buffer.from(csv),
-      fileSize: Buffer.byteLength(csv),
-    };
-    const result = await parseWithAnydoc(input);
-    assert.equal(result.metadata.billingPageCount, expected);
-    assert.equal(result.metadata.billingPageCountSource, "csv-records");
-  }
-});
-
-test("EPUB accounting counts nonempty chapters and excludes an empty spine chapter", async () => {
+test("EPUB parses a single manifest item without an obsolete metadata-reader restriction", async () => {
   const result = await parseWithAnydoc(
-    await fixture("billing-chapters.epub", "application/epub+zip"),
+    await fixture("single-chapter.epub", "application/epub+zip"),
   );
-  assert.equal(result.metadata.billingPageCount, 2);
-  assert.equal(result.metadata.billingPageCountSource, "epub-chapters");
-  assert.ok(result.content.includes("Second billable chapter 2468"));
+  assert.ok(result.content.includes("9876"));
+  assert.equal(result.metadata.billingPageCount, undefined);
+});
+
+test("CSV preserves multiline fields and empty fields as native content", async () => {
+  for (const csv of [
+    "name,value\n,\n",
+    'name,value\n"two\nlines",1\nbeta,2\n',
+  ]) {
+    const content = Buffer.from(csv);
+    const result = await parseWithAnydoc({
+      ...(await fixture("sample.csv", "text/csv")),
+      content,
+      fileSize: content.length,
+    });
+    assert.ok(result.content.includes("name"));
+    assert.equal(result.metadata.billingPageCount, undefined);
+  }
 });

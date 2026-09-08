@@ -89,7 +89,10 @@ if (mode === "cleanup") {
     const source = detail.source;
     const metadata = source.metadata;
     assert.equal(metadata.documentParseEntryEngine, "anydoc");
-    assert.equal(source.parserVersion, "v3-anydoc-0.2.4");
+    assert.equal(
+      source.parserVersion,
+      process.env.E2E_PARSER_VERSION || "v4-anydoc-unified-0.2.4",
+    );
     if (kind === "ocrPdf") {
       assert.equal(metadata.documentParseProviderResolved, "pdf2markdown");
       assert.equal(
@@ -114,7 +117,8 @@ if (mode === "cleanup") {
       assert.equal(metadata.pageLocationAvailable, false);
       if (kind === "docx") {
         assert.equal(source.estimatedPages, 1);
-        assert.equal(metadata.billingPageCount, 1);
+        assert.equal(metadata.ingestionBillingPages, 1);
+        assert.equal(metadata.ingestionBillingBasis, "text-equivalent");
         assert.match(content.content, /中文测试/);
         assert.match(content.content, /1234\.56/);
       } else {

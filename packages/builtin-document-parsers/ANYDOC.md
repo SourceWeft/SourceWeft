@@ -39,19 +39,15 @@ AnyDoc 0.2.4 text-PDF Markdown does not contain reliable page markers. Do not in
 
 The existing `pdfjs-dist` dependency reads only PDF `numPages`, recorded as `pageCountSource: "pdfjs"`. It never extracts or replaces body text. Metadata inspection failure fails parsing rather than estimating a count.
 
-`billingPageCount` is separate from physical pages:
+All file parsing is billed centrally using the existing `credits-core` ingestion rule. A verified physical PDF/image page count takes precedence. Without physical pages, the source service estimates tokens with `max(1, ceil(content.length / 4))` and charges `max(1, ceil(tokens / 1000))` standard pages. This is the existing UTF-16 string-length estimate; it does not introduce a Chinese/English word segmentation rule. Empty content fails ingestion.
 
-- DOC/DOCX/PPTX retain one document unit. Newly supported Office and RTF formats use the same document unit (`billingPageCountSource: "document"`).
-- CSV retains the old comma-delimited, trimmed UTF-8 record count through direct `d3-dsv` parsing (`csv-records`). Header-only files fail. Empty-valued records and interior blank records retain their existing counting semantics; quoted newlines are not counted as extra records.
-- EPUB retains the existing nonempty chapter count using `epub2` spine traversal and `html-to-text` emptiness checking (`epub-chapters`). Empty chapters are excluded. A zero count fails rather than triggering estimated billing.
-
-These CSV/EPUB tools are accounting-only dependencies. No LangChain CSV/EPUB/Word/PowerPoint loader remains and their text never substitutes for AnyDoc output. Keeping the EPUB accounting pass costs an additional archive/chapter read, but avoids an unannounced fee change. Using only AnyDoc AST chapter anchors is not equivalent: AnyDoc deduplicates spine items and handles malformed chapters differently from the old accounting reader. Replacing the remaining accounting tools requires a separately agreed billing-policy migration.
+AnyDoc does not emit per-document, CSV-record, spreadsheet-row or EPUB-chapter billing overrides. Office/CSV/EPUB outputs without physical pages use the same text-based charge as other unpaginated files. The previous record/chapter/document-one compatibility pass was removed because it incorrectly bypassed the existing rule. No `d3-dsv`, `epub2` or `html-to-text` accounting dependency remains. The central parsing/indexing and real ledger tests verify token boundaries, physical-page precedence and idempotent charging.
 
 ## Verification
 
 Native tests exercise all 21 official extensions, including binary DOC/PPT/XLS/XLSB, OpenDocument formats, content-type-correct macro/slideshow variants, Chinese text, table numbers, text/scanned/mixed PDFs and errors. Upstream real fixtures are pinned to the v0.2.4 release with MIT license/provenance in `tests/fixtures/anydoc/upstream-v0.2.4`; synthetic fixtures and transformations are documented alongside them. These samples verify native compatibility, not a representative document-quality benchmark.
 
-Accounting regressions cover CSV header-only, empty fields, blank records, duplicate headers and multiline cells; EPUB nonempty/empty chapters and the existing zero-chapter edge case. Other tests enforce no hosted upload, narrow OCR routing, shared MIME registration and no eager native loading.
+Native content regressions cover CSV header-only/empty/multiline fields and single-chapter EPUB packages without a legacy metadata reader. Every supported format asserts that the parser emits no billing override. Backend tests enforce central page/text charging. Other tests enforce no hosted upload, narrow OCR routing, shared MIME registration and no eager native loading.
 
 Real application E2E verification must use an isolated database/queue/ports: authenticate, upload through supported UI, wait for worker parsing and indexing, inspect actual engine/format metadata, and retrieve through chat. Remote OCR and model calls must be distinguished from mocks, and external service failures reported rather than replaced.
 

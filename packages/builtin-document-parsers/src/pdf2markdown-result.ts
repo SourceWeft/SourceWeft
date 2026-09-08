@@ -97,12 +97,14 @@ export function extractPdf2MarkdownResult(resultJson: unknown): {
       ? result.page_count
       : typeof data?.page_count === "number"
         ? data.page_count
-        : pages.length || undefined;
+        : // A complete provider page array includes real blank pages, even
+          // though blank content is excluded from the display/citation list.
+          pagesValue.length || undefined;
 
   return {
     content,
-    pages:
-      pages.length > 0 ? pages : content ? [{ pageNumber: 1, content }] : [],
+    // Markdown-only responses contain no physical page provenance.
+    pages,
     pageCount,
   };
 }
