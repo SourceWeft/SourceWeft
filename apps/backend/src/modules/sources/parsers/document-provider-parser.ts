@@ -2,7 +2,6 @@ import {
   anydocMimeTypes,
   imageMimeTypes,
 } from "@sourceweft/builtin-document-parsers";
-import { config } from "../../../shared/config";
 import type { ParsedDocument, ParseInput, SourceParser } from "./types";
 import { startDocumentParse } from "./providers/document-parse-orchestrator";
 
@@ -17,11 +16,7 @@ export class DocumentProviderParser implements SourceParser {
   readonly id = "pdf";
   readonly name = "Document Provider Parser";
   readonly supportedMimeTypes: readonly string[] = Array.from(
-    new Set([
-      "application/pdf",
-      ...imageMimeTypes,
-      ...(config.documentParsing.provider === "anydoc" ? anydocMimeTypes : []),
-    ]),
+    new Set(["application/pdf", ...imageMimeTypes, ...anydocMimeTypes]),
   );
 
   async parse(input: ParseInput): Promise<ParsedDocument> {

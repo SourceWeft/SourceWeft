@@ -1,3 +1,4 @@
+import { getAnydocFormatByMimeType } from "@sourceweft/builtin-document-parsers/formats";
 import {
   isAnydocNeedsOcrError,
   isAnydocMimeType,
@@ -8,23 +9,13 @@ import type {
   DocumentParseStrategy,
 } from "../../../content/types";
 import type { ProviderParseInput, ProviderParseOutcome } from "./types";
-import { classifyPdf } from "./pdf-classifier";
-import { langChainPdfProvider } from "./langchain-pdf-provider";
 import { getDocumentProvider } from "./registry";
-import { isSupportedImageMimeType, summarizeNumbers } from "./utils";
+import { isSupportedImageMimeType } from "./utils";
 import { tryParseImageWithVision } from "./image-vision-provider";
 
 type ImageVisionParser = typeof tryParseImageWithVision;
 
 let imageVisionParser: ImageVisionParser = tryParseImageWithVision;
-
-function getConfiguredStrategy() {
-  return config.documentParsing.strategy as DocumentParseStrategy;
-}
-
-function getConfiguredProviderId() {
-  return config.documentParsing.provider as DocumentParseProviderId;
-}
 
 function ensureSupported(
   providerId: DocumentParseProviderId,
@@ -112,18 +103,45 @@ async function startConfiguredOcr(
 }
 
 export function isDocumentProviderMimeType(mimeType: string): boolean {
-  return (
-    mimeType === "application/pdf" ||
-    isSupportedImageMimeType(mimeType) ||
-    (getConfiguredProviderId() === "anydoc" && isAnydocMimeType(mimeType))
-  );
+  return isSupportedImageMimeType(mimeType) || isAnydocMimeType(mimeType);
 }
 
 export async function startDocumentParse(
   input: ProviderParseInput,
 ): Promise<ProviderParseOutcome> {
-  const strategy = getConfiguredStrategy();
-  const requestedProvider = getConfiguredProviderId();
+  const canonicalMimeType =
+    getAnydocFormatByMimeType(input.mimeType)?.mimeType ?? input.mimeType;
+  const canonicalInput =
+    canonicalMimeType === input.mimeType
+      ? input
+      : { ...input, mimeType: canonicalMimeType };
+  const outcome = await startCanonicalDocumentParse(canonicalInput);
+  if (canonicalMimeType === input.mimeType) return outcome;
+  const provenance = {
+    documentParseInputMimeType: input.mimeType,
+    documentParseCanonicalMimeType: canonicalMimeType,
+  };
+  return {
+    ...outcome,
+    ...(outcome.kind === "completed"
+      ? {
+          document: {
+            ...outcome.document,
+            metadata: { ...outcome.document.metadata, ...provenance },
+          },
+        }
+      : {}),
+    diagnostics: {
+      metadata: { ...outcome.diagnostics?.metadata, ...provenance },
+    },
+  };
+}
+
+async function startCanonicalDocumentParse(
+  input: ProviderParseInput,
+): Promise<ProviderParseOutcome> {
+  const strategy = "explicit";
+  const requestedProvider = "anydoc";
 
   if (isSupportedImageMimeType(input.mimeType)) {
     if (config.documentParsing.imageStrategy === "ocr") {
@@ -148,76 +166,21 @@ export async function startDocumentParse(
     });
   }
 
-  if (requestedProvider === "anydoc") {
-    const provider = ensureSupported("anydoc", input.mimeType);
-    let outcome: ProviderParseOutcome;
-    try {
-      outcome = await provider.start(input);
-    } catch (error) {
-      // OCR is a declared branch, never a catch-all replacement parser.
-      if (!isAnydocNeedsOcrError(error)) throw error;
-      return startConfiguredOcr(input, strategy, requestedProvider, "needsOcr");
-    }
-    return withDecisionMetadata({
-      outcome,
-      strategy,
-      requestedProvider,
-      resolvedProvider: "anydoc",
-      extraMetadata: { documentParseEntryEngine: "anydoc" },
-    });
+  const provider = ensureSupported("anydoc", input.mimeType);
+  let outcome: ProviderParseOutcome;
+  try {
+    outcome = await provider.start(input);
+  } catch (error) {
+    // OCR is a declared branch, never a catch-all replacement parser.
+    if (!isAnydocNeedsOcrError(error)) throw error;
+    return startConfiguredOcr(input, strategy, requestedProvider, "needsOcr");
   }
-
-  if (strategy === "explicit") {
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
-      strategy,
-      requestedProvider,
-    });
-  }
-
-  if (strategy === "quality") {
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
-      strategy,
-      requestedProvider,
-    });
-  }
-
-  if (input.mimeType !== "application/pdf") {
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
-      strategy,
-      requestedProvider,
-    });
-  }
-
-  // Classification errors and local parser errors must fail without silently
-  // routing a document to a different (possibly remote) implementation.
-  const classification = await classifyPdf(input.content);
-  const metadata = {
-    pdfClassification: classification.kind,
-    pdfClassificationConfidence: classification.confidence,
-    pdfBitmapCoverageSummary: summarizeNumbers(classification.bitmapCoverage),
-  };
-  if (classification.kind === "pure_text") {
-    const outcome = await langChainPdfProvider.start(input);
-    return withDecisionMetadata({
-      outcome,
-      strategy,
-      requestedProvider,
-      resolvedProvider: "langchain",
-      extraMetadata: metadata,
-    });
-  }
-  return startWithProvider({
-    providerId: requestedProvider,
-    parseInput: input,
+  return withDecisionMetadata({
+    outcome,
     strategy,
     requestedProvider,
-    extraMetadata: metadata,
+    resolvedProvider: "anydoc",
+    extraMetadata: { documentParseEntryEngine: "anydoc" },
   });
 }
 

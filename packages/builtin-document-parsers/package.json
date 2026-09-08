@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./providers": "./src/providers/index.ts"
+    "./providers": "./src/providers/index.ts",
+    "./formats": "./src/anydoc-formats.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -14,14 +15,19 @@
   "dependencies": {
     "@firecrawl/anydoc": "0.2.4",
     "@langchain/classic": "^1.0.42",
-    "@langchain/community": "^1.1.29",
     "@langchain/core": "^1.2.9",
     "@langchain/textsplitters": "^1.0.1",
     "@sourceweft/capability-contracts": "workspace:*",
+    "d3-dsv": "3.0.1",
+    "epub2": "3.0.2",
+    "html-to-text": "9.0.5",
     "pdfjs-dist": "^6.2.108",
+    "srt-parser-2": "1.2.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/d3-dsv": "3.0.7",
+    "@types/html-to-text": "9.0.4",
     "@types/node": "^22.20.1",
     "tsx": "^4.23.12",
     "typescript": "5.9.2"

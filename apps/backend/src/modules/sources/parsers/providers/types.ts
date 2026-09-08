@@ -3,7 +3,6 @@ import type { ContentBillingPort } from "../../../content/billing-port";
 
 export type {
   DocumentParseProvider,
-  PdfClassification,
   ProviderDiagnostics,
   ProviderParseOutcome,
   ProviderPendingToken,

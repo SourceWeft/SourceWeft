@@ -6,6 +6,7 @@ vi.mock("dotenv/config", () => ({}));
 
 beforeEach(() => {
   for (const name of [
+    "DOCUMENT_PARSE_DEFAULT_PARSER_VERSION",
     "DOCUMENT_PARSE_STRATEGY",
     "DOCUMENT_PARSE_PROVIDER",
     "DOCUMENT_PARSE_OCR_ENABLED",
@@ -27,11 +28,16 @@ afterEach(() => {
   vi.resetModules();
 });
 
-test("AnyDoc selection is explicit and an OCR credential never enables its OCR branch", async () => {
+test("AnyDoc is the sole document engine and an OCR credential never enables its OCR branch", async () => {
   vi.stubEnv("DOCUMENT_PARSE_PROVIDER", " ANYDOC ");
   vi.stubEnv("PDF2MARKDOWN_API_KEY", "test-key-never-output");
   const { config } = await import("./config");
-  assert.equal(config.documentParsing.provider, "anydoc");
+  assert.equal("provider" in config.documentParsing, false);
+  assert.equal("strategy" in config.documentParsing, false);
+  assert.equal(
+    config.documentParsing.defaultParserVersion,
+    "v4-anydoc-unified-0.2.4",
+  );
   assert.equal(config.documentParsing.ocrEnabled, false);
   assert.equal(config.documentParsing.ocrProvider, "pdf2markdown");
   assert.equal(config.documentParsing.imageStrategy, "vision");
@@ -89,7 +95,6 @@ test("Docker and backend examples agree on explicit migration and OCR defaults",
     "utf8",
   );
   for (const [name, value] of Object.entries({
-    DOCUMENT_PARSE_PROVIDER: "pdf2markdown",
     DOCUMENT_PARSE_OCR_ENABLED: "false",
     DOCUMENT_PARSE_OCR_PROVIDER: "pdf2markdown",
     DOCUMENT_PARSE_IMAGE_STRATEGY: "vision",
@@ -100,16 +105,37 @@ test("Docker and backend examples agree on explicit migration and OCR defaults",
   }
 });
 
-test("misspelled legacy strategy fails instead of selecting a different routing strategy", async () => {
-  vi.stubEnv("DOCUMENT_PARSE_STRATEGY", "balaned");
-  await assert.rejects(
-    import("./config"),
-    /DOCUMENT_PARSE_STRATEGY must be one of/,
-  );
-});
-
-test("legacy strategy normalizes an explicit supported value", async () => {
-  vi.stubEnv("DOCUMENT_PARSE_STRATEGY", " BALANCED ");
+for (const provider of [
+  "langchain",
+  "pdf2markdown",
+  "docling",
+  "llamaparse",
+  "unstructured",
+  "secret-value-not-to-echo",
+]) {
+  test(`retired document provider ${provider} fails migration explicitly`, async () => {
+    vi.stubEnv("DOCUMENT_PARSE_PROVIDER", provider);
+    await assert.rejects(import("./config"), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /DOCUMENT_PARSE_PROVIDER no longer selects/);
+      assert.equal(error.message.includes(provider), false);
+      return true;
+    });
+  });
+}
+for (const strategy of ["balanced", "cost", "quality", "balaned"]) {
+  test(`retired strategy ${strategy} fails migration explicitly`, async () => {
+    vi.stubEnv("DOCUMENT_PARSE_STRATEGY", strategy);
+    await assert.rejects(
+      import("./config"),
+      /DOCUMENT_PARSE_STRATEGY no longer selects/,
+    );
+  });
+}
+test("existing anydoc/explicit declarations are harmless migration aliases", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_PROVIDER", " ANYDOC ");
+  vi.stubEnv("DOCUMENT_PARSE_STRATEGY", " EXPLICIT ");
   const { config } = await import("./config");
-  assert.equal(config.documentParsing.strategy, "balanced");
+  assert.equal("provider" in config.documentParsing, false);
+  assert.equal("strategy" in config.documentParsing, false);
 });

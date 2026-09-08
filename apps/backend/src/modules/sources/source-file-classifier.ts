@@ -1,3 +1,4 @@
+import { anydocFormatCatalog } from "@sourceweft/builtin-document-parsers/formats";
 import {
   assertTextLikeSourceContent,
   ParserContentError,
@@ -5,13 +6,7 @@ import {
 import { ContentError } from "../content/errors";
 
 export type SourceFileKind =
-  | "text"
-  | "table"
-  | "json"
-  | "transcript"
-  | "document"
-  | "image"
-  | "audio";
+  "text" | "table" | "json" | "transcript" | "document" | "image" | "audio";
 
 export type SourceFileClassification = {
   supported: true;
@@ -165,6 +160,38 @@ const textMimeByExtension: Record<string, string> = {
   tsv: "text/tab-separated-values",
 };
 
+function anydocRule(
+  entry: (typeof anydocFormatCatalog)[number],
+): SourceFileRule {
+  return {
+    kind: entry.format === "csv" ? "table" : "document",
+    mimeType: entry.mimeType,
+    label: entry.format.toUpperCase(),
+  };
+}
+
+const anydocExtensionRules = Object.fromEntries(
+  anydocFormatCatalog.flatMap((entry) =>
+    entry.extensions.map((extension) => [extension, anydocRule(entry)]),
+  ),
+);
+const anydocMimeRules = Object.fromEntries(
+  anydocFormatCatalog.flatMap((entry) =>
+    [entry.mimeType, ...entry.mimeAliases].map((mime) => [
+      mime,
+      anydocRule(entry),
+    ]),
+  ),
+);
+const anydocCompatibleExtensions = Object.fromEntries(
+  anydocFormatCatalog.flatMap((entry) =>
+    [entry.mimeType, ...entry.mimeAliases].map((mime) => [
+      mime,
+      entry.extensions,
+    ]),
+  ),
+);
+
 const extensionRules: Partial<Record<string, SourceFileRule>> = {
   ...Object.fromEntries(
     textExtensions.map((extension) => [
@@ -172,31 +199,14 @@ const extensionRules: Partial<Record<string, SourceFileRule>> = {
       {
         kind: "text",
         mimeType:
-          textMimeByExtension[
-            extension as keyof typeof textMimeByExtension
-          ] ?? "text/plain",
+          textMimeByExtension[extension as keyof typeof textMimeByExtension] ??
+          "text/plain",
         label: "Text",
       } satisfies SourceFileRule,
     ]),
   ),
-  csv: { kind: "table", mimeType: "text/csv", label: "CSV" },
   json: { kind: "json", mimeType: "application/json", label: "JSON" },
   srt: { kind: "transcript", mimeType: "text/srt", label: "Subtitle" },
-  pdf: { kind: "document", mimeType: "application/pdf", label: "PDF" },
-  doc: { kind: "document", mimeType: "application/msword", label: "Word" },
-  docx: {
-    kind: "document",
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    label: "Word",
-  },
-  pptx: {
-    kind: "document",
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    label: "Slides",
-  },
-  epub: { kind: "document", mimeType: "application/epub+zip", label: "EPUB" },
   avif: { kind: "image", mimeType: "image/avif", label: "Image" },
   png: { kind: "image", mimeType: "image/png", label: "Image" },
   jpg: { kind: "image", mimeType: "image/jpeg", label: "Image" },
@@ -215,6 +225,7 @@ const extensionRules: Partial<Record<string, SourceFileRule>> = {
   ogg: { kind: "audio", mimeType: "audio/ogg", label: "Audio" },
   wav: { kind: "audio", mimeType: "audio/wav", label: "Audio" },
   webm: { kind: "audio", mimeType: "audio/webm", label: "Audio" },
+  ...anydocExtensionRules,
 };
 
 const mimeRules: Partial<Record<string, SourceFileRule>> = {
@@ -298,12 +309,6 @@ const mimeRules: Partial<Record<string, SourceFileRule>> = {
     mimeType: "text/tab-separated-values",
     label: "Text",
   },
-  "text/csv": { kind: "table", mimeType: "text/csv", label: "CSV" },
-  "application/csv": {
-    kind: "table",
-    mimeType: "application/csv",
-    label: "CSV",
-  },
   "application/json": {
     kind: "json",
     mimeType: "application/json",
@@ -319,53 +324,6 @@ const mimeRules: Partial<Record<string, SourceFileRule>> = {
     kind: "transcript",
     mimeType: "application/srt",
     label: "Subtitle",
-  },
-  "application/pdf": {
-    kind: "document",
-    mimeType: "application/pdf",
-    label: "PDF",
-  },
-  "application/x-pdf": {
-    kind: "document",
-    mimeType: "application/pdf",
-    label: "PDF",
-  },
-  "application/acrobat": {
-    kind: "document",
-    mimeType: "application/pdf",
-    label: "PDF",
-  },
-  "applications/vnd.pdf": {
-    kind: "document",
-    mimeType: "application/pdf",
-    label: "PDF",
-  },
-  "application/msword": {
-    kind: "document",
-    mimeType: "application/msword",
-    label: "Word",
-  },
-  "application/vnd.ms-word": {
-    kind: "document",
-    mimeType: "application/msword",
-    label: "Word",
-  },
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
-    kind: "document",
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    label: "Word",
-  },
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
-    kind: "document",
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    label: "Slides",
-  },
-  "application/epub+zip": {
-    kind: "document",
-    mimeType: "application/epub+zip",
-    label: "EPUB",
   },
   "image/avif": { kind: "image", mimeType: "image/avif", label: "Image" },
   "image/png": { kind: "image", mimeType: "image/png", label: "Image" },
@@ -390,22 +348,13 @@ const mimeRules: Partial<Record<string, SourceFileRule>> = {
   "audio/webm": { kind: "audio", mimeType: "audio/webm", label: "Audio" },
   "video/mp4": { kind: "audio", mimeType: "video/mp4", label: "Audio" },
   "video/webm": { kind: "audio", mimeType: "video/webm", label: "Audio" },
+  ...anydocMimeRules,
 };
 
-const compatibleExtensionsByMimeType: Partial<Record<string, readonly string[]>> = {
-  "application/pdf": ["pdf"],
-  "application/x-pdf": ["pdf"],
-  "application/acrobat": ["pdf"],
-  "applications/vnd.pdf": ["pdf"],
-  "application/msword": ["doc"],
-  "application/vnd.ms-word": ["doc"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
-    "docx",
-  ],
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
-    "pptx",
-  ],
-  "application/epub+zip": ["epub"],
+const compatibleExtensionsByMimeType: Partial<
+  Record<string, readonly string[]>
+> = {
+  ...anydocCompatibleExtensions,
   "image/avif": ["avif"],
   "image/png": ["png"],
   "image/x-png": ["png"],
@@ -526,7 +475,9 @@ function isCompatibleMimeForExtension(input: {
   }
 
   return (
-    ["text", "table", "json", "transcript"].includes(input.extensionRule.kind) &&
+    ["text", "table", "json", "transcript"].includes(
+      input.extensionRule.kind,
+    ) &&
     input.mimeRule.kind === "text" &&
     isGenericTextMime(input.mimeType)
   );
@@ -552,7 +503,9 @@ export function classifySourceFile(input: {
   const extension = getSourceFileExtension(input.fileName);
   const extensionRule = extension ? extensionRules[extension] : undefined;
   const normalizedMimeType = normalizeMimeType(input.mimeType);
-  const mimeRule = normalizedMimeType ? mimeRules[normalizedMimeType] : undefined;
+  const mimeRule = normalizedMimeType
+    ? mimeRules[normalizedMimeType]
+    : undefined;
 
   if (extensionRule) {
     if (normalizedMimeType && mimeRule) {
@@ -567,8 +520,7 @@ export function classifySourceFile(input: {
         return unsupported({
           extension,
           mimeType: normalizedMimeType,
-          reason:
-            `MIME type '${normalizedMimeType}' does not match file extension '.${extension}'`,
+          reason: `MIME type '${normalizedMimeType}' does not match file extension '.${extension}'`,
         });
       }
 
@@ -593,8 +545,7 @@ export function classifySourceFile(input: {
         return unsupported({
           extension,
           mimeType: normalizedMimeType,
-          reason:
-            `Unsupported MIME type '${normalizedMimeType}' for file extension '.${extension}'`,
+          reason: `Unsupported MIME type '${normalizedMimeType}' for file extension '.${extension}'`,
         });
       }
     }
@@ -607,8 +558,7 @@ export function classifySourceFile(input: {
       return unsupported({
         extension,
         mimeType: normalizedMimeType,
-        reason:
-          `Unsupported audio MIME type '${normalizedMimeType}' for file extension '.${extension}'`,
+        reason: `Unsupported audio MIME type '${normalizedMimeType}' for file extension '.${extension}'`,
       });
     }
 
@@ -663,7 +613,7 @@ export function requireSupportedSourceFile(input: {
   throw new ContentError(
     400,
     "UNSUPPORTED_SOURCE_TYPE",
-    `${classification.reason}. Supported formats include PDF, DOC/DOCX, PPTX, EPUB, common text/code files, CSV, JSON, SRT, images, and DeepInfra ASR audio formats (flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm).`,
+    `${classification.reason}. Supported formats include ${anydocFormatCatalog.map((entry) => entry.extensions.join("/")).join(", ")}, common text/code files, JSON, SRT, images, and DeepInfra ASR audio formats (flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm).`,
   );
 }
 

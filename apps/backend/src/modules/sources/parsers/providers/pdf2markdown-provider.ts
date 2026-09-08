@@ -1,3 +1,4 @@
+import { getAnydocFormatByMimeType } from "@sourceweft/builtin-document-parsers/formats";
 import { buildParsedDocument } from "./utils";
 import type {
   DocumentParseProvider,
@@ -34,7 +35,10 @@ function isTerminalFailureStatus(status: string) {
 export const pdf2MarkdownProvider: DocumentParseProvider = {
   id: "pdf2markdown",
   supports(mimeType) {
-    return mimeType === "application/pdf" || isSupportedImageMimeType(mimeType);
+    return (
+      getAnydocFormatByMimeType(mimeType)?.format === "pdf" ||
+      isSupportedImageMimeType(mimeType)
+    );
   },
   async start(input: ProviderParseInput) {
     const normalized = await normalizeImageForPdf2Markdown({

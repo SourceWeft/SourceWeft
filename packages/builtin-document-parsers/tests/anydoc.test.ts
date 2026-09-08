@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
-import { csvSourceParser } from "../src/csv";
-import { epubSourceParser } from "../src/epub";
 import { readPdfPageCount } from "../src/pdf-page-count";
 import { buildParsedDocument } from "../src/build-parsed-document";
 import {
@@ -108,14 +106,14 @@ test("malformed, empty, and mismatched files do not become OCR requirements", as
   assert.equal(isAnydocNeedsOcrError({ code: "needsOcr" }), false);
 });
 
-test("unvalidated formats are not advertised", () => {
+test("document formats are advertised while images remain separate", () => {
   assert.equal(isAnydocMimeType("image/png"), false);
-  assert.equal(isAnydocMimeType("application/msword"), false);
+  assert.equal(isAnydocMimeType("application/msword"), true);
   assert.equal(
     isAnydocMimeType(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ),
-    false,
+    true,
   );
 });
 
@@ -201,18 +199,16 @@ test("importing legacy parser entry does not load AnyDoc or its native bindings"
   assert.match(output, /legacy-without-anydoc/);
 });
 
-for (const [name, mime, parser] of [
-  ["sample.csv", "text/csv", csvSourceParser],
-  ["sample.csv", "application/csv", csvSourceParser],
-  ["sample.epub", "application/epub+zip", epubSourceParser],
+for (const [name, mime, count, source] of [
+  ["sample.csv", "text/csv", 2, "csv-records"],
+  ["sample.csv", "application/csv", 2, "csv-records"],
+  ["sample.epub", "application/epub+zip", 1, "epub-chapters"],
 ] as const) {
   test(`AnyDoc ${mime} preserves legacy billing count without making page claims`, async () => {
     const input = await fixture(name, mime);
-    const legacy = await parser.parse(input);
     const result = await parseWithAnydoc(input);
-    assert.ok((legacy.metadata.pageCount ?? 0) > 0);
-    assert.equal(result.metadata.billingPageCount, legacy.metadata.pageCount);
-    assert.equal(result.metadata.billingPageCountSource, "legacy-loader");
+    assert.equal(result.metadata.billingPageCount, count);
+    assert.equal(result.metadata.billingPageCountSource, source);
     assert.equal(result.metadata.pageCount, undefined);
     assert.deepEqual(result.pages, []);
   });
@@ -257,18 +253,18 @@ test("header-only CSV is rejected instead of indexing headers and estimating bil
 });
 
 test("CSV empty fields and blank records retain the existing record-count semantics", async () => {
-  for (const csv of ["name,value\n,\n", "name,value\nalpha,1\n\nbeta,2\n"]) {
+  for (const [csv, count] of [
+    ["name,value\n,\n", 1],
+    ["name,value\nalpha,1\n\nbeta,2\n", 3],
+  ] as const) {
     const input = {
       ...(await fixture("sample.csv", "text/csv")),
       content: Buffer.from(csv),
       fileSize: Buffer.byteLength(csv),
     };
-    const legacy = await csvSourceParser.parse(input);
     const result = await parseWithAnydoc(input);
     // Legacy documents contain column labels even when all field values are empty.
-    assert.ok((legacy.metadata.pageCount ?? 0) > 0);
-    assert.ok((legacy.metadata.pageCount ?? 0) > 0);
-    assert.equal(result.metadata.billingPageCount, legacy.metadata.pageCount);
+    assert.equal(result.metadata.billingPageCount, count);
   }
 });
 
@@ -277,8 +273,6 @@ test("EPUB with zero legacy billable chapters fails instead of estimating", asyn
     "legacy-zero-chapters.epub",
     "application/epub+zip",
   );
-  const legacy = await epubSourceParser.parse(input);
-  assert.equal(legacy.metadata.pageCount, 0);
   await assert.rejects(
     () => parseWithAnydoc(input),
     (error: unknown) => {
@@ -287,4 +281,30 @@ test("EPUB with zero legacy billable chapters fails instead of estimating", asyn
       return true;
     },
   );
+});
+
+test("CSV accounting preserves quoted multiline and duplicate-header record semantics", async () => {
+  for (const [csv, expected] of [
+    ['name,value\n"two\nlines",1\nbeta,2\n', 2],
+    ["name,name\nalpha,beta\ngamma,delta\n", 2],
+    ["name,value\r\nalpha,1\r\nbeta,2\r\n", 2],
+  ] as const) {
+    const input = {
+      ...(await fixture("sample.csv", "text/csv")),
+      content: Buffer.from(csv),
+      fileSize: Buffer.byteLength(csv),
+    };
+    const result = await parseWithAnydoc(input);
+    assert.equal(result.metadata.billingPageCount, expected);
+    assert.equal(result.metadata.billingPageCountSource, "csv-records");
+  }
+});
+
+test("EPUB accounting counts nonempty chapters and excludes an empty spine chapter", async () => {
+  const result = await parseWithAnydoc(
+    await fixture("billing-chapters.epub", "application/epub+zip"),
+  );
+  assert.equal(result.metadata.billingPageCount, 2);
+  assert.equal(result.metadata.billingPageCountSource, "epub-chapters");
+  assert.ok(result.content.includes("Second billable chapter 2468"));
 });

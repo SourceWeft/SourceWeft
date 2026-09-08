@@ -1,6 +1,12 @@
+import {
+  anydocFormatCatalog,
+  getAnydocFormatByExtension,
+} from "@sourceweft/builtin-document-parsers/formats";
+
 /** Upload file-type vocabulary and helpers for the Add Source dialog. */
 
 export const SOURCE_FILE_EXTENSIONS = [
+  ...anydocFormatCatalog.flatMap((entry) => entry.extensions),
   "txt",
   "text",
   "md",
@@ -81,13 +87,7 @@ export const SOURCE_FILE_EXTENSIONS = [
   "makefile",
   "cmake",
   "tsv",
-  "csv",
   "srt",
-  "pdf",
-  "doc",
-  "docx",
-  "pptx",
-  "epub",
   "avif",
   "png",
   "jpg",
@@ -140,11 +140,9 @@ export function getUploadFileExtension(fileName: string) {
 export function getUploadFileLabel(file: File) {
   const extension = getUploadFileExtension(file.name);
   if (!extension) return "FILE";
-  if (["pdf"].includes(extension)) return "PDF";
-  if (["doc", "docx"].includes(extension)) return "DOC";
-  if (["pptx"].includes(extension)) return "PPT";
-  if (["epub"].includes(extension)) return "EPUB";
-  if (["csv", "tsv"].includes(extension)) return "CSV";
+  const documentFormat = getAnydocFormatByExtension(extension);
+  if (documentFormat) return documentFormat.format.toUpperCase();
+  if (extension === "tsv") return "CSV";
   if (extension === "json") return "JSON";
   if (extension === "srt") return "SRT";
   if (

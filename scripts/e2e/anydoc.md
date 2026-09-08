@@ -1,5 +1,8 @@
 # AnyDoc live E2E
 
+This is the initial integration runbook. For the current sole-engine implementation,
+use [the unified format runbook](anydoc-unified.md).
+
 Run in a dedicated worktree. The existing application must continue using its
 own ports, database and queue. Do not use a passing mocked provider test as
 proof of successful live OCR or retrieval.

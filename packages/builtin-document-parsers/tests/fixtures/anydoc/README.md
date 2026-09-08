@@ -1,1 +1,3 @@
 These minimal, synthetic fixtures are owned by SourceWeft and contain no external content. OOXML/EPUB archives contain standard XML parts; PDFs contain two Helvetica text pages or two image-only pages. They exercise the actual native AnyDoc binary, not mocked conversion. They are compatibility smoke samples, not a representative document quality corpus.
+
+Macro/slideshow variants sample.docm, sample.pptm, sample.ppsx, sample.ppsm use the synthetic source OOXML with the appropriate main-part content type. They contain no VBA. sample.xlsm derives from upstream-v0.2.4/sheet.xlsx with the macro-enabled content type; it is covered by the included upstream MIT LICENSE. Binary PowerPoint pps/pot alias tests use the same actual OLE presentation bytes with the alias filename.

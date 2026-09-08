@@ -1,11 +1,6 @@
-import { config } from "../../../shared/config";
 import {
   createSourceParserRegistry,
-  csvSourceParser,
-  docxSourceParser,
-  epubSourceParser,
   jsonSourceParser,
-  pptxSourceParser,
   srtSourceParser,
 } from "@sourceweft/builtin-document-parsers";
 import { audioSourceParser } from "./audio";
@@ -18,9 +13,6 @@ import { webFetchSourceParser } from "./web-fetch";
 const sourceParsers: readonly SourceParser[] = [
   documentProviderParser,
   audioSourceParser,
-  ...(config.documentParsing.provider === "anydoc"
-    ? []
-    : [docxSourceParser, epubSourceParser, csvSourceParser, pptxSourceParser]),
   jsonSourceParser,
   srtSourceParser,
   textSourceParser,
@@ -35,13 +27,9 @@ export const listSupportedSourceMimeTypes =
 
 export {
   audioSourceParser,
-  csvSourceParser,
-  docxSourceParser,
   documentProviderParser,
-  epubSourceParser,
   jsonSourceParser,
   pdfSourceParser,
-  pptxSourceParser,
   srtSourceParser,
   textSourceParser,
   webFetchSourceParser,

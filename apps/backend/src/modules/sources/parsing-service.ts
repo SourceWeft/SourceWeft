@@ -105,6 +105,8 @@ function currentParseDecisionMetadata(metadata: SourceRecord["metadata"]) {
     "documentParseStrategy",
     "documentParseProviderRequested",
     "documentParseOcrReason",
+    "documentParseInputMimeType",
+    "documentParseCanonicalMimeType",
   ];
   return Object.fromEntries(
     keys

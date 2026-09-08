@@ -1,57 +1,68 @@
 import { ParserContentError } from "./errors";
-import { createCsvLoader, createEpubLoader } from "./langchain-loaders";
 import { withTempFile } from "./file-buffer";
 import { normalizeWhitespace } from "./text-utils";
+import { getAnydocFormatByMimeType } from "./anydoc-formats";
 import type { ParseInput } from "./types";
 
-/** Preserve the pre-migration billing unit count, independently of citations.
- * CSV/EPUB deliberately run the existing loader for accounting metadata only;
- * its content is never substituted for AnyDoc output, even on failure.
+/** Accounting metadata only; document extraction belongs exclusively to AnyDoc.
+ * Preserve pre-migration CSV row and EPUB nonempty chapter billing semantics
+ * with the same low-level readers, without loading a legacy document parser.
  */
 export async function readAnydocBillingMetadata(input: ParseInput): Promise<
   | {
       billingPageCount: number;
-      billingPageCountSource: "legacy-loader" | "document";
+      billingPageCountSource: "csv-records" | "epub-chapters" | "document";
     }
   | undefined
 > {
-  if (
-    input.mimeType === "text/csv" ||
-    input.mimeType === "application/csv" ||
-    input.mimeType === "application/epub+zip"
-  ) {
-    const docs =
-      input.mimeType === "application/epub+zip"
-        ? await withTempFile({
-            fileName: input.fileName,
-            content: input.content,
-            run: (path) => createEpubLoader(path).load(),
-          })
-        : await createCsvLoader(
-            new Blob([new Uint8Array(input.content)]),
-          ).load();
-    const billingPageCount = docs.filter(
-      (doc) => normalizeWhitespace(doc.pageContent).length > 0,
-    ).length;
-    if (billingPageCount === 0) {
-      throw new ParserContentError(
-        422,
-        "ANYDOC_NO_INDEXABLE_RECORDS",
-        "Document contains no indexable records or chapters.",
-      );
-    }
-    return {
-      billingPageCount,
-      billingPageCountSource: "legacy-loader",
-    };
+  const format = getAnydocFormatByMimeType(input.mimeType)?.format;
+  if (!format || format === "pdf") return undefined;
+  if (format === "csv") {
+    const { csvParse } = await import("d3-dsv");
+    // CSVLoader used the same comma parser over trimmed UTF-8 input. Even
+    // empty-valued rows counted because their old content contained headers.
+    return countMetadata(
+      csvParse(input.content.toString("utf8").trim()).length,
+      "csv-records",
+    );
   }
-  if (
-    input.mimeType ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    input.mimeType ===
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-  ) {
-    return { billingPageCount: 1, billingPageCountSource: "document" };
+  if (format === "epub") {
+    const [{ EPub }, { htmlToText }] = await Promise.all([
+      import("epub2"),
+      import("html-to-text"),
+    ]);
+    const count = await withTempFile({
+      fileName: input.fileName,
+      content: input.content,
+      run: async (path) => {
+        const epub = await EPub.createAsync(path);
+        let count = 0;
+        for (const chapter of epub.flow) {
+          if (!chapter.id) continue;
+          const html = await epub.getChapterRawAsync(chapter.id);
+          if (html && normalizeWhitespace(htmlToText(html)).length > 0)
+            count += 1;
+        }
+        return count;
+      },
+    });
+    return countMetadata(count, "epub-chapters");
   }
-  return undefined;
+  // Existing DOC/DOCX/PPTX used one document unit, not a physical page count.
+  // Newly supported office/RTF formats use that same document billing unit.
+  return { billingPageCount: 1, billingPageCountSource: "document" };
+}
+
+function countMetadata(
+  billingPageCount: number,
+  billingPageCountSource: "csv-records" | "epub-chapters",
+) {
+  if (billingPageCount === 0) {
+    throw new ParserContentError(
+      422,
+      "ANYDOC_NO_INDEXABLE_RECORDS",
+      "Document contains no indexable records or chapters.",
+    );
+  }
+  return { billingPageCount, billingPageCountSource };
 }

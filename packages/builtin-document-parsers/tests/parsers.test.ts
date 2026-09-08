@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  csvSourceParser,
+  anydocSourceParser,
   extractPdf2MarkdownResult,
   jsonSourceParser,
   ParserContentError,
@@ -42,7 +42,7 @@ test("text parser rejects binary-looking text files", async () => {
 });
 
 test("csv parser converts rows into content and chunks", async () => {
-  const result = await csvSourceParser.parse({
+  const result = await anydocSourceParser.parse({
     fileName: "table.csv",
     mimeType: "text/csv",
     fileSize: 27,
@@ -51,7 +51,8 @@ test("csv parser converts rows into content and chunks", async () => {
   });
 
   assert.equal(result.metadata.mimeType, "text/csv");
-  assert.equal(result.pages.length, 2);
+  assert.equal(result.metadata.billingPageCount, 2);
+  assert.equal(result.pages.length, 0);
   assert.equal(result.content.includes("alpha"), true);
   assert.equal(result.chunks.length > 0, true);
 });

@@ -1,51 +1,60 @@
-# AnyDoc in-process document parsing
+# AnyDoc document parsing
 
-## Decision
+## Engine and format ownership
 
-Use @firecrawl/anydoc 0.2.4 inside the existing document parser capability. Backend orchestration calls the configured OCR provider only when native conversion reports `needsOcr`. No HTTP gateway, hosted AnyDoc fallback, or upstream fork is introduced.
+`@firecrawl/anydoc` 0.2.4 is the sole content extraction engine for every document format it supports. There is no legacy Office/PDF provider selector, HTTP gateway, hosted AnyDoc fallback, or upstream fork. The parser package owns local conversion, byte/type validation, native error classification and normalized output. The backend owns OCR, tenant/billing context, queue state and diagnostics. Plain text, JSON, SRT, audio, images and web pages retain their dedicated paths because AnyDoc does not support those inputs.
 
-The user approved the design and implementation in an isolated branch/worktree with multiple agents and end-to-end verification.
+The browser-safe `@sourceweft/builtin-document-parsers/formats` entry exposes the shared extension/MIME capability catalog. Upload classification and parser registration consume this catalog. It mirrors the release's complete native extension list:
 
-## Scope and ownership
+| Native format          | Supported extensions   |
+| ---------------------- | ---------------------- |
+| doc                    | doc                    |
+| docx                   | docx, docm             |
+| ppt                    | ppt, pps, pot          |
+| pptx                   | pptx, pptm, ppsx, ppsm |
+| xlsx                   | xls, xlsx, xlsm, xlsb  |
+| odt / ods / odp        | odt, ods, odp          |
+| rtf / epub / csv / pdf | rtf, epub, csv, pdf    |
 
-The parser package owns local conversion, format validation, native error classification and result normalization. The backend owns remote provider selection, tenant/billing context, queue state and diagnostics. Existing PDF2Markdown asynchronous submission/resume remains the OCR implementation. Text, JSON, SRT, audio and web parsers keep their dedicated paths.
+Macro and slideshow MIME variants are explicit catalog entries. Existing CSV, PDF, Word and PowerPoint MIME aliases are retained. Byte detection must agree with the declared format family; an XLS binary workbook intentionally resolves to the native `xlsx` family. A declared native format is supplied for signature-less CSV and containers that need a format hint. Native encrypted/malformed errors still fail; they never select a different engine. Native loading is deferred until conversion, so importing the catalog or another parser does not load its binary.
 
-Initial AnyDoc formats are the existing DOCX, PPTX, EPUB, CSV and PDF formats covered by real native fixtures. Additional formats require explicit fixture and upload validation work before exposure.
+## OCR and image configuration
 
-## Routing and configuration
-
-- `DOCUMENT_PARSE_PROVIDER=anydoc` enables the new Office/PDF path explicitly; the deployment default remains `pdf2markdown` during migration.
-- `DOCUMENT_PARSE_OCR_ENABLED=false` by default; existing credentials do not enable OCR.
-- `DOCUMENT_PARSE_OCR_PROVIDER=pdf2markdown` selects the OCR implementation.
+- `DOCUMENT_PARSE_OCR_ENABLED=false` by default; credentials do not enable OCR.
+- `DOCUMENT_PARSE_OCR_PROVIDER=pdf2markdown` selects the explicitly supported OCR backend.
 - `DOCUMENT_PARSE_IMAGE_STRATEGY=vision|ocr` selects one image policy. Vision errors do not automatically call OCR. Image OCR requires OCR activation.
-- AnyDoc uses `ocr: "reject"` even if ambient Firecrawl credentials are present.
-- Only native `needsOcr` enters the declared OCR route. Encrypted, malformed, unsupported, resource-limit, chunking and remote errors fail without replacement providers.
-- Existing legacy balanced/cost PDF routing remains selectable, but classification and extraction errors no longer cause catch-all remote fallback.
+- AnyDoc always uses `ocr: "reject"`, including when ambient Firecrawl credentials exist.
+- Only native `needsOcr` enters the declared OCR branch. Scanned/mixed PDFs send the whole original document to the configured backend; no partial local extraction is accepted.
+- Encrypted, malformed, unsupported, resource-limit, metadata, chunking and remote errors fail without replacement providers.
 
-The AnyDoc path is independent of legacy strategy heuristics. Unknown explicit configuration fails loading. Activation and credentials are separate from global model Provider and BYOK configuration.
+Old `DOCUMENT_PARSE_PROVIDER` and `DOCUMENT_PARSE_STRATEGY` selectors are retired. New ingestion uses `v4-anydoc-unified-0.2.4`. Existing indexed revisions are not automatically reprocessed. Rollback requires reverting the deployment; there is no per-file legacy parser fallback. Image deployments previously relying on automatic vision-to-OCR switching must choose an explicit policy.
 
 ## Asynchronous state
 
-OCR `pending` tokens retain the actual backend ID (`pdf2markdown`). Resume dispatches directly to that backend, without rerunning AnyDoc. Persist the requested provider, actual backend and AnyDoc entry-engine diagnostics. Completed results must carry the same diagnostics in document metadata, not only a transient outcome wrapper.
+OCR pending tokens retain actual backend ID `pdf2markdown`. Resume dispatches directly to that backend without rerunning AnyDoc. Entry-engine and actual-backend diagnostics remain distinct. Once the OCR task is persisted, retried source jobs resume that task. An external submission accepted before its response/task ID is durably recorded cannot be guaranteed exactly once without provider idempotency support; never describe the whole path as exactly once.
 
-## Page provenance and billing
+## Physical pages and billing units
 
-Native AnyDoc 0.2.4 text-PDF output has no reliable page markers. Never infer PDF pages from Markdown headings or construct a fake first page. Explicit `pages: []` means page locations are unavailable. Record `pageLocationAvailable: false`.
+AnyDoc 0.2.4 text-PDF Markdown does not contain reliable page markers. Do not infer pages from headings or construct a fake page one. Results have `pages: []` and `pageLocationAvailable: false`; physical page-level citations are unavailable even though document-level retrieval works.
 
-Use the already installed pdfjs-dist solely to read PDF `numPages`, with an explicit page-count source diagnostic, so billing does not treat a multipage PDF as one page. PDF.js does not extract or replace AnyDoc body text. Metadata reading failure is a failure, not an estimated count. Page-level PDF citations remain unavailable on this path, which is why migration is opt-in.
+The existing `pdfjs-dist` dependency reads only PDF `numPages`, recorded as `pageCountSource: "pdfjs"`. It never extracts or replaces body text. Metadata inspection failure fails parsing rather than estimating a count.
 
-For Office logical billing units, retain `billingPageCount` separately from physical page locations. DOCX/PPTX keep one document unit; CSV/EPUB retain the existing loader record/chapter counts via an explicit metadata-only compatibility pass. This costs a second parse for CSV/EPUB and retains their existing dependencies, but never replaces AnyDoc body text or changes the existing charge units. Compatibility metadata failure fails parsing.
+`billingPageCount` is separate from physical pages:
 
-## Migration
+- DOC/DOCX/PPTX retain one document unit. Newly supported Office and RTF formats use the same document unit (`billingPageCountSource: "document"`).
+- CSV retains the old comma-delimited, trimmed UTF-8 record count through direct `d3-dsv` parsing (`csv-records`). Header-only files fail. Empty-valued records and interior blank records retain their existing counting semantics; quoted newlines are not counted as extra records.
+- EPUB retains the existing nonempty chapter count using `epub2` spine traversal and `html-to-text` emptiness checking (`epub-chapters`). Empty chapters are excluded. A zero count fails rather than triggering estimated billing.
 
-Select AnyDoc and `v3-anydoc-0.2.4` together for new ingestion. Existing indexed revisions are not silently reprocessed. Roll back through explicit configuration; do not retry individual failures through legacy loaders. Image deployments previously relying on automatic vision-to-OCR behavior must select the desired image policy explicitly.
+These CSV/EPUB tools are accounting-only dependencies. No LangChain CSV/EPUB/Word/PowerPoint loader remains and their text never substitutes for AnyDoc output. Keeping the EPUB accounting pass costs an additional archive/chapter read, but avoids an unannounced fee change. Using only AnyDoc AST chapter anchors is not equivalent: AnyDoc deduplicates spine items and handles malformed chapters differently from the old accounting reader. Replacing the remaining accounting tools requires a separately agreed billing-policy migration.
 
 ## Verification
 
-Use native fixtures for Chinese text, tables/numbers, slides, EPUB, CSV, text/scanned/mixed PDFs and malformed content. Assert local conversion never calls hosted OCR. Verify narrow OCR routing, activation, actual backend tokens, resume metadata and source-level integration. Check strict config parsing and backend/Docker example consistency.
+Native tests exercise all 21 official extensions, including binary DOC/PPT/XLS/XLSB, OpenDocument formats, content-type-correct macro/slideshow variants, Chinese text, table numbers, text/scanned/mixed PDFs and errors. Upstream real fixtures are pinned to the v0.2.4 release with MIT license/provenance in `tests/fixtures/anydoc/upstream-v0.2.4`; synthetic fixtures and transformations are documented alongside them. These samples verify native compatibility, not a representative document-quality benchmark.
 
-Run real end-to-end verification in an isolated database, queue and API/Web ports: authenticate, upload through the supported UI flow, parse through the worker, inspect content, index and retrieve. Distinguish real remote OCR/embedding calls from unit-test mocks. Store sanitized evidence and report any external service blocker without replacing providers or models.
+Accounting regressions cover CSV header-only, empty fields, blank records, duplicate headers and multiline cells; EPUB nonempty/empty chapters and the existing zero-chapter edge case. Other tests enforce no hosted upload, narrow OCR routing, shared MIME registration and no eager native loading.
+
+Real application E2E verification must use an isolated database/queue/ports: authenticate, upload through supported UI, wait for worker parsing and indexing, inspect actual engine/format metadata, and retrieve through chat. Remote OCR and model calls must be distinguished from mocks, and external service failures reported rather than replaced.
 
 ## Deferred
 
-Structure-aware chunking, embedded Office image OCR, full document blocks/assets persistence, additional document formats, and a default provider switch are separate changes.
+Structure-aware chunking, embedded Office image OCR and full document blocks/assets persistence remain separate changes. Page-level PDF provenance needs an upstream structured-output capability or an explicitly designed enhancement; Markdown headings are insufficient.

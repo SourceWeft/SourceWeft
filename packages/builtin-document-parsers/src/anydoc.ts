@@ -5,30 +5,8 @@ import { readAnydocBillingMetadata } from "./anydoc-billing-metadata";
 import { readPdfPageCount } from "./pdf-page-count";
 import type { ParsedDocument, ParseInput } from "./types";
 
-/** Only formats exercised by our integration are enabled here. */
-export const anydocMimeTypes = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/epub+zip",
-  "text/csv",
-  "application/csv",
-] as const;
-
-const formats: Readonly<Record<string, string>> = {
-  "application/pdf": "pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-    "docx",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-    "pptx",
-  "application/epub+zip": "epub",
-  "text/csv": "csv",
-  "application/csv": "csv",
-};
-
-export function isAnydocMimeType(mimeType: string): boolean {
-  return Object.hasOwn(formats, mimeType);
-}
+export { anydocMimeTypes, isAnydocMimeType } from "./anydoc-formats";
+import { anydocMimeTypes, getAnydocFormatByMimeType } from "./anydoc-formats";
 
 /** No message matching: malformed/encrypted/limit failures must never enable OCR. */
 export function isAnydocNeedsOcrError(error: unknown): error is NeedsOcrError {
@@ -38,7 +16,7 @@ export function isAnydocNeedsOcrError(error: unknown): error is NeedsOcrError {
 export async function parseWithAnydoc(
   input: ParseInput,
 ): Promise<ParsedDocument> {
-  const expectedFormat = formats[input.mimeType];
+  const expectedFormat = getAnydocFormatByMimeType(input.mimeType)?.format;
   if (!expectedFormat) {
     throw new ParserContentError(
       400,
@@ -53,8 +31,8 @@ export async function parseWithAnydoc(
       "Cannot parse an empty document.",
     );
   }
-  // Keep native loading behind the explicit AnyDoc route; legacy parsing must
-  // not require an installed native binary merely by importing this package.
+  // Only conversion loads native code. Catalog and non-document parser
+  // consumers do not require the binary merely by importing this package.
   const { formatFromBytes, toMarkdownBytes } =
     await import("@firecrawl/anydoc");
   const detectedFormat = formatFromBytes(input.content);
@@ -65,11 +43,12 @@ export async function parseWithAnydoc(
       `Document bytes identify ${detectedFormat}, but MIME type declares ${expectedFormat}.`,
     );
   }
-  // CSV has no signature; all other formats must be detected from their bytes.
+  // Supply the declared format for signature-less CSV and unrecognizable
+  // containers; detected formats above must still match the declaration.
   // Explicit reject prevents ambient Firecrawl credentials from enabling uploads.
   const content = await toMarkdownBytes(
     input.content,
-    expectedFormat === "csv" ? ("csv" as Format) : undefined,
+    expectedFormat as Format,
     { ocr: "reject" },
   );
   if (!content.trim()) {
@@ -101,3 +80,10 @@ export async function parseWithAnydoc(
     },
   });
 }
+
+export const anydocSourceParser = {
+  id: "anydoc",
+  name: "AnyDoc Document Parser",
+  supportedMimeTypes: anydocMimeTypes,
+  parse: parseWithAnydoc,
+} as const;

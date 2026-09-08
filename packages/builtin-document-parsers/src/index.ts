@@ -10,17 +10,8 @@ export { createDocumentProviderRegistry } from "./providers";
 export { withTempFile } from "./file-buffer";
 export { isSupportedImageMimeType, imageMimeTypes } from "./image-mime";
 export { extractPdf2MarkdownResult } from "./pdf2markdown-result";
-export {
-  createCsvLoader,
-  createDocxLoader,
-  createEpubLoader,
-  createJsonLoader,
-  createPptxLoader,
-  createSrtLoader,
-  createTextLoader,
-} from "./langchain-loaders";
+export { createJsonLoader, createTextLoader } from "./langchain-loaders";
 export { createLoaderParser } from "./loader-parser";
-export { summarizeNumbers } from "./numbers";
 export {
   createSourceParserRegistry,
   getPureSourceParser,
@@ -34,11 +25,7 @@ export {
 } from "./text-utils";
 export { validatePublicHttpUrl } from "./web-url-safety";
 export { WebFetchSourceParser, WEB_FETCH_SOURCE_MIME_TYPE } from "./web-fetch";
-export { csvSourceParser } from "./csv";
-export { docxSourceParser } from "./docx";
-export { epubSourceParser } from "./epub";
 export { jsonSourceParser } from "./json";
-export { pptxSourceParser } from "./pptx";
 export { srtSourceParser } from "./srt";
 export { textSourceParser } from "./text";
 export type {
@@ -65,3 +52,12 @@ export {
   isAnydocNeedsOcrError,
   parseWithAnydoc,
 } from "./anydoc";
+
+export { anydocSourceParser } from "./anydoc";
+export {
+  anydocFormatCatalog,
+  anydocExtensions,
+  getAnydocFormatByExtension,
+  getAnydocFormatByMimeType,
+} from "./anydoc-formats";
+export type { AnydocFormat, AnydocFormatDefinition } from "./anydoc-formats";
