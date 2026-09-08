@@ -98,6 +98,8 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           BETTER_AUTH_SECRET: ci-test-secret-at-least-32-chars
           MODEL_GATEWAY_ENCRYPTION_SECRET: ci-test-model-secret-at-least-32
+      - name: Verify patched npm dependency behavior
+        run: node scripts/ci/verify-security-dependencies.cjs
       # Runs every workspace package that defines a `test` script, not just
       # backend and web. Package-level suites (contracts, model-gateway,
       # builtin-*) were previously never executed in CI, so breakage there
