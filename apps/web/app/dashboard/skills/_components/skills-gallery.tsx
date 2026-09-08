@@ -575,7 +575,8 @@ function SkillCard({
   variant?: "page" | "modal";
 }) {
   const compact = variant === "modal";
-  const canManageInstall = item.installable !== false;
+  const installed = item.sourceType === "registry_github" ? !!item.enabledWorkspaceSkillId : item.enabled;
+  const canManageInstall = item.installable !== false || installed;
   const isRegistry = item.sourceType === "registry_github";
   const unverified = isUnverifiedRegistrySkill(item);
 
@@ -597,7 +598,7 @@ function SkillCard({
             {item.displayName}
           </h3>
           {canManageInstall ? (
-            item.enabled ? (
+            installed ? (
               <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
                 <Check className="h-3 w-3" />
                 Installed
@@ -605,7 +606,7 @@ function SkillCard({
             ) : null
           ) : (
             <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
-              Built-in
+              {isRegistry ? "Unavailable" : "Built-in"}
             </span>
           )}
         </div>
@@ -681,20 +682,20 @@ function SkillCard({
           <Button
             className="min-w-0 rounded-full px-2"
             disabled={pending}
-            onClick={() => (item.enabled ? onUninstall(item) : onInstall(item))}
+            onClick={() => (installed ? onUninstall(item) : onInstall(item))}
             size="xs"
             type="button"
-            variant={item.enabled ? "secondary" : "default"}
+            variant={installed ? "secondary" : "default"}
           >
             {pending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : item.enabled ? (
+            ) : installed ? (
               <Trash2 className="h-3.5 w-3.5" />
             ) : (
               <SkillIcon className="h-3.5 w-3.5" />
             )}
             <span className="min-w-0 truncate">
-              {item.enabled ? "Uninstall" : "Install"}
+              {installed ? "Uninstall" : "Install"}
             </span>
           </Button>
         ) : (
@@ -706,7 +707,7 @@ function SkillCard({
             variant="secondary"
           >
             <Check className="h-3.5 w-3.5" />
-            <span className="min-w-0 truncate">Built-in</span>
+            <span className="min-w-0 truncate">{isRegistry ? "Unavailable" : "Built-in"}</span>
           </Button>
         )}
       </div>
@@ -1302,6 +1303,7 @@ export function SkillsGallery({
       </Sheet>
       <SkillDetailDialog
         item={selectedItem}
+        onVersionChanged={() => void refreshCatalog()}
         onInstall={(next) => void installSkill(next)}
         onOpenChange={(open) => {
           if (!open) setSelectedCatalogId(null);

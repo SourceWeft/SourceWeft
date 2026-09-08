@@ -84,3 +84,6 @@ thoughts
 ARCHITECTURE_PLAN.md
 packages/sandbox-provider-cloudflare/bridge/sandbox-bridge/
 output
+
+# Local skill E2E credentials
+/apps/backend/.skills-e2e-accounts.json

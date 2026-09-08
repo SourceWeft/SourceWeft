@@ -32,11 +32,12 @@ test("submit response constrains status and keeps slug optional", () => {
   assert.ok(
     submitRegistrySkillResponseSchema.safeParse({
       status: "indexed",
+      skills: [],
       slug: "gh-a-b",
     }).success,
   );
   assert.ok(
-    submitRegistrySkillResponseSchema.safeParse({ status: "queued" }).success,
+    submitRegistrySkillResponseSchema.safeParse({ status: "queued", skills: [] }).success,
   );
   assert.equal(
     submitRegistrySkillResponseSchema.safeParse({ status: "active" }).success,
@@ -75,4 +76,9 @@ test("slug: distinct skills in one repo never collide, and stay readable", () =>
     deriveRegistrySlug("acme", "skills", "shared"),
     deriveRegistrySlug("acme", "skills", "shared"),
   );
+});
+
+test("submit response retains per-item failure diagnostics", () => {
+  const skills = [{sourcePath:"broken",status:"failed",flags:[],diagnostics:[{code:"SKILL_YAML_INVALID",severity:"error",message:"Invalid YAML",file:"SKILL.md",line:3}]}];
+  assert.deepEqual(submitRegistrySkillResponseSchema.parse({status:"queued",skills}).skills,skills);
 });

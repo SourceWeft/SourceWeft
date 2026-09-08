@@ -1,0 +1,390 @@
+import {
+  test,
+  expect,
+  request,
+  type Page,
+  type APIRequestContext,
+} from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import type { RegistrySkillResult } from "@sourceweft/contracts";
+const api = process.env.SKILL_E2E_API_URL ?? "http://localhost:3311";
+const web = process.env.SKILL_E2E_WEB_URL ?? "http://localhost:3310";
+const defaultSource =
+  "https://github.com/cisco-ai-defense/skill-scanner/tree/431cb58a5ac333bc0bb9aaa23f7c30ac628f59f8/evals/test_skills/safe/simple-formatter";
+const accounts = JSON.parse(
+  readFileSync(resolve("../backend/.skills-e2e-accounts.json"), "utf8"),
+) as Record<string, { email: string; password: string }>;
+const fixtures: {
+  sourceA?: string;
+  name?: string;
+  title?: string;
+  mixed?: string;
+  invalid?: string;
+  spoof?: string;
+  versionB?: string;
+  versionC?: string;
+} = process.env.SKILL_E2E_FIXTURES_FILE
+  ? JSON.parse(readFileSync(process.env.SKILL_E2E_FIXTURES_FILE, "utf8"))
+  : {};
+const source = fixtures.sourceA ?? defaultSource;
+const skillName = fixtures.name ?? "simple-formatter",
+  skillTitle = fixtures.title ?? "Simple Formatter";
+if (
+  process.env.SKILL_E2E_REQUIRE_ALL === "1" &&
+  (!fixtures.mixed ||
+    !fixtures.invalid ||
+    !fixtures.spoof ||
+    !fixtures.versionB || !fixtures.versionC)
+)
+  throw new Error(
+    "Full E2E is BLOCKED: mixed, invalid, spoof, changed-content versionB and review versionC fixture URLs are required",
+  );
+let admin: APIRequestContext;
+
+test.beforeAll(async () => {
+  admin = await request.newContext({
+    baseURL: api,
+    extraHTTPHeaders: { Origin: web },
+  });
+  const r = await admin.post("/api/auth/sign-in/email", {
+    data: accounts.admin,
+  });
+  expect(r.ok()).toBeTruthy();
+});
+test.afterAll(async () => {
+  await admin?.dispose();
+});
+test.beforeEach(() => {
+  execFileSync("pnpm", ["exec", "tsx", "scripts/reset-skills-e2e.ts"], {
+    cwd: resolve("../backend"),
+    stdio: "pipe",
+  });
+});
+async function login(page: Page, role = "owner") {
+  const sessionReady = page.waitForResponse(
+    (r) => r.url().includes("/api/auth/get-session") && r.status() === 200,
+    { timeout: 60000 },
+  );
+  await Promise.all([sessionReady, page.goto("/auth/sign-in")]);
+  await page.getByLabel("Email", { exact: true }).fill(accounts[role]!.email);
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill(accounts[role]!.password);
+  await page.getByRole("button", { name: "Login", exact: true }).click();
+  await expect(page).not.toHaveURL(/\/auth\/sign-in/, { timeout: 45000 });
+  const catalogReady = page.waitForResponse(
+    (r) =>
+      /\/v1\/workspaces\/[^/]+\/skills\/catalog$/.test(r.url()) &&
+      r.status() === 200,
+    { timeout: 60000 },
+  );
+  const [catalog] = await Promise.all([catalogReady, page.goto("/dashboard/skills")]);
+  await expect(
+    page.getByRole("button", { name: "Submit skill", exact: true }),
+  ).toBeVisible({ timeout: 45000 });
+  return new URL(catalog.url()).pathname.split("/")[3]!;
+}
+async function submit(page: Page, url = source) {
+  await page.getByRole("button", { name: "Submit skill", exact: true }).click();
+  await page.getByLabel("GitHub skill repository").fill(url);
+  const wait = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/skills/registry/submit") &&
+      r.request().method() === "POST",
+    { timeout: 90000 },
+  );
+  const [response] = await Promise.all([wait, page.getByRole("button", { name: "Submit", exact: true }).click()]);
+  return {
+    response,
+    body: (await response.json()) as {
+      skills?: RegistrySkillResult[];
+      details?: { skills: RegistrySkillResult[] };
+    },
+  };
+}
+async function publish(item: RegistrySkillResult) {
+  if (item.status === "indexed") return;
+  const r = await admin.post(
+    `/v1/skills/registry/admin/submissions/${item.skillVersionId}/publish`,
+    { data: {} },
+  );
+  expect(r.ok(), await r.text()).toBeTruthy();
+}
+async function closeResult(page: Page) {
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+}
+async function openFormatter(page: Page) {
+  await page
+    .locator("article")
+    .filter({
+      has: page.getByRole("heading", { name: skillTitle, exact: true }),
+    })
+    .getByRole("button")
+    .first()
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Skill versions" }),
+  ).toBeVisible();
+}
+
+test("E1 real GitHub import, review, version details and install", async ({
+  page,
+}) => {
+  const ws = await login(page);
+  const { response, body } = await submit(page);
+  expect(response.status()).toBe(201);
+  const item = body.skills![0]!;
+  expect(item).toMatchObject({
+    name: skillName,
+    version: new URL(source).pathname.split("/")[4]!.slice(0, 12),
+  });
+  expect(["indexed", "queued"]).toContain(item.status);
+  await expect(
+    page.getByRole("region", { name: "Import results" }),
+  ).toContainText(item.status === "queued" ? "1 awaiting review" : "1 indexed");
+  await publish(item);
+  await closeResult(page);
+  await page.reload();
+  await openFormatter(page);
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByRole("button", { name: "Install", exact: true }),
+  ).toBeEnabled();
+  const installation = page.waitForResponse(
+    (r) =>
+      r.url() === `${api}/v1/workspaces/${ws}/skills` &&
+      r.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Install", exact: true }).click();
+  expect((await installation).status()).toBe(201);
+  const installed = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
+  expect(installed.ok()).toBeTruthy();
+  expect(
+    (await installed.json()).items.some(
+      (s: { skillVersionId: string }) =>
+        s.skillVersionId === item.skillVersionId,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: "../../output/playwright/skill-version-installed.png",
+    fullPage: true,
+  });
+});
+test("E2 mixed malformed fixtures return every item", async ({ page }) => {
+  test.skip(
+    !fixtures.mixed,
+    "BLOCKED: fixed public mixed fixture URL not supplied",
+  );
+  await login(page);
+  const { response, body } = await submit(page, fixtures.mixed!);
+  expect(response.status()).toBe(201);
+  expect(body.skills!.some((s) => s.status === "failed")).toBeTruthy();
+  expect(body.skills!.some((s) => s.status === "indexed")).toBeTruthy();
+  await expect(
+    page.getByRole("region", { name: "Import results" }),
+  ).toContainText("failed");
+});
+test("E3 malformed-only fixture permits correction", async ({ page }) => {
+  test.skip(
+    !fixtures.invalid,
+    "BLOCKED: fixed invalid fixture URL not supplied",
+  );
+  await login(page);
+  const { response, body } = await submit(page, fixtures.invalid!);
+  expect(response.status()).toBe(422);
+  expect(body.details!.skills.every((s) => s.status === "failed")).toBeTruthy();
+  await closeResult(page);
+  expect((await submit(page)).response.status()).toBe(201);
+});
+test("E4 builtin contracts and public capability spoof remain distinct", async ({
+  page,
+}) => {
+  test.skip(
+    !fixtures.spoof,
+    "BLOCKED: public inert capability-spoof fixture URL not supplied",
+  );
+  const ws = await login(page);
+  const catalog = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  const items = (await catalog.json()).items;
+  expect(
+    items.some(
+      (s: { slug: string; sourceType: string }) =>
+        s.slug === "feynman" && s.sourceType === "builtin",
+    ),
+  ).toBeTruthy();
+  const result = await submit(page, fixtures.spoof!);
+  expect(result.response.status()).toBe(201);
+  const fresh = await page.request.get(`${api}/v1/workspaces/${ws}/skills/catalog`);
+  const external = (await fresh.json()).items.find((item: {slug:string}) => item.slug === result.body.skills![0]!.slug);
+  expect(external).toMatchObject({sourceType:"registry_github",publisher:"Community",verified:false});
+  expect(external.tools ?? []).not.toContain("generate_image");
+});
+test("E5 repeat import is immutable and other user cannot claim it", async ({
+  page,
+  browser,
+}) => {
+  await login(page);
+  const first = await submit(page);
+  await publish(first.body.skills![0]!);
+  await closeResult(page);
+  const again = await submit(page);
+  expect(again.body.skills![0]).toMatchObject({
+    skillVersionId: first.body.skills![0]!.skillVersionId,
+    status: "indexed",
+  });
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await login(other, "other");
+  const rejected = await submit(other);
+  expect(rejected.response.status()).toBe(422);
+  await expect(
+    other.getByRole("region", { name: "Import results" }),
+  ).toContainText("failed");
+  await context.close();
+});
+test("E6 published B leaves A installed until explicit switch and rollback", async ({
+  page,
+}) => {
+  test.skip(
+    !fixtures.versionB,
+    "BLOCKED: same-skill changed-content B fixture URL not supplied",
+  );
+  const ws = await login(page);
+  const a = (await submit(page)).body.skills![0]!;
+  await publish(a);
+  await closeResult(page);
+  const catalog = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  const row = (await catalog.json()).items.find(
+    (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
+  );
+  expect(
+    (
+      await page.request.post(`${api}/v1/workspaces/${ws}/skills`, {
+        data: { skillId: row.skillId, skillVersionId: a.skillVersionId },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const b = (await submit(page, fixtures.versionB!)).body.skills![0]!;
+  if (b.status === "queued") await publish(b);
+  await closeResult(page);
+  await page.reload();
+  await openFormatter(page);
+  await page
+    .getByLabel("Version", { exact: true })
+    .selectOption(b.skillVersionId!);
+  await page.getByRole("button", { name: "Use selected version" }).click();
+  await page
+    .getByLabel("Version", { exact: true })
+    .selectOption(a.skillVersionId!);
+  await page.getByRole("button", { name: "Use selected version" }).click();
+  const installed = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
+  expect(
+    (await installed.json()).items.some(
+      (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
+    ),
+  ).toBeTruthy();
+});
+test("E7 review reasons persist and revoked versions cannot be installed", async ({
+  page,
+}) => {
+  const ws = await login(page);
+  const a = (await submit(page)).body.skills![0]!;
+  expect(
+    (
+      await admin.post(
+        `/v1/skills/registry/admin/submissions/${a.skillVersionId}/reject`,
+        { data: {} },
+      )
+    ).status(),
+  ).toBe(400);
+  await publish(a);
+  await closeResult(page);
+  if (fixtures.versionC) {
+    const pending = (await submit(page, fixtures.versionC)).body.skills![0]!;
+    expect(pending.status).toBe("queued");
+    const reject = await admin.post(`/v1/skills/registry/admin/submissions/${pending.skillVersionId}/reject`, {data:{reason:"Fix the test review phrase"}});
+    expect(reject.ok()).toBeTruthy();
+    await closeResult(page);
+  }
+  const catalog = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  const row = (await catalog.json()).items.find(
+    (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
+  );
+  expect(
+    (
+      await admin.post(
+        `/v1/skills/registry/admin/submissions/${a.skillVersionId}/reject`,
+        { data: { reason: "E2E revoked sample" } },
+      )
+    ).ok(),
+  ).toBeTruthy();
+  expect(
+    (
+      await page.request.post(`${api}/v1/workspaces/${ws}/skills`, {
+        data: { skillId: row.skillId, skillVersionId: a.skillVersionId },
+      })
+    ).status(),
+  ).toBe(404);
+  const d = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog/${encodeURIComponent(row.catalogId)}/versions/${a.skillVersionId}`,
+  );
+  expect((await d.json()).version.moderation.reason).toBe("E2E revoked sample");
+  const repeat = await submit(page);
+  expect(repeat.response.status()).toBe(422);
+  await expect(
+    page.getByRole("region", { name: "Import results" }),
+  ).toContainText("revoked");
+});
+test("E8 published is not public; explicit admin visibility controls history access", async ({
+  page,
+  browser,
+}) => {
+  const ws = await login(page);
+  const a = (await submit(page)).body.skills![0]!;
+  await publish(a);
+  await closeResult(page);
+  const own = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  const row = (await own.json()).items.find(
+    (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
+  );
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  const otherWs = await login(other, "other");
+  const url = `${api}/v1/workspaces/${otherWs}/skills/catalog/${encodeURIComponent(row.catalogId)}/versions`;
+  expect((await other.request.get(url)).status()).toBe(404);
+  expect(
+    (
+      await other.request.put(
+        `${api}/v1/skills/registry/admin/skills/${row.skillId}/visibility`,
+        { data: { visibility: "public" } },
+      )
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await admin.put(
+        `/v1/skills/registry/admin/skills/${row.skillId}/visibility`,
+        { data: { visibility: "public" } },
+      )
+    ).ok(),
+  ).toBeTruthy();
+  expect((await other.request.get(url)).status()).toBe(200);
+  await other.reload();
+  await expect(
+    other.getByRole("heading", { name: skillTitle, exact: true }),
+  ).toBeVisible();
+  await context.close();
+});

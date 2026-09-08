@@ -6,7 +6,11 @@
  */
 export class RegistrySubmissionError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  constructor(
+    code: string,
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "RegistrySubmissionError";
     this.code = code;

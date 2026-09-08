@@ -13,7 +13,11 @@
  * bytes, never the skill's self-description.
  */
 
+export type RegistryFinding = { ruleId: string; file?: string; line?: number };
+export const SCAN_RULE_VERSION = "1";
+
 export type RegistrySkillScan = {
+  findings: RegistryFinding[];
   reviewRequired: boolean;
   flags: string[];
 };
@@ -94,9 +98,21 @@ const SECRET_PATTERNS: Array<{ code: string; re: RegExp }> = [
 const SENSITIVE_TOOL_PATTERN =
   /\b(bash|shell|zsh|sh|exec|execute|terminal|subprocess|command|computer|code[-_ ]?(exec|execution|interpreter)|run[-_ ]?(code|command|shell))\b/i;
 
-function scanText(text: string, patterns: Array<{ code: string; re: RegExp }>, flags: Set<string>) {
+function scanText(
+  text: string,
+  patterns: Array<{ code: string; re: RegExp }>,
+  flags: Set<string>,
+  file: string,
+  findings: RegistryFinding[],
+) {
   for (const { code, re } of patterns) {
-    if (re.test(text)) {
+    const match = re.exec(text);
+    if (match) {
+      findings.push({
+        ruleId: code,
+        file,
+        line: text.slice(0, match.index).split("\n").length,
+      });
       flags.add(code);
     }
   }
@@ -106,20 +122,22 @@ export function scanRegistrySkill(
   input: RegistrySkillScanInput,
 ): RegistrySkillScan {
   const flags = new Set<string>();
+  const findings: RegistryFinding[] = [];
 
   for (const file of input.files) {
-    scanText(file.contentText, EGRESS_PATTERNS, flags);
-    scanText(file.contentText, INJECTION_PATTERNS, flags);
-    scanText(file.contentText, SECRET_PATTERNS, flags);
+    scanText(file.contentText, EGRESS_PATTERNS, flags, file.path, findings);
+    scanText(file.contentText, INJECTION_PATTERNS, flags, file.path, findings);
+    scanText(file.contentText, SECRET_PATTERNS, flags, file.path, findings);
   }
 
   for (const tool of input.allowedTools) {
     if (SENSITIVE_TOOL_PATTERN.test(tool)) {
       flags.add("tool:sensitive");
+      findings.push({ ruleId: "tool:sensitive", file: "SKILL.md" });
       break;
     }
   }
 
   const list = [...flags].sort();
-  return { reviewRequired: list.length > 0, flags: list };
+  return { reviewRequired: list.length > 0, flags: list, findings };
 }

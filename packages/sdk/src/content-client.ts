@@ -1,3 +1,4 @@
+import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
   ThreadRunFailureSummary,
   AddByokModelRequest,
@@ -699,6 +700,16 @@ export class ContentClient {
       `/v1/workspaces/${encode(workspaceId)}/skills/registry/submit`,
       input,
     );
+  }
+
+  listRegistryVersions(workspaceId: string, catalogId: string, cursor?: string) {
+    return this.http.get<RegistryVersionsResponse>(`/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/versions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+  }
+  getRegistryVersion(workspaceId: string, catalogId: string, versionId: string) {
+    return this.http.get<RegistryVersionDetail>(`/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/versions/${encode(versionId)}`);
+  }
+  switchRegistryVersion(workspaceId: string, workspaceSkillId: string, skillVersionId: string) {
+    return this.http.put<{workspaceSkill: import("@sourceweft/contracts").WorkspaceSkill}>(`/v1/workspaces/${encode(workspaceId)}/skills/${encode(workspaceSkillId)}/version`, { skillVersionId });
   }
 
   getSkillCatalogDetail(workspaceId: string, catalogId: string) {
