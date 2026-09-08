@@ -15,16 +15,18 @@ export async function buildParsedDocument(input: {
   readonly metadata?: SourceMetadata;
 }): Promise<ParsedDocument> {
   const content = normalizeWhitespace(input.content);
-  const pages = input.pages?.length
-    ? input.pages
-        .map((page) => ({
-          pageNumber: page.pageNumber,
-          content: normalizeWhitespace(page.content),
-        }))
-        .filter((page) => page.content.length > 0)
-    : content.length > 0
-      ? [{ pageNumber: 1, content }]
-      : [];
+  // Explicit empty pages means the engine supplied no trustworthy page locations.
+  const pages =
+    input.pages !== undefined
+      ? input.pages
+          .map((page) => ({
+            pageNumber: page.pageNumber,
+            content: normalizeWhitespace(page.content),
+          }))
+          .filter((page) => page.content.length > 0)
+      : content.length > 0
+        ? [{ pageNumber: 1, content }]
+        : [];
   const pageCount = input.metadata?.pageCount ?? pages.length;
   const chunks = await chunkSourceContent(content, input.parseInput.config);
   return {

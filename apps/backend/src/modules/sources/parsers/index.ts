@@ -1,3 +1,4 @@
+import { config } from "../../../shared/config";
 import {
   createSourceParserRegistry,
   csvSourceParser,
@@ -17,11 +18,10 @@ import { webFetchSourceParser } from "./web-fetch";
 const sourceParsers: readonly SourceParser[] = [
   documentProviderParser,
   audioSourceParser,
-  docxSourceParser,
-  epubSourceParser,
-  csvSourceParser,
+  ...(config.documentParsing.provider === "anydoc"
+    ? []
+    : [docxSourceParser, epubSourceParser, csvSourceParser, pptxSourceParser]),
   jsonSourceParser,
-  pptxSourceParser,
   srtSourceParser,
   textSourceParser,
   webFetchSourceParser,

@@ -58,3 +58,10 @@ export type {
   WebFetchResultItem,
   WebProviderName,
 } from "./types";
+
+export {
+  anydocMimeTypes,
+  isAnydocMimeType,
+  isAnydocNeedsOcrError,
+  parseWithAnydoc,
+} from "./anydoc";

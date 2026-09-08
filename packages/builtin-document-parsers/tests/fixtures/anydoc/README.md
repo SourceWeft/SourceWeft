@@ -1,0 +1,1 @@
+These minimal, synthetic fixtures are owned by SourceWeft and contain no external content. OOXML/EPUB archives contain standard XML parts; PDFs contain two Helvetica text pages or two image-only pages. They exercise the actual native AnyDoc binary, not mocked conversion. They are compatibility smoke samples, not a representative document quality corpus.

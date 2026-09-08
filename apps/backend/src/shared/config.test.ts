@@ -184,6 +184,7 @@ for (const value of [undefined, "", "  \t\n"]) {
 }
 
 for (const provider of [
+  "anydoc",
   "langchain",
   "pdf2markdown",
   "docling",
@@ -211,7 +212,7 @@ for (const value of [
       assert.ok(error instanceof Error);
       assert.match(
         error.message,
-        /DOCUMENT_PARSE_PROVIDER must be one of: langchain, pdf2markdown, docling, llamaparse, unstructured/,
+        /DOCUMENT_PARSE_PROVIDER must be one of: anydoc, langchain, pdf2markdown, docling, llamaparse, unstructured/,
       );
       assert.equal(error.message.includes(value), false);
       return true;

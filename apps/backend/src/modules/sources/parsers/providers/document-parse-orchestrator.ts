@@ -1,3 +1,7 @@
+import {
+  isAnydocNeedsOcrError,
+  isAnydocMimeType,
+} from "@sourceweft/builtin-document-parsers";
 import { config } from "../../../../shared/config";
 import type {
   DocumentParseProviderId,
@@ -15,8 +19,7 @@ type ImageVisionParser = typeof tryParseImageWithVision;
 let imageVisionParser: ImageVisionParser = tryParseImageWithVision;
 
 function getConfiguredStrategy() {
-  const envValue = process.env.DOCUMENT_PARSE_STRATEGY?.trim().toLowerCase();
-  return (envValue ?? config.documentParsing.strategy) as DocumentParseStrategy;
+  return config.documentParsing.strategy as DocumentParseStrategy;
 }
 
 function getConfiguredProviderId() {
@@ -44,20 +47,26 @@ function withDecisionMetadata(input: {
   resolvedProvider: DocumentParseProviderId;
   extraMetadata?: Record<string, unknown>;
 }): ProviderParseOutcome {
-  return {
-    ...input.outcome,
-    diagnostics: {
-      metadata: {
-        ...(input.outcome.diagnostics?.metadata ?? {}),
-        documentParseStrategy: input.strategy,
-        documentParseProviderRequested: input.requestedProvider,
-        documentParseProviderResolved: input.resolvedProvider,
-        documentParseProvider: input.resolvedProvider,
-        documentParseBackend: input.resolvedProvider,
-        ...(input.extraMetadata ?? {}),
-      },
-    },
+  const metadata = {
+    ...(input.outcome.diagnostics?.metadata ?? {}),
+    documentParseStrategy: input.strategy,
+    documentParseProviderRequested: input.requestedProvider,
+    documentParseProviderResolved: input.resolvedProvider,
+    documentParseProvider: input.resolvedProvider,
+    documentParseBackend: input.resolvedProvider,
+    ...(input.extraMetadata ?? {}),
   };
+  if (input.outcome.kind === "completed") {
+    return {
+      ...input.outcome,
+      document: {
+        ...input.outcome.document,
+        metadata: { ...input.outcome.document.metadata, ...metadata },
+      },
+      diagnostics: { metadata },
+    };
+  }
+  return { ...input.outcome, diagnostics: { metadata } };
 }
 
 async function startWithProvider(input: {
@@ -79,6 +88,37 @@ async function startWithProvider(input: {
   });
 }
 
+async function startConfiguredOcr(
+  input: ProviderParseInput,
+  strategy: DocumentParseStrategy,
+  requestedProvider: DocumentParseProviderId,
+  reason: "needsOcr" | "image_strategy",
+): Promise<ProviderParseOutcome> {
+  if (!config.documentParsing.ocrEnabled) {
+    throw new Error(
+      "Document requires OCR, but DOCUMENT_PARSE_OCR_ENABLED is false",
+    );
+  }
+  return startWithProvider({
+    providerId: config.documentParsing.ocrProvider,
+    parseInput: input,
+    strategy,
+    requestedProvider,
+    extraMetadata: {
+      ...(reason === "needsOcr" ? { documentParseEntryEngine: "anydoc" } : {}),
+      documentParseOcrReason: reason,
+    },
+  });
+}
+
+export function isDocumentProviderMimeType(mimeType: string): boolean {
+  return (
+    mimeType === "application/pdf" ||
+    isSupportedImageMimeType(mimeType) ||
+    (getConfiguredProviderId() === "anydoc" && isAnydocMimeType(mimeType))
+  );
+}
+
 export async function startDocumentParse(
   input: ProviderParseInput,
 ): Promise<ProviderParseOutcome> {
@@ -86,28 +126,44 @@ export async function startDocumentParse(
   const requestedProvider = getConfiguredProviderId();
 
   if (isSupportedImageMimeType(input.mimeType)) {
-    const visionOutcome = await imageVisionParser(input);
-    if (visionOutcome.kind === "completed") {
-      return withDecisionMetadata({
-        outcome: visionOutcome.outcome,
+    if (config.documentParsing.imageStrategy === "ocr") {
+      return startConfiguredOcr(
+        input,
         strategy,
         requestedProvider,
-        resolvedProvider: "vision",
-      });
+        "image_strategy",
+      );
     }
-
-    return startWithProvider({
-      providerId: "pdf2markdown",
-      parseInput: input,
+    const visionOutcome = await imageVisionParser(input);
+    if (visionOutcome.kind !== "completed") {
+      throw new Error(
+        `Configured image vision parsing failed: ${visionOutcome.reason}`,
+      );
+    }
+    return withDecisionMetadata({
+      outcome: visionOutcome.outcome,
       strategy,
       requestedProvider,
-      extraMetadata: {
-        ...(requestedProvider === "pdf2markdown"
-          ? {}
-          : { documentParseProviderFallbackReason: "image_requires_ocr" }),
-        visionFallbackReason: visionOutcome.reason,
-        pageCount: 1,
-      },
+      resolvedProvider: "vision",
+    });
+  }
+
+  if (requestedProvider === "anydoc") {
+    const provider = ensureSupported("anydoc", input.mimeType);
+    let outcome: ProviderParseOutcome;
+    try {
+      outcome = await provider.start(input);
+    } catch (error) {
+      // OCR is a declared branch, never a catch-all replacement parser.
+      if (!isAnydocNeedsOcrError(error)) throw error;
+      return startConfiguredOcr(input, strategy, requestedProvider, "needsOcr");
+    }
+    return withDecisionMetadata({
+      outcome,
+      strategy,
+      requestedProvider,
+      resolvedProvider: "anydoc",
+      extraMetadata: { documentParseEntryEngine: "anydoc" },
     });
   }
 
@@ -138,50 +194,31 @@ export async function startDocumentParse(
     });
   }
 
-  try {
-    const classification = await classifyPdf(input.content);
-    const summary = summarizeNumbers(classification.bitmapCoverage);
-
-    if (classification.kind === "pure_text") {
-      const outcome = await langChainPdfProvider.start(input);
-      return withDecisionMetadata({
-        outcome,
-        strategy,
-        requestedProvider,
-        resolvedProvider: "langchain",
-        extraMetadata: {
-          pdfClassification: classification.kind,
-          pdfClassificationConfidence: classification.confidence,
-          pdfBitmapCoverageSummary: summary,
-        },
-      });
-    }
-
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
+  // Classification errors and local parser errors must fail without silently
+  // routing a document to a different (possibly remote) implementation.
+  const classification = await classifyPdf(input.content);
+  const metadata = {
+    pdfClassification: classification.kind,
+    pdfClassificationConfidence: classification.confidence,
+    pdfBitmapCoverageSummary: summarizeNumbers(classification.bitmapCoverage),
+  };
+  if (classification.kind === "pure_text") {
+    const outcome = await langChainPdfProvider.start(input);
+    return withDecisionMetadata({
+      outcome,
       strategy,
       requestedProvider,
-      extraMetadata: {
-        pdfClassification: classification.kind,
-        pdfClassificationConfidence: classification.confidence,
-        pdfBitmapCoverageSummary: summary,
-      },
-    });
-  } catch (error) {
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
-      strategy,
-      requestedProvider,
-      extraMetadata: {
-        pdfClassification: "non_pure_text",
-        pdfClassificationConfidence: 0,
-        pdfClassificationError:
-          error instanceof Error ? error.message : "PDF classification failed",
-      },
+      resolvedProvider: "langchain",
+      extraMetadata: metadata,
     });
   }
+  return startWithProvider({
+    providerId: requestedProvider,
+    parseInput: input,
+    strategy,
+    requestedProvider,
+    extraMetadata: metadata,
+  });
 }
 
 export const testExports = {

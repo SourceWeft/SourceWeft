@@ -239,7 +239,7 @@ There is no visible text in the image.
   assert.equal(content.endsWith("```"), false);
   assert.equal(content.includes("# Image Description"), true);
 });
-test("image document parse falls back to OCR with one-page metadata when vision fails", async () => {
+test("image vision failure propagates without submitting an undeclared OCR request", async () => {
   const restoreVisionParser =
     documentParseTestExports.setImageVisionParserForTest(async () => ({
       kind: "fallback",
@@ -260,36 +260,28 @@ test("image document parse falls back to OCR with one-page metadata when vision 
       ),
   );
   try {
-    const result = await startDocumentParse({
-      fileName: "receipt.png",
-      mimeType: "image/png",
-      fileSize: 4,
-      content: Buffer.from([1, 2, 3, 4]),
-      config: {
-        chunkSize: 512,
-        parserVersion: "v1",
-      },
-      sourceId: "source-1",
-      sourceRevisionId: "revision-1",
-      teamId: "team-1",
-      workspaceId: "workspace-1",
-      userId: "user-1",
-    });
-
-    assert.equal(result.kind, "pending");
-    assert.equal(result.diagnostics?.metadata?.documentParseMode, "image_ocr");
-    assert.equal(
-      result.diagnostics?.metadata?.visionFallbackReason,
-      "Default vision model gateway profile is not configured",
+    await assert.rejects(
+      startDocumentParse({
+        fileName: "receipt.png",
+        mimeType: "image/png",
+        fileSize: 4,
+        content: Buffer.from([1, 2, 3, 4]),
+        config: {
+          chunkSize: 512,
+          parserVersion: "v1",
+        },
+        sourceId: "source-1",
+        sourceRevisionId: "revision-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      }),
+      /Default vision model gateway profile is not configured/,
     );
-    assert.equal(result.diagnostics?.metadata?.pageCount, 1);
-    assert.equal(
-      result.diagnostics?.metadata?.documentParseProviderResolved,
-      "pdf2markdown",
-    );
-    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.equal(fetchMock.mock.calls.length, 0);
   } finally {
     restoreVisionParser();
+    fetchMock.mockRestore();
   }
 });
 test("docx parser extracts content, metadata, and chunks", async () => {

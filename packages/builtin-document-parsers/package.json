@@ -12,6 +12,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@firecrawl/anydoc": "0.2.4",
     "@langchain/classic": "^1.0.42",
     "@langchain/community": "^1.1.29",
     "@langchain/core": "^1.2.9",

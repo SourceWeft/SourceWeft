@@ -88,6 +88,7 @@ const billingProviders: ReadonlySet<BillingProvider> = new Set([
 ]);
 
 const documentParseProviders = new Set([
+  "anydoc",
   "langchain",
   "pdf2markdown",
   "docling",
@@ -241,16 +242,28 @@ function parseDocumentParseProvider(
   );
 }
 
+function parseDocumentOption<T extends string>(
+  name: string,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (allowed.includes(normalized as T)) return normalized as T;
+  throw new Error(`${name} must be one of: ${allowed.join(", ")}.`);
+}
+
 function parseDocumentParseStrategy(
   value: string | undefined,
   fallback: string,
 ) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return documentParseStrategies.has(normalized) ? normalized : fallback;
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (documentParseStrategies.has(normalized)) return normalized;
+  throw new Error(
+    `DOCUMENT_PARSE_STRATEGY must be one of: ${[...documentParseStrategies].join(", ")}.`,
+  );
 }
 
 /**
@@ -679,6 +692,18 @@ export const config = {
     provider: parseDocumentParseProvider(
       process.env.DOCUMENT_PARSE_PROVIDER,
       "pdf2markdown",
+    ),
+    // Credentials do not enable the AnyDoc OCR branch.
+    ocrEnabled: parseStrictBooleanEnv("DOCUMENT_PARSE_OCR_ENABLED", false),
+    ocrProvider: parseDocumentOption(
+      "DOCUMENT_PARSE_OCR_PROVIDER",
+      ["pdf2markdown"] as const,
+      "pdf2markdown",
+    ),
+    imageStrategy: parseDocumentOption(
+      "DOCUMENT_PARSE_IMAGE_STRATEGY",
+      ["vision", "ocr"] as const,
+      "vision",
     ),
     pureTextBitmapThreshold: 0.05,
     pureTextMinCharsPerPage: 80,

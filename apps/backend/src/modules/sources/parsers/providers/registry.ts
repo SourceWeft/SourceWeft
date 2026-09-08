@@ -2,7 +2,10 @@ import { createDocumentProviderRegistry } from "@sourceweft/builtin-document-par
 import { langChainPdfProvider } from "./langchain-pdf-provider";
 import { pdf2MarkdownProvider } from "./pdf2markdown-provider";
 
+import { anydocProvider } from "./anydoc-provider";
+
 const registry = createDocumentProviderRegistry({
+  anydoc: anydocProvider,
   langchain: langChainPdfProvider,
   pdf2markdown: pdf2MarkdownProvider,
 });

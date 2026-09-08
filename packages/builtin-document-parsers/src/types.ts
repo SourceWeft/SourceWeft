@@ -4,6 +4,7 @@ export type ParsingConfig = {
 };
 
 export type DocumentParseProviderId =
+  | "anydoc"
   | "langchain"
   | "pdf2markdown"
   | "vision"
@@ -12,17 +13,10 @@ export type DocumentParseProviderId =
   | "unstructured";
 
 export type DocumentParseStrategy =
-  | "explicit"
-  | "balanced"
-  | "cost"
-  | "quality";
+  "explicit" | "balanced" | "cost" | "quality";
 
 export type DocumentParseMode =
-  | "pure_text_pdf"
-  | "ocr_pdf"
-  | "image_ocr"
-  | "image_vision"
-  | "generic";
+  "pure_text_pdf" | "ocr_pdf" | "image_ocr" | "image_vision" | "generic";
 
 export type ChunkSpec = {
   readonly text: string;
