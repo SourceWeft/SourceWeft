@@ -1,9 +1,6 @@
+import { getPerSeatQuota, type PlanQuota } from "./plans";
 import type { PoolClient } from "pg";
-import {
-  getAnchoredMonthlyCycleWindow,
-  getPerSeatQuota,
-  type PlanQuota,
-} from "@sourceweft/credits-core";
+import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
 import { BillingError } from "./errors";
 import {
   appendBillingLedger,

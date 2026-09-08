@@ -70,6 +70,15 @@ if (existing) {
       "Output already exists; --replace=true explicitly replaces this generated workspace",
     );
 }
+// A locked, licensed source tree is required before any existing output is removed.
+for (const required of [
+  "package.json",
+  "pnpm-workspace.yaml",
+  "pnpm-lock.yaml",
+  "LICENSE",
+]) {
+  await lstat(path.join(sourceRoot, required));
+}
 // Validate commercial inputs before touching an existing prepared workspace.
 let commercial;
 if (edition === "commercial") {
@@ -79,7 +88,30 @@ if (edition === "commercial") {
       "utf8",
     ),
   );
-  for (const file of Object.keys(commercial.dependencies)) {
+  await lstat(path.join(sourceRoot, "enterprise/billing/package.json"));
+  await lstat(path.join(sourceRoot, "enterprise/LICENSE"));
+  for (const app of ["backend", "web"]) {
+    if (
+      commercial.dependencies?.[`apps/${app}/package.json`]?.[
+        "@sourceweft/billing"
+      ] !== "workspace:*"
+    ) {
+      throw new Error(`Commercial ${app} dependency binding is missing`);
+    }
+  }
+  for (const binding of [
+    "apps/backend/src/billing-host/bindings.ts",
+    "apps/web/lib/billing-edition/client.tsx",
+    "apps/web/lib/billing-edition/auth-client.ts",
+    "apps/web/lib/billing-edition/catalog.ts",
+  ]) {
+    if (!commercial.bindings?.[binding])
+      throw new Error(`Commercial binding is missing: ${binding}`);
+  }
+  for (const file of Object.keys({
+    ...commercial.dependencies,
+    ...commercial.scripts,
+  })) {
     if (!/^apps\/[a-z0-9-]+\/package\.json$/.test(file))
       throw new Error("Invalid dependency manifest destination");
   }
@@ -122,6 +154,8 @@ const allowed = [
   "turbo.json",
   "Dockerfile",
   ".npmrc",
+  ".dockerignore",
+  ".gitignore",
 ];
 const excluded = new Set([
   "node_modules",
@@ -176,10 +210,25 @@ if (commercial) {
     workspacePath,
     workspace.replace("packages:\n", "packages:\n  - enterprise/*\n"),
   );
+  if (commercial.overrides) {
+    const rootManifestPath = path.join(output, "package.json");
+    const manifest = JSON.parse(await readFile(rootManifestPath, "utf8"));
+    manifest.pnpm = {
+      ...manifest.pnpm,
+      overrides: { ...manifest.pnpm?.overrides, ...commercial.overrides },
+    };
+    await writeFile(rootManifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
   for (const [file, additions] of Object.entries(commercial.dependencies)) {
     const manifestPath = path.join(output, file);
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     manifest.dependencies = { ...manifest.dependencies, ...additions };
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+  for (const [file, scripts] of Object.entries(commercial.scripts ?? {})) {
+    const manifestPath = path.join(output, file);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.scripts = { ...manifest.scripts, ...scripts };
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   }
   for (const [destination, template] of Object.entries(commercial.bindings)) {

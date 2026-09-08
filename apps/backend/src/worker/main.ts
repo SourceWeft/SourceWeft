@@ -1,3 +1,4 @@
+import { validateBillingStartup } from "../billing-host/bindings";
 import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { buildAuditInputFromJob, recordJobAudit } from "../shared/jobs-audit";
@@ -30,6 +31,7 @@ import {
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 
+validateBillingStartup();
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();

@@ -20,7 +20,20 @@ test("Postgres billing preserves concurrent idempotency, member isolation and le
     );
   }
   const pool = new Pool({ connectionString, max: 4 });
-  const store = new PostgresBillingStore(pool);
+  const memberships = {
+    async listTeamMemberUserIds() {
+      throw new Error(
+        "Unexpected membership lookup during individual metering",
+      );
+    },
+    async countTeamMembers() {
+      throw new Error("Unexpected member count");
+    },
+    async countPendingTeamInvitations() {
+      throw new Error("Unexpected invitation count");
+    },
+  };
+  const store = new PostgresBillingStore(pool, memberships);
   const service = new BillingService(store, runtimeConfig, noopProvider);
   const teamId = `billing_test_${randomUUID()}`;
   const actor = `actor_${randomUUID()}`;
@@ -62,7 +75,7 @@ test("Postgres billing preserves concurrent idempotency, member isolation and le
       }
     }
     const failing = new BillingService(
-      new FailingLedgerStore(pool),
+      new FailingLedgerStore(pool, memberships),
       runtimeConfig,
       noopProvider,
     );

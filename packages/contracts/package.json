@@ -43,7 +43,8 @@
     "./artifact-execution": "./src/artifact-execution.ts",
     "./html-artifact": "./src/html-artifact.ts",
     "./billing-runtime": "./src/billing-runtime.ts",
-    "./deployment-capabilities": "./src/deployment-capabilities.ts"
+    "./deployment-capabilities": "./src/deployment-capabilities.ts",
+    "./organization-metadata": "./src/organization-metadata.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

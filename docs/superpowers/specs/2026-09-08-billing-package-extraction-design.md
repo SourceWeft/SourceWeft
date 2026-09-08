@@ -1,7 +1,7 @@
 # Billing 独立商业 package 设计
 
 日期：2026-09-08
-状态：Implementation in progress；用户已要求在独立工作区开始实现，商业发布尚未完成。
+状态：Implementation complete；定向验证见 docs/verification/billing-extraction/completion.md。生产发布与真实支付验证不在本次执行范围。
 关联计划：[分阶段实施计划](../plans/2026-09-08-billing-package-extraction-implementation.md)
 
 ## 1. 目标与范围

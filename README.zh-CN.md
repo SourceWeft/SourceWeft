@@ -108,3 +108,5 @@ Bug 报告、功能建议、代码和设计——都欢迎。
 [Apache License 2.0](LICENSE)
 
 `enterprise/` 目录（如存在）不适用上述许可，按其独立许可证授权。具体范围见 [LICENSE](LICENSE)。
+
+计费为可选模块：默认核心构建不运行 credits/pages 商业账本。订阅、支付和计费界面由 `enterprise/billing` 提供，见[构建与迁移说明](enterprise/billing/README.md)。

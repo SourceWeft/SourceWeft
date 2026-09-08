@@ -1,4 +1,4 @@
-import { getPlanQuota } from "@sourceweft/credits-core";
+import { getPlanQuota } from "./plans";
 import type {
   BillingInterval,
   PricingCheckoutPlan,

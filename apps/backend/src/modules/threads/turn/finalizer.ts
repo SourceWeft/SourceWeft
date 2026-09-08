@@ -129,19 +129,22 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     userId: prepared.userId,
     workspaceOrganizationId: prepared.workspace.organizationId,
   });
-  const billingSummary = await input.billing.getSummary(
+  const billingState = await input.billing.getExecutionState(
     billingTeamId,
     prepared.userId,
   );
-  const billing = {
-    teamId: billingTeamId,
-    consumedCredits: meteredLlmCreditsConsumed,
-    availableCredits: billingSummary.credits.available,
-    consumedThisCycle: billingSummary.credits.consumedThisCycle,
-    idempotencyReplayed: meteredLlmCalls.some(
-      (call) => call.billing?.idempotencyReplayed === true,
-    ),
-  };
+  const billing =
+    billingState.kind === "metered"
+      ? {
+          teamId: billingTeamId,
+          consumedCredits: meteredLlmCreditsConsumed,
+          availableCredits: billingState.availableCredits,
+          consumedThisCycle: billingState.consumedThisCycle,
+          idempotencyReplayed: meteredLlmCalls.some(
+            (call) => call.billing?.idempotencyReplayed === true,
+          ),
+        }
+      : undefined;
 
   const existingAssistantMessage = input.assistantMessageId
     ? await findMessageRecord({

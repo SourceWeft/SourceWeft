@@ -1,7 +1,7 @@
 # Billing 拆包实施计划
 
 日期：2026-09-08
-状态：Implementation in progress；技术基线与初版 package 已开始落地，详见 verification/billing-extraction/progress.md。
+状态：Implementation complete；定向验证见 docs/verification/billing-extraction/completion.md。生产发布与真实支付验证不在本次执行范围。
 设计依据：[Billing 独立商业 package 设计](../specs/2026-09-08-billing-package-extraction-design.md)
 
 本文件给出实现顺序、修改位置、测试与交付条件。文档制定阶段未修改业务代码；用户随后明确要求独立工作区和分支开始实现。当前进度见 `docs/verification/billing-extraction/progress.md`，尚未生产部署。本实施分支仅显式纳管本方案、计划和任务进度，不修改 `/docs/` 的整体忽略规则。

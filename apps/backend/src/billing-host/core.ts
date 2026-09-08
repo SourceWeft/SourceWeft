@@ -10,7 +10,8 @@ export function createCoreBillingRuntime(): BillingRuntime {
     async getExecutionState() {
       return { kind: "unmetered", reason: "billing_not_installed" };
     },
-    async settleModelUsage() {
+    async settleModelUsage(input) {
+      if (typeof input.cost === "function") await input.cost();
       return { status: "skipped", reason: "billing_not_installed" };
     },
     async meterIngestion() {

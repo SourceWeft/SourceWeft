@@ -2,6 +2,7 @@ name: sourceweft
 
 x-sourceweft-env: &sourceweft-env
   NODE_ENV: production
+  SOURCEWEFT_EDITION: ${SOURCEWEFT_EDITION:-core}
   DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}

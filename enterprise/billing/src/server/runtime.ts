@@ -41,7 +41,8 @@ async function settleModelUsage(
   if (input.modelKind === "embedding" || input.modelKind === "rerank") {
     return { status: "skipped", reason: "model_kind_not_user_billed" };
   }
-  const { cost } = input;
+  const cost =
+    typeof input.cost === "function" ? await input.cost() : input.cost;
   const metadata = {
     costSource: cost.costSource,
     missingPriceComponents: cost.missingPriceComponents,

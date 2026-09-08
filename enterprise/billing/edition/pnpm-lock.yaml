@@ -25,6 +25,7 @@ overrides:
   bundle-require>esbuild: ^0.28.2
   '@esbuild-kit/core-utils>esbuild': ^0.25.12
   pptxgenjs>image-size: '-'
+  creem: 1.6.0
 
 patchedDependencies:
   '@google/generative-ai@0.24.1':
@@ -86,9 +87,6 @@ importers:
       '@better-auth/utils':
         specifier: 0.4.2
         version: 0.4.2
-      '@creem_io/better-auth':
-        specifier: ^1.1.4
-        version: 1.1.4(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)
       '@daveyplate/better-auth-ui':
         specifier: ^3.4.0
         version: 3.4.0(1bdac3d21175cf27cec015a4c04dc802)
@@ -131,6 +129,9 @@ importers:
       '@sourceweft/agent-tool-registry':
         specifier: workspace:*
         version: link:../../packages/agent-tool-registry
+      '@sourceweft/billing':
+        specifier: workspace:*
+        version: link:../../enterprise/billing
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -424,9 +425,6 @@ importers:
       '@choochmeque/tauri-plugin-google-auth-api':
         specifier: ^0.5.1
         version: 0.5.1
-      '@creem_io/better-auth':
-        specifier: ^1.1.4
-        version: 1.1.4(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)
       '@daveyplate/better-auth-ui':
         specifier: ^3.4.0
         version: 3.4.0(1bdac3d21175cf27cec015a4c04dc802)
@@ -469,6 +467,9 @@ importers:
       '@sourceweft/agent-tool-registry':
         specifier: workspace:*
         version: link:../../packages/agent-tool-registry
+      '@sourceweft/billing':
+        specifier: workspace:*
+        version: link:../../enterprise/billing
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -601,7 +602,7 @@ importers:
     dependencies:
       '@creem_io/better-auth':
         specifier: ^1.1.4
-        version: 1.1.4(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)
+        version: 1.2.3(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -611,6 +612,12 @@ importers:
       '@sourceweft/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sourceweft/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../../packages/ui
       better-auth:
         specifier: 1.7.2
         version: 1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7)
@@ -620,9 +627,24 @@ importers:
       hono:
         specifier: ^4.13.2
         version: 4.13.2
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.8)
+      next:
+        specifier: ~16.3.0
+        version: 16.3.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       pg:
         specifier: ^8.23.0
         version: 8.23.0
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      sonner:
+        specifier: ^2.0.8
+        version: 2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       unique-names-generator:
         specifier: ^4.7.1
         version: 4.7.1
@@ -633,6 +655,12 @@ importers:
       '@types/pg':
         specifier: ^8.21.0
         version: 8.21.0
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.4
+        version: 19.2.4(@types/react@19.2.18)
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -2043,14 +2071,14 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
-  '@creem_io/better-auth@1.1.4':
-    resolution: {integrity: sha512-sGp2SJ28LI+0yr9EyFd7hPVCczdSx6K2yTBmkB4MdNzmEsPumBqEfn/MX7HNazVTQ3xEVyyDAicnz4XKrTOX3g==}
+  '@creem_io/better-auth@1.2.3':
+    resolution: {integrity: sha512-he81AEuWyO/y51zKsu7AU7QQb+y7ozSib6liX7hJy9BfMhl1HvWAd2XBoDl8nRmkWulV7iGuXQazj3hpQlYShw==}
     peerDependencies:
       better-auth: ^1.3.34
       zod: ^3.23.8 || ^4
 
-  '@creem_io/webhook-types@1.0.0':
-    resolution: {integrity: sha512-LZUgFG+UNb+SkVAz/TngdGDgwfE1mxzX1tlcRmwfA94h/SH5nv0Qtg25GO+JTXyMsMAu5pD596HpezAo3WtJcQ==}
+  '@creem_io/webhook-types@1.0.1':
+    resolution: {integrity: sha512-bcft8t+A29H2sUR4FsYK5x08ZBQau9LlYBja478UwtFxG87ls0M1b9p04Zj5IOQCiISVmeYldek4u/IMaPQg8w==}
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -11118,9 +11146,9 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@creem_io/better-auth@1.1.4(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)':
+  '@creem_io/better-auth@1.2.3(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7))(zod@4.4.3)':
     dependencies:
-      '@creem_io/webhook-types': 1.0.0
+      '@creem_io/webhook-types': 1.0.1
       better-auth: 1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.0(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.7)
       creem: 1.6.0(@cfworker/json-schema@4.1.1)
       zod: 4.4.3
@@ -11128,7 +11156,7 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@creem_io/webhook-types@1.0.0': {}
+  '@creem_io/webhook-types@1.0.1': {}
 
   '@csstools/color-helpers@5.1.0':
     optional: true

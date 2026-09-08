@@ -22,6 +22,8 @@ export function createBilling(input: {
     typeof input.host.organizationMetadata !== "function" ||
     !input.host.logger ||
     typeof input.host.logger.error !== "function" ||
+    typeof input.host.logger.info !== "function" ||
+    typeof input.host.logger.warn !== "function" ||
     !input.alerts ||
     typeof input.alerts.trigger !== "function" ||
     typeof input.alerts.resolve !== "function"

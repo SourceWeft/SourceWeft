@@ -79,3 +79,30 @@ test("runtime settles an explicit provider cost once and preserves the BYOK and 
   assert.equal(minimum.billedBy, "minimum_credit");
   assert.equal(minimum.billing.consumedCredits, 1);
 });
+
+for (const modelKind of ["embedding", "rerank"]) {
+  test(`${modelKind} preserves the existing no-cost-lookup billing policy`, async () => {
+    const store = new MemoryBillingStore();
+    const runtime = createBillingRuntime(
+      new BillingService(store, runtimeConfig, noopProvider),
+    );
+    const result = await runtime.settleModelUsage({
+      teamId: "t",
+      actorUserId: "u",
+      feature: "retrieval",
+      operation: "retrieval",
+      modelKind,
+      profileAlias: "default",
+      cost: async () => {
+        throw new Error(
+          "Non-user-billed work must not need a billing price lookup",
+        );
+      },
+    });
+    assert.deepEqual(result, {
+      status: "skipped",
+      reason: "model_kind_not_user_billed",
+    });
+    assert.equal(store.ledgers.length, 0);
+  });
+}

@@ -224,7 +224,15 @@ function parseDateOrUndefined(value: string | null | undefined) {
  */
 export class PostgresBillingStore implements BillingStore {
   private readonly db;
-  constructor(private readonly pool: Pool) {
+  constructor(
+    private readonly pool: Pool,
+    private readonly memberships: Pick<
+      BillingStore,
+      | "listTeamMemberUserIds"
+      | "countTeamMembers"
+      | "countPendingTeamInvitations"
+    >,
+  ) {
     this.db = drizzle(pool, { schema, casing: "snake_case" });
   }
 
@@ -323,10 +331,7 @@ export class PostgresBillingStore implements BillingStore {
 
   /** Better Auth organization members — the users who each get an allocation row. */
   async listTeamMemberUserIds(teamId: string, client?: PoolClient) {
-    const result = await this.pickDb(client).execute<{ userId: string }>(sql`
-      select "userId" from member where "organizationId" = ${teamId}
-    `);
-    return (result.rows ?? []).map((row) => row.userId);
+    return this.memberships.listTeamMemberUserIds(teamId, client);
   }
 
   async insertAccount(account: BillingAccountState, client: PoolClient) {
@@ -705,29 +710,11 @@ export class PostgresBillingStore implements BillingStore {
   }
 
   async countTeamMembers(teamId: string, client?: PoolClient) {
-    const result = await this.pickDb(client).execute<{ count: string }>(sql`
-      select count(*)::text as count
-      from member
-      where "organizationId" = ${teamId}
-    `);
-
-    const rawCount = result.rows?.[0]?.count;
-    const count = rawCount ? Number(rawCount) : 0;
-    return Number.isFinite(count) ? count : 0;
+    return this.memberships.countTeamMembers(teamId, client);
   }
 
   async countPendingTeamInvitations(teamId: string, client?: PoolClient) {
-    const result = await this.pickDb(client).execute<{ count: string }>(sql`
-      select count(*)::text as count
-      from invitation
-      where "organizationId" = ${teamId}
-        and status = 'pending'
-        and "expiresAt" > now()
-    `);
-
-    const rawCount = result.rows?.[0]?.count;
-    const count = rawCount ? Number(rawCount) : 0;
-    return Number.isFinite(count) ? count : 0;
+    return this.memberships.countPendingTeamInvitations(teamId, client);
   }
 
   async getSubscriptionByTeam(teamId: string, client?: PoolClient) {

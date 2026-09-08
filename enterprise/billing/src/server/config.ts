@@ -1,3 +1,4 @@
+import { validateBillingCatalog } from "./catalog";
 import type {
   BillingMode,
   BillingProvider,
@@ -14,7 +15,7 @@ function parsePositiveNumber(value: string | undefined, fallback: number) {
 
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
+    throw new Error("Billing configuration value must be a positive number");
   }
 
   return parsed;
@@ -27,7 +28,9 @@ function parseNonNegativeNumber(value: string | undefined, fallback: number) {
 
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return fallback;
+    throw new Error(
+      "Billing configuration value must be a non-negative number",
+    );
   }
 
   return parsed;
@@ -35,7 +38,9 @@ function parseNonNegativeNumber(value: string | undefined, fallback: number) {
 
 function parseNonNegativeInteger(value: string | undefined, fallback: number) {
   const parsed = parseNonNegativeNumber(value, fallback);
-  return Number.isInteger(parsed) ? parsed : fallback;
+  if (!Number.isInteger(parsed))
+    throw new Error("Billing configuration value must be an integer");
+  return parsed;
 }
 
 const billingModes: ReadonlySet<BillingMode> = new Set([
@@ -65,42 +70,50 @@ const planFamilies: ReadonlySet<PlanFamily> = new Set([
 ]);
 
 function parseBillingMode(value: string | undefined, fallback: BillingMode) {
-  if (!value) {
+  if (value === undefined) {
     return fallback;
   }
 
   const normalized = value.trim().toLowerCase() as BillingMode;
-  return billingModes.has(normalized) ? normalized : fallback;
+  if (!billingModes.has(normalized))
+    throw new Error("Invalid BACKEND_BILLING_MODE");
+  return normalized;
 }
 
 function parseBillingProvider(
   value: string | undefined,
   fallback: BillingProvider,
 ) {
-  if (!value) {
+  if (value === undefined) {
     return fallback;
   }
 
   const normalized = value.trim().toLowerCase() as BillingProvider;
-  return billingProviders.has(normalized) ? normalized : fallback;
+  if (!billingProviders.has(normalized))
+    throw new Error("Invalid BACKEND_BILLING_PROVIDER");
+  return normalized;
 }
 
 function parseBillingScope(value: string | undefined, fallback: BillingScope) {
-  if (!value) {
+  if (value === undefined) {
     return fallback;
   }
 
   const normalized = value.trim().toLowerCase() as BillingScope;
-  return billingScopes.has(normalized) ? normalized : fallback;
+  if (!billingScopes.has(normalized))
+    throw new Error("Invalid BACKEND_BILLING_SCOPE");
+  return normalized;
 }
 
 function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
-  if (!value) {
+  if (value === undefined) {
     return fallback;
   }
 
   const normalized = value.trim().toLowerCase() as PlanFamily;
-  return planFamilies.has(normalized) ? normalized : fallback;
+  if (!planFamilies.has(normalized))
+    throw new Error("Invalid BACKEND_DEFAULT_PLAN_FAMILY");
+  return normalized;
 }
 
 export function readBillingConfig(
@@ -112,6 +125,11 @@ export function readBillingConfig(
     env.BACKEND_BILLING_PROVIDER,
     "none",
   );
+  if (saasEnabled && !["none", "creem"].includes(requestedBillingProvider)) {
+    throw new Error(
+      `BACKEND_BILLING_PROVIDER=${requestedBillingProvider} is not supported for checkout`,
+    );
+  }
   const effectiveBillingProvider =
     saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
   return {
@@ -194,4 +212,29 @@ export function readBillingConfig(
       ),
     },
   };
+}
+
+/** Validate only enabled payment products; credentials alone never enable checkout. */
+export function validateBillingConfiguration(
+  config: BillingRuntimeConfig,
+): void {
+  if (config.saasEnabled && config.provider === "creem") {
+    for (const [name, value] of [
+      ["CREEM_API_KEY", config.creem.apiKey],
+      ["CREEM_WEBHOOK_SECRET", config.creem.webhookSecret],
+    ]) {
+      if (!value?.trim())
+        throw new Error(`${name} is required for enabled checkout`);
+    }
+    validateBillingCatalog({
+      runtimeConfig: config,
+      subscriptionPlanFamilies: config.teamBillingEnabled
+        ? ["individual_pro", "team_standard"]
+        : ["individual_pro"],
+      topupUnitTypes: [
+        ...(config.creem.creditTopupProductId ? ["credit" as const] : []),
+        ...(config.creem.pageTopupProductId ? ["page" as const] : []),
+      ],
+    });
+  }
 }

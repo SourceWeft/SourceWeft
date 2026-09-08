@@ -43,7 +43,7 @@ export type SettleModelUsageInput = BillingActor & {
   referenceId?: string;
   idempotencyKey?: string;
   executionMode?: "GLOBAL" | "BYOK";
-  cost: BillingModelCost;
+  cost: BillingModelCost | (() => Promise<BillingModelCost>);
   providerActualCostUsd?: number | null;
   providerCostSource?: string | null;
   providerCostDetails?: unknown;
@@ -83,9 +83,7 @@ export interface BillingRuntime {
     input: MeterIngestionRequest,
     actorUserId: string,
   ): Promise<IngestionSettlement>;
-  reconcileProviderCost(
-    input: ReconcileBillingProviderCostInput,
-  ): Promise<
+  reconcileProviderCost(input: ReconcileBillingProviderCostInput): Promise<
     | BillingSkipped
     | {
         status: "settled";

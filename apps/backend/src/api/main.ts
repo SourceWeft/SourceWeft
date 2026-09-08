@@ -1,3 +1,4 @@
+import { validateBillingStartup } from "../billing-host/bindings";
 import { serve } from "@hono/node-server";
 import { config } from "../shared/config";
 import { closeDatabase } from "@sourceweft/db";
@@ -15,6 +16,7 @@ import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 
+validateBillingStartup();
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();
