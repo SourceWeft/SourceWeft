@@ -143,6 +143,12 @@ importers:
       '@sourceweft/builtin-skill-feynman':
         specifier: workspace:*
         version: link:../../packages/builtin-skill-feynman
+      '@sourceweft/builtin-skill-html':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-html
+      '@sourceweft/builtin-skill-html-slides':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-html-slides
       '@sourceweft/builtin-skill-image-generate':
         specifier: workspace:*
         version: link:../../packages/builtin-skill-image-generate

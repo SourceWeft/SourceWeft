@@ -62,6 +62,8 @@
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-feynman": "workspace:*",
+    "@sourceweft/builtin-skill-html": "workspace:*",
+    "@sourceweft/builtin-skill-html-slides": "workspace:*",
     "@sourceweft/builtin-skill-image-generate": "workspace:*",
     "@sourceweft/builtin-skill-meeting-summary": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
