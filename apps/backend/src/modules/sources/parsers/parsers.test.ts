@@ -588,7 +588,7 @@ test("CSV upload keeps binary-content validation while binary Office files reach
       "sheet.xlsx",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ],
-  ]) {
+  ] as const) {
     const classification = classifySourceFile({ fileName, mimeType });
     assert.equal(classification.supported, true);
     if (!classification.supported) continue;

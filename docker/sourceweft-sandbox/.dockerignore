@@ -1,5 +1,7 @@
-# Ignore everything — we only need the Dockerfile and the shared base script.
+# Include only the Dockerfile and its shared provisioning inputs.
 # Context is docker/sourceweft-sandbox/.
 *
 !Dockerfile
 !install-base.sh
+!html-runtime/
+!html-runtime/**

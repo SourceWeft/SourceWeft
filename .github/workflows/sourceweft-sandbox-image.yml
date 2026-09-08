@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docker/sourceweft-sandbox/**'
+      - '.github/workflows/sourceweft-sandbox-image.yml'
   schedule:
     # Monthly rebuild to pick up base OS security patches and
     # refreshed package indices.  03:00 UTC on the 1st.
