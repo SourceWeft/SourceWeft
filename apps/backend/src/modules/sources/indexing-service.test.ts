@@ -231,7 +231,15 @@ test("an explicit idempotency key still wins for both embeddings and page billin
   );
 });
 
-test("page-based ingestion billing is unchanged by the migration", async () => {
+test("trusted PDF page-based ingestion billing is unchanged by the migration", async () => {
+  requireContentSource.mockResolvedValue({
+    workspace,
+    source: {
+      ...source,
+      mimeType: "application/pdf",
+      metadata: { pageCount: 3, pageCountSource: "pdfjs" },
+    },
+  });
   await makeService().indexSource({
     workspaceId: WORKSPACE_ID,
     sourceId: SOURCE_ID,
@@ -249,6 +257,7 @@ test("page-based ingestion billing is unchanged by the migration", async () => {
       referenceId: `source:${SOURCE_ID}`,
       idempotencyKey: `source-index:${SOURCE_ID}`,
       pages: 3,
+      parsedTokens: 3,
     },
     USER_ID,
   );
@@ -291,4 +300,119 @@ test("a result from a different actual model cannot write vectors or bill ingest
   expect(recordGatewayOperationEvent).toHaveBeenCalledWith(
     expect.objectContaining({ success: false }),
   );
+});
+
+for (const kind of ["manual", "docx", "csv", "epub"]) {
+  test(`${kind} reindex bills body tokens rather than stale estimates or logical page one`, async () => {
+    const mimeType = (
+      {
+        manual: "text/plain",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        csv: "text/csv",
+        epub: "application/epub+zip",
+      } as const
+    )[kind as "manual" | "docx" | "csv" | "epub"];
+    requireContentSource.mockResolvedValue({
+      workspace,
+      source: {
+        ...source,
+        mimeType,
+        contentText: "x".repeat(12001),
+        estimatedPages: 99,
+        parsedTokens: 1,
+        metadata: {
+          pageCount: 1,
+          parsedPages: 15,
+          totalPages: 15,
+          billingPageCount: 1,
+          billingPageCountSource: "csv-records",
+        },
+      },
+    });
+    await makeService().indexSource({
+      workspaceId: WORKSPACE_ID,
+      sourceId: SOURCE_ID,
+      userId: USER_ID,
+      chunks,
+      parsedPages: 1,
+      estimatedPages: 88,
+      parsedTokens: 1,
+      idempotencyKey: "same-revision",
+    });
+    expect(billing.meterIngestion).toHaveBeenCalledWith(
+      TEAM_ID,
+      expect.objectContaining({
+        pages: 4,
+        parsedTokens: 3001,
+        idempotencyKey: "same-revision",
+      }),
+      USER_ID,
+    );
+    expect(updateSourceStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estimatedPages: 4,
+        parsedTokens: 3001,
+        metadata: expect.objectContaining({
+          ingestionBillingBasis: "text-equivalent",
+          ingestionBillingPages: 4,
+          parsedPages: 0,
+          totalPages: 0,
+        }),
+      }),
+    );
+    const writtenMetadata = updateSourceStatus.mock.calls[0]?.[0].metadata;
+    for (const key of [
+      "billingPageCount",
+      "billingPageCountSource",
+      "pageCount",
+    ])
+      expect(writtenMetadata).not.toHaveProperty(key);
+  });
+}
+
+test("PDF reindex uses trusted physical pages even when text is longer", async () => {
+  requireContentSource.mockResolvedValue({
+    workspace,
+    source: {
+      ...source,
+      mimeType: "application/pdf",
+      contentText: "x".repeat(40001),
+      metadata: { pageCount: 2, pageCountSource: "pdfjs" },
+      estimatedPages: 77,
+    },
+  });
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+    estimatedPages: 99,
+  });
+  expect(billing.meterIngestion).toHaveBeenCalledWith(
+    TEAM_ID,
+    expect.objectContaining({ pages: 2, parsedTokens: 10001 }),
+    USER_ID,
+  );
+});
+
+test("empty source cannot become a one-page charge through stale estimates or chunks", async () => {
+  requireContentSource.mockResolvedValue({
+    workspace,
+    source: {
+      ...source,
+      contentText: " ",
+      parsedTokens: 1000,
+      estimatedPages: 5,
+    },
+  });
+  await expect(
+    makeService().indexSource({
+      workspaceId: WORKSPACE_ID,
+      sourceId: SOURCE_ID,
+      userId: USER_ID,
+      chunks,
+      parsedTokens: 1000,
+    }),
+  ).rejects.toThrow(/Nonempty source content/);
+  expect(billing.meterIngestion).not.toHaveBeenCalled();
 });

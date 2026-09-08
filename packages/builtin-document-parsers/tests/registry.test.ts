@@ -3,16 +3,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  anydocSourceParser,
   createDocumentProviderRegistry,
   createSourceParserRegistry,
-  csvSourceParser,
-  docxSourceParser,
-  epubSourceParser,
   getPureSourceParser,
   isSupportedImageMimeType,
   jsonSourceParser,
   listPureSupportedSourceMimeTypes,
-  pptxSourceParser,
   srtSourceParser,
   textSourceParser,
   validatePublicHttpUrl,
@@ -28,15 +25,15 @@ async function readPackageSource(relativePath: string) {
 test("pure parser registry resolves known mime types", () => {
   assert.equal(getPureSourceParser("text/markdown")?.id, "text");
   assert.equal(getPureSourceParser("application/typescript")?.id, "text");
-  assert.equal(getPureSourceParser("text/csv")?.id, "csv");
+  assert.equal(getPureSourceParser("text/csv")?.id, "anydoc");
   assert.equal(getPureSourceParser("application/json")?.id, "json");
-  assert.equal(getPureSourceParser("application/msword")?.id, "docx");
-  assert.equal(getPureSourceParser("application/epub+zip")?.id, "epub");
+  assert.equal(getPureSourceParser("application/msword")?.id, "anydoc");
+  assert.equal(getPureSourceParser("application/epub+zip")?.id, "anydoc");
   assert.equal(
     getPureSourceParser(
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )?.id,
-    "pptx",
+    "anydoc",
   );
   assert.equal(getPureSourceParser("text/srt")?.id, "srt");
   assert.equal(getPureSourceParser("application/octet-stream"), null);
@@ -54,11 +51,8 @@ test("custom parser registry accepts external-owned adapters", () => {
       },
     },
     ...[
-      docxSourceParser,
-      epubSourceParser,
-      csvSourceParser,
+      anydocSourceParser,
       jsonSourceParser,
-      pptxSourceParser,
       srtSourceParser,
       textSourceParser,
     ],
@@ -111,7 +105,7 @@ test("document provider registry resolves resume-capable providers", () => {
   assert.equal(registry.getDocumentProvider("pdf2markdown"), provider);
   assert.equal(registry.getDocumentProviderForResume("pdf2markdown"), provider);
   assert.throws(
-    () => registry.getDocumentProvider("langchain"),
+    () => registry.getDocumentProvider("anydoc"),
     /not implemented/u,
   );
 });
@@ -136,7 +130,6 @@ test("provider contracts avoid backend, billing, and secret terminology", async 
   const contractFiles = [
     join("src", "types.ts"),
     join("src", "providers", "types.ts"),
-    join("src", "providers", "decision-metadata.ts"),
   ];
   const forbiddenPattern = /\b(?:backend|billing|apiKey|AnyCrawl)\b/u;
   const sources = await Promise.all(

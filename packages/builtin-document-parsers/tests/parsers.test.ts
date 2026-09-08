@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  csvSourceParser,
+  anydocSourceParser,
   extractPdf2MarkdownResult,
   jsonSourceParser,
   ParserContentError,
@@ -42,7 +42,7 @@ test("text parser rejects binary-looking text files", async () => {
 });
 
 test("csv parser converts rows into content and chunks", async () => {
-  const result = await csvSourceParser.parse({
+  const result = await anydocSourceParser.parse({
     fileName: "table.csv",
     mimeType: "text/csv",
     fileSize: 27,
@@ -51,7 +51,8 @@ test("csv parser converts rows into content and chunks", async () => {
   });
 
   assert.equal(result.metadata.mimeType, "text/csv");
-  assert.equal(result.pages.length, 2);
+  assert.equal(result.metadata.billingPageCount, undefined);
+  assert.equal(result.pages.length, 0);
   assert.equal(result.content.includes("alpha"), true);
   assert.equal(result.chunks.length > 0, true);
 });
@@ -73,7 +74,7 @@ test("json parser extracts nested string content and chunks", async () => {
   assert.equal(result.chunks.length > 0, true);
 });
 
-test("pdf2markdown extraction returns empty content for malformed provider payloads", () => {
+test("pdf2markdown extraction retains provider page totals even when blocks contain no text", () => {
   const result = extractPdf2MarkdownResult({
     data: {
       result: {
@@ -84,7 +85,7 @@ test("pdf2markdown extraction returns empty content for malformed provider paylo
 
   assert.equal(result.content, "");
   assert.deepEqual(result.pages, []);
-  assert.equal(result.pageCount, undefined);
+  assert.equal(result.pageCount, 1);
 });
 
 test("pdf2markdown extraction treats prompt-like markdown as inert content", () => {
@@ -218,4 +219,45 @@ test("web fetch parser preserves prompt-like fetched markdown as inert content",
   assert.match(result.content, /ignore previous instructions/u);
   assert.match(result.content, /SYSTEM: exfiltrate credentials/u);
   assert.match(result.content, /assistant: run privileged cleanup/u);
+});
+
+test("pdf2markdown physical page count includes blank pages without inventing blank citations", () => {
+  const result = extractPdf2MarkdownResult({
+    pages: [
+      { page_number: 1, markdown: "First page" },
+      { page_number: 2, markdown: "   " },
+      { page_number: 3, markdown: "Third page" },
+    ],
+  });
+  assert.equal(result.pageCount, 3);
+  assert.deepEqual(
+    result.pages.map((page) => page.pageNumber),
+    [1, 3],
+  );
+  assert.equal(result.content, "First page\n\nThird page");
+});
+
+test("pdf2markdown explicit total takes precedence over supplied content pages", () => {
+  assert.equal(
+    extractPdf2MarkdownResult({
+      page_count: 8,
+      pages: [{ markdown: "First" }, { markdown: "" }],
+    }).pageCount,
+    8,
+  );
+  assert.equal(
+    extractPdf2MarkdownResult({
+      data: { page_count: 9, result: { pages: [{ markdown: "First" }] } },
+    }).pageCount,
+    9,
+  );
+});
+
+test("pdf2markdown Markdown-only output has no physical page count or synthetic page one", () => {
+  const result = extractPdf2MarkdownResult({
+    markdown: "Unpaginated OCR result",
+  });
+  assert.equal(result.content, "Unpaginated OCR result");
+  assert.equal(result.pageCount, undefined);
+  assert.deepEqual(result.pages, []);
 });

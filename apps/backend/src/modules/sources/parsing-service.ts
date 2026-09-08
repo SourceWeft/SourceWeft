@@ -1,3 +1,8 @@
+import {
+  estimateSourceTokens,
+  resolveBillingPages,
+  resolvePhysicalPageCount,
+} from "./billing-pages";
 import { createHash } from "node:crypto";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
@@ -8,7 +13,11 @@ import {
   webFetchSourceParser,
   WEB_FETCH_SOURCE_MIME_TYPE,
 } from "./parsers/web-fetch";
-import { startDocumentParse } from "./parsers/providers/document-parse-orchestrator";
+import {
+  startDocumentParse,
+  isDocumentProviderMimeType,
+} from "./parsers/providers/document-parse-orchestrator";
+import type { ProviderPendingToken } from "./parsers/providers/types";
 import { getDocumentProviderForResume } from "./parsers/providers/registry";
 import { isSupportedImageMimeType } from "./parsers/providers/utils";
 import type {
@@ -44,10 +53,6 @@ import {
   buildSourceParseLogContext,
 } from "./parse-diagnostics";
 
-function estimateTokens(text: string) {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
 function computeContentHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -62,29 +67,105 @@ function mergeStatusMetadata(
   };
 }
 
-function isDocumentProviderMimeType(mimeType: string) {
-  return [
-    "application/pdf",
-    "image/avif",
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/webp",
-    "image/tiff",
-    "image/bmp",
-    "image/gif",
-  ].includes(mimeType);
+// Provenance belongs to one parse, while upload/user metadata survives reparses.
+function withoutParseMetadata(metadata: SourceRecord["metadata"]) {
+  return Object.fromEntries(
+    Object.entries(metadata ?? {}).filter(
+      ([key]) =>
+        !/^(ingestionBilling|documentParse|provider|parserEngine|pdfClassification|pdfBitmap)/.test(
+          key,
+        ) &&
+        ![
+          "detectedFormat",
+          "pageLocationAvailable",
+          "pageCountSource",
+          "pageCount",
+          "parsedPages",
+          "totalPages",
+          "billingPageCount",
+          "billingPageCountSource",
+        ].includes(key),
+    ),
+  );
 }
 
-function resolveParsedPageCount(input: {
-  mimeType?: string | null;
-  parsed: ParsedDocument;
-}) {
-  if (input.mimeType && isSupportedImageMimeType(input.mimeType)) {
-    return 1;
-  }
+function currentParseDecisionMetadata(metadata: SourceRecord["metadata"]) {
+  const keys = [
+    "documentParseEntryEngine",
+    "documentParseStrategy",
+    "documentParseProviderRequested",
+    "documentParseOcrReason",
+    "documentParseInputMimeType",
+    "documentParseCanonicalMimeType",
+  ];
+  return Object.fromEntries(
+    keys
+      .filter((key) => metadata?.[key] !== undefined)
+      .map((key) => [key, metadata[key]]),
+  );
+}
 
-  return input.parsed.metadata.pageCount ?? input.parsed.pages.length;
+function savedPendingToken(
+  source: SourceRecord,
+  job: SourceParseJobPayload,
+): ProviderPendingToken | null {
+  const pending = source.metadata?.documentParsePending;
+  if (!pending || typeof pending !== "object") return null;
+  const record = pending as Record<string, unknown>;
+  if (
+    record.sourceRevisionId !== job.sourceRevisionId ||
+    !record.token ||
+    typeof record.token !== "object"
+  )
+    return null;
+  const token = record.token as ProviderPendingToken;
+  if (
+    token.sourceId !== job.sourceId ||
+    token.teamId !== job.teamId ||
+    token.workspaceId !== job.workspaceId ||
+    token.userId !== job.userId ||
+    token.backendId !== "pdf2markdown" ||
+    typeof token.taskId !== "string" ||
+    !token.taskId ||
+    typeof token.fileName !== "string" ||
+    typeof token.mimeType !== "string" ||
+    typeof token.fileSize !== "number" ||
+    !token.parsingConfig ||
+    typeof token.parsingConfig !== "object" ||
+    typeof token.parsingConfig.chunkSize !== "number" ||
+    !Number.isFinite(token.parsingConfig.chunkSize) ||
+    token.parsingConfig.chunkSize <= 0 ||
+    typeof token.parsingConfig.parserVersion !== "string" ||
+    !token.parsingConfig.parserVersion.trim() ||
+    !Number.isSafeInteger(token.attempt) ||
+    token.attempt < 0
+  )
+    return null;
+  return token;
+}
+
+async function enqueuePendingParse(
+  job: SourceParseJobPayload,
+  token: ProviderPendingToken,
+) {
+  await enqueueSourceParsePollJob(
+    {
+      sourceId: job.sourceId,
+      sourceRevisionId: job.sourceRevisionId,
+      workspaceId: job.workspaceId,
+      teamId: job.teamId,
+      userId: job.userId,
+      idempotencyKey: job.idempotencyKey,
+      backendId: token.backendId,
+      taskId: token.taskId,
+      fileName: token.fileName,
+      mimeType: token.mimeType,
+      fileSize: token.fileSize,
+      parsingConfig: token.parsingConfig,
+      attempt: token.attempt,
+    },
+    nextProviderPollDelay(token.attempt),
+  );
 }
 
 function isImageSourceMimeType(mimeType?: string | null) {
@@ -215,7 +296,7 @@ export class SourceParsingService {
   async processSourceParseJob(
     input: SourceParseJobPayload & { isFinalAttempt?: boolean },
   ) {
-    const source = await findSourceRecord({
+    let source = await findSourceRecord({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       sourceId: input.sourceId,
@@ -244,6 +325,14 @@ export class SourceParsingService {
           "SOURCE_STORAGE_MISSING",
           "Source file storage is incomplete",
         );
+      }
+
+      // Recover a task saved before an enqueue failure without another paid OCR submission.
+      // A remote success before local persistence still requires provider-side idempotency.
+      const pendingToken = savedPendingToken(source, input);
+      if (pendingToken) {
+        await enqueuePendingParse(input, pendingToken);
+        return;
       }
 
       const parser = getSourceParser(source.mimeType);
@@ -304,35 +393,26 @@ export class SourceParsingService {
         : null;
 
       if (providerOutcome?.kind === "pending") {
-        await updateSourceRecord({
+        const saved = await updateSourceRecordForLatestRevision({
+          sourceRevisionId: input.sourceRevisionId,
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           sourceId: input.sourceId,
-          metadata: mergeStatusMetadata(source, {
+          metadata: {
+            ...withoutParseMetadata(source.metadata),
             ...(providerOutcome.diagnostics?.metadata ?? {}),
+            documentParsePending: {
+              sourceRevisionId: input.sourceRevisionId,
+              token: providerOutcome.token,
+            },
             progress: 30,
             currentStep: "parsing",
-          }),
+          },
         });
 
-        await enqueueSourceParsePollJob(
-          {
-            sourceId: input.sourceId,
-            sourceRevisionId: input.sourceRevisionId,
-            workspaceId: input.workspaceId,
-            teamId: input.teamId,
-            userId: input.userId,
-            idempotencyKey: input.idempotencyKey,
-            backendId: providerOutcome.token.backendId,
-            taskId: providerOutcome.token.taskId,
-            fileName: providerOutcome.token.fileName,
-            mimeType: providerOutcome.token.mimeType,
-            fileSize: providerOutcome.token.fileSize,
-            parsingConfig,
-            attempt: 0,
-          },
-          nextProviderPollDelay(0),
-        );
+        if (!saved) return;
+        source = saved;
+        await enqueuePendingParse(input, providerOutcome.token);
         return;
       }
 
@@ -481,17 +561,23 @@ export class SourceParsingService {
           );
         }
 
-        await updateSourceRecord({
+        const saved = await updateSourceRecordForLatestRevision({
+          sourceRevisionId: input.sourceRevisionId,
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           sourceId: input.sourceId,
           metadata: mergeStatusMetadata(source, {
             ...(outcome.diagnostics?.metadata ?? {}),
+            documentParsePending: {
+              sourceRevisionId: input.sourceRevisionId,
+              token: outcome.token,
+            },
             progress: Math.min(55, 30 + outcome.token.attempt),
             currentStep: "parsing",
           }),
         });
 
+        if (!saved) return;
         await enqueueSourceParsePollJob(
           {
             ...input,
@@ -505,7 +591,13 @@ export class SourceParsingService {
       await this.completeParsedSource({
         input,
         source,
-        parsed: outcome.document,
+        parsed: {
+          ...outcome.document,
+          metadata: {
+            ...currentParseDecisionMetadata(source.metadata),
+            ...outcome.document.metadata,
+          },
+        },
         parsingConfig: input.parsingConfig,
         originalSizeBytes: fileBuffer.byteLength,
       });
@@ -537,14 +629,23 @@ export class SourceParsingService {
     }
 
     const contentHash = computeContentHash(input.parsed.content);
-    const parsedTokens = estimateTokens(input.parsed.content);
-    const parsedPages = resolveParsedPageCount({
+    const parsedTokens = estimateSourceTokens(input.parsed.content);
+    const physicalPageCount = resolvePhysicalPageCount({
       mimeType: input.source.mimeType,
-      parsed: input.parsed,
+      metadata: input.parsed.metadata,
     });
-    const billablePages = parsedPages;
+    const parsedPages = physicalPageCount ?? 0;
+    const billablePages = resolveBillingPages({
+      physicalPageCount,
+      contentText: input.parsed.content,
+    });
+    const billingMetadata = {
+      ingestionBillingPages: billablePages,
+      ingestionBillingBasis:
+        physicalPageCount === undefined ? "text-equivalent" : "physical-pages",
+    };
     const imagePageMetadata = isImageSourceMimeType(input.source.mimeType)
-      ? { pageCount: parsedPages }
+      ? { pageCount: 1, pageCountSource: "image" }
       : {};
     const parsedSource = await updateSourceRecordForLatestRevision({
       teamId: input.input.teamId,
@@ -559,15 +660,16 @@ export class SourceParsingService {
         Buffer.byteLength(input.parsed.content, "utf8"),
       parserVersion: input.parsingConfig.parserVersion,
       parsingConfig: input.parsingConfig,
-      estimatedPages: parsedPages || input.source.estimatedPages,
+      estimatedPages: billablePages,
       parsedTokens,
       metadata: {
-        ...(input.source.metadata ?? {}),
+        ...withoutParseMetadata(input.source.metadata),
         ...input.parsed.metadata,
         ...imagePageMetadata,
+        ...billingMetadata,
         parsedTextSizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
         parsedPages,
-        totalPages: billablePages || parsedPages,
+        totalPages: parsedPages,
         progress: 60,
         currentStep: "chunking",
         error: null,
@@ -583,8 +685,8 @@ export class SourceParsingService {
       sourceId: input.input.sourceId,
       userId: input.input.userId,
       sourceRevisionId: input.input.sourceRevisionId,
-      estimatedPages: parsedPages,
-      parsedPages: billablePages || parsedPages,
+      estimatedPages: billablePages,
+      parsedPages,
       parsedTokens,
       idempotencyKey: input.input.idempotencyKey,
       chunks: input.parsed.chunks,
@@ -605,7 +707,7 @@ export class SourceParsingService {
       sourceRevisionId: input.input.sourceRevisionId,
       metadata: mergeStatusMetadata(result.source, {
         parsedPages,
-        totalPages: billablePages || parsedPages,
+        totalPages: parsedPages,
         progress: 100,
         currentStep: "completed",
         error: null,

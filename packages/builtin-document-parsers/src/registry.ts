@@ -1,8 +1,5 @@
-import { csvSourceParser } from "./csv";
-import { docxSourceParser } from "./docx";
-import { epubSourceParser } from "./epub";
+import { anydocSourceParser } from "./anydoc";
 import { jsonSourceParser } from "./json";
-import { pptxSourceParser } from "./pptx";
 import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
 import type { SourceParser } from "./types";
@@ -26,11 +23,8 @@ export function createSourceParserRegistry<TParser extends SourceParser>(
 }
 
 export const pureFileSourceParsers: readonly SourceParser[] = [
-  docxSourceParser,
-  epubSourceParser,
-  csvSourceParser,
+  anydocSourceParser,
   jsonSourceParser,
-  pptxSourceParser,
   srtSourceParser,
   textSourceParser,
 ] as const;

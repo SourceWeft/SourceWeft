@@ -1,0 +1,2 @@
+# PDF xref records contain significant fixed-width whitespace.
+*.pdf binary

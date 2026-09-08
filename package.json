@@ -37,7 +37,6 @@
       "adm-zip": "^0.6.0",
       "next>sharp": "^0.35.3",
       "next>postcss": "^8.5.26",
-      "officeparser": "^7.5.1",
       "pdfjs-dist": "^6.2.108",
       "node-notifier>uuid": "^11.1.1",
       "undici@5": "^6.28.0",
@@ -51,7 +50,6 @@
     "peerDependencyRules": {
       "allowedVersions": {
         "@better-auth/api-key>better-call": "2",
-        "@langchain/community>officeparser": "7",
         "@better-auth/core>better-call": "2",
         "@better-auth/passkey>better-call": "2",
         "@better-auth/oauth-provider>better-call": "2",

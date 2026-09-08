@@ -1,9 +1,5 @@
 import type { ParsedDocument, ParseInput, SourceMetadata } from "../types";
-import type {
-  DocumentParseProviderId,
-  DocumentParseStrategy,
-  ParsingConfig,
-} from "../types";
+import type { DocumentParseProviderId, ParsingConfig } from "../types";
 
 export type ProviderPendingToken = {
   readonly backendId: DocumentParseProviderId;
@@ -51,26 +47,3 @@ export interface DocumentParseProvider {
     content: Buffer,
   ): Promise<ProviderParseOutcome>;
 }
-
-export type PdfClassification =
-  | {
-      readonly kind: "pure_text";
-      readonly confidence: number;
-      readonly pageCount: number;
-      readonly bitmapCoverage: readonly number[];
-    }
-  | {
-      readonly kind: "non_pure_text";
-      readonly confidence: number;
-      readonly pageCount: number;
-      readonly bitmapCoverage: readonly number[];
-      readonly reason: "scan_like" | "hybrid" | "image_heavy" | "unknown";
-    };
-
-export type DocumentParseDecisionMetadataInput = {
-  readonly outcome: ProviderParseOutcome;
-  readonly strategy: DocumentParseStrategy;
-  readonly requestedProvider: DocumentParseProviderId;
-  readonly resolvedProvider: DocumentParseProviderId;
-  readonly extraMetadata?: Record<string, unknown>;
-};

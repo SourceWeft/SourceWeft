@@ -3,26 +3,12 @@ export type ParsingConfig = {
   readonly parserVersion: string;
 };
 
-export type DocumentParseProviderId =
-  | "langchain"
-  | "pdf2markdown"
-  | "vision"
-  | "docling"
-  | "llamaparse"
-  | "unstructured";
+export type DocumentParseProviderId = "anydoc" | "pdf2markdown" | "vision";
 
-export type DocumentParseStrategy =
-  | "explicit"
-  | "balanced"
-  | "cost"
-  | "quality";
+export type DocumentParseStrategy = "explicit";
 
 export type DocumentParseMode =
-  | "pure_text_pdf"
-  | "ocr_pdf"
-  | "image_ocr"
-  | "image_vision"
-  | "generic";
+  "pure_text_pdf" | "ocr_pdf" | "image_ocr" | "image_vision" | "generic";
 
 export type ChunkSpec = {
   readonly text: string;

@@ -21,7 +21,11 @@ import {
   updateSourceStatus,
   updateSourceStatusForLatestRevision,
 } from "./repository";
-import { resolveBillingPages } from "./billing-pages";
+import {
+  estimateSourceTokens,
+  resolveBillingPages,
+  resolvePhysicalPageCount,
+} from "./billing-pages";
 
 type StaleIndexingResult = {
   stale: true;
@@ -118,8 +122,31 @@ export class SourceIndexingService {
       }
     }
 
-    let estimatedPages = input.estimatedPages ?? source.estimatedPages;
-    const parsedTokens = input.parsedTokens ?? source.parsedTokens;
+    // Recompute from this revision's actual content, never caller/file-size estimates.
+    const parsedTokens = estimateSourceTokens(source.contentText);
+    const physicalPageCount = resolvePhysicalPageCount({
+      mimeType: source.mimeType,
+      metadata: source.metadata,
+    });
+    const estimatedPages = resolveBillingPages({
+      physicalPageCount,
+      contentText: source.contentText,
+    });
+    const billingMetadata = {
+      ...Object.fromEntries(
+        Object.entries(source.metadata ?? {}).filter(
+          ([key]) =>
+            key !== "billingPageCount" &&
+            key !== "billingPageCountSource" &&
+            (physicalPageCount !== undefined || key !== "pageCount"),
+        ),
+      ),
+      parsedPages: physicalPageCount ?? 0,
+      totalPages: physicalPageCount ?? 0,
+      ingestionBillingPages: estimatedPages,
+      ingestionBillingBasis:
+        physicalPageCount === undefined ? "text-equivalent" : "physical-pages",
+    };
 
     const processingSource = input.sourceRevisionId
       ? await updateSourceStatusForLatestRevision({
@@ -130,6 +157,7 @@ export class SourceIndexingService {
           status: "processing",
           estimatedPages,
           parsedTokens,
+          metadata: billingMetadata,
         })
       : await updateSourceStatus({
           sourceId: source.id,
@@ -138,6 +166,7 @@ export class SourceIndexingService {
           status: "processing",
           estimatedPages,
           parsedTokens,
+          metadata: billingMetadata,
         });
     if (!processingSource) {
       return this.handleStaleRevision(
@@ -149,14 +178,7 @@ export class SourceIndexingService {
 
     let embeddings: number[][] = [];
     try {
-      const billingPages = resolveBillingPages({
-        parsedPages: input.parsedPages,
-        estimatedPages: input.estimatedPages,
-        sourceEstimatedPages: source.estimatedPages,
-        chunkCount: chunkSpecs.length,
-        contentText: source.contentText,
-      });
-      estimatedPages ??= billingPages;
+      const billingPages = estimatedPages;
 
       if (chunkSpecs.length > 0 && profile.vectorStrategy !== "disabled") {
         const embedStartedAt = Date.now();
@@ -320,6 +342,7 @@ export class SourceIndexingService {
           referenceId: `source:${source.id}`,
           idempotencyKey: input.idempotencyKey || `source-index:${source.id}`,
           pages: billingPages,
+          parsedTokens,
         },
         input.userId,
       );
@@ -334,6 +357,7 @@ export class SourceIndexingService {
           indexedAt: new Date(),
           estimatedPages,
           parsedTokens,
+          metadata: billingMetadata,
         }));
 
       return {
@@ -373,6 +397,7 @@ export class SourceIndexingService {
           status: "failed",
           estimatedPages,
           parsedTokens,
+          metadata: billingMetadata,
         });
 
         if (!failedSource) {
@@ -390,6 +415,7 @@ export class SourceIndexingService {
           status: "failed",
           estimatedPages,
           parsedTokens,
+          metadata: billingMetadata,
         });
       }
       throw error;

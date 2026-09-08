@@ -91,19 +91,14 @@ Stream closure, partial-usage settlement, tool-message grouping and durable
 terminal events now follow [stream and run lifecycle](stream-run-lifecycle.md).
 Unauthenticated System OpenAI-compatible transport is supported through the
 explicit configuration described in [local LLM networking](llm-network.md).
-`DOCUMENT_PARSE_PROVIDER` is validated when configuration loads at service
-startup. Values are trimmed and case-insensitive; unset or blank uses the
-existing `pdf2markdown` default. Unknown nonblank values fail startup instead
-of selecting the default. Correct historical typos before upgrading or
-restarting the service. The parser reads this resolved configuration only;
-changing raw process env later cannot replace it.
-
-The accepted configuration IDs remain `langchain`, `pdf2markdown`, `docling`,
-`llamaparse` and `unstructured`. Only the first two have registered backend
-implementations; selecting one of the three placeholders through the registry
-still fails with the existing not-implemented error. `vision` is an internal
-image-path result, not a valid configuration ID. This validation change does
-not alter document strategy, image routing or pending-task provider identity.
+AnyDoc is the sole parser for its supported document formats. Retired
+`DOCUMENT_PARSE_PROVIDER` selections (including `langchain` and `pdf2markdown`)
+and non-explicit `DOCUMENT_PARSE_STRATEGY` values fail startup with migration
+instructions. Remove these environment variables; an existing `anydoc`/`explicit`
+declaration is accepted without exposing a runtime selector. PDF2Markdown remains
+available only for explicitly enabled OCR and existing pending-task resumes.
+Only native `needsOcr` enters that OCR branch. Other failures propagate without
+switching parsers or providers.
 
 ## Optional default skills
 

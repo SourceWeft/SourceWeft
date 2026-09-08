@@ -87,21 +87,6 @@ const billingProviders: ReadonlySet<BillingProvider> = new Set([
   "manual",
 ]);
 
-const documentParseProviders = new Set([
-  "langchain",
-  "pdf2markdown",
-  "docling",
-  "llamaparse",
-  "unstructured",
-]);
-
-const documentParseStrategies = new Set([
-  "explicit",
-  "balanced",
-  "cost",
-  "quality",
-]);
-
 const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
 
 const planFamilies: ReadonlySet<PlanFamily> = new Set([
@@ -225,32 +210,32 @@ function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   return fallback;
 }
 
-function parseDocumentParseProvider(
-  value: string | undefined,
-  fallback: string,
-) {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) {
-    return fallback;
-  }
-  if (documentParseProviders.has(normalized)) {
-    return normalized;
-  }
-  throw new Error(
-    `DOCUMENT_PARSE_PROVIDER must be one of: ${[...documentParseProviders].join(", ")}.`,
-  );
+function parseDocumentOption<T extends string>(
+  name: string,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (allowed.includes(normalized as T)) return normalized as T;
+  throw new Error(`${name} must be one of: ${allowed.join(", ")}.`);
 }
 
-function parseDocumentParseStrategy(
-  value: string | undefined,
-  fallback: string,
-) {
-  if (!value) {
-    return fallback;
+// Reject retired routes explicitly instead of silently changing deployments.
+function assertDocumentParsingMigration() {
+  const provider = process.env.DOCUMENT_PARSE_PROVIDER?.trim().toLowerCase();
+  if (provider && provider !== "anydoc") {
+    throw new Error(
+      "DOCUMENT_PARSE_PROVIDER no longer selects a parser. Remove it: AnyDoc handles documents; configure DOCUMENT_PARSE_OCR_ENABLED and DOCUMENT_PARSE_OCR_PROVIDER for OCR.",
+    );
   }
-
-  const normalized = value.trim().toLowerCase();
-  return documentParseStrategies.has(normalized) ? normalized : fallback;
+  const strategy = process.env.DOCUMENT_PARSE_STRATEGY?.trim().toLowerCase();
+  if (strategy && strategy !== "explicit") {
+    throw new Error(
+      "DOCUMENT_PARSE_STRATEGY no longer selects a routing strategy. Remove it: AnyDoc handles documents and only needsOcr enters the explicitly enabled OCR branch.",
+    );
+  }
 }
 
 /**
@@ -509,6 +494,8 @@ if (
   );
 }
 
+assertDocumentParsingMigration();
+
 export const config = {
   apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
   apiPort: Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001),
@@ -672,21 +659,23 @@ export const config = {
     mode: parseSourceUploadMode(process.env.SOURCE_UPLOAD_MODE),
   },
   documentParsing: {
-    strategy: parseDocumentParseStrategy(
-      process.env.DOCUMENT_PARSE_STRATEGY,
-      "explicit",
-    ),
-    provider: parseDocumentParseProvider(
-      process.env.DOCUMENT_PARSE_PROVIDER,
+    // Credentials do not enable the AnyDoc OCR branch.
+    ocrEnabled: parseStrictBooleanEnv("DOCUMENT_PARSE_OCR_ENABLED", false),
+    ocrProvider: parseDocumentOption(
+      "DOCUMENT_PARSE_OCR_PROVIDER",
+      ["pdf2markdown"] as const,
       "pdf2markdown",
     ),
-    pureTextBitmapThreshold: 0.05,
-    pureTextMinCharsPerPage: 80,
+    imageStrategy: parseDocumentOption(
+      "DOCUMENT_PARSE_IMAGE_STRATEGY",
+      ["vision", "ocr"] as const,
+      "vision",
+    ),
     // Configurable so shipping a new parser version does not require a code
     // change to become the default for newly ingested sources.
     defaultParserVersion:
       process.env.DOCUMENT_PARSE_DEFAULT_PARSER_VERSION?.trim() ||
-      "v2-document-provider",
+      "v4-anydoc-unified-0.2.4",
     defaultChunkSize: parsePositiveInteger(
       process.env.DOCUMENT_PARSE_DEFAULT_CHUNK_SIZE,
       1000,

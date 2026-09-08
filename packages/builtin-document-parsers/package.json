@@ -5,19 +5,21 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./providers": "./src/providers/index.ts"
+    "./providers": "./src/providers/index.ts",
+    "./formats": "./src/anydoc-formats.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@firecrawl/anydoc": "0.2.4",
     "@langchain/classic": "^1.0.42",
-    "@langchain/community": "^1.1.29",
     "@langchain/core": "^1.2.9",
     "@langchain/textsplitters": "^1.0.1",
     "@sourceweft/capability-contracts": "workspace:*",
     "pdfjs-dist": "^6.2.108",
+    "srt-parser-2": "1.2.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
