@@ -4,7 +4,11 @@ import { Client } from "pg";
 const env = parse(await readFile(".env.skills-test"));
 if (!new URL(env.DATABASE_URL!).pathname.startsWith("/sourceweft_skillv6_"))
   throw new Error("Refusing non-isolated database");
-const client = new Client({ connectionString: env.DATABASE_URL });
+const client = new Client({
+  connectionString: env.DATABASE_URL,
+  connectionTimeoutMillis: 5000,
+  query_timeout: 15000,
+});
 try {
   await client.connect();
   await client.query(

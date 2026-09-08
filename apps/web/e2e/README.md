@@ -9,7 +9,7 @@ Real local Web/API, authentication, PostgreSQL and pinned GitHub downloads. Core
 3. Set `NEXT_PUBLIC_API_BASE_URL=http://localhost:3311` and `NEXT_PUBLIC_WEB_BASE_URL=http://localhost:3310` in that test env. Set the same URLs and isolated DATABASE_URL in web `.env.local`.
 4. Start API from backend: `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/api/main.ts`. Start Web from web: `pnpm exec next dev --port 3310`.
 5. In backend run `pnpm exec tsx scripts/seed-skills-e2e.ts`, then restart the test API. This uses normal registration and configures only this test deployment's administrator allowlist. Credentials are in an ignored local file.
-6. In web run `pnpm test:e2e:skills`. Each case clears registry records in the explicitly named disposable database. Do not run other database tests against that database concurrently.
+6. In web run `pnpm test:e2e:skills`. The suite performs normal browser login once for each user, then reuses genuine session cookies in isolated contexts; authentication and rate limiting stay enabled. Each case clears registry records in the explicitly named disposable database. Do not run other database tests against that database concurrently.
 
 The default source is a real script-bearing Cisco fixture; it is queued by the current local rules. The authenticated test administrator publishes it for installation tests. This does not substitute for malformed or changed-content fixtures.
 

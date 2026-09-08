@@ -4,6 +4,8 @@ import {
   request,
   type Page,
   type APIRequestContext,
+  type Browser,
+  type BrowserContext,
 } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -33,25 +35,72 @@ const skillName = fixtures.name ?? "simple-formatter",
   skillTitle = fixtures.title ?? "Simple Formatter";
 if (
   process.env.SKILL_E2E_REQUIRE_ALL === "1" &&
-  (!fixtures.mixed ||
+  (!fixtures.sourceA ||
+    !fixtures.name ||
+    !fixtures.title ||
+    !fixtures.mixed ||
     !fixtures.invalid ||
     !fixtures.spoof ||
-    !fixtures.versionB || !fixtures.versionC)
+    !fixtures.versionB ||
+    !fixtures.versionC)
 )
   throw new Error(
-    "Full E2E is BLOCKED: mixed, invalid, spoof, changed-content versionB and review versionC fixture URLs are required",
+    "Full E2E is BLOCKED: sourceA/name/title, mixed, invalid, spoof, changed-content versionB and review versionC fixture URLs are required",
   );
 let admin: APIRequestContext;
+const sessions: Record<
+  string,
+  Awaited<ReturnType<BrowserContext["storageState"]>>
+> = {};
 
-test.beforeAll(async () => {
+async function authenticate(browser: Browser, role: string) {
+  const context = await browser.newContext({ baseURL: web });
+  try {
+    const page = await context.newPage();
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/get-session") && r.status() === 200,
+      { timeout: 60000 },
+    );
+    await Promise.all([ready, page.goto("/auth/sign-in")]);
+    await page.getByLabel("Email", { exact: true }).fill(accounts[role]!.email);
+    await page
+      .getByLabel("Password", { exact: true })
+      .fill(accounts[role]!.password);
+    const signIn = page.waitForResponse(
+      (r) =>
+        r.url().endsWith("/api/auth/sign-in/email") &&
+        r.request().method() === "POST",
+      { timeout: 30000 },
+    );
+    const [response] = await Promise.all([
+      signIn,
+      page.getByRole("button", { name: "Login", exact: true }).click(),
+    ]);
+    expect(
+      response.status(),
+      `Normal ${role} login must succeed; do not disable authentication/rate limits`,
+    ).toBe(200);
+    await expect(page).not.toHaveURL(/\/auth\/sign-in/, { timeout: 45000 });
+    return await context.storageState();
+  } finally {
+    await context.close();
+  }
+}
+
+test.beforeAll(async ({ browser }) => {
+  // Authenticate once per real account. New contexts reuse genuine session
+  // cookies instead of repeatedly hitting the sign-in endpoint in every case.
+  sessions.owner = await authenticate(browser, "owner");
+  sessions.other = await authenticate(browser, "other");
   admin = await request.newContext({
     baseURL: api,
+    timeout: 30000,
     extraHTTPHeaders: { Origin: web },
   });
   const r = await admin.post("/api/auth/sign-in/email", {
     data: accounts.admin,
   });
-  expect(r.ok()).toBeTruthy();
+  expect(r.status(), "Normal administrator login").toBe(200);
 });
 test.afterAll(async () => {
   await admin?.dispose();
@@ -60,27 +109,18 @@ test.beforeEach(() => {
   execFileSync("pnpm", ["exec", "tsx", "scripts/reset-skills-e2e.ts"], {
     cwd: resolve("../backend"),
     stdio: "pipe",
+    timeout: 30000,
   });
 });
 async function login(page: Page, role = "owner") {
-  const sessionReady = page.waitForResponse(
-    (r) => r.url().includes("/api/auth/get-session") && r.status() === 200,
-    { timeout: 60000 },
-  );
-  await Promise.all([sessionReady, page.goto("/auth/sign-in")]);
-  await page.getByLabel("Email", { exact: true }).fill(accounts[role]!.email);
-  await page
-    .getByLabel("Password", { exact: true })
-    .fill(accounts[role]!.password);
-  await page.getByRole("button", { name: "Login", exact: true }).click();
-  await expect(page).not.toHaveURL(/\/auth\/sign-in/, { timeout: 45000 });
-  const catalogReady = page.waitForResponse(
+  await page.context().addCookies(sessions[role]!.cookies);
+  const ready = page.waitForResponse(
     (r) =>
       /\/v1\/workspaces\/[^/]+\/skills\/catalog$/.test(r.url()) &&
       r.status() === 200,
     { timeout: 60000 },
   );
-  const [catalog] = await Promise.all([catalogReady, page.goto("/dashboard/skills")]);
+  const [catalog] = await Promise.all([ready, page.goto("/dashboard/skills")]);
   await expect(
     page.getByRole("button", { name: "Submit skill", exact: true }),
   ).toBeVisible({ timeout: 45000 });
@@ -95,7 +135,10 @@ async function submit(page: Page, url = source) {
       r.request().method() === "POST",
     { timeout: 90000 },
   );
-  const [response] = await Promise.all([wait, page.getByRole("button", { name: "Submit", exact: true }).click()]);
+  const [response] = await Promise.all([
+    wait,
+    page.getByRole("button", { name: "Submit", exact: true }).click(),
+  ]);
   return {
     response,
     body: (await response.json()) as {
@@ -160,8 +203,11 @@ test("E1 real GitHub import, review, version details and install", async ({
       r.url() === `${api}/v1/workspaces/${ws}/skills` &&
       r.request().method() === "POST",
   );
-  await dialog.getByRole("button", { name: "Install", exact: true }).click();
-  expect((await installation).status()).toBe(201);
+  const [installResponse] = await Promise.all([
+    installation,
+    dialog.getByRole("button", { name: "Install", exact: true }).click(),
+  ]);
+  expect(installResponse.status()).toBe(201);
   const installed = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
   expect(installed.ok()).toBeTruthy();
   expect(
@@ -221,9 +267,17 @@ test("E4 builtin contracts and public capability spoof remain distinct", async (
   ).toBeTruthy();
   const result = await submit(page, fixtures.spoof!);
   expect(result.response.status()).toBe(201);
-  const fresh = await page.request.get(`${api}/v1/workspaces/${ws}/skills/catalog`);
-  const external = (await fresh.json()).items.find((item: {slug:string}) => item.slug === result.body.skills![0]!.slug);
-  expect(external).toMatchObject({sourceType:"registry_github",publisher:"Community",verified:false});
+  const fresh = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  const external = (await fresh.json()).items.find(
+    (item: { slug: string }) => item.slug === result.body.skills![0]!.slug,
+  );
+  expect(external).toMatchObject({
+    sourceType: "registry_github",
+    publisher: "Community",
+    verified: false,
+  });
   expect(external.tools ?? []).not.toContain("generate_image");
 });
 test("E5 repeat import is immutable and other user cannot claim it", async ({
@@ -239,7 +293,7 @@ test("E5 repeat import is immutable and other user cannot claim it", async ({
     skillVersionId: first.body.skills![0]!.skillVersionId,
     status: "indexed",
   });
-  const context = await browser.newContext();
+  const context = await browser.newContext({ baseURL: web });
   const other = await context.newPage();
   await login(other, "other");
   const rejected = await submit(other);
@@ -281,11 +335,33 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
   await page
     .getByLabel("Version", { exact: true })
     .selectOption(b.skillVersionId!);
-  await page.getByRole("button", { name: "Use selected version" }).click();
+  await expect(
+    page.getByRole("button", { name: "Use selected version" }),
+  ).toBeEnabled();
+  const switchResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/version") && r.request().method() === "PUT",
+    { timeout: 30000 },
+  );
+  const [switched] = await Promise.all([
+    switchResponse,
+    page.getByRole("button", { name: "Use selected version" }).click(),
+  ]);
+  expect(switched.status()).toBe(200);
   await page
     .getByLabel("Version", { exact: true })
     .selectOption(a.skillVersionId!);
-  await page.getByRole("button", { name: "Use selected version" }).click();
+  await expect(
+    page.getByRole("button", { name: "Use selected version" }),
+  ).toBeEnabled();
+  const rollbackResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/version") && r.request().method() === "PUT",
+    { timeout: 30000 },
+  );
+  const [rolledBack] = await Promise.all([
+    rollbackResponse,
+    page.getByRole("button", { name: "Use selected version" }).click(),
+  ]);
+  expect(rolledBack.status()).toBe(200);
   const installed = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
   expect(
     (await installed.json()).items.some(
@@ -311,7 +387,10 @@ test("E7 review reasons persist and revoked versions cannot be installed", async
   if (fixtures.versionC) {
     const pending = (await submit(page, fixtures.versionC)).body.skills![0]!;
     expect(pending.status).toBe("queued");
-    const reject = await admin.post(`/v1/skills/registry/admin/submissions/${pending.skillVersionId}/reject`, {data:{reason:"Fix the test review phrase"}});
+    const reject = await admin.post(
+      `/v1/skills/registry/admin/submissions/${pending.skillVersionId}/reject`,
+      { data: { reason: "Fix the test review phrase" } },
+    );
     expect(reject.ok()).toBeTruthy();
     await closeResult(page);
   }
@@ -360,7 +439,7 @@ test("E8 published is not public; explicit admin visibility controls history acc
   const row = (await own.json()).items.find(
     (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
   );
-  const context = await browser.newContext();
+  const context = await browser.newContext({ baseURL: web });
   const other = await context.newPage();
   const otherWs = await login(other, "other");
   const url = `${api}/v1/workspaces/${otherWs}/skills/catalog/${encodeURIComponent(row.catalogId)}/versions`;
