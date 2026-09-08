@@ -73,6 +73,7 @@ import { collectPendingArtifacts } from "../../_components/chat-canvas/artifact-
 import { isArtifactSnapshotTerminal } from "../../_components/chat-canvas/artifact-work-state";
 import { mapArtifactStatusSnapshot } from "../../_components/chat-canvas/map-artifact-status-snapshot";
 import { hasActivelyRunningToolWork } from "../../_components/chat-canvas/tool-confirmation-state";
+import { resolveMessageVersionRunLifecycle } from "../../_components/chat-canvas/thread-run-state";
 import {
   buildToolConfirmationResumeStreamInput,
   createToolConfirmationResumeQueueState,
@@ -351,9 +352,18 @@ export function useThreadPageController({
     () =>
       hasActivelyRunningToolWork({
         artifactStatuses,
-        messages: mergedMessages,
+        messages: messageGroups.flatMap((group) =>
+          group.versions.map((version) => ({
+            toolCalls: version.toolCalls,
+            runLifecycle: resolveMessageVersionRunLifecycle({
+              activeThreadRun,
+              isStreaming,
+              version,
+            }),
+          })),
+        ),
       }),
-    [artifactStatuses, mergedMessages],
+    [activeThreadRun, artifactStatuses, isStreaming, messageGroups],
   );
 
   // Use ref to avoid re-creating callback when pendingArtifactIds changes

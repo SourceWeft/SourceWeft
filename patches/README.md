@@ -1,4 +1,4 @@
-# Model SDK patches
+# Dependency patches
 
 ## OpenAI-compatible local services
 
@@ -70,3 +70,20 @@ applies the existing patch to a clean package; do not modify the installed
 `src/shared/model-gateway/gemini-network.test.ts` against a local HTTP server.
 The tests include native chat, streaming, tools/history, schema, embeddings,
 credential isolation, policy refusal, ordinary retry behavior, and cancellation.
+
+## Streamdown streaming state
+
+`streamdown@2.5.0` replaces the parsed-block `useEffect`/`setState` mirror with
+`useDeferredValue`, retaining synchronous blocks for static and animated output.
+This prevents React's nested-update cascade during long streaming replies.
+The ESM chunk is the published runtime for both Web and UI consumers; pnpm's
+patch hash in the lockfile ensures CI installs the same implementation.
+
+The implementation follows [upstream PR #530](https://github.com/vercel/streamdown/pull/530)
+at `3be0f504afae7e2f77bd6b6da84519618bcd2b91`, which was still open on 2026-09-08.
+Review/remove this patch when adopting an upstream release containing the fix.
+`long-reply-rendering.test.tsx` exercises the real renderer and scheduler with
+long growing Markdown in both streaming modes; it reproduces the cascade on
+the unpatched package. Do not wrap its frame loop in `act()`, which drains
+each update and hides this scheduling failure. Also verify a live long chat
+through publication, final reply, reload, and artifact download.

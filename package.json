@@ -76,7 +76,8 @@
     "patchedDependencies": {
       "@google/generative-ai@0.24.1": "patches/@google__generative-ai@0.24.1.patch",
       "@langchain/google-genai@2.2.0": "patches/@langchain__google-genai@2.2.0.patch",
-      "openai@6.49.0": "patches/openai@6.49.0.patch"
+      "openai@6.49.0": "patches/openai@6.49.0.patch",
+      "streamdown@2.5.0": "patches/streamdown@2.5.0.patch"
     }
   },
   "engines": {

@@ -26,6 +26,7 @@ import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
 import { UserQuestionInterventionBar } from "./user-question-panel";
+import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import type {
   ActiveThreadRun,
   ChatExecutionState,
@@ -418,10 +419,15 @@ export function ChatCanvas({
         messages: messageGroups.flatMap((group) =>
           group.versions.map((version) => ({
             toolCalls: version.toolCalls,
+            runLifecycle: resolveMessageVersionRunLifecycle({
+              activeThreadRun,
+              isStreaming,
+              version,
+            }),
           })),
         ),
       }),
-    [artifactStatuses, messageGroups],
+    [activeThreadRun, artifactStatuses, isStreaming, messageGroups],
   );
   // A streaming run — this member's own or another member's — no longer locks
   // the composer. Sending while one is active queues the message and auto-sends

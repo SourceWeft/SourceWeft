@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import {
   getToolConfirmationRunKey,
   initialToolConfirmationControllerState,
@@ -16,6 +17,7 @@ import {
   getPendingUserQuestionItems as getPendingUserQuestionItemsForTurn,
   getVisibleToolConfirmationItems,
   hasLiveToolConfirmationSignalForRun,
+  hasActivelyRunningToolWork,
   isExpiredToolConfirmationResponse,
   isStaleToolConfirmationResponse,
   isToolCallActivelyRunning,
@@ -694,6 +696,90 @@ test("composer lock blocks while background tool work is active", () => {
   );
 });
 
+test("terminal and historical runs cannot lock the composer with stale running tools", () => {
+  for (const status of ["failed", "cancelled", "completed", "running"]) {
+    const version: MessageVersion = {
+      id: "old-assistant",
+      content: "",
+      threadRun: { id: "old-run", status },
+      toolCalls: [
+        {
+          id: "stale-call",
+          tool: "ls",
+          input: {},
+          output: null,
+          latencyMs: 0,
+          error: null,
+          status: "running",
+        },
+      ],
+    };
+    assert.equal(
+      hasActivelyRunningToolWork({
+        messages: [
+          {
+            ...version,
+            runLifecycle: resolveMessageVersionRunLifecycle({ version }),
+          },
+        ],
+      }),
+      false,
+    );
+  }
+});
+
+test("live tools and independent background artifact work still lock the composer", () => {
+  const tool: ToolCallRecord = {
+    id: "live-call",
+    tool: "ls",
+    input: {},
+    output: null,
+    latencyMs: 0,
+    error: null,
+    status: "running",
+  };
+  assert.equal(
+    hasActivelyRunningToolWork({
+      messages: [{ toolCalls: [tool], runLifecycle: "live" }],
+    }),
+    true,
+  );
+  assert.equal(
+    hasActivelyRunningToolWork({
+      messages: [
+        {
+          toolCalls: [
+            {
+              ...tool,
+              tool: "async-artifact",
+              output: { artifactId: "artifact-1", status: "running" },
+            },
+          ],
+          runLifecycle: "terminal",
+        },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    hasActivelyRunningToolWork({
+      messages: [
+        {
+          toolCalls: [
+            {
+              ...tool,
+              tool: "async-artifact",
+              output: { artifactId: "artifact-1", status: "ready" },
+            },
+          ],
+          runLifecycle: "terminal",
+        },
+      ],
+    }),
+    false,
+  );
+});
+
 test("resolved approval requests are not treated as actively running tool calls", () => {
   const item = createConfirmationItem("action-1");
   assert.equal(
@@ -1165,7 +1251,11 @@ test("stale confirmation response errors are identified by backend error code", 
 
 function createQuestionVersion(
   id: string,
-  input: { threadRunId?: string; threadRunStatus?: string; finishReason?: string },
+  input: {
+    threadRunId?: string;
+    threadRunStatus?: string;
+    finishReason?: string;
+  },
 ): MessageVersion {
   return {
     id,
@@ -1197,7 +1287,11 @@ function createQuestionVersion(
 function questionGroup(version: MessageVersion) {
   return [
     { id: "user:1", role: "user" as const, versions: [] },
-    { id: `assistant:${version.id}`, role: "assistant" as const, versions: [version] },
+    {
+      id: `assistant:${version.id}`,
+      role: "assistant" as const,
+      versions: [version],
+    },
   ] as never;
 }
 
@@ -1233,8 +1327,9 @@ test("a question surfaces mid-stream, before the turn has a finish reason", () =
     threadRunStatus: "running",
   });
   assert.equal(
-    getPendingUserQuestionItemsForTurn({ messageGroups: questionGroup(version) })
-      .length,
+    getPendingUserQuestionItemsForTurn({
+      messageGroups: questionGroup(version),
+    }).length,
     1,
   );
 });
@@ -1248,7 +1343,9 @@ test("a turn with no outstanding question exposes none", () => {
     toolCalls: [],
   } as unknown as MessageVersion;
   assert.deepEqual(
-    getPendingUserQuestionItemsForTurn({ messageGroups: questionGroup(version) }),
+    getPendingUserQuestionItemsForTurn({
+      messageGroups: questionGroup(version),
+    }),
     [],
   );
 });

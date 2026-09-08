@@ -26,6 +26,7 @@ import {
   isDeliverableToolName,
 } from "./artifact-progress";
 import { toObjectRecord } from "../../../../../lib/records";
+import type { MessageVersionRunLifecycle } from "./thread-run-state";
 
 type ToolConfirmationItem = {
   confirmation: ToolConfirmationRequest;
@@ -718,9 +719,12 @@ export function shouldLockComposerForRun(input: {
 export function isToolCallActivelyRunning(input: {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   resolvedConfirmationIds?: Set<string>;
+  runLifecycle?: MessageVersionRunLifecycle;
   toolCall: Pick<ToolCallRecord, "output" | "status" | "tool">;
 }) {
-  if (input.toolCall.status === "running") {
+  const runInactive =
+    input.runLifecycle === "terminal" || input.runLifecycle === "idle";
+  if (input.toolCall.status === "running" && !runInactive) {
     return true;
   }
 
@@ -746,6 +750,7 @@ export function isToolCallActivelyRunning(input: {
     return isToolOutputClaimingInProgress(input.toolCall.output);
   }
 
+  if (runInactive) return false;
   const confirmation = getToolConfirmationOutput(input.toolCall.output);
   return (
     confirmation !== null &&
@@ -759,6 +764,7 @@ export function hasActivelyRunningToolWork(input: {
   messages: Array<{
     metadata?: Record<string, unknown>;
     toolCalls?: ToolCallRecord[];
+    runLifecycle?: MessageVersionRunLifecycle;
   }>;
   resolvedConfirmationIds?: Set<string>;
 }) {
@@ -768,6 +774,7 @@ export function hasActivelyRunningToolWork(input: {
         isToolCallActivelyRunning({
           artifactStatuses: input.artifactStatuses,
           resolvedConfirmationIds: input.resolvedConfirmationIds,
+          runLifecycle: message.runLifecycle,
           toolCall,
         })
       ) {
