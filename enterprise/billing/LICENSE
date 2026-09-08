@@ -1,0 +1,49 @@
+SourceWeft Commercial License
+
+This license applies to material expressly identified as commercially licensed
+under enterprise/, subject to the pre-existing and third-party rights below.
+The licensor is the applicable copyright holder or an entity authorized to
+license that material. No ownership assignment is implied by this document.
+
+Development and evaluation
+
+You may inspect, copy and modify the commercially licensed material for your
+own non-production development, testing and evaluation. This permission does
+not authorize production operation, operating a service for customers, or
+redistributing commercially licensed material to others.
+
+Production and distribution
+
+Production use, including productive internal use, hosted services, embedding,
+resale, OEM distribution and other redistribution requires a separate valid
+written commercial agreement with a licensor authorized to grant the required
+rights. That agreement specifies the permitted scope and takes precedence over
+this document for the uses it covers. A tenant's payment subscription, API key
+or deployment environment variable is not such an agreement.
+
+Existing and third-party rights
+
+This document does not revoke rights previously granted under Apache-2.0 or
+other applicable licenses. Portions derived from earlier SourceWeft versions
+remain subject to those pre-existing grants and required notices. Third-party
+components retain their own licenses. A copy of the Apache-2.0 terms for the
+applicable portions accompanies the billing package under LICENSES/.
+
+Modifications and contributions
+
+Permission to modify material does not assign ownership of modifications to
+the licensor. Contributors must have the rights needed for their contribution;
+contribution and commercial distribution rights must be agreed separately.
+
+Warranty and liability
+
+Except as expressly provided in a separate written agreement or required by
+applicable law, the material is provided without warranties, including as to
+fitness for a particular purpose, merchantability or non-infringement. To the
+extent permitted by applicable law, the licensors are not liable for damages
+arising from use of the material.
+
+All rights to the commercially licensed material not expressly granted here
+or in a separate applicable agreement are reserved. No trademark rights are
+granted. Official commercial publication remains subject to the project's
+copyright-provenance and license review process.
