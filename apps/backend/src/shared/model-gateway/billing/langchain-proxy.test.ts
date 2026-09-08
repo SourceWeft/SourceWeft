@@ -107,13 +107,21 @@ const billing = {
   gatewayConfigId: "gw_1",
 };
 
-async function buildModel(scope: ReturnType<typeof createScope>, usage = USAGE) {
+async function buildModel(
+  scope: ReturnType<typeof createScope>,
+  usage = USAGE,
+) {
   rawMocks.createRawAgentChatModel.mockImplementation(
     async (input: { observeSink?: ObserveSink }) =>
       createFakeModel(input.observeSink, usage),
   );
   return createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing,
@@ -124,9 +132,66 @@ beforeEach(() => {
   rawMocks.createRawAgentChatModel.mockReset();
 });
 
+test("trusted trace scope overrides request metadata without changing the payer", async () => {
+  const scope = createScope("guest-payer");
+  rawMocks.createRawAgentChatModel.mockImplementation(async (input) =>
+    createFakeModel(input.observeSink, USAGE),
+  );
+  const model = await createBilledAgentChatModel({
+    modelAlias: "chat-default",
+    context: scope.context,
+    scope,
+    billing,
+    observationContext: {
+      traceId: "actual-trace",
+      parentSpanId: "actual-parent",
+      teamId: "workspace-owner",
+      workspaceId: "ws_1",
+    },
+    execution: {
+      metadata: {
+        traceId: "forged-trace",
+        teamId: "forged-team",
+        workspaceId: "forged-workspace",
+      },
+    },
+  });
+  const metadata =
+    rawMocks.createRawAgentChatModel.mock.calls[0]![0].execution.metadata;
+  assert.equal(metadata.traceId, "actual-trace");
+  assert.equal(metadata.parentSpanId, "actual-parent");
+  assert.equal(metadata.teamId, "workspace-owner");
+  assert.equal(metadata.workspaceId, "ws_1");
+  await model.invoke("hello");
+  assert.equal(scope.context.teamId, "guest-payer");
+  assert.equal(scope.meteredCalls().length, 1);
+});
+
+test("missing trace identity fails before the model is created or billed", async () => {
+  const scope = createScope();
+  await assert.rejects(
+    createBilledAgentChatModel({
+      modelAlias: "chat-default",
+      context: scope.context,
+      scope,
+      billing,
+      observationContext: {
+        traceId: " ",
+        teamId: "team_1",
+        workspaceId: "ws_1",
+      },
+    }),
+    /LLM_TRACE_CONTEXT_REQUIRED/,
+  );
+  assert.equal(rawMocks.createRawAgentChatModel.mock.calls.length, 0);
+  assert.equal(scope.meteredCalls().length, 0);
+});
+
 test("invoke settles exactly once with the usage the sink reported", async () => {
   const scope = createScope();
-  const model = (await buildModel(scope)) as unknown as { invoke: (i: unknown) => Promise<unknown> };
+  const model = (await buildModel(scope)) as unknown as {
+    invoke: (i: unknown) => Promise<unknown>;
+  };
 
   await model.invoke([{ role: "user", content: "hi" }]);
 
@@ -140,7 +205,9 @@ test("billing survives bindTools composition", async () => {
     bindTools: (t: unknown[]) => { invoke: (i: unknown) => Promise<unknown> };
   };
 
-  await model.bindTools([{ name: "t" }]).invoke([{ role: "user", content: "hi" }]);
+  await model
+    .bindTools([{ name: "t" }])
+    .invoke([{ role: "user", content: "hi" }]);
 
   assert.equal(scope.meteredCalls().length, 1);
 });
@@ -149,7 +216,10 @@ test("billing survives bindTools composition", async () => {
 test("billing survives withStructuredOutput composition", async () => {
   const scope = createScope();
   const model = (await buildModel(scope)) as unknown as {
-    withStructuredOutput: (s: unknown, c: unknown) => { invoke: (i: unknown) => Promise<unknown> };
+    withStructuredOutput: (
+      s: unknown,
+      c: unknown,
+    ) => { invoke: (i: unknown) => Promise<unknown> };
   };
 
   await model
@@ -163,7 +233,10 @@ test("billing survives bindTools then withStructuredOutput", async () => {
   const scope = createScope();
   const model = (await buildModel(scope)) as unknown as {
     bindTools: (t: unknown[]) => {
-      withStructuredOutput: (s: unknown, c: unknown) => { invoke: (i: unknown) => Promise<unknown> };
+      withStructuredOutput: (
+        s: unknown,
+        c: unknown,
+      ) => { invoke: (i: unknown) => Promise<unknown> };
     };
   };
 
@@ -191,6 +264,11 @@ test("billing survives withConfig composition", async () => {
   );
   const model = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing,
@@ -214,6 +292,11 @@ test("billing survives bind composition", async () => {
   );
   const model = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing,
@@ -237,6 +320,11 @@ test("billing survives bindTools then withConfig", async () => {
   );
   const model = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing,
@@ -246,7 +334,10 @@ test("billing survives bindTools then withConfig", async () => {
     };
   };
 
-  await model.bindTools([{ name: "t" }]).withConfig({}).invoke([]);
+  await model
+    .bindTools([{ name: "t" }])
+    .withConfig({})
+    .invoke([]);
 
   assert.equal(scope.meteredCalls().length, 1);
 });
@@ -281,7 +372,9 @@ test("a stream abandoned early still settles once", async () => {
 
 test("two invocations settle separately rather than reusing stale usage", async () => {
   const scope = createScope();
-  const model = (await buildModel(scope)) as unknown as { invoke: (i: unknown) => Promise<unknown> };
+  const model = (await buildModel(scope)) as unknown as {
+    invoke: (i: unknown) => Promise<unknown>;
+  };
 
   await model.invoke([{ role: "user", content: "one" }]);
   await model.invoke([{ role: "user", content: "two" }]);
@@ -306,7 +399,9 @@ test("concurrent invocations on one model settle with their own usage", async ()
         await input.observeSink?.onGenerationEnd?.({
           usage: { inputTokens: tokens },
         } as never);
-        await new Promise((resolve) => setTimeout(resolve, tokens === 1 ? 20 : 1));
+        await new Promise((resolve) =>
+          setTimeout(resolve, tokens === 1 ? 20 : 1),
+        );
         call += 1;
         return { content: "ok" };
       },
@@ -319,6 +414,11 @@ test("concurrent invocations on one model settle with their own usage", async ()
 
   const model = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing,
@@ -341,7 +441,10 @@ test("concurrent models for different teams do not cross usage", async () => {
   const scopeB = createScope("team_2");
 
   rawMocks.createRawAgentChatModel.mockImplementation(
-    async (input: { observeSink?: ObserveSink; execution?: { metadata?: { teamId?: string } } }) =>
+    async (input: {
+      observeSink?: ObserveSink;
+      execution?: { metadata?: { teamId?: string } };
+    }) =>
       createFakeModel(
         input.observeSink,
         input.execution?.metadata?.teamId === "team_2"
@@ -352,12 +455,22 @@ test("concurrent models for different teams do not cross usage", async () => {
 
   const modelA = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scopeA.context.scopeId,
+      teamId: scopeA.context.teamId,
+      workspaceId: scopeA.context.workspaceId!,
+    },
     context: scopeA.context,
     scope: scopeA,
     billing,
   })) as unknown as { invoke: (i: unknown) => Promise<unknown> };
   const modelB = (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scopeB.context.scopeId,
+      teamId: scopeB.context.teamId,
+      workspaceId: scopeB.context.workspaceId!,
+    },
     context: scopeB.context,
     scope: scopeB,
     billing,

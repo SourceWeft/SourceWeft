@@ -23,6 +23,7 @@ import type {
   ModelCallObservation,
 } from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "../../modules/content/billing-port";
+import type { TraceContext } from "../../modules/llm-observability/types";
 import {
   admitCoveredScope,
   billingAdmission,
@@ -100,6 +101,7 @@ export type BilledModelGateway = {
   };
   agentChatModel(input: {
     modelAlias: string;
+    observationContext: TraceContext;
     execution?: LangChainModelExecutionConfig;
     billing: Omit<ModelCallBillingOptions, "operation">;
   }): Promise<BaseLanguageModel>;
@@ -383,6 +385,7 @@ async function openBilledGateway(
       });
       return createBilledAgentChatModel({
         modelAlias: agentInput.modelAlias,
+        observationContext: agentInput.observationContext,
         execution:
           thinking === execution?.thinking
             ? agentInput.execution

@@ -44,6 +44,69 @@ function parseSseData(value: string) {
   >;
 }
 
+test("progress snapshots preserve committed accounting even when the snapshot is absent or stale", () => {
+  const settled = { id: "settled", consumedCredits: 23 };
+  const metadata = {
+    meteredLlmCalls: [settled],
+    meteredLlmCreditsConsumed: 23,
+    usage: { totalTokens: 110 },
+    billingSkipped: false,
+  };
+  for (const calls of [
+    undefined,
+    [],
+    [{ id: "older-run", consumedCredits: 1 }],
+  ]) {
+    const actual = testExports.buildSnapshotMetadata({
+      currentMetadata: metadata,
+      run: createRun(),
+      snapshot: {
+        meteredLlmCalls: calls as never,
+        traceEvents: [{ id: "last-tool", type: "tool-call" }],
+      },
+    });
+    assert.deepEqual(actual.meteredLlmCalls, [settled]);
+    assert.equal(actual.meteredLlmCreditsConsumed, 23);
+    assert.deepEqual(actual.usage, metadata.usage);
+    assert.ok(Array.isArray(actual.traceEvents));
+    assert.equal(actual.traceEvents.length, 1);
+  }
+  const unknown = testExports.buildSnapshotMetadata({
+    run: createRun(),
+    snapshot: {},
+  });
+  assert.equal("meteredLlmCalls" in unknown, false);
+  assert.equal("meteredLlmCreditsConsumed" in unknown, false);
+});
+
+test("finalized results replace snapshot accounting once without inheriting another run", () => {
+  const calls = [{ id: "new-run-call", consumedCredits: 2 }];
+  const result = {
+    assistantMessage: {
+      metadata: {
+        meteredLlmCalls: calls,
+        meteredLlmCreditsConsumed: 2,
+        usage: { totalTokens: 5 },
+      },
+    },
+    billing: { consumedCredits: 2 },
+  } as never;
+  const next = testExports.snapshotWithFinalizedResult(
+    { meteredLlmCalls: [{ id: "old-call", consumedCredits: 9 }] as never },
+    result,
+  );
+  assert.deepEqual(next.meteredLlmCalls, calls);
+  assert.equal(next.meteredLlmCreditsConsumed, 2);
+  assert.deepEqual(next.usage, { totalTokens: 5 });
+  assert.deepEqual(testExports.snapshotWithFinalizedResult(next, result), next);
+  const missing = testExports.snapshotWithFinalizedResult(next, {
+    assistantMessage: { metadata: {} },
+    billing: { consumedCredits: 0 },
+  } as never);
+  assert.equal(missing.meteredLlmCalls, undefined);
+  assert.equal(missing.usage, undefined);
+});
+
 test("terminal failure commits the run before emitting error and finish", async () => {
   const order: string[] = [];
   const appendedPayloads: string[] = [];

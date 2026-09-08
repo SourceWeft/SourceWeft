@@ -3,6 +3,7 @@ import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import { logger } from "../../logger";
 import type { ModelCallBillingOptions, ModelUsageContext } from "./context";
 import type { BillingScope } from "./scope";
+import type { TraceContext } from "../../../modules/llm-observability/types";
 import { createRawAgentChatModel } from "../internal/raw";
 import {
   createUsageCaptureSink,
@@ -65,12 +66,23 @@ const warnedUnknownEntryPoints = new Set<string>();
 
 export async function createBilledAgentChatModel(input: {
   modelAlias: string;
+  observationContext: TraceContext;
   execution?: LangChainModelExecutionConfig;
   gatewayConfigId?: string | null;
   context: ModelUsageContext;
   scope: BillingScope;
   billing: Omit<ModelCallBillingOptions, "operation">;
 }): Promise<BaseLanguageModel> {
+  const observation = input.observationContext;
+  if (
+    !observation?.traceId?.trim() ||
+    !observation.teamId?.trim() ||
+    !observation.workspaceId?.trim()
+  ) {
+    throw new Error(
+      "LLM_TRACE_CONTEXT_REQUIRED: agent model calls require a scoped trace context.",
+    );
+  }
   const model = await createRawAgentChatModel({
     modelAlias: input.modelAlias,
     gatewayConfigId: input.gatewayConfigId,
@@ -78,8 +90,12 @@ export async function createBilledAgentChatModel(input: {
       ...input.execution,
       metadata: {
         ...(input.execution?.metadata ?? {}),
-        teamId: input.context.teamId,
-        workspaceId: input.context.workspaceId,
+        traceId: observation.traceId,
+        parentSpanId: observation.parentSpanId,
+        // A guest may pay through another organization. Observation belongs
+        // to the workspace owner; the billing scope retains the payer.
+        teamId: observation.teamId,
+        workspaceId: observation.workspaceId,
         userId: input.context.actorUserId,
         threadId: input.context.threadId,
         messageId: input.context.messageId,

@@ -1,4 +1,5 @@
 import type { MeterConsumeResponse } from "@sourceweft/contracts";
+import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { MessageRecord, ThreadRecord } from "../../content/types";
 import type { AgentCitation } from "../agent/citation-registry";
 import type {
@@ -82,6 +83,8 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   traceParts?: unknown[];
   renderBlocks?: unknown[];
   meteredLlmCalls?: MeteredLlmCallTrace[];
+  meteredLlmCreditsConsumed?: number;
+  usage?: UsageInfo;
   citations?: unknown[];
   availableCitations?: unknown[];
   lastEventType?: string;

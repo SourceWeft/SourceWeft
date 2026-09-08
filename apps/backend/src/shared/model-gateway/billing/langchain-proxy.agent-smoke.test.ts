@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  HumanMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
 import {
   BaseChatModel,
   type BaseChatModelParams,
@@ -59,7 +63,8 @@ class ScriptedChatModel extends BaseChatModel {
   }
 
   async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
-    const step = this.script[Math.min(this.generateCount, this.script.length - 1)];
+    const step =
+      this.script[Math.min(this.generateCount, this.script.length - 1)];
     this.generateCount += 1;
 
     await this.sink?.onGenerationEnd?.({ usage: USAGE } as never);
@@ -139,6 +144,11 @@ async function buildAgentWithBilledModel(
 
   const model = await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing: {

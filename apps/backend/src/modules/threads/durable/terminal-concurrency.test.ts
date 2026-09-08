@@ -443,6 +443,109 @@ const jobPayload = () => ({
   userId: "test-user",
 });
 
+for (const finishReason of ["stop", "tool_confirmation_requested"]) {
+  test(`committed metering survives the real runner's final progress flush (${finishReason})`, async () => {
+    const messages = await import("../message-repository");
+    const { billingService } = await import("../../billing");
+    const consume = vi
+      .spyOn(billingService, "meterConsume")
+      .mockRejectedValue(new Error("Progress must never charge again"));
+    vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
+      async () => {},
+    );
+    vi.spyOn(streams.chatRunStreamManager, "appendEvent").mockImplementation(
+      async (_key, event) => {
+        emitted.push(event);
+        return emitted.length;
+      },
+    );
+    const call = {
+      id: `settled:${run.id}`,
+      consumedCredits: 23,
+      billingStatus: "metered",
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    };
+    let assistantId: string | undefined;
+    mocked.stream.mockImplementation(async function* (_request, options) {
+      const userMessage = await messages.createMessageRecord({
+        teamId,
+        workspaceId,
+        threadId,
+        role: "user",
+        content: "question",
+        createdBy: null,
+      });
+      const prepared = {
+        workspace: { id: workspaceId, organizationId: teamId },
+        thread: { id: threadId },
+        userMessage,
+        userId: "test-user",
+        runTraceId: run.id,
+        modelAlias: "synthetic-chat",
+        profileAlias: "synthetic-chat",
+        preflightThinkingSteps: [],
+      };
+      const placeholder = await options.onPrepared(prepared);
+      assistantId = placeholder.assistantMessageId;
+      yield `data: ${JSON.stringify({ type: "text-delta", delta: "answer" })}\n\n`;
+      const committed = await messages.updateMessageRecord({
+        teamId,
+        workspaceId,
+        threadId,
+        messageId: assistantId!,
+        creditsConsumed: 23,
+        metadata: {
+          meteredLlmCalls: [call],
+          meteredLlmCreditsConsumed: 23,
+          usage: call.usage,
+          finishReason,
+          billingSkipped: false,
+        },
+      });
+      await options.onFinalized({
+        assistantMessage: committed,
+        billing: {
+          teamId,
+          consumedCredits: 23,
+          availableCredits: 77,
+          consumedThisCycle: 23,
+          idempotencyReplayed: false,
+        },
+      });
+      // This progress event arrives after the finalizer committed, before the
+      // assistant-message event forces the last flush in the production runner.
+      yield `data: ${JSON.stringify({ type: "thinking-step", step: { id: "last-check", title: "Done", kind: "verification", status: "completed", items: [] } })}\n\n`;
+      yield 'data: {"type":"text-end"}\n\n';
+      yield `data: ${JSON.stringify({ type: "assistant-message", messageId: assistantId })}\n\n`;
+      yield `data: ${JSON.stringify({ type: "finish", finishReason })}\n\n`;
+    });
+    const result = await runner.processThreadChatRunJob(jobPayload());
+    assert.equal(
+      result.status,
+      finishReason === "stop" ? "completed" : "waiting_for_approval",
+    );
+    const stored = await messages.findMessageRecord({
+      teamId,
+      workspaceId,
+      messageId: assistantId!,
+    });
+    assert.deepEqual(stored?.metadata.meteredLlmCalls, [call]);
+    assert.equal(stored?.metadata.meteredLlmCreditsConsumed, 23);
+    assert.equal(stored?.creditsConsumed, 23);
+    assert.deepEqual(stored?.metadata.usage, call.usage);
+    assert.equal(
+      (stored?.metadata.thinkingSteps as Array<{ id: string }>).some(
+        (s) => s.id === "last-check",
+      ),
+      true,
+    );
+    const saved = (await current())!.snapshotJson;
+    assert.deepEqual(saved.meteredLlmCalls, [call]);
+    assert.deepEqual(saved.usage, call.usage);
+    assert.equal(consume.mock.calls.length, 0);
+  });
+}
+
 async function useFailingPreparation(prepare: () => Promise<never>) {
   const { ContentThreadStreamService } =
     await vi.importActual<typeof import("../stream/service")>(

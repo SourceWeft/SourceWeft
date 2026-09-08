@@ -92,6 +92,11 @@ type TestModel = {
 async function billedModel(scope: ReturnType<typeof scopeHarness>["scope"]) {
   return (await createBilledAgentChatModel({
     modelAlias: "chat-default",
+    observationContext: {
+      traceId: scope.context.scopeId,
+      teamId: scope.context.teamId,
+      workspaceId: scope.context.workspaceId!,
+    },
     context: scope.context,
     scope,
     billing: billingOptions,

@@ -58,6 +58,16 @@ export async function openTurnBillingScope(input: {
 
   const model = await gateway.agentChatModel({
     modelAlias: prepared.providerModel,
+    observationContext: {
+      traceId: input.traceContext?.traceId ?? prepared.runTraceId,
+      parentSpanId: input.traceContext?.parentSpanId,
+      teamId: prepared.workspace.organizationId,
+      workspaceId: prepared.workspace.id,
+      userId: prepared.userId,
+      threadId: prepared.thread.id,
+      messageId: prepared.userMessage.id,
+      feature: "chat",
+    },
     execution: {
       executionMode: input.llm?.executionMode,
       profileAlias: isByok ? undefined : prepared.profileAlias,

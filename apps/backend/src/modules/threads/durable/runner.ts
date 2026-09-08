@@ -48,6 +48,7 @@ import type {
   ChatThreadRunRecord,
   ChatThreadRunStatus,
   DurableRunRequestSnapshot,
+  DurableRunResultSnapshot,
 } from "./types";
 import { toObjectRecord } from "../../../shared/records";
 import {
@@ -1091,11 +1092,8 @@ function buildSnapshotMetadata(input: {
     traceEvents: input.snapshot.traceEvents ?? [],
     traceParts: input.snapshot.traceParts ?? [],
     renderBlocks: input.snapshot.renderBlocks ?? [],
-    meteredLlmCalls: input.snapshot.meteredLlmCalls ?? [],
-    meteredLlmCreditsConsumed: (input.snapshot.meteredLlmCalls ?? []).reduce(
-      (sum, item) => sum + item.consumedCredits,
-      0,
-    ),
+    // Progress does not own accounting. In particular, an absent or stale
+    // snapshot must not clear the finalizer's already-committed call facts.
     ...(input.snapshot.finishReason !== undefined
       ? { finishReason: input.snapshot.finishReason }
       : {}),
@@ -1113,6 +1111,33 @@ function buildSnapshotMetadata(input: {
     existingMetadata: input.currentMetadata,
     nextMetadata,
   });
+}
+
+function snapshotWithFinalizedResult(
+  snapshot: ChatRunSnapshot,
+  result: Required<
+    Pick<DurableRunResultSnapshot, "assistantMessage" | "billing">
+  > &
+    Pick<DurableRunResultSnapshot, "retrieval">,
+): ChatRunSnapshot {
+  const metadata = result.assistantMessage.metadata ?? {};
+  // Only the committed finalizer result supplies these fields. Assign missing
+  // values as undefined too, so a different run's facts cannot be inherited.
+  return {
+    ...snapshot,
+    ...result,
+    meteredLlmCalls: Array.isArray(metadata.meteredLlmCalls)
+      ? (metadata.meteredLlmCalls as NonNullable<
+          ChatRunSnapshot["meteredLlmCalls"]
+        >)
+      : undefined,
+    meteredLlmCreditsConsumed:
+      typeof metadata.meteredLlmCreditsConsumed === "number"
+        ? metadata.meteredLlmCreditsConsumed
+        : undefined,
+    usage: (toObjectRecord(metadata.usage) ??
+      undefined) as ChatRunSnapshot["usage"],
+  };
 }
 
 function resolveFinalRunAfterFinish(input: {
@@ -1728,12 +1753,7 @@ export async function processThreadChatRunJob(
         },
         onFinalized: async (result) => {
           runBilling = result.billing;
-          snapshot = {
-            ...snapshot,
-            assistantMessage: result.assistantMessage,
-            billing: result.billing,
-            retrieval: result.retrieval,
-          };
+          snapshot = snapshotWithFinalizedResult(snapshot, result);
         },
       },
     });
@@ -2050,6 +2070,7 @@ export async function processThreadChatRunJob(
 }
 
 export const testExports = {
+  snapshotWithFinalizedResult,
   buildSnapshotMetadata,
   resolvePersistedTerminalMessageIds,
   requestWithDurableMessageOverrides,

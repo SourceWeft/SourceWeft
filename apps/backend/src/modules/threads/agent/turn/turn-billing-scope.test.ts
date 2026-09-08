@@ -4,6 +4,7 @@ import type { BillingSummaryResponse } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { PreparedThreadTurn } from "../..";
 import { createTurnRuntime } from "./turn-runtime";
+import { workspaceService } from "../../../workspace";
 
 const gatewayMocks = vi.hoisted(() => ({
   openBilledModelGateway: vi.fn(),
@@ -97,4 +98,57 @@ test("a BYOK turn opens a covered scope rather than a billed one", async () => {
   const context = gatewayMocks.openBilledModelGateway.mock.calls[0]?.[0]
     ?.context as Record<string, unknown>;
   assert.deepEqual(context.intent, { mode: "covered", coveredBy: "byok" });
+});
+
+test("agent observation uses the scoped trace and workspace owner while a guest pays separately", async () => {
+  stubGateway();
+  vi.spyOn(workspaceService, "resolveBillingOrganizationId").mockResolvedValue(
+    "guest-payer",
+  );
+  const prepared = createPrepared();
+  await openTurnBillingScope({
+    prepared,
+    billing: createBilling(),
+    runtime: createTurnRuntime({ prepared }),
+    traceContext: {
+      traceId: "current-trace",
+      parentSpanId: "parent-span",
+      teamId: "team_1",
+      workspaceId: "ws_1",
+    },
+  });
+  const opened = gatewayMocks.openBilledModelGateway.mock.calls[0]![0];
+  assert.equal(opened.context.teamId, "guest-payer");
+  assert.equal(opened.context.scopeId, "current-trace");
+  const gateway =
+    await gatewayMocks.openBilledModelGateway.mock.results[0]!.value;
+  assert.deepEqual(
+    gateway.gateway.agentChatModel.mock.calls[0][0].observationContext,
+    {
+      traceId: "current-trace",
+      parentSpanId: "parent-span",
+      teamId: "team_1",
+      workspaceId: "ws_1",
+      userId: "user_1",
+      threadId: "thread_1",
+      messageId: "msg_1",
+      feature: "chat",
+    },
+  );
+});
+
+test("preparer runTraceId supplies the observation identity before trace decoration", async () => {
+  stubGateway();
+  const prepared = createPrepared();
+  await openTurnBillingScope({
+    prepared,
+    billing: createBilling(),
+    runtime: createTurnRuntime({ prepared }),
+  });
+  const opened =
+    await gatewayMocks.openBilledModelGateway.mock.results[0]!.value;
+  assert.equal(
+    opened.gateway.agentChatModel.mock.calls[0][0].observationContext.traceId,
+    prepared.runTraceId,
+  );
 });
