@@ -43,6 +43,14 @@ export type AutostartState = {
   reason?: string | null;
 };
 
+/** Native capability discovery only; does not authorize local execution. */
+export type LocalHostStatus = {
+  protocolVersion: number;
+  platformSupported: boolean;
+  storageInitialized: boolean;
+  authenticatedDispatchAvailable: boolean;
+};
+
 type DesktopListener<TPayload> = (payload: TPayload) => void;
 
 function getBridge() {
@@ -99,6 +107,9 @@ export const desktopBridge = {
   },
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");
+  },
+  localHostStatus() {
+    return invokeDesktop<LocalHostStatus>("local_host_status");
   },
   showMainWindow() {
     return invokeDesktop<void>("show_main_window");

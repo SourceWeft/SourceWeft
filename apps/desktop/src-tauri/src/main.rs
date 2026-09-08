@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod local_bridge;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -100,6 +101,7 @@ fn main() {
             get_autostart,
             set_autostart,
             open_external_url,
+            local_bridge::local_host_status,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {
@@ -108,6 +110,10 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.manage(sourceweft_desktop::local_host::LocalHost::open(
+                &app.path().app_data_dir()?,
+            )?);
             let settings_path = resolve_settings_path(app.handle())?;
             let settings = read_settings(&settings_path);
             app.manage(DesktopState {
@@ -374,7 +380,11 @@ fn is_allowed_external_url(url: &Url) -> bool {
         return matches!(url.port_or_known_default(), Some(3000));
     }
 
-    url.scheme() == "https" && matches!(url.host_str(), Some("sourceweft.com" | "www.sourceweft.com"))
+    url.scheme() == "https"
+        && matches!(
+            url.host_str(),
+            Some("sourceweft.com" | "www.sourceweft.com")
+        )
 }
 
 fn same_origin(left: &Url, right: &Url) -> bool {
