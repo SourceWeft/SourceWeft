@@ -158,6 +158,9 @@ export function DashboardChatThreadPageView({
   threadCitations,
   threadId,
   threadTitle,
+  parentThread,
+  openParentThread,
+  openThreadInNewWindow,
   thinkingSettings,
   toolConfirmationInterventionSignal,
   toggleSourcesVisible,
@@ -253,7 +256,10 @@ export function DashboardChatThreadPageView({
           onOpenHub={() => {
             chatHubContext?.setMobileHubOpen(true);
           }}
+          onOpenInNewWindow={openThreadInNewWindow}
+          onOpenParentThread={openParentThread}
           onToggleSources={toggleSourcesVisible}
+          parentThread={parentThread}
           presenceSlot={<ThreadPresenceAvatars viewers={presentViewers} />}
           selectedModels={selectedModels}
           setSelectedModels={setSelectedModels}

@@ -8,6 +8,8 @@ export type ThreadRunFailureSummary = {
   errorMessage: string;
 };
 
+export const threadOriginSchema = z.enum(["user", "subagent"]);
+
 export const threadSchema = z.object({
   id: z.string(),
   teamId: z.string(),
@@ -23,6 +25,10 @@ export const threadSchema = z.object({
   }),
   sourceCount: z.number().int().nonnegative(),
   visibility: z.enum(["private", "workspace", "public_link"]),
+  // Sub-agent conversations nest one level under the thread that hosts them.
+  parentThreadId: z.string().nullable(),
+  personaId: z.string().nullable(),
+  origin: threadOriginSchema,
   createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -106,6 +112,10 @@ export const createThreadRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
   chatPreferences: threadChatPreferencesSchema.optional(),
+  // Start the thread as a sub-agent conversation nested under a parent.
+  parentThreadId: z.string().trim().min(1).max(128).optional(),
+  // The persona that owns the thread (a built-in slug such as "explore").
+  personaId: z.string().trim().min(1).max(128).optional(),
 });
 
 export const createThreadResponseSchema = z.object({
@@ -126,9 +136,18 @@ export const listThreadsRequestSchema = z.object({
   cursor: z.string().trim().min(1).max(1024).optional(),
 });
 
+export const threadListItemSchema = threadWithChatPreferencesSchema.extend({
+  // One visible level: the sub-agent conversations nested under this thread.
+  children: z.array(threadWithChatPreferencesSchema).optional(),
+});
+
 export const listThreadsResponseSchema = z.object({
-  items: z.array(threadWithChatPreferencesSchema),
+  items: z.array(threadListItemSchema),
   nextCursor: z.string().nullable(),
+});
+
+export const listChildThreadsResponseSchema = z.object({
+  items: z.array(threadWithChatPreferencesSchema),
 });
 
 export const threadCommandRequestSchema = z
@@ -205,4 +224,10 @@ export type UpdateThreadVisibilityResponse = z.infer<
 >;
 export type UpdateThreadChatPreferencesResponse = z.infer<
   typeof updateThreadChatPreferencesResponseSchema
+>;
+
+export type ThreadOrigin = z.infer<typeof threadOriginSchema>;
+export type ThreadListItem = z.infer<typeof threadListItemSchema>;
+export type ListChildThreadsResponse = z.infer<
+  typeof listChildThreadsResponseSchema
 >;

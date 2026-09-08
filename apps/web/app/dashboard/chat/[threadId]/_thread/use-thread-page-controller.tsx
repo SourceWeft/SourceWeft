@@ -90,6 +90,7 @@ import {
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
 import { BREAKPOINTS, useMediaQuery } from "../../../../../lib/use-media-query";
+import { findChatItem } from "../../../_components/dashboard-chat-items";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
@@ -106,6 +107,7 @@ export function useThreadPageController({
   threadId: string;
 }) {
   const {
+    archivedChats,
     privateChats,
     hasMorePrivateChats,
     hasWorkspaceHydrated,
@@ -124,10 +126,32 @@ export function useThreadPageController({
     workspaces,
   } = dashboardState;
 
-  const chatItem = [...privateChats, ...sharedChats].find(
-    (chat) => chat.id === threadId,
-  );
+  // The thread may be a sub-agent conversation nested under another chat, so
+  // look one level down as well as at the top level.
+  const chatItem = findChatItem([...privateChats, ...sharedChats], threadId);
   const threadTitle = chatItem?.title ?? "Chat";
+  const parentThreadId = chatItem?.parentThreadId ?? null;
+  // A sub-agent conversation shows where it came from. The parent's title is
+  // whatever the sidebar currently knows, with a neutral fallback until then.
+  const parentThread = useMemo(() => {
+    if (!parentThreadId) {
+      return null;
+    }
+    const parent = findChatItem(
+      [...privateChats, ...sharedChats, ...archivedChats],
+      parentThreadId,
+    );
+    return { id: parentThreadId, title: parent?.title ?? "Parent chat" };
+  }, [archivedChats, parentThreadId, privateChats, sharedChats]);
+  const openParentThread = useCallback(() => {
+    if (parentThreadId) {
+      router.push(`/dashboard/chat/${parentThreadId}`);
+    }
+  }, [parentThreadId, router]);
+  // A thread is its own route, so a separate window is just that route.
+  const openThreadInNewWindow = useCallback(() => {
+    window.open(`/dashboard/chat/${threadId}`, "_blank", "noopener,noreferrer");
+  }, [threadId]);
 
   const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
   const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
@@ -1292,6 +1316,9 @@ export function useThreadPageController({
     threadCitations,
     threadId,
     threadTitle,
+    parentThread,
+    openParentThread,
+    openThreadInNewWindow,
     thinkingSettings,
     toolConfirmationInterventionSignal,
     toggleSourcesVisible,

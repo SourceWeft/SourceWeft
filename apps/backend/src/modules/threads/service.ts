@@ -14,6 +14,7 @@ import {
   deleteThreadRecord,
   findThreadRecord,
   findRecentThreadRecordByUser,
+  listChildThreadRecords,
   listThreadRecordsByWorkspace,
   updateThreadChatPreferencesRecord,
   updateThreadModelSettingsRecord,
@@ -37,6 +38,7 @@ import {
   validateThreadModelSettings,
 } from "./model-settings";
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
+import { findPersona, listPersonas as listPersonaSpecs } from "./agent";
 import {
   listThreadModelCatalog,
   listThreadModelSelectorCatalog,
@@ -201,7 +203,82 @@ class ContentThreadService {
           })
         : null;
 
-    return { items: pageItems, nextCursor };
+    // One visible level of nesting: attach each page item's sub-agent
+    // conversations so the sidebar never has to page for them separately.
+    const children = await listChildThreadRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      parentThreadIds: pageItems.map((thread) => thread.id),
+    });
+    const childrenByParent = new Map<string, typeof children>();
+    for (const child of children) {
+      if (!child.parentThreadId) {
+        continue;
+      }
+      const bucket = childrenByParent.get(child.parentThreadId) ?? [];
+      bucket.push(child);
+      childrenByParent.set(child.parentThreadId, bucket);
+    }
+
+    return {
+      items: pageItems.map((thread) => ({
+        ...thread,
+        children: childrenByParent.get(thread.id) ?? [],
+      })),
+      nextCursor,
+    };
+  }
+
+  async listChildThreads(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const parent = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+    if (!parent || !canViewThread(input.userId, parent)) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    const items = await listChildThreadRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      parentThreadIds: [parent.id],
+    });
+
+    return { items };
+  }
+
+  async listPersonas(input: { workspaceId: string; userId: string }) {
+    await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    return {
+      items: listPersonaSpecs().map((persona) => ({
+        slug: persona.slug,
+        name: persona.name,
+        description: persona.description,
+        systemPrompt: persona.systemPrompt,
+        avatar: persona.avatar ?? null,
+        trust: persona.trust,
+        modelSettings: persona.modelSettings ?? null,
+        toolAllowlist: persona.toolAllowlist
+          ? [...persona.toolAllowlist]
+          : null,
+      })),
+    };
   }
 
   async getThread(input: {
@@ -480,14 +557,50 @@ class ContentThreadService {
       visionProfileAlias?: string | null;
     };
     chatPreferences?: Partial<ThreadChatPreferences>;
+    /** Nest the new thread one level under an existing, visible thread. */
+    parentThreadId?: string | null;
+    /** The persona that owns the thread; built-in slugs only for now. */
+    personaId?: string | null;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
     });
 
+    const parent = input.parentThreadId
+      ? await findThreadRecord({
+          threadId: input.parentThreadId,
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+        })
+      : null;
+    if (
+      input.parentThreadId &&
+      (!parent || !canViewThread(input.userId, parent))
+    ) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+    if (parent?.parentThreadId) {
+      // One visible level: a sub-agent conversation cannot host its own.
+      throw new ContentError(
+        400,
+        "THREAD_NESTING_TOO_DEEP",
+        "A sub-agent conversation cannot be nested under another one",
+      );
+    }
+
+    const persona = input.personaId ? findPersona(input.personaId) : null;
+    if (input.personaId && !persona) {
+      throw new ContentError(404, "PERSONA_NOT_FOUND", "Persona not found");
+    }
+
+    // The persona's preferred model seeds the thread's settings so the normal
+    // per-thread resolution applies unchanged; an explicit request still wins.
     const modelSettings = await pruneUnavailableThreadModelAliases(
-      normalizeThreadModelSettings(input.modelSettings),
+      normalizeThreadModelSettings({
+        ...(persona?.modelSettings ?? {}),
+        ...(input.modelSettings ?? {}),
+      }),
     );
     await validateThreadModelSettings(modelSettings);
     const resolvedModelSettings =
@@ -496,10 +609,21 @@ class ContentThreadService {
     const thread = await createThreadRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      title: normalizeContentTitle(input.title, "New Thread"),
+      title: normalizeContentTitle(input.title, persona?.name ?? "New Thread"),
       createdBy: input.userId,
       modelSettings: resolvedModelSettings,
       chatPreferences: input.chatPreferences,
+      // A child starts with its parent's audience (a public link is a grant on
+      // the parent alone, so it does not carry over); it can be changed later.
+      ...(parent
+        ? {
+            visibility:
+              parent.visibility === "private" ? "private" : "workspace",
+          }
+        : {}),
+      parentThreadId: parent?.id ?? null,
+      personaId: persona?.slug ?? null,
+      origin: "user",
     });
 
     return { thread };

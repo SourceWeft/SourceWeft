@@ -27,6 +27,7 @@ import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
+import { applyPersonaToolAllowlist, findPersona } from "../agent";
 import {
   createMessageRecord,
   findMessageRecord,
@@ -1541,11 +1542,17 @@ export async function prepareThreadTurn(
     webAccessEnabled,
     ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
   });
-  const toolPermissions = resolveToolPermissions({
-    command: resolvedCommand,
-    selectedSkillRuntime,
-    tools: effectiveTools,
-  });
+  // A persona-owned thread narrows the permissions to the persona's allowlist
+  // before anything downstream reads them.
+  const persona = findPersona(thread.personaId);
+  const toolPermissions = applyPersonaToolAllowlist(
+    resolveToolPermissions({
+      command: resolvedCommand,
+      selectedSkillRuntime,
+      tools: effectiveTools,
+    }),
+    persona,
+  );
   const runtimeTools = buildRuntimeTools({
     toolPermissions,
     tools: effectiveTools,

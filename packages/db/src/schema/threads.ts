@@ -30,6 +30,7 @@ type ThreadModelSettings = {
 };
 type MessageRole = (typeof messageRoleSchema.options)[number];
 type ThreadVisibility = "private" | "workspace" | "public_link";
+type ThreadOrigin = "user" | "subagent";
 /**
  * Domain enums live in @sourceweft/contracts so the wire schema, the column
  * type, and the CHECK constraint below cannot drift apart. The dependency only
@@ -61,6 +62,16 @@ export const threads = pgTable(
       .$type<ThreadVisibility>()
       .notNull()
       .default("private"),
+    // A sub-agent conversation nests under the thread that spawned or hosts
+    // it. Mirrors `messages.parentMessageId`: one level, `set null` on delete
+    // so removing the parent keeps the child transcript.
+    parentThreadId: text("parent_thread_id").references(
+      (): AnyPgColumn => threads.id,
+      { onDelete: "set null" },
+    ),
+    // The persona driving this thread (built-in slug today, table id later).
+    personaId: text("persona_id"),
+    origin: text("origin").$type<ThreadOrigin>().notNull().default("user"),
     archived: boolean("archived").notNull().default(false),
     createdBy: text("created_by"),
     lastMessageAt: timestamp("last_message_at", {
@@ -92,6 +103,11 @@ export const threads = pgTable(
     check(
       "threads_chat_preferences_object_check",
       sql`jsonb_typeof(${table.chatPreferencesJson}) = 'object'`,
+    ),
+    check("threads_origin_check", sql`${table.origin} in ('user', 'subagent')`),
+    index("threads_workspace_parent_idx").on(
+      table.workspaceId,
+      table.parentThreadId,
     ),
     index("threads_team_workspace_created_idx").on(
       table.teamId,

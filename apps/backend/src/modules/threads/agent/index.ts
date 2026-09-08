@@ -60,6 +60,8 @@ export interface CreateThreadAgentParams {
   filesystemMounts?: AgentFilesystemMountCapability[];
   permissions?: FilesystemPermission[];
   runtimePrompt?: string;
+  /** Persona instructions that replace the default assistant identity. */
+  personaPrompt?: string;
   chatProfileConfig?: unknown;
   contextCompressionReportKey?: string;
   commandExecutionPolicy?: CommandExecutionPolicy;
@@ -119,6 +121,7 @@ export async function createThreadAgent(
     tools: params.tools ?? [],
     systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt, {
       mounts: filesystemMounts,
+      personaPrompt: params.personaPrompt,
     }),
     middleware,
     checkpointer,
@@ -183,3 +186,13 @@ export {
   AgentToolTerminationUnknownError,
   findAgentToolTerminationUnknownReason,
 } from "./middleware/tool-execution-timeout";
+
+// Personas are referenced from the threads root (service, turn preparer): the
+// chat-able roster and the tool-allowlist helpers the turn applies.
+export {
+  applyPersonaToolAllowlist,
+  filterToolsForPersona,
+  findPersona,
+  listPersonas,
+} from "./personas";
+export type { PersonaSpec } from "./personas";

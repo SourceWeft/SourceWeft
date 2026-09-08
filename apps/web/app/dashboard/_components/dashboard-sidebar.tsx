@@ -152,6 +152,7 @@ export function DashboardSidebar() {
     archiveChat,
     clearArchivedChats,
     clearPrivateChats,
+    createChat,
     createWorkspace,
     deleteChat,
     setChatVisibility,
@@ -226,6 +227,27 @@ export function DashboardSidebar() {
 
     startNewChat();
     router.push("/dashboard/chat");
+  };
+
+  // A persona-owned thread lands in the list like any created chat, nested
+  // under its parent when one was chosen, then opens like a click on its row.
+  const handleCreateAgentChat = async (input: {
+    personaId: string;
+    parentThreadId: string | null;
+  }) => {
+    const created = await createChat(input);
+    if (!created) {
+      throw new Error("Failed to create agent chat");
+    }
+
+    setOpenMobile(false);
+    router.prefetch(`/dashboard/chat/${created.id}`);
+    router.push(`/dashboard/chat/${created.id}`);
+  };
+
+  // A thread is its own route, so a separate window is just that route.
+  const handleOpenChatInNewWindow = (id: string) => {
+    window.open(`/dashboard/chat/${id}`, "_blank", "noopener,noreferrer");
   };
 
   const handleRenameWorkspace = async (workspaceId: string, name: string) => {
@@ -342,6 +364,7 @@ export function DashboardSidebar() {
           onArchiveChat={archiveChat}
           onClearArchivedChats={handleClearArchivedChats}
           onClearPrivateChats={handleClearPrivateChats}
+          onCreateAgentChat={handleCreateAgentChat}
           onCreateChat={handleStartNewChat}
           onCreateWorkspace={handleCreateWorkspace}
           onDeleteChat={handleDeleteChat}
@@ -352,6 +375,7 @@ export function DashboardSidebar() {
             setSettingsRequest({ id: Date.now(), tab: "usage" })
           }
           onOpenChat={onOpenChat}
+          onOpenChatInNewWindow={handleOpenChatInNewWindow}
           onPrefetchChat={handlePrefetchChat}
           onRenameWorkspace={handleRenameWorkspace}
           hasMorePrivateChats={hasMorePrivateChats}

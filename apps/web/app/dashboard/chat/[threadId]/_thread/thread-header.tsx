@@ -2,7 +2,12 @@
 
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import dynamic from "next/dynamic";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  ChevronLeft,
+  ExternalLink,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
 import type {
@@ -55,7 +60,10 @@ export function ThreadHeader({
   onByokSelect,
   onModelSelect,
   onOpenHub,
+  onOpenInNewWindow,
+  onOpenParentThread,
   onToggleSources,
+  parentThread,
   selectedModels,
   setSelectedModels,
   sourcesVisible,
@@ -73,7 +81,11 @@ export function ThreadHeader({
   onByokSelect: (input: HeaderByokSelectInput) => void;
   onModelSelect: (input: { type: ModelType; model: ModelItem }) => void;
   onOpenHub: () => void;
+  onOpenInNewWindow?: () => void;
+  onOpenParentThread?: () => void;
   onToggleSources: () => void;
+  /** Set for a sub-agent conversation: the chat it nests under. */
+  parentThread?: { id: string; title: string } | null;
   selectedModels: SelectedModels;
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
   sourcesVisible: boolean;
@@ -93,7 +105,18 @@ export function ThreadHeader({
           <div className="shrink-0 md:hidden">
             <SidebarTrigger />
           </div>
-          <div className="flex min-w-0 flex-1 items-center md:flex-none">
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 md:flex-none">
+            {parentThread ? (
+              <button
+                className="flex min-w-0 items-center gap-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+                onClick={onOpenParentThread}
+                title={`Back to ${parentThread.title}`}
+                type="button"
+              >
+                <ChevronLeft className="size-3 shrink-0" />
+                <span className="truncate">{parentThread.title}</span>
+              </button>
+            ) : null}
             <h1 className="truncate text-base leading-none font-semibold text-foreground">
               {threadTitle}
             </h1>
@@ -102,6 +125,19 @@ export function ThreadHeader({
         </div>
 
         <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">
+          {parentThread && onOpenInNewWindow ? (
+            <Button
+              className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
+              onClick={onOpenInNewWindow}
+              size="icon-sm"
+              title="Open in new window"
+              type="button"
+              variant="outline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              <span className="sr-only">Open in new window</span>
+            </Button>
+          ) : null}
           <HeaderModelSelector
             availableModels={availableModels}
             byokCredentials={byokCredentials}

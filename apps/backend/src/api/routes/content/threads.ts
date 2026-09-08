@@ -200,9 +200,40 @@ export function registerThreadRoutes(app: Hono) {
       title: parsed.data.title,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
+      parentThreadId: parsed.data.parentThreadId,
+      personaId: parsed.data.personaId,
     });
 
     return ApiResponse.success(c, result, 201);
+  });
+
+  app.get("/personas", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.listPersonas({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/threads/:id/children", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.listChildThreads({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
   });
 
   app.post("/threads/start-turn", async (c) => {

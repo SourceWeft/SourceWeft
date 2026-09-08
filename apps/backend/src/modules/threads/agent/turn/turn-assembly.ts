@@ -61,6 +61,7 @@ import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
 import { createExploreSubagent } from "../subagents/explore";
 import { createPlanSubagent } from "../subagents/plan";
+import { filterToolsForPersona, findPersona } from "../personas";
 import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { commandExecutionPolicyFor } from "./command-success";
@@ -665,13 +666,20 @@ export async function buildThreadAgentAssembly(
   const filesystemPermissions = filesystemPermissionsForMounts(
     promptFilesystemMounts,
   );
-  const boundTools = filterCommandPolicyTools(prepared, [
-    ...filterAllowedTools(prepared, capabilityTools),
-    ...filterAllowedTools(prepared, skillTools),
-    ...connectorActionTools,
-    ...mcpTools,
-    ...(sandboxRuntime?.tools ?? []),
-  ]);
+  // A persona-owned thread binds only the persona's allowlisted tools. The
+  // permissions already deny registry tools it may not use; this pass also drops
+  // connector, MCP, and sandbox tools, which are bound under their own names.
+  const persona = findPersona(prepared.thread.personaId);
+  const boundTools = filterToolsForPersona(
+    persona,
+    filterCommandPolicyTools(prepared, [
+      ...filterAllowedTools(prepared, capabilityTools),
+      ...filterAllowedTools(prepared, skillTools),
+      ...connectorActionTools,
+      ...mcpTools,
+      ...(sandboxRuntime?.tools ?? []),
+    ]),
+  );
   const inheritableTools = filterInheritableAgentTools(boundTools);
   const searchSourcesTool = boundTools.find(
     (candidate) => candidate.name === AGENT_TOOL_NAMES.searchSources,
@@ -775,8 +783,11 @@ export async function buildThreadAgentAssembly(
     backend,
     filesystemMounts: promptFilesystemMounts,
     skills,
-    permissions: filesystemPermissions,
+    permissions: persona?.filesystemPermissions
+      ? [...persona.filesystemPermissions]
+      : filesystemPermissions,
     runtimePrompt,
+    personaPrompt: persona?.systemPrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
     extraMiddleware: interpreterMiddleware,

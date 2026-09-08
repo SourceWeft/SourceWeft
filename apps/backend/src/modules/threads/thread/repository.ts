@@ -23,6 +23,9 @@ type RawThreadRow = {
   model_settings_json: ThreadModelSettingsInput | undefined;
   chat_preferences_json: unknown;
   visibility: ThreadRecord["visibility"];
+  parent_thread_id: string | null;
+  persona_id: string | null;
+  origin: ThreadRecord["origin"];
   created_by: string | null;
   created_at: Date;
   updated_at: Date;
@@ -37,6 +40,9 @@ const THREAD_RETURNING_SQL = `
   model_settings_json,
   chat_preferences_json,
   visibility,
+  parent_thread_id,
+  persona_id,
+  origin,
   created_by,
   created_at,
   updated_at,
@@ -75,6 +81,9 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     chatPreferences: normalizeThreadChatPreferences(row.chat_preferences_json),
     sourceCount,
     visibility: row.visibility,
+    parentThreadId: row.parent_thread_id,
+    personaId: row.persona_id,
+    origin: row.origin,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -132,6 +141,10 @@ export async function createThreadRecord(input: {
   createdBy: string;
   modelSettings?: Partial<ThreadModelSettings>;
   chatPreferences?: Partial<ThreadChatPreferences>;
+  visibility?: ThreadRecord["visibility"];
+  parentThreadId?: string | null;
+  personaId?: string | null;
+  origin?: ThreadRecord["origin"];
 }) {
   const id = randomUUID();
   const modelSettings = normalizeThreadModelSettings(input.modelSettings);
@@ -145,9 +158,13 @@ export async function createThreadRecord(input: {
         title,
         model_settings_json,
         chat_preferences_json,
-        created_by
+        created_by,
+        visibility,
+        parent_thread_id,
+        persona_id,
+        origin
       )
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11)
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -158,6 +175,10 @@ export async function createThreadRecord(input: {
       JSON.stringify(modelSettings),
       JSON.stringify(chatPreferences),
       input.createdBy,
+      input.visibility ?? "private",
+      input.parentThreadId ?? null,
+      input.personaId ?? null,
+      input.origin ?? "user",
     ],
   );
   const row = result.rows[0];
@@ -210,6 +231,7 @@ export async function listThreadRecordsByWorkspace(input: {
       where team_id = $1
         and workspace_id = $2
         and archived = false
+        and parent_thread_id is null
         and ${visibility}
         ${cursorSql}
       order by ${THREAD_ACTIVITY_SQL} desc, id desc
@@ -505,4 +527,48 @@ export async function updateThreadTitleIfMatches(input: {
   });
 
   return mapRawThread(row, sourceCounts.get(row.id) ?? 0);
+}
+
+/**
+ * The sub-agent conversations nested directly under each of `parentThreadIds`,
+ * newest activity first. One level only (the sidebar shows one), and the same
+ * visibility rule as the top-level list: another member's private child stays
+ * hidden even when its parent is shared.
+ */
+export async function listChildThreadRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  parentThreadIds: readonly string[];
+}) {
+  if (input.parentThreadIds.length === 0) {
+    return [] as ThreadRecord[];
+  }
+  const visibility = threadVisibilityClause(3);
+  const result = await database.query<RawThreadRow>(
+    `
+      select ${THREAD_RETURNING_SQL}
+      from threads
+      where team_id = $1
+        and workspace_id = $2
+        and archived = false
+        and parent_thread_id = any($4::text[])
+        and ${visibility}
+      order by ${THREAD_ACTIVITY_SQL} desc, id desc
+    `,
+    [
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      toPostgresTextArray([...input.parentThreadIds]),
+    ],
+  );
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: result.rows.map((row) => row.id),
+  });
+  return result.rows.map((row) =>
+    mapRawThread(row, sourceCounts.get(row.id) ?? 0),
+  );
 }

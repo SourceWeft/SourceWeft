@@ -204,6 +204,13 @@
       "when": 1788856332041,
       "tag": "0028_html_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788884180399,
+      "tag": "0029_subagent_threads",
+      "breakpoints": true
     }
   ]
 }

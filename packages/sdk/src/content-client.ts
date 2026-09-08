@@ -89,6 +89,8 @@ import type {
   RetrySourceResponse,
   SourceStatusResponse,
   ListThreadsResponse,
+  ListPersonasResponse,
+  ListChildThreadsResponse,
   StartThreadTurnRequest,
   StartThreadTurnResponse,
   StreamThreadRequest,
@@ -598,6 +600,18 @@ export class ContentClient {
   deleteWorkingFile(workspaceId: string, threadId: string, path: string) {
     return this.http.delete<DeleteWorkingFileResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files?path=${encode(path)}`,
+    );
+  }
+
+  listPersonas(workspaceId: string) {
+    return this.http.get<ListPersonasResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas`,
+    );
+  }
+
+  listChildThreads(workspaceId: string, threadId: string) {
+    return this.http.get<ListChildThreadsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/children`,
     );
   }
 

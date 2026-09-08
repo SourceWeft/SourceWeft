@@ -202,6 +202,11 @@ export type ThreadRecord = {
   chatPreferences: ThreadChatPreferences;
   sourceCount: number;
   visibility: ThreadVisibility;
+  /** Parent thread when this is a nested sub-agent conversation. */
+  parentThreadId: string | null;
+  /** Persona driving the thread; null for an ordinary chat. */
+  personaId: string | null;
+  origin: "user" | "subagent";
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

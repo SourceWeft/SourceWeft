@@ -29,6 +29,13 @@ import {
   type WorkspaceSwitchStatus,
   type WorkspaceSwitchTransitionState,
 } from "./dashboard-chat-transitions";
+import {
+  findChatItem,
+  insertChildChatItem,
+  mapChatItems,
+  mapThreadToChatItem,
+  removeChatItem,
+} from "./dashboard-chat-items";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
@@ -91,6 +98,10 @@ type DashboardChatState = {
     title?: string;
     modelSettings?: ThreadModelSettingsInput;
     chatPreferences?: ThreadChatPreferences;
+    /** Start the thread with a persona (built-in slug such as "explore"). */
+    personaId?: string | null;
+    /** Nest the new thread one level under an existing chat. */
+    parentThreadId?: string | null;
   }) => Promise<{ id: string; title: string } | null>;
   adoptChat: (thread: {
     id: string;
@@ -98,6 +109,9 @@ type DashboardChatState = {
     chatPreferences?: ThreadChatPreferences;
     sourceCount?: number | null;
     updatedAt?: string | null;
+    visibility?: ChatItem["visibility"] | null;
+    parentThreadId?: string | null;
+    personaId?: string | null;
   }) => void;
   updateChatTitle: (id: string, title: string) => void;
   updateChatSourceCount: (id: string, sourceCount: number) => void;
@@ -116,40 +130,6 @@ type DashboardChatState = {
 const DashboardChatStateContext = createContext<DashboardChatState | null>(
   null,
 );
-
-function normalizeUpdatedAt(value?: string | null) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) {
-    return new Date().toISOString();
-  }
-  return date.toISOString();
-}
-
-function mapThreadToChatItem(item: {
-  id: string;
-  title: string;
-  sourceCount?: number | null;
-  updatedAt?: string | null;
-  createdAt?: string | null;
-  lastMessageAt?: string | null;
-  visibility?: ChatItem["visibility"] | null;
-}): ChatItem {
-  return {
-    id: item.id,
-    title: item.title,
-    // Sort/display timestamp is conversation activity — last message, falling
-    // back to creation. NOT updatedAt, which metadata writes (title/model/
-    // prefs) bump, which used to make the list reshuffle on every title.
-    updatedAt: normalizeUpdatedAt(
-      item.lastMessageAt ?? item.createdAt ?? item.updatedAt,
-    ),
-    sourceCount: item.sourceCount ?? 0,
-    // A thread persisted before visibility existed reads as private, matching
-    // the column's own default and keeping it out of the shared bucket.
-    visibility: item.visibility ?? "private",
-    status: "ready",
-  };
-}
 
 /**
  * Splits a page of threads into the sidebar's two buckets. Private threads are
@@ -714,13 +694,12 @@ export function DashboardChatStateProvider({
 
   const updateChatSourceCount = useCallback(
     (id: string, sourceCount: number) => {
-      setPrivateChats((value) =>
-        value.map((item) =>
-          item.id === id
-            ? { ...item, sourceCount: Math.max(item.sourceCount, sourceCount) }
-            : item,
-        ),
-      );
+      const bump = (item: ChatItem) =>
+        item.id === id
+          ? { ...item, sourceCount: Math.max(item.sourceCount, sourceCount) }
+          : item;
+      setPrivateChats((value) => mapChatItems(value, bump));
+      setSharedChats((value) => mapChatItems(value, bump));
     },
     [],
   );
@@ -736,9 +715,9 @@ export function DashboardChatStateProvider({
       const updateItem = (item: ChatItem) =>
         item.id === id ? { ...item, title: safeTitle } : item;
 
-      setPrivateChats((value) => value.map(updateItem));
-      setSharedChats((value) => value.map(updateItem));
-      setArchivedChats((value) => value.map(updateItem));
+      setPrivateChats((value) => mapChatItems(value, updateItem));
+      setSharedChats((value) => mapChatItems(value, updateItem));
+      setArchivedChats((value) => mapChatItems(value, updateItem));
       setThreadTitle((value) => (activeChatId === id ? safeTitle : value));
     },
     [activeChatId],
@@ -751,13 +730,15 @@ export function DashboardChatStateProvider({
       }
 
       const result = await contentClient.getThread(workspaceId, id);
+      // A single-thread response carries no `children`, so the spread keeps
+      // whatever the list item already nests.
       const nextItem = mapThreadToChatItem(result.thread);
       const updateItem = (item: ChatItem) =>
         item.id === id ? { ...item, ...nextItem } : item;
 
-      setPrivateChats((value) => value.map(updateItem));
-      setSharedChats((value) => value.map(updateItem));
-      setArchivedChats((value) => value.map(updateItem));
+      setPrivateChats((value) => mapChatItems(value, updateItem));
+      setSharedChats((value) => mapChatItems(value, updateItem));
+      setArchivedChats((value) => mapChatItems(value, updateItem));
       setThreadTitle((value) => (activeChatId === id ? nextItem.title : value));
 
       return { title: nextItem.title };
@@ -770,32 +751,51 @@ export function DashboardChatStateProvider({
       title?: string;
       modelSettings?: ThreadModelSettingsInput;
       chatPreferences?: ThreadChatPreferences;
+      personaId?: string | null;
+      parentThreadId?: string | null;
     }): Promise<{ id: string; title: string } | null> => {
       if (!workspaceId) return null;
 
-      const safeTitle = input?.title?.trim() || "New chat";
+      const trimmedTitle = input?.title?.trim();
+      // A persona-owned thread is titled after the persona by the server; an
+      // ordinary chat keeps the "New chat" placeholder until it is titled.
+      const safeTitle =
+        trimmedTitle || (input?.personaId ? undefined : "New chat");
 
       try {
         const result = await contentClient.createThread(workspaceId, {
           title: safeTitle,
           modelSettings: input?.modelSettings,
           chatPreferences: input?.chatPreferences ?? initialChatPreferences,
+          personaId: input?.personaId ?? undefined,
+          parentThreadId: input?.parentThreadId ?? undefined,
         });
         const { id, title: newTitle } = result.thread;
 
         rememberChatPreferences(result.thread.chatPreferences);
-        setPrivateChats((value) => [
-          {
-            id,
-            title: newTitle,
-            updatedAt: new Date().toISOString(),
-            sourceCount: 0,
-            // New threads start private; sharing is an explicit action.
-            visibility: "private",
-            status: "ready",
-          },
-          ...value,
-        ]);
+        const item: ChatItem = {
+          ...mapThreadToChatItem(result.thread),
+          updatedAt: new Date().toISOString(),
+        };
+        // A sub-agent conversation nests under its parent wherever that parent
+        // is listed; a top-level chat lands in the bucket its visibility names
+        // (new chats start private; sharing is an explicit action).
+        const parentId = item.parentThreadId;
+        const hasParent = (bucket: ChatItem[]) =>
+          parentId !== null && bucket.some((chat) => chat.id === parentId);
+        if (hasParent(privateChats)) {
+          setPrivateChats((value) => insertChildChatItem(value, item) ?? value);
+        } else if (hasParent(sharedChats)) {
+          setSharedChats((value) => insertChildChatItem(value, item) ?? value);
+        } else if (hasParent(archivedChats)) {
+          setArchivedChats(
+            (value) => insertChildChatItem(value, item) ?? value,
+          );
+        } else if (isSharedChat(item)) {
+          setSharedChats((value) => [item, ...value]);
+        } else {
+          setPrivateChats((value) => [item, ...value]);
+        }
         setMode("thread");
         setActiveChatId(id);
         setThreadTitle(newTitle);
@@ -805,7 +805,14 @@ export function DashboardChatStateProvider({
         return null;
       }
     },
-    [initialChatPreferences, rememberChatPreferences, workspaceId],
+    [
+      archivedChats,
+      initialChatPreferences,
+      privateChats,
+      rememberChatPreferences,
+      sharedChats,
+      workspaceId,
+    ],
   );
 
   const adoptChat = useCallback(
@@ -816,39 +823,67 @@ export function DashboardChatStateProvider({
       sourceCount?: number | null;
       updatedAt?: string | null;
       visibility?: ChatItem["visibility"] | null;
+      parentThreadId?: string | null;
+      personaId?: string | null;
     }) => {
-      const item = mapThreadToChatItem(thread);
+      // A single-thread response carries no children; keep the ones the list
+      // already shows for this chat.
+      const previous = findChatItem(
+        [...privateChats, ...sharedChats, ...archivedChats],
+        thread.id,
+      );
+      const item: ChatItem = {
+        ...mapThreadToChatItem(thread),
+        ...(previous?.children ? { children: previous.children } : {}),
+      };
       if (thread.chatPreferences) {
         rememberChatPreferences(thread.chatPreferences);
       }
-      // Route by the thread's own visibility so an opened shared thread lands
-      // in the shared bucket rather than being mislabeled private.
       const dropElsewhere = (value: ChatItem[]) =>
-        value.filter((chat) => chat.id !== item.id);
-      const insert = (value: ChatItem[]) => [item, ...dropElsewhere(value)];
-      if (isSharedChat(item)) {
-        setSharedChats(insert);
-        setPrivateChats(dropElsewhere);
-      } else {
-        setPrivateChats(insert);
+        removeChatItem(value, item.id);
+      const parentId = item.parentThreadId;
+      const hasParent = (bucket: ChatItem[]) =>
+        parentId !== null && bucket.some((chat) => chat.id === parentId);
+      const nestUnderParent = (value: ChatItem[]) =>
+        insertChildChatItem(dropElsewhere(value), item) ?? value;
+      if (hasParent(privateChats)) {
+        setPrivateChats(nestUnderParent);
         setSharedChats(dropElsewhere);
+        setArchivedChats(dropElsewhere);
+      } else if (hasParent(sharedChats)) {
+        setSharedChats(nestUnderParent);
+        setPrivateChats(dropElsewhere);
+        setArchivedChats(dropElsewhere);
+      } else if (hasParent(archivedChats)) {
+        setArchivedChats(nestUnderParent);
+        setPrivateChats(dropElsewhere);
+        setSharedChats(dropElsewhere);
+      } else {
+        // Route by the thread's own visibility so an opened shared thread
+        // lands in the shared bucket rather than being mislabeled private.
+        const insert = (value: ChatItem[]) => [item, ...dropElsewhere(value)];
+        if (isSharedChat(item)) {
+          setSharedChats(insert);
+          setPrivateChats(dropElsewhere);
+        } else {
+          setPrivateChats(insert);
+          setSharedChats(dropElsewhere);
+        }
+        setArchivedChats(dropElsewhere);
       }
-      setArchivedChats(dropElsewhere);
       setMode("thread");
       setActiveChatId(item.id);
       setThreadTitle(item.title);
     },
-    [rememberChatPreferences],
+    [archivedChats, privateChats, rememberChatPreferences, sharedChats],
   );
 
   const archiveChat = useCallback(
     (id: string) => {
-      const candidate = [...sharedChats, ...privateChats].find(
-        (item) => item.id === id,
-      );
+      const candidate = findChatItem([...sharedChats, ...privateChats], id);
 
-      setSharedChats((value) => value.filter((item) => item.id !== id));
-      setPrivateChats((value) => value.filter((item) => item.id !== id));
+      setSharedChats((value) => removeChatItem(value, id));
+      setPrivateChats((value) => removeChatItem(value, id));
 
       if (candidate) {
         setArchivedChats((value) => {
@@ -865,9 +900,9 @@ export function DashboardChatStateProvider({
   );
 
   const removeChatFromState = useCallback((id: string) => {
-    setSharedChats((value) => value.filter((item) => item.id !== id));
-    setPrivateChats((value) => value.filter((item) => item.id !== id));
-    setArchivedChats((value) => value.filter((item) => item.id !== id));
+    setSharedChats((value) => removeChatItem(value, id));
+    setPrivateChats((value) => removeChatItem(value, id));
+    setArchivedChats((value) => removeChatItem(value, id));
 
     setActiveChatId((value) => {
       if (value !== id) return value;
@@ -897,7 +932,21 @@ export function DashboardChatStateProvider({
         id,
         { visibility },
       );
-      const updated = mapThreadToChatItem(thread);
+      const previous = findChatItem([...privateChats, ...sharedChats], id);
+      const updated: ChatItem = {
+        ...mapThreadToChatItem(thread),
+        ...(previous?.children ? { children: previous.children } : {}),
+      };
+
+      if (updated.parentThreadId) {
+        // A nested conversation stays under its parent whatever its own
+        // visibility; only the row's own label changes.
+        const replace = (item: ChatItem) =>
+          item.id === id ? { ...item, ...updated } : item;
+        setPrivateChats((value) => mapChatItems(value, replace));
+        setSharedChats((value) => mapChatItems(value, replace));
+        return;
+      }
 
       // Re-partition from scratch: the toggle both changes the item and moves
       // it across the private/shared boundary, so a single pass that drops it
@@ -915,7 +964,7 @@ export function DashboardChatStateProvider({
         setPrivateChats(insert);
       }
     },
-    [workspaceId],
+    [privateChats, sharedChats, workspaceId],
   );
 
   const clearPrivateChats = useCallback(async () => {

@@ -74,12 +74,40 @@ function buildChatSystemPromptSuffix() {
 </output_rules>`;
 }
 
+/**
+ * The identity block a persona-owned thread uses instead of the SourceWeft
+ * assistant identity. The persona's own instructions lead; the confidentiality
+ * and citation-marker rules the rest of the prompt relies on stay in place.
+ */
+function buildPersonaSystemPromptIdentity(personaPrompt: string) {
+  return `<persona>
+${personaPrompt}
+</persona>
+
+<system_instruction>
+This thread belongs to the persona above. You are talking directly with the user here — this is your own conversation, not a delegated task: answer the user, keep the persona's role and limits, and ask when the request is unclear.
+
+Do not expose internal tool parameters, internal knowledge or skill paths, backend IDs, raw evidence payloads, XML tags, CDATA markers, or implementation details to the user. Citation markers like [citation:c1] are the only user-visible source IDs you MUST output when citing source evidence. Use natural, user-facing language and refer to evidence uniformly as "sources" or "selected sources".
+</system_instruction>`;
+}
+
+const IDENTITY_BLOCK_PATTERN =
+  /<system_instruction>[\s\S]*?<\/system_instruction>/;
+
 export function buildBaseSystemPrompt(input?: {
   mounts?: AgentFilesystemMountCapability[];
+  /** Persona instructions that replace the default assistant identity. */
+  personaPrompt?: string;
 }) {
   const mounts = input?.mounts ?? createDefaultFilesystemMounts();
+  const personaPrompt = input?.personaPrompt?.trim();
+  const prefix = personaPrompt
+    ? buildChatSystemPromptPrefix().replace(IDENTITY_BLOCK_PATTERN, () =>
+        buildPersonaSystemPromptIdentity(personaPrompt),
+      )
+    : buildChatSystemPromptPrefix();
   return [
-    buildChatSystemPromptPrefix(),
+    prefix,
     buildFilesystemMountPrompt({ mounts }),
     buildChatSystemPromptSuffix(),
   ].join("\n\n");
@@ -89,7 +117,10 @@ export const CHAT_SYSTEM_PROMPT = buildBaseSystemPrompt();
 
 export function buildRuntimeSystemPrompt(
   runtimePrompt?: string,
-  input?: { mounts?: AgentFilesystemMountCapability[] },
+  input?: {
+    mounts?: AgentFilesystemMountCapability[];
+    personaPrompt?: string;
+  },
 ) {
   const basePrompt = buildBaseSystemPrompt(input);
   const compactRuntimePrompt = runtimePrompt?.trim();

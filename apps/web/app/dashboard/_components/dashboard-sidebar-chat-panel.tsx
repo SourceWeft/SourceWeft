@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
+  Bot,
   ChevronDown,
   Clock3,
+  ExternalLink,
   Gauge,
   Lock,
   MoreHorizontal,
@@ -13,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { Persona } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import {
@@ -47,7 +50,7 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { authClient } from "../../../lib/auth-client";
-import { billingClient } from "../../../lib/sdk";
+import { billingClient, contentClient } from "../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
 import { subscribeDashboardBillingSummaryRefresh } from "./dashboard-billing-summary-refresh";
 import { getPersonalOrganization } from "./dashboard-team-selector-shared";
@@ -57,6 +60,7 @@ import {
   getDashboardWorkspaceShortcutKeys,
   useDashboardShortcutPlatform,
 } from "./dashboard-shortcuts";
+import { flattenChatItems } from "./dashboard-chat-items";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -449,6 +453,119 @@ function WorkspaceSwitcher({
   );
 }
 
+/**
+ * Picks the persona that will own a new thread. Used both for a top-level
+ * agent chat and for a sub-agent nested under a parent; the caller decides
+ * where the thread goes, the dialog only chooses who drives it.
+ */
+function PersonaPickerDialog({
+  onOpenChange,
+  onPick,
+  open,
+  parentTitle,
+  workspaceId,
+}: {
+  onOpenChange: (open: boolean) => void;
+  onPick: (personaId: string) => Promise<void>;
+  open: boolean;
+  parentTitle: string | null;
+  workspaceId: string | null;
+}) {
+  const [personas, setPersonas] = useState<Persona[] | null>(null);
+  const [loadedForWorkspace, setLoadedForWorkspace] = useState<string | null>(
+    null,
+  );
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [pickingSlug, setPickingSlug] = useState<string | null>(null);
+
+  // Personas are fetched the first time the picker opens for a workspace and
+  // reused until the workspace changes.
+  const loadPersonas = useCallback(async () => {
+    if (!workspaceId) {
+      return;
+    }
+    setIsLoading(true);
+    setHasError(false);
+    try {
+      const result = await contentClient.listPersonas(workspaceId);
+      setPersonas(result.items);
+      setLoadedForWorkspace(workspaceId);
+    } catch {
+      setHasError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (open && workspaceId && loadedForWorkspace !== workspaceId) {
+      void loadPersonas();
+    }
+  }, [loadPersonas, loadedForWorkspace, open, workspaceId]);
+
+  const handlePick = async (persona: Persona) => {
+    if (pickingSlug) return;
+    setPickingSlug(persona.slug);
+    try {
+      await onPick(persona.slug);
+      onOpenChange(false);
+    } catch {
+      toast.error("Could not start the agent chat.");
+    } finally {
+      setPickingSlug(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {parentTitle ? "Add sub-agent" : "New agent chat"}
+          </DialogTitle>
+          <DialogDescription>
+            {parentTitle
+              ? `Start a sub-agent conversation under "${parentTitle}". It gets its own thread and shows nested in the list.`
+              : "Pick the agent that will own this conversation. You can keep talking to it in its own thread."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-1.5">
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground">Loading agents...</p>
+          ) : null}
+          {hasError ? (
+            <p className="text-xs text-destructive">
+              Could not load agents. Close and try again.
+            </p>
+          ) : null}
+          {personas?.map((persona) => (
+            <button
+              key={persona.slug}
+              className="flex w-full items-start gap-2.5 rounded-md border border-border px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              disabled={pickingSlug !== null}
+              onClick={() => void handlePick(persona)}
+              type="button"
+            >
+              <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">
+                  {pickingSlug === persona.slug
+                    ? `Starting ${persona.name}...`
+                    : persona.name}
+                </span>
+                <span className="line-clamp-2 block text-xs text-muted-foreground">
+                  {persona.description}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function StatusDot({ status }: { status?: ChatItem["status"] }) {
   return (
     <span
@@ -468,8 +585,11 @@ function ChatListRow({
   active,
   canArchive = true,
   item,
+  nested = false,
+  onAddSubagent,
   onArchive,
   onDelete,
+  onOpenInNewWindow,
   onSetVisibility,
   onOpen,
   onPrefetch,
@@ -477,8 +597,12 @@ function ChatListRow({
   active: boolean;
   canArchive?: boolean;
   item: ChatItem;
+  /** A sub-agent conversation rendered under its parent row. */
+  nested?: boolean;
+  onAddSubagent?: (id: string, title: string) => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
+  onOpenInNewWindow?: (id: string) => void;
   onSetVisibility?: (
     id: string,
     visibility: "private" | "workspace",
@@ -504,11 +628,12 @@ function ChatListRow({
   };
 
   return (
-    <SidebarMenuItem className="relative px-2">
+    <SidebarMenuItem className={cn("relative px-2", nested && "pl-6")}>
       <button
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-auto w-full items-start gap-2 px-3 py-2 text-left text-sm leading-snug transition-colors",
+          nested && "py-1.5",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
             : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
@@ -518,12 +643,25 @@ function ChatListRow({
         onMouseEnter={() => onPrefetch?.(item.id)}
         type="button"
       >
+        {nested ? (
+          <span
+            aria-hidden="true"
+            className="shrink-0 font-mono text-[11px] leading-4 text-muted-foreground/70"
+          >
+            ↳
+          </span>
+        ) : null}
         <StatusDot status={item.status} />
         <div className="min-w-0 flex-1">
           <div className="flex w-full items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="relative min-w-0 pr-8">
-                <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-4.5">
+                <span
+                  className={cn(
+                    "line-clamp-1 flex-1 font-medium leading-4.5",
+                    nested ? "text-[12px]" : "text-[13px]",
+                  )}
+                >
                   {item.title}
                 </span>
               </div>
@@ -593,6 +731,20 @@ function ChatListRow({
                 )}
               </DropdownMenuItem>
             ) : null}
+            {!nested && onAddSubagent ? (
+              <DropdownMenuItem
+                onSelect={() => onAddSubagent(item.id, item.title)}
+              >
+                <Bot className="size-4" />
+                <span>Add sub-agent...</span>
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenInNewWindow ? (
+              <DropdownMenuItem onSelect={() => onOpenInNewWindow(item.id)}>
+                <ExternalLink className="size-4" />
+                <span>Open in new window</span>
+              </DropdownMenuItem>
+            ) : null}
             {canArchive ? (
               <DropdownMenuItem onSelect={() => onArchive(item.id)}>
                 <Archive className="size-4" />
@@ -620,9 +772,11 @@ function ChatSection({
   isLoadingMore = false,
   items,
   onLoadMore,
+  onAddSubagent,
   onArchive,
   onClear,
   onDelete,
+  onOpenInNewWindow,
   onSetVisibility,
   onOpen,
   onPrefetch,
@@ -634,9 +788,11 @@ function ChatSection({
   isLoadingMore?: boolean;
   items: ChatItem[];
   onLoadMore?: () => void;
+  onAddSubagent?: (id: string, title: string) => void;
   onArchive: (id: string) => void;
   onClear?: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onOpenInNewWindow?: (id: string) => void;
   onSetVisibility?: (
     id: string,
     visibility: "private" | "workspace",
@@ -709,17 +865,35 @@ function ChatSection({
       <SidebarGroupContent>
         <SidebarMenu className="gap-1 py-0.5">
           {items.map((item) => (
-            <ChatListRow
-              key={item.id}
-              active={item.id === activeId}
-              canArchive={canArchive}
-              item={item}
-              onArchive={onArchive}
-              onDelete={onDelete}
-              onSetVisibility={onSetVisibility}
-              onOpen={onOpen}
-              onPrefetch={onPrefetch}
-            />
+            <Fragment key={item.id}>
+              <ChatListRow
+                active={item.id === activeId}
+                canArchive={canArchive}
+                item={item}
+                onAddSubagent={onAddSubagent}
+                onArchive={onArchive}
+                onDelete={onDelete}
+                onSetVisibility={onSetVisibility}
+                onOpen={onOpen}
+                onPrefetch={onPrefetch}
+              />
+              {/* One visible level: a chat's sub-agent conversations follow it. */}
+              {item.children?.map((child) => (
+                <ChatListRow
+                  key={child.id}
+                  active={child.id === activeId}
+                  canArchive={canArchive}
+                  item={child}
+                  nested
+                  onArchive={onArchive}
+                  onDelete={onDelete}
+                  onOpenInNewWindow={onOpenInNewWindow}
+                  onSetVisibility={onSetVisibility}
+                  onOpen={onOpen}
+                  onPrefetch={onPrefetch}
+                />
+              ))}
+            </Fragment>
           ))}
         </SidebarMenu>
         {hasMore && onLoadMore ? (
@@ -747,6 +921,7 @@ export function DashboardSidebarChatPanel({
   onArchiveChat,
   onClearArchivedChats,
   onClearPrivateChats,
+  onCreateAgentChat,
   onCreateChat,
   onDeleteChat,
   onSetChatVisibility,
@@ -754,6 +929,7 @@ export function DashboardSidebarChatPanel({
   onOpenMembers,
   onOpenUsage,
   onOpenChat,
+  onOpenChatInNewWindow,
   onPrefetchChat,
   onCreateWorkspace,
   onRenameWorkspace,
@@ -772,6 +948,11 @@ export function DashboardSidebarChatPanel({
   onArchiveChat: (id: string) => void;
   onClearArchivedChats: () => Promise<void>;
   onClearPrivateChats: () => Promise<void>;
+  /** Starts a persona-owned thread, nested under `parentThreadId` when set. */
+  onCreateAgentChat: (input: {
+    personaId: string;
+    parentThreadId: string | null;
+  }) => Promise<void>;
   onCreateChat: () => void;
   onDeleteChat: (id: string) => Promise<void>;
   onSetChatVisibility: (
@@ -782,6 +963,7 @@ export function DashboardSidebarChatPanel({
   onOpenMembers?: () => void;
   onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
+  onOpenChatInNewWindow: (id: string) => void;
   onPrefetchChat?: (id: string) => void;
   onCreateWorkspace: (name: string) => Promise<void>;
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
@@ -795,13 +977,20 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const [personaPicker, setPersonaPicker] = useState<{
+    parentThreadId: string | null;
+    parentTitle: string | null;
+  } | null>(null);
+  const openSubagentPicker = (id: string, title: string) =>
+    setPersonaPicker({ parentThreadId: id, parentTitle: title });
+
   const weekAgo = Date.now() - ONE_WEEK_MS;
   const seenIds = new Set<string>();
-  const threadsThisWeek = [
+  const threadsThisWeek = flattenChatItems([
     ...sharedChats,
     ...privateChats,
     ...archivedChats,
-  ].reduce((count, item) => {
+  ]).reduce((count, item) => {
     if (seenIds.has(item.id)) {
       return count;
     }
@@ -842,6 +1031,18 @@ export function DashboardSidebarChatPanel({
             <PenSquare className="size-3" />
             New chat
           </Button>
+          <Button
+            onClick={() =>
+              setPersonaPicker({ parentThreadId: null, parentTitle: null })
+            }
+            size="icon-xs"
+            title="New agent chat"
+            type="button"
+            variant="outline"
+          >
+            <Bot className="size-3" />
+            <span className="sr-only">New agent chat</span>
+          </Button>
           {/* "Share the workspace" = bring people in: opens member & guest management. */}
           <Button
             onClick={onOpenMembers}
@@ -860,8 +1061,10 @@ export function DashboardSidebarChatPanel({
         <ChatSection
           activeId={activeChatId}
           items={sharedChats}
+          onAddSubagent={openSubagentPicker}
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
+          onOpenInNewWindow={onOpenChatInNewWindow}
           onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
@@ -873,9 +1076,11 @@ export function DashboardSidebarChatPanel({
           isLoadingMore={isLoadingPrivateChats}
           items={privateChats}
           onLoadMore={onLoadMoreChats}
+          onAddSubagent={openSubagentPicker}
           onArchive={onArchiveChat}
           onClear={onClearPrivateChats}
           onDelete={onDeleteChat}
+          onOpenInNewWindow={onOpenChatInNewWindow}
           onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
@@ -888,11 +1093,27 @@ export function DashboardSidebarChatPanel({
           onArchive={onArchiveChat}
           onClear={onClearArchivedChats}
           onDelete={onDeleteChat}
+          onOpenInNewWindow={onOpenChatInNewWindow}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}
           title="Archived"
         />
       </SidebarContent>
+
+      <PersonaPickerDialog
+        onOpenChange={(open) => {
+          if (!open) setPersonaPicker(null);
+        }}
+        onPick={(personaId) =>
+          onCreateAgentChat({
+            personaId,
+            parentThreadId: personaPicker?.parentThreadId ?? null,
+          })
+        }
+        open={personaPicker !== null}
+        parentTitle={personaPicker?.parentTitle ?? null}
+        workspaceId={workspaceId}
+      />
 
       <SidebarFooter className="border-t px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">

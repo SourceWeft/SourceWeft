@@ -6,6 +6,7 @@ export * from "./sources";
 export * from "./artifacts";
 export * from "./messages";
 export * from "./threads";
+export * from "./personas";
 export * from "./stream";
 export * from "./skills";
 export * from "./working-files";
