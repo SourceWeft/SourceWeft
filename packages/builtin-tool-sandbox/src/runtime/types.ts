@@ -145,7 +145,9 @@ export type SandboxProvider = {
    */
   cancellationScope?: "command" | "sandbox";
   createSandbox(input: CreateSandboxInput): Promise<{ id: string }>;
+  /** Must verify reusability when no stronger health check is declared. */
   getSandbox(providerSandboxId: string): Promise<unknown>;
+  /** A complete reusability check, including existence; replaces getSandbox. */
   checkSandboxHealth?(providerSandboxId: string): Promise<unknown>;
   deleteSandbox(providerSandboxId: string): Promise<unknown>;
   /**
@@ -252,6 +254,8 @@ export type SandboxRecord = {
   userId: string;
   status: SandboxStatus;
   updatedAt: Date;
+  /** Exact database timestamp for conditional writes; Date loses sub-ms precision. */
+  updatedAtToken?: string;
   expiresAt: Date | null;
 };
 
@@ -262,7 +266,7 @@ export type SandboxStore = {
   }): Promise<SandboxRecord | null>;
   markCreatingSandboxError(input: {
     sandboxId: string;
-    expectedUpdatedAt?: Date;
+    expectedUpdatedAt?: Date | string;
   }): Promise<boolean>;
   insertCreatingSandbox(input: {
     sandboxId: string;
@@ -275,15 +279,24 @@ export type SandboxStore = {
     sandboxId: string;
     providerSandboxId: string;
     expiresAt: Date;
-  }): Promise<void>;
-  markSandboxExpired(input: { sandboxId: string }): Promise<void>;
+  }): Promise<boolean>;
+  markSandboxExpired(input: {
+    sandboxId: string;
+    providerSandboxId?: string;
+    expectedStatus?: SandboxStatus;
+    expectedUpdatedAt?: Date | string;
+  }): Promise<boolean>;
   releaseReadyThreadSandboxLease(input: {
     context: SandboxRuntimeContext;
     expiresAt: Date;
     provider: SandboxProviderId;
     reason: string;
   }): Promise<number>;
-  touchSandbox(input: { sandboxId: string; expiresAt: Date }): Promise<void>;
+  touchSandbox(input: {
+    sandboxId: string;
+    providerSandboxId?: string;
+    expiresAt: Date;
+  }): Promise<boolean>;
 };
 
 export type ExistingSandboxOperation = {

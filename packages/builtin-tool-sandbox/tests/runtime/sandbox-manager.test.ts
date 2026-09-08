@@ -6,6 +6,10 @@ import {
   stableSandboxRequestJson,
 } from "../../src/runtime/sandbox-manager";
 import { sandboxRequestFingerprint } from "../../src/runtime/redaction";
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "../../src/runtime/errors";
 import type {
   SandboxOperationStore,
   SandboxProvider,
@@ -33,12 +37,18 @@ function createTestSandboxStore(): SandboxStore {
     async insertCreatingSandbox() {
       return true;
     },
-    async markSandboxReady() {},
-    async markSandboxExpired() {},
+    async markSandboxReady() {
+      return true;
+    },
+    async markSandboxExpired() {
+      return true;
+    },
     async releaseReadyThreadSandboxLease() {
       return 0;
     },
-    async touchSandbox() {},
+    async touchSandbox() {
+      return true;
+    },
   };
 }
 
@@ -151,18 +161,21 @@ function createMessageScopedOperationStore() {
       if (!input.toolCallId) {
         return;
       }
-      operations.set(keyFor({
-        context: input.context,
-        operationType: input.operationType,
-        toolCallId: input.toolCallId,
-      }), {
-        id: input.operationId,
-        createdAt: new Date(),
-        messageId: input.context.messageId,
-        request: input.request ?? {},
-        result: input.result ?? {},
-        status: input.status as "running" | "succeeded" | "failed",
-      });
+      operations.set(
+        keyFor({
+          context: input.context,
+          operationType: input.operationType,
+          toolCallId: input.toolCallId,
+        }),
+        {
+          id: input.operationId,
+          createdAt: new Date(),
+          messageId: input.context.messageId,
+          request: input.request ?? {},
+          result: input.result ?? {},
+          status: input.status as "running" | "succeeded" | "failed",
+        },
+      );
     },
     async findSucceededOperationByToolCall(input) {
       const operation = operations.get(keyFor(input));
@@ -345,12 +358,18 @@ test("beginToolOperation releases stale running operation and claims a new one",
     async insertCreatingSandbox() {
       return true;
     },
-    async markSandboxReady() {},
-    async markSandboxExpired() {},
+    async markSandboxReady() {
+      return true;
+    },
+    async markSandboxExpired() {
+      return true;
+    },
     async releaseReadyThreadSandboxLease() {
       return 0;
     },
-    async touchSandbox() {},
+    async touchSandbox() {
+      return true;
+    },
   };
   const provider: SandboxProvider = {
     id: "fake",
@@ -452,6 +471,7 @@ test("getOrCreateThreadSandbox checks newly created sandbox health before markin
       ...createTestSandboxStore(),
       async markSandboxReady(input) {
         ready.push(input.providerSandboxId);
+        return true;
       },
     },
     operationStore: createMessageScopedOperationStore(),
@@ -503,6 +523,7 @@ test("a persisted generation fence rejects late results across manager instances
     },
     async markSandboxExpired() {
       active = false;
+      return true;
     },
   };
   const operationStore = createMessageScopedOperationStore();
@@ -538,10 +559,10 @@ test("a persisted generation fence rejects late results across manager instances
     reason: "user_cancelled",
   });
 
-  assert.equal(dispositionDuringProviderCancellation, "termination_unknown");
+  assert.equal(dispositionDuringProviderCancellation, "instance_changed");
   assert.equal(
     await firstManager.resolveExecutionResultDisposition(sandbox, context),
-    "termination_unknown",
+    "instance_changed",
   );
 });
 
@@ -583,11 +604,11 @@ test("a persisted generation replacement rejects a result from the old sandbox",
 
   assert.equal(
     await manager.resolveExecutionResultDisposition(oldSandbox, context),
-    "termination_unknown",
+    "instance_changed",
   );
 });
 
-test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fresh one", async () => {
+test("getOrCreateThreadSandbox recreates only a confirmed missing instance before binding", async () => {
   const expired: string[] = [];
   const created: string[] = [];
   const checked: string[] = [];
@@ -613,7 +634,11 @@ test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fre
       async checkSandboxHealth(providerSandboxId) {
         checked.push(providerSandboxId);
         if (providerSandboxId === "provider-existing") {
-          throw new Error("SANDBOX_NOT_READY_OR_UNHEALTHY");
+          throw new SandboxProviderError(
+            SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+            "identity missing",
+            "get",
+          );
         }
       },
     },
@@ -624,6 +649,7 @@ test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fre
       },
       async markSandboxExpired(input) {
         expired.push(input.sandboxId);
+        return true;
       },
     },
     operationStore: createMessageScopedOperationStore(),
@@ -679,6 +705,7 @@ test("getOrCreateThreadSandbox waits for concurrent sandbox creation and reuses 
       },
       async touchSandbox(input) {
         touched.push(input.sandboxId);
+        return true;
       },
     },
     operationStore: createMessageScopedOperationStore(),
@@ -701,6 +728,329 @@ test("getOrCreateThreadSandbox waits for concurrent sandbox creation and reuses 
   assert.equal(sandbox.providerSandboxId, "provider-concurrent");
   assert.equal(lookupCount, 2);
   assert.deepEqual(touched, ["sandbox-concurrent"]);
+});
+
+function acquisitionFixture() {
+  const context: SandboxRuntimeContext = {
+    teamId: "tenant-a",
+    workspaceId: "workspace-a",
+    threadId: "thread-a",
+    userId: "user-a",
+    messageId: "message-a",
+    runId: "run-a",
+  };
+  const existing = {
+    ...context,
+    id: "instance-a",
+    provider: "synthetic-provider",
+    providerSandboxId: "remote-a",
+    status: "ready" as const,
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 3600_000),
+  };
+  return {
+    context,
+    existing,
+    store: {
+      ...createTestSandboxStore(),
+      findLatestActiveThreadSandbox: async () => existing,
+    } satisfies SandboxStore,
+  };
+}
+
+test("parallel acquisitions share checking and asset preparation and pin the instance for the run", async () => {
+  const { context, store } = acquisitionFixture();
+  let checked!: () => void,
+    releaseCheck!: () => void,
+    staging!: () => void,
+    releaseStaging!: () => void;
+  const checkEntered = new Promise<void>((r) => {
+    checked = r;
+  });
+  const checkGate = new Promise<void>((r) => {
+    releaseCheck = r;
+  });
+  const stagingEntered = new Promise<void>((r) => {
+    staging = r;
+  });
+  const stagingGate = new Promise<void>((r) => {
+    releaseStaging = r;
+  });
+  let checks = 0,
+    prepared = 0,
+    settled = 0,
+    touches = 0;
+  const manager = new SandboxManager({
+    provider: {
+      ...createTestProvider(),
+      id: "synthetic-provider",
+      getSandbox: async () => {
+        throw new Error("must not repeat the declared health check");
+      },
+      checkSandboxHealth: async () => {
+        checks++;
+        checked();
+        await checkGate;
+      },
+    },
+    sandboxStore: {
+      ...store,
+      touchSandbox: async () => {
+        touches++;
+        return true;
+      },
+    },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+    requiredAssetStaging: {
+      plans: async () => {
+        prepared++;
+        staging();
+        await stagingGate;
+        return [];
+      },
+      commandTimeoutMs: 1000,
+      maxOutputChars: 1000,
+    },
+  });
+  const pending = [1, 2, 3].map(() =>
+    manager.getOrCreateThreadSandbox(context).then((x) => {
+      settled++;
+      return x;
+    }),
+  );
+  await checkEntered;
+  assert.equal(checks, 1);
+  releaseCheck();
+  await stagingEntered;
+  assert.equal(
+    settled,
+    0,
+    "no operation may escape while preparation is pending",
+  );
+  releaseStaging();
+  const refs = await Promise.all(pending);
+  assert.strictEqual(refs[0], refs[1]);
+  assert.strictEqual(refs[1], refs[2]);
+  await manager.getOrCreateThreadSandbox(context);
+  assert.equal(checks, 1);
+  assert.equal(prepared, 1);
+  assert.equal(touches, 4);
+  await manager.getOrCreateThreadSandbox({ ...context, runId: "another-run" });
+  await manager.getOrCreateThreadSandbox({
+    ...context,
+    workspaceId: "another-workspace",
+  });
+  assert.equal(checks, 3, "different scopes must not share acquisitions");
+});
+
+for (const error of [
+  new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+    "network unavailable",
+    "get",
+  ),
+  new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.authentication,
+    "not authorized",
+    "get",
+  ),
+  new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+    "file missing",
+    "download",
+  ),
+  new Error(
+    "SANDBOX_NOT_FOUND_OR_EXPIRED: a string is not a provider classification",
+  ),
+])
+  test(`acquisition failure is shared without expiry or recreation: ${error.message}`, async () => {
+    const { context, store } = acquisitionFixture();
+    let checked = 0,
+      expired = 0,
+      created = 0;
+    const manager = new SandboxManager({
+      provider: {
+        ...createTestProvider(),
+        getSandbox: async () => {
+          checked++;
+          throw error;
+        },
+        createSandbox: async () => {
+          created++;
+          return { id: "unexpected" };
+        },
+      },
+      sandboxStore: {
+        ...store,
+        markSandboxExpired: async () => {
+          expired++;
+          return true;
+        },
+      },
+      operationStore: createMessageScopedOperationStore(),
+      ttlSeconds: 3600,
+      maxCommandTimeoutMs: 1000,
+    });
+    const results = await Promise.allSettled(
+      [1, 2, 3].map(() => manager.getOrCreateThreadSandbox(context)),
+    );
+    for (const result of results) {
+      assert.equal(result.status, "rejected");
+      if (result.status === "rejected")
+        assert.strictEqual(result.reason, error);
+    }
+    await assert.rejects(
+      manager.getOrCreateThreadSandbox(context),
+      (e) => e === error,
+    );
+    assert.equal(checked, 1);
+    assert.equal(expired, 0);
+    assert.equal(created, 0);
+  });
+
+test("renewal errors preserve the original cause and safe diagnostics without invalidating the instance", async () => {
+  const { context, store } = acquisitionFixture();
+  let checks = 0,
+    expired = 0;
+  const error = new Error("renew failed", {
+    cause: new Error("api_key=private-value"),
+  });
+  const logs: unknown[] = [];
+  const manager = new SandboxManager({
+    provider: {
+      ...createTestProvider(),
+      getSandbox: async () => {
+        checks++;
+      },
+    },
+    sandboxStore: {
+      ...store,
+      touchSandbox: async () => {
+        throw error;
+      },
+      markSandboxExpired: async () => {
+        expired++;
+        return true;
+      },
+    },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+    logWarn: (_message, data) => logs.push(data),
+  });
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e) => e === error,
+  );
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e) => e === error,
+  );
+  assert.equal(checks, 1);
+  assert.equal(expired, 0);
+  assert.match(JSON.stringify(logs), /renew/);
+  assert.ok(!JSON.stringify(logs).includes("private-value"));
+});
+
+test("a bound instance that loses its ready state is never replaced within that run", async () => {
+  const { context, store } = acquisitionFixture();
+  let active = true,
+    checks = 0,
+    created = 0;
+  const manager = new SandboxManager({
+    provider: {
+      ...createTestProvider(),
+      getSandbox: async () => {
+        checks++;
+      },
+      createSandbox: async () => {
+        created++;
+        return { id: "unexpected" };
+      },
+    },
+    sandboxStore: { ...store, touchSandbox: async () => active },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+  });
+  await manager.getOrCreateThreadSandbox(context);
+  active = false;
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e: unknown) =>
+      (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(checks, 1);
+  assert.equal(created, 0);
+});
+
+test("late operation completion cannot persist success after its instance expires", async () => {
+  let completions = 0;
+  const manager = new SandboxManager({
+    provider: createTestProvider(),
+    sandboxStore: {
+      ...createTestSandboxStore(),
+      touchSandbox: async () => false,
+    },
+    operationStore: {
+      ...createMessageScopedOperationStore(),
+      completeToolOperation: async () => {
+        completions++;
+      },
+    },
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+  });
+  await assert.rejects(
+    manager.completeToolOperation({
+      operationId: "late-result",
+      sandboxId: "expired-instance",
+      status: "succeeded",
+    }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(completions, 0);
+});
+
+test("creation failure remains shared when persisting that failure also fails", async () => {
+  const { context } = acquisitionFixture();
+  const original = new Error("provider acquisition failed");
+  let creates = 0;
+  const logs: unknown[] = [];
+  const manager = new SandboxManager({
+    provider: {
+      ...createTestProvider(),
+      createSandbox: async () => {
+        creates++;
+        throw original;
+      },
+    },
+    sandboxStore: {
+      ...createTestSandboxStore(),
+      markCreatingSandboxError: async () => {
+        throw new Error("database unavailable");
+      },
+    },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+    logWarn: (_message, meta) => {
+      logs.push(meta);
+    },
+  });
+  const results = await Promise.allSettled([
+    manager.getOrCreateThreadSandbox(context),
+    manager.getOrCreateThreadSandbox(context),
+  ]);
+  for (const result of results) {
+    assert.equal(result.status, "rejected");
+    if (result.status === "rejected") assert.equal(result.reason, original);
+  }
+  assert.equal(creates, 1);
+  assert.match(JSON.stringify(logs), /record_create_failure/);
 });
 
 test("beginToolOperation replays succeeded operations only within the same message id", async () => {

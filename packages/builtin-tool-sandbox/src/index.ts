@@ -4,6 +4,12 @@ export {
   prepareSandboxWorkspaceAgentTool,
   sandboxAgentToolDefs,
 } from "./agent-tool-defs";
+export {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+  isSandboxInstanceMissingError,
+  SandboxInstanceChangedError,
+} from "./runtime/errors";
 
 import { builtinSandboxCapabilityManifest } from "./manifest";
 import {

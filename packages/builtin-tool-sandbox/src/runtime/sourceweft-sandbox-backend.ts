@@ -1,3 +1,4 @@
+import { SandboxInstanceChangedError } from "./errors";
 import { randomUUID } from "node:crypto";
 import type {
   EditResult,
@@ -1179,6 +1180,8 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             sandbox,
             this.input.context,
           );
+        if (disposition === "instance_changed")
+          throw new SandboxInstanceChangedError();
         if (disposition === "termination_unknown") {
           throw new SandboxModelExecutionAbortError({
             cancellation: { confirmed: false, mode: "unknown" },

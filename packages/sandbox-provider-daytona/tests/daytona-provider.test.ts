@@ -665,6 +665,35 @@ describe("assertDaytonaCommandSucceeded", () => {
 });
 
 describe("mapDaytonaProviderError", () => {
+  test("classifies 404 by operation and preserves the native cause", () => {
+    for (const [operation, expected] of [
+      ["download", "SANDBOX_FILE_NOT_FOUND"],
+      ["execute", "SANDBOX_PROVIDER_ERROR"],
+      ["get", "SANDBOX_NOT_FOUND_OR_EXPIRED"],
+    ] as const) {
+      const cause = { statusCode: 404 };
+      const error = mapDaytonaProviderError(cause, operation);
+      assert.equal(error.code, expected);
+      assert.equal(error.cause, cause);
+      assert.equal(error.phase, operation);
+      assert.equal(mapDaytonaProviderError(error, "upload"), error);
+    }
+    assert.equal(
+      mapDaytonaProviderError(
+        {
+          code: "sandbox_not_found",
+          statusCode: 404,
+        },
+        "download",
+      ).code,
+      "SANDBOX_NOT_FOUND_OR_EXPIRED",
+    );
+    assert.equal(
+      mapDaytonaProviderError(new Error("file does not exist"), "execute").code,
+      "SANDBOX_PROVIDER_ERROR",
+    );
+  });
+
   test("maps provider auth failures", () => {
     assert.match(
       mapDaytonaProviderError({ status: 401 }, "create").message,

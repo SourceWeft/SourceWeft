@@ -1,3 +1,4 @@
+import { SandboxInstanceChangedError } from "./errors";
 import { randomUUID } from "node:crypto";
 import {
   AGENT_TOOL_HOST_LIMITS,
@@ -463,6 +464,8 @@ export function createTrustedSandboxHostAdapter(input: {
       current.sandbox,
       input.context,
     );
+    if (disposition === "instance_changed")
+      throw new SandboxInstanceChangedError();
     if (disposition === "termination_unknown") {
       throw new TrustedSandboxAbortError({
         cancellation: { confirmed: false, mode: "unknown" },
@@ -635,6 +638,8 @@ export function createTrustedSandboxHostAdapter(input: {
         current.sandbox,
         input.context,
       );
+      if (disposition === "instance_changed")
+        throw new SandboxInstanceChangedError();
       if (disposition === "termination_unknown") {
         throw new TrustedSandboxAbortError({
           cancellation: { confirmed: false, mode: "unknown" },
@@ -906,17 +911,19 @@ export function createTrustedSandboxHostAdapter(input: {
           );
         if (disposition !== "accepted") {
           const error =
-            disposition === "termination_unknown"
-              ? new TrustedSandboxAbortError({
-                  cancellation: { confirmed: false, mode: "unknown" },
-                  reason: "user_cancelled",
-                })
-              : new TrustedSandboxResultDiscardedError();
+            disposition === "instance_changed"
+              ? new SandboxInstanceChangedError()
+              : disposition === "termination_unknown"
+                ? new TrustedSandboxAbortError({
+                    cancellation: { confirmed: false, mode: "unknown" },
+                    reason: "user_cancelled",
+                  })
+                : new TrustedSandboxResultDiscardedError();
           await input.manager.recordOperation({
             context: input.context,
             sandboxId: current.sandbox.id,
             operationType: "execute",
-            status: "canceled",
+            status: disposition === "instance_changed" ? "failed" : "canceled",
             request,
             result: {
               errorCode: error.code,

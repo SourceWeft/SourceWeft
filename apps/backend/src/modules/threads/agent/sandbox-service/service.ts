@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, lte } from "drizzle-orm";
 import {
   AgentSandboxService,
+  isSandboxInstanceMissingError,
   SANDBOX_OPERATION_STALE_GRACE_MS,
   SANDBOX_OPERATION_STALE_RELEASED_CODE,
   SANDBOX_RELEASE_LEASE_GRACE_MS,
@@ -52,10 +53,6 @@ const sandboxService = new AgentSandboxService({
   logWarn: (message, meta) => logger.warn(message, meta),
 });
 
-function isProviderNotFoundOrExpired(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("SANDBOX_NOT_FOUND_OR_EXPIRED");
-}
 
 /**
  * Every entry point that can reach a provider awaits provider discovery first.
@@ -198,7 +195,7 @@ export const agentSandboxService = {
         cleaned += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (isProviderNotFoundOrExpired(error)) {
+        if (isSandboxInstanceMissingError(error)) {
           await db.update(agentSandboxes)
             .set({ status: "expired", updatedAt: new Date() })
             .where(eq(agentSandboxes.id, sandbox.id));

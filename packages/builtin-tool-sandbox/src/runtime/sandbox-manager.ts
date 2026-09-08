@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import {
+  isSandboxInstanceMissingError,
+  SandboxInstanceChangedError,
+  sandboxErrorDiagnostic,
+} from "./errors";
 import type {
   ExistingSandboxOperation,
   SandboxBridgeOperationType,
@@ -65,7 +70,10 @@ type BeginToolOperationResult =
   | { kind: "replay"; result: Record<string, unknown> };
 
 export type SandboxExecutionResultDisposition =
-  "accepted" | "sandbox_terminated" | "termination_unknown";
+  | "accepted"
+  | "instance_changed"
+  | "sandbox_terminated"
+  | "termination_unknown";
 
 export function stableSandboxRequestJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -186,10 +194,41 @@ export class SandboxManager {
        */
       maxCommandTimeoutMs: number;
       environment?: string;
+      logWarn?: (message: string, meta: Record<string, unknown>) => void;
       skillStaging?: SandboxSkillStaging;
       requiredAssetStaging?: SandboxRuntimeAssetStaging;
     },
   ) {}
+
+  // A failed acquisition is shared too: siblings must not each start a new
+  // sandbox after the same failure. A new run has its own initialization.
+  private readonly initializationRuns = new Map<string, Promise<SandboxRef>>();
+
+  private async acquisitionPhase<T>(
+    phase: string,
+    context: SandboxRuntimeContext,
+    operation: () => Promise<T>,
+    sandboxId?: string,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      this.input.logWarn?.("sandbox.acquire.failed", {
+        phase,
+        provider: this.input.provider.id,
+        ...context,
+        sandboxId,
+        error: sandboxErrorDiagnostic(error),
+      });
+      throw error;
+    }
+  }
+
+  private checkReusableSandbox(providerSandboxId: string) {
+    return this.input.provider.checkSandboxHealth
+      ? this.input.provider.checkSandboxHealth(providerSandboxId)
+      : this.input.provider.getSandbox(providerSandboxId);
+  }
 
   /**
    * Per-provider-sandbox staging memo. The manager lives for one turn, so
@@ -239,9 +278,48 @@ export class SandboxManager {
     context: SandboxRuntimeContext,
     options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
   ): Promise<SandboxRef> {
-    const sandbox = await this.acquireThreadSandbox(context, options);
-    await this.ensureRequiredAssetsOnce(sandbox);
-    await this.ensureSkillAssetsOnce(sandbox);
+    const key = JSON.stringify([
+      this.input.provider.id,
+      context.teamId,
+      context.workspaceId,
+      context.threadId,
+      context.runId,
+      context.userId,
+    ]);
+    let initialization = this.initializationRuns.get(key);
+    if (!initialization) {
+      initialization = (async () => {
+        const sandbox = await this.acquireThreadSandbox(context, options);
+        await this.acquisitionPhase(
+          "prepare",
+          context,
+          async () => {
+            await this.ensureRequiredAssetsOnce(sandbox);
+            await this.ensureSkillAssetsOnce(sandbox);
+          },
+          sandbox.id,
+        );
+        return sandbox;
+      })();
+      this.initializationRuns.set(key, initialization);
+    }
+    const sandbox = await initialization;
+    if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
+      throw new SandboxInstanceChangedError();
+    }
+    await this.acquisitionPhase(
+      "renew",
+      context,
+      async () => {
+        const touched = await this.input.sandboxStore.touchSandbox({
+          sandboxId: sandbox.id,
+          providerSandboxId: sandbox.providerSandboxId,
+          expiresAt: this.sandboxExpiresAt(),
+        });
+        if (!touched) throw new SandboxInstanceChangedError();
+      },
+      sandbox.id,
+    );
     return sandbox;
   }
 
@@ -256,11 +334,12 @@ export class SandboxManager {
     const waitStartedAt = Date.now();
 
     for (;;) {
-      const existing =
-        await this.input.sandboxStore.findLatestActiveThreadSandbox({
+      const existing = await this.acquisitionPhase("lookup", context, () =>
+        this.input.sandboxStore.findLatestActiveThreadSandbox({
           provider: this.input.provider.id,
           context,
-        });
+        }),
+      );
 
       if (existing) {
         if (existing.status === "creating") {
@@ -277,7 +356,7 @@ export class SandboxManager {
           const claimed =
             await this.input.sandboxStore.markCreatingSandboxError({
               sandboxId: existing.id,
-              expectedUpdatedAt: existing.updatedAt,
+              expectedUpdatedAt: existing.updatedAtToken ?? existing.updatedAt,
             });
           if (!claimed) {
             throw new Error(
@@ -286,24 +365,32 @@ export class SandboxManager {
           }
         } else {
           try {
-            await this.input.provider.getSandbox(existing.providerSandboxId);
-            await this.input.provider.checkSandboxHealth?.(
-              existing.providerSandboxId,
+            await this.acquisitionPhase(
+              "check",
+              context,
+              () => this.checkReusableSandbox(existing.providerSandboxId),
+              existing.id,
             );
-            await this.input.sandboxStore.touchSandbox({
+          } catch (error) {
+            if (!isSandboxInstanceMissingError(error)) throw error;
+            const expired = await this.input.sandboxStore.markSandboxExpired({
               sandboxId: existing.id,
-              expiresAt: this.sandboxExpiresAt(),
-            });
-            return {
-              id: existing.id,
-              provider: this.input.provider.id,
               providerSandboxId: existing.providerSandboxId,
-            };
-          } catch {
-            await this.input.sandboxStore.markSandboxExpired({
-              sandboxId: existing.id,
+              expectedStatus: "ready",
+              expectedUpdatedAt: existing.updatedAtToken ?? existing.updatedAt,
             });
+            // A concurrent renewal/transition won. Re-read rather than
+            // creating from a stale observation of the previous generation.
+            if (!expired && Date.now() - waitStartedAt >= waitTimeoutMs) {
+              throw new SandboxInstanceChangedError();
+            }
+            continue;
           }
+          return {
+            id: existing.id,
+            provider: this.input.provider.id,
+            providerSandboxId: existing.providerSandboxId,
+          };
         }
       }
 
@@ -318,10 +405,17 @@ export class SandboxManager {
       });
 
       if (!inserted) {
-        return this.acquireThreadSandbox(context, options);
+        if (Date.now() - waitStartedAt >= waitTimeoutMs) {
+          throw new Error(
+            "SANDBOX_CREATION_WAIT_TIMEOUT: sandbox acquisition is still in progress.",
+          );
+        }
+        await sleep(waitIntervalMs);
+        continue;
       }
 
       const startedAt = Date.now();
+      let providerSandboxId: string | undefined;
       try {
         const sandbox = await this.input.provider.createSandbox({
           ttlSeconds: this.input.ttlSeconds,
@@ -335,12 +429,14 @@ export class SandboxManager {
             environment: this.input.environment ?? "development",
           },
         });
-        await this.input.provider.checkSandboxHealth?.(sandbox.id);
-        await this.input.sandboxStore.markSandboxReady({
+        providerSandboxId = sandbox.id;
+        await this.checkReusableSandbox(sandbox.id);
+        const ready = await this.input.sandboxStore.markSandboxReady({
           sandboxId: id,
           providerSandboxId: sandbox.id,
           expiresAt: this.sandboxExpiresAt(),
         });
+        if (!ready) throw new SandboxInstanceChangedError();
         await this.recordOperation({
           context,
           sandboxId: id,
@@ -355,19 +451,39 @@ export class SandboxManager {
           providerSandboxId: sandbox.id,
         };
       } catch (error) {
-        await this.input.sandboxStore.markCreatingSandboxError({
+        this.input.logWarn?.("sandbox.acquire.failed", {
+          phase: "create",
+          provider: this.input.provider.id,
+          ...context,
           sandboxId: id,
+          providerSandboxId,
+          error: sandboxErrorDiagnostic(error),
         });
-        await this.recordOperation({
-          context,
-          sandboxId: id,
-          operationType: "create",
-          status: "failed",
-          result: {
-            error: error instanceof Error ? error.message : String(error),
-          },
-          durationMs: Date.now() - startedAt,
-        });
+        try {
+          await this.input.sandboxStore.markCreatingSandboxError({
+            sandboxId: id,
+          });
+          await this.recordOperation({
+            context,
+            sandboxId: id,
+            operationType: "create",
+            status: "failed",
+            result: {
+              error: error instanceof Error ? error.message : String(error),
+              diagnostic: sandboxErrorDiagnostic(error),
+            },
+            durationMs: Date.now() - startedAt,
+          });
+        } catch (recordingError) {
+          this.input.logWarn?.("sandbox.acquire.failed", {
+            phase: "record_create_failure",
+            provider: this.input.provider.id,
+            ...context,
+            sandboxId: id,
+            providerSandboxId,
+            error: sandboxErrorDiagnostic(recordingError),
+          });
+        }
         throw error;
       }
     }
@@ -753,18 +869,19 @@ export class SandboxManager {
     result?: Record<string, unknown>;
     durationMs?: number;
   }) {
+    if (input.sandboxId && input.status === "succeeded") {
+      const touched = await this.input.sandboxStore.touchSandbox({
+        sandboxId: input.sandboxId,
+        expiresAt: this.sandboxExpiresAt(),
+      });
+      if (!touched) throw new SandboxInstanceChangedError();
+    }
     await this.input.operationStore.completeToolOperation({
       ...input,
       result: input.result
         ? (redactSandboxSecrets(input.result) as Record<string, unknown>)
         : undefined,
     });
-    if (input.sandboxId && input.status === "succeeded") {
-      await this.input.sandboxStore.touchSandbox({
-        sandboxId: input.sandboxId,
-        expiresAt: this.sandboxExpiresAt(),
-      });
-    }
   }
 
   async expireThreadSandbox(input: { sandboxId: string }) {
@@ -842,10 +959,9 @@ export class SandboxManager {
         active.id !== sandbox.id ||
         active.providerSandboxId !== sandbox.providerSandboxId
       ) {
-        // Another runtime/process invalidated or replaced this generation. Its
-        // local cancellation outcome is unavailable here, so never claim more
-        // than the durable store proves: the late result is unsafe/unknown.
-        return "termination_unknown";
+        // The store proves only that this generation is no longer current.
+        // That is not evidence that a user requested physical cancellation.
+        return "instance_changed";
       }
 
       const currentRuns = this.sandboxCancellationRuns.get(
@@ -884,7 +1000,7 @@ export class SandboxManager {
           latestActive.id === sandbox.id &&
           latestActive.providerSandboxId === sandbox.providerSandboxId
           ? "accepted"
-          : "termination_unknown";
+          : "instance_changed";
       }
     }
   }
@@ -922,12 +1038,12 @@ export class SandboxManager {
       result = input.forceSandbox
         ? await this.deleteSandboxForCancellation(input.sandbox)
         : this.input.provider.cancelExecution
-        ? await this.input.provider.cancelExecution({
-            providerSandboxId: input.sandbox.providerSandboxId,
-            executionId: input.executionId,
-            reason: input.reason,
-          })
-        : await this.deleteSandboxForCancellation(input.sandbox);
+          ? await this.input.provider.cancelExecution({
+              providerSandboxId: input.sandbox.providerSandboxId,
+              executionId: input.executionId,
+              reason: input.reason,
+            })
+          : await this.deleteSandboxForCancellation(input.sandbox);
     } catch {
       result = { confirmed: false, mode: "unknown" };
     }

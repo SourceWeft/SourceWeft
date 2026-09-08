@@ -47,6 +47,7 @@ export function createSandboxRuntimeForTurn(input: {
   operationStore: SandboxOperationStore;
   toolApprovalEnabled: boolean;
   environment?: string;
+  logWarn?: (message: string, meta: Record<string, unknown>) => void;
   /**
    * Class of operation this runtime's backend commands belong to. Agent turns
    * must omit it and stay interactive; host-only runtimes may name `batch`.
@@ -79,6 +80,7 @@ export function createSandboxRuntimeForTurn(input: {
     // maxSandboxCommandTimeoutMs.
     maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(input.limits),
     environment: input.environment,
+    logWarn: input.logWarn,
     ...(input.skillAssets
       ? {
           skillStaging: {

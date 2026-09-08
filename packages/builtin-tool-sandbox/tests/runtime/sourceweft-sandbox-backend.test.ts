@@ -84,13 +84,19 @@ function createSandboxStore(): SandboxStore & { releaseReasons: string[] } {
     async insertCreatingSandbox() {
       return true;
     },
-    async markSandboxReady() {},
-    async markSandboxExpired() {},
+    async markSandboxReady() {
+      return true;
+    },
+    async markSandboxExpired() {
+      return true;
+    },
     async releaseReadyThreadSandboxLease(input) {
       releaseReasons.push(input.reason);
       return 1;
     },
-    async touchSandbox() {},
+    async touchSandbox() {
+      return true;
+    },
   };
 }
 
@@ -477,15 +483,20 @@ test("SourceWeftSandboxBackend aborts a blocked write, waits for sandbox deletio
   lateUpload.resolve();
   await Promise.resolve();
   let settled = false;
-  void invocation.finally(() => {
-    settled = true;
-  }).catch(() => undefined);
+  void invocation
+    .finally(() => {
+      settled = true;
+    })
+    .catch(() => undefined);
   await Promise.resolve();
   assert.equal(settled, false);
 
   deletionConfirmed.resolve();
   await assert.rejects(invocation, (error: unknown) => {
-    assert.equal((error as { code?: unknown }).code, "SANDBOX_OPERATION_CANCELLED");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_OPERATION_CANCELLED",
+    );
     return true;
   });
   assert.equal(uploadedAfterAbort, true);
@@ -523,7 +534,10 @@ test("SourceWeftSandboxBackend aborts a blocked read command and never returns l
     }),
   );
   await assert.rejects(invocation, (error: unknown) => {
-    assert.equal((error as { code?: unknown }).code, "SANDBOX_OPERATION_TIMED_OUT");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_OPERATION_TIMED_OUT",
+    );
     return true;
   });
   assert.equal(deleteCalls, 1);
@@ -623,7 +637,10 @@ test("SourceWeftSandboxBackend rejects a file result from a replaced sandbox gen
   lateRead.resolve({ output: "stale", exitCode: 0, truncated: false });
 
   await assert.rejects(invocation, (error: unknown) => {
-    assert.equal((error as { code?: unknown }).code, "SANDBOX_TERMINATION_UNKNOWN");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "SANDBOX_INSTANCE_CHANGED",
+    );
     return true;
   });
 });
@@ -1135,9 +1152,11 @@ test("SourceWeftSandboxBackend Stop waits for physical cancellation and discards
   await deletionStarted.promise;
 
   let settled = false;
-  void invocation.finally(() => {
-    settled = true;
-  }).catch(() => undefined);
+  void invocation
+    .finally(() => {
+      settled = true;
+    })
+    .catch(() => undefined);
   await Promise.resolve();
   assert.equal(settled, false);
   assert.equal(provider.executeInputs[0]?.signal, stop.signal);

@@ -1,3 +1,4 @@
+import { SandboxInstanceChangedError } from "./errors";
 import { randomUUID } from "node:crypto";
 import type { SandboxManager } from "./sandbox-manager";
 import type {
@@ -164,6 +165,8 @@ export async function runPinnedSandboxOperation<T>(input: {
         pinnedOperationCancellationReason(controller.signal),
       );
     }
+    if (disposition === "instance_changed")
+      throw new SandboxInstanceChangedError();
     if (disposition === "termination_unknown") {
       throw input.createAbortError({
         cancellation: { confirmed: false, mode: "unknown" },

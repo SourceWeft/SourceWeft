@@ -1,3 +1,9 @@
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+  isSandboxInstanceMissingError,
+  redactSandboxText,
+} from "@sourceweft/builtin-tool-sandbox";
 import type { ExecuteResponse } from "deepagents";
 import type {
   SandboxProvider,
@@ -97,7 +103,7 @@ function errorMessage(error: unknown) {
 
 function errorDiagnostic(error: unknown) {
   const message = errorMessage(error);
-  return message.slice(0, 200);
+  return redactSandboxText(message).slice(0, 200);
 }
 
 export function mapCloudflareProviderError(
@@ -114,20 +120,29 @@ export function mapCloudflareProviderError(
   }
 
   if (status === 401 || status === 403) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.authentication,
       "SANDBOX_PROVIDER_AUTH_FAILED: sandbox provider authentication failed. Check sandbox provider credentials and API URL.",
+      operation,
+      error,
     );
   }
 
   if (status === 404 && operation === "download") {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
       "SANDBOX_FILE_NOT_FOUND: requested sandbox file was not found.",
+      operation,
+      error,
     );
   }
 
-  if (status === 404) {
-    return new Error(
+  if (status === 404 && (operation === "get" || operation === "delete")) {
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
       "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+      operation,
+      error,
     );
   }
 
@@ -138,8 +153,11 @@ export function mapCloudflareProviderError(
     message.includes("timed out") ||
     message.includes("aborted")
   ) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.timeout,
       "SANDBOX_COMMAND_TIMEOUT: sandbox command exceeded the configured timeout.",
+      operation,
+      error,
     );
   }
 
@@ -150,16 +168,22 @@ export function mapCloudflareProviderError(
     message.includes("network") ||
     message.includes("socket")
   ) {
-    return new Error(
-      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is not ready or has no network address. Retry the operation to create a fresh sandbox.",
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is temporarily unavailable. Retry when the provider is available.",
+      operation,
+      error,
     );
   }
 
   const diagnostic = errorDiagnostic(error);
-  return new Error(
+  return new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.unknown,
     `SANDBOX_PROVIDER_ERROR: sandbox provider ${operation} failed${
       diagnostic ? `: ${diagnostic}` : ""
     }. Check backend logs for provider diagnostics.`,
+    operation,
+    error,
   );
 }
 
@@ -367,7 +391,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     try {
       await this.deleteSandbox(input.providerSandboxId);
     } catch (error) {
-      if (!errorMessage(error).includes("SANDBOX_NOT_FOUND_OR_EXPIRED")) {
+      if (!isSandboxInstanceMissingError(error)) {
         throw error;
       }
     }
@@ -542,22 +566,23 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         this.filePath(providerSandboxId, SOURCEWEFT_SANDBOX_STAMP_PATH),
       );
     } catch (error) {
-      // 404 = stamp file missing; 400 = the bridge rejected the sandbox id as
-      // format-invalid (live-verified), which means it cannot exist either way.
-      if (
-        error instanceof CloudflareBridgeHttpError &&
-        (error.status === 404 || error.status === 400)
-      ) {
-        throw new Error(
-          "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+      // A missing stamp proves identity loss; a generic 400 does not.
+      if (error instanceof CloudflareBridgeHttpError && error.status === 404) {
+        throw new SandboxProviderError(
+          SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+          "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox identity stamp was not found.",
+          "get",
+          error,
         );
       }
       throw error;
     }
     const stamp = (await response.text()).trim();
     if (stamp !== providerSandboxId) {
-      throw new Error(
-        "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+        "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox identity stamp did not match.",
+        "get",
       );
     }
     return { id: providerSandboxId };

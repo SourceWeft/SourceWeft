@@ -117,12 +117,18 @@ function createSandboxStore(): SandboxStore {
     async insertCreatingSandbox() {
       return true;
     },
-    async markSandboxReady() {},
-    async markSandboxExpired() {},
+    async markSandboxReady() {
+      return true;
+    },
+    async markSandboxExpired() {
+      return true;
+    },
     async releaseReadyThreadSandboxLease() {
       return 1;
     },
-    async touchSandbox() {},
+    async touchSandbox() {
+      return true;
+    },
   };
 }
 

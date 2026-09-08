@@ -1,4 +1,10 @@
 import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+  isSandboxInstanceMissingError,
+  redactSandboxText,
+} from "@sourceweft/builtin-tool-sandbox";
+import {
   DaytonaSandbox as LangChainDaytonaSandbox,
   DaytonaSandboxError,
 } from "@langchain/daytona";
@@ -179,9 +185,14 @@ export function mapDaytonaProviderError(
   const status = providerErrorStatus(error).toLowerCase();
   const message = providerErrorMessage(error).toLowerCase();
 
+  if (error instanceof SandboxProviderError) return error;
+
   if (message.includes("sandbox_not_ready_or_unhealthy")) {
-    return new Error(
-      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is not ready or has no network address. Retry the operation to create a fresh sandbox.",
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is temporarily unavailable. Retry when the provider is available.",
+      operation,
+      error,
     );
   }
 
@@ -194,8 +205,11 @@ export function mapDaytonaProviderError(
     message.includes("invalid api key") ||
     message.includes("authentication")
   ) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.authentication,
       "SANDBOX_PROVIDER_AUTH_FAILED: sandbox provider authentication failed. Check sandbox provider credentials and API URL.",
+      operation,
+      error,
     );
   }
 
@@ -206,31 +220,41 @@ export function mapDaytonaProviderError(
     message.includes("sandbox not started") ||
     message.includes("container ip")
   ) {
-    return new Error(
-      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is not ready or has no network address. Retry the operation to create a fresh sandbox.",
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is temporarily unavailable. Retry when the provider is available.",
+      operation,
+      error,
     );
   }
 
   if (
     operation === "download" &&
+    code !== "sandbox_not_found" &&
     (message.includes("file not found") ||
       message.includes("no such file") ||
-      message.includes("enoent"))
+      message.includes("enoent") ||
+      status === "404")
   ) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
       "SANDBOX_FILE_NOT_FOUND: requested sandbox file was not found.",
+      operation,
+      error,
     );
   }
 
   if (
     code === "sandbox_not_found" ||
-    status === "404" ||
+    (status === "404" && (operation === "get" || operation === "delete")) ||
     message.includes("sandbox not found") ||
-    message.includes("sandbox was not found") ||
-    message.includes("does not exist")
+    message.includes("sandbox was not found")
   ) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
       "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+      operation,
+      error,
     );
   }
 
@@ -242,22 +266,31 @@ export function mapDaytonaProviderError(
     message.includes("timed out") ||
     message.includes("deadline")
   ) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.timeout,
       "SANDBOX_COMMAND_TIMEOUT: sandbox command exceeded the configured timeout.",
+      operation,
+      error,
     );
   }
 
   if (operation === "download" && message.includes("not found")) {
-    return new Error(
+    return new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
       "SANDBOX_FILE_NOT_FOUND: requested sandbox file was not found.",
+      operation,
+      error,
     );
   }
 
-  const diagnostic = providerErrorDiagnostic(error);
-  return new Error(
+  const diagnostic = redactSandboxText(providerErrorDiagnostic(error));
+  return new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.unknown,
     `SANDBOX_PROVIDER_ERROR: sandbox provider ${operation} failed${
       diagnostic ? `: ${diagnostic}` : ""
     }. Check backend logs for provider diagnostics.`,
+    operation,
+    error,
   );
 }
 
@@ -597,9 +630,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     try {
       await this.deleteSandbox(input.providerSandboxId);
     } catch (error) {
-      if (
-        !providerErrorMessage(error).includes("SANDBOX_NOT_FOUND_OR_EXPIRED")
-      ) {
+      if (!isSandboxInstanceMissingError(error)) {
         throw error;
       }
     }
@@ -709,10 +740,12 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   }
 
   private connectSandbox(providerSandboxId: string, timeoutMs?: number) {
-    return this.daytonaSandbox.fromId(providerSandboxId, {
-      auth: this.authOptions(),
-      ...(timeoutMs ? { timeout: Math.ceil(timeoutMs / 1000) } : {}),
-    });
+    return this.withProviderErrorMapping("get", () =>
+      this.daytonaSandbox.fromId(providerSandboxId, {
+        auth: this.authOptions(),
+        ...(timeoutMs ? { timeout: Math.ceil(timeoutMs / 1000) } : {}),
+      }),
+    );
   }
 
   private async waitForSandboxReady(providerSandboxId: string) {
@@ -737,7 +770,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       } catch (error) {
         lastError = error;
         const mapped = mapDaytonaProviderError(error, "execute");
-        if (!mapped.message.includes("SANDBOX_NOT_READY_OR_UNHEALTHY")) {
+        if (mapped.code !== SANDBOX_PROVIDER_ERROR_CODES.unavailable) {
           throw error;
         }
         await sleep(DAYTONA_HEALTH_CHECK_INTERVAL_MS);

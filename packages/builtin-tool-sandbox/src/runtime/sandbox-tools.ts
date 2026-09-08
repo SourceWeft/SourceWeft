@@ -1,3 +1,4 @@
+import { isSandboxInstanceMissingError } from "./errors";
 import { tool, type ToolRuntime } from "langchain";
 import type { BackendProtocolV2 } from "deepagents";
 import {
@@ -66,7 +67,8 @@ function sandboxErrorCode(error: unknown) {
   return match?.[1] ?? "SANDBOX_TOOL_FAILED";
 }
 
-const SANDBOX_CANCELLATION_CONTROL_CODES = new Set([
+const SANDBOX_CONTROL_FLOW_ERROR_CODES = new Set([
+  "SANDBOX_INSTANCE_CHANGED",
   "SANDBOX_EXECUTION_RESULT_DISCARDED",
   "SANDBOX_HOST_OPERATION_CANCELLED",
   "SANDBOX_HOST_OPERATION_TIMED_OUT",
@@ -78,7 +80,7 @@ function cancellationControlError(input: {
   signal?: AbortSignal;
 }) {
   const errorCode = sandboxErrorCode(input.error);
-  if (SANDBOX_CANCELLATION_CONTROL_CODES.has(errorCode)) {
+  if (SANDBOX_CONTROL_FLOW_ERROR_CODES.has(errorCode)) {
     return input.error;
   }
   if (!input.signal?.aborted) return null;
@@ -134,14 +136,6 @@ function toRecoverableSandboxToolErrorOutput(input: {
     message: compactRecoverableToolError(input.error),
     recoverable: true as const,
   };
-}
-
-function shouldExpireSandboxAfterToolError(error: unknown) {
-  const message = compactError(error).toLowerCase();
-  return (
-    message.includes("sandbox_not_found_or_expired") ||
-    message.includes("sandbox_not_ready_or_unhealthy")
-  );
 }
 
 function requireSandboxToolCallId(input: {
@@ -352,7 +346,7 @@ export function createSandboxTools(input: {
             reason: "sandbox_prepare_runtime_error",
           })
           .catch(() => undefined);
-        if (sandboxId && shouldExpireSandboxAfterToolError(error)) {
+        if (sandboxId && isSandboxInstanceMissingError(error)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);
@@ -512,7 +506,7 @@ export function createSandboxTools(input: {
             reason: "sandbox_collect_runtime_error",
           })
           .catch(() => undefined);
-        if (sandboxId && shouldExpireSandboxAfterToolError(error)) {
+        if (sandboxId && isSandboxInstanceMissingError(error)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);

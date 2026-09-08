@@ -1,3 +1,8 @@
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+  isSandboxInstanceMissingError,
+} from "@sourceweft/builtin-tool-sandbox";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
@@ -218,7 +223,7 @@ describe("CloudflareSandboxProvider", () => {
     );
   });
 
-  test("health check maps a format-rejected sandbox id to expired", async () => {
+  test("health check does not turn an arbitrary bad request into instance expiry", async () => {
     const { provider } = createProvider([
       [
         /^GET /,
@@ -230,7 +235,10 @@ describe("CloudflareSandboxProvider", () => {
     ]);
     await assert.rejects(
       provider.checkSandboxHealth("stale-db-row-id"),
-      /SANDBOX_NOT_FOUND_OR_EXPIRED/,
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.unknown &&
+        !isSandboxInstanceMissingError(error),
     );
   });
 
@@ -562,21 +570,22 @@ describe("mapCloudflareProviderError", () => {
     }
   });
 
-  test("maps download 404s to file-not-found and other 404s to expired", () => {
-    assert.match(
-      mapCloudflareProviderError(
-        new CloudflareBridgeHttpError(404, "download", ""),
-        "download",
-      ).message,
-      /SANDBOX_FILE_NOT_FOUND/,
-    );
-    assert.match(
-      mapCloudflareProviderError(
-        new CloudflareBridgeHttpError(404, "execute", ""),
-        "execute",
-      ).message,
-      /SANDBOX_NOT_FOUND_OR_EXPIRED/,
-    );
+  test("distinguishes instance 404s from file and unknown operation 404s", () => {
+    for (const [phase, code] of [
+      ["download", "SANDBOX_FILE_NOT_FOUND"],
+      ["execute", "SANDBOX_PROVIDER_ERROR"],
+      ["get", "SANDBOX_NOT_FOUND_OR_EXPIRED"],
+      ["delete", "SANDBOX_NOT_FOUND_OR_EXPIRED"],
+    ] as const) {
+      const cause = new CloudflareBridgeHttpError(404, phase, "");
+      const mapped = mapCloudflareProviderError(cause, phase);
+      assert.equal((mapped as { code?: string }).code, code);
+      assert.equal(mapped.cause, cause);
+      assert.equal(
+        isSandboxInstanceMissingError(mapped),
+        phase === "get" || phase === "delete",
+      );
+    }
   });
 
   test("maps timeouts and aborts", () => {

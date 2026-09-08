@@ -9,6 +9,7 @@ import type {
   SandboxProviderId,
   SandboxRecord,
   SandboxRuntimeContext,
+  SandboxStatus,
   SandboxStore,
 } from "@sourceweft/builtin-tool-sandbox";
 import { agentSandboxes, agentSandboxOperations, db } from "@sourceweft/db";
@@ -61,11 +62,17 @@ function sandboxTimelineResult(input: {
 }
 
 export class DrizzleSandboxStore implements SandboxStore {
+  constructor(
+    private readonly client: Pick<
+      typeof db,
+      "query" | "insert" | "update"
+    > = db,
+  ) {}
   async findLatestActiveThreadSandbox(input: {
     provider: SandboxProviderId;
     context: SandboxRuntimeContext;
   }): Promise<SandboxRecord | null> {
-    const row = await db.query.agentSandboxes.findFirst({
+    const row = await this.client.query.agentSandboxes.findFirst({
       where: and(
         eq(agentSandboxes.provider, input.provider),
         eq(agentSandboxes.teamId, input.context.teamId),
@@ -74,22 +81,31 @@ export class DrizzleSandboxStore implements SandboxStore {
         inArray(agentSandboxes.status, ["creating", "ready"]),
       ),
       orderBy: [desc(agentSandboxes.updatedAt)],
+      extras: {
+        updatedAtToken: sql<string>`${agentSandboxes.updatedAt}::text`.as(
+          "updated_at_token",
+        ),
+      },
     });
     return row ?? null;
   }
 
   async markCreatingSandboxError(input: {
     sandboxId: string;
-    expectedUpdatedAt?: Date;
+    expectedUpdatedAt?: Date | string;
   }) {
     const where = input.expectedUpdatedAt
       ? and(
           eq(agentSandboxes.id, input.sandboxId),
           eq(agentSandboxes.status, "creating"),
-          eq(agentSandboxes.updatedAt, input.expectedUpdatedAt),
+          sql`${agentSandboxes.updatedAt} = ${typeof input.expectedUpdatedAt === "string" ? input.expectedUpdatedAt : input.expectedUpdatedAt.toISOString()}::timestamptz`,
         )
-      : eq(agentSandboxes.id, input.sandboxId);
-    const updated = await db.update(agentSandboxes)
+      : and(
+          eq(agentSandboxes.id, input.sandboxId),
+          eq(agentSandboxes.status, "creating"),
+        );
+    const updated = await this.client
+      .update(agentSandboxes)
       .set({ status: "error", updatedAt: new Date() })
       .where(where)
       .returning({ id: agentSandboxes.id });
@@ -103,19 +119,23 @@ export class DrizzleSandboxStore implements SandboxStore {
     context: SandboxRuntimeContext;
     expiresAt: Date;
   }) {
-    const inserted = await db.insert(agentSandboxes).values({
-      id: input.sandboxId,
-      provider: input.provider,
-      providerSandboxId: input.providerSandboxId,
-      teamId: input.context.teamId,
-      workspaceId: input.context.workspaceId,
-      threadId: input.context.threadId,
-      userId: input.context.userId,
-      status: "creating",
-      networkPolicy: "default",
-      lastUsedAt: new Date(),
-      expiresAt: input.expiresAt,
-    }).onConflictDoNothing().returning({ id: agentSandboxes.id });
+    const inserted = await this.client
+      .insert(agentSandboxes)
+      .values({
+        id: input.sandboxId,
+        provider: input.provider,
+        providerSandboxId: input.providerSandboxId,
+        teamId: input.context.teamId,
+        workspaceId: input.context.workspaceId,
+        threadId: input.context.threadId,
+        userId: input.context.userId,
+        status: "creating",
+        networkPolicy: "default",
+        lastUsedAt: new Date(),
+        expiresAt: input.expiresAt,
+      })
+      .onConflictDoNothing()
+      .returning({ id: agentSandboxes.id });
     return inserted.length > 0;
   }
 
@@ -124,7 +144,8 @@ export class DrizzleSandboxStore implements SandboxStore {
     providerSandboxId: string;
     expiresAt: Date;
   }) {
-    await db.update(agentSandboxes)
+    const updated = await this.client
+      .update(agentSandboxes)
       .set({
         providerSandboxId: input.providerSandboxId,
         status: "ready",
@@ -132,13 +153,41 @@ export class DrizzleSandboxStore implements SandboxStore {
         expiresAt: input.expiresAt,
         updatedAt: new Date(),
       })
-      .where(eq(agentSandboxes.id, input.sandboxId));
+      .where(
+        and(
+          eq(agentSandboxes.id, input.sandboxId),
+          eq(agentSandboxes.status, "creating"),
+        ),
+      )
+      .returning({ id: agentSandboxes.id });
+    return updated.length > 0;
   }
 
-  async markSandboxExpired(input: { sandboxId: string }) {
-    await db.update(agentSandboxes)
+  async markSandboxExpired(input: {
+    sandboxId: string;
+    providerSandboxId?: string;
+    expectedStatus?: SandboxStatus;
+    expectedUpdatedAt?: Date | string;
+  }) {
+    const updated = await this.client
+      .update(agentSandboxes)
       .set({ status: "expired", updatedAt: new Date() })
-      .where(eq(agentSandboxes.id, input.sandboxId));
+      .where(
+        and(
+          eq(agentSandboxes.id, input.sandboxId),
+          input.expectedStatus
+            ? eq(agentSandboxes.status, input.expectedStatus)
+            : inArray(agentSandboxes.status, ["creating", "ready"]),
+          input.providerSandboxId
+            ? eq(agentSandboxes.providerSandboxId, input.providerSandboxId)
+            : undefined,
+          input.expectedUpdatedAt
+            ? sql`${agentSandboxes.updatedAt} = ${typeof input.expectedUpdatedAt === "string" ? input.expectedUpdatedAt : input.expectedUpdatedAt.toISOString()}::timestamptz`
+            : undefined,
+        ),
+      )
+      .returning({ id: agentSandboxes.id });
+    return updated.length > 0;
   }
 
   async releaseReadyThreadSandboxLease(input: {
@@ -148,7 +197,8 @@ export class DrizzleSandboxStore implements SandboxStore {
     reason: string;
   }) {
     const now = new Date();
-    const updated = await db.update(agentSandboxes)
+    const updated = await this.client
+      .update(agentSandboxes)
       .set({
         expiresAt: input.expiresAt,
         metadataJson: {
@@ -174,15 +224,30 @@ export class DrizzleSandboxStore implements SandboxStore {
     return updated.length;
   }
 
-  async touchSandbox(input: { sandboxId: string; expiresAt: Date }) {
+  async touchSandbox(input: {
+    sandboxId: string;
+    providerSandboxId?: string;
+    expiresAt: Date;
+  }) {
     const now = new Date();
-    await db.update(agentSandboxes)
+    const updated = await this.client
+      .update(agentSandboxes)
       .set({
         lastUsedAt: now,
-        expiresAt: input.expiresAt,
-        updatedAt: now,
+        expiresAt: sql`greatest(${agentSandboxes.expiresAt}, ${input.expiresAt})`,
+        updatedAt: sql`clock_timestamp()`,
       })
-      .where(eq(agentSandboxes.id, input.sandboxId));
+      .where(
+        and(
+          eq(agentSandboxes.id, input.sandboxId),
+          eq(agentSandboxes.status, "ready"),
+          input.providerSandboxId
+            ? eq(agentSandboxes.providerSandboxId, input.providerSandboxId)
+            : undefined,
+        ),
+      )
+      .returning({ id: agentSandboxes.id });
+    return updated.length > 0;
   }
 }
 

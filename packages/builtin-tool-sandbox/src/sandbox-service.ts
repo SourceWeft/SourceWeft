@@ -115,6 +115,7 @@ export class AgentSandboxService {
       operationStore,
       toolApprovalEnabled: config.toolApprovalEnabled,
       environment: process.env.NODE_ENV || "development",
+      logWarn: this.deps.logWarn,
       commandBudget: input.commandBudget,
       ...(input.artifacts ? { artifacts: input.artifacts } : {}),
       ...(input.skillAssets ? { skillAssets: input.skillAssets } : {}),

@@ -201,14 +201,19 @@ function createHarness(
     async insertCreatingSandbox() {
       return true;
     },
-    async markSandboxReady() {},
+    async markSandboxReady() {
+      return true;
+    },
     async markSandboxExpired(input) {
       expiredSandboxIds.push(input.sandboxId);
+      return true;
     },
     async releaseReadyThreadSandboxLease() {
       return 1;
     },
-    async touchSandbox() {},
+    async touchSandbox() {
+      return true;
+    },
   };
 
   const operationStore: SandboxOperationStore = {
