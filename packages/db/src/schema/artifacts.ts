@@ -1,3 +1,4 @@
+import type { ArtifactVersionFiles } from "@sourceweft/contracts/artifact-version-files";
 import { desc, sql } from "drizzle-orm";
 import {
   artifactStatusSchema,
@@ -121,7 +122,7 @@ export const artifacts = pgTable(
     }).onDelete("cascade"),
     check(
       "artifacts_artifact_type_check",
-      sql`${table.artifactType} in ('file', 'report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'video_presentation', 'flashcards', 'quiz', 'table', 'infographic', 'image')`,
+      sql`${table.artifactType} in ('file', 'html', 'report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'video_presentation', 'flashcards', 'quiz', 'table', 'infographic', 'image')`,
     ),
     check(
       "artifacts_status_check",
@@ -171,6 +172,8 @@ export const artifactVersions = pgTable(
         onDelete: "set null",
       },
     ),
+    /** Immutable host-owned files for this exact version; absent on legacy rows. */
+    filesJson: jsonb("files_json").$type<ArtifactVersionFiles>(),
     contentJson: jsonb("content_json")
       .$type<Record<string, unknown>>()
       .notNull()

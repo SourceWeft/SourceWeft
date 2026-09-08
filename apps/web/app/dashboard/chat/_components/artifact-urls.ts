@@ -22,7 +22,7 @@ const ARTIFACT_QUERY_ROUTE_PATHS = new Set([
   LEGACY_ARTIFACT_PREVIEW_API_ROUTE,
 ]);
 
-type ParsedArtifactRoute =
+type ParsedArtifactRouteBase =
   | {
       artifactId: string;
       download: boolean;
@@ -42,6 +42,10 @@ type ParsedArtifactRoute =
       workspaceId: string;
     };
 
+type ParsedArtifactRoute = ParsedArtifactRouteBase & {
+  artifactVersionId?: string;
+};
+
 export const isSafeFlatArtifactAssetFileName =
   isSafeFlatArtifactAssetFileNameContract;
 
@@ -60,6 +64,7 @@ function artifactResource(input: {
 }
 
 export function resolveArtifactProxyFileUrl(input: {
+  artifactVersionId?: string | null;
   artifactId: string;
   asset?: "previewImage";
   download?: boolean;
@@ -68,6 +73,9 @@ export function resolveArtifactProxyFileUrl(input: {
   return (
     buildArtifactProxyUrl({
       artifactId: input.artifactId,
+      ...(input.artifactVersionId
+        ? { artifactVersionId: input.artifactVersionId }
+        : {}),
       resource: artifactResource(input),
       workspaceId: input.workspaceId,
     }) ?? ""
@@ -75,6 +83,7 @@ export function resolveArtifactProxyFileUrl(input: {
 }
 
 export function resolveArtifactPreviewImageUrl(input: {
+  artifactVersionId?: string | null;
   artifactId: string;
   workspaceId: string;
 }) {
@@ -133,6 +142,7 @@ export function artifactPreviewImageMetadataFromArtifact(input: {
 }
 
 export function resolveArtifactPreviewImageUrlFromArtifact(input: {
+  artifactVersionId?: string | null;
   artifactId?: string | null;
   previewMetadataJson?: unknown;
   previewStorageKey?: string | null;
@@ -143,25 +153,36 @@ export function resolveArtifactPreviewImageUrlFromArtifact(input: {
     input.workspaceId
     ? resolveArtifactPreviewImageUrl({
         artifactId: input.artifactId,
+        ...(input.artifactVersionId
+          ? { artifactVersionId: input.artifactVersionId }
+          : {}),
         workspaceId: input.workspaceId,
       })
     : null;
 }
 
 export function resolveArtifactPageUrl(input: {
+  artifactVersionId?: string | null;
   artifactId: string;
   workspaceId: string;
 }) {
-  return buildArtifactPreviewUrl(input);
+  return buildArtifactPreviewUrl({
+    ...input,
+    artifactVersionId: input.artifactVersionId ?? undefined,
+  });
 }
 
 export function resolveArtifactProxyAssetUrl(input: {
+  artifactVersionId?: string | null;
   artifactId: string;
   fileName: string;
   workspaceId: string;
 }) {
   return buildArtifactProxyUrl({
     artifactId: input.artifactId,
+    ...(input.artifactVersionId
+      ? { artifactVersionId: input.artifactVersionId }
+      : {}),
     resource: { fileName: input.fileName, kind: "asset" },
     workspaceId: input.workspaceId,
   });
@@ -266,8 +287,13 @@ function parseArtifactQueryRoute(value: string): ParsedArtifactRoute | null {
   };
 }
 
-function parseArtifactRoute(value: string) {
-  return parseArtifactFileRoute(value) ?? parseArtifactQueryRoute(value);
+function parseArtifactRoute(value: string): ParsedArtifactRoute | null {
+  const route = parseArtifactFileRoute(value) ?? parseArtifactQueryRoute(value);
+  if (!route) return null;
+  const version = new URL(value, "http://sourceweft.local").searchParams.get(
+    "artifactVersionId",
+  );
+  return { ...route, ...(version ? { artifactVersionId: version } : {}) };
 }
 
 export function artifactApiUrlToPageUrl(value: string) {
@@ -310,6 +336,7 @@ export function normalizeWebAssetUrl(value: string) {
 }
 
 export function resolveArtifactPageUrlFromArtifact(input: {
+  artifactVersionId?: string | null;
   artifactId?: string | null;
   fallbackUrl?: string | null;
   workspaceId?: string | null;
@@ -317,6 +344,9 @@ export function resolveArtifactPageUrlFromArtifact(input: {
   if (input.workspaceId && input.artifactId) {
     return resolveArtifactPageUrl({
       artifactId: input.artifactId,
+      ...(input.artifactVersionId
+        ? { artifactVersionId: input.artifactVersionId }
+        : {}),
       workspaceId: input.workspaceId,
     });
   }
@@ -333,6 +363,9 @@ export function resolveArtifactPageUrlFromArtifact(input: {
 
     return resolveArtifactPageUrl({
       artifactId: route.artifactId,
+      ...(route.artifactVersionId
+        ? { artifactVersionId: route.artifactVersionId }
+        : {}),
       workspaceId: route.workspaceId,
     });
   }
@@ -341,6 +374,7 @@ export function resolveArtifactPageUrlFromArtifact(input: {
 }
 
 export function resolveArtifactProxyFileUrlFromArtifact(input: {
+  artifactVersionId?: string | null;
   artifactId?: string | null;
   download?: boolean;
   fallbackUrl?: string | null;
@@ -349,6 +383,9 @@ export function resolveArtifactProxyFileUrlFromArtifact(input: {
   if (input.workspaceId && input.artifactId) {
     return resolveArtifactProxyFileUrl({
       artifactId: input.artifactId,
+      ...(input.artifactVersionId
+        ? { artifactVersionId: input.artifactVersionId }
+        : {}),
       download: input.download,
       workspaceId: input.workspaceId,
     });
@@ -369,6 +406,9 @@ export function resolveArtifactProxyFileUrlFromArtifact(input: {
 
     return resolveArtifactProxyFileUrl({
       artifactId: route.artifactId,
+      ...(route.artifactVersionId
+        ? { artifactVersionId: route.artifactVersionId }
+        : {}),
       download: input.download ?? route.download,
       workspaceId: route.workspaceId,
     });

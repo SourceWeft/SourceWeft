@@ -1,3 +1,11 @@
+import {
+  artifactExecutionCsp,
+  inertArtifactCsp,
+  ARTIFACT_EXECUTION_POLICY_HEADER,
+  type ArtifactExecutionPolicy,
+} from "@sourceweft/contracts/artifact-execution";
+import type { Context } from "hono";
+import { config } from "../../../shared/config";
 import type { Hono } from "hono";
 import {
   createArtifactShareRequestSchema,
@@ -24,6 +32,43 @@ function unwrapShareResult<T>(result: ShareMutationResult<T>): T {
     );
   }
   throw new ApiError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+}
+
+function requestedVersion(c: Context) {
+  const values = c.req.queries("artifactVersionId");
+  if (!values) return undefined;
+  if (
+    values.length !== 1 ||
+    !values[0]?.trim() ||
+    values[0] !== values[0].trim()
+  )
+    throw ApiError.validation({
+      artifactVersionId: ["Expected one non-empty version identifier"],
+    });
+  return values[0];
+}
+
+function applyFilePolicy(
+  c: Context,
+  file: { contentType: string; executionPolicy?: ArtifactExecutionPolicy },
+) {
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "no-referrer");
+  if (file.executionPolicy) {
+    c.header(ARTIFACT_EXECUTION_POLICY_HEADER, file.executionPolicy);
+    c.header(
+      "Content-Security-Policy",
+      artifactExecutionCsp(file.executionPolicy, [config.auth.webBaseUrl]),
+    );
+    c.header("Cache-Control", "private, no-store");
+  } else {
+    c.header(
+      "Content-Security-Policy",
+      inertArtifactCsp([config.auth.webBaseUrl]),
+    );
+    if (c.req.query("artifactVersionId"))
+      c.header("Cache-Control", "private, no-store");
+  }
 }
 
 export function registerArtifactRoutes(app: Hono) {
@@ -66,6 +111,7 @@ export function registerArtifactRoutes(app: Hono) {
     }
 
     const result = await contentArtifactsService.getArtifactFile({
+      artifactVersionId: requestedVersion(c),
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -76,7 +122,13 @@ export function registerArtifactRoutes(app: Hono) {
       "Content-Disposition",
       `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
-    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Cache-Control",
+      c.req.query("artifactVersionId")
+        ? "private, no-store"
+        : "private, max-age=60",
+    );
+    applyFilePolicy(c, result);
     if (result.renderer) {
       c.header("X-SourceWeft-Artifact-Renderer", result.renderer);
     }
@@ -150,6 +202,7 @@ export function registerArtifactRoutes(app: Hono) {
     }
 
     const result = await contentArtifactsService.getArtifact({
+      artifactVersionId: requestedVersion(c),
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -179,6 +232,12 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
+    if (requestedVersion(c))
+      throw ApiError.validation({
+        artifactVersionId: [
+          "Versioned authoring sources use an authorized file reader",
+        ],
+      });
     const result = await contentArtifactsService.getArtifactSourceJson({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
@@ -190,7 +249,12 @@ export function registerArtifactRoutes(app: Hono) {
       "Content-Disposition",
       `attachment; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
-    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Cache-Control",
+      c.req.query("artifactVersionId")
+        ? "private, no-store"
+        : "private, max-age=60",
+    );
     return c.body(result.body);
   });
 
@@ -201,6 +265,7 @@ export function registerArtifactRoutes(app: Hono) {
     }
 
     const result = await contentArtifactsService.getArtifactPreviewImage({
+      artifactVersionId: requestedVersion(c),
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -211,7 +276,13 @@ export function registerArtifactRoutes(app: Hono) {
       "Content-Disposition",
       `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
-    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Cache-Control",
+      c.req.query("artifactVersionId")
+        ? "private, no-store"
+        : "private, max-age=60",
+    );
+    applyFilePolicy(c, result);
     return c.body(result.body);
   });
 
@@ -222,6 +293,7 @@ export function registerArtifactRoutes(app: Hono) {
     }
 
     const result = await contentArtifactsService.getArtifactAsset({
+      artifactVersionId: requestedVersion(c),
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       fileName: requireRouteParam(c, "fileName"),
@@ -233,7 +305,13 @@ export function registerArtifactRoutes(app: Hono) {
       "Content-Disposition",
       `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
-    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Cache-Control",
+      c.req.query("artifactVersionId")
+        ? "private, no-store"
+        : "private, max-age=60",
+    );
+    applyFilePolicy(c, result);
     return c.body(result.body);
   });
 
@@ -244,6 +322,7 @@ export function registerArtifactRoutes(app: Hono) {
     }
 
     const result = await contentArtifactsService.getArtifactFile({
+      artifactVersionId: requestedVersion(c),
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -254,7 +333,13 @@ export function registerArtifactRoutes(app: Hono) {
       "Content-Disposition",
       `attachment; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
-    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Cache-Control",
+      c.req.query("artifactVersionId")
+        ? "private, no-store"
+        : "private, max-age=60",
+    );
+    applyFilePolicy(c, result);
     return c.body(result.body);
   });
 

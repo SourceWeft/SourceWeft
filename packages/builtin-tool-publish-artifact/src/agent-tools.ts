@@ -1,4 +1,8 @@
-import { tool, type ToolRuntime } from "langchain";
+import {
+  createHtmlVisualReviewTools,
+  type HtmlVisualReviewInput,
+} from "./html/visual-review";
+import { tool, type ToolRuntime, type StructuredTool } from "langchain";
 import type {
   AgentToolArtifactServices,
   AgentToolHostServices,
@@ -37,9 +41,14 @@ type CapabilityAgentToolFactoryInput = {
       | "userId"
       | "userMessageId"
       | "workspaceId"
+      | "turnState"
+      | "traceId"
     >
   >;
   readonly services?: {
+    readonly modelGateway?: NonNullable<
+      HtmlVisualReviewInput["services"]
+    >["modelGateway"];
     /** One member of the artifact port: this tool publishes, nothing else. */
     readonly artifacts?: Pick<AgentToolArtifactServices, "publishArtifact">;
     readonly sandbox?: AgentToolHostServices["sandbox"];
@@ -88,6 +97,7 @@ const pptxArtifactRuntimePromptProvider = {
       "For PPT Deck preview thumbnails, `previewImage` is required. Use the `PREVIEW_IMAGE_PATH` printed by final visual QA as `previewImage.source.path`, with `previewImage.source.kind='sandbox_path'` for sandbox files.",
       "Optional preview alt text goes in `previewImage.altText`; do not place preview metadata in `source`, `qa`, or a manifest file.",
       "`publish_artifact` does not search the QA directory automatically; pass the exact `PREVIEW_IMAGE_PATH` from the skill QA output.",
+      "For self-contained HTML, use artifactType=html. Finish resource embedding and QA before publishing; pass expectedContentDigest from the checked final file. When editing, pass republishArtifactId and the expectedVersionNo read before the edit.",
       "For generic downloadable files, publish with `artifactType=file` and the actual generated file path.",
       "For PPT Deck visual QA, first render the actual PPTX to PDF with LibreOffice, then render slide JPG files with pdftoppm, print QA_IMAGE_COUNT and PREVIEW_IMAGE_PATH, inspect the rendered slide images, and include a visible visual QA summary before publishing.",
       "After publishing a PPT Deck, the final response must report the rendered slide image count and visual QA result, not only placeholder/content checks.",
@@ -323,9 +333,7 @@ function shouldBindTool(input: {
   );
 }
 
-export function createCapabilityAgentTools(
-  input: CapabilityAgentToolFactoryInput,
-) {
+function createPublisherTools(input: CapabilityAgentToolFactoryInput) {
   const context = input.context;
   const services = input.services;
   const shouldBindCanonical = shouldBindTool({
@@ -474,4 +482,15 @@ export function createCapabilityAgentTools(
     promptProviders: [pptxArtifactRuntimePromptProvider],
     tools,
   };
+}
+
+export function createCapabilityAgentTools(
+  input: CapabilityAgentToolFactoryInput,
+) {
+  const publisher = createPublisherTools(input);
+  const tools: { tool: StructuredTool; categories: readonly ["artifact"] }[] = [
+    ...publisher.tools,
+    ...createHtmlVisualReviewTools(input),
+  ];
+  return { ...publisher, tools };
 }

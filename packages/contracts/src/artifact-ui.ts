@@ -164,6 +164,8 @@ export type ArtifactPreviewResult = {
   readonly content: ReactNode;
   /** The preview owns downloading; the host chrome must not offer its own. */
   readonly blocksDefaultDownload?: boolean;
+  /** The registered preview supplies its own fullscreen control. */
+  readonly blocksDefaultFullscreen?: boolean;
   /** The preview owns opening; the host chrome must not offer its own. */
   readonly blocksDefaultOpen?: boolean;
 };

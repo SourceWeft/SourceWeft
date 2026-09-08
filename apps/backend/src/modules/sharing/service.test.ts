@@ -16,6 +16,7 @@ const mockHasServableFile = vi.fn();
 const mockHasPreview = vi.fn();
 const mockBuildPublicPayload = vi.fn();
 const mockCurrentVersionMedia = vi.fn();
+const mockCurrentVersionFiles = vi.fn();
 
 vi.mock("../workspace", () => ({
   workspaceService: {
@@ -35,6 +36,8 @@ vi.mock("../artifacts/repository", () => ({
 }));
 vi.mock("../artifacts", () => ({
   contentArtifactsService: {
+    getSharedCurrentVersionFiles: (...args: unknown[]) =>
+      mockCurrentVersionFiles(...args),
     isSharedArtifactInlineRenderable: (...a: unknown[]) =>
       mockInlineRenderable(...a),
     sharedArtifactHasServableFile: (...a: unknown[]) =>
@@ -93,6 +96,7 @@ function artifact(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  mockCurrentVersionFiles.mockReset().mockResolvedValue(null);
   vi.clearAllMocks();
   mockResolveAccess.mockResolvedValue(ACCESS);
   mockCanAdministerContainer.mockReturnValue(false);

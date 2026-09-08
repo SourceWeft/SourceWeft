@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  artifactContentDigestSchema,
+  artifactFileNameSchema,
+} from "@sourceweft/contracts/artifact-version-files";
 
 export const SandboxPathSourceSchema = z.object({
   kind: z.literal("sandbox_path"),
@@ -32,7 +36,7 @@ export const PreviewImageInputSchema = z.object({
 
 export type PreviewImageInput = z.infer<typeof PreviewImageInputSchema>;
 
-export const PublishArtifactTypeSchema = z.enum(["slides", "file"]);
+export const PublishArtifactTypeSchema = z.enum(["slides", "file", "html"]);
 export type PublishArtifactType = z.infer<typeof PublishArtifactTypeSchema>;
 
 export const QaSummarySchema = z.object({
@@ -41,10 +45,24 @@ export const QaSummarySchema = z.object({
   warnings: z.array(z.string()).default([]),
 });
 
+export const PublishAttachmentInputSchema = z
+  .object({
+    fileName: artifactFileNameSchema,
+    source: ArtifactSourceSchema,
+    contentType: z.string().min(1),
+    role: z.enum(["asset", "source"]).default("asset"),
+    access: z.enum(["artifact", "private"]).default("private"),
+  })
+  .strict()
+  .refine(
+    (value) => value.role !== "source" || value.access === "private",
+    "Source attachments must be private",
+  );
+
 export const PublishArtifactInputSchema = z
   .object({
     artifactType: PublishArtifactTypeSchema.describe(
-      "File artifact type to publish. Supported: slides for PPTX decks, file for generic downloadable files.",
+      "File artifact type to publish. Supported: html for self-contained HTML, slides for PPTX, file for other downloads.",
     ),
     title: z.string().min(1).describe("Artifact title for metadata."),
     description: z.string().optional(),
@@ -53,6 +71,9 @@ export const PublishArtifactInputSchema = z
       "Required preview image for slides artifacts, usually PREVIEW_IMAGE_PATH from final PPTX visual QA.",
     ),
     qa: QaSummarySchema.optional(),
+    attachments: z.array(PublishAttachmentInputSchema).max(100).optional(),
+    expectedContentDigest: artifactContentDigestSchema.optional(),
+    expectedVersionNo: z.number().int().positive().optional(),
     republishArtifactId: z
       .string()
       .min(1)
@@ -62,6 +83,25 @@ export const PublishArtifactInputSchema = z
       ),
   })
   .superRefine((value, ctx) => {
+    if (
+      value.artifactType === "html" &&
+      value.republishArtifactId &&
+      !value.expectedVersionNo
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["expectedVersionNo"],
+        message:
+          "HTML revisions require the version number read before editing",
+      });
+    }
+    if (value.expectedVersionNo !== undefined && !value.republishArtifactId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["expectedVersionNo"],
+        message: "A version precondition requires republishArtifactId",
+      });
+    }
     if (value.artifactType === "slides" && !value.previewImage) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -70,10 +110,13 @@ export const PublishArtifactInputSchema = z
         path: ["previewImage"],
       });
     }
-    if (value.previewImage && value.artifactType !== "slides") {
+    if (
+      value.previewImage &&
+      !["slides", "html"].includes(value.artifactType)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "previewImage is only supported for slides artifacts",
+        message: "previewImage is only supported for slides and html artifacts",
         path: ["previewImage"],
       });
     }
@@ -121,7 +164,7 @@ export const PublishArtifactToolInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "File artifact type to publish. Use slides for PPTX decks or file for generic downloadable files.",
+      "File artifact type to publish. Use html for self-contained HTML, slides for PPTX, or file for other downloads.",
     ),
   title: z.string().optional().describe("Artifact title for metadata."),
   description: z.string().optional(),
@@ -140,6 +183,20 @@ export const PublishArtifactToolInputSchema = z.object({
     "Required for slides. Use PREVIEW_IMAGE_PATH from final PPTX visual QA, for example { source: { kind: 'sandbox_path', path: '/workspace/qa/preview.jpg' }, altText: 'First slide preview' }.",
   ),
   qa: ToolQaSchema.optional(),
+  attachments: z.array(PublishAttachmentInputSchema).max(100).optional(),
+  expectedContentDigest: artifactContentDigestSchema
+    .optional()
+    .describe(
+      "Digest of the exact final file checked by QA; publication fails if it changed.",
+    ),
+  expectedVersionNo: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Version number read before editing; required when republishing HTML.",
+    ),
   republishArtifactId: z
     .string()
     .optional()
@@ -158,6 +215,7 @@ export const PublishSlidesArtifactOutputSchema = z.object({
   status: z.literal("ready"),
   reused: z.boolean(),
   artifactId: z.string(),
+  artifactVersionId: z.string().optional(),
   artifact_id: z.string(),
   artifactType: z.literal("slides"),
   title: z.string(),
@@ -181,6 +239,7 @@ export const PublishFileArtifactOutputSchema = z.object({
   status: z.literal("ready"),
   reused: z.boolean(),
   artifactId: z.string(),
+  artifactVersionId: z.string().optional(),
   artifact_id: z.string(),
   artifactType: z.literal("file"),
   title: z.string(),
@@ -196,12 +255,23 @@ export const PublishFileArtifactOutputSchema = z.object({
   download_url: z.string(),
 });
 
+export const PublishHtmlArtifactOutputSchema =
+  PublishFileArtifactOutputSchema.extend({
+    type: z.literal("html_artifact_result"),
+    artifactType: z.literal("html"),
+    contentDigest: artifactContentDigestSchema,
+    artifactVersionId: z.string().optional(),
+    previewImageUrl: z.string().optional(),
+    preview_image_url: z.string().optional(),
+  });
+
 export const PublishImageArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("generated_image"),
   status: z.literal("ready"),
   reused: z.boolean(),
   artifactId: z.string(),
+  artifactVersionId: z.string().optional(),
   artifact_id: z.string(),
   artifactType: z.literal("image"),
   title: z.string(),
@@ -218,6 +288,7 @@ export const PublishImageArtifactOutputSchema = z.object({
 export const PublishArtifactOutputSchema = z.union([
   PublishSlidesArtifactOutputSchema,
   PublishFileArtifactOutputSchema,
+  PublishHtmlArtifactOutputSchema,
   PublishImageArtifactOutputSchema,
 ]);
 
@@ -235,6 +306,9 @@ export const ARTIFACT_PUBLISH_ERROR_CODES = [
   "ARTIFACT_SOURCE_INVALID",
   "ARTIFACT_STORAGE_UNAVAILABLE",
   "ARTIFACT_RECORD_UNAVAILABLE",
+  "HTML_DOCUMENT_INVALID",
+  "HTML_RESOURCE_UNRESOLVED",
+  "ARTIFACT_CONTENT_CHANGED",
   "ARTIFACT_FILE_EMPTY",
   "ARTIFACT_FILE_TOO_LARGE",
   "ARTIFACT_PREVIEW_IMAGE_INVALID",

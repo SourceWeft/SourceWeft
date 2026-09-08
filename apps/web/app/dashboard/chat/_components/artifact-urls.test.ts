@@ -249,3 +249,28 @@ test("resolveArtifactPageUrlFromArtifact maps legacy API preview fallbacks to th
     "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
   );
 });
+
+test("exact version identity survives every URL adapter", () => {
+  const source = "/v1/workspaces/w/artifacts/a/file?artifactVersionId=v1";
+  for (const url of [
+    artifactApiUrlToPageUrl(source),
+    artifactApiUrlToProxyFileUrl(source),
+    resolveArtifactPageUrlFromArtifact({ fallbackUrl: source }),
+    resolveArtifactProxyFileUrlFromArtifact({ fallbackUrl: source }),
+  ])
+    assert.equal(
+      new URL(url!, "https://example.test").searchParams.get(
+        "artifactVersionId",
+      ),
+      "v1",
+    );
+  const asset = artifactApiUrlToProxyFileUrl(
+    "/v1/workspaces/w/artifacts/a/assets/slide-01.jpg?artifactVersionId=v1",
+  );
+  assert.equal(
+    new URL(asset!, "https://example.test").searchParams.get(
+      "artifactVersionId",
+    ),
+    "v1",
+  );
+});

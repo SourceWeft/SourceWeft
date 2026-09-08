@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/html-slides",
+  "kind": "skill",
+  "name": "HTML Slides",
+  "description": "Create and revise self-contained HTML presentations with Reveal, complete themes, layouts, animation effects, offline playback, and slide-by-slide quality checks.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "html-slides",
+      "visibility": "restricted",
+      "defaultEnabled": true,
+      "listing": "listed",
+      "categories": ["create", "present"],
+      "runtime": {
+        "tools": [
+          "prepare_sandbox_workspace",
+          "execute",
+          "generate_image",
+          "review_html_visuals",
+          "publish_artifact"
+        ],
+        "output": {
+          "kind": "artifact",
+          "artifactType": "html",
+          "publisherTool": "publish_artifact"
+        }
+      }
+    }
+  ]
+}

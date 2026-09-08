@@ -69,6 +69,7 @@ export type ArtifactResource =
   | { readonly kind: "asset"; readonly fileName: string };
 
 export type ArtifactUrlTarget = {
+  readonly artifactVersionId?: string;
   readonly workspaceId: string;
   readonly artifactId: string;
   /** Defaults to the artifact's primary file. */
@@ -155,20 +156,24 @@ export function buildArtifactVersionMediaProxyUrl(input: {
  */
 export function buildArtifactRestUrl(input: ArtifactUrlTarget): string | null {
   const root = artifactRestRoot(input.workspaceId, input.artifactId);
+  const suffix = input.artifactVersionId
+    ? `?artifactVersionId=${encodeURIComponent(input.artifactVersionId)}`
+    : "";
   const resource = input.resource ?? { kind: "file" };
+  if (input.artifactVersionId && resource.kind === "sourceJson") return null;
 
   switch (resource.kind) {
     case "file":
-      return `${root}/file`;
+      return `${root}/file${suffix}`;
     case "download":
-      return `${root}/download`;
+      return `${root}/download${suffix}`;
     case "previewImage":
-      return `${root}/preview-image`;
+      return `${root}/preview-image${suffix}`;
     case "sourceJson":
-      return `${root}/source.json`;
+      return `${root}/source.json${suffix}`;
     case "asset":
       return isSafeFlatArtifactAssetFileName(resource.fileName)
-        ? `${root}/assets/${encodeURIComponent(resource.fileName)}`
+        ? `${root}/assets/${encodeURIComponent(resource.fileName)}${suffix}`
         : null;
   }
 }
@@ -207,7 +212,10 @@ export function buildArtifactProxyQuery(
     artifactId: input.artifactId,
     workspaceId: input.workspaceId,
   });
+  if (input.artifactVersionId)
+    params.set("artifactVersionId", input.artifactVersionId);
   const resource = input.resource ?? { kind: "file" };
+  if (input.artifactVersionId && resource.kind === "sourceJson") return null;
 
   switch (resource.kind) {
     case "file":
@@ -248,7 +256,11 @@ export function buildArtifactProxyUrl(input: ArtifactUrlTarget): string | null {
  * only `asset` carries a name that can fail validation.
  */
 function proxyUrlFor(
-  input: { readonly workspaceId: string; readonly artifactId: string },
+  input: {
+    readonly workspaceId: string;
+    readonly artifactId: string;
+    readonly artifactVersionId?: string;
+  },
   kind: Exclude<ArtifactResource["kind"], "asset">,
 ): string {
   return buildArtifactProxyUrl({ ...input, resource: { kind } }) ?? "";
@@ -256,6 +268,7 @@ function proxyUrlFor(
 
 /** Proxy URL for an artifact's stored preview image. */
 export function buildArtifactPreviewImageUrl(input: {
+  readonly artifactVersionId?: string;
   readonly workspaceId: string;
   readonly artifactId: string;
 }): string {
@@ -264,6 +277,7 @@ export function buildArtifactPreviewImageUrl(input: {
 
 /** Proxy URL that delivers the artifact's primary file as an attachment. */
 export function buildArtifactDownloadUrl(input: {
+  readonly artifactVersionId?: string;
   readonly workspaceId: string;
   readonly artifactId: string;
 }): string {
@@ -280,6 +294,7 @@ export function buildArtifactDownloadUrl(input: {
  * land, not a byte stream.
  */
 export function buildArtifactPreviewUrl(input: {
+  readonly artifactVersionId?: string;
   readonly workspaceId: string;
   readonly artifactId: string;
 }): string {
@@ -287,5 +302,7 @@ export function buildArtifactPreviewUrl(input: {
     artifactId: input.artifactId,
     workspaceId: input.workspaceId,
   });
+  if (input.artifactVersionId)
+    params.set("artifactVersionId", input.artifactVersionId);
   return `${ARTIFACT_PREVIEW_PAGE_ROUTE}?${params.toString()}`;
 }

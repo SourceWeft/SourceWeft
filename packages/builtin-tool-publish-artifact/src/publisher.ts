@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 /**
  * Allocates an artifact id.
@@ -26,7 +26,10 @@ import {
   normalizeMimeType,
 } from "@sourceweft/contracts/artifact-files";
 import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
-import type { ArtifactPublisher } from "@sourceweft/contracts/artifact-write";
+import type {
+  ArtifactAttachment,
+  ArtifactPublisher,
+} from "@sourceweft/contracts/artifact-write";
 import type { AgentToolArtifactServices } from "@sourceweft/contracts/agent-tools";
 import {
   artifactSourceTypeHandlers,
@@ -97,6 +100,7 @@ export type PublishPreparedArtifactOperationInput = {
   readonly context: PublishArtifactContext;
   readonly descriptor: ArtifactPublishDescriptor;
   readonly previewImage?: PreparedPreviewImage;
+  readonly attachments?: readonly ArtifactAttachment[];
   /**
    * Whether the caller asked for a preview image, which is not the same as
    * whether one survived preparation: an oversized preview is dropped rather
@@ -296,10 +300,43 @@ export async function publishArtifact(
     : undefined;
   throwArtifactPublicationAbortReason(input.signal);
 
+  const attachments: ArtifactAttachment[] = [];
+  for (const attachment of parsed.attachments ?? []) {
+    const attachmentAdapter = adapterForSource(
+      attachment.source,
+      input.sourceAdapters ?? artifactSourceAdapters,
+    );
+    if (!attachmentAdapter)
+      throw new ArtifactPublishError("ARTIFACT_SOURCE_INVALID");
+    const file = await attachmentAdapter.read({
+      publishInput: { ...parsed, source: attachment.source },
+      services: input.services,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (!file.bytes.byteLength)
+      throw new ArtifactPublishError(
+        "ARTIFACT_FILE_EMPTY",
+        attachment.fileName,
+      );
+    if (file.bytes.byteLength > ARTIFACT_LIMITS.htmlBytes)
+      throw new ArtifactPublishError(
+        "ARTIFACT_FILE_TOO_LARGE",
+        attachment.fileName,
+      );
+    attachments.push({
+      fileName: attachment.fileName,
+      contentType: attachment.contentType,
+      bytes: file.bytes,
+      role: attachment.role,
+      access: attachment.access,
+      maxBytes: ARTIFACT_LIMITS.htmlBytes,
+    });
+  }
   return (
     await publishPreparedArtifact({
       context: input.context,
       descriptor: parsed,
+      attachments,
       previewImage,
       previewImageRequested: parsed.previewImage !== undefined,
       source,
@@ -326,10 +363,37 @@ export async function publishPreparedArtifact(
     );
   }
 
+  if (input.descriptor.expectedContentDigest !== undefined) {
+    const digest = `sha256:${createHash("sha256").update(input.source.bytes).digest("hex")}`;
+    if (digest !== input.descriptor.expectedContentDigest)
+      throw new ArtifactPublishError(
+        "ARTIFACT_CONTENT_CHANGED",
+        "The final file changed after QA; check it again before publishing",
+      );
+  }
   const preparedArtifact = handler.prepare({
     publishInput: input.descriptor,
     source: input.source,
   });
+  for (const fileName of preparedArtifact.requiredAssets ?? []) {
+    const asset = input.attachments?.find((file) => file.fileName === fileName);
+    if (asset && asset.bytes.byteLength > ARTIFACT_LIMITS.previewImageBytes)
+      throw new ArtifactPublishError(
+        "ARTIFACT_PREVIEW_IMAGE_TOO_LARGE",
+        fileName,
+      );
+    if (
+      !asset ||
+      asset.role === "source" ||
+      asset.access !== "artifact" ||
+      !isArtifactPreviewImageMimeType(asset.contentType)
+    ) {
+      throw new ArtifactPublishError(
+        "ARTIFACT_SOURCE_INVALID",
+        `Declared preview asset ${fileName} must be supplied as a visible image attachment`,
+      );
+    }
+  }
   // These two invariants are about the *request*: slides publishing is gated on
   // the caller having run visual QA and passed the frame. Whether that frame
   // then survives the size check is a separate, best-effort concern.
@@ -341,10 +405,13 @@ export async function publishPreparedArtifact(
       "previewImage is required for slides artifacts; use PREVIEW_IMAGE_PATH from final PPTX visual QA",
     );
   }
-  if (previewImageRequested && preparedArtifact.artifactType !== "slides") {
+  if (
+    previewImageRequested &&
+    !["slides", "html"].includes(preparedArtifact.artifactType)
+  ) {
     throw new ArtifactPublishError(
       "ARTIFACT_PREVIEW_IMAGE_INVALID",
-      "previewImage is only supported for slides artifacts",
+      "previewImage is only supported for slides and html artifacts",
     );
   }
 
@@ -357,7 +424,17 @@ export async function publishPreparedArtifact(
   }
 
   const republishArtifactId = input.descriptor.republishArtifactId;
-  let republishExpectedVersionNo: number | undefined;
+  let republishExpectedVersionNo = input.descriptor.expectedVersionNo;
+  if (
+    republishArtifactId &&
+    preparedArtifact.artifactType === "html" &&
+    republishExpectedVersionNo === undefined
+  ) {
+    throw new ArtifactPublishError(
+      "ARTIFACT_REPUBLISH_INVALID",
+      "Read the artifact version before editing and provide expectedVersionNo",
+    );
+  }
   if (republishArtifactId) {
     const findArtifact = input.services.artifacts?.findArtifact;
     const republish = input.services.artifacts?.republishArtifact;
@@ -393,7 +470,7 @@ export async function publishPreparedArtifact(
         `artifact ${republishArtifactId} is ${existing.artifactType}, not ${preparedArtifact.artifactType}`,
       );
     }
-    republishExpectedVersionNo =
+    republishExpectedVersionNo ??=
       typeof existing.currentVersionNo === "number"
         ? existing.currentVersionNo
         : undefined;
@@ -422,6 +499,32 @@ export async function publishPreparedArtifact(
           ...(input.signal ? { signal: input.signal } : {}),
         });
   };
+  const semanticKey =
+    input.requestKey ??
+    (preparedArtifact.contentAddressedRequests && input.toolCallId
+      ? `publish:${input.toolCallId}:${createHash("sha256")
+          .update(input.source.bytes)
+          .update(
+            JSON.stringify({
+              title: input.descriptor.title,
+              description: input.descriptor.description,
+              type: preparedArtifact.artifactType,
+              preview: input.previewImage
+                ? createHash("sha256")
+                    .update(input.previewImage.bytes)
+                    .digest("hex")
+                : null,
+              files: input.attachments?.map((file) => [
+                file.fileName,
+                file.contentType,
+                file.role,
+                file.access,
+                createHash("sha256").update(file.bytes).digest("hex"),
+              ]),
+            }),
+          )
+          .digest("hex")}`
+      : undefined);
   const record = await publishRecord({
     artifactType: preparedArtifact.artifactType,
     title: input.descriptor.title,
@@ -437,6 +540,7 @@ export async function publishPreparedArtifact(
         bytes: input.source.bytes,
         role: "primary",
       },
+      ...(input.attachments ?? []),
     ],
     ...(input.previewImage
       ? {
@@ -448,18 +552,22 @@ export async function publishPreparedArtifact(
           },
         }
       : {}),
-    ...(input.requestKey
-      ? { idempotency: { requestKey: input.requestKey } }
-      : {}),
+    ...(semanticKey ? { idempotency: { requestKey: semanticKey } } : {}),
   });
   const artifactId = record.artifactId;
 
   const artifactUrl = buildArtifactPreviewUrl({
     artifactId,
+    ...(preparedArtifact.immutableFileUrls
+      ? { artifactVersionId: record.versionId }
+      : {}),
     workspaceId: input.context.workspaceId,
   });
   const downloadUrl = buildArtifactDownloadUrl({
     artifactId,
+    ...(preparedArtifact.immutableFileUrls
+      ? { artifactVersionId: record.versionId }
+      : {}),
     workspaceId: input.context.workspaceId,
   });
   const output = preparedArtifact.toOutput({
@@ -470,8 +578,11 @@ export async function publishPreparedArtifact(
     title: input.descriptor.title,
   });
   const previewImageUrl =
-    input.previewImage && output.artifactType === "slides"
+    input.previewImage && ["slides", "html"].includes(output.artifactType)
       ? buildArtifactPreviewImageUrl({
+          ...(preparedArtifact.immutableFileUrls
+            ? { artifactVersionId: record.versionId }
+            : {}),
           artifactId,
           workspaceId: input.context.workspaceId,
         })
@@ -486,7 +597,7 @@ export async function publishPreparedArtifact(
 
   return {
     artifactId,
-    output: outputWithPreviewImage,
+    output: { ...outputWithPreviewImage, artifactVersionId: record.versionId },
     record,
   };
 }

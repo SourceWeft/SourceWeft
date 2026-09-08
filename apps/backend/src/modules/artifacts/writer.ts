@@ -1,4 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  artifactVersionFilesSchema,
+  type ArtifactVersionFile,
+  type ArtifactVersionFiles,
+} from "@sourceweft/contracts/artifact-version-files";
 import {
   ARTIFACT_LIMITS,
   extensionForMimeType,
@@ -110,6 +115,7 @@ const REUSE_STATUSES = {
 } as const;
 
 type PreparedWrite = {
+  readonly files: ArtifactVersionFiles | null;
   readonly payload: Record<string, unknown>;
   readonly storageBucket: string | null;
   readonly storageKey: string | null;
@@ -306,6 +312,8 @@ export class ArtifactWriter {
     let previewStorageKey: string | null = null;
     let previewMetadata: Record<string, unknown> | null = null;
     const attemptedStorageKeys: string[] = [];
+    const files: ArtifactVersionFile[] = [];
+    let versionFiles: ArtifactVersionFiles | null = null;
 
     try {
       for (const attachment of spec.attachments ?? []) {
@@ -323,6 +331,20 @@ export class ArtifactWriter {
           ...(input.signal ? { signal: input.signal } : {}),
         });
         throwArtifactWriteAbortReason(input.signal);
+        files.push({
+          fileName: attachment.fileName,
+          contentType: attachment.contentType,
+          byteLength: attachment.bytes.byteLength,
+          contentDigest: `sha256:${createHash("sha256").update(attachment.bytes).digest("hex")}`,
+          storageBucket: this.deps.storage.getBucketName(),
+          storageKey: key,
+          role: attachment.role ?? "asset",
+          access:
+            attachment.role === "source"
+              ? "private"
+              : (attachment.access ??
+                (attachment === primary ? "artifact" : "private")),
+        });
         if (attachment === primary) {
           storageBucket = this.deps.storage.getBucketName();
           storageKey = key;
@@ -353,6 +375,16 @@ export class ArtifactWriter {
           ...(input.signal ? { signal: input.signal } : {}),
         });
         throwArtifactWriteAbortReason(input.signal);
+        files.push({
+          fileName,
+          contentType: preview.contentType,
+          byteLength: preview.bytes.byteLength,
+          contentDigest: `sha256:${createHash("sha256").update(preview.bytes).digest("hex")}`,
+          storageBucket: this.deps.storage.getBucketName(),
+          storageKey: key,
+          role: "preview",
+          access: "artifact",
+        });
         previewStorageKey = key;
         previewMetadata = {
           altText: preview.altText ?? null,
@@ -361,6 +393,9 @@ export class ArtifactWriter {
           mimeType: preview.contentType,
         };
       }
+      versionFiles = files.length
+        ? artifactVersionFilesSchema.parse({ schemaVersion: 1, files })
+        : null;
     } catch (error) {
       await this.cleanupAfterFailure(attemptedStorageKeys, error);
       throwArtifactWriteAbortReason(input.signal);
@@ -371,6 +406,7 @@ export class ArtifactWriter {
     }
 
     return {
+      files: versionFiles,
       payload,
       storageBucket,
       storageKey,
@@ -436,6 +472,7 @@ export class ArtifactWriter {
         title: input.spec.title,
         prompt: input.spec.prompt ?? input.spec.title,
         payload: prepared.payload,
+        ...(prepared.files ? { files: prepared.files } : {}),
         storageBucket: prepared.storageBucket,
         storageKey: prepared.storageKey,
         previewStorageKey: prepared.previewStorageKey,
@@ -608,6 +645,7 @@ export class ArtifactWriter {
         workspaceId: input.context.workspaceId,
         userId: input.context.userId,
         payload: prepared.payload,
+        ...(prepared.files ? { files: prepared.files } : {}),
         // Omitted rather than null: the repository carries forward whatever the
         // row already points at, which is what a payload-only completion wants.
         ...(prepared.storageBucket

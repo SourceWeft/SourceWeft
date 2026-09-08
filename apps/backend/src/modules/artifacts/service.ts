@@ -1,3 +1,13 @@
+import { parseArtifactVersionFiles } from "@sourceweft/contracts/artifact-version-files";
+import {
+  buildArtifactProxyUrl,
+  type ArtifactResource,
+} from "@sourceweft/contracts/artifact-urls";
+import {
+  resolveArtifactVersionFile,
+  readArtifactVersionFile,
+  projectArtifactVersionFiles,
+} from "./version-files";
 import { createHash } from "node:crypto";
 import {
   ARTIFACT_MIME_TYPES,
@@ -673,6 +683,58 @@ export class ContentArtifactsService {
     currentVersion?: CurrentArtifactVersionRecord | null;
   }) {
     const base = this.buildArtifactResponse(input);
+    if (input.handler?.executionPolicy) {
+      const version =
+        "currentVersion" in input
+          ? input.currentVersion
+          : await findCurrentReadyArtifactVersionRecord({
+              teamId: input.teamId,
+              workspaceId: input.workspaceId,
+              artifactId: input.artifact.id,
+              expectedArtifactType: input.artifact.artifactType,
+            });
+      if (!version || !canViewContent(input.userId, version))
+        return {
+          ...base,
+          payloadJson: {},
+          storageBucket: null,
+          storageKey: null,
+          previewStorageKey: null,
+        };
+      const url = (resource: ArtifactResource) =>
+        buildArtifactProxyUrl({
+          workspaceId: input.workspaceId,
+          artifactId: input.artifact.id,
+          artifactVersionId: version.versionId,
+          resource,
+        });
+      const payload =
+        input.handler.buildPublicPayload?.({
+          artifact: { ...input.artifact, payloadJson: version.contentJson },
+          assetUrl: (fileName) => url({ kind: "asset", fileName })!,
+        }) ?? {};
+      return {
+        ...base,
+        artifactVersionId: version.versionId,
+        payloadJson: {
+          ...payload,
+          versionNo: version.versionNo,
+          versionFiles: projectArtifactVersionFiles({
+            filesJson: version.filesJson,
+            url,
+          }),
+        },
+        storageBucket: null,
+        storageKey: null,
+        previewStorageKey: null,
+        previewMetadataJson: {},
+        previewUrl: buildArtifactPreviewPageUrl({
+          workspaceId: input.workspaceId,
+          artifactId: input.artifact.id,
+          artifactVersionId: version.versionId,
+        }),
+      };
+    }
     if (!input.handler?.resolveVersionMedia) return base;
     const unavailable = () => ({
       ...base,
@@ -759,7 +821,8 @@ export class ContentArtifactsService {
     const versionedArtifactIds = artifacts.items
       .filter((artifact) =>
         Boolean(
-          registry.handlerFor(artifact.artifactType)?.resolveVersionMedia,
+          registry.handlerFor(artifact.artifactType)?.resolveVersionMedia ||
+          registry.handlerFor(artifact.artifactType)?.executionPolicy,
         ),
       )
       .map((artifact) => artifact.id);
@@ -848,10 +911,28 @@ export class ContentArtifactsService {
   }
 
   async getArtifact(input: {
+    artifactVersionId?: string;
     workspaceId: string;
     artifactId: string;
     userId: string;
   }) {
+    if (input.artifactVersionId) {
+      const { workspace, version } = await this.requireViewableArtifactVersion({
+        ...input,
+        artifactVersionId: input.artifactVersionId,
+      });
+      const registry = await loadArtifactViewHandlerRegistry();
+      return {
+        artifact: await this.buildWebArtifactResponse({
+          artifact: { ...version, payloadJson: version.contentJson },
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          handler: registry.handlerFor(version.artifactType),
+          currentVersion: { ...version, artifactId: version.id },
+        }),
+      };
+    }
     const { workspace, artifact } = await this.requireViewableArtifact(input);
 
     const registry = await loadArtifactViewHandlerRegistry();
@@ -868,6 +949,76 @@ export class ContentArtifactsService {
         handler,
         isPublic: publicArtifactIds.has(artifact.id),
       }),
+    };
+  }
+
+  async getArtifactVersionFile(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    userId: string;
+    resource: ArtifactResource;
+  }) {
+    const { workspace, version } =
+      await this.requireViewableArtifactVersion(input);
+    const file = resolveArtifactVersionFile({
+      filesJson: version.filesJson,
+      workspaceId: workspace.id,
+      artifactId: version.id,
+      resource: input.resource,
+    });
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(version.artifactType);
+    return {
+      ...(await readArtifactVersionFile(file, downloadArtifactObject)),
+      artifactVersionId: version.versionId,
+      versionNo: version.versionNo,
+      contentDigest: file.contentDigest,
+      renderer:
+        file.role === "primary"
+          ? (handler?.resolveRenderer?.({
+              artifact: exactVersionArtifact(version),
+            }) ?? null)
+          : null,
+      executionPolicy:
+        file.role === "primary" ? handler?.executionPolicy : undefined,
+    };
+  }
+
+  async getSharedCurrentVersionFiles(artifact: NonNullable<ArtifactRecord>) {
+    const version = await findCurrentReadyArtifactVersionRecord({
+      teamId: artifact.teamId,
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      expectedArtifactType: artifact.artifactType,
+    });
+    return version?.filesJson ? version : null;
+  }
+
+  async getSharedVersionFile(
+    artifact: NonNullable<ArtifactRecord>,
+    artifactVersionId: string,
+    resource: ArtifactResource,
+  ) {
+    const version = await this.getSharedCurrentVersionFiles(artifact);
+    if (!version || version.versionId !== artifactVersionId)
+      throw new ContentError(
+        409,
+        "ARTIFACT_VERSION_CHANGED",
+        "The shared version changed; reload the artifact",
+      );
+    const file = resolveArtifactVersionFile({
+      filesJson: version.filesJson,
+      workspaceId: artifact.workspaceId,
+      artifactId: artifact.id,
+      resource,
+    });
+    const registry = await loadArtifactViewHandlerRegistry();
+    const handler = registry.handlerFor(artifact.artifactType);
+    return {
+      ...(await readArtifactVersionFile(file, downloadArtifactObject)),
+      executionPolicy:
+        file.role === "primary" ? handler?.executionPolicy : undefined,
     };
   }
 
@@ -1007,10 +1158,7 @@ export class ContentArtifactsService {
       { bucket: string | null; key: string }
     >();
     const versionHandler = registry.handlerFor(artifact.artifactType);
-    if (
-      versionHandler?.listOwnedStorageObjects ||
-      versionHandler?.resolveVersionMedia
-    ) {
+    {
       const versions = await listArtifactVersionContentRecords({
         teamId: access.organizationId,
         workspaceId: input.workspaceId,
@@ -1021,14 +1169,15 @@ export class ContentArtifactsService {
           ...artifact,
           payloadJson: version.contentJson,
         };
-        const media = versionHandler.resolveVersionMedia?.({
+        const files = parseArtifactVersionFiles(version.filesJson);
+        const media = versionHandler?.resolveVersionMedia?.({
           artifact: versionArtifact,
         });
         const locations =
-          versionHandler.listOwnedStorageObjects?.({
+          versionHandler?.listOwnedStorageObjects?.({
             artifact: versionArtifact,
           }) ?? (media ? [media.media, media.coverImage] : []);
-        for (const location of locations) {
+        for (const location of [...locations, ...(files?.files ?? [])]) {
           if (
             !location ||
             !isArtifactOwnedStorageKey({
@@ -1129,14 +1278,35 @@ export class ContentArtifactsService {
   }
 
   async getArtifactFile(input: {
+    artifactVersionId?: string;
     workspaceId: string;
     artifactId: string;
     userId: string;
   }) {
+    if (input.artifactVersionId)
+      return this.getArtifactVersionFile({
+        ...input,
+        artifactVersionId: input.artifactVersionId,
+        resource: { kind: "file" },
+      });
     const { artifact } = await this.requireViewableArtifact(input);
 
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    if (handler?.executionPolicy) {
+      const version = await this.getSharedCurrentVersionFiles(artifact);
+      if (!version)
+        throw new ContentError(
+          404,
+          "ARTIFACT_VERSION_FILE_NOT_FOUND",
+          "No published file snapshot is available",
+        );
+      return this.getArtifactVersionFile({
+        ...input,
+        artifactVersionId: version.versionId,
+        resource: { kind: "file" },
+      });
+    }
     if (handler?.resolveVersionMedia) {
       throw new ContentError(
         404,
@@ -1167,6 +1337,7 @@ export class ContentArtifactsService {
         contentType: primary.contentType,
         fileName: primary.fileName,
         renderer: resolveArtifactRenderer(artifact, handler),
+        executionPolicy: handler?.executionPolicy,
       };
     }
 
@@ -1178,6 +1349,7 @@ export class ContentArtifactsService {
       contentType: resolveArtifactContentType(artifact, handler),
       fileName: resolveArtifactFileName(artifact, handler),
       renderer: resolveArtifactRenderer(artifact, handler),
+      executionPolicy: handler?.executionPolicy,
     };
   }
 
@@ -1237,10 +1409,17 @@ export class ContentArtifactsService {
   }
 
   async getArtifactPreviewImage(input: {
+    artifactVersionId?: string;
     workspaceId: string;
     artifactId: string;
     userId: string;
   }) {
+    if (input.artifactVersionId)
+      return this.getArtifactVersionFile({
+        ...input,
+        artifactVersionId: input.artifactVersionId,
+        resource: { kind: "previewImage" },
+      });
     const { artifact } = await this.requireViewableArtifact(input);
     const previewImage = resolveArtifactPreviewImage(artifact);
     if (!previewImage) {
@@ -1270,8 +1449,19 @@ export class ContentArtifactsService {
   async getSharedArtifactFile(
     artifact: NonNullable<Awaited<ReturnType<typeof findArtifactRecord>>>,
   ) {
+    const version = await this.getSharedCurrentVersionFiles(artifact);
+    if (version)
+      return this.getSharedVersionFile(artifact, version.versionId, {
+        kind: "file",
+      });
     const registry = await loadArtifactViewHandlerRegistry();
     const handler = registry.handlerFor(artifact.artifactType);
+    if (handler?.executionPolicy)
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_FILE_NOT_FOUND",
+        "No published file snapshot is available",
+      );
     if (handler?.resolveVersionMedia) {
       throw new ContentError(
         404,
@@ -1299,6 +1489,7 @@ export class ContentArtifactsService {
         contentType: primary.contentType,
         fileName: primary.fileName,
         renderer: resolveArtifactRenderer(artifact, handler),
+        executionPolicy: handler?.executionPolicy,
       };
     }
     return {
@@ -1309,6 +1500,7 @@ export class ContentArtifactsService {
       contentType: resolveArtifactContentType(artifact, handler),
       fileName: resolveArtifactFileName(artifact, handler),
       renderer: resolveArtifactRenderer(artifact, handler),
+      executionPolicy: handler?.executionPolicy,
     };
   }
 
@@ -1501,11 +1693,18 @@ export class ContentArtifactsService {
   }
 
   async getArtifactAsset(input: {
+    artifactVersionId?: string;
     workspaceId: string;
     artifactId: string;
     userId: string;
     fileName: string;
   }) {
+    if (input.artifactVersionId)
+      return this.getArtifactVersionFile({
+        ...input,
+        artifactVersionId: input.artifactVersionId,
+        resource: { kind: "asset", fileName: input.fileName },
+      });
     const { artifact } = await this.requireViewableArtifact(input);
     const registry = await loadArtifactViewHandlerRegistry();
     const asset = resolveArtifactAsset(

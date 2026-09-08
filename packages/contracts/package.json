@@ -37,7 +37,10 @@
     "./llm-observability": "./src/llm-observability.ts",
     "./misc": "./src/misc.ts",
     "./capabilities": "./src/capabilities.ts",
-    "./capability-host-services": "./src/capability-host-services.ts"
+    "./capability-host-services": "./src/capability-host-services.ts",
+    "./artifact-version-files": "./src/artifact-version-files.ts",
+    "./artifact-execution": "./src/artifact-execution.ts",
+    "./html-artifact": "./src/html-artifact.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

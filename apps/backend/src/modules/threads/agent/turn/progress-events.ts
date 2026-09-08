@@ -28,6 +28,7 @@ const ACTIVE_ARTIFACT_GENERATION_PHASES = new Set<ArtifactGenerationPhase>([
  * presentation or no generation-step copy.
  */
 export function buildArtifactGenerationStep(input: {
+  toolInput?: Readonly<Record<string, unknown>>;
   description?: string;
   error?: string | null;
   item?: string;
@@ -39,6 +40,7 @@ export function buildArtifactGenerationStep(input: {
   const copy = getAgentToolPresentation(input.toolName)?.generationStep?.({
     phase: input.phase,
     error: input.error,
+    toolInput: input.toolInput,
   });
   if (!copy) {
     return null;

@@ -51,13 +51,16 @@ export const prepareSandboxWorkspaceSchema = z.object({
            * into the sandbox, since the DB-backed VFS is text-oriented.
            */
           artifactId: z.string().min(1).optional(),
+          artifactVersionId: z.string().min(1).optional(),
           sandboxPath: z.string().min(1),
+        })
+        .refine((file) => !file.artifactVersionId || Boolean(file.artifactId), {
+          message: "artifactVersionId requires artifactId",
         })
         .refine(
           (file) => Boolean(file.sourcePath) !== Boolean(file.artifactId),
           {
-            message:
-              "each file names exactly one of sourcePath or artifactId",
+            message: "each file names exactly one of sourcePath or artifactId",
           },
         ),
     )

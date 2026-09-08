@@ -242,9 +242,13 @@ export class ContentClient {
     );
   }
 
-  getArtifact(workspaceId: string, artifactId: string) {
+  getArtifact(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId?: string,
+  ) {
     return this.http.get<GetArtifactResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}${artifactVersionId ? `?artifactVersionId=${encode(artifactVersionId)}` : ""}`,
     );
   }
 

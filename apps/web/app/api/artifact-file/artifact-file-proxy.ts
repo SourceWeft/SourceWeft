@@ -1,4 +1,8 @@
 import {
+  artifactExecutionCsp,
+  ARTIFACT_EXECUTION_POLICY_HEADER,
+} from "@sourceweft/contracts/artifact-execution";
+import {
   buildArtifactRestUrl,
   buildArtifactVersionMediaRestUrl,
   isSafeFlatArtifactAssetFileName,
@@ -37,6 +41,13 @@ export async function proxyArtifactFile(request: NextRequest) {
   const assetFileName = request.nextUrl.searchParams.get("assetFileName");
   const isDownload = request.nextUrl.searchParams.get("download") === "1";
 
+  if (
+    request.nextUrl.searchParams.has("artifactVersionId") &&
+    (!artifactVersionId?.trim() ||
+      artifactVersionId !== artifactVersionId.trim() ||
+      request.nextUrl.searchParams.getAll("artifactVersionId").length !== 1)
+  )
+    return badRequest("artifactVersionId must be one non-empty identifier.");
   if (!workspaceId || !artifactId) {
     return badRequest("workspaceId and artifactId are required.");
   }
@@ -47,10 +58,8 @@ export async function proxyArtifactFile(request: NextRequest) {
   if (asset && asset !== "previewImage") {
     return badRequest("asset must be previewImage when provided.");
   }
-  if (Boolean(artifactVersionId) !== Boolean(versionMedia)) {
-    return badRequest(
-      "artifactVersionId and versionMedia must be provided together.",
-    );
+  if (versionMedia && !artifactVersionId) {
+    return badRequest("versionMedia requires artifactVersionId.");
   }
   if (versionMedia && versionMedia !== "video" && versionMedia !== "cover") {
     return badRequest("versionMedia must be video or cover.");
@@ -77,6 +86,7 @@ export async function proxyArtifactFile(request: NextRequest) {
           download: isDownload,
         })
       : buildArtifactRestUrl({
+          ...(artifactVersionId ? { artifactVersionId } : {}),
           artifactId,
           resource,
           workspaceId,
@@ -129,7 +139,19 @@ export async function proxyArtifactFile(request: NextRequest) {
   }
 
   if (!isDownload && contentType.toLowerCase().includes("text/html")) {
-    headers.set("Content-Security-Policy", GENERIC_HTML_ARTIFACT_CSP);
+    const policy = response.headers.get(ARTIFACT_EXECUTION_POLICY_HEADER);
+    if (policy && policy !== "sandboxed-html")
+      return new NextResponse("Unsupported artifact execution policy", {
+        status: 502,
+      });
+    headers.set(
+      "Content-Security-Policy",
+      policy === "sandboxed-html"
+        ? artifactExecutionCsp(policy)
+        : GENERIC_HTML_ARTIFACT_CSP,
+    );
+    headers.set("Referrer-Policy", "no-referrer");
+    headers.set("Cache-Control", "private, no-store");
   }
 
   return new NextResponse(response.status === 304 ? null : response.body, {

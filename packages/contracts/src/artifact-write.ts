@@ -1,3 +1,4 @@
+import { artifactFileNameSchema } from "./artifact-version-files";
 /**
  * The write-side contract for an artifact.
  *
@@ -50,7 +51,9 @@ export type ArtifactAttachment = {
   readonly contentType: string;
   readonly bytes: Uint8Array;
   /** Defaults to `"asset"`. */
-  readonly role?: "primary" | "asset";
+  readonly role?: "primary" | "asset" | "source";
+  /** Non-primary attachments default private; source is always private. */
+  readonly access?: "artifact" | "private";
   /**
    * Per-attachment ceiling. Left unset means "no type-specific ceiling"; a
    * handler that has one (an image artifact, a pptx deck) supplies it from
@@ -157,7 +160,7 @@ const MAX_PRIMARY_ATTACHMENTS = 1;
 
 export function attachmentRole(
   attachment: ArtifactAttachment,
-): "primary" | "asset" {
+): "primary" | "asset" | "source" {
   return attachment.role ?? "asset";
 }
 
@@ -212,6 +215,20 @@ export function validateArtifactPublishSpec(
       primaryCount += 1;
     }
     const fileName = attachment.fileName?.trim() ?? "";
+    if (fileName && !artifactFileNameSchema.safeParse(fileName).success) {
+      issues.push({
+        code: invalid,
+        field: `${field}.fileName`,
+        message: "Attachment fileName must be a safe flat name",
+      });
+    }
+    if (attachment.role === "source" && attachment.access === "artifact") {
+      issues.push({
+        code: invalid,
+        field: `${field}.access`,
+        message: "Authoring source must remain private",
+      });
+    }
     if (fileName.length === 0) {
       issues.push({
         code: invalid,
@@ -248,6 +265,13 @@ export function validateArtifactPublishSpec(
     }
   });
 
+  const previewName = spec.preview?.fileName;
+  if (previewName && seenFileNames.has(previewName))
+    issues.push({
+      code: invalid,
+      field: "preview.fileName",
+      message: "Preview name conflicts with an attachment",
+    });
   if (primaryCount > MAX_PRIMARY_ATTACHMENTS) {
     issues.push({
       code: invalid,

@@ -1,3 +1,4 @@
+import type { ArtifactVersionFiles } from "@sourceweft/contracts/artifact-version-files";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gt, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import {
@@ -155,6 +156,7 @@ export async function createReadyArtifactRecord(input: {
   title: string;
   prompt: string;
   payload: Record<string, unknown>;
+  files?: ArtifactVersionFiles;
   /**
    * Nullable because a file is no longer the centre of an artifact: a
    * client-rendered type publishes a payload and never a stored file. The
@@ -226,6 +228,7 @@ export async function createReadyArtifactRecord(input: {
       artifactId: input.artifactId,
       versionNo: 1,
       contentJson: input.payload,
+      filesJson: input.files ?? null,
       createdBy: input.userId,
     });
     return { artifactId: input.artifactId, versionId, reused: false };
@@ -408,7 +411,7 @@ export async function findArtifactWriteReferences(input: {
         or exists (
           select 1 from artifact_versions av
           where av.artifact_id = a.id and av.team_id = ${input.teamId} and av.workspace_id = ${input.workspaceId}
-            and jsonb_path_exists(av.content_json, '$.** ? (@ == $key)', jsonb_build_object('key', candidate.key))
+            and (jsonb_path_exists(av.content_json, '$.** ? (@ == $key)', jsonb_build_object('key', candidate.key)) or jsonb_path_exists(av.files_json, '$.** ? (@ == $key)', jsonb_build_object('key', candidate.key)))
         )
     ) as "referencedKeys"
     from artifacts a where a.id = ${input.artifactId} and a.team_id = ${input.teamId} and a.workspace_id = ${input.workspaceId}
@@ -435,6 +438,7 @@ export async function markArtifactReady(input: {
   workspaceId: string;
   userId: string;
   payload: Record<string, unknown>;
+  files?: ArtifactVersionFiles;
   /**
    * Set by pipelines that produce their own thumbnail. Omitted means "keep
    * whatever preview the artifact already has".
@@ -591,6 +595,7 @@ export async function markArtifactReady(input: {
       artifactId: input.artifactId,
       versionNo,
       contentJson: input.payload,
+      filesJson: input.files ?? null,
       createdBy: input.userId,
     });
 
@@ -738,6 +743,7 @@ export async function findCurrentReadyArtifactVersionRecord(input: {
       versionId: artifactVersions.id,
       versionNo: artifactVersions.versionNo,
       contentJson: artifactVersions.contentJson,
+      filesJson: artifactVersions.filesJson,
     })
     .from(artifacts)
     .innerJoin(
@@ -782,6 +788,7 @@ export async function listCurrentReadyArtifactVersionRecords(input: {
       versionId: artifactVersions.id,
       versionNo: artifactVersions.versionNo,
       contentJson: artifactVersions.contentJson,
+      filesJson: artifactVersions.filesJson,
     })
     .from(artifacts)
     .innerJoin(
@@ -817,6 +824,7 @@ export async function findReadyArtifactVersionRecord(input: {
       versionId: artifactVersions.id,
       versionNo: artifactVersions.versionNo,
       contentJson: artifactVersions.contentJson,
+      filesJson: artifactVersions.filesJson,
     })
     .from(artifacts)
     .innerJoin(
@@ -846,6 +854,7 @@ export async function findReadyArtifactVersionRecord(input: {
         versionId: row.versionId,
         versionNo: row.versionNo,
         contentJson: row.contentJson,
+        filesJson: row.filesJson,
       }
     : null;
 }
@@ -887,6 +896,7 @@ export async function listArtifactVersionContentRecords(input: {
     .select({
       versionId: artifactVersions.id,
       contentJson: artifactVersions.contentJson,
+      filesJson: artifactVersions.filesJson,
     })
     .from(artifactVersions)
     .where(

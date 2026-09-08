@@ -30,7 +30,8 @@ export type AgentToolPresentationContext = {
    * State of the background job, for capabilities whose work outlives the
    * call. A completed call with a still-running job is normal.
    */
-  readonly generationStatus?: ArtifactGenerationPhase | "pending" | "running" | "ready" | null;
+  readonly generationStatus?:
+    ArtifactGenerationPhase | "pending" | "running" | "ready" | null;
 };
 
 /**
@@ -38,12 +39,7 @@ export type AgentToolPresentationContext = {
  * Shared vocabulary so one generic step builder serves every capability.
  */
 export type ArtifactGenerationPhase =
-  | "planning"
-  | "generating"
-  | "saving"
-  | "repairing"
-  | "completed"
-  | "failed";
+  "planning" | "generating" | "saving" | "repairing" | "completed" | "failed";
 
 export type ArtifactGenerationStepCopy = {
   /** Stable step id so the client replaces the step rather than appending. */
@@ -105,6 +101,7 @@ export type AgentToolPresentation = {
    * finish within the call do not implement this.
    */
   generationStep?(context: {
+    readonly toolInput?: Readonly<Record<string, unknown>>;
     readonly phase: ArtifactGenerationPhase;
     readonly error?: string | null;
   }): ArtifactGenerationStepCopy;

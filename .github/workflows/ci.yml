@@ -176,3 +176,50 @@ jobs:
           path: output/ci/docker-startup/
           if-no-files-found: ignore
           retention-days: 7
+
+  html-artifacts:
+    name: HTML runtime and complete library
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pnpm install --frozen-lockfile
+      - run: python -m pip install -r docker/sourceweft-sandbox/html-runtime/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: output/html-fonts
+          key: html-fonts-${{ hashFiles('docker/sourceweft-sandbox/html-runtime/fonts.json') }}
+      - run: python docker/sourceweft-sandbox/html-runtime/install_fonts.py docker/sourceweft-sandbox/html-runtime/fonts.json output/html-fonts
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: html-browsers-${{ runner.os }}-1.59.1
+      - run: pnpm --filter @sourceweft/builtin-tool-publish-artifact exec playwright install --with-deps chromium firefox webkit
+      - name: Verify library, responsive pages and revisions
+        env:
+          NODE_PATH: ${{ github.workspace }}/packages/builtin-tool-publish-artifact/node_modules
+          SOURCEWEFT_HTML_RUNTIME: ${{ github.workspace }}/docker/sourceweft-sandbox/html-runtime
+          SOURCEWEFT_HTML_FONTS: ${{ github.workspace }}/output/html-fonts
+        run: |
+          node packages/builtin-skill-html-slides/scripts/verify-library.cjs output/html-library
+          node packages/builtin-skill-html/scripts/verify-pages.cjs output/html-pages
+          node packages/builtin-skill-html-slides/scripts/verify-behavior.cjs output/html-behavior
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: html-verification-${{ github.sha }}
+          path: |
+            output/html-library
+            output/html-pages
+            output/html-behavior
+          retention-days: 7

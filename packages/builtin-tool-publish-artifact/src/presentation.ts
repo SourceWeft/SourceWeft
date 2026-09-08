@@ -28,16 +28,17 @@ function needsSlideContent(context: Context) {
     ?.toLowerCase()
     .trim();
   return (
-    type === "presentation_artifact_input_required" || status === "needs_content"
+    type === "presentation_artifact_input_required" ||
+    status === "needs_content"
   );
 }
 
 function hasArtifactUrl(context: Context) {
   return Boolean(
     context.readOutputField(context.toolOutput, "artifact_url") ??
-      context.readOutputField(context.toolOutput, "pptx_url") ??
-      context.readOutputField(context.toolOutput, "artifactUrl") ??
-      context.readOutputField(context.toolOutput, "pptxUrl"),
+    context.readOutputField(context.toolOutput, "pptx_url") ??
+    context.readOutputField(context.toolOutput, "artifactUrl") ??
+    context.readOutputField(context.toolOutput, "pptxUrl"),
   );
 }
 
@@ -65,11 +66,12 @@ const DECK_STEP_DESCRIPTIONS: Record<string, string> = {
   planning: "Preparing the generated presentation for artifact publishing.",
   generating: "The generated PPTX is being validated before publishing.",
   saving: "The presentation artifact is being saved.",
-  repairing: "The deck tool needs a complete deck plan before artifact creation.",
+  repairing:
+    "The deck tool needs a complete deck plan before artifact creation.",
   completed: "The presentation artifact was published.",
 };
 
-export const publishArtifactPresentation: AgentToolPresentation = {
+const slidesPublishArtifactPresentation: AgentToolPresentation = {
   renderAs: "pptx",
   progressEventTypes: ["publish_artifact_progress"],
   title(context) {
@@ -128,5 +130,52 @@ export const publishArtifactPresentation: AgentToolPresentation = {
       return "The deck tool completed without returning an artifact URL.";
     }
     return "Created a presentation artifact.";
+  },
+};
+
+/** Preserve old PPTX presentation while describing other registered file types correctly. */
+export const publishArtifactPresentation: AgentToolPresentation = {
+  ...slidesPublishArtifactPresentation,
+  title(context) {
+    const type =
+      context.readOutputField(context.toolOutput, "artifactType") ??
+      context.toolInput.artifactType;
+    if (!type || type === "slides")
+      return slidesPublishArtifactPresentation.title(context);
+    if (context.status === "error") return "Artifact publishing failed";
+    if (context.status === "running") return "Publishing artifact";
+    return hasArtifactUrl(context)
+      ? "Artifact published"
+      : "Artifact publishing incomplete";
+  },
+  generationStep(context) {
+    const type = context.toolInput?.artifactType;
+    if (!type || type === "slides")
+      return slidesPublishArtifactPresentation.generationStep!(context);
+    return {
+      stepId: "artifact-publication",
+      artifactType: String(type),
+      title:
+        context.phase === "completed"
+          ? "Artifact published"
+          : "Publishing artifact",
+      item:
+        context.phase === "failed"
+          ? "Artifact publishing failed"
+          : "Validate and save generated file",
+      description:
+        context.error ??
+        "The generated file is checked and saved as an artifact version.",
+    };
+  },
+  describe(context) {
+    const type =
+      context.readOutputField(context.toolOutput, "artifactType") ??
+      context.toolInput.artifactType;
+    return !type || type === "slides"
+      ? slidesPublishArtifactPresentation.describe!(context)
+      : hasArtifactUrl(context)
+        ? "Published the generated file."
+        : "No artifact was published.";
   },
 };

@@ -186,7 +186,14 @@ function decodeSandboxTextOutput(content: Buffer, sandboxPath: string) {
 export type SandboxArtifactReader = {
   readPrimaryBytes(input: {
     artifactId: string;
-  }): Promise<{ bytes: Uint8Array; fileName?: string } | null>;
+    artifactVersionId?: string;
+  }): Promise<{
+    bytes: Uint8Array;
+    fileName?: string;
+    artifactVersionId?: string;
+    versionNo?: number;
+    contentDigest?: string;
+  } | null>;
 };
 
 export function createSandboxTools(input: {
@@ -228,6 +235,12 @@ export function createSandboxTools(input: {
         sandboxPath: string;
         sizeBytes: number;
         sourcePath: string;
+        sourceArtifact?: {
+          artifactId: string;
+          artifactVersionId: string;
+          versionNo: number;
+          contentDigest?: string;
+        };
       }> = [];
 
       try {
@@ -243,6 +256,14 @@ export function createSandboxTools(input: {
           );
           let content: Uint8Array;
           let sourceLabel: string;
+          let sourceArtifact:
+            | {
+                artifactId: string;
+                artifactVersionId: string;
+                versionNo: number;
+                contentDigest?: string;
+              }
+            | undefined;
           if (file.artifactId) {
             const reader = input.artifacts?.readPrimaryBytes;
             if (!reader) {
@@ -250,7 +271,12 @@ export function createSandboxTools(input: {
                 "SANDBOX_ARTIFACT_SOURCE_UNAVAILABLE: artifact staging is not available in this runtime.",
               );
             }
-            const artifact = await reader({ artifactId: file.artifactId });
+            const artifact = await reader({
+              artifactId: file.artifactId,
+              ...(file.artifactVersionId
+                ? { artifactVersionId: file.artifactVersionId }
+                : {}),
+            });
             throwIfInvocationAborted(signal);
             if (!artifact) {
               throw new Error(
@@ -258,6 +284,13 @@ export function createSandboxTools(input: {
               );
             }
             content = artifact.bytes;
+            if (artifact.artifactVersionId && artifact.versionNo !== undefined)
+              sourceArtifact = {
+                artifactId: file.artifactId,
+                artifactVersionId: artifact.artifactVersionId,
+                versionNo: artifact.versionNo,
+                contentDigest: artifact.contentDigest,
+              };
             sourceLabel = `artifact:${file.artifactId}`;
           } else {
             const sourcePath = assertSourceWorkPath(file.sourcePath ?? "");
@@ -287,6 +320,7 @@ export function createSandboxTools(input: {
           prepared.push({
             content,
             sourcePath: sourceLabel,
+            ...(sourceArtifact ? { sourceArtifact } : {}),
             sandboxPath,
             sizeBytes,
           });
