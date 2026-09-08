@@ -389,23 +389,14 @@ test("LangChain invoke and stream honor per-call options, with a fresh timeout o
   // downloads unrelated data on first use; fix only this public counting seam
   // locally. This test verifies transport/options/callbacks, not token accuracy.
   t.mock.method(ChatOpenAICompletions.prototype, "getNumTokens", async () => 1);
-  // This test observes a signal after its request has already completed. Node
-  // keeps timeout/composite dependencies weakly, so retain the observed chain
-  // until the assertions finish; use the original composition and real timers.
-  const observedSignalChain: AbortSignal[] = [];
-  const composeSignals = AbortSignal.any.bind(AbortSignal);
-  t.mock.method(AbortSignal, "any", (sources: AbortSignal[]) => {
-    const composed = composeSignals(sources);
-    observedSignalChain.push(...sources, composed);
-    return composed;
-  });
-  t.after(() => {
-    observedSignalChain.length = 0;
-  });
   const signals: AbortSignal[] = [];
   const settings = config(async (input, init) => {
     const request = new Request(input, init);
     signals.push(request.signal);
+    // Observe timeout while the transport is active. A completed request's
+    // signal may lose its timeout dependency and is not a lifecycle contract.
+    if (signals.length === 1)
+      await delay(10_000, undefined, { signal: request.signal });
     const body = (await request.json()) as { stream?: boolean };
     return success(body.stream);
   });
@@ -422,20 +413,25 @@ test("LangChain invoke and stream honor per-call options, with a fresh timeout o
       },
     },
   ];
-  await model.invoke("hello", { callbacks });
-  await delay(130);
+  await assert.rejects(model.invoke("hello", { callbacks }), {
+    name: "TimeoutError",
+  });
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]!.aborted, true);
   await model.invoke("hello", { timeoutMs: 1_000, callbacks } as never);
   for await (const _ of await model.stream("hello", {
     timeoutMs: 1_000,
     maxRetries: 0,
+    callbacks,
   } as never)) {
     /* consume real SDK stream */
   }
   assert.equal(signals.length, 3);
-  assert.equal(signals[0]!.aborted, true);
   assert.equal(signals[1]!.aborted, false);
+  assert.equal(signals[2]!.aborted, false);
   assert.notEqual(signals[0], signals[1]);
-  assert.ok(tokens >= 2, "each rebuilt invoke still delivers token callbacks");
+  assert.notEqual(signals[1], signals[2]);
+  assert.ok(tokens >= 2, "both successful calls still deliver token callbacks");
 });
 
 test("LangChain withConfig keeps provider budgets, per-call overrides, callbacks and bound tools", async (t) => {
