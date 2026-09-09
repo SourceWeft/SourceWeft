@@ -56,7 +56,9 @@ jobs:
         run: |
           node scripts/editions/check-boundaries.mjs ${{ matrix.edition }}
           pnpm install --frozen-lockfile
+          pnpm audit --audit-level=moderate
           node scripts/ci/verify-security-dependencies.cjs
+          node scripts/ci/verify-security-patches.mjs
           pnpm --filter @sourceweft/market-contracts build
           pnpm --filter @sourceweft/ui-web build
       - name: Typecheck and build both applications
