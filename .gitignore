@@ -47,6 +47,7 @@ dist/
 
 # local docs
 /docs/
+/.docs/
 
 # rust
 target/
