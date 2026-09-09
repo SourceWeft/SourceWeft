@@ -142,6 +142,7 @@ const allowed = [
   "packages",
   "scripts",
   "patches",
+  "third_party",
   "docker",
   ".github",
   "AGENTS.md",

@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: read
 jobs:
   edition:
     runs-on: ubuntu-latest
@@ -13,7 +14,10 @@ jobs:
         edition: [core, commercial]
     services:
       postgres:
-        image: ghcr.io/sourceweft/sourceweft-postgres:17
+        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
         env:
           POSTGRES_USER: sourceweft
           POSTGRES_PASSWORD: sourceweft
@@ -52,6 +56,7 @@ jobs:
         run: |
           node scripts/editions/check-boundaries.mjs ${{ matrix.edition }}
           pnpm install --frozen-lockfile
+          node scripts/ci/verify-security-dependencies.cjs
           pnpm --filter @sourceweft/market-contracts build
           pnpm --filter @sourceweft/ui-web build
       - name: Typecheck and build both applications
