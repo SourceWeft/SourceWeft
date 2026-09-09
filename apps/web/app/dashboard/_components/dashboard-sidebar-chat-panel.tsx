@@ -1,18 +1,24 @@
 "use client";
 import { billingUiAvailable } from "../../../lib/billing-edition/catalog";
 import { SidebarUsageSummary } from "../../../lib/billing-edition/client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Archive,
+  ArrowLeft,
   ChevronDown,
+  ChevronRight,
   Clock3,
+  Link2,
+  ListFilter,
   Lock,
+  MessagesSquare,
   MoreHorizontal,
   PanelsTopLeft,
   PenSquare,
   Share2,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -31,6 +37,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
@@ -39,13 +47,17 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
   SidebarMenuItem,
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@sourceweft/ui-web/components/ui/tooltip";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
 import {
@@ -55,6 +67,10 @@ import {
   useDashboardShortcutPlatform,
 } from "./dashboard-shortcuts";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import {
+  getSidebarChatItems,
+  type ChatVisibilityFilter,
+} from "./dashboard-sidebar-chat-list";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -341,21 +357,35 @@ function ChatListRow({
         <div className="min-w-0 flex-1">
           <div className="flex w-full items-start gap-2">
             <div className="min-w-0 flex-1">
-              <div className="relative min-w-0 pr-8">
-                <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-4.5">
+              <div className="relative flex min-w-0 items-center gap-2 pr-8">
+                <span className="line-clamp-1 min-w-0 flex-1 text-[13px] font-medium leading-4.5">
                   {item.title}
                 </span>
+                {shared ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 text-muted-foreground">
+                        {item.visibility === "public_link" ? (
+                          <Link2 className="size-3.5" aria-hidden="true" />
+                        ) : (
+                          <Users className="size-3.5" aria-hidden="true" />
+                        )}
+                        <span className="sr-only">
+                          {item.visibility === "public_link"
+                            ? "Anyone with the link"
+                            : "Visible to workspace"}
+                        </span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {item.visibility === "public_link"
+                        ? "Anyone with the link"
+                        : "Visible to workspace"}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
-                {shared ? (
-                  <>
-                    <Users
-                      className="size-2.5"
-                      aria-label="Visible to workspace"
-                    />
-                    <span aria-hidden="true">|</span>
-                  </>
-                ) : null}
                 <span>{item.sourceCount} sources</span>
                 <span aria-hidden="true">|</span>
                 <span>{status}</span>
@@ -370,7 +400,7 @@ function ChatListRow({
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute inset-y-1.5 right-2.5 w-12 rounded-r-md bg-gradient-to-l from-sidebar via-sidebar/70 to-transparent invisible opacity-0 transition-opacity",
+          "pointer-events-none absolute inset-y-1.5 right-2.5 w-8 rounded-r-md bg-gradient-to-l from-sidebar via-sidebar/70 to-transparent invisible opacity-0 transition-opacity",
           "group-hover/menu-item:visible group-hover/menu-item:opacity-100 group-focus-within/menu-item:visible group-focus-within/menu-item:opacity-100",
           menuOpen && "visible opacity-100",
         )}
@@ -432,29 +462,32 @@ function ChatListRow({
   );
 }
 
-function ChatSection({
+function ChatList({
   activeId,
-  canArchive = true,
   hasMore = false,
   isLoadingMore = false,
-  items,
+  privateChats,
+  sharedChats,
+  archivedChats,
   onLoadMore,
   onArchive,
-  onClear,
+  onClearPrivate,
+  onClearArchived,
   onDelete,
   onSetVisibility,
   onOpen,
   onPrefetch,
-  title,
 }: {
   activeId?: string;
-  canArchive?: boolean;
   hasMore?: boolean;
   isLoadingMore?: boolean;
-  items: ChatItem[];
+  privateChats: ChatItem[];
+  sharedChats: ChatItem[];
+  archivedChats: ChatItem[];
   onLoadMore?: () => void;
   onArchive: (id: string) => void;
-  onClear?: () => Promise<void>;
+  onClearPrivate: () => Promise<void>;
+  onClearArchived: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onSetVisibility?: (
     id: string,
@@ -462,9 +495,35 @@ function ChatSection({
   ) => Promise<void>;
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
-  title: string;
 }) {
   const [isClearing, setIsClearing] = useState(false);
+  const [view, setView] = useState<"chats" | "archived">("chats");
+  const [filter, setFilter] = useState<ChatVisibilityFilter>("all");
+  const isArchived = view === "archived";
+  const items = useMemo(
+    () =>
+      getSidebarChatItems({
+        privateChats,
+        sharedChats,
+        archivedChats,
+        view,
+        filter,
+      }),
+    [privateChats, sharedChats, archivedChats, view, filter],
+  );
+  const canLoadMore = !isArchived && hasMore;
+  // Clear actions keep their original scope, regardless of the visible subset.
+  const onClear = isArchived
+    ? onClearArchived
+    : filter === "private"
+      ? onClearPrivate
+      : undefined;
+  const clearItems = isArchived ? archivedChats : privateChats;
+  const clearTitle = isArchived ? "archived chats" : "private chats";
+  const switchView = (nextView: "chats" | "archived") => {
+    setView(nextView);
+    setFilter("all");
+  };
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -478,30 +537,43 @@ function ChatSection({
   };
 
   return (
-    <SidebarGroup className="px-0">
-      <SidebarGroupLabel className="group/section-label flex h-6 items-center justify-between px-3.5 text-[10px] uppercase tracking-[0.16em]">
-        <span>{title}</span>
-        {onClear && items.length > 0 ? (
+    <>
+      <div className="group/section-label flex shrink-0 items-center gap-1 px-3.5 py-2">
+        {isArchived ? (
+          <Button
+            onClick={() => switchView("chats")}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+            aria-label="Back to chats"
+          >
+            <ArrowLeft className="size-3.5" />
+          </Button>
+        ) : null}
+        <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          {isArchived ? "Archived" : "Chats"}
+        </span>
+        {onClear && clearItems.length > 0 ? (
           <Dialog>
             <DialogTrigger asChild>
               <Button
                 className="invisible size-5 pointer-events-none text-destructive opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:visible focus-visible:pointer-events-auto focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/section-label:visible group-hover/section-label:pointer-events-auto group-hover/section-label:opacity-100 group-focus-within/section-label:visible group-focus-within/section-label:pointer-events-auto group-focus-within/section-label:opacity-100"
                 size="icon-xs"
-                title={`Clear all ${title.toLowerCase()}`}
+                title={`Clear all ${clearTitle}`}
                 type="button"
                 variant="destructive"
               >
                 <Trash2 className="size-3" />
-                <span className="sr-only">Clear all {title.toLowerCase()}</span>
+                <span className="sr-only">Clear all {clearTitle}</span>
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Clear all {title.toLowerCase()}?</DialogTitle>
+                <DialogTitle>Clear all {clearTitle}?</DialogTitle>
                 <DialogDescription>
-                  This will remove {items.length}{" "}
-                  {items.length === 1 ? "chat" : "chats"}
-                  from this section. This action cannot be undone.
+                  This will remove {clearItems.length} {clearTitle}, including
+                  chats hidden by the current filter. This action cannot be
+                  undone.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -524,39 +596,143 @@ function ChatSection({
             </DialogContent>
           </Dialog>
         ) : null}
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu className="gap-1 py-0.5">
-          {items.map((item) => (
-            <ChatListRow
-              key={item.id}
-              active={item.id === activeId}
-              canArchive={canArchive}
-              item={item}
-              onArchive={onArchive}
-              onDelete={onDelete}
-              onSetVisibility={onSetVisibility}
-              onOpen={onOpen}
-              onPrefetch={onPrefetch}
-            />
-          ))}
-        </SidebarMenu>
-        {hasMore && onLoadMore ? (
-          <div className="px-3.5 py-1.5">
+        {filter !== "all" ? (
+          <Button
+            className="h-6 gap-1 rounded px-1.5 text-[11px]"
+            onClick={() => setFilter("all")}
+            size="xs"
+            type="button"
+            variant="secondary"
+            aria-label={`Clear ${filter} filter`}
+          >
+            {filter === "shared" ? "Shared" : "Private"}
+            <X className="size-3" />
+          </Button>
+        ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-              disabled={isLoadingMore}
-              onClick={onLoadMore}
-              size="xs"
+              className={cn(
+                "text-muted-foreground",
+                filter !== "all" &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground",
+              )}
+              size="icon-xs"
               type="button"
               variant="ghost"
+              title="Filter chats"
+              aria-label="Filter chats"
             >
-              {isLoadingMore ? "Loading..." : "Load more"}
+              <ListFilter className="size-3.5" />
             </Button>
-          </div>
-        ) : null}
-      </SidebarGroupContent>
-    </SidebarGroup>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Visibility
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={filter}
+              onValueChange={(value) => {
+                if (
+                  value === "all" ||
+                  value === "shared" ||
+                  value === "private"
+                ) {
+                  setFilter(value);
+                }
+              }}
+            >
+              <DropdownMenuRadioItem value="all">
+                <MessagesSquare className="size-4" />
+                All chats
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="shared">
+                <Users className="size-4" />
+                Shared
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="private">
+                <Lock className="size-4" />
+                Private
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <SidebarContent
+        key={`${view}-${filter}`}
+        className="min-h-0 overflow-y-auto"
+      >
+        <SidebarGroup className="px-0 pt-0">
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-1 py-0.5">
+              {items.map((item) => (
+                <ChatListRow
+                  key={item.id}
+                  active={item.id === activeId}
+                  canArchive={!isArchived}
+                  item={item}
+                  onArchive={onArchive}
+                  onDelete={onDelete}
+                  onSetVisibility={isArchived ? undefined : onSetVisibility}
+                  onOpen={onOpen}
+                  onPrefetch={onPrefetch}
+                />
+              ))}
+            </SidebarMenu>
+            {items.length === 0 ? (
+              <p
+                className="px-3.5 py-4 text-xs text-muted-foreground"
+                role="status"
+              >
+                {isLoadingMore && !isArchived
+                  ? "Loading chats..."
+                  : canLoadMore
+                    ? "No matching chats loaded. Load more to see older chats."
+                    : filter !== "all"
+                      ? `No ${filter} chats${isArchived ? " in archive" : ""}.`
+                      : isArchived
+                        ? "No archived chats."
+                        : "No chats yet."}
+              </p>
+            ) : null}
+            {canLoadMore && onLoadMore ? (
+              <div className="px-3.5 py-1.5">
+                <Button
+                  className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  disabled={isLoadingMore}
+                  onClick={onLoadMore}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  {isLoadingMore ? "Loading..." : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      {!isArchived ? (
+        <div className="shrink-0 border-t px-3.5 py-1.5">
+          <Button
+            className="w-full justify-start gap-2 text-xs text-muted-foreground"
+            onClick={() => switchView("archived")}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <Archive className="size-3.5" />
+            <span className="flex-1 text-left">Archived</span>
+            {archivedChats.length > 0 ? (
+              <span className="text-[11px] tabular-nums">
+                {archivedChats.length}
+              </span>
+            ) : null}
+            <ChevronRight className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -614,6 +790,7 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const [chatListResetKey, setChatListResetKey] = useState(0);
   const weekAgo = Date.now() - ONE_WEEK_MS;
   const seenIds = new Set<string>();
   const threadsThisWeek = [
@@ -654,7 +831,10 @@ export function DashboardSidebarChatPanel({
         <div className="flex items-center gap-2">
           <Button
             className="flex-1"
-            onClick={onCreateChat}
+            onClick={() => {
+              setChatListResetKey((value) => value + 1);
+              onCreateChat();
+            }}
             size="xs"
             type="button"
           >
@@ -675,43 +855,23 @@ export function DashboardSidebarChatPanel({
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="min-h-0 overflow-y-auto">
-        <ChatSection
-          activeId={activeChatId}
-          items={sharedChats}
-          onArchive={onArchiveChat}
-          onDelete={onDeleteChat}
-          onSetVisibility={onSetChatVisibility}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Shared chats"
-        />
-        <ChatSection
-          activeId={activeChatId}
-          hasMore={hasMorePrivateChats}
-          isLoadingMore={isLoadingPrivateChats}
-          items={privateChats}
-          onLoadMore={onLoadMoreChats}
-          onArchive={onArchiveChat}
-          onClear={onClearPrivateChats}
-          onDelete={onDeleteChat}
-          onSetVisibility={onSetChatVisibility}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Private chats"
-        />
-        <ChatSection
-          activeId={activeChatId}
-          canArchive={false}
-          items={archivedChats}
-          onArchive={onArchiveChat}
-          onClear={onClearArchivedChats}
-          onDelete={onDeleteChat}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Archived"
-        />
-      </SidebarContent>
+      <ChatList
+        key={`${workspaceId}-${chatListResetKey}`}
+        activeId={activeChatId}
+        hasMore={hasMorePrivateChats}
+        isLoadingMore={isLoadingPrivateChats}
+        privateChats={privateChats}
+        sharedChats={sharedChats}
+        archivedChats={archivedChats}
+        onLoadMore={onLoadMoreChats}
+        onArchive={onArchiveChat}
+        onClearPrivate={onClearPrivateChats}
+        onClearArchived={onClearArchivedChats}
+        onDelete={onDeleteChat}
+        onSetVisibility={onSetChatVisibility}
+        onOpen={onOpenChat}
+        onPrefetch={onPrefetchChat}
+      />
 
       <SidebarFooter className="border-t px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
