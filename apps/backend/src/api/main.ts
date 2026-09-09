@@ -14,6 +14,7 @@ import { createApp } from "./app";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
+import { attachLocalDeviceGateway } from "../modules/devices/gateway";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
@@ -30,7 +31,7 @@ await notifyHub.start();
 metrics.startPeriodicFlush();
 const app = createApp();
 
-serve(
+const httpServer = serve(
   {
     fetch: app.fetch,
     hostname: config.apiHost,
@@ -44,8 +45,12 @@ serve(
     void agentSandboxService.logStartupWarning("api");
   },
 );
+const closeLocalGateway = attachLocalDeviceGateway(
+  httpServer as import("node:http").Server,
+);
 
 async function shutdown() {
+  closeLocalGateway();
   logger.info("API shutting down");
   metrics.stop();
   // Stop the hub (ends its dedicated LISTEN client) before closing the pool.

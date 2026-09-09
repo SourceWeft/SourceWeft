@@ -1,0 +1,22 @@
+import "dotenv/config";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
+if (!new URL(process.env.DATABASE_URL!).pathname.startsWith("/sourceweft_local_pc_e2e_")) throw new Error("Only the isolated E2E database is allowed");
+const root = new URL("../../../../output/playwright/local-pc/", import.meta.url);
+const fixture = JSON.parse(await readFile(new URL("environment.private.json", root), "utf8"));
+const base = "http://localhost:3101";
+const response = await fetch(`${base}/api/auth/sign-in/email`, { method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:3100" }, body: JSON.stringify({ email: fixture.email, password: fixture.password }) });
+assert.equal(response.status, 200, "The real authentication endpoint must accept the test account");
+const cookie = response.headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
+const enrolled = await fetch(`${base}/v1/local-devices/enroll`, { method: "POST", headers: { cookie, "content-type": "application/json", origin: "http://localhost:3100" }, body: "{}" });
+assert.equal(enrolled.status, 200);
+const { ticket } = await enrolled.json();
+const runId = randomUUID();
+const run = new URL(`live-${runId}/`, root);
+await mkdir(run, { recursive: true, mode: 0o700 });
+await writeFile(new URL("enrollment.private.json", run), JSON.stringify({ ticket, runId }), { mode: 0o600 });
+await writeFile(new URL("current-live-run.json", root), JSON.stringify({ runId, runDirectory: fileURLToPath(run) }));
+console.log(`Prepared fixture enrollment for the production native host: ${fileURLToPath(run)}`);

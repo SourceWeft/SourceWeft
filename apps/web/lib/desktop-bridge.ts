@@ -49,6 +49,9 @@ export type LocalHostStatus = {
   platformSupported: boolean;
   storageInitialized: boolean;
   authenticatedDispatchAvailable: boolean;
+  deviceId: string | null;
+  connected: boolean;
+  connectionError: string | null;
 };
 
 type DesktopListener<TPayload> = (payload: TPayload) => void;
@@ -102,7 +105,7 @@ export const desktopBridge = {
   isAvailable() {
     return Boolean(
       (typeof window !== "undefined" && window.__SOURCEWEFT_DESKTOP__) ||
-        nativeBridge.isAvailable("desktop"),
+      nativeBridge.isAvailable("desktop"),
     );
   },
   info() {
@@ -110,6 +113,16 @@ export const desktopBridge = {
   },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");
+  },
+  enableLocalHost(ticket: string) {
+    return invokeDesktop<{
+      deviceId: string | null;
+      connected: boolean;
+      error: string | null;
+    }>("enable_local_host", { ticket });
+  },
+  disconnectLocalHost() {
+    return invokeDesktop<void>("disconnect_local_host");
   },
   showMainWindow() {
     return invokeDesktop<void>("show_main_window");

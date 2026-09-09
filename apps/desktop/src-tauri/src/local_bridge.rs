@@ -11,6 +11,9 @@ pub struct LocalHostStatus {
     platform_supported: bool,
     storage_initialized: bool,
     authenticated_dispatch_available: bool,
+    device_id: Option<String>,
+    connected: bool,
+    connection_error: Option<String>,
 }
 
 fn allowed_caller(label: &str, url: &Url, dev_url: Option<&Url>) -> bool {
@@ -35,14 +38,55 @@ pub fn local_host_status(app: AppHandle, window: WebviewWindow) -> Result<LocalH
             "LOCAL_HOST_ACCESS_DENIED: Use the existing dashboard in this PC client.".into(),
         );
     }
+    let remote = app
+        .try_state::<crate::remote_host::RemoteHost>()
+        .map(|host| host.status())
+        .unwrap_or_default();
     Ok(LocalHostStatus {
         protocol_version: 1,
         platform_supported: cfg!(target_os = "macos"),
         storage_initialized: app
-            .try_state::<sourceweft_desktop::local_host::LocalHost>()
+            .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
             .is_some(),
-        authenticated_dispatch_available: false,
+        authenticated_dispatch_available: remote.connected,
+        device_id: remote.device_id,
+        connected: remote.connected,
+        connection_error: remote.error,
     })
+}
+
+#[tauri::command]
+pub async fn enable_local_host(
+    app: AppHandle,
+    window: WebviewWindow,
+    ticket: String,
+) -> Result<crate::remote_host::RemoteStatus, String> {
+    let url = window.url().map_err(|e| e.to_string())?;
+    let dev = if cfg!(debug_assertions) {
+        app.config().build.dev_url.as_ref()
+    } else {
+        None
+    };
+    if !allowed_caller(window.label(), &url, dev) {
+        return Err("LOCAL_HOST_ACCESS_DENIED".into());
+    }
+    let host = app.state::<crate::remote_host::RemoteHost>();
+    host.enroll(ticket).await
+}
+
+#[tauri::command]
+pub fn disconnect_local_host(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    let url = window.url().map_err(|e| e.to_string())?;
+    let dev = if cfg!(debug_assertions) {
+        app.config().build.dev_url.as_ref()
+    } else {
+        None
+    };
+    if !allowed_caller(window.label(), &url, dev) {
+        return Err("LOCAL_HOST_ACCESS_DENIED".into());
+    }
+    app.state::<crate::remote_host::RemoteHost>().disconnect();
+    Ok(())
 }
 
 #[cfg(test)]

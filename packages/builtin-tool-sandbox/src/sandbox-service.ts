@@ -23,6 +23,8 @@ import type {
 export type SandboxRuntimeName = "api" | "worker" | "scheduler";
 
 export type SandboxRuntimeRequest = {
+  /** Trusted host snapshot from the persisted conversation, never model input. */
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   filesystem: BackendProtocolV2;
   context: SandboxRuntimeContext;
   /**

@@ -1,4 +1,6 @@
 "use client";
+import { LocalExecutionSelector } from "./local-execution-selector";
+import { LOCAL_TARGET_KEY } from "../../../../lib/local-execution";
 
 import {
   useCallback,
@@ -925,6 +927,12 @@ export function DashboardChatPageClient() {
       try {
         const result = await contentClient.createThread(workspaceId, {
           title: "New chat",
+          executionTarget: sessionStorage.getItem(LOCAL_TARGET_KEY)
+            ? {
+                kind: "local",
+                deviceId: sessionStorage.getItem(LOCAL_TARGET_KEY)!,
+              }
+            : { kind: "cloud" },
           modelSettings: resolvedThreadModelSettings,
           chatPreferences: {
             thinking: thinkingSettings,
@@ -1012,6 +1020,7 @@ export function DashboardChatPageClient() {
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <LocalExecutionSelector workspaceId={workspaceId} />
         <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
           <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
             <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">

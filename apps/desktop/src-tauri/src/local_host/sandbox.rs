@@ -1,6 +1,4 @@
-//! P0 Seatbelt policy probe, not a production command dispatcher. In particular,
-//! network proxy and approval integration must pass validation before commands are
-//! exposed to the Agent or a WebView.
+//! Seatbelt filesystem policy shared by the block-all probe and controlled-proxy runner.
 use super::{HostError, Result};
 use std::{path::Path, process::Command};
 
@@ -35,6 +33,15 @@ pub fn isolation_probe_profile(workspace: &Path) -> Result<String> {
 (allow file-read* (literal "/dev/urandom") (literal "/dev/random"))
 "#
     ))
+}
+
+pub fn command_profile(workspace: &Path, proxy_port: u16) -> Result<String> {
+    let mut profile = isolation_probe_profile(workspace)?;
+    profile.push_str(&format!(
+        "\n(allow network-outbound (remote ip \"localhost:{proxy_port}\"))\n"
+    ));
+    profile.push_str("(allow file-read* (literal \"/private/etc/ssl/openssl.cnf\") (literal \"/private/etc/ssl/cert.pem\"))\n");
+    Ok(profile)
 }
 
 pub fn probe_seatbelt(workspace: &Path) -> Result<()> {

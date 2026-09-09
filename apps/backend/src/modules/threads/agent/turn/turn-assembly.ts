@@ -571,6 +571,7 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
     !commandNeedsTrustedSandbox
       ? null
       : await agentSandboxService.createRuntimeForTurn({
+          executionTarget: prepared.thread.executionTarget ?? { kind: "cloud" },
           filesystem: filesystemBackend.backend,
           context: {
             teamId: prepared.workspace.organizationId,

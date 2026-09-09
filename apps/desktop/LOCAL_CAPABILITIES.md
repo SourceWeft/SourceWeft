@@ -1,4 +1,9 @@
-# macOS local capabilities — implementation checkpoint
+# macOS local capabilities — foundation checkpoint (3fd84bfd)
+
+This file records the earlier foundation commit. The current in-progress device
+gateway, immutable conversation targets, and real test results are described in
+`E2E_REPORT.md`; statements below about unavailable dispatch refer to that earlier
+checkpoint, not the current working tree.
 
 The desktop client continues to load the existing Web URL and reuse the existing
 chat/settings UI. There is no separate desktop homepage or native settings page.
