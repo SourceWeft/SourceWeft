@@ -749,6 +749,10 @@ export class BillingOrderService {
       input.request.successUrl ??
       defaultSuccessUrl(this.runtimeConfig, draft.id);
 
+    draft.metadata = {
+      ...draft.metadata,
+      ...(await this.provider.checkoutMetadata?.()),
+    };
     const order = await this.store.insertOrder(draft);
     return toTopupResponse(
       await this.createProviderTopupCheckout(order, input.actor),

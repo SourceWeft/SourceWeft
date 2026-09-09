@@ -11,6 +11,7 @@ import type {
   TeamSubscriptionSnapshot,
 } from "../types";
 import { toObjectRecord } from "../records";
+import { syncCreemCheckoutCompleted } from "./creem-checkout-sync";
 
 type CreemSubscriptionSyncDeps = {
   billing: BillingService;
@@ -429,6 +430,14 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     data: unknown,
     fallbackStatus: BillingSubscriptionStatus,
   ) {
+    if (eventType === "checkout.completed") {
+      await syncCreemCheckoutCompleted({
+        billing: deps.billing,
+        config: deps.config,
+        data,
+      });
+      return;
+    }
     const record = toObjectRecord(data);
     const payload = record ?? {
       raw: data,
@@ -580,4 +589,4 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
   };
 }
 
-export { createCreemScheduledCancelWebhook } from "./creem-webhook-bypass";
+export { createCreemWebhookHandler } from "./creem-webhook-bypass";

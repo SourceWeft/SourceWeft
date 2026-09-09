@@ -17,7 +17,7 @@ import {
 } from "@sourceweft/billing/config";
 import {
   createCreemSubscriptionSync,
-  createCreemScheduledCancelWebhook,
+  createCreemWebhookHandler,
 } from "@sourceweft/billing/integrations/creem";
 import { createBillingAuthPlugins } from "@sourceweft/billing/integrations/auth";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
@@ -114,7 +114,7 @@ export function getBillingAuthPlugins(
   if (mode === "runtime") validateBillingConfiguration(billingConfig);
   return createBillingAuthPlugins({ mode, config: billingConfig, sync });
 }
-export const handleBillingAuthRequest = createCreemScheduledCancelWebhook({
+export const handleBillingAuthRequest = createCreemWebhookHandler({
   config: billingConfig,
   logger,
   sync,

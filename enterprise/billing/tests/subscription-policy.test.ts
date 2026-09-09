@@ -106,8 +106,7 @@ test("Creem uses common storage and does not expose provider checkout or managem
     },
     sync: async () => {},
   });
-  assert.deepEqual(plugins[0]?.schema, {});
-  assert.deepEqual(Object.keys(plugins[0]!.endpoints), ["creemWebhook"]);
+  assert.deepEqual(plugins, []);
 });
 
 test("manual subscriptions expire locally without payment credentials and retain top-up credits", async () => {
