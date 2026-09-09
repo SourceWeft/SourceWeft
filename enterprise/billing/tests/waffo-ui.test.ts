@@ -3,11 +3,55 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
+import { TopupActions } from "../src/ui/topup-actions";
 import {
   BillingUiProvider,
   useBillingUiHost,
   type BillingUiHost,
 } from "../src/ui/context";
+
+test.each(["creem", "stripe", "waffo"] as const)(
+  "top-up entry follows %s deployment capabilities",
+  async (billingProvider) => {
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const host = {
+      billingProvider,
+      billingTopupEnabled: true,
+      billingCheckoutEnabled: true,
+    } as BillingUiHost;
+    try {
+      await act(async () => {
+        root.render(
+          h(BillingUiProvider, {
+            value: host,
+            children: h(TopupActions, { teamId: "team_test" }),
+          }),
+        );
+      });
+      assert.match(container.textContent!, /Buy pages/);
+      assert.match(container.textContent!, /Buy credits/);
+      await act(async () => {
+        root.render(
+          h(BillingUiProvider, {
+            value: { ...host, billingTopupEnabled: false },
+            children: h(TopupActions, { teamId: "team_test" }),
+          }),
+        );
+      });
+      assert.equal(container.querySelectorAll("button").length, 0);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+        .IS_REACT_ACT_ENVIRONMENT;
+    }
+  },
+);
 
 test("Waffo checkout waits for a user click, opens a protected new tab and preserves the merchant page", async () => {
   (

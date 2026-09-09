@@ -6,20 +6,13 @@ import { useBillingUiHost } from "./context";
 export function TopupActions({ teamId }: { teamId: string | null }) {
   const {
     billingClient,
-    billingProvider,
     billingTopupEnabled,
     billingCheckoutEnabled,
     openCheckout,
   } = useBillingUiHost();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (
-    !teamId ||
-    !["waffo", "stripe"].includes(billingProvider ?? "") ||
-    !billingTopupEnabled ||
-    !billingCheckoutEnabled
-  )
-    return null;
+  if (!teamId || !billingTopupEnabled || !billingCheckoutEnabled) return null;
   async function buy(unitType: "credit" | "page") {
     if (!teamId) return;
     setBusy(true);
