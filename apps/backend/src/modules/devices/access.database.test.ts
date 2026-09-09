@@ -246,15 +246,13 @@ test("folder and device bindings remain immutable before the first message", asy
 test("only the target PC can revoke a folder, without changing historical bindings", async () => {
   const h = await host(),
     folderId = randomUUID();
-  await schema.db
-    .insert(schema.localFolderGrants)
-    .values({
-      id: folderId,
-      userId: h.userId,
-      deviceId: h.id,
-      name: "Folder",
-      path: "/Users/test/Folder",
-    });
+  await schema.db.insert(schema.localFolderGrants).values({
+    id: folderId,
+    userId: h.userId,
+    deviceId: h.id,
+    name: "Folder",
+    path: "/Users/test/Folder",
+  });
   await access.setRemotePolicy(h.userId, h.id, h.caller, true);
   const remote = { sessionId: randomUUID() };
   await access.connectRemote(h.userId, remote.sessionId, h.id);
@@ -277,5 +275,31 @@ test("only the target PC can revoke a folder, without changing historical bindin
         where: eq(schema.localFolderGrants.id, folderId),
       })
     )?.revokedAt,
+  );
+});
+
+test("Web sign-out revokes only its connection; PC sign-out disables remote access", async () => {
+  const h = await host();
+  await access.setRemotePolicy(h.userId, h.id, h.caller, true);
+  const first = { sessionId: randomUUID() },
+    second = { sessionId: randomUUID() };
+  await access.connectRemote(h.userId, first.sessionId, h.id);
+  await access.connectRemote(h.userId, second.sessionId, h.id);
+  await access.revokeSessionDeviceAccess(first.sessionId);
+  assert.equal(
+    (await access.requireDeviceAccess(h.userId, h.id, second)).native,
+    false,
+  );
+  await access.revokeSessionDeviceAccess(h.sessionId);
+  await assert.rejects(access.requireDeviceAccess(h.userId, h.id, second), {
+    code: "REMOTE_ACCESS_DISABLED",
+  });
+  assert.equal(
+    (
+      await schema.db.query.localDevices.findFirst({
+        where: eq(schema.localDevices.id, h.id),
+      })
+    )?.remoteEnabled,
+    false,
   );
 });

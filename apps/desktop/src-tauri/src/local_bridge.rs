@@ -63,7 +63,7 @@ pub fn local_host_status(app: AppHandle, window: WebviewWindow) -> Result<LocalH
         .map(|host| host.status())
         .unwrap_or_default();
     Ok(LocalHostStatus {
-        protocol_version: 1,
+        protocol_version: 2,
         platform_supported: cfg!(target_os = "macos"),
         storage_initialized: app
             .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
@@ -136,6 +136,8 @@ mod tests {
 pub async fn choose_local_folder(
     app: AppHandle,
     window: WebviewWindow,
+    ticket: String,
+    user_id: String,
 ) -> Result<serde_json::Value, String> {
     let url = window.url().map_err(|e| e.to_string())?;
     if window.label() != "main"
@@ -146,6 +148,6 @@ pub async fn choose_local_folder(
     }
     app.try_state::<crate::remote_host::RemoteHost>()
         .ok_or("UNSUPPORTED_PLATFORM")?
-        .choose_folder()
+        .choose_folder(ticket, user_id)
         .await
 }

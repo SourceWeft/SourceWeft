@@ -1,7 +1,8 @@
 "use client";
 
+import { synchronizeLocalHostScope } from "../../lib/local-host-session";
 import type * as React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardChatStateProvider } from "./_components/dashboard-chat-state";
@@ -63,6 +64,17 @@ export function DashboardLayoutClient({
   const [hasConfirmedSession, setHasConfirmedSession] = useState(false);
   const { data, isPending, refetch } = authClient.useSession();
   const hasSession = hasActiveSession(data as SessionData | undefined);
+  const userId = data?.user?.id;
+  const sessionId = data?.session?.id;
+  useLayoutEffect(() => {
+    if (isPending) return;
+    void synchronizeLocalHostScope(
+      hasSession ? userId : undefined,
+      hasSession ? sessionId : undefined,
+    ).catch((error) =>
+      console.error("Local host initialization unavailable", error),
+    );
+  }, [hasSession, isPending, userId, sessionId]);
   const routePathname = pathname || "/dashboard";
   const redirectTo = useMemo(() => {
     const query = searchParams.toString();

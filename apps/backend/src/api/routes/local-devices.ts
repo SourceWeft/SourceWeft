@@ -280,6 +280,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
           })
         : null;
       return ApiResponse.success(c, {
+        userId: session.user.id,
         executionTarget: thread.executionTargetJson,
         workspace: binding?.localWorkspaceId
           ? { id: binding.localWorkspaceId, path: binding.workspacePath }

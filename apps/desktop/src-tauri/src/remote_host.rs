@@ -39,7 +39,13 @@ pub struct RemoteHost {
 
 impl RemoteHost {
     #[cfg(target_os = "macos")]
-    pub async fn choose_folder(&self) -> Result<Value, String> {
+    pub async fn choose_folder(&self, ticket: String, user_id: String) -> Result<Value, String> {
+        let owner = user_id.clone();
+        let authenticated = self.authenticate(ticket, user_id).await?;
+        if authenticated["needsProof"] == true || self.status().user_id.as_deref() != Some(&owner) {
+            return Err("Authenticate the current account before choosing a folder".into());
+        }
+        let folder_generation = self.generation.load(Ordering::SeqCst);
         let bytes = security_framework::passwords::get_generic_password(
             &self.keychain_service,
             &format!(
@@ -70,6 +76,11 @@ impl RemoteHost {
             return Err("Folder selection cancelled or unavailable".into());
         }
         let path = String::from_utf8(output.stdout).map_err(|_| "Invalid folder path")?;
+        if self.generation.load(Ordering::SeqCst) != folder_generation
+            || self.status().user_id.as_deref() != Some(&owner)
+        {
+            return Err("Folder selection was cancelled after account change".into());
+        }
         let grant = self
             .host
             .register_folder(&credential.user_id, std::path::Path::new(path.trim()))
@@ -90,7 +101,7 @@ impl RemoteHost {
         response.json().await.map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
-    pub async fn choose_folder(&self) -> Result<Value, String> {
+    pub async fn choose_folder(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM".into())
     }
 
@@ -99,6 +110,7 @@ impl RemoteHost {
         if self.status().device_id.is_some() && self.status().user_id.as_deref() != Some(&user_id) {
             self.disconnect();
         }
+        let auth_generation = self.generation.load(Ordering::SeqCst);
         let account = format!("local-device:{user_id}");
         let saved =
             security_framework::passwords::get_generic_password(&self.keychain_service, &account);
@@ -158,6 +170,9 @@ impl RemoteHost {
             &bytes,
         )
         .map_err(|e| e.to_string())?;
+        if self.generation.load(Ordering::SeqCst) != auth_generation {
+            return Err("Local authentication was cancelled".into());
+        }
         if self.status().device_id.is_none() {
             self.start(credentials);
         }
@@ -202,6 +217,7 @@ impl RemoteHost {
         if self.status().device_id.is_some() {
             return Err("A local host is already enrolled in this application session.".into());
         }
+        let enroll_generation = self.generation.load(Ordering::SeqCst);
         let api_base = std::env::var("SOURCEWEFT_API_BASE_URL").unwrap_or_else(|_| {
             if cfg!(debug_assertions) {
                 "http://localhost:3001".into()
@@ -245,6 +261,9 @@ impl RemoteHost {
             &serde_json::to_vec(&credential).map_err(|e| e.to_string())?,
         )
         .map_err(|e| format!("Keychain enrollment failed: {e}"))?;
+        if self.generation.load(Ordering::SeqCst) != enroll_generation {
+            return Err("Device enrollment was cancelled".into());
+        }
         self.start(credential);
         Ok(self.status())
     }

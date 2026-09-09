@@ -1,4 +1,5 @@
 "use client";
+import { clearChatDraft } from "../../../../lib/chat-drafts";
 import { localRequest } from "../../../../lib/local-execution";
 import { ChatHeader } from "./chat-header";
 import {
@@ -322,6 +323,9 @@ export function DashboardChatPageClient() {
   const [recoveries, setRecoveries] = useState<
     Record<string, { text: string; key: number }>
   >({});
+  useEffect(() => {
+    setRecoveries({});
+  }, [creationContext.draftId]);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
   const {
@@ -867,14 +871,24 @@ export function DashboardChatPageClient() {
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
+      const preserveDraft = () =>
+        setRecoveries((previous) => ({
+          ...previous,
+          [creationContext.key]: {
+            text: input.content,
+            key: (previous[creationContext.key]?.key ?? 0) + 1,
+          },
+        }));
       if (isStartingChatRef.current) {
         return;
       }
       if (!workspaceId) {
+        preserveDraft();
         toast.error("No workspace selected yet.");
         return;
       }
       if (modelCatalogStatus !== "ready") {
+        preserveDraft();
         toast.error(
           modelCatalogStatus === "error"
             ? "Model catalog failed to load. Refresh and try again."
@@ -883,6 +897,7 @@ export function DashboardChatPageClient() {
         return;
       }
       if (!selectedModels.llm?.capabilities) {
+        preserveDraft();
         toast.error("Chat model capabilities are not loaded yet.");
         return;
       }
@@ -935,6 +950,7 @@ export function DashboardChatPageClient() {
       });
 
       if (!creationContext.target || creationContext.error) {
+        preserveDraft();
         toast.error(creationContext.error || "请等待电脑初始化。");
         return;
       }
@@ -942,6 +958,7 @@ export function DashboardChatPageClient() {
         creationContext.target.kind === "local" &&
         !creationContext.selectedDevice?.connected
       ) {
+        preserveDraft();
         toast.error("请先连接所选电脑。");
         return;
       }
@@ -973,6 +990,15 @@ export function DashboardChatPageClient() {
             composerOptions,
           },
         });
+        if (creationContext.userId && creationContext.draftId) {
+          await clearChatDraft(
+            `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`,
+          ).catch((e) =>
+            toast.error(
+              e instanceof Error ? e.message : "已创建对话，但草稿清理失败。",
+            ),
+          );
+        }
         adoptChat(result.thread);
         writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
         writeStoredByokState(
@@ -1128,6 +1154,9 @@ export function DashboardChatPageClient() {
         {shouldShowModelCatalogError ? (
           <ModelCatalogErrorState />
         ) : (
+          creationContext.draftId &&
+          creationContext.userId &&
+          workspaceId &&
           visitedContexts.map((contextKey) => (
             <div
               key={`${workspaceId}:${contextKey}`}
@@ -1139,6 +1168,7 @@ export function DashboardChatPageClient() {
               }
             >
               <ChatCanvas
+                composerDraftKey={`${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${contextKey}`}
                 workingFolderSlot={
                   <WorkingFolderPicker
                     creation={creationContext}

@@ -1,4 +1,7 @@
-import { localHostHeaders } from "../../../../lib/local-host-session";
+import {
+  localHostHeaders,
+  clearLocalHostSession,
+} from "../../../../lib/local-host-session";
 import type { ByokModelSelection } from "../_components/byok-state";
 import type {
   ChatSendInput,
@@ -286,19 +289,34 @@ export async function runChatStream(
     toolApprovalResume: input.toolApprovalResume,
   });
 
+  const nativeHeaders = await localHostHeaders({
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+  });
   const response = await fetch(
     `${apiBaseUrl}/v1/workspaces/${input.workspaceId}/threads/${input.threadId}/stream`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(await localHostHeaders()),
+        ...nativeHeaders,
       },
       credentials: "include",
       body: JSON.stringify(requestBody),
     },
   );
 
+  if (
+    !response.ok &&
+    response.status === 403 &&
+    nativeHeaders["X-Local-Proof"]
+  ) {
+    const failure = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    if (failure?.code === "NATIVE_PROOF_EXPIRED") clearLocalHostSession();
+  }
   if (!response.ok) {
     await input.throwStreamRequestError(response);
   }

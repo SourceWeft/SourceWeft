@@ -1,4 +1,5 @@
 "use client";
+import { authClient } from "../../../../lib/auth-client";
 import { useEffect, useState } from "react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -11,17 +12,19 @@ import {
 } from "../../../../lib/local-execution";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 export function LocalHostPanel() {
+  const userId = authClient.useSession().data?.user.id;
+  const [dataOwner, setDataOwner] = useState<string | null>(null);
   const [status, setStatus] = useState<LocalHostStatus | null>(null);
   const [device, setDevice] = useState<LocalDevice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    if (!desktopBridge.isAvailable()) return;
+    if (!desktopBridge.isAvailable() || !userId) return;
     let active = true;
     const refresh = async () => {
       try {
-        const native = await ensureLocalHostSession();
+        const native = await ensureLocalHostSession(userId);
         const [state, list] = await Promise.all([
           desktopBridge.localHostStatus(),
           localRequest<{ devices: LocalDevice[] }>("/v1/local-devices"),
@@ -32,6 +35,7 @@ export function LocalHostPanel() {
             )
           : { folders: [] };
         if (active) {
+          setDataOwner(userId);
           setFolders(listFolders.folders);
           setStatus(state);
           setDevice(
@@ -49,8 +53,15 @@ export function LocalHostPanel() {
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [userId]);
   if (!desktopBridge.isAvailable()) return null;
+  if (dataOwner && dataOwner !== userId)
+    return (
+      <section>
+        <h2 className="text-lg font-semibold">本机</h2>
+        <p className="mt-3 text-sm text-muted-foreground">正在确认当前账号…</p>
+      </section>
+    );
   return (
     <section className="space-y-6">
       <div>
@@ -70,7 +81,7 @@ export function LocalHostPanel() {
         <h3 className="font-medium">允许其他设备连接</h3>
         <p className="text-sm text-muted-foreground">
           开启后，同账号的 Web、手机或另一台 PC
-          可以连接这台电脑。关闭后仍可在本机工作。
+          可以连接这台电脑，使用自动任务目录和已授权的工作文件夹。关闭后仍可在本机工作。
         </p>
         <Button
           disabled={busy || !device}
@@ -138,7 +149,14 @@ export function LocalHostPanel() {
             setBusy(true);
             setError(null);
             try {
-              const folder = await desktopBridge.chooseLocalFolder();
+              const challenge = await localRequest<{
+                ticket: string;
+                userId: string;
+              }>("/v1/local-devices/enroll", {});
+              const folder = await desktopBridge.chooseLocalFolder(
+                challenge.ticket,
+                challenge.userId,
+              );
               setFolders((items) => [...items, folder]);
             } catch (e) {
               setError(e instanceof Error ? e.message : String(e));

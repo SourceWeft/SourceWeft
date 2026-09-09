@@ -111,8 +111,11 @@ export const desktopBridge = {
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");
   },
-  chooseLocalFolder() {
-    return invokeDesktop<{ id: string; name: string }>("choose_local_folder");
+  chooseLocalFolder(ticket: string, userId: string) {
+    return invokeDesktop<{ id: string; name: string }>("choose_local_folder", {
+      ticket,
+      userId,
+    });
   },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");

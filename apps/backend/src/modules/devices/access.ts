@@ -285,7 +285,32 @@ export async function revokeSessionDeviceAccess(sessionId: string) {
         isNull(localDeviceAccess.revokedAt),
       ),
     )
-    .returning({ id: localDeviceAccess.id });
+    .returning();
+  const nativeDevices = [
+    ...new Set(
+      grants.filter((grant) => grant.native).map((grant) => grant.deviceId),
+    ),
+  ];
+  if (nativeDevices.length) {
+    await db
+      .update(localDevices)
+      .set({
+        remoteEnabled: false,
+        policyRevision: sql`${localDevices.policyRevision}+1`,
+      })
+      .where(inArray(localDevices.id, nativeDevices));
+    const revoked = await db
+      .update(localDeviceAccess)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          inArray(localDeviceAccess.deviceId, nativeDevices),
+          isNull(localDeviceAccess.revokedAt),
+        ),
+      )
+      .returning();
+    grants.push(...revoked);
+  }
   if (grants.length)
     await db
       .update(localToolInvocations)

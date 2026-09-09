@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { authClient } from "../../../../lib/auth-client";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Cloud, Laptop, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
@@ -25,22 +26,71 @@ import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 
 export function useChatCreationContext() {
-  const { setWorkTarget } = useDashboardChatState();
+  const { setWorkTarget, workspaceId } = useDashboardChatState();
+  const session = authClient.useSession();
   const query = useSearchParams();
+  const draftNonce = useRef<string | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(null);
   const router = useRouter();
   const [devices, setDevices] = useState<LocalDevice[]>([]);
   const [nativeId, setNativeId] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [readyFor, setReadyFor] = useState<string | null | undefined>(
+    undefined,
+  );
+  const refreshVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const requested = query.get("computer");
+  const ready = readyFor === requested;
+  const queryDraft = query.get("draft");
+  useEffect(() => {
+    if (!draftNonce.current) draftNonce.current = crypto.randomUUID();
+    const id = queryDraft ?? draftNonce.current;
+    setDraftId(id);
+    if (!queryDraft) {
+      const next = new URLSearchParams(window.location.search);
+      next.set("draft", id);
+      router.replace(`/dashboard/chat?${next.toString()}`);
+    }
+  }, [queryDraft, router]);
   const folderByComputer = useRef<Record<string, string | undefined>>({});
+  const [draftMetadataError, setDraftMetadataError] = useState<string | null>(
+    null,
+  );
+  const folderStorageKey =
+    session.data?.user.id && workspaceId && draftId
+      ? `sourceweft:draft-folders:${session.data.user.id}:${workspaceId}:${draftId}`
+      : null;
+  useEffect(() => {
+    folderByComputer.current = {};
+    setDraftMetadataError(null);
+    if (!folderStorageKey) return;
+    try {
+      const raw = sessionStorage.getItem(folderStorageKey);
+      if (raw) {
+        const value = JSON.parse(raw);
+        if (
+          !value ||
+          Array.isArray(value) ||
+          typeof value !== "object" ||
+          Object.values(value).some((folder) => typeof folder !== "string")
+        )
+          throw new Error("工作文件夹草稿数据不可用。");
+        folderByComputer.current = value;
+      }
+    } catch (e) {
+      setDraftMetadataError(
+        e instanceof Error ? e.message : "无法恢复工作文件夹选择。",
+      );
+    }
+  }, [folderStorageKey]);
+
   const folderId = query.get("folder");
   const target = useMemo<ThreadExecutionTarget | null>(
     () =>
-      !ready
-        ? null
-        : requested === "cloud"
-          ? { kind: "cloud" }
+      requested === "cloud"
+        ? { kind: "cloud" }
+        : !ready
+          ? null
           : requested
             ? {
                 kind: "local",
@@ -53,19 +103,25 @@ export function useChatCreationContext() {
     [ready, requested, nativeId, folderId],
   );
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     try {
-      const native = await ensureLocalHostSession();
+      const native =
+        requested === "cloud"
+          ? null
+          : await ensureLocalHostSession(session.data?.user.id);
       const response = await localRequest<{ devices: LocalDevice[] }>(
         "/v1/local-devices",
       );
+      if (version !== refreshVersion.current) return;
       setDevices(response.devices);
-      setNativeId(native?.deviceId ?? null);
-      setReady(true);
+      if (native) setNativeId(native.deviceId);
+      setReadyFor(requested);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (version === refreshVersion.current)
+        setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [requested, session.data?.user.id]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), 10000);
@@ -75,7 +131,19 @@ export function useChatCreationContext() {
     const next = new URLSearchParams(query.toString());
     if (target?.kind === "local")
       folderByComputer.current[target.deviceId] = target.folderId;
+    if (folderStorageKey) {
+      try {
+        sessionStorage.setItem(
+          folderStorageKey,
+          JSON.stringify(folderByComputer.current),
+        );
+      } catch {
+        setDraftMetadataError("工作文件夹选择保存失败，请暂勿刷新。");
+        return;
+      }
+    }
     next.set("computer", id);
+    if (draftId) next.set("draft", draftId);
     const rememberedFolder = folderByComputer.current[id];
     if (rememberedFolder) next.set("folder", rememberedFolder);
     else next.delete("folder");
@@ -90,10 +158,14 @@ export function useChatCreationContext() {
       : null;
   const invalid = ready && target?.kind === "local" && !selectedDevice;
   return {
+    draftId,
+    userId: session.data?.user.id ?? null,
     target,
     devices,
     nativeId,
-    error: invalid ? "所选电脑不可用，请重新选择。" : error,
+    error: invalid
+      ? "所选电脑不可用，请重新选择。"
+      : (draftMetadataError ?? error),
     ready,
     select,
     refresh,
@@ -199,7 +271,7 @@ export function ChatWorkContext({
           <PopoverTrigger asChild>
             <button
               type="button"
-              disabled={disabled || !creation?.ready}
+              disabled={disabled}
               aria-label="选择云端或电脑"
               className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded px-1 hover:bg-muted disabled:opacity-50"
             >
@@ -426,7 +498,14 @@ export function WorkingFolderPicker({
             onClick={async () => {
               setError(null);
               try {
-                const f = await desktopBridge.chooseLocalFolder();
+                const challenge = await localRequest<{
+                  ticket: string;
+                  userId: string;
+                }>("/v1/local-devices/enroll", {});
+                const f = await desktopBridge.chooseLocalFolder(
+                  challenge.ticket,
+                  challenge.userId,
+                );
                 setFolders((previous) => [...previous, f]);
                 creation.setFolder(f.id);
                 setOpen(false);

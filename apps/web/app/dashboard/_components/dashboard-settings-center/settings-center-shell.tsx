@@ -73,7 +73,19 @@ export function DashboardSettingsCenterModal({
   const wasOpenRef = React.useRef(open);
   const [isLocalPc, setIsLocalPc] = React.useState(false);
   React.useEffect(() => {
-    setIsLocalPc(desktopBridge.isAvailable());
+    if (!desktopBridge.isAvailable()) return;
+    let active = true;
+    void desktopBridge.info().then(
+      (info) => {
+        if (active) setIsLocalPc(info.platform === "macos");
+      },
+      () => {
+        if (active) setIsLocalPc(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
   }, []);
   const visibleMenuItems = isLocalPc
     ? [...menuItems, { key: "local" as const, label: "本机", icon: Monitor }]

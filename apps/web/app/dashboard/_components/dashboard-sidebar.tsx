@@ -250,6 +250,7 @@ export function DashboardSidebar() {
       });
     }
 
+    query.set("draft", crypto.randomUUID());
     startNewChat();
     setOpenMobile(false);
     router.push(`/dashboard/chat${query.size ? `?${query.toString()}` : ""}`);

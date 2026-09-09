@@ -134,6 +134,7 @@ function countSelectedTools(tools: ChatSendInput["tools"]) {
 }
 
 export function ChatCanvas({
+  composerDraftKey,
   workingFolderSlot,
   activeVersionByGroup = {},
   artifactStatuses,
@@ -199,6 +200,7 @@ export function ChatCanvas({
   composerOptions,
   onComposerOptionsChange,
 }: {
+  composerDraftKey?: string;
   workingFolderSlot?: import("react").ReactNode;
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
@@ -664,6 +666,7 @@ export function ChatCanvas({
     return (
       <EmptyState
         workingFolderSlot={workingFolderSlot}
+        composerDraftKey={composerDraftKey}
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         allSources={allSources}
@@ -911,6 +914,7 @@ export function ChatCanvas({
           ) : null}
           {typingIndicator}
           <Composer
+            draftKey={composerDraftKey}
             workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}

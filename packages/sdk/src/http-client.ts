@@ -4,7 +4,7 @@ export type HttpClientOptions = {
   baseUrl: string;
   getToken?: () => string | undefined | Promise<string | undefined>;
   credentials?: RequestCredentials;
-  getHeaders?: () => Promise<Record<string, string>>;
+  getHeaders?: (path: string) => Promise<Record<string, string>>;
 };
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
@@ -110,7 +110,7 @@ export class HttpClient {
     const token = await this.getToken?.();
     const headers = new Headers(init.headers);
     for (const [key, value] of Object.entries(
-      (await this.getHeaders?.()) ?? {},
+      (await this.getHeaders?.(path)) ?? {},
     ))
       headers.set(key, value);
     if (token) {

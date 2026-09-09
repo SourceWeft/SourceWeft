@@ -1,4 +1,9 @@
 import {
+  readChatDraft,
+  writeChatDraft,
+  type ChatDraft,
+} from "../../../../../lib/chat-drafts";
+import {
   Fragment,
   useEffect,
   useMemo,
@@ -40,6 +45,7 @@ import {
   PromptInputSubmit,
   PromptInputTools,
   usePromptInputAttachments,
+  usePromptInputController,
   type PromptInputMentionSourceLoader,
   type PromptInputMessage,
   type PromptInputSegment,
@@ -386,7 +392,9 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
   return option.valueType === "boolean" ? false : undefined;
 }
 
-export function Composer({
+function ComposerBody({
+  draftKey,
+  draftPaused = false,
   workingFolderSlot,
   isEditing = false,
   placeholder,
@@ -425,6 +433,8 @@ export function Composer({
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
 }: {
+  draftKey?: string;
+  draftPaused?: boolean;
   workingFolderSlot?: import("react").ReactNode;
   isEditing?: boolean;
   placeholder?: string;
@@ -1376,6 +1386,7 @@ export function Composer({
         initialInput={initialInput}
         key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachments.map((a) => a.id).join(",")}`}
       >
+        {draftKey && <DraftMirror draftKey={draftKey} paused={draftPaused} />}
         <PromptInput
           accept="image/png,image/jpeg,image/webp,image/gif"
           maxFileSize={10 * 1024 * 1024}
@@ -2642,5 +2653,137 @@ function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
       <ImageIcon className="size-4" />
       <span className="sr-only">Add image</span>
     </PromptInputButton>
+  );
+}
+
+function DraftMirror({
+  draftKey,
+  paused,
+}: {
+  draftKey: string;
+  paused: boolean;
+}) {
+  const { textInput, attachments } = usePromptInputController();
+  const [status, setStatus] = useState("saved");
+  useEffect(() => {
+    if (paused) return;
+    let live = true;
+    setStatus("saving");
+    void writeChatDraft(draftKey, textInput.value, attachments.files).then(
+      () => {
+        if (live) setStatus("saved");
+      },
+      (error) => {
+        if (live) {
+          setStatus("error");
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "草稿保存失败，请暂勿刷新。",
+          );
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [draftKey, paused, textInput.value, attachments.files]);
+  return <span hidden data-draft-status={status} />;
+}
+function PersistentComposer(
+  props: import("react").ComponentProps<typeof ComposerBody> & {
+    draftKey: string;
+  },
+) {
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    draft: ChatDraft | null;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const loadKey = `${props.draftKey}:${props.inputKey ?? 0}:${retry}`;
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void readChatDraft(props.draftKey).then(
+      (draft) => {
+        if (active) {
+          setLoaded({ key: loadKey, draft });
+          setPaused(false);
+        }
+      },
+      (e) => {
+        if (active) setError(e instanceof Error ? e.message : "无法恢复草稿。");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [props.draftKey, loadKey]);
+  const files = useMemo(
+    () =>
+      loaded?.draft?.files.map((file) => ({
+        id: file.id,
+        type: "file" as const,
+        filename: file.filename,
+        mediaType: file.mediaType,
+        url: URL.createObjectURL(file.blob),
+      })) ?? [],
+    [loaded],
+  );
+  useEffect(
+    () => () => {
+      files.forEach((file) => URL.revokeObjectURL(file.url));
+    },
+    [files],
+  );
+  if (error)
+    return (
+      <div role="alert" className="space-y-2 text-sm text-destructive">
+        {error}
+        <button
+          type="button"
+          className="ml-2 underline"
+          onClick={() => setRetry((value) => value + 1)}
+        >
+          重试
+        </button>
+      </div>
+    );
+  if (loaded?.key !== loadKey)
+    return (
+      <div className="min-h-24 text-sm text-muted-foreground">
+        正在恢复草稿…
+      </div>
+    );
+  return (
+    <ComposerBody
+      {...props}
+      key={`${props.draftKey}:${props.inputKey ?? 0}:${retry}`}
+      draftPaused={paused}
+      initialInput={props.initialInput ?? loaded.draft?.text ?? ""}
+      initialAttachments={files}
+      onSubmit={(...args) => {
+        setPaused(true);
+        void writeChatDraft(
+          props.draftKey,
+          args[4] ?? args[0].text,
+          args[0].files,
+        ).catch((e) =>
+          toast.error(e instanceof Error ? e.message : "草稿保存失败。"),
+        );
+        props.onSubmit?.(...args);
+      }}
+    />
+  );
+}
+export function Composer(
+  props: import("react").ComponentProps<typeof ComposerBody>,
+) {
+  return props.draftKey ? (
+    <PersistentComposer {...props} draftKey={props.draftKey} />
+  ) : (
+    <ComposerBody {...props} />
   );
 }

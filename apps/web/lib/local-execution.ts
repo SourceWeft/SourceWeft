@@ -1,6 +1,9 @@
 "use client";
 import { apiBaseUrl } from "./api-base-url";
-import { localHostHeaders } from "./local-host-session";
+import {
+  cachedLocalHostHeaders,
+  clearLocalHostSession,
+} from "./local-host-session";
 
 export type LocalDevice = {
   id: string;
@@ -19,11 +22,13 @@ export async function localRequest<T>(
     credentials: "include",
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(await localHostHeaders()),
+      ...(await cachedLocalHostHeaders()),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json();
+  if (!response.ok && value.code === "NATIVE_PROOF_EXPIRED")
+    clearLocalHostSession();
   if (!response.ok)
     throw new Error(
       value.message ?? `Local execution request failed (${response.status})`,
