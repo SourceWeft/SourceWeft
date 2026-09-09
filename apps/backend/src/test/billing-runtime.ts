@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import type { BillingRuntime } from "@sourceweft/contracts/billing-runtime";
 import type {
   BillingSummaryResponse,
@@ -55,9 +56,12 @@ export function adaptBillingTestPort<T extends object>(
         ),
       };
     },
-    async meterIngestion(...args) {
-      return { status: "settled", billing: await ingestion(...args) };
-    },
+    meterIngestion: vi.fn(
+      async (...args: Parameters<BillingRuntime["meterIngestion"]>) => ({
+        status: "settled" as const,
+        billing: await ingestion(...args),
+      }),
+    ),
     async reconcileProviderCost() {
       throw new Error("Cost reconciliation was not configured for this test");
     },

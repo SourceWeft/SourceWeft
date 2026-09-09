@@ -61,3 +61,7 @@ Core billing and quota entries are hidden on desktop/mobile and in loading skele
 Removed the core billing page directory, redirect compatibility, client re-export wrappers and unused core checkout/success components. Commercial edition templates now generate the checkout and success pages directly, preserving their URLs and query parameters. Core no longer registers those pages; the shared loading shell renders billing skeletons only for the commercial edition.
 
 Both editions were freshly projected and passed the source boundary check, which now requires billing pages to be absent in core and present in commercial. Core and the updated installed commercial workspace passed Web type checks. The 80-file / 580-test Web suite, six source preparation tests and ESLint on changed/generated Web files passed. This cleanup did not repeat browser E2E or production builds; earlier E2E coverage is recorded above.
+
+## PR CI follow-up — 2026-09-09
+
+PR #5's initial remote run passed both edition matrices (including builds, migrations, API E2E and startup), lint/types and HTML verification. The full Node 22/24 suites found that the test-only billing adapter replaced the ingestion spy with an ordinary function, breaking 11 assertions across indexing and embedding tests. The adapter now records calls while returning the new runtime result. Both affected files passed locally (15 tests), and backend type checking passed. The fix is submitted for a fresh full CI run; the initial failed run is not counted as a successful full-suite verification.
