@@ -144,6 +144,8 @@ export class StripeBillingProvider implements BillingProviderAdapter {
     const session = await this.client.checkout.sessions.create(
       {
         mode: subscription ? "subscription" : "payment",
+        // Keep this fixed-price Checkout adapter independent of account-level MoR defaults.
+        managed_payments: { enabled: false },
         adaptive_pricing: { enabled: false },
         automatic_tax: { enabled: false },
         allow_promotion_codes: false,

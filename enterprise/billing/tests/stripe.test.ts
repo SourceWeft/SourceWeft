@@ -93,6 +93,7 @@ test("official SDK creates server-priced Checkout with metadata and stable idemp
   assert.equal(call.body.get("line_items[0][price_data][unit_amount]"), "1250");
   assert.equal(call.body.get("mode"), "payment");
   assert.equal(call.body.get("adaptive_pricing[enabled]"), "false");
+  assert.equal(call.body.get("managed_payments[enabled]"), "false");
   assert.equal(call.body.get("client_reference_id"), result.orderId);
   assert.equal(call.body.get("metadata[sourceweftAccountId]"), "acct_fixture");
   assert.equal(
