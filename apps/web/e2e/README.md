@@ -15,6 +15,8 @@ The default source is a real script-bearing Cisco fixture; it is queued by the c
 
 ## Full acceptance fixtures
 
+The approved inert fixtures are now published at https://github.com/QThans/sourceweft-skill-registry-e2e. The committed `fixtures/public-registry.json` pins A/B/C and expected original SKILL.md hashes. After setup, run `pnpm test:e2e:skills:full` from `apps/web` for the complete eight-case acceptance run.
+
 Set `SKILL_E2E_FIXTURES_FILE` to a local JSON file with fixed 40-character-commit GitHub tree URLs:
 
 ```json

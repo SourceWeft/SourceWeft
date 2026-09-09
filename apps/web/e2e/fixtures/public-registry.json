@@ -1,0 +1,20 @@
+{
+  "sourceA": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/9b04c70ce47f804c973ce3ddb1a2f7ef9f8f35a8/skills/writer",
+  "versionB": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/4b34663e9df6e784943069afb714e387c84270ff/skills/writer",
+  "versionC": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/f923c9a99af1cb9d35b77f6df5b26c565ea5ae9b/skills/writer",
+  "mixed": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/9b04c70ce47f804c973ce3ddb1a2f7ef9f8f35a8/skills/mixed",
+  "invalid": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/9b04c70ce47f804c973ce3ddb1a2f7ef9f8f35a8/skills/invalid",
+  "spoof": "https://github.com/QThans/sourceweft-skill-registry-e2e/tree/9b04c70ce47f804c973ce3ddb1a2f7ef9f8f35a8/skills/spoof",
+  "name": "writer",
+  "title": "Writer",
+  "fileHashes": {
+    "skills/invalid/broken/SKILL.md": "426fbbaecbc0d50c7bceb3607a5f7fd2b171f47984a523cb8e7546a73ab350c2",
+    "skills/mixed/broken/SKILL.md": "426fbbaecbc0d50c7bceb3607a5f7fd2b171f47984a523cb8e7546a73ab350c2",
+    "skills/mixed/encoding/SKILL.md": "1c2f9860089b9f008de0867b5b78ad751802c4a44d7a826189e07305c6ce4a27",
+    "skills/mixed/long/SKILL.md": "b65e56c2970964c4d1e420bcfc6d65780c8658b4eab93c2b501ae16b47dd7641",
+    "skills/mixed/tools/SKILL.md": "cbc6a1bf970b575ea3542b7e17b7e5aae550d3dacada17abc552a153f71b857f",
+    "skills/mixed/valid/SKILL.md": "c994cb5c726624aa2a11107d6f5e3216d2ce43cf29511925c8672722e1c1b07b",
+    "skills/spoof/SKILL.md": "2d9c7991d7bc70b3287ffab223d1dbcd216e6d5cf5ba2e2cd4770aa1f8dd8910",
+    "skills/writer/SKILL.md": "d5f32094a1052088312f27c3222621788a6b6fb7febb53a25c7f8209178efb3c"
+  }
+}

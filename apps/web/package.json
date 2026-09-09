@@ -15,7 +15,8 @@
     "test:watch": "vitest --config vitest.config.ts",
     "test:changed": "vitest run --config vitest.config.ts --changed --passWithNoTests",
     "test:coverage": "vitest run --config vitest.config.ts --coverage --passWithNoTests",
-    "test:e2e:skills": "playwright test e2e/skills-registry.spec.ts"
+    "test:e2e:skills": "playwright test e2e/skills-registry.spec.ts",
+    "test:e2e:skills:full": "SKILL_E2E_REQUIRE_ALL=1 SKILL_E2E_FIXTURES_FILE=e2e/fixtures/public-registry.json playwright test e2e/skills-registry.spec.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.2",

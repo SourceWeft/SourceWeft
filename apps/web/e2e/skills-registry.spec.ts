@@ -8,6 +8,7 @@ import {
   type BrowserContext,
 } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import type { RegistrySkillResult } from "@sourceweft/contracts";
@@ -27,6 +28,7 @@ const fixtures: {
   spoof?: string;
   versionB?: string;
   versionC?: string;
+  fileHashes?: Record<string, string>;
 } = process.env.SKILL_E2E_FIXTURES_FILE
   ? JSON.parse(readFileSync(process.env.SKILL_E2E_FIXTURES_FILE, "utf8"))
   : {};
@@ -226,11 +228,56 @@ test("E2 mixed malformed fixtures return every item", async ({ page }) => {
     !fixtures.mixed,
     "BLOCKED: fixed public mixed fixture URL not supplied",
   );
-  await login(page);
+  const ws = await login(page);
   const { response, body } = await submit(page, fixtures.mixed!);
   expect(response.status()).toBe(201);
   expect(body.skills!.some((s) => s.status === "failed")).toBeTruthy();
   expect(body.skills!.some((s) => s.status === "indexed")).toBeTruthy();
+  if (fixtures.fileHashes) {
+    expect(body.skills).toHaveLength(5);
+    expect(body.skills!.filter((s) => s.status === "indexed")).toHaveLength(4);
+    expect(body.skills!.filter((s) => s.status === "failed")).toHaveLength(1);
+    const catalog = await page.request.get(
+      `${api}/v1/workspaces/${ws}/skills/catalog`,
+    );
+    const rows = (await catalog.json()).items;
+    for (const item of body.skills!.filter((s) => s.status !== "failed")) {
+      const row = rows.find(
+        (v: { skillVersionId: string }) =>
+          v.skillVersionId === item.skillVersionId,
+      );
+      const response = await page.request.get(
+        `${api}/v1/workspaces/${ws}/skills/catalog/${encodeURIComponent(row.catalogId)}/versions/${item.skillVersionId}`,
+      );
+      expect(response.status()).toBe(200);
+      const detail = await response.json();
+      const expected = fixtures.fileHashes[`${item.sourcePath}/SKILL.md`];
+      expect(
+        detail.files.find((f: { path: string }) => f.path === "SKILL.md")
+          .contentHash,
+      ).toBe(expected);
+      expect(
+        createHash("sha256").update(detail.skillContent).digest("hex"),
+      ).toBe(expected);
+      expect(detail.version.diagnostics).toEqual(item.diagnostics);
+    }
+    const broken = body.skills!.find((s) => s.status === "failed")!;
+    expect(broken.diagnostics[0]).toMatchObject({
+      code: "SKILL_YAML_INVALID",
+      file: "SKILL.md",
+    });
+    expect(broken.diagnostics[0]!.line).toBeGreaterThan(0);
+    expect(
+      body.skills!.some((s) =>
+        s.diagnostics.some((d) => d.code === "FILE_EXCLUDED"),
+      ),
+    ).toBeTruthy();
+    expect(
+      body.skills!.some((s) =>
+        s.diagnostics.some((d) => d.code === "DESCRIPTION_SUMMARIZED"),
+      ),
+    ).toBeTruthy();
+  }
   await expect(
     page.getByRole("region", { name: "Import results" }),
   ).toContainText("failed");
@@ -327,7 +374,31 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
       })
     ).ok(),
   ).toBeTruthy();
+  const before = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
+  const pin = (await before.json()).items.find(
+    (v: { skillVersionId: string }) => v.skillVersionId === a.skillVersionId,
+  );
+  const config = { fixtureNote: "preserve through upgrade and rollback" };
+  expect(
+    (
+      await page.request.patch(
+        `${api}/v1/workspaces/${ws}/skills/${pin.workspaceSkillId}`,
+        { data: { enabled: false, configJson: config } },
+      )
+    ).status(),
+  ).toBe(200);
   const b = (await submit(page, fixtures.versionB!)).body.skills![0]!;
+  const still = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
+  expect(
+    (await still.json()).items.find(
+      (v: { workspaceSkillId: string }) =>
+        v.workspaceSkillId === pin.workspaceSkillId,
+    ),
+  ).toMatchObject({
+    skillVersionId: a.skillVersionId,
+    enabled: false,
+    configJson: config,
+  });
   if (b.status === "queued") await publish(b);
   await closeResult(page);
   await page.reload();
@@ -347,6 +418,16 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
     page.getByRole("button", { name: "Use selected version" }).click(),
   ]);
   expect(switched.status()).toBe(200);
+  expect((await switched.json()).workspaceSkill).toMatchObject({
+    skillVersionId: b.skillVersionId,
+    enabled: false,
+    configJson: config,
+  });
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("heading", { name: "Writer B", exact: true }),
+  ).toBeVisible();
   await page
     .getByLabel("Version", { exact: true })
     .selectOption(a.skillVersionId!);
@@ -362,6 +443,34 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
     page.getByRole("button", { name: "Use selected version" }).click(),
   ]);
   expect(rolledBack.status()).toBe(200);
+  expect((await rolledBack.json()).workspaceSkill).toMatchObject({
+    skillVersionId: a.skillVersionId,
+    enabled: false,
+    configJson: config,
+  });
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("heading", { name: "Writer A", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "SKILL.md", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("heading", { name: "Writer A", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "../../output/playwright/skill-version-rollback.png",
+    fullPage: true,
+  });
+  const latest = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog`,
+  );
+  expect(
+    (await latest.json()).items.find(
+      (v: { skillId: string }) => v.skillId === row.skillId,
+    ).skillVersionId,
+  ).toBe(b.skillVersionId);
   const installed = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
   expect(
     (await installed.json()).items.some(
@@ -433,11 +542,16 @@ test("E8 published is not public; explicit admin visibility controls history acc
   const a = (await submit(page)).body.skills![0]!;
   await publish(a);
   await closeResult(page);
+  if (fixtures.versionB) {
+    const b = (await submit(page, fixtures.versionB)).body.skills![0]!;
+    await publish(b);
+    await closeResult(page);
+  }
   const own = await page.request.get(
     `${api}/v1/workspaces/${ws}/skills/catalog`,
   );
   const row = (await own.json()).items.find(
-    (s: { skillVersionId: string }) => s.skillVersionId === a.skillVersionId,
+    (s: { slug: string }) => s.slug === a.slug,
   );
   const context = await browser.newContext({ baseURL: web });
   const other = await context.newPage();
@@ -460,7 +574,16 @@ test("E8 published is not public; explicit admin visibility controls history acc
       )
     ).ok(),
   ).toBeTruthy();
-  expect((await other.request.get(url)).status()).toBe(200);
+  const publicHistory = await other.request.get(url);
+  expect(publicHistory.status()).toBe(200);
+  expect(
+    (await publicHistory.json()).items.some(
+      (v: { id: string }) => v.id === a.skillVersionId,
+    ),
+  ).toBeTruthy();
+  expect((await other.request.get(`${url}/${a.skillVersionId}`)).status()).toBe(
+    200,
+  );
   await other.reload();
   await expect(
     other.getByRole("heading", { name: skillTitle, exact: true }),

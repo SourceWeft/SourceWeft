@@ -284,14 +284,23 @@ export function SkillDetailDialog({
                         </TabsTrigger>
                       </TabsList>
                     </div>
+                    {/* Immutable version documents must not share streaming block state. */}
                     <TabsContent className="m-0 px-5 py-5" value="readme">
-                      <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                      <MessageResponse
+                        key={`${activeItem.skillVersionId}:readme`}
+                        mode="static"
+                        className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                      >
                         {readmeContent}
                       </MessageResponse>
                     </TabsContent>
                     <TabsContent className="m-0 px-5 py-5" value="skill">
                       {skillContent ? (
-                        <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                        <MessageResponse
+                          key={`${activeItem.skillVersionId}:skill`}
+                          mode="static"
+                          className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                        >
                           {skillContent}
                         </MessageResponse>
                       ) : (
