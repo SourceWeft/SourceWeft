@@ -1,7 +1,8 @@
+import { adaptBillingTestPort } from "../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../test/billing-runtime";
 import type { ModelUsageContext } from "./billing/context";
 
 const rawMocks = vi.hoisted(() => ({
@@ -25,7 +26,7 @@ function createBilling(
   billingMode = "enforced",
   available = 500,
 ): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(
       async (teamId: string) =>
         ({
@@ -36,7 +37,7 @@ function createBilling(
     ),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function meterUsageStub() {

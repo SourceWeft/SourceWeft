@@ -29,7 +29,7 @@ export interface BillingScope {
    */
   totalUsage(): UsageInfo | undefined;
   /** Remaining scope-local credit budget; drives the per-call gate with no DB read. */
-  remainingCredits(): number;
+  remainingCredits(): number | null;
   settle(input: {
     options: ModelCallBillingOptions;
     usage: UsageInfo | undefined;
@@ -64,7 +64,7 @@ export function openBillingScope(input: {
   context: ModelUsageContext;
   billing: ContentBillingPort;
   billingMode: BillingMode;
-  availableCredits: number;
+  availableCredits: number | null;
   meterUsage?: MeterUsageFn;
   scheduleReconciliation?: ScheduleProviderCostReconciliationFn;
 }): BillingScope {
@@ -116,7 +116,7 @@ export function openBillingScope(input: {
 
       if (trace) {
         traces.push(trace);
-        remaining -= trace.consumedCredits;
+        if (remaining !== null) remaining -= trace.consumedCredits;
       }
       return trace;
     },

@@ -367,7 +367,7 @@ export const indexSourceRequestSchema = z.object({
 
 export const indexSourceResponseSchema = z.object({
   source: sourceSchema,
-  billing: meterIngestionResponseSchema,
+  billing: meterIngestionResponseSchema.optional(),
   indexing: z.object({
     chunkCount: z.number().int().nonnegative(),
     embeddingProfileId: z.string(),

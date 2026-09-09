@@ -1,0 +1,16 @@
+export const billingHttpPaths = [
+  ["post", "/v1/billing/pricing/checkout"],
+  ["get", "/v1/billing/orders/:orderId"],
+  ["get", "/v1/teams/:teamId/billing/summary"],
+  ["get", "/v1/teams/:teamId/billing/usage"],
+  ["get", "/v1/teams/:teamId/billing/ledger"],
+  ["get", "/v1/teams/:teamId/billing/activity"],
+  ["get", "/v1/teams/:teamId/billing/subscription"],
+  ["post", "/v1/teams/:teamId/billing/spend-limits"],
+  ["post", "/v1/teams/:teamId/billing/topups/checkout"],
+  ["post", "/v1/teams/:teamId/billing/subscription/checkout"],
+  ["post", "/v1/teams/:teamId/billing/subscription/seats"],
+  ["post", "/v1/teams/:teamId/billing/subscription/seats/preview"],
+  ["post", "/v1/teams/:teamId/billing/subscription/portal"],
+  ["post", "/v1/teams/:teamId/billing/subscription/cancel"],
+] as const;

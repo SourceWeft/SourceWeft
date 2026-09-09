@@ -21,6 +21,15 @@ stay schema-focused: include schema-bearing plugins, but keep runtime email
 handlers, webhook callbacks, onboarding hooks, and workspace side effects out of
 migration mode.
 
+## Billing editions
+
+The core source binds no Creem plugin, including in migration mode. The
+commercial source projection contributes Creem schema through a schema-only
+factory; it does not register runtime webhooks or require checkout credentials
+for migration. Use the same edition for migration and deployment. Existing
+Creem fields/tables must not be dropped when a core migration sees an older
+commercial database. Drizzle still does not own those Auth fields.
+
 ## Commands
 
 Run auth migrations before Drizzle migrations:

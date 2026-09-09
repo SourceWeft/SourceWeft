@@ -1,14 +1,15 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import { billingAdmission } from "./admission";
 
 function billingWith(
   billingMode: string,
   available: number,
 ): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(
       async (teamId: string) =>
         ({
@@ -19,7 +20,7 @@ function billingWith(
     ),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 const scope = { teamId: "team_1", userId: "user_1" };

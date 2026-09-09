@@ -57,6 +57,12 @@ impl RemoteHost {
             status.connected = false;
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    pub async fn enroll(&self, _ticket: String) -> Result<RemoteStatus, String> {
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
+    }
+
+    #[cfg(target_os = "macos")]
     pub async fn enroll(&self, ticket: String) -> Result<RemoteStatus, String> {
         if self.status().device_id.is_some() {
             return Err("A local host is already enrolled in this application session.".into());

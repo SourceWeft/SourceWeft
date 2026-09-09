@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { billingUiAvailable } from "../../lib/billing-edition/catalog";
 
 type SkeletonProps = {
   className?: string;
@@ -84,7 +85,7 @@ function DashboardSkeletonContentForPath({
   if (isSkillsListRoute(pathname)) {
     return <DashboardDeferredContent />;
   }
-  if (pathname?.startsWith("/dashboard/billing")) {
+  if (billingUiAvailable && pathname?.startsWith("/dashboard/billing")) {
     return <BillingSkeletonContent />;
   }
   return <DashboardHomeSkeletonContent />;

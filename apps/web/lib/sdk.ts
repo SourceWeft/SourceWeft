@@ -1,5 +1,6 @@
 import {
   BillingClient,
+  DeploymentClient,
   ConnectorsClient,
   ContentClient,
   DashboardClient,
@@ -20,6 +21,7 @@ const httpClient = new HttpClient({
 
 export const jobsClient = new JobsClient(httpClient);
 export const billingClient = new BillingClient(httpClient);
+export const deploymentClient = new DeploymentClient(httpClient);
 export const connectorsClient = new ConnectorsClient(httpClient);
 export const contentClient = new ContentClient(httpClient);
 export const dashboardClient = new DashboardClient(httpClient);

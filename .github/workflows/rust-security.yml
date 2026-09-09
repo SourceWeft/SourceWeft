@@ -1,0 +1,71 @@
+name: Rust Security Regression
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/src-tauri/**'
+      - 'apps/mobile/src-tauri/**'
+      - 'third_party/rust/**'
+      - 'scripts/ci/verify-glib.py'
+      - '.github/workflows/rust-security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop/src-tauri/**'
+      - 'apps/mobile/src-tauri/**'
+      - 'third_party/rust/**'
+      - 'scripts/ci/verify-glib.py'
+      - '.github/workflows/rust-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  glib:
+    name: glib backport and Linux applications
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: 1.94.1
+      CARGO_BUILD_JOBS: 2
+      CARGO_TARGET_DIR: ${{ github.workspace }}/output/rust-security/target
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native Linux prerequisites
+        run: |
+          test "$(uname -m)" = x86_64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libglib2.0-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+          rustup toolchain install 1.94.1 --profile minimal
+          rustc --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            output/rust-security/target
+          key: glib-security-${{ runner.os }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'apps/mobile/src-tauri/Cargo.lock', 'third_party/rust/glib-0.18.5/Cargo.lock') }}
+          restore-keys: |
+            glib-security-${{ runner.os }}-1.94.1-
+      - name: Verify provenance and platform dependency graphs
+        run: python3 scripts/ci/verify-glib.py --metadata --output output/rust-security/verification.json
+      - name: Run upstream optimized iterator regressions
+        run: cargo test --locked --release --manifest-path third_party/rust/glib-0.18.5/Cargo.toml --lib test_variant_str_iter
+      - name: Run project optimized iterator regressions
+        run: cargo test --locked --release --manifest-path third_party/rust/glib-0.18.5/Cargo.toml --test sourceweft_variant_iter
+      - name: Build desktop Linux application
+        run: cargo build --locked --release --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
+      - name: Build mobile library on Linux
+        run: cargo build --locked --release --manifest-path apps/mobile/src-tauri/Cargo.toml --lib --target x86_64-unknown-linux-gnu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-security-${{ github.sha }}
+          path: output/rust-security/verification.json
+          if-no-files-found: ignore
+          retention-days: 14

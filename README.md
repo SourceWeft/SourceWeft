@@ -128,3 +128,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 [Apache License 2.0](LICENSE)
 
 Content under `enterprise/`, if present, is excluded and governed by its separate license. See [LICENSE](LICENSE) for the scope.
+
+Billing is optional. The default core build runs without credits/pages billing.
+Commercial subscription, payment and billing UI are provided by `enterprise/billing`;
+see [billing build and migration instructions](enterprise/billing/README.md).

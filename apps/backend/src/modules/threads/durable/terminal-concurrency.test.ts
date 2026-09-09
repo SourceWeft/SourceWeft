@@ -446,9 +446,10 @@ const jobPayload = () => ({
 for (const finishReason of ["stop", "tool_confirmation_requested"]) {
   test(`committed metering survives the real runner's final progress flush (${finishReason})`, async () => {
     const messages = await import("../message-repository");
-    const { billingService } = await import("../../billing");
+    const { billingRuntime: billingService } =
+      await import("../../../billing-host/bindings");
     const consume = vi
-      .spyOn(billingService, "meterConsume")
+      .spyOn(billingService, "settleModelUsage")
       .mockRejectedValue(new Error("Progress must never charge again"));
     vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
       async () => {},
@@ -551,7 +552,8 @@ async function useFailingPreparation(prepare: () => Promise<never>) {
     await vi.importActual<typeof import("../stream/service")>(
       "../stream/service",
     );
-  const { billingService } = await import("../../billing");
+  const { billingRuntime: billingService } =
+    await import("../../../billing-host/bindings");
   const streamService = new ContentThreadStreamService(
     { prepareThreadTurn: prepare } as never,
     undefined,

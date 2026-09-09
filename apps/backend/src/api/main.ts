@@ -1,3 +1,4 @@
+import { validateBillingStartup } from "../billing-host/bindings";
 import { serve } from "@hono/node-server";
 import { config } from "../shared/config";
 import { closeDatabase } from "@sourceweft/db";
@@ -16,6 +17,7 @@ import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 import { attachLocalDeviceGateway } from "../modules/devices/gateway";
 
+validateBillingStartup();
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();

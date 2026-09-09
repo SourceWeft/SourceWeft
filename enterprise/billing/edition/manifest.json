@@ -1,0 +1,34 @@
+{
+  "dependencies": {
+    "apps/backend/package.json": {
+      "@sourceweft/billing": "workspace:*"
+    },
+    "apps/web/package.json": {
+      "@sourceweft/billing": "workspace:*"
+    }
+  },
+  "bindings": {
+    "apps/backend/src/billing-host/bindings.ts": "backend-bindings.ts",
+    "apps/backend/src/scripts/audit-chat-metering.ts": "scripts/audit-chat-metering.ts",
+    "apps/backend/src/scripts/create-creem-product.ts": "scripts/create-creem-product.ts",
+    "apps/backend/src/scripts/delete-creem-product.ts": "scripts/delete-creem-product.ts",
+    "apps/backend/src/scripts/anydoc-billing-e2e.ts": "scripts/anydoc-billing-e2e.ts",
+    "apps/web/lib/billing-edition/client.tsx": "web-client.tsx",
+    "apps/web/lib/billing-edition/auth-client.ts": "web-auth-client.ts",
+    "apps/web/lib/billing-edition/catalog.ts": "web-catalog.ts",
+    "apps/backend/.env.example": "backend.env.example",
+    "apps/web/app/dashboard/billing/page.tsx": "routes/billing/page.tsx",
+    "apps/web/app/dashboard/billing/loading.tsx": "routes/billing/loading.tsx",
+    "apps/web/app/dashboard/billing/checkout/page.tsx": "routes/billing/checkout/page.tsx",
+    "apps/web/app/dashboard/billing/checkout/loading.tsx": "routes/billing/checkout/loading.tsx"
+  },
+  "overrides": {
+    "creem": "1.6.0"
+  },
+  "scripts": {
+    "apps/backend/package.json": {
+      "creem:product:create": "tsx src/scripts/create-creem-product.ts",
+      "creem:product:delete": "tsx src/scripts/delete-creem-product.ts"
+    }
+  }
+}

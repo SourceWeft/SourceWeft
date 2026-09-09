@@ -70,7 +70,9 @@ pub async fn enable_local_host(
     if !allowed_caller(window.label(), &url, dev) {
         return Err("LOCAL_HOST_ACCESS_DENIED".into());
     }
-    let host = app.state::<crate::remote_host::RemoteHost>();
+    let host = app
+        .try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?;
     host.enroll(ticket).await
 }
 
@@ -85,7 +87,9 @@ pub fn disconnect_local_host(app: AppHandle, window: WebviewWindow) -> Result<()
     if !allowed_caller(window.label(), &url, dev) {
         return Err("LOCAL_HOST_ACCESS_DENIED".into());
     }
-    app.state::<crate::remote_host::RemoteHost>().disconnect();
+    app.try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?
+        .disconnect();
     Ok(())
 }
 
