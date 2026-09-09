@@ -110,6 +110,13 @@ export type SkillManifestJson = {
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
+    ingestion?: {
+      formatVersion: 1; analyzedAt: string; parserVersion: string; scanRuleVersion: string;
+      diagnostics: Array<{ code: string; severity: "error" | "warning"; message: string; file?: string; field?: string; line?: number; column?: number }>;
+      findings: Array<{ ruleId: string; file?: string; line?: number }>;
+    };
+    moderation?: { action: "publish" | "reject" | "revoke"; actorUserId: string; at: string; reason?: string };
+    visibilityChange?: { actorUserId: string; at: string; visibility: "public" | "restricted" };
     /** Declared license name (e.g. "MIT") — display-only. */
     license?: string;
     fileManifest: {

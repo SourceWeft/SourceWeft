@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import type { RegistryVersionDetail } from "@sourceweft/contracts";
+import { RegistryVersions } from "./registry-versions";
 import {
   AlertTriangle,
   ExternalLink,
@@ -79,6 +81,7 @@ export function SkillDetailDialog({
   onInstall,
   onOpenChange,
   onUninstall,
+  onVersionChanged,
   pending,
   workspaceId,
 }: {
@@ -86,6 +89,7 @@ export function SkillDetailDialog({
   onInstall: (item: SkillCatalogItem) => void;
   onOpenChange: (open: boolean) => void;
   onUninstall: (item: SkillCatalogItem) => void;
+  onVersionChanged?: () => void;
   pending: boolean;
   workspaceId: string | null;
 }) {
@@ -94,9 +98,17 @@ export function SkillDetailDialog({
   const [loading, setLoading] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
   const generationRef = React.useRef(0);
+  const versionChangedRef = React.useRef(false);
+  const [registryDetail, setRegistryDetail] =
+    React.useState<RegistryVersionDetail | null>(null);
+  const handleVersionView = React.useCallback(
+    (value: RegistryVersionDetail) => setRegistryDetail(value),
+    [],
+  );
 
   React.useEffect(() => {
     const generation = ++generationRef.current;
+    setRegistryDetail(null);
     if (!item || !workspaceId) {
       setDetail(null);
       setError(null);
@@ -126,14 +138,45 @@ export function SkillDetailDialog({
       });
   }, [item, reloadKey, workspaceId]);
 
-  const activeItem = detail?.skill ?? item;
-  const canManageInstall = activeItem?.installable !== false;
+  const baseItem = detail?.skill ?? item;
+  const activeItem =
+    baseItem && registryDetail
+      ? {
+          ...baseItem,
+          skillVersionId: registryDetail.version.id,
+          version: registryDetail.version.version,
+          catalogId: `${baseItem.skillId}:${registryDetail.version.id}`,
+          description: registryDetail.version.description,
+          displayName: registryDetail.version.displayName,
+          installable: registryDetail.version.status === "published",
+          sourceUrl: registryDetail.version.sourceUrl,
+        }
+      : baseItem;
+  const installed =
+    activeItem?.sourceType === "registry_github"
+      ? !!activeItem.enabledWorkspaceSkillId
+      : activeItem?.enabled;
+  const canManageInstall = activeItem?.installable !== false || installed;
   const readmeContent = activeItem
-    ? (detail?.readmeContent ?? readmeFallback(activeItem))
+    ? registryDetail
+      ? (registryDetail.skillContent ?? readmeFallback(activeItem))
+      : (detail?.readmeContent ?? readmeFallback(activeItem))
     : "";
+  const skillContent = registryDetail
+    ? registryDetail.skillContent
+    : detail?.skillContent;
 
   return (
-    <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
+    <Dialog
+      open={Boolean(item)}
+      onOpenChange={(open) => {
+        if (!open && versionChangedRef.current) {
+          versionChangedRef.current = false;
+          onVersionChanged?.();
+        }
+        onOpenChange(open);
+      }}
+    >
       <DialogContent
         className="grid max-h-[calc(100svh-2rem)] w-[min(1080px,calc(100vw-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
         constrainWidth={false}
@@ -154,24 +197,26 @@ export function SkillDetailDialog({
             {activeItem && canManageInstall ? (
               <Button
                 className="mr-3 h-8 shrink-0 px-3 text-xs"
-                disabled={pending}
+                disabled={
+                  pending ||
+                  (activeItem.sourceType === "registry_github" &&
+                    !registryDetail)
+                }
                 onClick={() =>
-                  activeItem.enabled
-                    ? onUninstall(activeItem)
-                    : onInstall(activeItem)
+                  installed ? onUninstall(activeItem) : onInstall(activeItem)
                 }
                 size="sm"
                 type="button"
-                variant={activeItem.enabled ? "secondary" : "default"}
+                variant={installed ? "secondary" : "default"}
               >
                 {pending ? (
                   <Loader2 className="size-4 animate-spin" />
-                ) : activeItem.enabled ? (
+                ) : installed ? (
                   <Trash2 className="size-4" />
                 ) : (
                   <SkillIcon className="size-4" />
                 )}
-                {activeItem.enabled ? "Uninstall" : "Install"}
+                {installed ? "Uninstall" : "Install"}
               </Button>
             ) : null}
           </div>
@@ -199,11 +244,23 @@ export function SkillDetailDialog({
           ) : activeItem ? (
             <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_260px]">
               <div className="flex min-w-0 flex-col gap-4">
+                {item?.sourceType === "registry_github" && workspaceId ? (
+                  <RegistryVersions
+                    key={item.catalogId}
+                    workspaceId={workspaceId}
+                    catalogId={item.catalogId}
+                    initialVersionId={item.skillVersionId}
+                    onView={handleVersionView}
+                    onChanged={() => {
+                      versionChangedRef.current = true;
+                    }}
+                  />
+                ) : null}
                 {activeItem.flagged ? (
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    This skill was flagged during automated review and is held for
-                    a maintainer to approve before it is surfaced more widely.
+                    Automated checks found review flags in this skill. See the
+                    selected version for its current review decision.
                   </section>
                 ) : null}
                 {activeItem.sourceType === "registry_github" &&
@@ -211,39 +268,48 @@ export function SkillDetailDialog({
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     This is an unverified community skill indexed from GitHub.
-                    Review the source before installing — its instructions run in
-                    your conversations.
+                    Review the source before installing — its instructions run
+                    in your conversations.
                   </section>
                 ) : null}
                 <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
-                <Tabs className="gap-0" defaultValue="readme">
-                  <div className="border-b border-border px-5 py-3">
-                    <TabsList className="h-8" variant="line">
-                      <TabsTrigger className="px-2.5 text-xs" value="readme">
-                        README
-                      </TabsTrigger>
-                      <TabsTrigger className="px-2.5 text-xs" value="skill">
-                        SKILL.md
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
-                  <TabsContent className="m-0 px-5 py-5" value="readme">
-                    <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                      {readmeContent}
-                    </MessageResponse>
-                  </TabsContent>
-                  <TabsContent className="m-0 px-5 py-5" value="skill">
-                    {detail?.skillContent ? (
-                      <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                        {detail.skillContent}
+                  <Tabs className="gap-0" defaultValue="readme">
+                    <div className="border-b border-border px-5 py-3">
+                      <TabsList className="h-8" variant="line">
+                        <TabsTrigger className="px-2.5 text-xs" value="readme">
+                          README
+                        </TabsTrigger>
+                        <TabsTrigger className="px-2.5 text-xs" value="skill">
+                          SKILL.md
+                        </TabsTrigger>
+                      </TabsList>
+                    </div>
+                    {/* Immutable version documents must not share streaming block state. */}
+                    <TabsContent className="m-0 px-5 py-5" value="readme">
+                      <MessageResponse
+                        key={`${activeItem.skillVersionId}:readme`}
+                        mode="static"
+                        className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                      >
+                        {readmeContent}
                       </MessageResponse>
-                    ) : (
-                      <div className="py-10 text-sm text-muted-foreground">
-                        This skill does not include SKILL.md content.
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
+                    </TabsContent>
+                    <TabsContent className="m-0 px-5 py-5" value="skill">
+                      {skillContent ? (
+                        <MessageResponse
+                          key={`${activeItem.skillVersionId}:skill`}
+                          mode="static"
+                          className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                        >
+                          {skillContent}
+                        </MessageResponse>
+                      ) : (
+                        <div className="py-10 text-sm text-muted-foreground">
+                          This skill does not include SKILL.md content.
+                        </div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
                 </article>
               </div>
 

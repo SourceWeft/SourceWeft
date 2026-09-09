@@ -29,13 +29,8 @@ export type SubmitRegistrySkillRequest = z.infer<
  * collision-safe key the UI can deep-link to; it may be absent when a
  * submission is rejected before a definition is upserted.
  */
-export const submitRegistrySkillResponseSchema = z.object({
-  status: z.enum(["indexed", "queued"]),
-  slug: z.string().optional(),
-});
-export type SubmitRegistrySkillResponse = z.infer<
-  typeof submitRegistrySkillResponseSchema
->;
+export { submitRegistrySkillResponseSchema } from "@sourceweft/contracts";
+export type { SubmitRegistrySkillResponse } from "@sourceweft/contracts";
 
 // --- Slug derivation (§2) ----------------------------------------------------
 

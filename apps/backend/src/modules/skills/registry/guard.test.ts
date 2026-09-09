@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { RegistrySubmissionError } from "./errors";
-import {
-  type RegistryExistingEntry,
-  triageRegistrySubmission,
-} from "./guard";
+import { type RegistryExistingEntry, triageRegistrySubmission } from "./guard";
 
 const CLEAN = { reviewRequired: false, flags: [] as string[] };
 
@@ -80,8 +77,16 @@ test("sticky: an in-review (draft) entry cannot auto-index on a clean re-submit"
 
 test("sticky: a deprecated version or archived definition stays queued", () => {
   for (const existing of [
-    { ownerUserId: "me", definitionStatus: "active", currentVersionStatus: "deprecated" },
-    { ownerUserId: "me", definitionStatus: "archived", currentVersionStatus: "published" },
+    {
+      ownerUserId: "me",
+      definitionStatus: "active",
+      currentVersionStatus: "deprecated",
+    },
+    {
+      ownerUserId: "me",
+      definitionStatus: "archived",
+      currentVersionStatus: "published",
+    },
   ] as const) {
     const decision = triageRegistrySubmission({
       existing,

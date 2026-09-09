@@ -1,11 +1,18 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["NODE_ENV"],
+  "globalEnv": [
+    "NODE_ENV"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
       "outputs": [
         "dist/**",
         ".next/**",
@@ -15,15 +22,28 @@
       ]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": [
+        "^lint"
+      ]
     },
     "check-types": {
-      "dependsOn": ["^check-types", "^build"],
-      "outputs": ["tsconfig*.tsbuildinfo", ".next/types/**"]
+      "dependsOn": [
+        "^check-types",
+        "^build"
+      ],
+      "outputs": [
+        "tsconfig*.tsbuildinfo",
+        ".next/types/**"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
       "passThroughEnv": [
         "DATABASE_URL",
         "REDIS_URL",
@@ -40,6 +60,24 @@
     "dev:fast": {
       "cache": false,
       "persistent": true
+    },
+    "test:e2e:skills": {
+      "cache": false,
+      "env": [
+        "SKILL_E2E_API_URL",
+        "SKILL_E2E_WEB_URL",
+        "SKILL_E2E_FIXTURES_FILE",
+        "SKILL_E2E_REQUIRE_ALL"
+      ]
+    },
+    "test:e2e:skills:full": {
+      "cache": false,
+      "env": [
+        "SKILL_E2E_API_URL",
+        "SKILL_E2E_WEB_URL",
+        "SKILL_E2E_FIXTURES_FILE",
+        "SKILL_E2E_REQUIRE_ALL"
+      ]
     }
   }
 }

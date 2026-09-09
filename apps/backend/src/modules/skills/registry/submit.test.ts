@@ -63,6 +63,8 @@ function analyzed(overrides: Record<string, unknown> = {}) {
       },
     ],
     allowedTools: [] as string[],
+    diagnostics: [],
+    findings: [],
     ...overrides,
   };
 }
@@ -70,7 +72,13 @@ function analyzed(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getExisting.mockResolvedValue(null);
-  mocks.upsert.mockResolvedValue({ status: "indexed" });
+  mocks.upsert.mockImplementation(async (input) => ({
+    status: input.outcome,
+    flags: input.manifestJson.registry.scan.flags,
+    diagnostics: input.manifestJson.registry.ingestion.diagnostics,
+    skillVersionId: "version-1",
+    version: "a".repeat(12),
+  }));
 });
 
 test("a clean, new skill indexes and stores a pointer + published version", async () => {
@@ -132,7 +140,10 @@ test("an ownership conflict throws before any upsert", async () => {
       }),
     (error) =>
       error instanceof RegistrySubmissionError &&
-      error.code === "REGISTRY_SUBMISSION_CONFLICT",
+      error.code === "REGISTRY_SUBMISSION_NOT_SKILL" &&
+      (
+        error.details?.skills as Array<{ diagnostics: Array<{ code: string }> }>
+      )[0]?.diagnostics[0]?.code === "REGISTRY_SUBMISSION_CONFLICT",
   );
   assert.equal(mocks.upsert.mock.calls.length, 0);
 });
@@ -175,11 +186,12 @@ test("an invalid skill among several is skipped; valid ones still index", async 
   });
 
   assert.equal(result.status, "indexed");
-  assert.equal(result.skills.length, 1);
+  assert.equal(result.skills.length, 2);
+  assert.equal(result.skills[0]?.status, "failed");
   assert.equal(mocks.upsert.mock.calls.length, 1);
 });
 
-test("read failure is surfaced as NOT_SKILL and does not double-clean", async () => {
+test("unexpected read failures are not mislabeled as invalid skills", async () => {
   mocks.read.mockRejectedValue(new Error("network boom"));
 
   await assert.rejects(
@@ -188,8 +200,6 @@ test("read failure is surfaced as NOT_SKILL and does not double-clean", async ()
         repoUrl: "https://github.com/acme/skills",
         userId: "me",
       }),
-    (error) =>
-      error instanceof RegistrySubmissionError &&
-      error.code === "REGISTRY_SUBMISSION_NOT_SKILL",
+    (error) => error instanceof Error && error.message === "network boom",
   );
 });

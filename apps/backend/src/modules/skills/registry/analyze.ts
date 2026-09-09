@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { SkillDiagnostic } from "@sourceweft/contracts";
 import type { SkillManifestJson } from "@sourceweft/db";
 import { parseSkillFrontmatter } from "../frontmatter";
 import { deriveRegistrySlug } from "./contracts";
@@ -37,6 +38,8 @@ export type AnalyzedRegistrySkill = {
   scan: { reviewRequired: boolean; flags: string[] };
   fileManifest: RegistryFileManifest;
   allowedTools: string[];
+  diagnostics: SkillDiagnostic[];
+  findings: import("./scan").RegistryFinding[];
 };
 
 const MAX_NAME_LENGTH = 64;
@@ -82,19 +85,46 @@ function titleCase(name: string): string {
     .join(" ");
 }
 
-function readAllowedTools(frontmatter: Record<string, unknown>): string[] {
-  const raw = frontmatter["allowed-tools"] ?? frontmatter.allowedTools;
-  if (Array.isArray(raw)) {
-    return raw.filter((tool): tool is string => typeof tool === "string");
+export function readAllowedTools(
+  frontmatter: Record<string, unknown>,
+): string[] {
+  function invalid(): never {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_INVALID_SKILL",
+      "SKILL.md allowed-tools must contain balanced string tool declarations without conflicting aliases",
+    );
   }
-  if (typeof raw === "string") {
-    // agentskills.io allows a comma-separated string form.
-    return raw
-      .split(",")
-      .map((tool) => tool.trim())
-      .filter(Boolean);
+  function split(value: unknown): string[] {
+    const values = Array.isArray(value) ? value : [value];
+    if (!values.every((item) => typeof item === "string")) invalid();
+    const result: string[] = [];
+    for (const item of values as string[]) {
+      let depth = 0,
+        token = "";
+      for (const character of item) {
+        if (character === "(") depth++;
+        if (character === ")" && --depth < 0) invalid();
+        if (depth === 0 && /[\s,]/.test(character)) {
+          if (token) result.push(token);
+          token = "";
+        } else token += character;
+      }
+      if (depth !== 0) invalid();
+      if (token) result.push(token);
+    }
+    return [...new Set(result)];
   }
-  return [];
+  const declarations = ["allowed-tools", "allowedTools", "allowed_tools"]
+    .filter((key) => Object.hasOwn(frontmatter, key))
+    .map((key) => split(frontmatter[key]));
+  const first = declarations[0] ?? [];
+  if (
+    declarations.some(
+      (list) => [...list].sort().join("\0") !== [...first].sort().join("\0"),
+    )
+  )
+    invalid();
+  return first;
 }
 
 function fileRole(bundlePath: string): RegistryFileRole {
@@ -208,6 +238,11 @@ export function analyzeRegistrySkill(input: {
   }
 
   const frontmatter = parseSkillFrontmatter(skillMd.contentText);
+  if (!frontmatter)
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_INVALID_SKILL",
+      "SKILL.md requires YAML frontmatter",
+    );
   const name = frontmatter.name;
   const description = frontmatter.description;
   if (
@@ -298,5 +333,26 @@ export function analyzeRegistrySkill(input: {
     scan: { reviewRequired: finalFlags.length > 0, flags: finalFlags },
     fileManifest,
     allowedTools,
+    findings: baseScan.findings,
+    diagnostics: [
+      ...(description.trim().length > MAX_DESCRIPTION_LENGTH
+        ? [
+            {
+              code: "DESCRIPTION_SUMMARIZED",
+              severity: "warning" as const,
+              message:
+                "Catalog description is shortened; the original SKILL.md is preserved.",
+              file: "SKILL.md",
+              field: "description",
+            },
+          ]
+        : []),
+      ...(discovered.excludedFiles ?? []).map((file) => ({
+        code: "FILE_EXCLUDED",
+        severity: "warning" as const,
+        message: file.reason,
+        file: file.path,
+      })),
+    ],
   };
 }

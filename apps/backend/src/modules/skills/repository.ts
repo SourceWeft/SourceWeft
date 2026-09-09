@@ -132,10 +132,10 @@ function mapWorkspaceInstalledSkill(row: {
     skillId: row.definition.id,
     skillVersionId: row.version.id,
     slug: row.definition.slug,
-    name: row.definition.displayName,
+    name: row.version.manifestJson.displayName,
     version: row.version.version,
-    displayName: row.definition.displayName,
-    description: row.definition.description,
+    displayName: row.version.manifestJson.displayName,
+    description: row.version.manifestJson.description,
     visibility: row.definition.visibility,
     categories: Array.isArray(manifest.categories) ? manifest.categories : [],
     enabled: workspaceSkill.enabled,
@@ -338,6 +338,7 @@ export async function findCatalogSkillVersionForWorkspace(input: {
   workspaceId: string;
   skillId: string;
   skillVersionId: string;
+  userId?: string;
 }) {
   const [row] = await db
     .select({
@@ -365,7 +366,7 @@ export async function findCatalogSkillVersionForWorkspace(input: {
         sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
         eq(skillDefinitions.status, "active"),
         eq(skillVersions.status, "published"),
-        visibleSkillCondition(input),
+        or(visibleSkillCondition(input), input.userId ? and(eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.ownerUserId, input.userId)) : undefined),
       ),
     )
     .limit(1);

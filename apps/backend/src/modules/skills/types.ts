@@ -35,6 +35,7 @@ export type SkillOptionDescriptor = {
 };
 
 export type EnabledSkillDescriptor = {
+  skillVersionId?: string;
   workspaceSkillId: string;
   selectionId?: string;
   sourceType: SkillSourceType;

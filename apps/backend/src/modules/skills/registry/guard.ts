@@ -17,11 +17,7 @@ export type RegistryExistingEntry = {
   ownerUserId: string | null;
   definitionStatus: "active" | "archived";
   currentVersionStatus:
-    | "draft"
-    | "published"
-    | "deprecated"
-    | "disabled"
-    | null;
+    "draft" | "published" | "deprecated" | "disabled" | null;
 } | null;
 
 export type TriageInput = {
@@ -42,7 +38,8 @@ function isSticky(existing: NonNullable<RegistryExistingEntry>): boolean {
   return (
     existing.definitionStatus === "archived" ||
     existing.currentVersionStatus === "draft" ||
-    existing.currentVersionStatus === "deprecated"
+    existing.currentVersionStatus === "deprecated" ||
+    existing.currentVersionStatus === "disabled"
   );
 }
 

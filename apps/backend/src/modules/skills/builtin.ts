@@ -368,7 +368,7 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
           throw new Error(`Builtin skill '${skill.id}' missing SKILL.md`);
         }
         const parsed = parseBuiltinManifestFromFrontmatter(
-          parseSkillFrontmatter(skillMd.contentText),
+          parseSkillFrontmatter(skillMd.contentText) ?? {},
           `${skillDir}/SKILL.md`,
         );
         if (parsed.slug !== skill.id) {
