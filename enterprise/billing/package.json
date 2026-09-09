@@ -18,7 +18,8 @@
     "./auth-client": "./src/auth-client/index.ts",
     "./provider-sdk": "./src/server/providers/sdk.ts",
     "./integrations/waffo": "./src/integrations/waffo.ts",
-    "./waffo-setup": "./src/server/providers/waffo/setup.ts"
+    "./waffo-setup": "./src/server/providers/waffo/setup.ts",
+    "./integrations/stripe": "./src/integrations/stripe.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -42,7 +43,8 @@
     "sonner": "^2.0.8",
     "@sourceweft/ui-web": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
-    "@waffo/pancake-ts": "0.20.0"
+    "@waffo/pancake-ts": "0.20.0",
+    "stripe": "22.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

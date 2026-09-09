@@ -43,6 +43,7 @@ export type BillingRuntimeConfig = {
     creditTopupProductId: string;
     pageTopupProductId: string;
   };
+  stripe: { secretKey: string; webhookSecret: string; testMode: boolean };
   waffo: {
     merchantId: string;
     privateKey: string;
@@ -203,6 +204,7 @@ export type TeamPlanReconcileResult = {
 export type BillingProviderCheckoutInput = {
   orderId: string;
   persistedOrder?: boolean;
+  previousCheckoutId?: string;
   kind: BillingOrderKind;
   teamId: string | null;
   actorUserId: string;
@@ -260,6 +262,7 @@ export type BillingProviderUpdateSeatsResult = {
 };
 
 export type BillingProviderAdapter = {
+  getCheckoutScope?(): Promise<string>;
   createCheckout(
     input: BillingProviderCheckoutInput,
   ): Promise<BillingProviderCheckoutResult>;

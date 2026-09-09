@@ -14,6 +14,7 @@ and provider usage/cost observations. This package is not an agent capability.
 - `/integrations/auth`: runtime or schema-only Creem plugin factory.
 - `/integrations/creem`: webhook synchronization and scheduled-cancel handler.
 - `/integrations/waffo`: SDK-backed Waffo adapter, durable webhook inbox and HTTP handler.
+- `/integrations/stripe`: Stripe Checkout, customer portal and durable signed webhooks.
 - `/waffo-setup`: test store/product bootstrap with explicit store selection.
 - `/integrations/jobs`: subscription/order reconciliation schedule factory.
 - `/ui`: billing, usage, checkout, pricing and sidebar components; requires an
@@ -186,3 +187,62 @@ Official sources: [full documentation](https://docs.waffo.ai/llms-full.txt),
 [official skill](https://docs.waffo.ai/integrate/skill), and the types/guides shipped
 with `@waffo/pancake-ts@0.20.0`. The current SDK omits the older `productType` and
 `taxIncluded` checkout parameters; amounts are USD display strings, not cents.
+
+## Stripe
+
+Select `BACKEND_BILLING_PROVIDER=stripe` in the commercial edition. Existing
+SaaS and Web checkout flags still apply. Set:
+
+```dotenv
+STRIPE_SECRET_KEY=sk_test_yourKey
+STRIPE_WEBHOOK_SECRET=whsec_yourEndpointSecret
+# Optional; defaults to true and must match the secret key's environment.
+STRIPE_TEST_MODE=true
+```
+
+The adapter uses `stripe@22.6.1`, pinned to its `2026-08-26.dahlia` API version.
+It creates hosted Checkout with inline server-priced line items; no publishable
+key, client-side Stripe package, Product ID or Price ID env variable is needed.
+Subscription metadata and checkout references bind each purchase to its local
+order and Stripe account. Account/mode changes do not reuse old checkout URLs.
+
+Enable the Customer Portal in the Stripe Dashboard for invoice/payment-method
+management and cancellation. The app creates portal sessions for the customer
+bound to the subscription. Team seat increases invoice immediately with
+`payment_behavior=error_if_incomplete`; failed or unconfirmed updates do not
+increase local quota. Seat prices must match the current application catalog.
+Adaptive currency conversion, automatic tax, promotion codes, Connect accounts and portal-driven plan changes
+are not enabled by this initial adapter.
+
+Register `POST /v1/billing/webhooks/stripe` for:
+
+- `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `checkout.session.expired`
+- `invoice.paid`, `invoice.payment_failed`
+- `customer.subscription.created`, `customer.subscription.updated`,
+  `customer.subscription.deleted`
+
+The raw body is verified with the official SDK before durable storage. Mode and
+Connect-account mismatches are rejected. The background inbox re-reads current
+Stripe Checkout/subscription/invoice state before acting, so redirects, unpaid
+checkouts and stale events cannot grant access. Failed renewals preserve the last
+paid period and quota while recording `past_due`. Fulfillment is idempotent under
+PostgreSQL order locks.
+
+For local sandbox testing, use a Stripe test secret key and forward events with
+the official CLI:
+
+```sh
+stripe listen --forward-to http://127.0.0.1:3541/v1/billing/webhooks/stripe
+```
+
+Use the `whsec_...` printed by that CLI session for local forwarding; it is
+separate from a Dashboard endpoint signing secret. Restart the API after setting
+it. Complete a hosted test checkout and verify the persisted local order and
+webhook receipt. No Stripe account credentials or real sandbox transaction were
+used in the automated fixture tests.
+
+References: [Checkout](https://docs.stripe.com/api/checkout/sessions/create),
+[webhook verification](https://docs.stripe.com/webhooks),
+[subscription events](https://docs.stripe.com/billing/subscriptions/webhooks),
+[customer portal](https://docs.stripe.com/customer-management/integrate-customer-portal).

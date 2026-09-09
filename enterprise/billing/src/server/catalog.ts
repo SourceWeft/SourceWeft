@@ -42,17 +42,16 @@ export type PricingDisplayPlan = {
 export function createBillingCatalog(
   runtimeConfig: BillingRuntimeConfig,
 ): BillingCatalog {
-  const products =
-    runtimeConfig.provider === "waffo"
-      ? {
-          individualProMonthlyProductId: "",
-          individualProYearlyProductId: "",
-          teamStandardMonthlyProductId: "",
-          teamStandardYearlyProductId: "",
-          creditTopupProductId: "",
-          pageTopupProductId: "",
-        }
-      : runtimeConfig.creem;
+  const products = ["waffo", "stripe"].includes(runtimeConfig.provider)
+    ? {
+        individualProMonthlyProductId: "",
+        individualProYearlyProductId: "",
+        teamStandardMonthlyProductId: "",
+        teamStandardYearlyProductId: "",
+        creditTopupProductId: "",
+        pageTopupProductId: "",
+      }
+    : runtimeConfig.creem;
   return {
     subscriptions: {
       individual_pro: {

@@ -135,7 +135,7 @@ export class BillingService {
     input: CreateTeamSubscriptionCheckoutRequest,
     actor: { userId: string; email: string },
   ): Promise<CreateTeamSubscriptionCheckoutResponse> {
-    if (this.runtimeConfig.provider === "waffo") {
+    if (["waffo", "stripe"].includes(this.runtimeConfig.provider)) {
       return this.orderService
         .createPricingCheckout({
           request: {

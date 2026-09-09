@@ -39,7 +39,7 @@ export function ensureBillingCheckoutEnabled(
 ) {
   if (
     !runtimeConfig.saasEnabled ||
-    !(["creem", "waffo"] as string[]).includes(runtimeConfig.provider)
+    !(["creem", "waffo", "stripe"] as string[]).includes(runtimeConfig.provider)
   ) {
     throw new BillingError(
       "BILLING_CHECKOUT_DISABLED",

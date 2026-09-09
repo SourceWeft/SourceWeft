@@ -1,3 +1,4 @@
+import { StripeBillingProvider } from "./providers/stripe/provider";
 import { WaffoBillingProvider } from "./providers/waffo/provider";
 import type { WaffoStateStore } from "./providers/waffo/state";
 import { BillingError } from "./errors";
@@ -9,6 +10,7 @@ const PROVIDER_FACTORIES: Record<
   string,
   (config: BillingRuntimeConfig) => BillingProviderAdapter
 > = {
+  stripe: (config) => new StripeBillingProvider(config),
   creem: (config) => new CreemBillingProvider(config),
   none: () => new NoopBillingProvider(),
   manual: () => new NoopBillingProvider(),

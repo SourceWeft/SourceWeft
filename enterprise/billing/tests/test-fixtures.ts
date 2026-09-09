@@ -44,6 +44,7 @@ export const runtimeConfig: BillingRuntimeConfig = {
     creditTopupProductId: "prod_credit_topup",
     pageTopupProductId: "prod_page_topup",
   },
+  stripe: { secretKey: "", webhookSecret: "", testMode: true },
   waffo: { merchantId: "", privateKey: "", environment: "test" },
   catalog: {
     individualProMonthlyAmountCents: 1200,

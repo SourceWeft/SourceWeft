@@ -530,6 +530,12 @@ export class BillingSubscriptionService {
             );
           }
 
+          if (subscription.provider !== this.runtimeConfig.provider)
+            throw new BillingError(
+              "BILLING_PROVIDER_MISMATCH",
+              409,
+              "Manage seats through the subscription's original payment provider",
+            );
           if (!subscription.externalSubscriptionId) {
             throw new BillingError(
               "BILLING_SUBSCRIPTION_ID_MISSING",
@@ -666,7 +672,7 @@ export class BillingSubscriptionService {
     teamId: string,
     actorUserId: string,
   ): Promise<CreateTeamBillingPortalResponse> {
-    if (this.runtimeConfig.provider === "waffo")
+    if (["waffo", "stripe"].includes(this.runtimeConfig.provider))
       ensureBillingCheckoutEnabled(this.runtimeConfig);
     else ensureTeamBillingEnabled(this.runtimeConfig);
 
@@ -692,11 +698,14 @@ export class BillingSubscriptionService {
             409,
             "Manage this subscription through its original payment provider",
           );
-        const customerId = await this.resolvePortalCustomerId(
-          subscription,
-          actorUserId,
-          client,
-        );
+        const customerId =
+          this.runtimeConfig.provider === "stripe"
+            ? subscription.externalCustomerId
+            : await this.resolvePortalCustomerId(
+                subscription,
+                actorUserId,
+                client,
+              );
 
         if (!customerId && !subscription.externalSubscriptionId) {
           throw new BillingError(
@@ -726,7 +735,7 @@ export class BillingSubscriptionService {
     teamId: string,
     actorUserId: string,
   ): Promise<CancelTeamSubscriptionResponse> {
-    if (this.runtimeConfig.provider === "waffo")
+    if (["waffo", "stripe"].includes(this.runtimeConfig.provider))
       ensureBillingCheckoutEnabled(this.runtimeConfig);
     else ensureTeamBillingEnabled(this.runtimeConfig);
 
@@ -752,11 +761,14 @@ export class BillingSubscriptionService {
             409,
             "Manage this subscription through its original payment provider",
           );
-        const customerId = await this.resolvePortalCustomerId(
-          subscription,
-          actorUserId,
-          client,
-        );
+        const customerId =
+          this.runtimeConfig.provider === "stripe"
+            ? subscription.externalCustomerId
+            : await this.resolvePortalCustomerId(
+                subscription,
+                actorUserId,
+                client,
+              );
 
         if (!customerId && !subscription.externalSubscriptionId) {
           throw new BillingError(

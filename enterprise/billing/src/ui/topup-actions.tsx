@@ -15,7 +15,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
   const [error, setError] = useState<string | null>(null);
   if (
     !teamId ||
-    billingProvider !== "waffo" ||
+    !["waffo", "stripe"].includes(billingProvider ?? "") ||
     !billingTopupEnabled ||
     !billingCheckoutEnabled
   )

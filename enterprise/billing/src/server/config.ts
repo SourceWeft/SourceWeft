@@ -136,7 +136,7 @@ export function readBillingConfig(
   );
   if (
     saasEnabled &&
-    !["none", "creem", "waffo"].includes(requestedBillingProvider)
+    !["none", "creem", "waffo", "stripe"].includes(requestedBillingProvider)
   ) {
     throw new Error(
       `BACKEND_BILLING_PROVIDER=${requestedBillingProvider} is not supported for checkout`,
@@ -145,7 +145,8 @@ export function readBillingConfig(
   const effectiveBillingProvider =
     saasEnabled &&
     (requestedBillingProvider === "creem" ||
-      requestedBillingProvider === "waffo")
+      requestedBillingProvider === "waffo" ||
+      requestedBillingProvider === "stripe")
       ? requestedBillingProvider
       : "none";
   return {
@@ -193,6 +194,11 @@ export function readBillingConfig(
       creditTopupProductId: env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
       pageTopupProductId: env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
     },
+    stripe: {
+      secretKey: env.STRIPE_SECRET_KEY?.trim() || "",
+      webhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+      testMode: parseBoolean(env.STRIPE_TEST_MODE, true),
+    },
     waffo: {
       merchantId: env.WAFFO_MERCHANT_ID?.trim() || "",
       privateKey: env.WAFFO_PRIVATE_KEY || "",
@@ -239,6 +245,19 @@ export function readBillingConfig(
 export function validateBillingConfiguration(
   config: BillingRuntimeConfig,
 ): void {
+  if (config.saasEnabled && config.provider === "stripe") {
+    const prefix = config.stripe.testMode
+      ? /^(sk|rk)_test_\S+$/
+      : /^(sk|rk)_live_\S+$/;
+    if (!prefix.test(config.stripe.secretKey))
+      throw new Error(
+        "STRIPE_SECRET_KEY must match STRIPE_TEST_MODE and be a server-side secret key",
+      );
+    if (!/^whsec_\S+$/.test(config.stripe.webhookSecret))
+      throw new Error(
+        "STRIPE_WEBHOOK_SECRET is required for enabled Stripe checkout",
+      );
+  }
   if (config.saasEnabled && config.provider === "waffo") {
     if (!/^MER_[A-Za-z0-9]{22}$/.test(config.waffo.merchantId))
       throw new Error(

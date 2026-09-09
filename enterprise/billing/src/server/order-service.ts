@@ -93,6 +93,7 @@ const RECOVERABLE_CHECKOUT_STATUSES = new Set<BillingOrderState["status"]>([
   "pending",
   "checkout_created",
   "payment_failed",
+  "expired",
 ]);
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
@@ -101,6 +102,8 @@ const TEAM_SEAT_MAX = 99;
 
 function hasCheckoutUrl(order: BillingOrderState) {
   return (
+    order.status !== "expired" &&
+    order.status !== "payment_failed" &&
     typeof order.metadata.checkoutUrl === "string" &&
     order.metadata.checkoutUrl.trim().length > 0 &&
     (!order.expiresAt || Date.parse(order.expiresAt) > Date.now())
@@ -212,9 +215,12 @@ function addMonths(date: Date, months: number) {
 function normalizeClientReferenceKey(
   value: string | undefined,
   config: BillingRuntimeConfig,
+  scope?: string,
 ) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
+  if (config.provider === "stripe")
+    return `stripe:${scope}:${config.stripe.testMode ? "test" : "live"}:${trimmed}`;
   return config.provider === "waffo"
     ? `waffo:${config.waffo.merchantId}:${config.waffo.environment}:${trimmed}`
     : trimmed;
@@ -223,9 +229,13 @@ function normalizeClientReferenceKey(
 function checkoutMatchesProvider(
   order: BillingOrderState,
   config: BillingRuntimeConfig,
+  scope?: string,
 ) {
   return (
     order.provider === config.provider &&
+    (config.provider !== "stripe" ||
+      (order.metadata.stripeAccountId === scope &&
+        order.metadata.stripeTestMode === config.stripe.testMode)) &&
     (config.provider !== "waffo" ||
       (order.metadata.waffoMerchantId === config.waffo.merchantId &&
         order.metadata.waffoEnvironment === config.waffo.environment))
@@ -399,9 +409,11 @@ export class BillingOrderService {
       await this.rejectIfActiveSubscription(input.existingTeamId);
     }
 
+    const checkoutScope = await this.provider.getCheckoutScope?.();
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
       this.runtimeConfig,
+      checkoutScope,
     );
     if (clientReferenceKey) {
       const existing = await this.store.getOrderByClientReference(
@@ -409,7 +421,7 @@ export class BillingOrderService {
         clientReferenceKey,
       );
       if (
-        existing?.provider === "waffo" &&
+        (existing?.provider === "waffo" || existing?.provider === "stripe") &&
         (existing.kind !== "subscription" ||
           existing.planFamily !== planFamily ||
           existing.billingInterval !== billingInterval ||
@@ -455,7 +467,7 @@ export class BillingOrderService {
       });
       if (
         reusable &&
-        checkoutMatchesProvider(reusable, this.runtimeConfig) &&
+        checkoutMatchesProvider(reusable, this.runtimeConfig, checkoutScope) &&
         REUSABLE_ORDER_STATUSES.has(reusable.status) &&
         hasCheckoutUrl(reusable)
       ) {
@@ -537,9 +549,11 @@ export class BillingOrderService {
       unitType === "credit" ? catalogEntry.unitAmount * quantity : 0;
     const grantedPages =
       unitType === "page" ? catalogEntry.unitAmount * quantity : 0;
+    const checkoutScope = await this.provider.getCheckoutScope?.();
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
       this.runtimeConfig,
+      checkoutScope,
     );
 
     if (clientReferenceKey) {
@@ -616,6 +630,7 @@ export class BillingOrderService {
       providerResult = await this.provider.createCheckout({
         orderId: order.id,
         persistedOrder: true,
+        previousCheckoutId: order.externalCheckoutId ?? undefined,
         kind: order.kind,
         teamId: order.teamId,
         actorUserId: actor.userId,
@@ -682,6 +697,7 @@ export class BillingOrderService {
       providerResult = await this.provider.createCheckout({
         orderId: input.order.id,
         persistedOrder: true,
+        previousCheckoutId: input.order.externalCheckoutId ?? undefined,
         kind: input.order.kind,
         teamId: input.order.teamId,
         actorUserId: input.actor.userId,

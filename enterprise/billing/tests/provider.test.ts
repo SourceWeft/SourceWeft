@@ -53,6 +53,7 @@ function makeConfig(provider: BillingRuntimeConfig["provider"]) {
       creditTopupProductId: "",
       pageTopupProductId: "",
     },
+    stripe: { secretKey: "", webhookSecret: "", testMode: true },
     waffo: { merchantId: "", privateKey: "", environment: "test" as const },
     catalog: {
       individualProMonthlyAmountCents: 0,
@@ -86,14 +87,14 @@ describe("createBillingProvider", () => {
 
   it("throws BillingError with BILLING_PROVIDER_UNSUPPORTED for unknown provider", () => {
     try {
-      createBillingProvider(makeConfig("stripe" as never));
+      createBillingProvider(makeConfig("unsupported" as never));
       expect.unreachable("Expected BillingError to be thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(BillingError);
       if (error instanceof BillingError) {
         expect(error.code).toBe("BILLING_PROVIDER_UNSUPPORTED");
         expect(error.statusCode).toBe(400);
-        expect(error.message).toContain("stripe");
+        expect(error.message).toContain("unsupported");
       }
     }
   });

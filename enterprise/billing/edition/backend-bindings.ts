@@ -26,6 +26,12 @@ import {
   WaffoWebhookService,
   registerWaffoWebhook,
 } from "@sourceweft/billing/integrations/waffo";
+import {
+  StripeBillingProvider,
+  StripeWebhookService,
+  PostgresStripeInboxStore,
+  registerStripeWebhook,
+} from "@sourceweft/billing/integrations/stripe";
 import { waffoCatalogProducts } from "@sourceweft/billing/waffo-setup";
 import { createBillingSchedule } from "@sourceweft/billing/integrations/jobs";
 import { database } from "@sourceweft/db";
@@ -123,22 +129,35 @@ function waffo() {
     logger,
   }));
 }
+let stripeInbox: StripeWebhookService | undefined;
+function stripe() {
+  return (stripeInbox ??= new StripeWebhookService({
+    config: billingConfig,
+    provider: new StripeBillingProvider(billingConfig),
+    state: new PostgresStripeInboxStore(database),
+    store,
+    billing: billing().service,
+    logger,
+  }));
+}
 export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
   createBillingHttpRoutes(billing().service, host)(app);
   if (billingConfig.provider === "waffo") registerWaffoWebhook(app, waffo());
+  if (billingConfig.provider === "stripe") registerStripeWebhook(app, stripe());
 }
 export const billingSchedulesEnabled =
-  billingConfig.provider === "waffo" ||
+  ["waffo", "stripe"].includes(billingConfig.provider) ||
   (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled);
 export async function reconcileBillingSchedule() {
   if (billingConfig.provider === "waffo") await waffo().drain();
+  if (billingConfig.provider === "stripe") await stripe().drain();
   if (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled)
     return createBillingSchedule(billing().service, alerts, logger)();
 }
 export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
   const checkout =
     billingConfig.saasEnabled &&
-    ["creem", "waffo"].includes(billingConfig.provider);
+    ["creem", "waffo", "stripe"].includes(billingConfig.provider);
   return {
     edition: "commercial",
     billingRuntimeApiVersion: 1,
@@ -148,18 +167,22 @@ export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
       paymentEnvironment:
         billingConfig.provider === "waffo"
           ? billingConfig.waffo.environment
-          : billingConfig.provider === "creem"
-            ? billingConfig.creem.testMode
+          : billingConfig.provider === "stripe"
+            ? billingConfig.stripe.testMode
               ? "test"
               : "prod"
-            : undefined,
+            : billingConfig.provider === "creem"
+              ? billingConfig.creem.testMode
+                ? "test"
+                : "prod"
+              : undefined,
       mode: billingConfig.mode,
       checkout,
       teamSubscriptions: checkout && billingConfig.teamBillingEnabled,
       topup:
         checkout &&
         Boolean(
-          billingConfig.provider === "waffo" ||
+          ["waffo", "stripe"].includes(billingConfig.provider) ||
           billingConfig.creem.creditTopupProductId ||
           billingConfig.creem.pageTopupProductId,
         ),

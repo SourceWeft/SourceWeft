@@ -24,7 +24,7 @@ test("invalid modes and explicitly unsupported checkout providers fail rather th
   assert.throws(
     () =>
       readBillingConfig(
-        { SOURCEWEFT_SAAS_ENABLED: "true", BACKEND_BILLING_PROVIDER: "stripe" },
+        { SOURCEWEFT_SAAS_ENABLED: "true", BACKEND_BILLING_PROVIDER: "manual" },
         "http://localhost:3000",
       ),
     /not supported/,
