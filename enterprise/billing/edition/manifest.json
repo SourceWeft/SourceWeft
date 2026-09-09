@@ -16,7 +16,11 @@
     "apps/web/lib/billing-edition/client.tsx": "web-client.tsx",
     "apps/web/lib/billing-edition/auth-client.ts": "web-auth-client.ts",
     "apps/web/lib/billing-edition/catalog.ts": "web-catalog.ts",
-    "apps/backend/.env.example": "backend.env.example"
+    "apps/backend/.env.example": "backend.env.example",
+    "apps/web/app/dashboard/billing/page.tsx": "routes/billing/page.tsx",
+    "apps/web/app/dashboard/billing/loading.tsx": "routes/billing/loading.tsx",
+    "apps/web/app/dashboard/billing/checkout/page.tsx": "routes/billing/checkout/page.tsx",
+    "apps/web/app/dashboard/billing/checkout/loading.tsx": "routes/billing/checkout/loading.tsx"
   },
   "overrides": {
     "creem": "1.6.0"

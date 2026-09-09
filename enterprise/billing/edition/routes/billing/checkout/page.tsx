@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { billingUiAvailable } from "../../../../lib/billing-edition/catalog";
-import { BillingCheckoutClient } from "./billing-checkout-client";
+// Generated commercial billing route; subject to enterprise/LICENSE.
+import { BillingCheckoutClient } from "../../../../lib/billing-edition/client";
 
 type CheckoutSearchParams = {
   billingInterval?: string;
@@ -16,7 +15,6 @@ export default async function BillingCheckoutPage({
 }: {
   searchParams: Promise<CheckoutSearchParams>;
 }) {
-  if (!billingUiAvailable) redirect("/dashboard");
   const params = await searchParams;
 
   return (

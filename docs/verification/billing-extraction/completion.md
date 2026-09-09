@@ -54,4 +54,10 @@ The local baseline compatibility check passed: d33c9df5 read the new commercial 
 
 ## UI refinement — 2026-09-09
 
-Core billing and quota entries are hidden on desktop/mobile and in loading skeletons. No billing-unavailable notice or replacement usage prompt is rendered. Old billing/checkout page URLs redirect to Dashboard. The commercial catalog binding keeps these entries available. This refinement was checked with both edition type checks and the 580-test Web suite; it does not claim a new browser run.
+Core billing and quota entries are hidden on desktop/mobile and in loading skeletons. No billing-unavailable notice or replacement usage prompt is rendered. The initial redirect handling for old billing/checkout URLs was removed in the route cleanup below. The commercial catalog binding keeps these entries available. This refinement was checked with both edition type checks and the 580-test Web suite; it does not claim a new browser run.
+
+## Historical route cleanup — 2026-09-09
+
+Removed the core billing page directory, redirect compatibility, client re-export wrappers and unused core checkout/success components. Commercial edition templates now generate the checkout and success pages directly, preserving their URLs and query parameters. Core no longer registers those pages; the shared loading shell renders billing skeletons only for the commercial edition.
+
+Both editions were freshly projected and passed the source boundary check, which now requires billing pages to be absent in core and present in commercial. Core and the updated installed commercial workspace passed Web type checks. The 80-file / 580-test Web suite, six source preparation tests and ESLint on changed/generated Web files passed. This cleanup did not repeat browser E2E or production builds; earlier E2E coverage is recorded above.

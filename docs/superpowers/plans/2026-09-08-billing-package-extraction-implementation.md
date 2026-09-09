@@ -211,12 +211,12 @@ pnpm --filter @sourceweft/credits-core check-types
 步骤：
 
 1. 先提取 billing-utils 中通用的组织 helper，保持 trust-rules 与组织切换开放。
-2. 迁移 billing panel、plan actions、checkout/success、team checkout dialog、套餐展示与余额 sidebar 子组件。宿主只留路由和展示插槽。
+2. 迁移 billing panel、plan actions、checkout/success、team checkout dialog、套餐展示与余额 sidebar 子组件。宿主保留展示插槽，计费页面路由仅由商业版模板生成。
 3. 通过 props/context adapter 注入 SDK、组织信息和导航；商业 UI 禁止 app 相对 import。
 4. 分开 client、server、Auth 插件入口，保持 React client directive 和 Next server 边界；实施前按 `apps/web/AGENTS.md` 阅读安装版本的本地 Next 文档。
 5. `lib/auth-client.ts` 由绑定贡献 Creem client；core 空贡献不丢失其他插件或推导类型。
 6. 余额刷新事件、chat stream 通知、settings usage、侧边栏、定价 CTA 和 checkout URL 参数都依据 capabilities。core 不发 summary/订阅请求、不显示假余额；能力获取失败显示错误。
-7. core 隐藏计费和额度入口，旧账单 URL 无提示跳转 Dashboard。commercial 保持原购买与账单行为，校验前后端 edition 不匹配。
+7. core 隐藏计费和额度入口，删除旧账单页面及跳转兼容，计费路由仅在 commercial 生成。commercial 保持原购买与账单行为，校验前后端 edition 不匹配。
 8. SDK/client 构造不自动加载支付功能；回归 desktop/mobile/extension 的共享入口。
 
 **验证**：Web 独立 typecheck、原相关 tests、浏览器真实导航；核心 Auth 无 Creem 依赖；core 网络请求没有 billing summary；未认证、非管理员和错误 capability 分支；client bundle 不含服务端代码。
@@ -311,7 +311,7 @@ pnpm --filter @sourceweft/billing test
 | C02 | core 注册/组织/邀请 | 成功且 billing account 无业务读写，权限保持 | 集成/真实 DB |
 | C03 | core 对话/流式/标题/工具/长任务 | 功能完成，无 summary、ledger 或支付请求 | 集成/E2E |
 | C04 | core 文档/连接器/产物 | 成功，事实校验与资源限制保持 | 集成/E2E |
-| C05 | core UI/旧账单 URL | UI 无提示、无计费入口，旧 URL 回 Dashboard；API 保持 unavailable 契约 | Web/API |
+| C05 | core UI/旧账单 URL | UI 无提示、无计费入口，core 无计费页面路由；API 保持 unavailable 契约 | Web/API |
 | C06 | core 显式要求 commercial | 配置/构建失败而非忽略 | 负向 |
 | C07 | core 用量与成本回查 | 观测仍写入，缺失成本有标记，不调用商业调账 | 集成 |
 | B01 | commercial 所有原 billing 场景 | 与基线的账务不变量一致 | 单元/集成 |
@@ -384,7 +384,7 @@ pnpm --filter @sourceweft/billing test
 | `checks/{billing-catalog,index}.ts` | 商业检查扩展 | T03/T07 |
 | scripts `create-creem-product.ts`、`delete-creem-product.ts`、`audit-chat-metering.ts`、`anydoc-billing-e2e.ts` | 商业命令归包；解析 core fixtures 保留 | T07 |
 | `apps/web/lib/{auth-client,deployment-config,sdk}.ts` | edition 插槽和 capabilities | T08 |
-| Web `app/dashboard/billing/**`、`app/_components/team-checkout-dialog.tsx` | 路由薄壳，内容来自商业 UI | T08 |
+| Web `app/dashboard/billing/**`、`app/_components/team-checkout-dialog.tsx` | 计费路由由商业模板生成，共享展示插槽装配商业 UI | T08 |
 | settings-center `billing-*`、`use-billing-plan-action.ts`、`usage-panel.tsx`、`types.ts` | 商业账单与核心观测分离 | T08 |
 | settings-center `trust-rules-panel.tsx`、`settings-center-shell.tsx`、settings modal | 通用组织 helper 提取，导航能力化 | T08 |
 | `dashboard-sidebar-chat-panel.tsx`、`dashboard-billing-summary-refresh.ts`、chat stream runner control | 可选余额展示与刷新，不影响聊天 | T08 |

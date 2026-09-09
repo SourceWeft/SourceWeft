@@ -1,11 +1,10 @@
-import { billingUiAvailable } from "../../../lib/billing-edition/catalog";
+// Generated commercial billing route; subject to enterprise/LICENSE.
 import {
   BillingRouteSkeleton,
   DashboardContentRouteSkeleton,
-} from "../../_components/route-loading-skeleton";
+} from "../../../_components/route-loading-skeleton";
 
 export default function Loading() {
-  if (!billingUiAvailable) return null;
   return (
     <DashboardContentRouteSkeleton>
       <BillingRouteSkeleton />

@@ -27,6 +27,12 @@ async function files(dir) {
 }
 if (edition === "core") {
   await assert.rejects(stat(path.join(root, "enterprise")), { code: "ENOENT" });
+  await assert.rejects(
+    stat(path.join(root, "apps/web/app/dashboard/billing")),
+    {
+      code: "ENOENT",
+    },
+  );
   for (const dir of ["apps/backend/src", "apps/web", "packages"]) {
     for (const file of await files(path.join(root, dir))) {
       if (!/\.(?:ts|tsx|json)$/.test(file) || file.endsWith(".test.ts"))
@@ -41,6 +47,13 @@ if (edition === "core") {
     }
   }
 } else {
+  for (const route of ["page.tsx", "checkout/page.tsx"]) {
+    assert.ok(
+      (
+        await stat(path.join(root, "apps/web/app/dashboard/billing", route))
+      ).isFile(),
+    );
+  }
   for (const file of await files(path.join(root, "enterprise/billing/src"))) {
     if (!/\.tsx?$/.test(file)) continue;
     const text = await readFile(file, "utf8");

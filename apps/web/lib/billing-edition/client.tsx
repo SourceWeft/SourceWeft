@@ -15,21 +15,6 @@ export function BillingPanel() {
 export function UsagePanel() {
   return null;
 }
-export function BillingSuccessClient(_props: { orderId?: string | null }) {
-  void _props;
-  return <BillingPanel />;
-}
-export function BillingCheckoutClient(_props: {
-  billingInterval: string | null;
-  intent: string | null;
-  plan: string | null;
-  seatCount: string | null;
-  source: string | null;
-  teamName: string | null;
-}) {
-  void _props;
-  return <BillingPanel />;
-}
 export function PricingToggle(_props: {
   plans: PlanConfig[];
   authState: {

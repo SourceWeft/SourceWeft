@@ -206,13 +206,13 @@ Auth 核心 migration 不依赖 Creem package；商业 migration 通过 billing 
 
 ## 9. Web、SDK 与其他客户端
 
-将 billing panel、plan actions、checkout/success、team-checkout-dialog、套餐 UI 与余额组件迁入商业包。Next page 保留宿主路由薄壳，商业 server/client binding 注入对应实现。
+将 billing panel、plan actions、checkout/success、team-checkout-dialog、套餐 UI 与余额组件迁入商业包。Next page 和 loading 路由薄壳由商业版构建模板注入，核心源码不保留计费页面路由。
 
 UI 使用 props 注入 SDK、组织上下文、导航/刷新回调；不得 import app 的 authClient、lib/sdk 或相对 app 路径。共用 React、Next 和 Better Auth 的兼容 peer/type 边界，不能用 `any` 丢失 Auth 插件推导类型。
 
 `apps/web/lib/auth-client.ts` 通过 auth-client binding 接收插件贡献，core 是空贡献、commercial 是 Creem client；三类 binding 分离防止 client 间接导入 server。
 
-核心界面不显示 billing 不可用说明，隐藏计费及额度入口，包括移动端与加载骨架。旧 billing/checkout 页面无提示跳转 Dashboard。
+核心界面不显示 billing 不可用说明，隐藏计费及额度入口，包括移动端与加载骨架。核心不保留旧 billing/checkout 页面或跳转兼容，访问这些地址按普通未知页面处理。
 
 补充处理：侧边栏 credits、settings 的 usage/账单混排、聊天流结束刷新、定价 CTA、URL 参数进入 checkout、账务错误展示。核心保留现有用量观测入口，不承诺另建一个新的分析产品。
 
