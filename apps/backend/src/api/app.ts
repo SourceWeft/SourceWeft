@@ -5,7 +5,10 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "../modules/auth";
-import { handleCreemScheduledCancelWebhook } from "../modules/billing/providers/creem-webhook-bypass";
+import {
+  handleBillingAuthRequest,
+  getBillingDeploymentCapabilities,
+} from "../billing-host/bindings";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { describeError } from "./response/error-detail";
@@ -70,7 +73,7 @@ export function createApp() {
     const authRequest = withBetterAuthClientIp(c);
 
     if (c.req.method === "POST") {
-      const scheduledCancelResponse = await handleCreemScheduledCancelWebhook(
+      const scheduledCancelResponse = await handleBillingAuthRequest(
         authRequest.clone(),
       );
       if (scheduledCancelResponse) {
@@ -109,6 +112,9 @@ export function createApp() {
   registerWorkspaceRoutes(app);
   registerDashboardRoutes(app);
   registerUserSettingsRoutes(app);
+  app.get("/v1/deployment/capabilities", (c) =>
+    c.json(getBillingDeploymentCapabilities()),
+  );
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerMarketRoutes(app);

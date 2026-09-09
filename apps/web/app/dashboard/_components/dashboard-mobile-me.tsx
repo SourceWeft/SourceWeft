@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   Activity,
@@ -196,32 +197,34 @@ export function DashboardMobileMe() {
               </div>
             </div>
 
-            {panelItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
-                  key={item.key}
-                  onClick={() => setActivePanel(item.key)}
-                  type="button"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-foreground">
-                        {item.label}
+            {panelItems
+              .filter((item) => isSettingsTabAvailable(item.key))
+              .map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
+                    key={item.key}
+                    onClick={() => setActivePanel(item.key)}
+                    type="button"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Icon className="h-4 w-4" />
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {item.description}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {item.label}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {item.description}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              );
-            })}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                );
+              })}
             <button
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
               onClick={openObservability}

@@ -19,14 +19,18 @@ RUN apk add --no-cache libc6-compat libstdc++ \
 # out/full/ (complete source tree for only the target packages and
 # their workspace dependencies). No manual package list required.
 FROM base AS pruner
+ARG SOURCEWEFT_EDITION=core
 COPY . .
-RUN pnpm dlx turbo prune @sourceweft/backend web --docker
+RUN node scripts/editions/prepare.mjs --edition=${SOURCEWEFT_EDITION} --out=/prepared
+WORKDIR /prepared
+RUN pnpm dlx turbo@2.10.9 prune @sourceweft/backend web --docker \
+  && node scripts/editions/copy-licenses.mjs /prepared/out/full
 
 # ── Deps ─────────────────────────────────────────────────────────────
 FROM base AS deps
 RUN apk add --no-cache make g++ python3
-COPY --from=pruner /app/out/json/ .
-COPY --from=pruner /app/out/pnpm-lock.yaml .
+COPY --from=pruner /prepared/out/json/ .
+COPY --from=pruner /prepared/out/pnpm-lock.yaml .
 RUN pnpm install --frozen-lockfile
 
 # ── Builder ──────────────────────────────────────────────────────────
@@ -51,7 +55,7 @@ ENV NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=${NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_
 ENV NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID}
 ENV NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=${NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED}
 ENV NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=${NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED}
-COPY --from=pruner /app/out/full/ .
+COPY --from=pruner /prepared/out/full/ .
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
 RUN --mount=type=cache,id=sourceweft-next-cache,target=/app/apps/web/.next/cache,sharing=locked \
@@ -69,8 +73,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV BACKEND_API_PORT=3001
-COPY --from=pruner /app/out/json/ .
-COPY --from=pruner /app/out/pnpm-lock.yaml .
+COPY --from=pruner /prepared/out/json/ .
+COPY --from=pruner /prepared/out/pnpm-lock.yaml .
 RUN apk add --no-cache --virtual .runtime-build-deps make g++ python3 \
   && pnpm install --filter @sourceweft/backend... --frozen-lockfile --prod=false \
   && apk del .runtime-build-deps
@@ -79,7 +83,7 @@ RUN addgroup -S sourceweft \
 
 # Pruned workspace source tree (packages needed at runtime for pnpm workspace resolution).
 # turbo prune already limits this to @sourceweft/backend, web, and their dependencies.
-COPY --chown=sourceweft:sourceweft --from=pruner /app/out/full/ .
+COPY --chown=sourceweft:sourceweft --from=pruner /prepared/out/full/ .
 
 # Overlay built artifacts from builder (supersedes source files where applicable)
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/.next/standalone web-standalone

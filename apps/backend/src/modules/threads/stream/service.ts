@@ -111,7 +111,7 @@ export type ThreadStreamRunOptions = {
   createErrorMessage?: typeof createThreadStreamErrorMessage;
   onFinalized?: (result: {
     assistantMessage: MessageRecord;
-    billing: MeterConsumeResponse;
+    billing: MeterConsumeResponse | undefined;
     retrieval: {
       embeddingProfileId: string | null;
       vectorStrategy: EmbeddingVectorStrategy | null;

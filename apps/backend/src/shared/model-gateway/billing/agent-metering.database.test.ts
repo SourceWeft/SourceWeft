@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -9,7 +10,7 @@ import {
   createLangChainChatModel,
   type ObserveSink,
 } from "@sourceweft/model-gateway";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 
 const raw = vi.hoisted(() => ({
@@ -49,14 +50,12 @@ beforeAll(async () => {
     await import("../../../modules/llm-observability/sink");
   sink = createLlmObservabilitySink({ resolveCost: async () => null });
   ({ openBilledModelGateway: openGateway } = await import("../billed-client"));
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Agent metering",
-      slug: workspaceId,
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Agent metering",
+    slug: workspaceId,
+  });
   server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => {
@@ -166,13 +165,13 @@ async function build(covered = false) {
     strict: true,
   });
   const payer = randomUUID();
-  const billing = {
+  const billing = adaptBillingTestPort({
     getSummary: vi.fn(async () => ({
       teamId: payer,
       billingMode: "enforced",
       credits: { available: 100, consumedThisCycle: 0 },
     })),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
   // Pricing is outside this test; scope settlement and observation run for real.
   const meterUsage = vi.fn(async (input) => ({
     billing: {

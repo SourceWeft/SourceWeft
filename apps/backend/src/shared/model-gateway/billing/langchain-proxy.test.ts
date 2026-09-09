@@ -1,7 +1,8 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 import type { ObserveSink, UsageInfo } from "@sourceweft/model-gateway";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import type { ModelUsageContext } from "./context";
 import { openBillingScope } from "./scope";
 
@@ -51,7 +52,7 @@ function createFakeModel(sink: ObserveSink | undefined, usage: UsageInfo) {
 }
 
 function createBilling(): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(async (teamId: string) => ({
       teamId,
       billingMode: "enforced",
@@ -59,7 +60,7 @@ function createBilling(): ContentBillingPort {
     })),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function meterUsageStub() {

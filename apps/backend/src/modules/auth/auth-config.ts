@@ -12,7 +12,10 @@ import {
   username,
 } from "better-auth/plugins";
 import { apiKey } from "@better-auth/api-key";
-import { creem } from "@creem_io/better-auth";
+import {
+  getBillingAuthPlugins,
+  billingOrganizationHooks,
+} from "../../billing-host/bindings";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { APIError } from "better-auth/api";
@@ -124,14 +127,9 @@ type SourceweftAuthOptions = {
   mode?: SourceweftAuthMode;
 };
 
-function shouldIncludeCreemPlugin(mode: SourceweftAuthMode) {
-  return mode === "migration" || config.billing.provider === "creem";
-}
-
 export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
   const mode = options.mode || "runtime";
   const isRuntimeMode = mode === "runtime";
-  const includeCreemPlugin = shouldIncludeCreemPlugin(mode);
 
   return betterAuth({
     appName: "SourceWeft",
@@ -140,11 +138,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
     logger: {
       level:
         (process.env.BETTER_AUTH_LOG_LEVEL as
-          | "debug"
-          | "info"
-          | "warn"
-          | "error"
-          | undefined) || "info",
+          "debug" | "info" | "warn" | "error" | undefined) || "info",
       log: (level, message, ...args) => {
         const meta = args.length > 0 ? { args } : undefined;
         if (level === "debug") {
@@ -365,8 +359,9 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                     });
                   }
 
-                  const { billingService } = await import("../billing");
-                  await billingService.assertCanAddTeamMember(organization.id);
+                  await billingOrganizationHooks.beforeAddMember(
+                    organization.id,
+                  );
                 },
                 async beforeCreateInvitation({ organization }) {
                   if (isPersonalOrganizationMetadata(organization.metadata)) {
@@ -375,8 +370,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                     });
                   }
 
-                  const { billingService } = await import("../billing");
-                  await billingService.assertCanInviteTeamMember(
+                  await billingOrganizationHooks.beforeInviteMember(
                     organization.id,
                   );
                 },
@@ -387,8 +381,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                     });
                   }
 
-                  const { billingService } = await import("../billing");
-                  await billingService.assertCanAcceptTeamInvitation(
+                  await billingOrganizationHooks.beforeAcceptInvitation(
                     organization.id,
                   );
                 },
@@ -545,112 +538,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
           requireName: true,
         },
       ]),
-      ...(includeCreemPlugin
-        ? [
-            creem({
-              apiKey: config.billing.creem.apiKey,
-              testMode: config.billing.creem.testMode,
-              defaultSuccessUrl: config.billing.defaultSuccessUrl,
-              persistSubscriptions: true,
-              ...(isRuntimeMode
-                ? {
-                    webhookSecret:
-                      config.billing.creem.webhookSecret || undefined,
-                    onSubscriptionActive: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.active",
-                        data,
-                        "active",
-                      );
-                    },
-                    onSubscriptionTrialing: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.trialing",
-                        data,
-                        "trialing",
-                      );
-                    },
-                    onSubscriptionPaid: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.paid",
-                        data,
-                        "active",
-                      );
-                    },
-                    onSubscriptionPastDue: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.past_due",
-                        data,
-                        "past_due",
-                      );
-                    },
-                    onSubscriptionPaused: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.paused",
-                        data,
-                        "paused",
-                      );
-                    },
-                    onSubscriptionUnpaid: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.unpaid",
-                        data,
-                        "unpaid",
-                      );
-                    },
-                    onSubscriptionCanceled: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.canceled",
-                        data,
-                        "canceled",
-                      );
-                    },
-                    onSubscriptionExpired: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.expired",
-                        data,
-                        "expired",
-                      );
-                    },
-                    onSubscriptionUpdate: async (data) => {
-                      const { syncCreemSubscriptionEvent } = await import(
-                        "../billing"
-                      );
-                      await syncCreemSubscriptionEvent(
-                        "subscription.update",
-                        data,
-                        "active",
-                      );
-                    },
-                  }
-                : {}),
-            }),
-          ]
-        : []),
+      ...getBillingAuthPlugins(mode),
       ...(isRuntimeMode && config.auth.googleOneTapClientId
         ? [
             oneTap({

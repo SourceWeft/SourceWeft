@@ -1,3 +1,4 @@
+import { validateBillingStartup } from "../billing-host/bindings";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import {
@@ -11,9 +12,13 @@ import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
-import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
+import {
+  reconcileBillingSchedule as reconcileTeamSubscriptionsSchedule,
+  billingSchedulesEnabled,
+} from "../billing-host/bindings";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 
+validateBillingStartup();
 await syncGlobalModelGatewayConfig();
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 
@@ -31,7 +36,7 @@ async function tick() {
   try {
     const jobs: Array<Promise<unknown>> = [];
 
-    if (config.billing.teamBillingEnabled && config.billing.reconcileEnabled) {
+    if (billingSchedulesEnabled) {
       jobs.push(reconcileTeamSubscriptionsSchedule());
     }
 
@@ -121,8 +126,7 @@ const marketFederationTimer = setInterval(() => {
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
   modelPricingSyncIntervalMs: config.modelPricingSyncIntervalMs,
-  billingReconcileEnabled:
-    config.billing.teamBillingEnabled && config.billing.reconcileEnabled,
+  billingReconcileEnabled: billingSchedulesEnabled,
 });
 void agentSandboxService.logStartupWarning("scheduler");
 
