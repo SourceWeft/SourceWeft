@@ -51,7 +51,6 @@ import {
   type ByokProviderOption,
   type ByokSavedModelItem,
 } from "./byok-state";
-import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
 export type ModelType = "llm" | "image" | "vision";
 
@@ -854,7 +853,7 @@ function ByokPanel({
 
   return (
     <div className="px-2 pt-2 pb-1">
-      <div className="flex h-[382px] min-h-0 overflow-hidden rounded-lg border border-border/70 bg-background">
+      <div className="flex h-[min(382px,calc(100svh-14rem))] min-h-0 overflow-hidden rounded-lg border border-border/70 bg-background">
         <aside className="flex w-12 shrink-0 flex-col border-r border-border/70 bg-muted/10">
           <TooltipProvider>
             <ModelSelectorList className="max-h-none min-h-0 flex-1 overflow-y-auto py-1.5">
@@ -1142,7 +1141,7 @@ function SelectorPanel({
                 </TabsTrigger>
               </TabsList>
               <TabsContent className="mt-0" value="global">
-                <div className="flex h-[382px] min-h-0 flex-col px-2 pt-2 pb-1">
+                <div className="flex h-[min(382px,calc(100svh-14rem))] min-h-0 flex-col px-2 pt-2 pb-1">
                   <div className="shrink-0 pb-2">
                     <ModelSelectorInput placeholder="Search models..." />
                   </div>
@@ -1216,6 +1215,7 @@ export function HeaderModelSelector({
   byokProviders = [],
   byokSelections = {},
   isLoading = false,
+  compact = false,
   onAddByokModel,
   onByokSelect,
   onModelSelect,
@@ -1228,6 +1228,7 @@ export function HeaderModelSelector({
   byokProviders?: ByokProviderOption[];
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   isLoading?: boolean;
+  compact?: boolean;
   onAddByokModel?: (input: {
     credentialId?: string;
     providerKind?: string;
@@ -1246,7 +1247,15 @@ export function HeaderModelSelector({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelType>("llm");
   const [openSequence, setOpenSequence] = useState(0);
-  const isCompactModelSelector = !useMediaQuery(BREAKPOINTS.md);
+  const isCompactModelSelector = compact;
+  const primaryModel =
+    byokSelections.llm?.mode === "byok"
+      ? resolveByokSelectedModelItem({
+          availableModels,
+          selection: byokSelections.llm,
+          type: "llm",
+        })
+      : selectedModels.llm;
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen) {
@@ -1257,76 +1266,28 @@ export function HeaderModelSelector({
     <ModelSelector onOpenChange={handleOpenChange} open={open}>
       <TooltipProvider>
         {isCompactModelSelector ? (
-          <div className="order-last flex h-8 w-full min-w-0 basis-full items-center gap-0.5 rounded-md border border-border/50 bg-muted/20 px-1 py-0.5 md:order-none md:w-auto md:basis-auto">
-            {(["llm", "image", "vision"] as ModelType[]).map((type) => {
-              const byokSelection = byokSelections[type] ?? null;
-              const byokModel =
-                byokSelection?.mode === "byok"
-                  ? resolveByokSelectedModelItem({
-                      availableModels,
-                      selection: byokSelection,
-                      type,
-                    })
-                  : null;
-              const model =
-                byokModel ??
-                selectedModels[type] ??
-                availableModels[type]?.[0] ??
-                null;
-              const isCatalogLoading = isLoading && !model;
-              const showByokBadge = byokSelection?.mode === "byok";
-
-              return (
-                <Tooltip key={type}>
-                  <TooltipTrigger asChild>
-                    <ModelSelectorTrigger asChild>
-                      <button
-                        aria-busy={isCatalogLoading || undefined}
-                        aria-label={
-                          isCatalogLoading
-                            ? `${modelTypeLabels[type]} models loading`
-                            : `${modelTypeLabels[type]} model: ${model?.name ?? "None"}`
-                        }
-                        className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-1.5 text-left text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:bg-background/70 focus-visible:text-foreground aria-expanded:bg-background/70 aria-expanded:text-foreground"
-                        disabled={isCatalogLoading}
-                        onClick={() => setActiveTab(type)}
-                        type="button"
-                      >
-                        <span className="shrink-0">
-                          <ModelTypeIcon type={type} />
-                        </span>
-                        <span
-                          className={
-                            model
-                              ? "min-w-0 flex-1 truncate text-[10px] leading-3.5 font-medium text-foreground"
-                              : "min-w-0 flex-1 truncate text-[10px] leading-3.5 font-medium text-muted-foreground"
-                          }
-                        >
-                          {isCatalogLoading ? (
-                            <span className="block h-2 w-10 animate-pulse rounded-full bg-muted-foreground/25" />
-                          ) : (
-                            (model?.name ?? `No ${modelTypeLabels[type]}`)
-                          )}
-                        </span>
-                        {showByokBadge ? (
-                          <KeyRound className="size-2.5 shrink-0 text-muted-foreground" />
-                        ) : null}
-                      </button>
-                    </ModelSelectorTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={6}>
-                    {isCatalogLoading
-                      ? `${modelTypeLabels[type]} models loading`
-                      : byokSelection?.mode === "byok"
-                        ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
-                        : model
-                          ? `${modelTypeLabels[type]}: ${model.name}`
-                          : `No ${modelTypeLabels[type]} model available`}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
+          <ModelSelectorTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Models: ${primaryModel?.name ?? "Auto"}`}
+              title="Select language, image and vision models"
+              aria-busy={isLoading && !primaryModel}
+              disabled={isLoading && !primaryModel}
+              onClick={() => setActiveTab("llm")}
+              className="flex h-8 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 text-xs text-foreground shadow-xs"
+            >
+              <ModelTypeIcon type="llm" />
+              <span className="min-w-0 truncate">
+                {isLoading && !primaryModel
+                  ? "Loading models…"
+                  : (primaryModel?.name ?? "Auto")}
+              </span>
+              {byokSelections.llm?.mode === "byok" ? (
+                <KeyRound className="size-3 shrink-0" />
+              ) : null}
+              <ChevronDown className="size-3 shrink-0" />
+            </button>
+          </ModelSelectorTrigger>
         ) : (
           <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs">
             {(["llm", "image", "vision"] as ModelType[]).map((type) => {
@@ -1408,7 +1369,7 @@ export function HeaderModelSelector({
       </TooltipProvider>
 
       <ModelSelectorContent
-        className="max-w-[92vw] sm:max-w-[520px]"
+        className="max-h-[calc(100svh-2rem)] max-w-[92vw] overflow-y-auto sm:max-w-[520px]"
         title="Select model"
       >
         <SelectorPanel

@@ -149,6 +149,7 @@ export type LegacyThreadProfileAliasInput = Partial<
 >;
 
 export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
+  localCaller?: import("../../devices/access").LocalExecutionCaller;
   workspaceId: string;
   threadId: string;
   userId: string;
@@ -202,6 +203,7 @@ export type TraceContinuationMetadata = {
 };
 
 export type PreparedThreadTurn = {
+  localCaller?: import("../../devices/access").LocalExecutionCaller;
   userId: string;
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;

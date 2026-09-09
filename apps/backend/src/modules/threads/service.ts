@@ -1,3 +1,4 @@
+import { targetKey } from "../devices/access";
 import { validateThreadExecutionTarget } from "../devices/service";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import { findCitationByMessageRank } from "../citations";
@@ -140,6 +141,7 @@ function sanitizeClientMessagePage(input: {
 }
 
 export type StartThreadTurnInput = {
+  localCaller?: import("../devices/access").LocalExecutionCaller;
   executionTarget?: ThreadExecutionTarget;
   workspaceId: string;
   userId: string;
@@ -474,6 +476,7 @@ class ContentThreadService {
   }
 
   async createThread(input: {
+    creationId?: string;
     executionTarget?: ThreadExecutionTarget;
     workspaceId: string;
     userId: string;
@@ -490,6 +493,26 @@ class ContentThreadService {
       userId: input.userId,
     });
 
+    if (input.creationId) {
+      const existing = await findThreadRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: input.creationId,
+      });
+      if (existing) {
+        if (
+          existing.createdBy !== input.userId ||
+          targetKey(existing.executionTarget ?? { kind: "cloud" }) !==
+            targetKey(input.executionTarget ?? { kind: "cloud" })
+        )
+          throw new ContentError(
+            409,
+            "CREATION_CONTEXT_REUSED",
+            "新建上下文已用于其他对话。",
+          );
+        return { thread: existing };
+      }
+    }
     await validateThreadExecutionTarget(input.userId, input.executionTarget);
     const modelSettings = await pruneUnavailableThreadModelAliases(
       normalizeThreadModelSettings(input.modelSettings),
@@ -499,6 +522,7 @@ class ContentThreadService {
       await resolveThreadModelSettingsSnapshots(modelSettings);
 
     const thread = await createThreadRecord({
+      id: input.creationId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       title: normalizeContentTitle(input.title, "New Thread"),
@@ -571,6 +595,7 @@ class ContentThreadService {
 
     const mode: ChatThreadRunMode = "send";
     const request: StreamThreadEventInput = {
+      localCaller: input.localCaller,
       workspaceId: input.workspaceId,
       threadId: thread.id,
       userId: input.userId,

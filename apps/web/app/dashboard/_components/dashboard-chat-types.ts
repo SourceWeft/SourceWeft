@@ -1,6 +1,7 @@
 export type ChatVisibility = "private" | "workspace" | "public_link";
 
 export type ChatItem = {
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   id: string;
   title: string;
   updatedAt: string;

@@ -54,7 +54,7 @@ impl LocalHost {
                 "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
             )?;
             let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if version > 2 {
+            if version > 3 {
                 return Err(HostError::new(
                     "DATABASE_VERSION_UNSUPPORTED",
                     "Update the desktop app before opening this database.",
@@ -82,6 +82,10 @@ impl LocalHost {
                     PRAGMA user_version=2; COMMIT;",
                 )?;
             }
+            if version < 3 {
+                connection.execute_batch("BEGIN IMMEDIATE; ALTER TABLE workspaces ADD COLUMN attached_path TEXT; ALTER TABLE workspaces ADD COLUMN folder_id TEXT; PRAGMA user_version=3; COMMIT;")?;
+            }
+            connection.execute_batch("CREATE TABLE IF NOT EXISTS folder_grants(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,path TEXT NOT NULL,root_device INTEGER NOT NULL,root_inode INTEGER NOT NULL);")?;
             Ok(Self {
                 db: Mutex::new(connection),
                 base,
@@ -89,6 +93,11 @@ impl LocalHost {
         }
     }
 
+    pub(crate) fn backup_base(&self) -> Result<PathBuf> {
+        let path = self.base.join("local-host/backups");
+        private_dir(&path)?;
+        Ok(path)
+    }
     pub fn workspace_base(&self) -> PathBuf {
         self.base.join("task-workspaces")
     }
@@ -96,8 +105,70 @@ impl LocalHost {
     /// Call on the first committed message, not when opening an empty chat view.
     /// The first transaction reserves an ID. Recovery can finish ONLY that allocation.
     pub fn ensure_workspace(&self, owner: &str, thread: &str) -> Result<Workspace> {
+        self.ensure_bound_workspace(owner, thread, None, None)
+    }
+
+    pub fn register_folder(&self, owner: &str, path: &Path) -> Result<serde_json::Value> {
+        validate_identity(owner)?;
+        let path = path.canonicalize()?;
+        let (device, inode) = root_identity(&path)?;
+        let id = Uuid::new_v4().to_string();
+        self.db.lock().map_err(|_|HostError::new("HOST_UNAVAILABLE","Database lock failed"))?.execute("INSERT INTO folder_grants(id,owner_id,path,root_device,root_inode) VALUES(?1,?2,?3,?4,?5)",params![id,owner,path.to_string_lossy(),device,inode])?;
+        Ok(
+            serde_json::json!({"id":id,"path":path,"name":path.file_name().unwrap_or_default().to_string_lossy()}),
+        )
+    }
+
+    pub fn ensure_bound_workspace(
+        &self,
+        owner: &str,
+        thread: &str,
+        requested_id: Option<&str>,
+        folder_id: Option<&str>,
+    ) -> Result<Workspace> {
         validate_identity(owner)?;
         validate_identity(thread)?;
+        if requested_id.is_some_and(|id| Uuid::parse_str(id).is_err()) {
+            return Err(HostError::new(
+                "INVALID_WORKSPACE_ID",
+                "Workspace ID must be a UUID",
+            ));
+        }
+        if let Some(folder) = folder_id {
+            let id = requested_id.ok_or_else(|| {
+                HostError::new("INVALID_WORKSPACE_ID", "Attached workspace requires an ID")
+            })?;
+            let db = self
+                .db
+                .lock()
+                .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Database lock failed"))?;
+            let grant:Option<(String,u64,u64)>=db.query_row("SELECT path,root_device,root_inode FROM folder_grants WHERE id=?1 AND owner_id=?2",params![folder,owner],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+            let (path, device, inode) = grant.ok_or_else(|| {
+                HostError::new(
+                    "FOLDER_NOT_AUTHORIZED",
+                    "Folder is not authorized on this computer",
+                )
+            })?;
+            if root_identity(Path::new(&path))? != (device, inode) {
+                return Err(HostError::new(
+                    "WORKSPACE_REPLACED",
+                    "Authorized folder was replaced",
+                ));
+            }
+            db.execute("INSERT INTO workspaces(id,owner_id,thread_id,state,root_device,root_inode,attached_path,folder_id) VALUES(?1,?2,?3,'ready',?4,?5,?6,?7) ON CONFLICT(owner_id,thread_id) DO NOTHING",params![id,owner,thread,device,inode,path,folder])?;
+            let matches:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE owner_id=?1 AND thread_id=?2 AND id=?3 AND folder_id=?4 AND attached_path=?5)",params![owner,thread,id,folder,path],|r|r.get(0))?;
+            if !matches {
+                return Err(HostError::new(
+                    "WORKSPACE_BINDING_IMMUTABLE",
+                    "Conversation already uses another folder",
+                ));
+            }
+            return Ok(Workspace {
+                id: id.into(),
+                thread_id: thread.into(),
+                path: path.into(),
+            });
+        }
         let mut db = self
             .db
             .lock()
@@ -111,9 +182,17 @@ impl LocalHost {
             )
             .optional()?;
         let (id, _) = if let Some(found) = existing {
+            if requested_id.is_some_and(|id| id != found.0) {
+                return Err(HostError::new(
+                    "WORKSPACE_BINDING_IMMUTABLE",
+                    "Conversation already has a different workspace",
+                ));
+            }
             found
         } else {
-            let id = Uuid::new_v4().to_string();
+            let id = requested_id
+                .map(str::to_owned)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
             tx.execute("INSERT INTO workspaces(id,owner_id,thread_id,state) VALUES(?1,?2,?3,'provisioning')", params![id, owner, thread])?;
             (id, "provisioning".to_owned())
         };
@@ -223,6 +302,20 @@ impl LocalHost {
                 "No workspace is authorized for this account.",
             )
         })?;
+        let attached: Option<String> = db.query_row(
+            "SELECT attached_path FROM workspaces WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if let Some(path) = attached {
+            let path = PathBuf::from(path);
+            verify_root(&db, id, &path)?;
+            return Ok(Workspace {
+                id: id.into(),
+                thread_id,
+                path,
+            });
+        }
         require_real_directory(&self.workspace_base())?;
         let allocation = self.workspace_base().join(id);
         require_real_directory(&allocation)?;

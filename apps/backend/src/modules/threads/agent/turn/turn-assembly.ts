@@ -574,6 +574,7 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
           executionTarget: prepared.thread.executionTarget ?? { kind: "cloud" },
           filesystem: filesystemBackend.backend,
           context: {
+            localCaller: prepared.localCaller,
             teamId: prepared.workspace.organizationId,
             workspaceId: prepared.workspace.id,
             threadId: prepared.thread.id,
@@ -836,7 +837,11 @@ export async function buildThreadAgentAssembly(
           (skill) => skill.workspaceSkillId,
         ),
         selected_skill_count: prepared.enabledSkills.length,
-      skill_versions: prepared.enabledSkills.map(skill => ({ skillId: skill.workspaceSkillId, versionId: skill.skillVersionId, version: skill.version })),
+        skill_versions: prepared.enabledSkills.map((skill) => ({
+          skillId: skill.workspaceSkillId,
+          versionId: skill.skillVersionId,
+          version: skill.version,
+        })),
       },
     },
     interruptOn,
@@ -870,7 +875,11 @@ export async function buildThreadAgentAssembly(
       ),
       skill_ids: prepared.enabledSkills.map((skill) => skill.workspaceSkillId),
       selected_skill_count: prepared.enabledSkills.length,
-      skill_versions: prepared.enabledSkills.map(skill => ({ skillId: skill.workspaceSkillId, versionId: skill.skillVersionId, version: skill.version })),
+      skill_versions: prepared.enabledSkills.map((skill) => ({
+        skillId: skill.workspaceSkillId,
+        versionId: skill.skillVersionId,
+        version: skill.version,
+      })),
     },
     // Consumed via `agent.streamEvents(…, { version: "v3" })` (see
     // `runAgentStream`). v3 is built on `graph.stream({ subgraphs: true })`, so a

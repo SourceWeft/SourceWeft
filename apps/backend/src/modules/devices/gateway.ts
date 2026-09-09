@@ -1,3 +1,4 @@
+import { isDeviceAccessActive } from "./access";
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
@@ -112,7 +113,14 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
         await db
           .update(localToolInvocations)
           .set({
-            status: message.ok ? "succeeded" : "failed",
+            status: message.ok
+              ? "succeeded"
+              : message.error?.includes("OUTCOME_UNKNOWN")
+                ? "outcome_unknown"
+                : message.error?.includes("CALL_CANCELLED") ||
+                    message.error?.includes("CALL_EXPIRED")
+                  ? "cancelled"
+                  : "failed",
             result: message.result ?? null,
             error: message.error ?? null,
           })
@@ -172,6 +180,17 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
           call.deadline.getTime() <= Date.now()
         ) {
           ws.send(JSON.stringify({ type: "cancel", id: call.id }));
+          continue;
+        }
+        if (!(await isDeviceAccessActive(call.accessId, userId, deviceId))) {
+          ws.send(JSON.stringify({ type: "cancel", id: call.id }));
+          await db
+            .update(localToolInvocations)
+            .set({
+              status: delivered.has(call.id) ? "cancel_requested" : "cancelled",
+              error: "LOCAL_ACCESS_REVOKED",
+            })
+            .where(eq(localToolInvocations.id, call.id));
           continue;
         }
         if (delivered.has(call.id)) continue;

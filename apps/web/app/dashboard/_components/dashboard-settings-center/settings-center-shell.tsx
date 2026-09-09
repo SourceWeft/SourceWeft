@@ -93,12 +93,12 @@ export function DashboardSettingsCenterModal({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="h-[min(780px,calc(100svh-2rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border/80 bg-background p-0 shadow-2xl sm:w-[min(900px,calc(100vw-2rem))] sm:max-w-[min(900px,calc(100vw-2rem))]"
+        className="settings-center h-[min(780px,calc(100svh-2rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border/80 bg-background p-0 shadow-2xl sm:w-[min(900px,calc(100vw-2rem))] sm:max-w-[min(900px,calc(100vw-2rem))]"
         constrainWidth={false}
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">Settings center</DialogTitle>
-        <div className="grid h-full grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
+        <div className="settings-center-grid grid h-full min-h-0 grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
           {/* ── Sidebar ── */}
           <aside className="flex min-h-0 flex-col border-b border-border/70 bg-muted/30 sm:border-b-0 sm:border-r">
             {/* User identity */}
@@ -160,7 +160,7 @@ export function DashboardSettingsCenterModal({
             </button>
 
             {/* Scrollable area */}
-            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain px-6 pb-10 pt-6 pr-12">
+            <div className="settings-center-content absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pb-6 pt-5 pr-12 sm:pl-6">
               {activeTab === "account" && (
                 <AccountPanel
                   initials={initials}

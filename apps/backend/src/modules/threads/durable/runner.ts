@@ -1,3 +1,4 @@
+import { approvalFinishPayload } from "./approval-finish";
 import type {
   ThreadChatRunJobPayload,
   ThreadChatRunJobResult,
@@ -1900,7 +1901,15 @@ export async function processThreadChatRunJob(
     }
     if (finished) {
       const terminalEvents = isWaitingForApproval
-        ? [toSseData({ type: "finish" })]
+        ? [
+            toSseData(
+              approvalFinishPayload({
+                snapshot: finalSnapshot as Record<string, unknown>,
+                assistantMessageId,
+                userMessageId: finished.userMessageId,
+              }),
+            ),
+          ]
         : synthesizeTerminalRunEvents({ run: finished, sawErrorEvent: false });
       for (const event of terminalEvents)
         await durableChatRunService.appendRunEvent({

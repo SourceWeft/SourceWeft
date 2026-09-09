@@ -9,6 +9,7 @@ import { DashboardMobileBottomNav } from "./_components/dashboard-mobile-bottom-
 import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
+import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
 import { DashboardShellRouteSkeleton } from "../_components/route-loading-skeleton";
 
@@ -34,9 +35,9 @@ function hasActiveSessionResult(result: unknown) {
   const sessionResult = result as SessionResult | undefined;
   return Boolean(
     sessionResult?.data?.session ||
-      sessionResult?.data?.user ||
-      sessionResult?.session ||
-      sessionResult?.user,
+    sessionResult?.data?.user ||
+    sessionResult?.session ||
+    sessionResult?.user,
   );
 }
 
@@ -118,7 +119,11 @@ export function DashboardLayoutClient({
       setSessionConfirming(true);
 
       try {
-        for (let attempt = 0; attempt < SESSION_CONFIRM_ATTEMPTS; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < SESSION_CONFIRM_ATTEMPTS;
+          attempt += 1
+        ) {
           const session = await authClient.getSession({
             query: {
               disableCookieCache: true,
@@ -160,13 +165,7 @@ export function DashboardLayoutClient({
     }
 
     void confirmSessionOrRedirect();
-  }, [
-    hasSession,
-    isPending,
-    redirecting,
-    refetch,
-    router,
-  ]);
+  }, [hasSession, isPending, redirecting, refetch, router]);
 
   if (
     sessionConfirming ||
@@ -180,13 +179,13 @@ export function DashboardLayoutClient({
     <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
-          <div className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
+          <DashboardWorkspaceLayout>
             <DashboardSidebar />
             <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
               <DashboardMobileContent>{children}</DashboardMobileContent>
             </main>
             <DashboardMobileBottomNav />
-          </div>
+          </DashboardWorkspaceLayout>
         </DashboardMobileNavProvider>
       </DashboardChatStateProvider>
     </SidebarProvider>

@@ -1,3 +1,4 @@
+import { localHostHeaders } from "../../../../lib/local-host-session";
 import type { ByokModelSelection } from "../_components/byok-state";
 import type {
   ChatSendInput,
@@ -289,7 +290,10 @@ export async function runChatStream(
     `${apiBaseUrl}/v1/workspaces/${input.workspaceId}/threads/${input.threadId}/stream`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(await localHostHeaders()),
+      },
       credentials: "include",
       body: JSON.stringify(requestBody),
     },

@@ -1,5 +1,7 @@
 "use client";
 
+import { contentClient } from "../../../lib/sdk";
+import { toast } from "sonner";
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Activity, LayoutDashboard, MessageSquareText } from "lucide-react";
@@ -17,6 +19,7 @@ import { McpIcon, SkillIcon } from "./dashboard-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
+import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 
 type NavItem = {
   title: string;
@@ -130,6 +133,7 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
+  const { conversationsDocked, conversationWidth } = useWorkspaceLayout();
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
   const [settingsRequest, setSettingsRequest] = React.useState<{
     id: number;
@@ -156,6 +160,7 @@ export function DashboardSidebar() {
     deleteChat,
     setChatVisibility,
     privateChats,
+    workTarget,
     hasMorePrivateChats,
     isLoadingPrivateChats,
     loadMorePrivateChats,
@@ -215,7 +220,28 @@ export function DashboardSidebar() {
     router.push("/dashboard/chat");
   };
 
-  const handleStartNewChat = () => {
+  const handleStartNewChat = async () => {
+    let query = new URLSearchParams(window.location.search);
+    if (workspaceId && activeThreadId) {
+      try {
+        const { thread } = await contentClient.getThread(
+          workspaceId,
+          activeThreadId,
+        );
+        const target = thread.executionTarget ?? { kind: "cloud" };
+        query = new URLSearchParams({
+          computer: target.kind === "local" ? target.deviceId : "cloud",
+        });
+        if (target.kind === "local" && target.folderId)
+          query.set("folder", target.folderId);
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "无法读取对话归属",
+        );
+        return;
+      }
+    }
+
     if (workspaceId && activeThreadId) {
       copyStoredByokState({
         workspaceId,
@@ -225,7 +251,8 @@ export function DashboardSidebar() {
     }
 
     startNewChat();
-    router.push("/dashboard/chat");
+    setOpenMobile(false);
+    router.push(`/dashboard/chat${query.size ? `?${query.toString()}` : ""}`);
   };
 
   const handleRenameWorkspace = async (workspaceId: string, name: string) => {
@@ -337,6 +364,7 @@ export function DashboardSidebar() {
     hasChatPanel ? (
       <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
         <DashboardSidebarChatPanel
+          workTarget={workTarget}
           archivedChats={archivedChats}
           activeChatId={activeThreadId}
           onArchiveChat={archiveChat}
@@ -389,29 +417,53 @@ export function DashboardSidebar() {
   return (
     <>
       <aside
+        data-testid="conversation-sidebar"
+        style={{
+          width:
+            hasChatPanel && conversationsDocked ? 56 + conversationWidth : 56,
+        }}
         className={cn(
           "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
-          hasChatPanel ? "w-[360px] border-r border-border" : "w-14",
+          hasChatPanel && conversationsDocked
+            ? "border-r border-border"
+            : "w-14",
         )}
       >
         {renderRail()}
-        {desktopChatPanel}
+        {hasChatPanel && (
+          <div
+            className={cn("min-w-0 flex-1", !conversationsDocked && "hidden")}
+          >
+            {desktopChatPanel}
+          </div>
+        )}
       </aside>
 
       <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
+          onCloseAutoFocus={(event) => {
+            const trigger = document.querySelector<HTMLButtonElement>(
+              "[data-conversations-toggle]",
+            );
+            if (trigger) {
+              event.preventDefault();
+              trigger.focus();
+            }
+          }}
           className={cn(
-            "gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground md:hidden [&>button]:hidden",
+            "gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground",
             hasChatPanel
               ? "w-[min(100vw,360px)] max-w-none"
               : "w-[min(100vw,280px)] max-w-none",
           )}
           side="left"
         >
-          <SheetTitle className="sr-only">Dashboard menu</SheetTitle>
+          <SheetTitle className="shrink-0 border-b px-4 py-3 pr-12 text-sm">
+            {hasChatPanel ? "Conversations" : "Dashboard menu"}
+          </SheetTitle>
           <div
             className={cn(
-              "flex h-full min-h-0 bg-sidebar text-sidebar-foreground",
+              "flex min-h-0 flex-1 bg-sidebar text-sidebar-foreground",
               hasChatPanel ? "w-[min(100vw,360px)]" : "w-[min(100vw,280px)]",
             )}
           >

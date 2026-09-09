@@ -646,9 +646,11 @@ export function SourcesHub({
   return (
     <>
       <aside
+        data-testid="sources-hub"
+        data-hub-presentation={variant}
         className={cn(
           "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
-          variant === "drawer" ? "w-full min-w-0" : "w-[410px] border-l",
+          variant === "drawer" ? "w-full min-w-0" : "w-[360px] border-l",
         )}
       >
         <div className="min-w-0 shrink-0 border-b px-3 py-3">

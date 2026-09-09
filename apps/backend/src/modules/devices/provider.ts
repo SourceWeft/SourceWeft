@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { ContentError } from "../content/errors";
-import { and, eq } from "drizzle-orm";
-import { db, localThreadBindings, threads } from "@sourceweft/db";
+import { and, eq, isNull } from "drizzle-orm";
+import { db, localDevices, localThreadBindings, threads } from "@sourceweft/db";
 import type {
   SandboxProvider,
   SandboxProviderFactory,
@@ -49,13 +50,58 @@ export async function localProviderForTurn(
       "The local binding is missing or inconsistent. Cloud execution is not allowed.",
     );
   }
-  const call = (
+  // Reserve identity from authenticated host metadata, without contacting the PC.
+  // The physical directory is created/verified only when a tool acquires it.
+  let root = binding.workspacePath;
+  let id = binding.localWorkspaceId;
+  if (!root || !id) {
+    const device = await db.query.localDevices.findFirst({
+      where: eq(localDevices.id, binding.deviceId),
+    });
+    if (!device?.workspaceBase)
+      throw new ContentError(
+        409,
+        "LOCAL_HOST_UPGRADE_REQUIRED",
+        "请在目标 PC 登录一次以恢复本机目录信息。",
+      );
+    const reservedId = randomUUID();
+    const [saved] = await db
+      .update(localThreadBindings)
+      .set({
+        localWorkspaceId: reservedId,
+        workspacePath: `${device.workspaceBase}/${reservedId}/files`,
+      })
+      .where(
+        and(
+          eq(localThreadBindings.threadId, context.threadId),
+          isNull(localThreadBindings.localWorkspaceId),
+        ),
+      )
+      .returning();
+    const reserved =
+      saved ??
+      (await db.query.localThreadBindings.findFirst({
+        where: eq(localThreadBindings.threadId, context.threadId),
+      }));
+    root = reserved?.workspacePath ?? null;
+    id = reserved?.localWorkspaceId ?? null;
+  }
+  if (!root || !id)
+    throw new ContentError(
+      409,
+      "LOCAL_BINDING_INVALID",
+      "本地目录绑定不可用。",
+    );
+  const workspaceRoot = root;
+  const workspaceId = id;
+  const dispatch = (
     action: string,
     payload: Record<string, unknown>,
     extra: { id?: string; timeoutMs?: number; signal?: AbortSignal } = {},
   ) =>
     localCall({
       ...extra,
+      caller: context.localCaller,
       deviceId: binding.deviceId,
       userId: context.userId,
       threadId: context.threadId,
@@ -63,41 +109,57 @@ export async function localProviderForTurn(
       action,
       payload,
     });
-  const workspace = await call("workspace.ensure", {});
-  if (
-    typeof workspace.id !== "string" ||
-    typeof workspace.path !== "string" ||
-    !workspace.path.startsWith("/")
-  )
-    throw new Error("INVALID_LOCAL_WORKSPACE");
-  const root = workspace.path;
-  const id = workspace.id;
-  await db
-    .update(localThreadBindings)
-    .set({ localWorkspaceId: id, workspacePath: root })
-    .where(eq(localThreadBindings.threadId, context.threadId));
+  let initialized: Promise<Record<string, unknown>> | undefined;
+  const ensure = () =>
+    (initialized ??= (async () => {
+      const value = await dispatch("workspace.ensure", {
+        workspaceId,
+        folderId: binding.folderId ?? undefined,
+      });
+      if (value.id !== workspaceId || value.path !== workspaceRoot)
+        throw new ContentError(
+          409,
+          "LOCAL_WORKSPACE_MISMATCH",
+          "本机返回的目录与对话绑定不一致。",
+        );
+      return value;
+    })());
+  const call = async (
+    action: string,
+    payload: Record<string, unknown>,
+    extra: { id?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+  ) => {
+    if (action === "workspace.ensure") return ensure();
+    if (action !== "command.cancel") await ensure();
+    return dispatch(action, payload, extra);
+  };
   const relative = (path: string) => {
-    if (path === root) return ".";
-    if (!path.startsWith(`${root}/`))
+    if (path === workspaceRoot) return ".";
+    if (!path.startsWith(`${workspaceRoot}/`))
       throw new Error(
         "LOCAL_PATH_DENIED: Path is outside the bound workspace.",
       );
-    const result = path.slice(root.length + 1);
+    const result = path.slice(workspaceRoot.length + 1);
     if (result.split("/").some((part) => part === ".."))
       throw new Error("LOCAL_PATH_DENIED");
     return result;
   };
+  const observed = new Map<string, string>();
   const provider: SandboxProvider = {
     id: "local",
     cancellationScope: "command",
     pathPolicy: {
-      workspaceRoot: root,
-      defaultCwd: root,
-      prepareTargetRoots: [root],
-      collectSourceRoots: [root],
-      readWriteRoots: [root],
+      skillsRoot: `${workspaceRoot}/.sourceweft-skills`,
+      workspaceRoot,
+      defaultCwd: workspaceRoot,
+      prepareTargetRoots: [workspaceRoot],
+      collectSourceRoots: [workspaceRoot],
+      readWriteRoots: [workspaceRoot],
     },
-    createSandbox: async () => ({ id }),
+    createSandbox: async () => {
+      await ensure();
+      return { id: workspaceId };
+    },
     getSandbox: async () => call("workspace.ensure", {}),
     checkSandboxHealth: async () => call("workspace.ensure", {}),
     deleteSandbox: async () => ({ persistentWorkspacePreserved: true }),
@@ -136,12 +198,17 @@ export async function localProviderForTurn(
         ? { confirmed: true, mode: "command" }
         : { confirmed: false, mode: "unknown" };
     },
-    uploadFile: async (input) =>
-      call("file.write", {
+    uploadFile: async (input) => {
+      const content = Buffer.from(input.content).toString("base64");
+      const result = await call("file.write", {
         workspaceId: id,
         path: relative(input.sandboxPath),
         content: Buffer.from(input.content).toString("base64"),
-      }),
+        expectedContent: observed.get(input.sandboxPath),
+      });
+      observed.set(input.sandboxPath, content);
+      return result;
+    },
     downloadFile: async (input) => {
       const result = await call(
         "file.read",
@@ -166,16 +233,22 @@ export async function localProviderForTurn(
         workspaceId: id,
         path: relative(input.sandboxPath),
       });
-      return Buffer.from(String(result.content ?? ""), "base64").toString(
-        "utf8",
+      observed.set(input.sandboxPath, String(result.content ?? ""));
+      return new TextDecoder("utf-8", { fatal: true }).decode(
+        Buffer.from(String(result.content ?? ""), "base64"),
       );
     },
-    writeTextFile: async (input) =>
-      call("file.write", {
+    writeTextFile: async (input) => {
+      const content = Buffer.from(input.content).toString("base64");
+      const result = await call("file.write", {
         workspaceId: id,
         path: relative(input.sandboxPath),
         content: Buffer.from(input.content).toString("base64"),
-      }),
+        expectedContent: observed.get(input.sandboxPath),
+      });
+      observed.set(input.sandboxPath, content);
+      return result;
+    },
   };
   return {
     id: "local",

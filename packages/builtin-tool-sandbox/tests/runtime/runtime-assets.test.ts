@@ -39,9 +39,8 @@ function fakeSession(input: {
       // addresses the workspace, and assets may install outside it), so the
       // fake has to honour that redirect for `files` to stay a faithful view
       // of the sandbox filesystem.
-      const stampWrite = /printf '%s' '(?<json>[\s\S]*)' > '(?<path>[^']*)'/u.exec(
-        command,
-      );
+      const stampWrite =
+        /printf '%s' '(?<json>[\s\S]*)' > '(?<path>[^']*)'/u.exec(command);
       if (stampWrite?.groups) {
         files.set(
           stampWrite.groups.path!,
@@ -306,7 +305,10 @@ test("installDir overrides the version-nested default placement", async () => {
   assert.equal(resolution?.entrypointPath, "/skills/ppt-deck/SKILL.md");
   // Staging + promote target the fixed contract path, not the assets dir.
   assert.match(executed[0]!, /\/skills\/ppt-deck\.staging/u);
-  assert.match(executed[0]!, /mv '\/skills\/ppt-deck\.staging' '\/skills\/ppt-deck'/u);
+  assert.match(
+    executed[0]!,
+    /mv '\/skills\/ppt-deck\.staging' '\/skills\/ppt-deck'/u,
+  );
   assert.ok(files.get("/skills/ppt-deck/.sourceweft-asset.json"));
 });
 
@@ -342,7 +344,9 @@ test("a version bump restages over the same installDir (stamp mismatch)", async 
   assert.equal(executed.length, 1);
   // A matching stamp resolves without staging; the mismatch restaged instead.
   const stamp = JSON.parse(
-    new TextDecoder().decode(files.get("/skills/ppt-deck/.sourceweft-asset.json")!),
+    new TextDecoder().decode(
+      files.get("/skills/ppt-deck/.sourceweft-asset.json")!,
+    ),
   ) as { version: string };
   assert.equal(stamp.version, "sv_new");
 });
@@ -351,7 +355,9 @@ test("a matching stamp at installDir resolves without commands", async () => {
   const files = new Map<string, Uint8Array>([
     [
       "/skills/ppt-deck/.sourceweft-asset.json",
-      new TextEncoder().encode(JSON.stringify({ version: "sv_01", sha256: SHA })),
+      new TextEncoder().encode(
+        JSON.stringify({ version: "sv_01", sha256: SHA }),
+      ),
     ],
   ]);
   const { session, executed } = fakeSession({ files });
@@ -405,4 +411,37 @@ test("a presigned URL containing a single quote is refused", async () => {
   assert.equal(resolution?.ok, false);
   assert.match(resolution?.error ?? "", /single quote/u);
   assert.equal(executed.length, 0);
+});
+
+test("macOS skill staging uses the bound folder and shasum, including spaces", async () => {
+  const { session, executed } = fakeSession({
+    executeResults: [{ exitCode: 0 }],
+  });
+  session.skillsRoot = "/workspace/Application Support/.sourceweft-skills";
+  session.checksumCommand = "shasum -a 256";
+  const [result] = await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        name: "notes",
+        entrypoint: "SKILL.md",
+        installDir: "/skills/notes",
+        fetchUrl: async () => "https://cache.example/notes.zip",
+      }),
+    ],
+  });
+  assert.equal(result?.ok, true);
+  assert.equal(
+    result?.entrypointPath,
+    "/workspace/Application Support/.sourceweft-skills/notes/SKILL.md",
+  );
+  assert.ok(executed.some((command) => command.includes("shasum -a 256 -c -")));
+  assert.ok(
+    executed.some((command) =>
+      command.includes(
+        "'/workspace/Application Support/.sourceweft-skills/notes'",
+      ),
+    ),
+  );
+  assert.ok(executed.every((command) => !command.includes("'/skills/notes")));
 });

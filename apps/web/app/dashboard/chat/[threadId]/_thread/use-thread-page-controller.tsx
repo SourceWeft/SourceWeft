@@ -89,7 +89,7 @@ import {
 } from "./message-groups";
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
-import { BREAKPOINTS, useMediaQuery } from "../../../../../lib/use-media-query";
+import { useWorkspaceLayout } from "../../../_components/dashboard-workspace-layout";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
@@ -129,8 +129,12 @@ export function useThreadPageController({
   );
   const threadTitle = chatItem?.title ?? "Chat";
 
-  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
-  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
+  const {
+    canDockHub: isPersistentLayout,
+    canDockPreview: isDesktopPanel,
+    ready: layoutReady,
+    setHubDrawerOpen,
+  } = useWorkspaceLayout();
   const handledConnectorOAuthHubRef = useRef(false);
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
@@ -160,18 +164,26 @@ export function useThreadPageController({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledConnectorOAuthHubRef.current) return;
+    if (!layoutReady || handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
-      if (window.matchMedia(BREAKPOINTS.md).matches) {
+      if (isPersistentLayout) {
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
+      } else {
+        setHubDrawerOpen(true);
       }
     }
-  }, [sourcesVisible, toggleSourcesVisible]);
+  }, [
+    layoutReady,
+    isPersistentLayout,
+    setHubDrawerOpen,
+    sourcesVisible,
+    toggleSourcesVisible,
+  ]);
 
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
 

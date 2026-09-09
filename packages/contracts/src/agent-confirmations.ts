@@ -103,53 +103,53 @@ export const toolApprovalResumeSchema = z
     decisions: z.array(toolApprovalResumeDecisionSchema).default([]),
     askUser: askUserResumeAnswerSchema.optional(),
     sourceweft: z
-    .object({
-      connectorActions: z
-        .array(
-          z.object({
-            toolName: z.string().min(1),
-            connectorId: z.string().min(1),
-            actionRunId: z.string().min(1),
-            requestJson: jsonObjectSchema.optional(),
-          }),
-        )
-        .optional(),
-      // Approved MCP calls resumed as args-matched execution refs, mirroring
-      // connectorActions. The wrapped MCP tool resolves an approved ref by args
-      // (never by tool-call id), so an interrupt raised inside a sub-agent
-      // subgraph — whose tool-call id never surfaces in the top-level graph —
-      // resumes correctly. Retry-idempotency of the external call stays keyed on
-      // the execution-time tool-call id, independently of this approval channel.
-      mcpActions: z
-        .array(
-          z.object({
-            toolName: z.string().min(1),
-            actionRunId: z.string().min(1),
-            requestJson: jsonObjectSchema,
-          }),
-        )
-        .optional(),
-      sandboxActions: z
-        .array(
-          z.object({
-            toolName: z.string().min(1),
-            toolCallId: z.string().min(1),
-            requestJson: jsonObjectSchema,
-            confirmationId: z.string().min(1).optional(),
-            hitlInterruptId: z.string().min(1).optional(),
-            sourceUserMessageId: z.string().min(1).optional(),
-            sourceAssistantMessageId: z.string().min(1).optional(),
-          }),
-        )
-        .optional(),
-      hitlInterruptId: z.string().min(1).optional(),
-      confirmationId: z.string().min(1).optional(),
-      sourceUserMessageId: z.string().min(1).optional(),
-      sourceAssistantMessageId: z.string().min(1).optional(),
-    })
-    .optional(),
+      .object({
+        connectorActions: z
+          .array(
+            z.object({
+              toolName: z.string().min(1),
+              connectorId: z.string().min(1),
+              actionRunId: z.string().min(1),
+              requestJson: jsonObjectSchema.optional(),
+            }),
+          )
+          .optional(),
+        // Approved MCP calls resumed as args-matched execution refs, mirroring
+        // connectorActions. The wrapped MCP tool resolves an approved ref by args
+        // (never by tool-call id), so an interrupt raised inside a sub-agent
+        // subgraph — whose tool-call id never surfaces in the top-level graph —
+        // resumes correctly. Retry-idempotency of the external call stays keyed on
+        // the execution-time tool-call id, independently of this approval channel.
+        mcpActions: z
+          .array(
+            z.object({
+              toolName: z.string().min(1),
+              actionRunId: z.string().min(1),
+              requestJson: jsonObjectSchema,
+            }),
+          )
+          .optional(),
+        sandboxActions: z
+          .array(
+            z.object({
+              toolName: z.string().min(1),
+              toolCallId: z.string().min(1),
+              requestJson: jsonObjectSchema,
+              confirmationId: z.string().min(1).optional(),
+              hitlInterruptId: z.string().min(1).optional(),
+              sourceUserMessageId: z.string().min(1).optional(),
+              sourceAssistantMessageId: z.string().min(1).optional(),
+            }),
+          )
+          .optional(),
+        hitlInterruptId: z.string().min(1).optional(),
+        confirmationId: z.string().min(1).optional(),
+        sourceUserMessageId: z.string().min(1).optional(),
+        sourceAssistantMessageId: z.string().min(1).optional(),
+      })
+      .optional(),
   })
-  .refine((resume) => (resume.decisions.length > 0) !== Boolean(resume.askUser), {
+  .refine((resume) => resume.decisions.length > 0 !== Boolean(resume.askUser), {
     message:
       "toolApprovalResume must carry either approval decisions or an askUser answer, not both",
   });
@@ -245,6 +245,7 @@ export const toolConfirmationRequestSchema = z.object({
     executor: toolConfirmationExecutorSchema,
     sourceweft: z
       .object({
+        localDeviceId: z.string().uuid().optional(),
         toolCallId: z.string().min(1).optional(),
         hitlInterruptId: z.string().min(1).optional(),
         actionIndex: z.number().int().nonnegative().optional(),

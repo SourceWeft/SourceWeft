@@ -1,3 +1,7 @@
+import {
+  resolveLocalCaller,
+  resolveCreationContext,
+} from "../../../modules/devices/access";
 import type { Hono } from "hono";
 import {
   createThreadRequestSchema,
@@ -82,6 +86,7 @@ function buildResumeThreadInput(input: {
   threadId: string;
   userId: string;
   data: StreamThreadRequestData;
+  localCaller?: import("../../../modules/devices/access").LocalExecutionCaller;
   idempotencyKey?: string;
 }): ResumeThreadInput {
   assertResumeRequestData(input.data);
@@ -103,6 +108,7 @@ function buildResumeThreadInput(input: {
     vision: input.data.vision,
     ...legacyStreamModelSettings(input.data),
     toolApprovalResume: input.data.toolApprovalResume,
+    localCaller: input.localCaller,
     mcpInstallIds: input.data.mcpInstallIds,
   };
 }
@@ -194,11 +200,23 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
+    const localCaller = await resolveLocalCaller(
+      session.user.id,
+      session.session.id,
+      c.req.header("X-Local-Proof"),
+    );
+    const executionTarget = await resolveCreationContext(
+      session.user.id,
+      localCaller,
+      parsed.data.creationContextId,
+      parsed.data.executionTarget,
+    );
     const result = await contentThreadService.createThread({
+      creationId: parsed.data.creationContextId,
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
-      executionTarget: parsed.data.executionTarget,
+      executionTarget,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
     });
@@ -239,11 +257,23 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
+    const localCaller = await resolveLocalCaller(
+      session.user.id,
+      session.session.id,
+      c.req.header("X-Local-Proof"),
+    );
+    const executionTarget = await resolveCreationContext(
+      session.user.id,
+      localCaller,
+      parsed.data.creationContextId,
+      parsed.data.executionTarget,
+    );
     const result = await contentThreadService.startThreadTurn({
+      localCaller,
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
-      executionTarget: parsed.data.executionTarget,
+      executionTarget,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
       content,
@@ -633,6 +663,11 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
+    const localCaller = await resolveLocalCaller(
+      session.user.id,
+      session.session.id,
+      c.req.header("X-Local-Proof"),
+    );
     const mode = parsed.data.mode ?? "send";
     const imagesProvided = Object.hasOwn(body, "images");
     const images = parsed.data.images ?? [];
@@ -689,6 +724,7 @@ export function registerThreadRoutes(app: Hono) {
               workspaceId,
               threadId,
               userId,
+              localCaller,
               idempotencyKey: durableKey.idempotencyKey,
               data: parsed.data,
             })
@@ -697,6 +733,7 @@ export function registerThreadRoutes(app: Hono) {
                 workspaceId,
                 threadId,
                 userId,
+                localCaller,
                 content: "",
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
@@ -718,6 +755,7 @@ export function registerThreadRoutes(app: Hono) {
                   workspaceId,
                   threadId,
                   userId,
+                  localCaller,
                   content: parsed.data.content ?? "",
                   imagesProvided,
                   images,
@@ -740,6 +778,7 @@ export function registerThreadRoutes(app: Hono) {
                   workspaceId,
                   threadId,
                   userId,
+                  localCaller,
                   content: parsed.data.content ?? "",
                   images,
                   mentionedSourceIds: parsed.data.mentionedSourceIds,
@@ -801,6 +840,7 @@ export function registerThreadRoutes(app: Hono) {
                 workspaceId,
                 threadId,
                 userId,
+                localCaller,
                 data: parsed.data,
               }),
               directRunOptions,
@@ -811,6 +851,7 @@ export function registerThreadRoutes(app: Hono) {
                   workspaceId,
                   threadId,
                   userId,
+                  localCaller,
                   mentionedSourceIds: parsed.data.mentionedSourceIds,
                   sourceIds: parsed.data.sourceIds,
                   tools: parsed.data.tools,
@@ -834,6 +875,7 @@ export function registerThreadRoutes(app: Hono) {
                     workspaceId,
                     threadId,
                     userId,
+                    localCaller,
                     content: parsed.data.content ?? "",
                     imagesProvided,
                     images,
@@ -859,6 +901,7 @@ export function registerThreadRoutes(app: Hono) {
                     workspaceId,
                     threadId,
                     userId,
+                    localCaller,
                     content: parsed.data.content ?? "",
                     images,
                     mentionedSourceIds: parsed.data.mentionedSourceIds,
@@ -886,6 +929,7 @@ export function registerThreadRoutes(app: Hono) {
               workspaceId,
               threadId,
               userId,
+              localCaller,
               data: parsed.data,
             }),
             directRunOptions,
@@ -896,6 +940,7 @@ export function registerThreadRoutes(app: Hono) {
                 workspaceId,
                 threadId,
                 userId,
+                localCaller,
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
@@ -919,6 +964,7 @@ export function registerThreadRoutes(app: Hono) {
                   workspaceId,
                   threadId,
                   userId,
+                  localCaller,
                   content: parsed.data.content ?? "",
                   imagesProvided,
                   images,
@@ -944,6 +990,7 @@ export function registerThreadRoutes(app: Hono) {
                   workspaceId,
                   threadId,
                   userId,
+                  localCaller,
                   content: parsed.data.content ?? "",
                   images,
                   mentionedSourceIds: parsed.data.mentionedSourceIds,

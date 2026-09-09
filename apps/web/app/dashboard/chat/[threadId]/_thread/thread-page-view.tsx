@@ -8,7 +8,6 @@ import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-s
 import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
 import { ThreadHeader } from "./thread-header";
-import { LocalExecutionSelector } from "../../_components/local-execution-selector";
 import { ThreadPresenceAvatars } from "./thread-presence-avatars";
 import { ThreadTypingIndicator } from "./thread-typing-indicator";
 import { ThreadSidePanels } from "./thread-side-panels";
@@ -241,6 +240,8 @@ export function DashboardChatThreadPageView({
     <div className="flex h-full min-h-0 w-full overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ThreadHeader
+          workspaceId={workspaceId}
+          threadId={threadId}
           availableModels={availableModels}
           byokCredentials={byokCredentials}
           byokModels={byokModels}
@@ -262,7 +263,6 @@ export function DashboardChatThreadPageView({
           threadTitle={threadTitle}
         />
 
-        <LocalExecutionSelector workspaceId={workspaceId} threadId={threadId} />
         {latestRunFailure && !activeThreadRun && !isStreaming && (
           <div className="shrink-0 px-4 pt-3">
             <ChatErrorNotice

@@ -130,6 +130,7 @@ async function countUsedSourceIdsByThread(input: {
 }
 
 export async function createThreadRecord(input: {
+  id?: string;
   teamId: string;
   workspaceId: string;
   title: string;
@@ -138,7 +139,7 @@ export async function createThreadRecord(input: {
   chatPreferences?: Partial<ThreadChatPreferences>;
   executionTarget?: ThreadExecutionTarget;
 }) {
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const modelSettings = normalizeThreadModelSettings(input.modelSettings);
   const chatPreferences = normalizeThreadChatPreferences(input.chatPreferences);
   const result = await database.query<RawThreadRow>(
@@ -154,6 +155,7 @@ export async function createThreadRecord(input: {
         execution_target_json
       )
       values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb)
+      on conflict (id) do nothing
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -167,7 +169,22 @@ export async function createThreadRecord(input: {
       JSON.stringify(input.executionTarget ?? { kind: "cloud" }),
     ],
   );
-  const row = result.rows[0];
+  const row =
+    result.rows[0] ??
+    (input.id
+      ? (
+          await database.query<RawThreadRow>(
+            `select ${THREAD_RETURNING_SQL} from threads where id=$1 and workspace_id=$2 and team_id=$3 and created_by=$4 and execution_target_json=$5::jsonb`,
+            [
+              id,
+              input.workspaceId,
+              input.teamId,
+              input.createdBy,
+              JSON.stringify(input.executionTarget ?? { kind: "cloud" }),
+            ],
+          )
+        ).rows[0]
+      : undefined);
 
   if (!row) {
     throw new Error("Failed to create thread");

@@ -1,9 +1,11 @@
+import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
 import { ContentError } from "../content/errors";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, gt, isNull, inArray } from "drizzle-orm";
 import {
   db,
   localDevices,
+  localFolderGrants,
   localDeviceEnrollments,
   localThreadBindings,
   localToolInvocations,
@@ -30,14 +32,15 @@ export const isOnline = (device: {
   !!device.heartbeatAt &&
   Date.now() - device.heartbeatAt.getTime() < 20_000;
 
-export async function createEnrollment(userId: string) {
+export async function createEnrollment(userId: string, sessionId?: string) {
   const ticket = randomBytes(32).toString("base64url");
   await db.insert(localDeviceEnrollments).values({
     tokenHash: tokenHash(ticket),
     userId,
+    sessionId,
     expiresAt: new Date(Date.now() + 60_000),
   });
-  return { ticket };
+  return { ticket, userId };
 }
 
 export async function claimEnrollment(ticket: string, name: string) {
@@ -109,6 +112,22 @@ export async function validateThreadExecutionTarget(
       "LOCAL_DEVICE_NOT_FOUND",
       "Choose a computer owned by this account.",
     );
+  if (target.folderId) {
+    const folder = await db.query.localFolderGrants.findFirst({
+      where: and(
+        eq(localFolderGrants.id, target.folderId),
+        eq(localFolderGrants.deviceId, target.deviceId),
+        eq(localFolderGrants.userId, userId),
+        isNull(localFolderGrants.revokedAt),
+      ),
+    });
+    if (!folder)
+      throw new ApiError(
+        403,
+        "LOCAL_FOLDER_NOT_AUTHORIZED",
+        "工作文件夹未获授权。",
+      );
+  }
   // Being temporarily offline does not change a local conversation into cloud.
 }
 
@@ -122,7 +141,43 @@ export async function localCall(input: {
   payload: Record<string, unknown>;
   timeoutMs?: number;
   signal?: AbortSignal;
+  caller?: LocalExecutionCaller;
 }) {
+  const access = await requireDeviceAccess(
+    input.userId,
+    input.deviceId,
+    input.caller,
+  );
+  const bound = await db.query.localThreadBindings.findFirst({
+    where: and(
+      eq(localThreadBindings.threadId, input.threadId),
+      eq(localThreadBindings.deviceId, input.deviceId),
+      eq(localThreadBindings.userId, input.userId),
+    ),
+  });
+  if (!bound)
+    throw new ContentError(
+      403,
+      "LOCAL_BINDING_INVALID",
+      "调用不属于此电脑上的对话。",
+    );
+  if (bound.folderId) {
+    const folder = await db.query.localFolderGrants.findFirst({
+      where: and(
+        eq(localFolderGrants.id, bound.folderId),
+        eq(localFolderGrants.deviceId, input.deviceId),
+        eq(localFolderGrants.userId, input.userId),
+        isNull(localFolderGrants.revokedAt),
+      ),
+    });
+    if (!folder)
+      throw new ContentError(
+        403,
+        "LOCAL_FOLDER_REVOKED",
+        "工作文件夹授权已撤销。",
+      );
+  }
+
   const device = await db.query.localDevices.findFirst({
     where: and(
       eq(localDevices.id, input.deviceId),
@@ -147,6 +202,7 @@ export async function localCall(input: {
       userId: input.userId,
       threadId: input.threadId,
       runId: input.runId,
+      accessId: access.id,
       action: input.action,
       payload: input.payload,
       deadline,

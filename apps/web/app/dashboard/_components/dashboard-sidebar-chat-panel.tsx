@@ -561,6 +561,7 @@ function ChatSection({
 }
 
 export function DashboardSidebarChatPanel({
+  workTarget,
   archivedChats,
   activeChatId,
   onArchiveChat,
@@ -586,6 +587,7 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange,
   workspaceName,
 }: {
+  workTarget?: import("@sourceweft/contracts").ThreadExecutionTarget | null;
   archivedChats: ChatItem[];
   activeChatId: string;
   onArchiveChat: (id: string) => void;
@@ -614,6 +616,22 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const visible = (items: ChatItem[]) =>
+    items.filter((item) => {
+      if (search.trim())
+        return item.title.toLowerCase().includes(search.trim().toLowerCase());
+      if (showAll || !workTarget) return true;
+      const target = item.executionTarget ?? { kind: "cloud" };
+      return (
+        target.kind === workTarget.kind &&
+        (target.kind !== "local" ||
+          (workTarget.kind === "local" &&
+            target.deviceId === workTarget.deviceId))
+      );
+    });
+
   const weekAgo = Date.now() - ONE_WEEK_MS;
   const seenIds = new Set<string>();
   const threadsThisWeek = [
@@ -650,7 +668,19 @@ export function DashboardSidebarChatPanel({
           onRenameWorkspace={onRenameWorkspace}
           onWorkspaceChange={onWorkspaceChange}
         />
-        <SidebarInput className="h-7 text-xs" placeholder="Search threads..." />
+        <SidebarInput
+          className="h-7 text-xs"
+          placeholder="搜索全部对话…"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <button
+          type="button"
+          className="text-left text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setShowAll((value) => !value)}
+        >
+          {showAll ? "返回当前电脑 / 云端" : "全部对话"}
+        </button>
         <div className="flex items-center gap-2">
           <Button
             className="flex-1"
@@ -678,7 +708,7 @@ export function DashboardSidebarChatPanel({
       <SidebarContent className="min-h-0 overflow-y-auto">
         <ChatSection
           activeId={activeChatId}
-          items={sharedChats}
+          items={visible(sharedChats)}
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
           onSetVisibility={onSetChatVisibility}
@@ -690,10 +720,14 @@ export function DashboardSidebarChatPanel({
           activeId={activeChatId}
           hasMore={hasMorePrivateChats}
           isLoadingMore={isLoadingPrivateChats}
-          items={privateChats}
+          items={visible(privateChats)}
           onLoadMore={onLoadMoreChats}
           onArchive={onArchiveChat}
-          onClear={onClearPrivateChats}
+          onClear={
+            !search.trim() && (showAll || !workTarget)
+              ? onClearPrivateChats
+              : undefined
+          }
           onDelete={onDeleteChat}
           onSetVisibility={onSetChatVisibility}
           onOpen={onOpenChat}
@@ -703,9 +737,13 @@ export function DashboardSidebarChatPanel({
         <ChatSection
           activeId={activeChatId}
           canArchive={false}
-          items={archivedChats}
+          items={visible(archivedChats)}
           onArchive={onArchiveChat}
-          onClear={onClearArchivedChats}
+          onClear={
+            !search.trim() && (showAll || !workTarget)
+              ? onClearArchivedChats
+              : undefined
+          }
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
           onPrefetch={onPrefetchChat}

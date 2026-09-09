@@ -102,6 +102,8 @@ fn main() {
             set_autostart,
             open_external_url,
             local_bridge::local_host_status,
+            local_bridge::authenticate_local_host,
+            local_bridge::choose_local_folder,
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
         ])
@@ -132,6 +134,28 @@ fn main() {
 
             setup_deep_links(app.handle());
             register_deep_links(app.handle());
+            let base =
+                resolve_app_url(app.handle(), "/dashboard").map_err(std::io::Error::other)?;
+            let origin = base.origin().ascii_serialization();
+            app.add_capability(
+                tauri::ipc::CapabilityBuilder::new("configured-web-window")
+                    .window("main")
+                    .local(false)
+                    .remote(format!("{origin}/dashboard"))
+                    .remote(format!("{origin}/dashboard/*"))
+                    .remote(format!("{origin}/auth"))
+                    .remote(format!("{origin}/auth/*"))
+                    .permission("core:default")
+                    .permission("allow-desktop-info")
+                    .permission("allow-show-main-window")
+                    .permission("allow-get-autostart")
+                    .permission("allow-set-autostart")
+                    .permission("allow-open-external-url")
+                    .permission("allow-local-host-status")
+                    .permission("allow-authenticate-local-host")
+                    .permission("allow-choose-local-folder")
+                    .permission("allow-disconnect-local-host"),
+            )?;
             create_main_window(app)?;
             setup_tray(app)?;
             emit_startup_deep_links(app.handle());
@@ -151,7 +175,7 @@ fn main() {
 }
 
 fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
-    let window_config = app
+    let mut window_config = app
         .config()
         .app
         .windows
@@ -160,6 +184,9 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .cloned()
         .unwrap_or_else(|| app.config().app.windows[0].clone());
 
+    window_config.url = tauri::WebviewUrl::External(
+        resolve_app_url(app.handle(), "/dashboard").map_err(std::io::Error::other)?,
+    );
     let handle = app.handle().clone();
     WebviewWindowBuilder::from_config(app.handle(), &window_config)?
         .initialization_script(desktop_bridge_script())
@@ -196,23 +223,7 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
 }
 
 fn is_desktop_web_url(app: &AppHandle, url: &Url) -> bool {
-    if url.scheme() == "tauri"
-        || url.scheme() == "http" && url.host_str() == Some("tauri.localhost")
-        || url.scheme() == "https" && url.host_str() == Some("tauri.localhost")
-    {
-        return true;
-    }
-
-    app.config()
-        .build
-        .dev_url
-        .as_ref()
-        .map(|dev_url| {
-            url.scheme() == dev_url.scheme()
-                && url.host_str() == dev_url.host_str()
-                && url.port_or_known_default() == dev_url.port_or_known_default()
-        })
-        .unwrap_or(false)
+    resolve_app_url(app, "/dashboard").is_ok_and(|base| same_origin(url, &base))
 }
 
 fn is_allowed_desktop_path(path: &str) -> bool {
@@ -231,19 +242,28 @@ fn navigate_main_window(app: &AppHandle, path: &str) -> Result<(), String> {
 }
 
 fn resolve_app_url(app: &AppHandle, path: &str) -> Result<Url, String> {
-    if let Some(dev_url) = app.config().build.dev_url.as_ref() {
-        return dev_url.join(path).map_err(|error| error.to_string());
+    let configured = std::env::var("NEXT_PUBLIC_WEB_BASE_URL").ok();
+    let base = if let Some(value) = configured {
+        Url::parse(value.trim()).map_err(|e| e.to_string())?
+    } else if cfg!(debug_assertions) {
+        app.config()
+            .build
+            .dev_url
+            .clone()
+            .ok_or("Missing development Web URL")?
+    } else {
+        Url::parse("https://sourceweft.com").map_err(|e| e.to_string())?
+    };
+    if !base.username().is_empty()
+        || base.password().is_some()
+        || (base.scheme() != "https"
+            && !(cfg!(debug_assertions)
+                && base.scheme() == "http"
+                && base.host_str() == Some("localhost")))
+    {
+        return Err("Web URL requires HTTPS; localhost HTTP is development-only".into());
     }
-
-    Url::parse(&format!(
-        "tauri://localhost{}",
-        if path.starts_with('/') {
-            path.to_string()
-        } else {
-            format!("/{path}")
-        }
-    ))
-    .map_err(|error| error.to_string())
+    base.join(path).map_err(|e| e.to_string())
 }
 
 fn desktop_bridge_script() -> &'static str {

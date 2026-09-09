@@ -23,6 +23,8 @@ import type {
 import type { ArtifactListItem, ThreadCitationRecord } from "./sources-hub";
 import type { SourceItem } from "./source-types";
 
+import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
+
 export type ChatHubMode = "new" | "thread";
 
 export type ChatHubRegistration = {
@@ -135,7 +137,8 @@ export function ChatHubProvider({
       ...initialValue,
     }),
   );
-  const [mobileHubOpen, setMobileHubOpen] = useState(false);
+  const { hubDrawerOpen: mobileHubOpen, setHubDrawerOpen: setMobileHubOpen } =
+    useWorkspaceLayout();
 
   const setRegistration = useCallback(
     (partial: Partial<ChatHubRegistration>) => {
@@ -146,7 +149,7 @@ export function ChatHubProvider({
 
   const value = useMemo(
     () => ({ mobileHubOpen, registration, setMobileHubOpen, setRegistration }),
-    [mobileHubOpen, registration, setRegistration],
+    [mobileHubOpen, registration, setMobileHubOpen, setRegistration],
   );
 
   return (

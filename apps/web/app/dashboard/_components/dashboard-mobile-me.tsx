@@ -1,4 +1,5 @@
 "use client";
+import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
@@ -133,6 +134,7 @@ export function DashboardMobileMe() {
   async function handleSignOut() {
     setIsSigningOut(true);
     try {
+      await disconnectLocalHostSession();
       await authClient.signOut();
     } finally {
       setIsSigningOut(false);

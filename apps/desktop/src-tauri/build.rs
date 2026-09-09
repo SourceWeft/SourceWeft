@@ -7,6 +7,8 @@ fn main() {
             "set_autostart",
             "open_external_url",
             "local_host_status",
+            "authenticate_local_host",
+            "choose_local_folder",
             "enable_local_host",
             "disconnect_local_host",
         ]),

@@ -1,4 +1,5 @@
 "use client";
+import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
@@ -45,12 +46,10 @@ import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
 import { DashboardSettingsCenterModalSkeleton } from "./dashboard-settings-center-modal-skeleton";
 import { RawImage } from "../../_components/raw-image";
 
-const DashboardSettingsCenterModal = React.lazy(
-  async () => {
-    const settingsModal = await import("./dashboard-settings-center-modal");
-    return { default: settingsModal.DashboardSettingsCenterModal };
-  },
-);
+const DashboardSettingsCenterModal = React.lazy(async () => {
+  const settingsModal = await import("./dashboard-settings-center-modal");
+  return { default: settingsModal.DashboardSettingsCenterModal };
+});
 
 function getInitials(name?: string, email?: string) {
   const value = name || email || "SW";
@@ -113,6 +112,7 @@ export function DashboardAccountMenu({
   }
 
   async function handleSignOut() {
+    await disconnectLocalHostSession();
     await authClient.signOut();
   }
 
@@ -247,7 +247,9 @@ export function DashboardAccountMenu({
 
       {settingsOpen ? (
         <React.Suspense
-          fallback={<DashboardSettingsCenterModalSkeleton activeTab={initialTab} />}
+          fallback={
+            <DashboardSettingsCenterModalSkeleton activeTab={initialTab} />
+          }
         >
           <DashboardSettingsCenterModal
             hasTeam={orgList.length > 0}

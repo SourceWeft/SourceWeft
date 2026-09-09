@@ -4,6 +4,7 @@ export type HttpClientOptions = {
   baseUrl: string;
   getToken?: () => string | undefined | Promise<string | undefined>;
   credentials?: RequestCredentials;
+  getHeaders?: () => Promise<Record<string, string>>;
 };
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
@@ -48,15 +49,15 @@ export class HttpClientError extends Error {
 export class HttpClient {
   private readonly baseUrl: string;
   private readonly getToken?: () =>
-    | string
-    | undefined
-    | Promise<string | undefined>;
+    string | undefined | Promise<string | undefined>;
   private readonly credentials?: RequestCredentials;
+  private readonly getHeaders?: HttpClientOptions["getHeaders"];
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.getToken = options.getToken;
     this.credentials = options.credentials;
+    this.getHeaders = options.getHeaders;
   }
 
   async get<T>(path: string): Promise<T> {
@@ -108,6 +109,10 @@ export class HttpClient {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     const token = await this.getToken?.();
     const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(
+      (await this.getHeaders?.()) ?? {},
+    ))
+      headers.set(key, value);
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }

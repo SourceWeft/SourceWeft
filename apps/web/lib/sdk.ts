@@ -11,12 +11,14 @@ import {
   WorkspaceClient,
 } from "@sourceweft/sdk";
 import { apiBaseUrl } from "./api-base-url";
+import { localHostHeaders } from "./local-host-session";
 
 export { apiBaseUrl };
 
 const httpClient = new HttpClient({
   baseUrl: apiBaseUrl,
   credentials: "include",
+  getHeaders: localHostHeaders,
 });
 
 export const jobsClient = new JobsClient(httpClient);

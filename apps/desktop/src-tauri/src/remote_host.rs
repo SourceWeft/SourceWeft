@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{execution::Executions, LocalHost};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -23,6 +23,7 @@ struct Credentials {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteStatus {
     pub device_id: Option<String>,
+    pub user_id: Option<String>,
     pub connected: bool,
     pub error: Option<String>,
 }
@@ -32,10 +33,141 @@ pub struct RemoteHost {
     status: Arc<Mutex<RemoteStatus>>,
     stop: Arc<AtomicBool>,
     executions: Arc<Executions>,
+    generation: Arc<AtomicU64>,
     keychain_service: String,
 }
 
 impl RemoteHost {
+    #[cfg(target_os = "macos")]
+    pub async fn choose_folder(&self) -> Result<Value, String> {
+        let bytes = security_framework::passwords::get_generic_password(
+            &self.keychain_service,
+            &format!(
+                "local-device:{}",
+                self.status()
+                    .user_id
+                    .ok_or("Authenticate this account first")?
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+        let credential: Credentials =
+            serde_json::from_slice(&bytes).map_err(|_| "Invalid device credentials")?;
+        if self.status().device_id.as_deref() != Some(&credential.id) {
+            return Err("Authenticate this computer before choosing a folder".into());
+        }
+        let output = tauri::async_runtime::spawn_blocking(|| {
+            std::process::Command::new("/usr/bin/osascript")
+                .args([
+                    "-e",
+                    "POSIX path of (choose folder with prompt \"选择工作文件夹\")",
+                ])
+                .output()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err("Folder selection cancelled or unavailable".into());
+        }
+        let path = String::from_utf8(output.stdout).map_err(|_| "Invalid folder path")?;
+        let grant = self
+            .host
+            .register_folder(&credential.user_id, std::path::Path::new(path.trim()))
+            .map_err(|e| e.to_string())?;
+        let response = reqwest::Client::new()
+            .post(format!(
+                "{}/v1/local-devices/folders/register",
+                credential.api_base.trim_end_matches('/')
+            ))
+            .bearer_auth(&credential.token)
+            .json(&grant)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("Folder registration failed: {}", response.status()));
+        }
+        response.json().await.map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    pub async fn choose_folder(&self) -> Result<Value, String> {
+        Err("UNSUPPORTED_PLATFORM".into())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub async fn authenticate(&self, ticket: String, user_id: String) -> Result<Value, String> {
+        if self.status().device_id.is_some() && self.status().user_id.as_deref() != Some(&user_id) {
+            self.disconnect();
+        }
+        let account = format!("local-device:{user_id}");
+        let saved =
+            security_framework::passwords::get_generic_password(&self.keychain_service, &account);
+        // Adopt only this account's pre-release credential; never another user's.
+        let saved = match saved {
+            Err(error) if error.code() == -25300 => {
+                match security_framework::passwords::get_generic_password(
+                    &self.keychain_service,
+                    "local-device",
+                ) {
+                    Ok(bytes) => {
+                        let legacy: Credentials = serde_json::from_slice(&bytes)
+                            .map_err(|_| "Invalid saved legacy credentials")?;
+                        if legacy.user_id == user_id {
+                            Ok(bytes)
+                        } else {
+                            Err(error)
+                        }
+                    }
+                    Err(legacy_error) if legacy_error.code() != -25300 => Err(legacy_error),
+                    Err(_) => Err(error),
+                }
+            }
+            other => other,
+        };
+        let bytes = match saved {
+            Ok(bytes) => bytes,
+            Err(error) if error.code() == -25300 => {
+                self.enroll(ticket).await?;
+                return Ok(json!({"needsProof":true}));
+            }
+            Err(error) => return Err(format!("Keychain access failed: {error}")),
+        };
+        let credentials: Credentials =
+            serde_json::from_slice(&bytes).map_err(|_| "Invalid saved device credentials")?;
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?
+            .post(format!(
+                "{}/v1/local-devices/native-session",
+                credentials.api_base.trim_end_matches('/')
+            ))
+            .bearer_auth(&credentials.token)
+            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base()}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            self.disconnect();
+            return Err(format!("Native identity rejected: {}", response.status()));
+        }
+        let proof: Value = response.json().await.map_err(|e| e.to_string())?;
+        security_framework::passwords::set_generic_password(
+            &self.keychain_service,
+            &format!("local-device:{}", credentials.user_id),
+            &bytes,
+        )
+        .map_err(|e| e.to_string())?;
+        if self.status().device_id.is_none() {
+            self.start(credentials);
+        }
+        Ok(proof)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub async fn authenticate(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
+    }
     pub fn new(host: Arc<LocalHost>, service: String) -> Result<Self, String> {
         host.initialize_invocation_journal()
             .map_err(|e| e.to_string())?;
@@ -44,6 +176,7 @@ impl RemoteHost {
             status: Arc::new(Mutex::new(RemoteStatus::default())),
             stop: Arc::new(AtomicBool::new(false)),
             executions: Arc::new(Executions::default()),
+            generation: Arc::new(AtomicU64::new(0)),
             keychain_service: service,
         })
     }
@@ -51,10 +184,12 @@ impl RemoteHost {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
     pub fn disconnect(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         self.stop.store(true, Ordering::SeqCst);
         self.executions.cancel_all();
         if let Ok(mut status) = self.status.lock() {
             status.connected = false;
+            status.device_id = None;
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -106,7 +241,7 @@ impl RemoteHost {
         };
         security_framework::passwords::set_generic_password(
             &self.keychain_service,
-            "local-device",
+            &format!("local-device:{}", credential.user_id),
             &serde_json::to_vec(&credential).map_err(|e| e.to_string())?,
         )
         .map_err(|e| format!("Keychain enrollment failed: {e}"))?;
@@ -119,13 +254,28 @@ impl RemoteHost {
         let status = self.status.clone();
         let stop = self.stop.clone();
         let executions = self.executions.clone();
+        let generation = self.generation.clone();
+        let current = generation.fetch_add(1, Ordering::SeqCst) + 1;
         stop.store(false, Ordering::SeqCst);
         if let Ok(mut state) = status.lock() {
             state.device_id = Some(credential.id.clone());
+            state.user_id = Some(credential.user_id.clone());
         }
         tauri::async_runtime::spawn(async move {
-            while !stop.load(Ordering::SeqCst) {
-                let outcome = connection(&host, &executions, &credential, &status, &stop).await;
+            while !stop.load(Ordering::SeqCst) && generation.load(Ordering::SeqCst) == current {
+                let outcome = connection(
+                    &host,
+                    &executions,
+                    &credential,
+                    &status,
+                    &stop,
+                    &generation,
+                    current,
+                )
+                .await;
+                if generation.load(Ordering::SeqCst) != current {
+                    break;
+                }
                 executions.cancel_all();
                 if let Ok(mut state) = status.lock() {
                     state.connected = false;
@@ -146,6 +296,8 @@ async fn connection(
     credential: &Credentials,
     status: &Arc<Mutex<RemoteStatus>>,
     stop: &Arc<AtomicBool>,
+    generation: &Arc<AtomicU64>,
+    current: u64,
 ) -> Result<(), String> {
     let mut url = url::Url::parse(&credential.api_base).map_err(|e| e.to_string())?;
     let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
@@ -173,7 +325,7 @@ async fn connection(
     loop {
         tokio::select! {
             _=heartbeat.tick()=>{
-                if stop.load(Ordering::SeqCst){let _=sender.close().await;return Ok(());}
+                if stop.load(Ordering::SeqCst)||generation.load(Ordering::SeqCst)!=current {let _=sender.close().await;return Ok(());}
                 // The server confirms heartbeats; silent half-open connections stop work.
                 if last_received.elapsed()>Duration::from_secs(30){return Err("Device connection lease expired".into());}
                 sender.send(Message::Text(json!({"type":"heartbeat"}).to_string().into())).await.map_err(|e|e.to_string())?;
@@ -195,12 +347,12 @@ async fn connection(
                             let action=value["action"].as_str().ok_or("Missing action")?.to_owned();
                             let deadline=value["deadline"].as_u64().ok_or("Missing deadline")?;
                             let payload=value["payload"].clone();
-                            let owner=credential.user_id.clone();let host=host.clone();let calls=executions.clone();let events=events.clone();let serial=serial.clone();let stop=stop.clone();
+                            let owner=credential.user_id.clone();let host=host.clone();let calls=executions.clone();let events=events.clone();let serial=serial.clone();let stop=stop.clone();let generation=generation.clone();
                             sender.send(Message::Text(json!({"type":"accepted","id":id}).to_string().into())).await.map_err(|e|e.to_string())?;
                             tokio::spawn(async move{
                                 let _permit=serial.acquire_owned().await;
                                 let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d|d.as_millis() as u64).unwrap_or(u64::MAX);
-                                if now>=deadline||stop.load(Ordering::SeqCst){let _=events.send(json!({"type":"result","id":id,"ok":false,"error":"CALL_EXPIRED"})).await;return;}
+                                if now>=deadline||stop.load(Ordering::SeqCst)||generation.load(Ordering::SeqCst)!=current||calls.is_cancelled(&id){let _=events.send(json!({"type":"result","id":id,"ok":false,"error":"CALL_EXPIRED"})).await;return;}
                                 let result_id=id.clone();
                                 let result=tauri::async_runtime::spawn_blocking(move||host.dispatch(&calls,&id,&owner,&thread,&action,payload)).await;
                                 let reply=match result{Ok(Ok(result))=>json!({"type":"result","id":result_id,"ok":true,"result":result}),Ok(Err(error))=>json!({"type":"result","id":result_id,"ok":false,"error":error.to_string()}),Err(_)=>json!({"type":"result","id":result_id,"ok":false,"error":"LOCAL_EXECUTION_JOIN_FAILED"})};

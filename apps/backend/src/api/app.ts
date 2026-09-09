@@ -57,7 +57,12 @@ export function createApp() {
         // so a misconfigured/empty allow-list must fail closed, not open.
         return config.auth.trustedOrigins.includes(origin) ? origin : "";
       },
-      allowHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],
+      allowHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Workspace-Id",
+        "X-Local-Proof",
+      ],
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
       exposeHeaders: [
         "set-auth-token",

@@ -46,6 +46,10 @@ const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
 };
 
 type DashboardChatState = {
+  workTarget: import("@sourceweft/contracts").ThreadExecutionTarget | null;
+  setWorkTarget: (
+    target: import("@sourceweft/contracts").ThreadExecutionTarget | null,
+  ) => void;
   mode: ViewMode;
   sourcesVisible: boolean;
   organizationId: string | null;
@@ -126,6 +130,7 @@ function normalizeUpdatedAt(value?: string | null) {
 }
 
 function mapThreadToChatItem(item: {
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   id: string;
   title: string;
   sourceCount?: number | null;
@@ -136,6 +141,7 @@ function mapThreadToChatItem(item: {
 }): ChatItem {
   return {
     id: item.id,
+    executionTarget: item.executionTarget,
     title: item.title,
     // Sort/display timestamp is conversation activity — last message, falling
     // back to creation. NOT updatedAt, which metadata writes (title/model/
@@ -206,6 +212,25 @@ export function DashboardChatStateProvider({
 
   const [mode, setMode] = useState<ViewMode>("new");
   const [sourcesVisible, setSourcesVisible] = useState(true);
+  const [panelPreferenceLoaded, setPanelPreferenceLoaded] = useState(false);
+  useEffect(() => {
+    try {
+      setSourcesVisible(
+        localStorage.getItem("sourceweft:hub-expanded") !== "false",
+      );
+    } catch {
+      /* Optional local layout preference. */
+    }
+    setPanelPreferenceLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!panelPreferenceLoaded) return;
+    try {
+      localStorage.setItem("sourceweft:hub-expanded", String(sourcesVisible));
+    } catch {
+      /* The current session still retains the preference. */
+    }
+  }, [sourcesVisible, panelPreferenceLoaded]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Workspace");
   const [organizationId, setOrganizationId] = useState<string | null>(null);
@@ -214,6 +239,9 @@ export function DashboardChatStateProvider({
     Array<{ id: string; name: string }>
   >([]);
 
+  const [workTarget, setWorkTarget] = useState<
+    import("@sourceweft/contracts").ThreadExecutionTarget | null
+  >(null);
   const [sharedChats, setSharedChats] = useState<ChatItem[]>([]);
   const [privateChats, setPrivateChats] = useState<ChatItem[]>([]);
   const [archivedChats, setArchivedChats] = useState<ChatItem[]>([]);
@@ -991,6 +1019,8 @@ export function DashboardChatStateProvider({
 
   const state = useMemo<DashboardChatState>(
     () => ({
+      workTarget,
+      setWorkTarget,
       mode,
       sourcesVisible,
       organizationId,
@@ -1035,6 +1065,7 @@ export function DashboardChatStateProvider({
       clearArchivedChats,
     }),
     [
+      workTarget,
       mode,
       sourcesVisible,
       organizationId,

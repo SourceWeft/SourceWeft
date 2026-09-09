@@ -12,9 +12,10 @@ import { ChatHubProvider, useChatHubContext } from "./chat-hub-context";
 import type { ChatHubMode } from "./chat-hub-context";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
-import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
+import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
 
 function HubSlot() {
+  const { previewWidth } = useWorkspaceLayout();
   const context = useChatHubContext();
   const registration = context?.registration;
 
@@ -24,12 +25,18 @@ function HubSlot() {
 
   if (registration.previewArtifact) {
     return (
-      <ArtifactPreviewPanel
-        artifact={registration.previewArtifact}
-        className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
-        onClose={registration.onArtifactPreviewClose}
-        workspaceId={registration.workspaceId}
-      />
+      <div
+        data-testid="docked-artifact-preview"
+        className="h-full shrink-0"
+        style={{ width: previewWidth }}
+      >
+        <ArtifactPreviewPanel
+          artifact={registration.previewArtifact}
+          className="h-full min-w-0 w-full"
+          onClose={registration.onArtifactPreviewClose}
+          workspaceId={registration.workspaceId}
+        />
+      </div>
     );
   }
 
@@ -81,6 +88,14 @@ function MobileHubDrawer() {
   return (
     <Sheet open={context.mobileHubOpen} onOpenChange={context.setMobileHubOpen}>
       <SheetContent
+        onCloseAutoFocus={(event) => {
+          const trigger =
+            document.querySelector<HTMLButtonElement>("[data-hub-toggle]");
+          if (trigger) {
+            event.preventDefault();
+            trigger.focus();
+          }
+        }}
         className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
         side="right"
       >
@@ -136,16 +151,15 @@ function ChatHubScaffold({
 }) {
   const { sourcesVisible, workspaceId, workspaceName } =
     useDashboardChatState();
-  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
-  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
+  const { canDockHub } = useWorkspaceLayout();
 
   return (
     <ChatHubProvider initialValue={{ mode, workspaceId, workspaceName }}>
       <div className="flex h-full min-h-0 w-full overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
-        {sourcesVisible && isPersistentLayout ? <HubSlot /> : null}
+        {sourcesVisible && canDockHub ? <HubSlot /> : null}
       </div>
-      {!isDesktopPanel ? <MobileHubDrawer /> : null}
+      {!canDockHub ? <MobileHubDrawer /> : null}
     </ChatHubProvider>
   );
 }

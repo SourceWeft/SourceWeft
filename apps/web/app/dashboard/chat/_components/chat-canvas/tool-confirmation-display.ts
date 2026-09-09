@@ -216,7 +216,9 @@ export function requestDetailLines(
 ) {
   const sandboxLines = sandboxRequestDetailLines(confirmation, toolCallInput);
   if (sandboxLines) {
-    return sandboxLines.map((line) => compactText(line, 160));
+    return sandboxLines.map((line) =>
+      line.startsWith("CWD: ") ? line : compactText(line, 160),
+    );
   }
   const toolMetadata = confirmationToolMetadata(confirmation);
   const lines = [

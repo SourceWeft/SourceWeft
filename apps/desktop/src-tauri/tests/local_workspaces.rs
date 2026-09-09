@@ -169,3 +169,131 @@ fn replaced_real_directory_is_not_treated_as_the_original_workspace() {
         "WORKSPACE_REPLACED"
     );
 }
+
+#[test]
+fn bound_allocation_uses_server_id_and_cannot_be_retargeted() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let first = host
+        .ensure_bound_workspace("owner", "thread", Some(&id), None)
+        .unwrap();
+    assert_eq!(first.id, id);
+    assert!(host
+        .ensure_bound_workspace(
+            "owner",
+            "thread",
+            Some(&uuid::Uuid::new_v4().to_string()),
+            None
+        )
+        .is_err());
+    assert!(host
+        .ensure_bound_workspace("owner", "other", Some("../escape"), None)
+        .is_err());
+}
+
+#[test]
+fn attached_folder_preserves_identity_and_owner_across_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    let grant = host.register_folder("owner", folder.path()).unwrap();
+    let folder_id = grant["id"].as_str().unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let workspace = host
+        .ensure_bound_workspace("owner", "thread", Some(&id), Some(folder_id))
+        .unwrap();
+    std::fs::write(workspace.path.join("hello.txt"), "original").unwrap();
+    assert!(host
+        .ensure_bound_workspace(
+            "other",
+            "thread",
+            Some(&uuid::Uuid::new_v4().to_string()),
+            Some(folder_id)
+        )
+        .is_err());
+    drop(host);
+    let host = LocalHost::open(temp.path()).unwrap();
+    assert_eq!(
+        host.read_text("owner", "thread", &id, "hello.txt").unwrap(),
+        "original"
+    );
+    let moved = folder.path().with_extension("moved");
+    std::fs::rename(folder.path(), &moved).unwrap();
+    std::fs::create_dir(folder.path()).unwrap();
+    assert!(host.get_workspace("owner", "thread", &id).is_err());
+    std::fs::remove_dir_all(moved).unwrap();
+}
+
+#[test]
+fn file_updates_require_read_version_and_backup_original_bytes() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    host.write_bytes(
+        "owner",
+        "thread",
+        &workspace.id,
+        "report.txt",
+        b"first",
+        None,
+    )
+    .unwrap();
+    assert!(host
+        .write_bytes(
+            "owner",
+            "thread",
+            &workspace.id,
+            "report.txt",
+            b"second",
+            None
+        )
+        .is_err());
+    assert!(host
+        .write_bytes(
+            "owner",
+            "thread",
+            &workspace.id,
+            "report.txt",
+            b"second",
+            Some(b"stale")
+        )
+        .is_err());
+    let updated = host
+        .write_bytes(
+            "owner",
+            "thread",
+            &workspace.id,
+            "report.txt",
+            b"second",
+            Some(b"first"),
+        )
+        .unwrap();
+    let backup = temp
+        .path()
+        .join("local-host/backups")
+        .join(updated["backupId"].as_str().unwrap());
+    assert_eq!(std::fs::read(backup).unwrap(), b"first");
+    assert_eq!(
+        host.read_text("owner", "thread", &workspace.id, "report.txt")
+            .unwrap(),
+        "second"
+    );
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret"), "unchanged").unwrap();
+    std::os::unix::fs::symlink(outside.path(), workspace.path.join("escape")).unwrap();
+    assert!(host
+        .write_bytes(
+            "owner",
+            "thread",
+            &workspace.id,
+            "escape/secret",
+            b"changed",
+            Some(b"unchanged")
+        )
+        .is_err());
+    assert_eq!(
+        std::fs::read(outside.path().join("secret")).unwrap(),
+        b"unchanged"
+    );
+}

@@ -12,6 +12,8 @@
     "allow-show-main-window",
     "allow-get-autostart",
     "allow-set-autostart",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-authenticate-local-host",
+    "allow-choose-local-folder"
   ]
 }

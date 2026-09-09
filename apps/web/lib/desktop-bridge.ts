@@ -111,8 +111,20 @@ export const desktopBridge = {
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");
   },
+  chooseLocalFolder() {
+    return invokeDesktop<{ id: string; name: string }>("choose_local_folder");
+  },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");
+  },
+  authenticateLocalHost(ticket: string, userId: string) {
+    return invokeDesktop<{
+      needsProof?: boolean;
+      deviceId?: string;
+      proof?: string;
+      expiresAt?: string;
+      remoteEnabled?: boolean;
+    }>("authenticate_local_host", { ticket, userId });
   },
   enableLocalHost(ticket: string) {
     return invokeDesktop<{

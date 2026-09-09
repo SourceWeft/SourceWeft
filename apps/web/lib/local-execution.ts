@@ -1,8 +1,14 @@
 "use client";
 import { apiBaseUrl } from "./api-base-url";
+import { localHostHeaders } from "./local-host-session";
 
-export type LocalDevice = { id: string; name: string; online: boolean };
-export const LOCAL_TARGET_KEY = "sourceweft.local.execution-target";
+export type LocalDevice = {
+  id: string;
+  name: string;
+  online: boolean;
+  remoteEnabled: boolean;
+  connected: boolean;
+};
 
 export async function localRequest<T>(
   path: string,
@@ -11,8 +17,10 @@ export async function localRequest<T>(
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: body === undefined ? "GET" : "POST",
     credentials: "include",
-    headers:
-      body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(await localHostHeaders()),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json();

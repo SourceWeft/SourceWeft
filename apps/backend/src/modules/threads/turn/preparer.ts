@@ -1813,6 +1813,7 @@ export async function prepareThreadTurn(
   }
 
   return {
+    localCaller: input.localCaller,
     userId: input.userId,
     workspace,
     thread,

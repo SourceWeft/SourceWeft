@@ -17,6 +17,20 @@ impl LocalHost {
         workspace_id: &str,
         relative: &str,
     ) -> Result<String> {
+        let bytes = self.read_bytes(owner, thread, workspace_id, relative, MAX_TEXT_BYTES)?;
+        String::from_utf8(bytes).map_err(|_| {
+            HostError::new("INVALID_UTF8", "Use a binary file transfer for this file.")
+        })
+    }
+
+    pub fn read_bytes(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        relative: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>> {
         let workspace = self.get_workspace(owner, thread, workspace_id)?;
         let parts = safe_components(relative)?;
         let mut file = open_file_beneath(&workspace.path, &parts)?;
@@ -37,25 +51,21 @@ impl LocalHost {
                 ));
             }
         }
-        if metadata.len() > MAX_TEXT_BYTES {
+        if metadata.len() > max_bytes {
             return Err(HostError::new(
                 "FILE_TOO_LARGE",
                 "Text reads are limited to 1 MiB.",
             ));
         }
         let mut bytes = Vec::new();
-        (&mut file)
-            .take(MAX_TEXT_BYTES + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_TEXT_BYTES {
+        (&mut file).take(max_bytes + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > max_bytes {
             return Err(HostError::new(
                 "FILE_TOO_LARGE",
                 "The file grew beyond the text limit.",
             ));
         }
-        String::from_utf8(bytes).map_err(|_| {
-            HostError::new("INVALID_UTF8", "Use a binary file transfer for this file.")
-        })
+        Ok(bytes)
     }
 }
 
@@ -130,4 +140,171 @@ fn open_file_beneath(_: &Path, _: &[&std::ffi::OsStr]) -> Result<File> {
         "UNSUPPORTED_PLATFORM",
         "Local file access is currently implemented for macOS only.",
     ))
+}
+
+impl LocalHost {
+    /// All directory traversal and file opening are descriptor-relative. Existing
+    /// files require a previously read version and are backed up before replacement.
+    #[cfg(target_os = "macos")]
+    pub fn write_bytes(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        relative: &str,
+        content: &[u8],
+        expected: Option<&[u8]>,
+    ) -> Result<serde_json::Value> {
+        use std::{
+            ffi::CString,
+            io::Write,
+            os::{
+                fd::{AsRawFd, FromRawFd},
+                unix::{
+                    ffi::OsStrExt,
+                    fs::{MetadataExt, OpenOptionsExt},
+                },
+            },
+        };
+        let workspace = self.get_workspace(owner, thread, workspace_id)?;
+        let parts = safe_components(relative)?;
+        let mut parent = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&workspace.path)?;
+        for part in &parts[..parts.len() - 1] {
+            let name = CString::new(part.as_bytes())
+                .map_err(|_| HostError::new("INVALID_PATH", "Invalid path"))?;
+            let fd = unsafe {
+                libc::openat(
+                    parent.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            parent = unsafe { File::from_raw_fd(fd) };
+        }
+        let name = CString::new(parts.last().unwrap().as_bytes())
+            .map_err(|_| HostError::new("INVALID_PATH", "Invalid path"))?;
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
+        let mut backup = None;
+        let mut mode = 0o600;
+        let exists = fd >= 0;
+        if exists {
+            let mut file = unsafe { File::from_raw_fd(fd) };
+            let meta = file.metadata()?;
+            mode = meta.mode() & 0o777;
+            if !meta.is_file() || meta.nlink() != 1 || meta.len() > MAX_TEXT_BYTES {
+                return Err(HostError::new(
+                    "FILE_ACCESS_DENIED",
+                    "Only bounded ordinary files can be replaced",
+                ));
+            }
+            let mut bytes = Vec::new();
+            (&mut file)
+                .take(MAX_TEXT_BYTES + 1)
+                .read_to_end(&mut bytes)?;
+            if expected != Some(bytes.as_slice()) {
+                return Err(HostError::new(
+                    "FILE_VERSION_CONFLICT",
+                    "Read the current file before replacing it",
+                ));
+            }
+            let id = uuid::Uuid::new_v4().to_string();
+            let base = self.backup_base()?;
+            let mut saved = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(base.join(&id))?;
+            saved.write_all(&bytes)?;
+            saved.sync_all()?;
+            let metadata = serde_json::json!({"owner":owner,"thread":thread,"workspaceId":workspace_id,"path":relative});
+            let mut marker = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(base.join(format!("{id}.json")))?;
+            marker.write_all(metadata.to_string().as_bytes())?;
+            marker.sync_all()?;
+            backup = Some(id);
+        } else {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ENOENT) {
+                return Err(error.into());
+            }
+            if expected.is_some() {
+                return Err(HostError::new(
+                    "FILE_VERSION_CONFLICT",
+                    "The previously read file was removed",
+                ));
+            }
+        }
+        let temporary = CString::new(format!(".sourceweft-{}", uuid::Uuid::new_v4())).unwrap();
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                temporary.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let mut staged = unsafe { File::from_raw_fd(fd) };
+        let result = (|| -> Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+            staged.set_permissions(std::fs::Permissions::from_mode(mode))?;
+            staged.write_all(content)?;
+            staged.sync_all()?;
+            // RENAME_EXCL protects a concurrently created destination for new files.
+            let renamed = unsafe {
+                libc::renameatx_np(
+                    parent.as_raw_fd(),
+                    temporary.as_ptr(),
+                    parent.as_raw_fd(),
+                    name.as_ptr(),
+                    if exists { 0 } else { libc::RENAME_EXCL },
+                )
+            };
+            if renamed != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            parent.sync_all()?;
+            Ok(())
+        })();
+        if result.is_err() {
+            unsafe { libc::unlinkat(parent.as_raw_fd(), temporary.as_ptr(), 0) };
+        }
+        result?;
+        Ok(serde_json::json!({"bytes":content.len(),"backupId":backup}))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl LocalHost {
+    pub fn write_bytes(
+        &self,
+        _owner: &str,
+        _thread: &str,
+        _workspace_id: &str,
+        _relative: &str,
+        _content: &[u8],
+        _expected: Option<&[u8]>,
+    ) -> Result<serde_json::Value> {
+        Err(HostError::new(
+            "UNSUPPORTED_PLATFORM",
+            "Local file writes require macOS",
+        ))
+    }
 }

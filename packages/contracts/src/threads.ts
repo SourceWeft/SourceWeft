@@ -2,7 +2,13 @@ import { z } from "zod";
 
 export const threadExecutionTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cloud") }).strict(),
-  z.object({ kind: z.literal("local"), deviceId: z.string().uuid() }).strict(),
+  z
+    .object({
+      kind: z.literal("local"),
+      deviceId: z.string().uuid(),
+      folderId: z.string().uuid().optional(),
+    })
+    .strict(),
 ]);
 export type ThreadExecutionTarget = z.infer<typeof threadExecutionTargetSchema>;
 
@@ -110,6 +116,7 @@ export const threadModelSettingsPatchSchema =
   );
 
 export const createThreadRequestSchema = z.object({
+  creationContextId: z.string().uuid().optional(),
   executionTarget: threadExecutionTargetSchema.optional(),
   title: z.string().trim().min(1).max(200).optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),

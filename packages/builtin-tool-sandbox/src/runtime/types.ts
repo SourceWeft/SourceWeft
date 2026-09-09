@@ -34,6 +34,8 @@ export type SandboxStatus =
 export type SandboxProviderId = string;
 
 export type SandboxProviderPathPolicy = {
+  /** Host-local skill files may live under the bound workspace instead of /skills. */
+  skillsRoot?: string;
   workspaceRoot: string;
   defaultCwd: string;
   prepareTargetRoots: readonly string[];
@@ -81,6 +83,7 @@ export type SandboxCollectedOutput = {
 };
 
 export type SandboxRuntimeContext = {
+  localCaller?: { sessionId: string; nativeAccessId?: string };
   teamId: string;
   workspaceId: string;
   threadId: string;

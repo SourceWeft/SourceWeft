@@ -1,6 +1,10 @@
 "use client";
-import { LocalExecutionSelector } from "./local-execution-selector";
-import { LOCAL_TARGET_KEY } from "../../../../lib/local-execution";
+import { localRequest } from "../../../../lib/local-execution";
+import { ChatHeader } from "./chat-header";
+import {
+  useChatCreationContext,
+  WorkingFolderPicker,
+} from "./chat-work-context";
 
 import {
   useCallback,
@@ -12,15 +16,12 @@ import {
 } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Sheet,
   SheetContent,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
-import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import {
   DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
@@ -106,7 +107,7 @@ import {
   normalizeComposerOptionsState,
   type ComposerOptionsState,
 } from "./chat-canvas/composer-options";
-import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
+import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
 import { mergeSourceIds } from "../[threadId]/_thread/thread-utils";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
@@ -153,17 +154,6 @@ const ByokModelConfigDialog = dynamic(
   { ssr: false },
 );
 
-const HeaderModelSelector = dynamic(
-  () =>
-    import("./header-model-selector").then((mod) => mod.HeaderModelSelector),
-  {
-    loading: () => (
-      <div className="h-10 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
-    ),
-    ssr: false,
-  },
-);
-
 function ChatCanvasSkeleton() {
   return <ChatCanvasPanelSkeleton variant="new" />;
 }
@@ -185,7 +175,7 @@ function ModelCatalogErrorState() {
 
 function SourcesHubSkeleton() {
   return (
-    <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />
+    <SourcesHubPanelSkeleton className="hidden h-full w-[360px] shrink-0 border-l md:flex" />
   );
 }
 
@@ -271,6 +261,16 @@ function normalizeThinkingSettingsForModel(input: {
 }
 
 export function DashboardChatPageClient() {
+  const creationContext = useChatCreationContext();
+  const [visitedContexts, setVisitedContexts] = useState<string[]>([]);
+  useEffect(() => {
+    if (creationContext.ready)
+      setVisitedContexts((keys) =>
+        keys.includes(creationContext.key)
+          ? keys
+          : [...keys, creationContext.key],
+      );
+  }, [creationContext.ready, creationContext.key]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const mcpInstallIdFromQuery = searchParams.get("mcp_install_id");
@@ -319,13 +319,20 @@ export function DashboardChatPageClient() {
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [isStartingChat, setIsStartingChat] = useState(false);
-  const [composerRecoveryInput, setComposerRecoveryInput] = useState("");
-  const [composerRecoveryKey, setComposerRecoveryKey] = useState(0);
+  const [recoveries, setRecoveries] = useState<
+    Record<string, { text: string; key: number }>
+  >({});
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
-  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
-  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
+  const {
+    canDockHub: isPersistentLayout,
+    canDockPreview: isDesktopPanel,
+    ready: layoutReady,
+  } = useWorkspaceLayout();
   const isStartingChatRef = useRef(false);
+  const creationAttempt = useRef<{ fingerprint: string; id: string } | null>(
+    null,
+  );
   const appliedMcpRunRef = useRef<string | null>(null);
   const handledConnectorOAuthHubRef = useRef(false);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
@@ -370,12 +377,12 @@ export function DashboardChatPageClient() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledConnectorOAuthHubRef.current) return;
+    if (!layoutReady || handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
-      if (window.matchMedia(BREAKPOINTS.md).matches) {
+      if (isPersistentLayout) {
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
@@ -383,7 +390,13 @@ export function DashboardChatPageClient() {
       }
       chatHubContext?.setMobileHubOpen(true);
     }
-  }, [chatHubContext, sourcesVisible, toggleSourcesVisible]);
+  }, [
+    chatHubContext,
+    layoutReady,
+    isPersistentLayout,
+    sourcesVisible,
+    toggleSourcesVisible,
+  ]);
 
   const handleArtifactPreview = useCallback(
     (artifact: ArtifactPreviewRecord) => {
@@ -921,18 +934,38 @@ export function DashboardChatPageClient() {
         settings: thinkingSettings,
       });
 
+      if (!creationContext.target || creationContext.error) {
+        toast.error(creationContext.error || "请等待电脑初始化。");
+        return;
+      }
+      if (
+        creationContext.target.kind === "local" &&
+        !creationContext.selectedDevice?.connected
+      ) {
+        toast.error("请先连接所选电脑。");
+        return;
+      }
       isStartingChatRef.current = true;
       setIsStartingChat(true);
-      setComposerRecoveryInput("");
       try {
+        const fingerprint = JSON.stringify({
+          workspaceId,
+          target: creationContext.target,
+          text,
+          images,
+          modelSettings: resolvedThreadModelSettings,
+        });
+        const context =
+          creationAttempt.current?.fingerprint === fingerprint
+            ? creationAttempt.current
+            : await localRequest<{ id: string }>(
+                "/v1/local-devices/creation-context",
+                { target: creationContext.target },
+              );
+        creationAttempt.current = { fingerprint, id: context.id };
         const result = await contentClient.createThread(workspaceId, {
           title: "New chat",
-          executionTarget: sessionStorage.getItem(LOCAL_TARGET_KEY)
-            ? {
-                kind: "local",
-                deviceId: sessionStorage.getItem(LOCAL_TARGET_KEY)!,
-              }
-            : { kind: "cloud" },
+          creationContextId: context.id,
           modelSettings: resolvedThreadModelSettings,
           chatPreferences: {
             thinking: thinkingSettings,
@@ -987,11 +1020,20 @@ export function DashboardChatPageClient() {
         router.push(`/dashboard/chat/${result.thread.id}`);
       } catch (error) {
         console.error(error);
-        toast.error("Failed to create conversation.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to create conversation.",
+        );
         isStartingChatRef.current = false;
         setIsStartingChat(false);
-        setComposerRecoveryInput(input.content);
-        setComposerRecoveryKey((value) => value + 1);
+        setRecoveries((previous) => ({
+          ...previous,
+          [creationContext.key]: {
+            text: input.content,
+            key: (previous[creationContext.key]?.key ?? 0) + 1,
+          },
+        }));
       } finally {
         if (!isStartingChatRef.current) {
           setIsStartingChat(false);
@@ -1000,6 +1042,7 @@ export function DashboardChatPageClient() {
     },
     [
       workspaceId,
+      creationContext,
       adoptChat,
       activeSourceIds,
       availableModels,
@@ -1020,151 +1063,132 @@ export function DashboardChatPageClient() {
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <LocalExecutionSelector workspaceId={workspaceId} />
-        <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
-          <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
-            <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">
-              <div className="shrink-0 md:hidden">
-                <SidebarTrigger />
-              </div>
-              <div className="flex min-w-0 flex-1 items-center md:flex-none">
-                <h1 className="truncate text-base leading-none font-semibold text-foreground">
-                  New chat
-                </h1>
-              </div>
-            </div>
-
-            <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">
-              <HeaderModelSelector
-                availableModels={availableModels}
-                byokCredentials={byokCredentials}
-                byokModels={byokModels}
-                byokProviders={byokProviders}
-                byokSelections={selectedByokModels}
-                isLoading={modelCatalogStatus === "loading"}
-                onAddByokModel={(input) => setByokModelConfig(input)}
-                onByokSelect={({ model, selection, type }) => {
-                  setModelSelectionSources((current) => ({
-                    ...current,
-                    [type]: "user",
-                  }));
-                  setSelectedModels((current) => ({
-                    ...current,
-                    [type]: model,
-                  }));
-                  setSelectedByokModels((current) => ({
-                    ...current,
-                    [type]: selection,
-                  }));
-                  if (type === "llm") {
-                    setThinkingSettings((current) =>
-                      normalizeThinkingSettingsForModel({
-                        capabilities: model.capabilities,
-                        hasSavedPreference: hasSavedThinkingPreference,
-                        settings: current,
-                      }),
-                    );
-                  }
-                }}
-                onModelSelect={(input) => {
-                  setModelSelectionSources((current) => ({
-                    ...current,
-                    [input.type]: "user",
-                  }));
-                  setSelectedByokModels((current) => ({
-                    ...current,
-                    [input.type]: null,
-                  }));
-                  if (input.type === "llm") {
-                    setThinkingSettings((current) =>
-                      normalizeThinkingSettingsForModel({
-                        capabilities: input.model.capabilities,
-                        hasSavedPreference: hasSavedThinkingPreference,
-                        settings: current,
-                      }),
-                    );
-                  }
-                }}
-                selectedModels={selectedModels}
-                setSelectedModels={setSelectedModels}
-              />
-              <Button
-                className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
-                onClick={() => {
-                  if (isPersistentLayout) {
-                    toggleSourcesVisible();
-                    return;
-                  }
-                  chatHubContext?.setMobileHubOpen(true);
-                }}
-                size="icon-sm"
-                title={
-                  isPersistentLayout
-                    ? sourcesVisible
-                      ? "Hide sources"
-                      : "Show sources"
-                    : "Open Hub"
-                }
-                type="button"
-                variant="outline"
-              >
-                {isPersistentLayout && sourcesVisible ? (
-                  <PanelRightClose className="h-4 w-4" />
-                ) : (
-                  <PanelRightOpen className="h-4 w-4" />
-                )}
-                <span className="sr-only">
-                  {isPersistentLayout
-                    ? sourcesVisible
-                      ? "Hide sources"
-                      : "Show sources"
-                    : "Open Hub"}
-                </span>
-              </Button>
-            </div>
-          </div>
-        </header>
+        <ChatHeader
+          workspaceId={workspaceId}
+          creationContext={creationContext}
+          creationDisabled={isCreatingFirstThread}
+          threadTitle="New chat"
+          isPersistentLayout={isPersistentLayout}
+          sourcesVisible={sourcesVisible}
+          onToggleSources={toggleSourcesVisible}
+          onOpenHub={() => chatHubContext?.setMobileHubOpen(true)}
+          availableModels={availableModels}
+          byokCredentials={byokCredentials}
+          byokModels={byokModels}
+          byokProviders={byokProviders}
+          byokSelections={selectedByokModels}
+          isModelCatalogLoading={modelCatalogStatus === "loading"}
+          onAddByokModel={(input) => setByokModelConfig(input)}
+          onByokSelect={({ model, selection, type }) => {
+            setModelSelectionSources((current) => ({
+              ...current,
+              [type]: "user",
+            }));
+            setSelectedModels((current) => ({
+              ...current,
+              [type]: model,
+            }));
+            setSelectedByokModels((current) => ({
+              ...current,
+              [type]: selection,
+            }));
+            if (type === "llm") {
+              setThinkingSettings((current) =>
+                normalizeThinkingSettingsForModel({
+                  capabilities: model.capabilities,
+                  hasSavedPreference: hasSavedThinkingPreference,
+                  settings: current,
+                }),
+              );
+            }
+          }}
+          onModelSelect={(input) => {
+            setModelSelectionSources((current) => ({
+              ...current,
+              [input.type]: "user",
+            }));
+            setSelectedByokModels((current) => ({
+              ...current,
+              [input.type]: null,
+            }));
+            if (input.type === "llm") {
+              setThinkingSettings((current) =>
+                normalizeThinkingSettingsForModel({
+                  capabilities: input.model.capabilities,
+                  hasSavedPreference: hasSavedThinkingPreference,
+                  settings: current,
+                }),
+              );
+            }
+          }}
+          selectedModels={selectedModels}
+          setSelectedModels={setSelectedModels}
+        />
 
         {shouldShowModelCatalogError ? (
           <ModelCatalogErrorState />
         ) : (
-          <ChatCanvas
-            isStreaming={isCreatingFirstThread}
-            mode="new"
-            availableSkills={availableSkills}
-            capabilityCatalog={capabilityCatalog}
-            composerInitialInput={composerRecoveryInput}
-            composerResetKey={composerRecoveryKey}
-            onArtifactPreview={handleArtifactPreview}
-            onRemoveSource={(id) =>
-              persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
-            }
-            onSkillSelectionChange={handleSkillSelectionChange}
-            onSendMessage={handleSendMessage}
-            searchEnabled={searchEnabled}
-            onSearchEnabledChange={setSearchEnabled}
-            allSources={librarySources}
-            sourceMentionLoader={loadSourceMentions}
-            selectedSources={selectedSources}
-            selectedSkillIds={activeSkillIds}
-            selectedMcpInstallIds={activeMcpInstallIds}
-            selectedMcpToolIds={activeMcpToolIds}
-            sourcesVisible={sourcesVisible}
-            thinkingCapabilities={selectedModels.llm?.capabilities}
-            modelCapabilities={selectedModelCapabilities(selectedModels)}
-            imageModelAvailable={Boolean(selectedModels.image)}
-            imageModelAlias={selectedModels.image?.modelAlias ?? null}
-            notionConnectorId={activeConnectorTools.notionConnectorId}
-            activeConnectorIds={activeConnectorTools.activeConnectorIds}
-            disabledToolNames={disabledToolNames}
-            onDisabledToolNamesChange={setDisabledToolNames}
-            composerOptions={composerOptions}
-            onComposerOptionsChange={setComposerOptions}
-            thinkingSettings={thinkingSettings}
-            onThinkingSettingsChange={handleThinkingSettingsChange}
-            threadTitle="New chat"
-            workspaceId={workspaceId}
-          />
+          visitedContexts.map((contextKey) => (
+            <div
+              key={`${workspaceId}:${contextKey}`}
+              hidden={contextKey !== creationContext.key}
+              className={
+                contextKey === creationContext.key
+                  ? "flex min-h-0 flex-1 flex-col"
+                  : "hidden"
+              }
+            >
+              <ChatCanvas
+                workingFolderSlot={
+                  <WorkingFolderPicker
+                    creation={creationContext}
+                    disabled={isCreatingFirstThread}
+                  />
+                }
+                isStreaming={
+                  isCreatingFirstThread ||
+                  !creationContext.ready ||
+                  !!creationContext.error
+                }
+                mode="new"
+                availableSkills={availableSkills}
+                capabilityCatalog={capabilityCatalog}
+                composerInitialInput={recoveries[contextKey]?.text}
+                composerResetKey={recoveries[contextKey]?.key}
+                onArtifactPreview={handleArtifactPreview}
+                onRemoveSource={(id) =>
+                  persistActiveSourceIds(
+                    activeSourceIds.filter((x) => x !== id),
+                  )
+                }
+                onSkillSelectionChange={handleSkillSelectionChange}
+                onSendMessage={handleSendMessage}
+                searchEnabled={searchEnabled}
+                onSearchEnabledChange={setSearchEnabled}
+                allSources={librarySources}
+                sourceMentionLoader={loadSourceMentions}
+                selectedSources={selectedSources}
+                selectedSkillIds={activeSkillIds}
+                selectedMcpInstallIds={activeMcpInstallIds}
+                selectedMcpToolIds={activeMcpToolIds}
+                sourcesVisible={sourcesVisible}
+                thinkingCapabilities={selectedModels.llm?.capabilities}
+                modelCapabilities={selectedModelCapabilities(selectedModels)}
+                imageModelAvailable={Boolean(selectedModels.image)}
+                imageModelAlias={selectedModels.image?.modelAlias ?? null}
+                notionConnectorId={activeConnectorTools.notionConnectorId}
+                activeConnectorIds={activeConnectorTools.activeConnectorIds}
+                disabledToolNames={disabledToolNames}
+                onDisabledToolNamesChange={setDisabledToolNames}
+                composerOptions={composerOptions}
+                onComposerOptionsChange={setComposerOptions}
+                thinkingSettings={thinkingSettings}
+                onThinkingSettingsChange={handleThinkingSettingsChange}
+                threadTitle="New chat"
+                workspaceId={workspaceId}
+              />
+            </div>
+          ))
         )}
       </div>
 

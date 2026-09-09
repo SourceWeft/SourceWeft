@@ -31,8 +31,8 @@
         "title": "SourceWeft",
         "width": 1200,
         "height": 800,
-        "minWidth": 960,
-        "minHeight": 640,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
         "visible": true,
         "create": false
@@ -42,7 +42,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["sourceweft"]
+        "schemes": [
+          "sourceweft"
+        ]
       }
     }
   }

@@ -2,6 +2,7 @@
 //! Workspace/file operations stay internal until authenticated dispatch is wired.
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewWindow};
+#[cfg(test)]
 use url::Url;
 
 #[derive(Serialize)]
@@ -16,6 +17,7 @@ pub struct LocalHostStatus {
     connection_error: Option<String>,
 }
 
+#[cfg(test)]
 fn allowed_caller(label: &str, url: &Url, dev_url: Option<&Url>) -> bool {
     if label != "main" {
         return false;
@@ -26,14 +28,32 @@ fn allowed_caller(label: &str, url: &Url, dev_url: Option<&Url>) -> bool {
 }
 
 #[tauri::command]
+pub async fn authenticate_local_host(
+    app: AppHandle,
+    window: WebviewWindow,
+    ticket: String,
+    user_id: String,
+) -> Result<serde_json::Value, String> {
+    let url = window.url().map_err(|e| e.to_string())?;
+    if window.label() != "main"
+        || !crate::is_desktop_web_url(&app, &url)
+        || !(url.path() == "/dashboard" || url.path().starts_with("/dashboard/"))
+    {
+        return Err("LOCAL_HOST_ACCESS_DENIED".into());
+    }
+    app.try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM")?
+        .authenticate(ticket, user_id)
+        .await
+}
+
+#[tauri::command]
 pub fn local_host_status(app: AppHandle, window: WebviewWindow) -> Result<LocalHostStatus, String> {
     let url = window.url().map_err(|error| error.to_string())?;
-    let dev = if cfg!(debug_assertions) {
-        app.config().build.dev_url.as_ref()
-    } else {
-        None
-    };
-    if !allowed_caller(window.label(), &url, dev) {
+    if window.label() != "main"
+        || !crate::is_desktop_web_url(&app, &url)
+        || !(url.path() == "/dashboard" || url.path().starts_with("/dashboard/"))
+    {
         return Err(
             "LOCAL_HOST_ACCESS_DENIED: Use the existing dashboard in this PC client.".into(),
         );
@@ -62,12 +82,10 @@ pub async fn enable_local_host(
     ticket: String,
 ) -> Result<crate::remote_host::RemoteStatus, String> {
     let url = window.url().map_err(|e| e.to_string())?;
-    let dev = if cfg!(debug_assertions) {
-        app.config().build.dev_url.as_ref()
-    } else {
-        None
-    };
-    if !allowed_caller(window.label(), &url, dev) {
+    if window.label() != "main"
+        || !crate::is_desktop_web_url(&app, &url)
+        || !(url.path() == "/dashboard" || url.path().starts_with("/dashboard/"))
+    {
         return Err("LOCAL_HOST_ACCESS_DENIED".into());
     }
     let host = app
@@ -79,12 +97,10 @@ pub async fn enable_local_host(
 #[tauri::command]
 pub fn disconnect_local_host(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|e| e.to_string())?;
-    let dev = if cfg!(debug_assertions) {
-        app.config().build.dev_url.as_ref()
-    } else {
-        None
-    };
-    if !allowed_caller(window.label(), &url, dev) {
+    if window.label() != "main"
+        || !crate::is_desktop_web_url(&app, &url)
+        || !(url.path() == "/dashboard" || url.path().starts_with("/dashboard/"))
+    {
         return Err("LOCAL_HOST_ACCESS_DENIED".into());
     }
     app.try_state::<crate::remote_host::RemoteHost>()
@@ -114,4 +130,22 @@ mod tests {
         }
         assert!(!allowed_caller("main", &development, None));
     }
+}
+
+#[tauri::command]
+pub async fn choose_local_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<serde_json::Value, String> {
+    let url = window.url().map_err(|e| e.to_string())?;
+    if window.label() != "main"
+        || !crate::is_desktop_web_url(&app, &url)
+        || !url.path().starts_with("/dashboard/")
+    {
+        return Err("LOCAL_HOST_ACCESS_DENIED".into());
+    }
+    app.try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM")?
+        .choose_folder()
+        .await
 }

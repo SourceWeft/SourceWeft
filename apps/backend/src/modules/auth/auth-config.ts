@@ -625,6 +625,13 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       ? {
           databaseHooks: {
             session: {
+              delete: {
+                after: async (session) => {
+                  const { revokeSessionDeviceAccess } =
+                    await import("../devices/access");
+                  await revokeSessionDeviceAccess(session.id);
+                },
+              },
               create: {
                 after: async (session) => {
                   const { onboardingService } = await import("../onboarding");

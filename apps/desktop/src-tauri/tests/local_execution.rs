@@ -86,3 +86,25 @@ fn proxy_rejects_loopback_and_direct_egress() {
     let result=host.dispatch(&Executions::default(),"network","a","t","command.execute",json!({"workspaceId":w.id,"command":"/usr/bin/curl --max-time 5 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/","timeoutMs":10000})).unwrap();
     assert_eq!(result["output"], "403", "{result}");
 }
+
+#[test]
+fn cancelled_queued_invocation_never_runs_after_acquiring_the_host() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let calls = Executions::default();
+    calls.cancel("queued");
+    let error = host
+        .dispatch(
+            &calls,
+            "queued",
+            "owner",
+            "thread",
+            "file.write",
+            json!({"workspaceId":workspace.id,"path":"forbidden.txt","content":"eA=="}),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "CALL_CANCELLED");
+    assert!(!workspace.path.join("forbidden.txt").exists());
+}

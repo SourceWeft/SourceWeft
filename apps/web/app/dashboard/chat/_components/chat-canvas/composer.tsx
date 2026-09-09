@@ -387,6 +387,7 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
 }
 
 export function Composer({
+  workingFolderSlot,
   isEditing = false,
   placeholder,
   onSubmit,
@@ -424,6 +425,7 @@ export function Composer({
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
 }: {
+  workingFolderSlot?: import("react").ReactNode;
   isEditing?: boolean;
   placeholder?: string;
   onSubmit?: (
@@ -1368,7 +1370,7 @@ export function Composer({
   }, [isEditing, inputKey]);
 
   return (
-    <div className={className} ref={rootRef}>
+    <div className={cn("chat-composer min-w-0", className)} ref={rootRef}>
       <PromptInputProvider
         initialAttachments={initialAttachments}
         initialInput={initialInput}
@@ -1574,6 +1576,7 @@ export function Composer({
           />
           <PromptInputBody>
             <PromptInputMentionEditor
+              className="min-h-14 max-h-[min(192px,25svh)]"
               autoFocus={isEditing}
               data-chat-prompt-editor="true"
               initialSegments={initialPromptSegments}
@@ -1631,7 +1634,8 @@ export function Composer({
             />
           </PromptInputBody>
           <PromptInputFooter className="border-t-0">
-            <PromptInputTools className="w-full flex-wrap gap-3">
+            <PromptInputTools className="w-full flex-nowrap gap-2">
+              {workingFolderSlot}
               <div className="flex min-w-0 items-center gap-1.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -2475,6 +2479,8 @@ function ComposerAttachmentsHeader({
   const images = attachments.files.filter((file) =>
     file.mediaType?.startsWith("image/"),
   );
+  const [showAllImages, setShowAllImages] = useState(false);
+  const visibleImages = images.length > 2 && !showAllImages ? [] : images;
   const showSourceCountOnly = selectedSources.length > 2;
   const visibleSources = showSourceCountOnly ? [] : selectedSources;
 
@@ -2483,8 +2489,14 @@ function ComposerAttachmentsHeader({
   }
 
   return (
-    <PromptInputHeader className="items-start">
-      <Attachments className="gap-2.5 pt-0.5" variant="inline">
+    <PromptInputHeader
+      data-composer-attachments
+      className="min-w-0 items-start"
+    >
+      <Attachments
+        className="max-h-20 max-w-full overflow-y-auto gap-2 pt-0.5"
+        variant="inline"
+      >
         {showSourceCountOnly ? (
           <Attachment
             className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
@@ -2518,7 +2530,17 @@ function ComposerAttachmentsHeader({
             </Attachment>
           ))
         )}
-        {images.map((file) => (
+        {images.length > 2 ? (
+          <button
+            type="button"
+            className="rounded-lg bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            aria-expanded={showAllImages}
+            onClick={() => setShowAllImages((value) => !value)}
+          >
+            {images.length} images · {showAllImages ? "Collapse" : "Show"}
+          </button>
+        ) : null}
+        {visibleImages.map((file) => (
           <ComposerImageAttachment
             attachment={file}
             key={file.id}
@@ -2561,13 +2583,17 @@ function ComposerImageAttachment({
           </Attachment>
         </div>
       </AttachmentHoverCardTrigger>
-      <AttachmentHoverCardContent>
+      <AttachmentHoverCardContent
+        data-composer-image-preview
+        className="pointer-events-none max-w-[calc(100vw-2rem)]"
+        side="top"
+      >
         <div className="space-y-3">
           {attachment.url ? (
-            <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
+            <div className="flex max-h-[min(240px,40svh)] w-56 max-w-full items-center justify-center overflow-hidden rounded-md border bg-muted/30">
               <RawImage
                 alt={label}
-                className="max-h-full max-w-full object-contain"
+                className="h-auto max-h-[min(240px,40svh)] w-auto max-w-full object-contain"
                 height={384}
                 src={attachment.url}
                 width={320}
@@ -2575,7 +2601,12 @@ function ComposerImageAttachment({
             </div>
           ) : null}
           <div className="space-y-1 px-0.5">
-            <h4 className="font-semibold text-sm leading-none">{label}</h4>
+            <h4
+              className="line-clamp-3 break-words text-sm font-semibold leading-5 [overflow-wrap:anywhere]"
+              title={label}
+            >
+              {label}
+            </h4>
             {attachment.mediaType ? (
               <p className="font-mono text-muted-foreground text-xs">
                 {attachment.mediaType}

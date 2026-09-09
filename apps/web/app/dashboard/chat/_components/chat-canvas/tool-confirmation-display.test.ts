@@ -134,3 +134,10 @@ test("confirmation display shows sandbox collect review details", () => {
     "Outputs become durable only after collection into /workfiles or a supported artifact path.",
   ]);
 });
+
+test("approval retains the complete local directory even when it is long", () => {
+  const value = confirmation({ toolName: "execute" });
+  const cwd = `/Users/example/Library/Application Support/${"project-".repeat(24)}/files`;
+  value.preview.requestJson = { command: "pwd", cwd };
+  assert.ok(requestDetailLines(value).includes(`CWD: ${cwd}`));
+});

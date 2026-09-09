@@ -82,17 +82,23 @@ export function buildSandboxRuntimePrompt(
   // Skill-staging branches (docs/architecture/sandbox-skill-staging.md).
   // Each conditional replaces its line(s) IN PLACE so the unstaged prompt
   // stays byte-identical to the pre-staging prompt.
-  const skillsVfsLine = capabilities.skillScriptsStaged
-    ? `- /skills is SourceWeft skill content: readable through SourceWeft file tools, and materialized read-only at the same /skills/<name>/ paths inside the sandbox, so ${EXECUTE_TOOL_NAME} commands may run bundled skill scripts directly (for example python3 /skills/<name>/scripts/tool.py).`
-    : "- /skills is SourceWeft DB-backed VFS skill guidance accessed only through SourceWeft file tools.";
-  const executeNamespaceLines = capabilities.skillScriptsStaged
-    ? `- ${SOURCEWEFT_WORK_ROOT} and ${SOURCEWEFT_KB_ROOT} inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
+  const skillsVfsLine =
+    capabilities.skillScriptsStaged && pathPolicy?.skillsRoot
+      ? `- /skills contains virtual skill guidance. Executable skill bundles are materialized under ${pathPolicy.skillsRoot}/<name>/ inside this computer's workspace. Use that physical path for bundled scripts; /skills itself is not a local OS path.`
+      : capabilities.skillScriptsStaged
+        ? `- /skills is SourceWeft skill content: readable through SourceWeft file tools, and materialized read-only at the same /skills/<name>/ paths inside the sandbox, so ${EXECUTE_TOOL_NAME} commands may run bundled skill scripts directly (for example python3 /skills/<name>/scripts/tool.py).`
+        : "- /skills is SourceWeft DB-backed VFS skill guidance accessed only through SourceWeft file tools.";
+  const executeNamespaceLines =
+    capabilities.skillScriptsStaged && pathPolicy?.skillsRoot
+      ? `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills are virtual SourceWeft paths, not local OS paths. Use ${pathPolicy.workspaceRoot} for local files and ${pathPolicy.skillsRoot} for installed skill scripts. Do not modify staged skill resources.`
+      : capabilities.skillScriptsStaged
+        ? `- ${SOURCEWEFT_WORK_ROOT} and ${SOURCEWEFT_KB_ROOT} inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
 - Never include ${SOURCEWEFT_WORK_ROOT} or ${SOURCEWEFT_KB_ROOT} in an ${EXECUTE_TOOL_NAME} command. They are not sandbox paths, even for mkdir, ls, cat, test, node, python, or shell redirection.
 - Never write to /skills from ${EXECUTE_TOOL_NAME} commands: it is platform-managed and read-only. prepare and collect cannot target /skills.`
-    : `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
+        : `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
 - Never include ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, or /skills in an ${EXECUTE_TOOL_NAME} command. They are not sandbox paths, even for mkdir, ls, cat, test, node, python, or shell redirection.`;
   const skillsPrepareRule = capabilities.skillScriptsStaged
-    ? `- ${SOURCEWEFT_KB_ROOT} is not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile. Skill bundles are already staged under /skills and need no preparation.`
+    ? `- ${SOURCEWEFT_KB_ROOT} is not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile. Skill bundles are already staged under ${pathPolicy?.skillsRoot ?? "/skills"} and need no preparation.`
     : `- ${SOURCEWEFT_KB_ROOT} and /skills are not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile.`;
 
   return `<sandbox_rules>

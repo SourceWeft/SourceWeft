@@ -2,7 +2,7 @@ use super::{HostError, LocalHost, Result};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Read,
     path::Path,
     process::{Command, Stdio},
@@ -15,10 +15,20 @@ use std::{
 
 #[derive(Default)]
 pub struct Executions {
+    cancelled: Mutex<HashSet<String>>,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 impl Executions {
+    pub fn is_cancelled(&self, id: &str) -> bool {
+        self.cancelled
+            .lock()
+            .map(|s| s.contains(id))
+            .unwrap_or(true)
+    }
     pub fn cancel(&self, id: &str) -> bool {
+        if let Ok(mut cancelled) = self.cancelled.lock() {
+            cancelled.insert(id.to_owned());
+        }
         if let Ok(active) = self.active.lock() {
             if let Some(cancel) = active.get(id) {
                 cancel.store(true, Ordering::SeqCst);
@@ -53,6 +63,12 @@ impl LocalHost {
         action: &str,
         payload: Value,
     ) -> Result<Value> {
+        if calls.is_cancelled(id) {
+            return Err(HostError::new(
+                "CALL_CANCELLED",
+                "Invocation was cancelled before execution",
+            ));
+        }
         let fingerprint = serde_json::to_string(&(owner, thread, action, &payload))
             .map_err(|e| HostError::new("INVALID_CALL", e.to_string()))?;
         {
@@ -113,8 +129,13 @@ impl LocalHost {
         payload: &Value,
     ) -> Result<Value> {
         if action == "workspace.ensure" {
-            return serde_json::to_value(self.ensure_workspace(owner, thread)?)
-                .map_err(|e| HostError::new("INVALID_RESULT", e.to_string()));
+            return serde_json::to_value(self.ensure_bound_workspace(
+                owner,
+                thread,
+                payload.get("workspaceId").and_then(Value::as_str),
+                payload.get("folderId").and_then(Value::as_str),
+            )?)
+            .map_err(|e| HostError::new("INVALID_RESULT", e.to_string()));
         }
         if action == "command.cancel" {
             let target = text(payload, "executionId")?;
@@ -161,8 +182,9 @@ impl LocalHost {
             "file.read" => {
                 // Current Agent file tools request text; bounded descriptor reads retain
                 // traversal/link protection. Binary transfer is an explicit later capability.
-                let content = self.read_text(owner, thread, &workspace.id, relative)?;
-                Ok(json!({"content":STANDARD.encode(content.as_bytes())}))
+                let content =
+                    self.read_bytes(owner, thread, &workspace.id, relative, 1024 * 1024)?;
+                Ok(json!({"content":STANDARD.encode(&content)}))
             }
             "file.write" => {
                 let bytes = STANDARD
@@ -171,18 +193,24 @@ impl LocalHost {
                 if bytes.len() > 1024 * 1024 {
                     return Err(HostError::new("FILE_TOO_LARGE", "File exceeds 1 MiB"));
                 }
-                let path = checked_path(&workspace.path, relative, false)?;
-                // Workspace mutation is serialized by the device dispatcher. Refuse
-                // replacing files in this first delivery; generated outputs use new names.
-                use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)?;
-                file.write_all(&bytes)?;
-                file.sync_all()?;
-                Ok(json!({"bytes":bytes.len()}))
+                let expected = payload
+                    .get("expectedContent")
+                    .and_then(Value::as_str)
+                    .map(|v| STANDARD.decode(v))
+                    .transpose()
+                    .map_err(|_| {
+                        HostError::new("INVALID_CONTENT", "Invalid expected file content")
+                    })?;
+                self.write_bytes(
+                    owner,
+                    thread,
+                    &workspace.id,
+                    relative,
+                    &bytes,
+                    expected.as_deref(),
+                )
             }
+
             "file.mkdir" => {
                 let path = checked_path(&workspace.path, relative, false)?;
                 if !path.exists() {

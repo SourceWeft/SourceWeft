@@ -134,6 +134,7 @@ function countSelectedTools(tools: ChatSendInput["tools"]) {
 }
 
 export function ChatCanvas({
+  workingFolderSlot,
   activeVersionByGroup = {},
   artifactStatuses,
   composerInitialCommand = null,
@@ -198,6 +199,7 @@ export function ChatCanvas({
   composerOptions,
   onComposerOptionsChange,
 }: {
+  workingFolderSlot?: import("react").ReactNode;
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activeThreadRun?: ActiveThreadRun | null;
@@ -661,6 +663,7 @@ export function ChatCanvas({
   if (mode === "new") {
     return (
       <EmptyState
+        workingFolderSlot={workingFolderSlot}
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         allSources={allSources}
@@ -696,7 +699,10 @@ export function ChatCanvas({
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]">
+    <section
+      data-approval-pending={hasPendingConfirmationItems ? "true" : undefined}
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]"
+    >
       <MessageList
         activeThreadRun={activeThreadRun}
         activeVersionByGroup={activeVersionByGroup}
@@ -874,7 +880,7 @@ export function ChatCanvas({
         }}
       />
 
-      <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
+      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           {queuedSends.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -905,6 +911,7 @@ export function ChatCanvas({
           ) : null}
           {typingIndicator}
           <Composer
+            workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}
