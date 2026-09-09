@@ -59,6 +59,7 @@ export const billingAccounts = pgTable(
     teamId: text("team_id").notNull(),
     userId: text("user_id").notNull(),
     planFamily: text("plan_family").$type<PlanFamily>().notNull(),
+    subscriptionBindingId: text("subscription_binding_id"),
     cycleAnchorAt: timestamp("cycle_anchor_at", {
       withTimezone: true,
       mode: "date",
@@ -437,6 +438,16 @@ export const subscriptions = pgTable(
   {
     id: text("id").primaryKey(),
     teamId: text("team_id").notNull(),
+    currentBindingId: text("current_binding_id"),
+    version: integer("version").notNull().default(0),
+    confirmedPeriodStart: timestamp("confirmed_period_start", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    confirmedPeriodEnd: timestamp("confirmed_period_end", {
+      withTimezone: true,
+      mode: "date",
+    }),
     provider: text("provider")
       .$type<BillingProvider>()
       .notNull()
@@ -478,10 +489,7 @@ export const subscriptions = pgTable(
   },
   (table) => [
     unique("subscriptions_team_id_uq").on(table.teamId),
-    uniqueIndex("subscriptions_provider_external_subscription_uq").on(
-      table.provider,
-      table.externalSubscriptionId,
-    ),
+    uniqueIndex("subscriptions_current_binding_uq").on(table.currentBindingId),
     index("subscriptions_billing_order_idx").on(table.billingOrderId),
     check(
       "subscriptions_provider_check",
@@ -584,6 +592,62 @@ export const billingProviderSettings = pgTable(
     check(
       "billing_provider_settings_environment_check",
       sql`${table.environment} in ('test', 'prod')`,
+    ),
+  ],
+);
+
+// Local lifecycle identities and durable operations are provider-neutral storage.
+export const billingSubscriptionBindings = pgTable(
+  "billing_subscription_bindings",
+  {
+    id: text("id").primaryKey(),
+    identity: text("identity").notNull().unique(),
+    teamId: text("team_id").notNull(),
+    provider: text("provider").notNull(),
+    externalSubscriptionId: text("external_subscription_id"),
+    orderId: text("order_id"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+export const billingSubscriptionOperations = pgTable(
+  "billing_subscription_operations",
+  {
+    id: text("id").primaryKey(),
+    targetKey: text("target_key").notNull(),
+    kind: text("kind").notNull(),
+    requestHash: text("request_hash").notNull(),
+    orderId: text("order_id"),
+    status: text("status").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_subscription_operations_open_uq")
+      .on(table.targetKey)
+      .where(
+        sql`${table.status} in ('reserved','remote_pending','awaiting_confirmation','needs_resolution')`,
+      ),
+    check(
+      "billing_subscription_operations_status_check",
+      sql`${table.status} in ('reserved','remote_pending','awaiting_confirmation','needs_resolution','succeeded','failed')`,
+    ),
+    check(
+      "billing_subscription_operations_kind_check",
+      sql`${table.kind} in ('purchase','seats')`,
     ),
   ],
 );

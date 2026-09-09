@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { WaffoPancake } from "@waffo/pancake-ts";
 import type { BillingRuntimeConfig } from "../../types";
 import { BillingError } from "../../errors";
@@ -18,15 +19,32 @@ export function createWaffoClient(
       merchantId: config.waffo.merchantId,
       privateKey: config.waffo.privateKey,
       environment: config.waffo.environment,
-      fetch:
-        fetch ??
-        ((input, init) =>
-          globalThis.fetch(input, {
-            ...init,
-            signal: init?.signal
-              ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
-              : AbortSignal.timeout(30_000),
-          })),
+      fetch: (input, init) => {
+        const headers = new Headers(init?.headers);
+        if (
+          String(input).endsWith("/v1/actions/checkout/create-session") &&
+          typeof init?.body === "string"
+        ) {
+          const body = JSON.parse(init.body);
+          if (typeof body.metadata?.sourceweftOrderId === "string") {
+            // The SDK signs the original body. Its supported transport hook supplies a stable
+            // merchant-scoped idempotency key instead of the default 60-second window.
+            headers.set(
+              "X-Idempotency-Key",
+              createHash("sha256")
+                .update(`${config.waffo.merchantId}:${init.body}`)
+                .digest("hex"),
+            );
+          }
+        }
+        return (fetch ?? globalThis.fetch)(input, {
+          ...init,
+          headers,
+          signal: init?.signal
+            ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
+            : AbortSignal.timeout(30_000),
+        });
+      },
     });
   } catch {
     throw new BillingError(

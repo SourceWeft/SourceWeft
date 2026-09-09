@@ -99,6 +99,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     }
   }
 
+  async checkoutMetadata() {
+    return { paymentEnvironment: this.options.testMode ? "test" : "prod" };
+  }
+
   private resolveProductId(input: BillingProviderCheckoutInput) {
     const productId = input.externalProductId;
 
@@ -249,6 +253,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       );
     }
 
+    const existing = toObjectRecord(subscription);
+    const existingItems = Array.isArray(existing?.items) ? existing.items : [];
+    if (toObjectRecord(existingItems[0])?.units === input.seatCount)
+      return { provider: "creem", seatCount: input.seatCount };
     await creemClient.subscriptions.update(input.externalSubscriptionId, {
       items: [item],
       updateBehavior: input.updateBehavior,

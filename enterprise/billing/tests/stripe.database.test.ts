@@ -19,7 +19,7 @@ test("Postgres Stripe inbox persists verified events and concurrent processors f
   const id = randomUUID();
   const teamId = `stripe_db_${id}`;
   const userId = `stripe_user_${id}`;
-  const f = stripeFixture();
+  const f = stripeFixture({ sessionPrefix: id });
   const store = new PostgresBillingStore(pool, {
     async listTeamMemberUserIds() {
       return [userId];

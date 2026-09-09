@@ -6,6 +6,7 @@ import type {
   BillingProviderPortalInput,
   BillingProviderUpdateSeatsInput,
   BillingRuntimeConfig,
+  BillingOrderState,
 } from "../../types";
 
 export function stripeId(
@@ -41,6 +42,7 @@ export function createStripeClient(config: BillingRuntimeConfig) {
 }
 export class StripeBillingProvider implements BillingProviderAdapter {
   readonly client: Stripe;
+  readonly checkoutRetryWindowMs = 23 * 60 * 60 * 1000;
   private accountPromise?: Promise<string>;
   constructor(
     private readonly config: BillingRuntimeConfig,
@@ -66,6 +68,33 @@ export class StripeBillingProvider implements BillingProviderAdapter {
           throw error;
         });
     return this.accountPromise;
+  }
+  async checkoutMetadata() {
+    return {
+      stripeAccountId: await this.getCheckoutScope(),
+      stripeTestMode: this.config.stripe.testMode,
+    };
+  }
+  async inspectCheckout(order: BillingOrderState) {
+    if (!order.externalCheckoutId) return "unknown" as const;
+    const session = await this.client.checkout.sessions.retrieve(
+      order.externalCheckoutId,
+    );
+    if (
+      session.livemode !== !this.config.stripe.testMode ||
+      session.client_reference_id !== order.id ||
+      session.metadata?.sourceweftAccountId !== (await this.getCheckoutScope())
+    )
+      throw new BillingError(
+        "STRIPE_SESSION_MISMATCH",
+        409,
+        "Checkout belongs to a different purchase",
+      );
+    return session.payment_status === "paid"
+      ? ("paid" as const)
+      : session.status === "expired"
+        ? ("expired" as const)
+        : ("open" as const);
   }
   async createCheckout(input: BillingProviderCheckoutInput) {
     if (!input.persistedOrder)

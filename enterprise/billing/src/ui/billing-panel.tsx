@@ -259,7 +259,7 @@ export function BillingPanel() {
   }
 
   const canUpdateSeats =
-    subscription?.provider !== "waffo" &&
+    subscription?.capabilities?.updateSeats === true &&
     !isPersonal &&
     isSubscriptionActive &&
     targetSeatCount >= minimumSeatCount &&

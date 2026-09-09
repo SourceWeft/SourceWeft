@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { type PoolClient } from "pg";
 import { type BillingStore } from "../src/server/store-port";
 import {
+  type SubscriptionBinding,
+  type SubscriptionOperation,
   type BillingAccountState,
   type BillingLedgerRow,
   type BillingOrderState,
@@ -60,8 +62,35 @@ export const runtimeConfig: BillingRuntimeConfig = {
 };
 
 export class MemoryBillingStore implements BillingStore {
+  bindings = new Map<string, SubscriptionBinding>();
+  operations = new Map<string, SubscriptionOperation>();
+  async lockSubscriptionTarget() {}
+  async getSubscriptionBinding(identity: string) {
+    return this.bindings.get(identity) ?? null;
+  }
+  async insertSubscriptionBinding(binding: SubscriptionBinding) {
+    this.bindings.set(binding.identity, { ...binding });
+  }
+  async getOpenSubscriptionOperation(target: string) {
+    return (
+      [...this.operations.values()].find(
+        (op) =>
+          op.targetKey === target &&
+          !["succeeded", "failed"].includes(op.status),
+      ) ?? null
+    );
+  }
+  async saveSubscriptionOperation(operation: SubscriptionOperation) {
+    this.operations.set(operation.id, { ...operation });
+  }
+  async completeSubscriptionPurchase(orderId: string) {
+    for (const op of this.operations.values())
+      if (op.orderId === orderId && op.kind === "purchase")
+        op.status = "succeeded";
+  }
   account: BillingAccountState | null = null;
   subscription: BillingSubscriptionState | null = null;
+  orders = new Map<string, BillingOrderState>();
   order: BillingOrderState | null = null;
   webhook: BillingWebhookEventState | null = null;
   webhooks = new Map<string, BillingWebhookEventState>();
@@ -171,6 +200,10 @@ export class MemoryBillingStore implements BillingStore {
     const now = new Date().toISOString();
     const nextSubscription: BillingSubscriptionState = {
       id: this.subscription?.id ?? "sub_1",
+      currentBindingId: snapshot.currentBindingId,
+      version: snapshot.version,
+      confirmedPeriodStart: snapshot.confirmedPeriodStart,
+      confirmedPeriodEnd: snapshot.confirmedPeriodEnd,
       teamId: snapshot.teamId,
       provider: snapshot.provider,
       planFamily: snapshot.planFamily,
@@ -211,11 +244,13 @@ export class MemoryBillingStore implements BillingStore {
 
   async insertOrder(order: BillingOrderState) {
     this.order = { ...order, metadata: { ...order.metadata } };
+    this.orders.set(order.id, this.order);
     return this.order;
   }
 
   async updateOrder(order: BillingOrderState) {
     this.order = { ...order, metadata: { ...order.metadata } };
+    this.orders.set(order.id, this.order);
     return this.order;
   }
 

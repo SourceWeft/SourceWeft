@@ -1,3 +1,4 @@
+import { BillingError } from "./errors";
 import type { BillingServiceHost } from "./host";
 import type {
   CancelTeamSubscriptionResponse,
@@ -135,32 +136,25 @@ export class BillingService {
     input: CreateTeamSubscriptionCheckoutRequest,
     actor: { userId: string; email: string },
   ): Promise<CreateTeamSubscriptionCheckoutResponse> {
-    if (["waffo", "stripe"].includes(this.runtimeConfig.provider)) {
-      return this.orderService
-        .createPricingCheckout({
-          request: {
-            plan: input.planFamily === "individual_pro" ? "pro" : "team",
-            billingInterval: input.billingInterval,
-            source: "dashboard",
-            seatCount: input.seatCount,
-            successUrl: input.successUrl,
-          },
-          actor,
-          ...(input.planFamily === "individual_pro"
-            ? { personalTeamId: teamId }
-            : { existingTeamId: teamId }),
-        })
-        .then((order) => ({
-          teamId,
-          provider: order.provider,
-          checkoutUrl: order.checkoutUrl,
-        }));
-    }
-    return this.subscriptionService.createSubscriptionCheckout(
-      teamId,
-      input,
-      actor,
-    );
+    return this.orderService
+      .createPricingCheckout({
+        request: {
+          plan: input.planFamily === "individual_pro" ? "pro" : "team",
+          billingInterval: input.billingInterval,
+          source: "dashboard",
+          seatCount: input.seatCount,
+          successUrl: input.successUrl,
+        },
+        actor,
+        ...(input.planFamily === "individual_pro"
+          ? { personalTeamId: teamId }
+          : { existingTeamId: teamId }),
+      })
+      .then((order) => ({
+        teamId,
+        provider: order.provider,
+        checkoutUrl: order.checkoutUrl,
+      }));
   }
 
   createPricingCheckout(
@@ -195,6 +189,37 @@ export class BillingService {
     actorUserId: string,
   ): Promise<CancelTeamSubscriptionResponse> {
     return this.subscriptionService.cancelSubscription(teamId, actorUserId);
+  }
+
+  /** Internal operator integration only; no tenant HTTP route exposes this command. */
+  grantManualSubscription(
+    snapshot: TeamSubscriptionSnapshot,
+    operator: { userId: string; canGrantBilling: boolean },
+    operationId: string,
+  ) {
+    if (
+      !operator.canGrantBilling ||
+      !operator.userId ||
+      !operationId ||
+      snapshot.provider !== "manual"
+    )
+      throw new BillingError(
+        "MANUAL_SUBSCRIPTION_AUTHORIZATION_REQUIRED",
+        403,
+        "Explicit operator billing authorization is required",
+      );
+    return this.store.runInTransaction((client) =>
+      this.subscriptionService.applySubscriptionSnapshotLocked(
+        {
+          ...snapshot,
+          billingOrderId: operationId,
+          confirmCoverage: true,
+          metadata: { ...snapshot.metadata, authorizedBy: operator.userId },
+        },
+        client,
+        true,
+      ),
+    );
   }
 
   syncSubscriptionSnapshot(snapshot: TeamSubscriptionSnapshot) {

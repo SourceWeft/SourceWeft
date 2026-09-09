@@ -269,10 +269,13 @@ test("changing the Waffo environment does not reuse a test checkout URL or refer
     config,
     new WaffoBillingProvider(config, f.state, f.client),
   );
-  const second = await billing.createPricingCheckout(input, actor, {
-    personalTeamId: "team_1",
-  });
-  assert.notEqual(second.orderId, first.orderId);
-  assert.notEqual(second.checkoutUrl, first.checkoutUrl);
-  assert.equal(f.store.order?.metadata.waffoEnvironment, "prod");
+  await assert.rejects(
+    () =>
+      billing.createPricingCheckout(input, actor, {
+        personalTeamId: "team_1",
+      }),
+    (error: any) => error.code === "SUBSCRIPTION_OPERATION_CONFLICT",
+  );
+  assert.equal(f.store.order?.id, first.orderId);
+  assert.equal(f.store.order?.metadata.waffoEnvironment, "test");
 });

@@ -1,3 +1,4 @@
+import { prepareSubscriptionFact } from "./subscription-lifecycle";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
@@ -6,7 +7,6 @@ import type {
   CancelTeamSubscriptionResponse,
   CreateTeamBillingPortalResponse,
   CreateTeamSubscriptionCheckoutRequest,
-  CreateTeamSubscriptionCheckoutResponse,
   PreviewTeamSubscriptionSeatsResponse,
   TeamSubscriptionSeatBillingAdjustment,
   TeamSubscriptionSeatQuotaAdjustment,
@@ -16,7 +16,6 @@ import type {
 import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
 import type { BillingLogger } from "./host";
 import { BillingAccountService } from "./account-service";
-import { resolveSubscriptionProduct } from "./catalog";
 import { BillingError } from "./errors";
 import { appendBillingLedger, createOperationId } from "./ledger";
 import type { BillingStore } from "./store-port";
@@ -31,7 +30,6 @@ import {
   INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
   clawbackMonthlyCredits,
-  ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
   getTotalCreditsBalance,
   resolvePlanFromSubscription,
@@ -60,12 +58,6 @@ type BillingAlertSink = {
 
 function isActiveSubscriptionStatus(status: BillingSubscriptionStatus) {
   return ACTIVE_SUBSCRIPTION_STATUSES.has(status);
-}
-
-function getOrderCustomerId(
-  order: { externalCustomerId: string | null } | null | undefined,
-) {
-  return order?.externalCustomerId ?? null;
 }
 
 function parseProviderPeriod(snapshot: TeamSubscriptionSnapshot) {
@@ -337,66 +329,6 @@ export class BillingSubscriptionService {
     );
   }
 
-  async createSubscriptionCheckout(
-    teamId: string,
-    input: CreateTeamSubscriptionCheckoutRequest,
-    actor: { userId: string; email: string },
-  ): Promise<CreateTeamSubscriptionCheckoutResponse> {
-    ensureBillingCheckoutEnabled(this.runtimeConfig);
-    ensureTeamBillingEnabled(this.runtimeConfig);
-
-    if (
-      input.planFamily !== TEAM_STANDARD_PLAN &&
-      input.planFamily !== INDIVIDUAL_PRO_PLAN
-    ) {
-      throw new BillingError(
-        "UNSUPPORTED_SUBSCRIPTION_PLAN",
-        400,
-        "Only individual_pro and team_standard subscriptions are available",
-      );
-    }
-
-    return this.accountService.withRepresentativeTeamAccount(
-      teamId,
-      async ({ account, client }) => {
-        const seatCount =
-          input.planFamily === TEAM_STANDARD_PLAN
-            ? await this.resolveCheckoutSeatCount(account.teamId, input, client)
-            : undefined;
-        const product = resolveSubscriptionProduct({
-          runtimeConfig: this.runtimeConfig,
-          planFamily: input.planFamily,
-          billingInterval: input.billingInterval,
-        });
-        const result = await this.provider.createCheckout({
-          orderId: `legacy-subscription:${randomUUID()}`,
-          kind: "subscription",
-          teamId: account.teamId,
-          actorUserId: actor.userId,
-          actorEmail: actor.email,
-          planFamily: input.planFamily,
-          billingInterval: input.billingInterval,
-          quantity: seatCount ?? 1,
-          externalProductId: product.productId,
-          amountTotal: product.amountCents * (seatCount ?? 1),
-          currency: product.currency,
-          successUrl: input.successUrl,
-          metadata: {
-            teamId: account.teamId,
-            referenceId: actor.userId,
-            seatCount: seatCount ?? 1,
-          },
-        });
-
-        return {
-          teamId: account.teamId,
-          provider: result.provider,
-          checkoutUrl: result.checkoutUrl,
-        };
-      },
-    );
-  }
-
   async assertCanInviteTeamMember(teamId: string) {
     await this.assertTeamSeatCapacity(teamId, "invite");
   }
@@ -472,188 +404,194 @@ export class BillingSubscriptionService {
     },
   ): Promise<UpdateTeamSubscriptionSeatsResponse> {
     ensureTeamBillingEnabled(this.runtimeConfig);
-
-    let alertOperation: {
-      teamId: string;
-      currentSeatCount: number;
-      externalSubscriptionId: string;
-      seatCount: number;
-      seatsUsed: number;
-    } | null = null;
-
+    const seatCount = this.normalizeRequestedSeatCount(input.seatCount);
+    const targetKey = `team:${teamId}`;
+    const reserved = await this.accountService.withRepresentativeTeamAccount(
+      teamId,
+      async ({ account, client }) => {
+        const subscription = await this.store.getSubscriptionByTeam(
+          teamId,
+          client,
+        );
+        const seatsUsed = await this.store.countTeamMembers(teamId, client);
+        const pendingInvitations = await this.store.countPendingTeamInvitations(
+          teamId,
+          client,
+        );
+        this.assertSeatUpdateAllowed({
+          currentSeatCount: account.seatCount,
+          seatCount,
+          seatsUsed,
+          pendingInvitations,
+        });
+        if (
+          !subscription ||
+          subscription.planFamily !== TEAM_STANDARD_PLAN ||
+          subscription.status !== "active" ||
+          !subscription.externalSubscriptionId
+        )
+          throw new BillingError(
+            "TEAM_SUBSCRIPTION_NOT_ACTIVE",
+            409,
+            "Seat updates require an active team subscription",
+          );
+        if (subscription.provider !== this.runtimeConfig.provider)
+          throw new BillingError(
+            "BILLING_PROVIDER_MISMATCH",
+            409,
+            "Manage seats through the original provider",
+          );
+        const preview = calculateSeatPreview({
+          account,
+          subscription,
+          runtimeConfig: this.runtimeConfig,
+          seatCount,
+          seatsUsed,
+          pendingInvitations,
+          provider: subscription.provider,
+        });
+        const open = await this.store.getOpenSubscriptionOperation(
+          targetKey,
+          client,
+        );
+        const requestHash = JSON.stringify([
+          subscription.currentBindingId ?? subscription.externalSubscriptionId,
+          seatCount,
+        ]);
+        if (
+          open &&
+          (open.kind !== "seats" ||
+            open.requestHash !== requestHash ||
+            open.status === "remote_pending")
+        )
+          throw new BillingError(
+            "SUBSCRIPTION_OPERATION_CONFLICT",
+            409,
+            "Another subscription operation is unresolved",
+          );
+        if (account.seatCount === seatCount && !open)
+          return { subscription, preview, operation: null };
+        const operation = open ?? {
+          id: randomUUID(),
+          targetKey,
+          kind: "seats" as const,
+          requestHash,
+          orderId: null,
+          status: "reserved" as const,
+          metadata: { bindingId: subscription.currentBindingId, seatCount },
+        };
+        await this.store.saveSubscriptionOperation(
+          { ...operation, status: "remote_pending" },
+          client,
+        );
+        return { subscription, preview, operation };
+      },
+    );
+    if (!reserved.operation)
+      return {
+        ...reserved.preview,
+        quotaAdjustment: null,
+        billingAdjustment: null,
+      };
     try {
+      // The network operation runs after committing the reservation, without row locks.
+      const result = await this.provider.updateSubscriptionSeats({
+        teamId,
+        actorUserId: input.actorUserId,
+        externalSubscriptionId: reserved.subscription.externalSubscriptionId!,
+        externalProductId: reserved.subscription.externalProductId,
+        seatCount,
+        updateBehavior: toProviderUpdateBehavior(
+          reserved.preview.billingAdjustment?.providerAction ?? "none",
+        ),
+      });
       const response = await this.accountService.withLockedTeamAccounts(
         teamId,
         async ({ accounts, client }) => {
-          // All member rows mirror the team's seat/plan attributes; use the
-          // first row as the representative for team-level reads and validation.
-          const representative = accounts[0];
-          if (!representative) {
-            throw new BillingError(
-              "TEAM_HAS_NO_MEMBERS",
-              409,
-              "Team has no members to resolve a billing account for",
-              { teamId },
-            );
-          }
-          const subscription = await this.store.getSubscriptionByTeam(
-            representative.teamId,
+          const current = await this.store.getSubscriptionByTeam(
+            teamId,
             client,
           );
-          const seatsUsed = await this.store.countTeamMembers(
-            representative.teamId,
-            client,
-          );
-          const pendingInvitations =
-            await this.store.countPendingTeamInvitations(
-              representative.teamId,
-              client,
-            );
-          const seatCount = this.normalizeRequestedSeatCount(input.seatCount);
-
-          this.assertSeatUpdateAllowed({
-            currentSeatCount: representative.seatCount,
-            seatCount,
-            seatsUsed,
-            pendingInvitations,
-          });
-
           if (
-            !subscription ||
-            subscription.planFamily !== TEAM_STANDARD_PLAN ||
-            !isActiveSubscriptionStatus(subscription.status)
-          ) {
+            !current ||
+            current.currentBindingId !==
+              reserved.subscription.currentBindingId ||
+            current.externalSubscriptionId !==
+              reserved.subscription.externalSubscriptionId ||
+            current.status !== "active"
+          )
             throw new BillingError(
-              "TEAM_SUBSCRIPTION_NOT_ACTIVE",
+              "SUBSCRIPTION_BINDING_CONFLICT",
               409,
-              "Seat updates require an active team_standard subscription",
+              "Subscription changed during seat update",
             );
-          }
-
-          if (subscription.provider !== this.runtimeConfig.provider)
-            throw new BillingError(
-              "BILLING_PROVIDER_MISMATCH",
-              409,
-              "Manage seats through the subscription's original payment provider",
-            );
-          if (!subscription.externalSubscriptionId) {
-            throw new BillingError(
-              "BILLING_SUBSCRIPTION_ID_MISSING",
-              409,
-              "No provider subscription ID is available for this team",
-            );
-          }
-
-          const preview = calculateSeatPreview({
-            account: representative,
-            subscription,
-            runtimeConfig: this.runtimeConfig,
+          const seatsUsed = await this.store.countTeamMembers(teamId, client);
+          const pendingInvitations =
+            await this.store.countPendingTeamInvitations(teamId, client);
+          this.assertSeatUpdateAllowed({
+            currentSeatCount: accounts[0]?.seatCount ?? seatCount,
             seatCount,
             seatsUsed,
             pendingInvitations,
-            provider: this.runtimeConfig.provider,
           });
-          alertOperation = {
-            teamId: representative.teamId,
-            currentSeatCount: representative.seatCount,
-            externalSubscriptionId: subscription.externalSubscriptionId,
-            seatCount,
-            seatsUsed,
-          };
-
-          if (representative.seatCount === seatCount) {
-            return {
-              teamId: representative.teamId,
-              provider: this.runtimeConfig.provider,
-              seatCount,
-              seatsUsed,
-              pendingInvitations,
-              quotaAdjustment: null,
-              billingAdjustment: null,
-            };
-          }
-
-          // The provider seat change is a single team-level side effect.
-          const providerAction =
-            preview.billingAdjustment?.providerAction ?? "none";
-          const providerResult = await this.provider.updateSubscriptionSeats({
-            teamId: representative.teamId,
-            actorUserId: input.actorUserId,
-            externalSubscriptionId: subscription.externalSubscriptionId,
-            externalProductId: subscription.externalProductId,
-            seatCount,
-            updateBehavior: toProviderUpdateBehavior(providerAction),
-          });
-          const previousSeatCount = representative.seatCount;
-          const operationId = createOperationId(
-            "seat-change",
-            representative.teamId,
-            previousSeatCount,
-            seatCount,
-            subscription.externalSubscriptionId,
-            Date.now(),
-          );
-
-          // Apply the seat change, quota refresh and any clawback to every
-          // member row so each member's allocation is updated identically.
-          // The clawback is recomputed per member because it clamps to that
-          // member's own credit/page balances.
           for (const account of accounts) {
-            // Compute this member's clawback from its pre-mutation balances,
-            // mirroring the original ordering (preview before quota refresh).
-            const accountPreview = calculateSeatPreview({
-              account,
-              subscription,
-              runtimeConfig: this.runtimeConfig,
-              seatCount,
-              seatsUsed,
-              pendingInvitations,
-              provider: this.runtimeConfig.provider,
-            });
-
-            account.seatCount = seatCount;
+            const previousSeatCount = account.seatCount;
+            account.seatCount = result.seatCount;
             await this.accountService.refreshPlanQuotaLocked(account, client, {
               source: "seat_sync",
-              provider: providerResult.provider,
-              externalSubscriptionId: subscription.externalSubscriptionId,
-              reason: input.reason ?? "seat_count_update",
+              provider: result.provider,
               previousSeatCount,
               nextSeatCount: account.seatCount,
-              operationId,
+              operationId: reserved.operation!.id,
+              reason: input.reason ?? "seat_count_update",
             });
-
-            if (accountPreview.quotaAdjustment) {
-              await this.applySeatQuotaClawbackLocked(account, client, {
-                quotaAdjustment: accountPreview.quotaAdjustment,
-                billingAdjustment: accountPreview.billingAdjustment,
-                actorUserId: input.actorUserId,
-                externalSubscriptionId: subscription.externalSubscriptionId,
-                previousSeatCount,
-                nextSeatCount: account.seatCount,
-                reason: input.reason ?? "seat_count_update",
-                operationId,
-              });
-            }
           }
-
+          await this.store.upsertSubscription(
+            {
+              ...current,
+              version: (current.version ?? 0) + 1,
+              seatCount,
+              metadata: { ...current.metadata, seatCount },
+            },
+            client,
+          );
+          await this.store.saveSubscriptionOperation(
+            { ...reserved.operation!, status: "succeeded" },
+            client,
+          );
           return {
-            teamId: representative.teamId,
-            provider: providerResult.provider,
-            seatCount: representative.seatCount,
+            ...reserved.preview,
             seatsUsed,
             pendingInvitations,
-            quotaAdjustment: preview.quotaAdjustment ?? null,
-            billingAdjustment: preview.billingAdjustment ?? null,
+            seatCount: result.seatCount,
           };
         },
       );
-
-      await this.resolveSeatSyncAlert(response.teamId);
+      await this.resolveSeatSyncAlert(teamId);
       return response;
     } catch (error) {
-      if (alertOperation) {
-        await this.triggerSeatSyncAlert(alertOperation, error);
-      }
+      await this.store.runInTransaction(async (client) => {
+        await this.store.lockSubscriptionTarget(targetKey, client);
+        const open = await this.store.getOpenSubscriptionOperation(
+          targetKey,
+          client,
+        );
+        if (open?.id === reserved.operation!.id)
+          await this.store.saveSubscriptionOperation(
+            { ...open, status: "needs_resolution" },
+            client,
+          );
+      });
+      await this.triggerSeatSyncAlert(
+        {
+          teamId,
+          currentSeatCount: reserved.preview.currentSeatCount,
+          externalSubscriptionId: reserved.subscription.externalSubscriptionId!,
+          seatCount,
+          seatsUsed: reserved.preview.seatsUsed,
+        },
+        error,
+      );
       throw error;
     }
   }
@@ -668,204 +606,120 @@ export class BillingSubscriptionService {
     return null;
   }
 
-  async createBillingPortal(
-    teamId: string,
-    actorUserId: string,
-  ): Promise<CreateTeamBillingPortalResponse> {
-    if (["waffo", "stripe"].includes(this.runtimeConfig.provider))
-      ensureBillingCheckoutEnabled(this.runtimeConfig);
-    else ensureTeamBillingEnabled(this.runtimeConfig);
-
+  private async portalContext(teamId: string, actorUserId: string) {
     return this.accountService.withRepresentativeTeamAccount(
       teamId,
-      async ({ account, client }) => {
+      async ({ client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
-          account.teamId,
+          teamId,
           client,
         );
-
-        if (!subscription) {
+        if (!subscription)
           throw new BillingError(
             "SUBSCRIPTION_NOT_FOUND",
             404,
             "No billing subscription found",
           );
-        }
-
-        if (subscription.provider !== this.runtimeConfig.provider)
+        if (
+          subscription.provider !== this.runtimeConfig.provider ||
+          !["creem", "waffo", "stripe"].includes(subscription.provider)
+        )
           throw new BillingError(
             "BILLING_PROVIDER_MISMATCH",
             409,
-            "Manage this subscription through its original payment provider",
+            "Manage this subscription through its original source",
           );
-        const customerId =
-          this.runtimeConfig.provider === "stripe"
-            ? subscription.externalCustomerId
-            : await this.resolvePortalCustomerId(
-                subscription,
-                actorUserId,
-                client,
-              );
-
-        if (!customerId && !subscription.externalSubscriptionId) {
+        if (
+          !subscription.externalCustomerId &&
+          !subscription.externalSubscriptionId
+        )
           throw new BillingError(
             "BILLING_CUSTOMER_NOT_FOUND",
             409,
-            "No billing customer is available for this subscription",
+            "No payment customer is bound to this subscription",
           );
-        }
-
-        const result = await this.provider.createPortal({
-          teamId: account.teamId,
-          actorUserId,
-          externalCustomerId: customerId,
-          externalSubscriptionId: subscription.externalSubscriptionId,
-        });
-
         return {
-          teamId: account.teamId,
-          provider: result.provider,
-          portalUrl: result.portalUrl,
+          subscription,
+          input: {
+            teamId,
+            actorUserId,
+            externalCustomerId: subscription.externalCustomerId,
+            externalSubscriptionId: subscription.externalSubscriptionId,
+          },
         };
       },
     );
+  }
+
+  async createBillingPortal(
+    teamId: string,
+    actorUserId: string,
+  ): Promise<CreateTeamBillingPortalResponse> {
+    const context = await this.portalContext(teamId, actorUserId);
+    const result = await this.provider.createPortal(context.input);
+    return { teamId, provider: result.provider, portalUrl: result.portalUrl };
   }
 
   async cancelSubscription(
     teamId: string,
     actorUserId: string,
   ): Promise<CancelTeamSubscriptionResponse> {
-    if (["waffo", "stripe"].includes(this.runtimeConfig.provider))
-      ensureBillingCheckoutEnabled(this.runtimeConfig);
-    else ensureTeamBillingEnabled(this.runtimeConfig);
-
-    return this.accountService.withRepresentativeTeamAccount(
+    const context = await this.portalContext(teamId, actorUserId);
+    const result = await this.provider.createPortal(context.input);
+    // Opening the portal never changes local cancellation state.
+    return {
       teamId,
-      async ({ account, client }) => {
-        const subscription = await this.store.getSubscriptionByTeam(
-          account.teamId,
-          client,
-        );
-
-        if (!subscription) {
-          throw new BillingError(
-            "SUBSCRIPTION_NOT_FOUND",
-            404,
-            "No billing subscription found",
-          );
-        }
-
-        if (subscription.provider !== this.runtimeConfig.provider)
-          throw new BillingError(
-            "BILLING_PROVIDER_MISMATCH",
-            409,
-            "Manage this subscription through its original payment provider",
-          );
-        const customerId =
-          this.runtimeConfig.provider === "stripe"
-            ? subscription.externalCustomerId
-            : await this.resolvePortalCustomerId(
-                subscription,
-                actorUserId,
-                client,
-              );
-
-        if (!customerId && !subscription.externalSubscriptionId) {
-          throw new BillingError(
-            "BILLING_CUSTOMER_NOT_FOUND",
-            409,
-            "No billing customer is available for this subscription",
-          );
-        }
-
-        const result = await this.provider.createPortal({
-          teamId: account.teamId,
-          actorUserId,
-          externalCustomerId: customerId,
-          externalSubscriptionId: subscription.externalSubscriptionId,
-        });
-
-        return {
-          teamId: account.teamId,
-          status: subscription.status,
-          cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
-          portalUrl: result.portalUrl,
-        };
-      },
-    );
-  }
-
-  private async resolvePortalCustomerId(
-    subscription: {
-      billingOrderId: string | null;
-      externalCustomerId: string | null;
-    },
-    actorUserId: string,
-    client: PoolClient,
-  ) {
-    if (subscription.externalCustomerId) {
-      return subscription.externalCustomerId;
-    }
-
-    const subscriptionOrder = subscription.billingOrderId
-      ? await this.store.getOrderById(subscription.billingOrderId, client)
-      : null;
-    const userSubscription =
-      await this.store.getLatestCustomerSubscriptionByUser(actorUserId, client);
-    const userOrder = await this.store.getLatestCustomerOrderByUser(
-      actorUserId,
-      client,
-    );
-
-    return (
-      getOrderCustomerId(subscriptionOrder) ??
-      userSubscription?.externalCustomerId ??
-      getOrderCustomerId(userOrder)
-    );
+      status: context.subscription.status,
+      cancelAtPeriodEnd: context.subscription.cancelAtPeriodEnd,
+      portalUrl: result.portalUrl,
+    };
   }
 
   async syncSubscriptionSnapshot(snapshot: TeamSubscriptionSnapshot) {
-    if (snapshot.planFamily === TEAM_STANDARD_PLAN) {
-      ensureTeamBillingEnabled(this.runtimeConfig);
-    }
-
-    return this.accountService.withLockedTeamAccounts(
-      snapshot.teamId,
-      async ({ accounts, client }) => {
-        // Validate the snapshot period and upsert the subscription record once
-        // per team; the per-account mutation is then applied to every member.
-        const prepared = await this.prepareSubscriptionSnapshotLocked(
-          snapshot,
-          client,
-        );
-        for (const account of accounts) {
-          await this.applySubscriptionSnapshotToAccountLocked(
-            account,
-            snapshot,
-            prepared,
-            client,
-          );
-        }
-
-        const representative = accounts[0];
-        if (!representative) {
-          throw new BillingError(
-            "TEAM_HAS_NO_MEMBERS",
-            409,
-            "Team has no members to resolve a billing account for",
-            { teamId: snapshot.teamId },
-          );
-        }
-        return toSubscriptionSummary({
-          account: representative,
-          subscription: await this.store.getSubscriptionByTeam(
-            representative.teamId,
-            client,
-          ),
-          provider: this.runtimeConfig.provider,
-        });
-      },
+    return this.store.runInTransaction((client) =>
+      this.applySubscriptionSnapshotLocked(snapshot, client),
     );
+  }
+
+  async applySubscriptionSnapshotLocked(
+    input: TeamSubscriptionSnapshot,
+    client: PoolClient,
+    establish = false,
+  ) {
+    const snapshot = await prepareSubscriptionFact(
+      this.store,
+      input,
+      client,
+      establish,
+    );
+    if (!snapshot) return null;
+    const prepared = await this.prepareSubscriptionSnapshotLocked(
+      snapshot,
+      client,
+    );
+    // Status-only observations never issue or refresh an allocation.
+    if (
+      snapshot.status === "past_due" ||
+      (snapshot.status === "active" && !snapshot.confirmCoverage && !establish)
+    )
+      return snapshot;
+    const userIds = (
+      await this.store.listTeamMemberUserIds(snapshot.teamId, client)
+    ).sort();
+    for (const userId of userIds) {
+      const account = await this.accountService.ensureAccountLocked(
+        snapshot.teamId,
+        userId,
+        client,
+      );
+      await this.applySubscriptionSnapshotToAccountLocked(
+        account,
+        snapshot,
+        prepared,
+        client,
+      );
+    }
+    return snapshot;
   }
 
   private async prepareSubscriptionSnapshotLocked(
@@ -889,6 +743,7 @@ export class BillingSubscriptionService {
     const now = new Date();
     const metadata = {
       source: "subscription",
+      subscriptionBindingId: snapshot.currentBindingId,
       provider: snapshot.provider,
       status: snapshot.status,
       billingInterval: snapshot.billingInterval,
@@ -897,13 +752,18 @@ export class BillingSubscriptionService {
       currentPeriodEnd: snapshot.currentPeriodEnd,
     };
 
-    const period = parseProviderPeriod(snapshot);
+    const period = parseProviderPeriod({
+      ...snapshot,
+      currentPeriodStart: snapshot.confirmedPeriodStart ?? null,
+      currentPeriodEnd: snapshot.confirmedPeriodEnd ?? null,
+    });
     const providerCycle = period
       ? getProviderCycleWindow(snapshot, period, now)
       : null;
 
     if (
-      isActiveSubscriptionStatus(snapshot.status) &&
+      snapshot.status === "active" &&
+      snapshot.confirmCoverage === true &&
       (!period || !providerCycle || providerCycle.cycleEndAt <= now)
     ) {
       throw new BillingError(
@@ -1025,7 +885,8 @@ export class BillingSubscriptionService {
     const nextCycleEndAt = activeProviderCycle.cycleEndAt.toISOString();
     const nextCycleAnchorAt = activeProviderCycle.anchorAt.toISOString();
     const alreadyAligned =
-      account.cycleSource === "provider_subscription" &&
+      account.cycleSource ===
+        (snapshot.provider === "manual" ? "manual" : "provider_subscription") &&
       sameInstant(account.cycleAnchorAt, nextCycleAnchorAt) &&
       sameInstant(account.cycleStartAt, nextCycleStartAt) &&
       sameInstant(account.cycleEndAt, nextCycleEndAt);
@@ -1033,7 +894,8 @@ export class BillingSubscriptionService {
     if (!alreadyAligned) {
       await this.accountService.realignCycleLocked(account, client, {
         cycleAnchorAt: nextCycleAnchorAt,
-        cycleSource: "provider_subscription",
+        cycleSource:
+          snapshot.provider === "manual" ? "manual" : "provider_subscription",
         cycleStartAt: nextCycleStartAt,
         cycleEndAt: nextCycleEndAt,
         expireCurrentMonthly: true,

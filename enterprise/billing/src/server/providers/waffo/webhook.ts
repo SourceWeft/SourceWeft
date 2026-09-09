@@ -1,3 +1,4 @@
+import { stableSerialize } from "../../service-helpers";
 import { createHash } from "node:crypto";
 import { verifyWebhook, type WebhookEvent } from "@waffo/pancake-ts";
 import type {
@@ -40,8 +41,7 @@ export const waffoEventKey = (event: WebhookEvent) =>
         event.mode,
         event.storeId,
         event.eventType,
-        event.id,
-        event.timestamp,
+        event.eventId,
       ]),
     )
     .digest("hex");
@@ -143,6 +143,21 @@ export class WaffoWebhookService {
         400,
         "Invalid Waffo event envelope",
       );
+    const existing = await store.getWebhookEventByProviderEventId(
+      "waffo",
+      waffoEventKey(event),
+    );
+    if (existing) {
+      if (
+        stableSerialize(existing.payload.data) !== stableSerialize(event.data)
+      )
+        throw new BillingError(
+          "WAFFO_EVENT_CONFLICT",
+          409,
+          "A business event was redelivered with different data",
+        );
+      return existing;
+    }
     const recorded = await store.insertWebhookEvent({
       provider: "waffo",
       providerEventId: waffoEventKey(event),
@@ -322,7 +337,15 @@ export class WaffoWebhookService {
           );
         this.validateAmount(event, order);
       } else {
-        if (event.data.billingPeriod !== order.billingInterval)
+        const confirmsCoverage = [
+          "subscription.activated",
+          "subscription.renewed",
+          "subscription.recovered",
+        ].includes(event.eventType);
+        if (
+          event.data.billingPeriod &&
+          event.data.billingPeriod !== order.billingInterval
+        )
           throw new BillingError(
             "WAFFO_PERIOD_MISMATCH",
             422,
@@ -330,7 +353,14 @@ export class WaffoWebhookService {
           );
         const start = Date.parse(event.data.currentPeriodStart ?? "");
         const end = Date.parse(event.data.currentPeriodEnd ?? "");
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+        if (
+          (confirmsCoverage ||
+            (order.status !== "fulfilled" &&
+              ["active", "canceling"].includes(
+                event.data.orderStatus ?? "",
+              ))) &&
+          (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+        )
           throw new BillingError(
             "WAFFO_PERIOD_INVALID",
             422,
@@ -373,6 +403,8 @@ export class WaffoWebhookService {
           const snapshot: TeamSubscriptionSnapshot = {
             teamId: fulfilled.teamId,
             provider: "waffo",
+            eventOccurredAt: event.timestamp,
+            confirmCoverage: confirmsCoverage,
             planFamily: order.planFamily,
             status:
               status === "canceling"

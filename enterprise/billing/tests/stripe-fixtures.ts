@@ -18,7 +18,12 @@ export const stripeConfig = {
 };
 export class StripeMemoryStore extends MemoryBillingStore {
   override async getOrderById(id?: string) {
-    return !id || this.order?.id === id ? this.order : null;
+    return !id
+      ? this.order
+      : (this.orders.get(id) ?? (this.order?.id === id ? this.order : null));
+  }
+  override async getOrderByIdForUpdate(id?: string) {
+    return this.getOrderById(id);
   }
   override async getOrderByClientReference(_user?: string, key?: string) {
     return this.order?.clientReferenceKey === key ? this.order : null;
@@ -80,7 +85,9 @@ export class MemoryStripeInbox implements StripeInboxStore {
       .map((row) => row.payload as unknown as Stripe.Event);
   }
 }
-export function stripeFixture(options: { teamBillingEnabled?: boolean } = {}) {
+export function stripeFixture(
+  options: { teamBillingEnabled?: boolean; sessionPrefix?: string } = {},
+) {
   const config = { ...stripeConfig, ...options };
   const requests: Array<{
     path: string;
@@ -113,7 +120,7 @@ export function stripeFixture(options: { teamBillingEnabled?: boolean } = {}) {
       if (path === "/v1/account")
         data = { id: remote.accountId, object: "account" };
       else if (path === "/v1/checkout/sessions" && method === "POST") {
-        const id = `cs_test_${remote.sessions.size + 1}`;
+        const id = `cs_test_${options.sessionPrefix ?? ""}${remote.sessions.size + 1}`;
         const quantity = Number(body.get("line_items[0][quantity]"));
         const unitAmount = Number(
           body.get("line_items[0][price_data][unit_amount]"),

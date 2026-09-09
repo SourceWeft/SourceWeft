@@ -386,6 +386,10 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     return {
       teamId: resolvedTeamId,
       provider: "creem",
+      eventOccurredAt: toDateIso(record?.webhookCreatedAt) ?? undefined,
+      confirmCoverage: ["subscription.paid", "subscription.active"].includes(
+        eventType,
+      ),
       planFamily,
       status: resolveCreemSubscriptionStatus({
         eventType,
@@ -402,7 +406,10 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
         rawStatus === "scheduled_cancel" ||
         record?.cancel_at_period_end === true ||
         eventType === "subscription.scheduled_cancel",
-      metadata: metadata ?? {},
+      metadata: {
+        ...metadata,
+        paymentEnvironment: config.billing.creem.testMode ? "test" : "prod",
+      },
       seatCount: resolveCreemSeatCountWithFallback(
         data,
         metadata,
@@ -477,23 +484,25 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
           ...(metadata ?? {}),
         },
         snapshot,
-        orderFulfillment: orderId
-          ? {
-              orderId,
-              externalCustomerId: snapshot?.externalCustomerId ?? null,
-              externalSubscriptionId: externalSubscriptionId ?? null,
-              externalSubscriptionItemId:
-                snapshot?.externalSubscriptionItemId ?? null,
-              externalProductId: snapshot?.externalProductId ?? null,
-              currentPeriodStart: snapshot?.currentPeriodStart ?? null,
-              currentPeriodEnd: snapshot?.currentPeriodEnd ?? null,
-              status: snapshot?.status ?? fallbackStatus,
-              metadata: {
-                fallbackStatus,
-                ...(metadata ?? {}),
-              },
-            }
-          : null,
+        orderFulfillment:
+          orderId &&
+          ["subscription.active", "subscription.paid"].includes(eventType)
+            ? {
+                orderId,
+                externalCustomerId: snapshot?.externalCustomerId ?? null,
+                externalSubscriptionId: externalSubscriptionId ?? null,
+                externalSubscriptionItemId:
+                  snapshot?.externalSubscriptionItemId ?? null,
+                externalProductId: snapshot?.externalProductId ?? null,
+                currentPeriodStart: snapshot?.currentPeriodStart ?? null,
+                currentPeriodEnd: snapshot?.currentPeriodEnd ?? null,
+                status: snapshot?.status ?? fallbackStatus,
+                metadata: {
+                  fallbackStatus,
+                  ...(metadata ?? {}),
+                },
+              }
+            : null,
       });
 
       if (result.outcome === "ignored") {

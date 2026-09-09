@@ -6,6 +6,7 @@ import type {
   BillingProviderPortalInput,
   BillingProviderUpdateSeatsInput,
   BillingRuntimeConfig,
+  BillingOrderState,
 } from "../../types";
 import { centsToDisplay, createWaffoClient } from "./client";
 import type { WaffoStateStore } from "./state";
@@ -22,12 +23,59 @@ export function waffoProductKey(
 }
 export class WaffoBillingProvider implements BillingProviderAdapter {
   readonly client: WaffoPancake;
+  readonly checkoutRetryWindowMs = 23 * 60 * 60 * 1000;
   constructor(
     private readonly config: BillingRuntimeConfig,
     private readonly state: WaffoStateStore,
     client?: WaffoPancake,
   ) {
     this.client = client ?? createWaffoClient(config);
+  }
+  async checkoutMetadata() {
+    const settings = await this.state.getSettings(
+      this.config.waffo.merchantId,
+      this.config.waffo.environment,
+    );
+    if (!settings)
+      throw new BillingError(
+        "WAFFO_SETUP_REQUIRED",
+        503,
+        "Waffo setup is incomplete",
+      );
+    return {
+      waffoStoreId: settings.storeId,
+      waffoMerchantId: settings.merchantId,
+      waffoEnvironment: settings.environment,
+      waffoProducts: settings.products,
+    };
+  }
+  async inspectCheckout(order: BillingOrderState) {
+    if (!order.externalCheckoutId) return "unknown" as const;
+    if (
+      order.metadata.waffoMerchantId !== this.config.waffo.merchantId ||
+      order.metadata.waffoEnvironment !== this.config.waffo.environment
+    )
+      throw new BillingError(
+        "WAFFO_ORDER_BINDING_MISMATCH",
+        409,
+        "Checkout belongs to another merchant or environment",
+      );
+    const result = await this.client.graphql.query<{
+      checkoutSession: { id: string; status: string } | null;
+    }>({
+      query: "query($id: ID!) { checkoutSession(id: $id) { id status } }",
+      variables: { id: order.externalCheckoutId },
+    });
+    if (result.errors?.length)
+      throw new BillingError(
+        "WAFFO_CHECKOUT_QUERY_FAILED",
+        502,
+        "Unable to resolve previous checkout",
+      );
+    return result.data?.checkoutSession?.id === order.externalCheckoutId &&
+      result.data.checkoutSession.status === "expired"
+      ? ("expired" as const)
+      : ("unknown" as const);
   }
   async createCheckout(input: BillingProviderCheckoutInput) {
     if (!input.persistedOrder)
@@ -46,7 +94,12 @@ export class WaffoBillingProvider implements BillingProviderAdapter {
       this.config.waffo.merchantId,
       this.config.waffo.environment,
     );
-    const productId = settings?.products[waffoProductKey(input)];
+    const savedProducts = input.metadata?.waffoProducts as
+      Record<string, string> | undefined;
+    const productId =
+      input.externalProductId ||
+      savedProducts?.[waffoProductKey(input)] ||
+      settings?.products[waffoProductKey(input)];
     if (!settings || !productId)
       throw new BillingError(
         "WAFFO_SETUP_REQUIRED",
@@ -64,6 +117,7 @@ export class WaffoBillingProvider implements BillingProviderAdapter {
       orderMerchantExternalId: input.orderId,
       metadata: {
         sourceweftOrderId: input.orderId,
+        sourceweftCheckoutAttempt: input.previousCheckoutId ?? "initial",
         sourceweftUserId: input.actorUserId,
         sourceweftTeamId: input.teamId ?? "",
         sourceweftKind: input.kind,

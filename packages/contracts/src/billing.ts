@@ -301,6 +301,13 @@ export const billingOrderResponseSchema = z.object({
 });
 
 export const billingSubscriptionResponseSchema = z.object({
+  capabilities: z
+    .object({
+      managePortal: z.boolean(),
+      cancelViaPortal: z.boolean(),
+      updateSeats: z.boolean(),
+    })
+    .optional(),
   teamId: z.string(),
   provider: billingProviderSchema,
   planFamily: planFamilySchema.nullable(),

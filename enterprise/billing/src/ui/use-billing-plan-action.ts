@@ -43,10 +43,16 @@ export function useBillingPlanAction(input: {
   const actionLabel = shouldManageBilling ? "Manage billing" : "Upgrade plan";
   const actionDisabled =
     actionLoading ||
+    (shouldManageBilling &&
+      input.subscription?.capabilities?.managePortal !== true) ||
     (shouldManageBilling ? !input.teamId : !input.isPersonal && !input.teamId);
 
   const handleAction = React.useCallback(async () => {
-    if (!billingCheckoutEnabled) {
+    if (
+      shouldManageBilling
+        ? input.subscription?.capabilities?.managePortal !== true
+        : !billingCheckoutEnabled
+    ) {
       return;
     }
 
@@ -156,6 +162,7 @@ export function useBillingPlanAction(input: {
     input.teamId,
     input.teamSeatCount,
     shouldManageBilling,
+    input.subscription?.capabilities?.managePortal,
   ]);
 
   return {

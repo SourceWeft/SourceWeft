@@ -147,11 +147,11 @@ export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
 }
 export const billingSchedulesEnabled =
   ["waffo", "stripe"].includes(billingConfig.provider) ||
-  (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled);
+  billingConfig.reconcileEnabled;
 export async function reconcileBillingSchedule() {
   if (billingConfig.provider === "waffo") await waffo().drain();
   if (billingConfig.provider === "stripe") await stripe().drain();
-  if (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled)
+  if (billingConfig.reconcileEnabled)
     return createBillingSchedule(billing().service, alerts, logger)();
 }
 export function getBillingDeploymentCapabilities(): DeploymentCapabilities {

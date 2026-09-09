@@ -287,6 +287,28 @@ export class StripeWebhookService {
   ): Promise<boolean> {
     const client = this.input.provider.client;
     if (event.type.startsWith("checkout.session.")) {
+      if (!order.externalCheckoutId) {
+        const recovered = await client.checkout.sessions.retrieve(
+          objectId(event),
+        );
+        this.mode(recovered.livemode);
+        if (
+          recovered.client_reference_id !== order.id ||
+          recovered.metadata?.sourceweftOrderId !== order.id ||
+          recovered.metadata.sourceweftAccountId !==
+            order.metadata.stripeAccountId
+        )
+          throw new BillingError(
+            "STRIPE_SESSION_MISMATCH",
+            422,
+            "Cannot recover an unrelated checkout",
+          );
+        order = await this.input.store.updateOrder({
+          ...order,
+          externalCheckoutId: recovered.id,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       if (objectId(event) !== order.externalCheckoutId) {
         const previous = await client.checkout.sessions.retrieve(
           objectId(event),
@@ -369,6 +391,16 @@ export class StripeWebhookService {
     id: string,
     order: BillingOrderState,
   ): Promise<boolean> {
+    const observed = order.teamId
+      ? await this.input.store.getSubscriptionByTeam(order.teamId)
+      : null;
+    if (
+      observed &&
+      observed.externalSubscriptionId !== id &&
+      order.status === "fulfilled"
+    )
+      return false;
+    const expectedVersion = observed?.version;
     // Always re-read under the order lock; a delayed event must not restore stale state.
     const sub = await this.input.provider.client.subscriptions.retrieve(id, {
       expand: ["latest_invoice"],
@@ -413,31 +445,17 @@ export class StripeWebhookService {
       );
       const existing = context.subscription;
       if (!existing) return false;
-      // Failed collection updates status only; retain the last paid period and quotas.
-      await this.input.store.runInTransaction(async (transaction) => {
-        await this.input.store.upsertSubscription(
-          {
-            teamId: existing.teamId,
-            provider: "stripe",
-            planFamily: existing.planFamily,
-            status: "past_due",
-            billingInterval: existing.billingInterval,
-            currentPeriodStart: existing.currentPeriodStart,
-            currentPeriodEnd: existing.currentPeriodEnd,
-            externalCustomerId: existing.externalCustomerId,
-            externalSubscriptionId: sub.id,
-            externalSubscriptionItemId: existing.externalSubscriptionItemId,
-            externalProductId: existing.externalProductId,
-            billingOrderId: existing.billingOrderId,
-            cancelAtPeriodEnd: sub.cancel_at_period_end,
-            seatCount: context.account?.seatCount ?? order.quantity,
-            metadata: {
-              ...existing.metadata,
-              stripeUnpaidInvoiceId: stripeId(sub.latest_invoice),
-            },
-          },
-          transaction,
-        );
+      await this.input.billing.syncSubscriptionSnapshot({
+        ...existing,
+        status: "past_due",
+        confirmCoverage: false,
+        expectedVersion,
+        seatCount: context.account?.seatCount ?? order.quantity,
+        cancelAtPeriodEnd: sub.cancel_at_period_end,
+        metadata: {
+          ...existing.metadata,
+          stripeUnpaidInvoiceId: stripeId(sub.latest_invoice),
+        },
       });
       return true;
     }
@@ -524,6 +542,9 @@ export class StripeWebhookService {
     const snapshot: TeamSubscriptionSnapshot = {
       teamId: current.teamId,
       provider: "stripe",
+      confirmCoverage: active,
+      expectedVersion:
+        order.status === "fulfilled" ? expectedVersion : undefined,
       planFamily: order.planFamily,
       status: active
         ? "active"

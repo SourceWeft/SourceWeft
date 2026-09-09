@@ -1,3 +1,4 @@
+import { createWaffoClient } from "../src/server/providers/waffo/client";
 import { generateKeyPairSync, sign } from "node:crypto";
 import {
   WaffoPancake,
@@ -35,7 +36,12 @@ export const waffoConfig = {
 
 export class WaffoMemoryStore extends MemoryBillingStore {
   override async getOrderById(id?: string) {
-    return !id || this.order?.id === id ? this.order : null;
+    return !id
+      ? this.order
+      : (this.orders.get(id) ?? (this.order?.id === id ? this.order : null));
+  }
+  override async getOrderByIdForUpdate(id?: string) {
+    return this.getOrderById(id);
   }
   override async getOrderByClientReference(_user?: string, key?: string) {
     return this.order?.clientReferenceKey === key ? this.order : null;
@@ -121,26 +127,22 @@ export function createWaffoFixture() {
     body: Record<string, any>;
     headers: Headers;
   }> = [];
-  const client = new WaffoPancake({
-    merchantId,
-    privateKey: signingKey.privateKey,
-    fetch: async (url, init) => {
-      requests.push({
-        url: String(url),
-        body: JSON.parse(String(init?.body)),
-        headers: new Headers(init?.headers),
-      });
-      return new Response(
-        JSON.stringify({
-          data: {
-            sessionId: `cs_test_${requests.length}`,
-            checkoutUrl: `https://pancake.waffo.ai/checkout/cs_test_${requests.length}`,
-            expiresAt: new Date(Date.now() + 2_700_000).toISOString(),
-          },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
-    },
+  const client = createWaffoClient(waffoConfig, async (url, init) => {
+    requests.push({
+      url: String(url),
+      body: JSON.parse(String(init?.body)),
+      headers: new Headers(init?.headers),
+    });
+    return new Response(
+      JSON.stringify({
+        data: {
+          sessionId: `cs_test_${requests.length}`,
+          checkoutUrl: `https://pancake.waffo.ai/checkout/cs_test_${requests.length}`,
+          expiresAt: new Date(Date.now() + 2_700_000).toISOString(),
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
   });
   const store = new WaffoMemoryStore();
   const state = new MemoryWaffoState(store);

@@ -176,8 +176,10 @@ export function readBillingConfig(
       env.BACKEND_DEFAULT_MONTHLY_CREDITS,
       3000,
     ),
-    reconcileEnabled:
-      saasEnabled && parseBoolean(env.BACKEND_BILLING_RECONCILE_ENABLED, false),
+    reconcileEnabled: parseBoolean(
+      env.BACKEND_BILLING_RECONCILE_ENABLED,
+      false,
+    ),
     defaultSuccessUrl: `${webBaseUrl.replace(/\/$/, "")}/dashboard/billing?checkout=success`,
     creem: {
       apiKey: env.CREEM_API_KEY || "",

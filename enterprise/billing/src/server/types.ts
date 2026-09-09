@@ -63,6 +63,7 @@ export type BillingRuntimeConfig = {
 };
 
 export type BillingAccountState = {
+  subscriptionBindingId?: string | null;
   teamId: string;
   // Per-member allocation: each account row is keyed on (teamId, userId).
   // A member's runs settle against their own row (谁问谁付, deduct own first).
@@ -93,6 +94,11 @@ export type BillingAccountState = {
 export type BillingLedgerRow = BillingLedgerEntry;
 
 export type BillingSubscriptionState = {
+  currentBindingId?: string | null;
+  version?: number;
+  confirmedPeriodStart?: string | null;
+  confirmedPeriodEnd?: string | null;
+
   id: string;
   teamId: string;
   provider: BillingProvider;
@@ -169,7 +175,38 @@ export type BillingWebhookProcessResult = {
   reason?: string;
 };
 
+export type SubscriptionBinding = {
+  id: string;
+  identity: string;
+  teamId: string;
+  provider: BillingProvider;
+  externalSubscriptionId: string | null;
+  orderId: string | null;
+};
+export type SubscriptionOperation = {
+  id: string;
+  targetKey: string;
+  kind: "purchase" | "seats";
+  requestHash: string;
+  orderId: string | null;
+  status:
+    | "reserved"
+    | "remote_pending"
+    | "awaiting_confirmation"
+    | "succeeded"
+    | "failed"
+    | "needs_resolution";
+  metadata: Record<string, unknown>;
+};
 export type TeamSubscriptionSnapshot = {
+  currentBindingId?: string | null;
+  version?: number;
+  confirmedPeriodStart?: string | null;
+  confirmedPeriodEnd?: string | null;
+  confirmCoverage?: boolean;
+  eventOccurredAt?: string;
+  expectedVersion?: number;
+
   teamId: string;
   provider: BillingProvider;
   planFamily: PlanFamily;
@@ -262,6 +299,13 @@ export type BillingProviderUpdateSeatsResult = {
 };
 
 export type BillingProviderAdapter = {
+  readonly checkoutRetryWindowMs?: number;
+  checkoutMetadata?(): Promise<Record<string, unknown>>;
+
+  inspectCheckout?(
+    order: BillingOrderState,
+  ): Promise<"open" | "expired" | "paid" | "unknown">;
+
   getCheckoutScope?(): Promise<string>;
   createCheckout(
     input: BillingProviderCheckoutInput,
