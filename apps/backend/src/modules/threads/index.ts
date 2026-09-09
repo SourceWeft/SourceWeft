@@ -1,4 +1,4 @@
-import { billingService } from "../billing";
+import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { ContentThreadStreamService } from "./stream/service";
 import { ContentThreadTurnService } from "./turn/service";
 
@@ -32,7 +32,11 @@ export type { ChatThreadRunMode } from "./durable/types";
 
 // Thread
 export { findThreadRecord } from "./thread/repository";
-export { generateThreadTitle, applyGeneratedThreadTitle, buildFallbackThreadTitle } from "./thread/title-generation";
+export {
+  generateThreadTitle,
+  applyGeneratedThreadTitle,
+  buildFallbackThreadTitle,
+} from "./thread/title-generation";
 
 // Turn
 export * from "./turn/context";
@@ -59,7 +63,11 @@ export type {
   ToolCallTrace,
   ToolProducer,
 } from "./turn/types";
-export type { EditThreadInput, RefreshThreadInput, ResumeThreadInput } from "./stream/types";
+export type {
+  EditThreadInput,
+  RefreshThreadInput,
+  ResumeThreadInput,
+} from "./stream/types";
 
 // Agent
 export { agentSandboxService } from "./agent/sandbox-service/service";

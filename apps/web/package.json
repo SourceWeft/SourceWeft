@@ -25,7 +25,6 @@
     "@better-auth/passkey": "1.7.2",
     "@better-auth/utils": "0.4.2",
     "@choochmeque/tauri-plugin-google-auth-api": "^0.5.1",
-    "@creem_io/better-auth": "^1.1.4",
     "@daveyplate/better-auth-ui": "^3.4.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
@@ -38,7 +37,7 @@
     "@fontsource-variable/noto-sans-tc": "^5.3.0",
     "@fontsource-variable/noto-sans-thai": "^5.3.0",
     "@fontsource-variable/sora": "^5.3.0",
-    "@next/third-parties": "^16.3.0",
+    "@next/third-parties": "16.3.3",
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
@@ -58,7 +57,7 @@
     "chart.js": "^4.5.1",
     "date-fns": "^4.4.0",
     "lucide-react": "^0.562.0",
-    "next": "~16.3.0",
+    "next": "16.3.3",
     "next-themes": "^0.4.6",
     "pg": "^8.23.0",
     "react": "^19.2.8",
@@ -67,7 +66,7 @@
     "streamdown": "^2.5.0"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.3.0",
+    "@next/eslint-plugin-next": "16.3.3",
     "@playwright/test": "1.59.1",
     "@sourceweft/eslint-config": "workspace:*",
     "@sourceweft/tailwind-config": "workspace:*",
@@ -77,13 +76,13 @@
     "@types/pg": "^8.21.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitest/coverage-v8": "4.1.7",
+    "@vitest/coverage-v8": "4.1.11",
     "autoprefixer": "^10.5.4",
     "eslint": "^9.39.5",
     "postcss": "^8.5.26",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.2",
-    "vitest": "4.1.7"
+    "vitest": "4.1.11"
   }
 }

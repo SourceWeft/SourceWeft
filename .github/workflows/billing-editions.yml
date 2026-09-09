@@ -1,0 +1,93 @@
+name: Billing editions
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+jobs:
+  edition:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [core, commercial]
+    services:
+      postgres:
+        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
+        env:
+          POSTGRES_USER: sourceweft
+          POSTGRES_PASSWORD: sourceweft
+          POSTGRES_DB: sourceweft_billing_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+    env:
+      SOURCEWEFT_EDITION: ${{ matrix.edition }}
+      DATABASE_URL: postgresql://sourceweft:sourceweft@127.0.0.1:5432/sourceweft_billing_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      BETTER_AUTH_SECRET: billing-ci-test-auth-secret-at-least-32
+      MODEL_GATEWAY_ENCRYPTION_SECRET: billing-ci-test-model-secret-at-least-32
+      PDF2MARKDOWN_API_KEY: billing-ci-test-only
+      MAIL_PROVIDER: console
+      MARKET_ENABLED: "false"
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:3411
+      NEXT_PUBLIC_WEB_BASE_URL: http://127.0.0.1:3412
+      BACKEND_API_HOST: 127.0.0.1
+      BACKEND_API_PORT: "3411"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Prepare an independent source workspace
+        run: node scripts/editions/prepare.mjs --edition=${{ matrix.edition }} --out=${{ runner.temp }}/billing-edition
+      - name: Verify source boundary and locked installation
+        working-directory: ${{ runner.temp }}/billing-edition
+        run: |
+          node scripts/editions/check-boundaries.mjs ${{ matrix.edition }}
+          pnpm install --frozen-lockfile
+          pnpm audit --audit-level=moderate
+          node scripts/ci/verify-security-dependencies.cjs
+          node scripts/ci/verify-security-patches.mjs
+          pnpm --filter @sourceweft/market-contracts build
+          pnpm --filter @sourceweft/ui-web build
+      - name: Typecheck and build both applications
+        working-directory: ${{ runner.temp }}/billing-edition
+        run: |
+          pnpm --filter @sourceweft/backend check-types
+          pnpm --filter web check-types
+          pnpm --filter @sourceweft/backend build
+          pnpm --filter web build
+      - name: Apply the actual edition migrations
+        working-directory: ${{ runner.temp }}/billing-edition
+        run: pnpm --filter @sourceweft/backend db:migrate
+      - name: Commercial unit and PostgreSQL tests
+        if: matrix.edition == 'commercial'
+        working-directory: ${{ runner.temp }}/billing-edition
+        run: |
+          pnpm --filter @sourceweft/billing check-types
+          pnpm --filter @sourceweft/billing test
+          pnpm --filter @sourceweft/billing test:database
+      - name: Worker and scheduler startup smoke
+        working-directory: ${{ runner.temp }}/billing-edition
+        run: node scripts/e2e/billing-startup.mjs
+      - name: API end-to-end smoke
+        working-directory: ${{ runner.temp }}/billing-edition
+        env:
+          E2E_EDITION: ${{ matrix.edition }}
+          E2E_API_URL: http://127.0.0.1:3411
+        run: |
+          pnpm --filter @sourceweft/backend start:api > api-e2e.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          node scripts/e2e/billing-editions.mjs

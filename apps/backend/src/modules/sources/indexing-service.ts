@@ -334,7 +334,7 @@ export class SourceIndexingService {
         }
       }
 
-      const billing = await this.billing.meterIngestion(
+      const settlement = await this.billing.meterIngestion(
         workspace.organizationId,
         {
           workspaceId: workspace.id,
@@ -362,7 +362,8 @@ export class SourceIndexingService {
 
       return {
         source: updatedSource,
-        billing,
+        billing:
+          settlement.status === "settled" ? settlement.billing : undefined,
         indexing: {
           chunkCount: chunkSpecs.length,
           embeddingProfileId: profile.id,

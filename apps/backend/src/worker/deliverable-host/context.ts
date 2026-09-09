@@ -300,7 +300,8 @@ export function createDefaultDeliverableRuntimeResolver(input: {
      * `${feature}.tts`, `${feature}.visual_qa` and `${feature}.asset_image`.
      */
     const openGateway = async (gatewayConfigId: string) => {
-      const { billingService } = await import("../../modules/billing");
+      const { billingRuntime: billingService } =
+        await import("../../billing-host/bindings");
       const { gateway } = await modelGateway.openBilledModelGateway({
         billing: billingService,
         context: billingContext,

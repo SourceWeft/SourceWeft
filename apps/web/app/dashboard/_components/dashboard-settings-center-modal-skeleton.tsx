@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  isSettingsTabAvailable,
+  resolveSettingsTab,
+} from "../../../lib/billing-edition/visibility";
+
 import type { SettingsCenterTab } from "./dashboard-settings-center/types";
 
 type SkeletonProps = {
@@ -250,13 +255,14 @@ export function SettingsCenterPanelSkeleton({
 }: {
   activeTab?: SettingsCenterTab;
 }) {
-  if (activeTab === "team") {
+  const visibleTab = resolveSettingsTab(activeTab);
+  if (visibleTab === "team") {
     return <TeamPanelSkeleton />;
   }
-  if (activeTab === "usage") {
+  if (visibleTab === "usage") {
     return <UsagePanelSkeleton />;
   }
-  if (activeTab === "billing") {
+  if (visibleTab === "billing") {
     return <BillingPanelSkeleton />;
   }
   return <AccountPanelSkeleton />;
@@ -296,11 +302,12 @@ export function DashboardSettingsCenterModalSkeleton({
 
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
-                {navItems.map((item) => (
+                {navItems.filter(isSettingsTabAvailable).map((item) => (
                   <div
                     className={cx(
                       "flex h-8 items-center gap-2.5 rounded-md px-2.5",
-                      item === activeTab && "bg-background shadow-sm",
+                      item === resolveSettingsTab(activeTab) &&
+                        "bg-background shadow-sm",
                     )}
                     key={item}
                   >

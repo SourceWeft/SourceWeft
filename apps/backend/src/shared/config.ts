@@ -3,13 +3,6 @@ import "dotenv/config";
 import { parseBooleanEnv as parseBoolean } from "./env";
 import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
-import type {
-  BillingMode,
-  BillingProvider,
-  BillingScope,
-  PlanFamily,
-} from "@sourceweft/credits-core";
-
 type AlertLevel = "warn" | "error" | "critical";
 
 function parseStrictBooleanEnv(name: string, fallback: boolean) {
@@ -69,72 +62,7 @@ function parseNonNegativeInteger(value: string | undefined, fallback: number) {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
-const billingModes: ReadonlySet<BillingMode> = new Set([
-  "disabled",
-  "shadow",
-  "enforced",
-]);
-
-const billingScopes: ReadonlySet<BillingScope> = new Set([
-  "individual_only",
-  "team_enabled",
-]);
-
-const billingProviders: ReadonlySet<BillingProvider> = new Set([
-  "none",
-  "creem",
-  "stripe",
-  "manual",
-]);
-
 const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
-
-const planFamilies: ReadonlySet<PlanFamily> = new Set([
-  "individual_free",
-  "individual_pro",
-  "team_standard",
-  "team_premium",
-  "enterprise_usage",
-]);
-
-function parseBillingMode(value: string | undefined, fallback: BillingMode) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase() as BillingMode;
-  return billingModes.has(normalized) ? normalized : fallback;
-}
-
-function parseBillingScope(value: string | undefined, fallback: BillingScope) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase() as BillingScope;
-  return billingScopes.has(normalized) ? normalized : fallback;
-}
-
-function parseBillingProvider(
-  value: string | undefined,
-  fallback: BillingProvider,
-) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase() as BillingProvider;
-  return billingProviders.has(normalized) ? normalized : fallback;
-}
-
-function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
-  if (!value) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase() as PlanFamily;
-  return planFamilies.has(normalized) ? normalized : fallback;
-}
 
 function parseCsv(value: string | undefined): string[] {
   if (!value) {
@@ -399,16 +327,6 @@ function resolvePasskeyOrigin() {
   return resolveWebBaseUrl();
 }
 
-const saasEnabled = parseBoolean(process.env.SOURCEWEFT_SAAS_ENABLED, false);
-const requestedBillingProvider = parseBillingProvider(
-  process.env.BACKEND_BILLING_PROVIDER,
-  "none",
-);
-// SOURCEWEFT_SAAS_ENABLED is the payment/subscription gate for OSS deploys:
-// provider credentials alone must not turn checkout on, and only Creem is a
-// provider-backed checkout path in this release.
-const effectiveBillingProvider: BillingProvider =
-  saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
 const queueName = process.env.JOB_QUEUE_NAME || "sourceweft-jobs";
 const agentInterpreterLimits = {
   executionTimeoutMs: parseBoundedIntegerEnv({
@@ -810,97 +728,6 @@ export const config = {
     plunkApiBaseUrl:
       process.env.PLUNK_API_BASE_URL || "https://next-api.useplunk.com",
     plunkApiKey: process.env.PLUNK_API_KEY || "",
-  },
-  billing: {
-    saasEnabled,
-    mode: parseBillingMode(process.env.BACKEND_BILLING_MODE, "enforced"),
-    scope: parseBillingScope(
-      process.env.BACKEND_BILLING_SCOPE,
-      "individual_only",
-    ),
-    creditsEnabled: parseBoolean(process.env.BACKEND_CREDITS_ENABLED, true),
-    pagesEnabled: parseBoolean(process.env.BACKEND_PAGES_ENABLED, true),
-    provider: effectiveBillingProvider,
-    enforceLimits: parseBoolean(
-      process.env.BACKEND_BILLING_ENFORCE_LIMITS,
-      true,
-    ),
-    teamBillingEnabled:
-      saasEnabled &&
-      parseBoolean(process.env.BACKEND_TEAM_BILLING_ENABLED, false),
-    creditUnitUsd: parsePositiveNumber(
-      process.env.BACKEND_CREDIT_UNIT_USD,
-      0.00125,
-    ),
-    defaultMarkupRate: parseNonNegativeNumber(
-      process.env.BACKEND_CREDIT_MARKUP_RATE,
-      0.25,
-    ),
-    defaultPlanFamily: parsePlanFamily(
-      process.env.BACKEND_DEFAULT_PLAN_FAMILY,
-      "individual_free",
-    ),
-    defaultMonthlyPages: parseNonNegativeInteger(
-      process.env.BACKEND_DEFAULT_MONTHLY_PAGES,
-      300,
-    ),
-    defaultMonthlyCredits: parseNonNegativeInteger(
-      process.env.BACKEND_DEFAULT_MONTHLY_CREDITS,
-      3000,
-    ),
-    reconcileEnabled:
-      saasEnabled &&
-      parseBoolean(process.env.BACKEND_BILLING_RECONCILE_ENABLED, false),
-    defaultSuccessUrl: `${resolveWebBaseUrl()}/dashboard/billing?checkout=success`,
-    creem: {
-      apiKey: process.env.CREEM_API_KEY || "",
-      webhookSecret: process.env.CREEM_WEBHOOK_SECRET || "",
-      testMode: parseBoolean(process.env.CREEM_TEST_MODE, true),
-      individualProMonthlyProductId:
-        process.env.CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID || "",
-      individualProYearlyProductId:
-        process.env.CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID || "",
-      teamStandardMonthlyProductId:
-        process.env.CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID || "",
-      teamStandardYearlyProductId:
-        process.env.CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID || "",
-      creditTopupProductId: process.env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
-      pageTopupProductId: process.env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
-    },
-    catalog: {
-      individualProMonthlyAmountCents: parsePositiveNumber(
-        process.env.BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS,
-        1200,
-      ),
-      individualProYearlyAmountCents: parsePositiveNumber(
-        process.env.BILLING_PRICE_INDIVIDUAL_PRO_YEARLY_CENTS,
-        9600,
-      ),
-      teamStandardMonthlyAmountCents: parsePositiveNumber(
-        process.env.BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS,
-        4900,
-      ),
-      teamStandardYearlyAmountCents: parsePositiveNumber(
-        process.env.BILLING_PRICE_TEAM_STANDARD_YEARLY_CENTS,
-        39200,
-      ),
-      creditTopupUnitAmount: parsePositiveNumber(
-        process.env.BILLING_CREDIT_TOPUP_UNIT_AMOUNT,
-        10000,
-      ),
-      creditTopupAmountCents: parsePositiveNumber(
-        process.env.BILLING_CREDIT_TOPUP_AMOUNT_CENTS,
-        1250,
-      ),
-      pageTopupUnitAmount: parsePositiveNumber(
-        process.env.BILLING_PAGE_TOPUP_UNIT_AMOUNT,
-        1000,
-      ),
-      pageTopupAmountCents: parsePositiveNumber(
-        process.env.BILLING_PAGE_TOPUP_AMOUNT_CENTS,
-        500,
-      ),
-    },
   },
   capability: {
     builtinNamespace:

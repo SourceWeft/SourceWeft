@@ -35,7 +35,7 @@ import {
   updateMessageRecord,
 } from "../message-repository";
 import { findThreadRecord } from "../thread/repository";
-import { billingService } from "../../../modules/billing";
+import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import { logger } from "../../../shared/logger";
 import { durableChatRunService } from "./service";
 import { chatRunStreamManager } from "./stream-manager";
@@ -1115,10 +1115,8 @@ function buildSnapshotMetadata(input: {
 
 function snapshotWithFinalizedResult(
   snapshot: ChatRunSnapshot,
-  result: Required<
-    Pick<DurableRunResultSnapshot, "assistantMessage" | "billing">
-  > &
-    Pick<DurableRunResultSnapshot, "retrieval">,
+  result: Required<Pick<DurableRunResultSnapshot, "assistantMessage">> &
+    Pick<DurableRunResultSnapshot, "retrieval" | "billing">,
 ): ChatRunSnapshot {
   const metadata = result.assistantMessage.metadata ?? {};
   // Only the committed finalizer result supplies these fields. Assign missing
@@ -1752,7 +1750,7 @@ export async function processThreadChatRunJob(
           return errorMessage;
         },
         onFinalized: async (result) => {
-          runBilling = result.billing;
+          runBilling = result.billing ?? null;
           snapshot = snapshotWithFinalizedResult(snapshot, result);
         },
       },

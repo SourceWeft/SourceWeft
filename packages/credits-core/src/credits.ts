@@ -1,10 +1,8 @@
-export const DEFAULT_CREDIT_UNIT_USD = 0.00125;
-
 export type CreditComputationInput = {
   providerCostUsd: number;
   platformCostUsd?: number;
   markupRate?: number;
-  creditUnitUsd?: number;
+  creditUnitUsd: number;
 };
 
 function assertNonNegative(value: number, field: string) {
@@ -13,10 +11,7 @@ function assertNonNegative(value: number, field: string) {
   }
 }
 
-export function toCreditsFromUsd(
-  usd: number,
-  creditUnitUsd = DEFAULT_CREDIT_UNIT_USD,
-) {
+export function toCreditsFromUsd(usd: number, creditUnitUsd: number) {
   assertNonNegative(usd, "usd");
 
   if (!Number.isFinite(creditUnitUsd) || creditUnitUsd <= 0) {
@@ -26,10 +21,7 @@ export function toCreditsFromUsd(
   return Math.ceil(usd / creditUnitUsd);
 }
 
-export function toUsdFromCredits(
-  credits: number,
-  creditUnitUsd = DEFAULT_CREDIT_UNIT_USD,
-) {
+export function toUsdFromCredits(credits: number, creditUnitUsd: number) {
   assertNonNegative(credits, "credits");
 
   if (!Number.isFinite(creditUnitUsd) || creditUnitUsd <= 0) {
@@ -43,7 +35,7 @@ export function computeCreditsFromCost({
   providerCostUsd,
   platformCostUsd = 0,
   markupRate = 0,
-  creditUnitUsd = DEFAULT_CREDIT_UNIT_USD,
+  creditUnitUsd,
 }: CreditComputationInput) {
   assertNonNegative(providerCostUsd, "providerCostUsd");
   assertNonNegative(platformCostUsd, "platformCostUsd");

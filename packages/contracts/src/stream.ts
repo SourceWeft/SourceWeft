@@ -421,7 +421,7 @@ export const streamThreadResponseSchema = z.object({
   thread: threadWithChatPreferencesSchema,
   userMessage: messageSchema,
   assistantMessage: messageSchema,
-  billing: meterConsumeResponseSchema,
+  billing: meterConsumeResponseSchema.optional(),
   retrieval: retrievalResponseSchema,
 });
 

@@ -1,7 +1,7 @@
 import { SkillParseError } from "../../modules/skills/frontmatter";
 import type { Context } from "hono";
 import { ZodError } from "zod";
-import { isBillingError } from "../../modules/billing/errors";
+import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
 import { isMcpError } from "../../modules/mcp/errors";

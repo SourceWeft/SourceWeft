@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { afterAll, test, vi } from "vitest";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
@@ -20,7 +21,7 @@ import type {
   DeepAgentTurnEvent,
   DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
-import type { ContentBillingPort } from "../../content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import type { MessageRecord } from "../../content/types";
 import type {
   MeteredLlmCallTrace,
@@ -48,7 +49,7 @@ function parseSseData(value: string) {
 function createBillingPort(
   overrides: Partial<ContentBillingPort> = {},
 ): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(async (teamId: string) => ({
       teamId,
       planFamily: "individual_free",
@@ -102,7 +103,7 @@ function createBillingPort(
       idempotencyReplayed: false,
     })),
     ...overrides,
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function createAssistantMessageRecord(
