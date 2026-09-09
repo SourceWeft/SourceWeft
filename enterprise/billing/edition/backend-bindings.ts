@@ -21,6 +21,12 @@ import {
 } from "@sourceweft/billing/integrations/creem";
 import { createBillingAuthPlugins } from "@sourceweft/billing/integrations/auth";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
+import {
+  PostgresWaffoStateStore,
+  WaffoWebhookService,
+  registerWaffoWebhook,
+} from "@sourceweft/billing/integrations/waffo";
+import { waffoCatalogProducts } from "@sourceweft/billing/waffo-setup";
 import { createBillingSchedule } from "@sourceweft/billing/integrations/jobs";
 import { database } from "@sourceweft/db";
 import { config } from "../shared/config";
@@ -40,16 +46,19 @@ const alerts: BillingAlertSink = {
     return (await import("../modules/ops")).opsAlertService.resolve(key);
   },
 };
+const store = new PostgresBillingStore(
+  database,
+  createBillingMembershipSource(database),
+);
+const waffoState = new PostgresWaffoStateStore(database);
 let instance: ReturnType<typeof createBilling> | undefined;
 function billing() {
-  validateBillingConfiguration(billingConfig);
-  if (!instance)
+  if (!instance) {
+    validateBillingConfiguration(billingConfig);
     instance = createBilling({
       config: billingConfig,
-      store: new PostgresBillingStore(
-        database,
-        createBillingMembershipSource(database),
-      ),
+      store,
+      waffoState,
       alerts,
       host: {
         logger,
@@ -66,6 +75,7 @@ function billing() {
         },
       },
     });
+  }
   return instance;
 }
 export const billingRuntime: BillingRuntime = {
@@ -103,28 +113,53 @@ export const handleBillingAuthRequest = createCreemScheduledCancelWebhook({
   logger,
   sync,
 });
+let waffoInbox: WaffoWebhookService | undefined;
+function waffo() {
+  return (waffoInbox ??= new WaffoWebhookService({
+    config: billingConfig,
+    state: waffoState,
+    store,
+    billing: billing().service,
+    logger,
+  }));
+}
 export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
   createBillingHttpRoutes(billing().service, host)(app);
+  if (billingConfig.provider === "waffo") registerWaffoWebhook(app, waffo());
 }
 export const billingSchedulesEnabled =
-  billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled;
-export function reconcileBillingSchedule() {
-  return createBillingSchedule(billing().service, alerts, logger)();
+  billingConfig.provider === "waffo" ||
+  (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled);
+export async function reconcileBillingSchedule() {
+  if (billingConfig.provider === "waffo") await waffo().drain();
+  if (billingConfig.teamBillingEnabled && billingConfig.reconcileEnabled)
+    return createBillingSchedule(billing().service, alerts, logger)();
 }
 export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
   const checkout =
-    billingConfig.saasEnabled && billingConfig.provider === "creem";
+    billingConfig.saasEnabled &&
+    ["creem", "waffo"].includes(billingConfig.provider);
   return {
     edition: "commercial",
     billingRuntimeApiVersion: 1,
     billing: {
       available: true,
+      provider: billingConfig.provider,
+      paymentEnvironment:
+        billingConfig.provider === "waffo"
+          ? billingConfig.waffo.environment
+          : billingConfig.provider === "creem"
+            ? billingConfig.creem.testMode
+              ? "test"
+              : "prod"
+            : undefined,
       mode: billingConfig.mode,
       checkout,
       teamSubscriptions: checkout && billingConfig.teamBillingEnabled,
       topup:
         checkout &&
         Boolean(
+          billingConfig.provider === "waffo" ||
           billingConfig.creem.creditTopupProductId ||
           billingConfig.creem.pageTopupProductId,
         ),
@@ -133,6 +168,24 @@ export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
 }
 export async function runBillingCatalogCheck(): Promise<CheckResult> {
   validateBillingConfiguration(billingConfig);
+  if (billingConfig.provider === "waffo") {
+    const settings = await waffoState.getSettings(
+      billingConfig.waffo.merchantId,
+      billingConfig.waffo.environment,
+    );
+    const missing = waffoCatalogProducts(billingConfig)
+      .map((product) => product.key)
+      .filter((key) => !settings?.products[key]);
+    if (missing.length)
+      return {
+        name: "billing-catalog",
+        status: "error",
+        message: "Waffo catalog setup is incomplete.",
+        details: { missingProducts: missing },
+        hints: ["Run the commercial waffo:setup command."],
+        durationMs: 0,
+      };
+  }
   return {
     name: "billing-catalog",
     status: "ok",

@@ -14,6 +14,7 @@ export const billingModeSchema = z.enum(["disabled", "shadow", "enforced"]);
 export const billingProviderSchema = z.enum([
   "none",
   "creem",
+  "waffo",
   "stripe",
   "manual",
 ]);

@@ -1,3 +1,4 @@
+import { createWaffoClient } from "./providers/waffo/client";
 import { validateBillingCatalog } from "./catalog";
 import type {
   BillingMode,
@@ -57,6 +58,7 @@ const billingScopes: ReadonlySet<BillingScope> = new Set([
 const billingProviders: ReadonlySet<BillingProvider> = new Set([
   "none",
   "creem",
+  "waffo",
   "stripe",
   "manual",
 ]);
@@ -116,6 +118,13 @@ function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
   return normalized;
 }
 
+function parseWaffoEnvironment(value: string | undefined): "test" | "prod" {
+  const mode = value?.trim().toLowerCase() ?? "test";
+  if (mode !== "test" && mode !== "prod")
+    throw new Error("Invalid WAFFO_ENVIRONMENT");
+  return mode;
+}
+
 export function readBillingConfig(
   env: Readonly<Record<string, string | undefined>>,
   webBaseUrl: string,
@@ -125,13 +134,20 @@ export function readBillingConfig(
     env.BACKEND_BILLING_PROVIDER,
     "none",
   );
-  if (saasEnabled && !["none", "creem"].includes(requestedBillingProvider)) {
+  if (
+    saasEnabled &&
+    !["none", "creem", "waffo"].includes(requestedBillingProvider)
+  ) {
     throw new Error(
       `BACKEND_BILLING_PROVIDER=${requestedBillingProvider} is not supported for checkout`,
     );
   }
   const effectiveBillingProvider =
-    saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
+    saasEnabled &&
+    (requestedBillingProvider === "creem" ||
+      requestedBillingProvider === "waffo")
+      ? requestedBillingProvider
+      : "none";
   return {
     saasEnabled,
     mode: parseBillingMode(env.BACKEND_BILLING_MODE, "enforced"),
@@ -177,6 +193,11 @@ export function readBillingConfig(
       creditTopupProductId: env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
       pageTopupProductId: env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
     },
+    waffo: {
+      merchantId: env.WAFFO_MERCHANT_ID?.trim() || "",
+      privateKey: env.WAFFO_PRIVATE_KEY || "",
+      environment: parseWaffoEnvironment(env.WAFFO_ENVIRONMENT),
+    },
     catalog: {
       individualProMonthlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS,
@@ -218,6 +239,17 @@ export function readBillingConfig(
 export function validateBillingConfiguration(
   config: BillingRuntimeConfig,
 ): void {
+  if (config.saasEnabled && config.provider === "waffo") {
+    if (!/^MER_[A-Za-z0-9]{22}$/.test(config.waffo.merchantId))
+      throw new Error(
+        "WAFFO_MERCHANT_ID must be the Merchant ID from API & Development, not a Store ID",
+      );
+    if (!config.waffo.privateKey.trim())
+      throw new Error(
+        "WAFFO_PRIVATE_KEY is required for enabled Waffo checkout",
+      );
+    createWaffoClient(config);
+  }
   if (config.saasEnabled && config.provider === "creem") {
     for (const [name, value] of [
       ["CREEM_API_KEY", config.creem.apiKey],

@@ -44,7 +44,7 @@ export class BillingService {
 
   constructor(
     private readonly store: BillingStore,
-    runtimeConfig: BillingRuntimeConfig,
+    private readonly runtimeConfig: BillingRuntimeConfig,
     provider: BillingProviderAdapter,
     alerts?: ConstructorParameters<typeof BillingSubscriptionService>[4],
     host?: BillingServiceHost,
@@ -135,6 +135,27 @@ export class BillingService {
     input: CreateTeamSubscriptionCheckoutRequest,
     actor: { userId: string; email: string },
   ): Promise<CreateTeamSubscriptionCheckoutResponse> {
+    if (this.runtimeConfig.provider === "waffo") {
+      return this.orderService
+        .createPricingCheckout({
+          request: {
+            plan: input.planFamily === "individual_pro" ? "pro" : "team",
+            billingInterval: input.billingInterval,
+            source: "dashboard",
+            seatCount: input.seatCount,
+            successUrl: input.successUrl,
+          },
+          actor,
+          ...(input.planFamily === "individual_pro"
+            ? { personalTeamId: teamId }
+            : { existingTeamId: teamId }),
+        })
+        .then((order) => ({
+          teamId,
+          provider: order.provider,
+          checkoutUrl: order.checkoutUrl,
+        }));
+    }
     return this.subscriptionService.createSubscriptionCheckout(
       teamId,
       input,

@@ -43,6 +43,11 @@ export type BillingRuntimeConfig = {
     creditTopupProductId: string;
     pageTopupProductId: string;
   };
+  waffo: {
+    merchantId: string;
+    privateKey: string;
+    environment: "test" | "prod";
+  };
   catalog: {
     individualProMonthlyAmountCents: number;
     individualProYearlyAmountCents: number;
@@ -218,6 +223,9 @@ export type BillingProviderCheckoutInput = {
 };
 
 export type BillingProviderCheckoutResult = {
+  externalProductId?: string;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
   provider: BillingProvider;
   checkoutUrl: string;
   externalCheckoutId: string | null;

@@ -102,7 +102,8 @@ const TEAM_SEAT_MAX = 99;
 function hasCheckoutUrl(order: BillingOrderState) {
   return (
     typeof order.metadata.checkoutUrl === "string" &&
-    order.metadata.checkoutUrl.trim().length > 0
+    order.metadata.checkoutUrl.trim().length > 0 &&
+    (!order.expiresAt || Date.parse(order.expiresAt) > Date.now())
   );
 }
 
@@ -208,9 +209,27 @@ function addMonths(date: Date, months: number) {
   return next;
 }
 
-function normalizeClientReferenceKey(value: string | undefined) {
+function normalizeClientReferenceKey(
+  value: string | undefined,
+  config: BillingRuntimeConfig,
+) {
   const trimmed = value?.trim();
-  return trimmed || null;
+  if (!trimmed) return null;
+  return config.provider === "waffo"
+    ? `waffo:${config.waffo.merchantId}:${config.waffo.environment}:${trimmed}`
+    : trimmed;
+}
+
+function checkoutMatchesProvider(
+  order: BillingOrderState,
+  config: BillingRuntimeConfig,
+) {
+  return (
+    order.provider === config.provider &&
+    (config.provider !== "waffo" ||
+      (order.metadata.waffoMerchantId === config.waffo.merchantId &&
+        order.metadata.waffoEnvironment === config.waffo.environment))
+  );
 }
 
 function normalizeTeamSeatCount(value: number | undefined) {
@@ -333,6 +352,7 @@ export class BillingOrderService {
     request: CreatePricingCheckoutRequest;
     actor: Actor;
     personalTeamId?: string | null;
+    existingTeamId?: string;
   }): Promise<CreatePricingCheckoutResponse> {
     const planFamily = pricingPlanToPlanFamily(input.request.plan);
     ensureBillingCheckoutEnabled(this.runtimeConfig);
@@ -375,16 +395,33 @@ export class BillingOrderService {
 
     if (planFamily === INDIVIDUAL_PRO_PLAN) {
       await this.rejectIfActiveSubscription(teamId);
+    } else if (input.existingTeamId) {
+      await this.rejectIfActiveSubscription(input.existingTeamId);
     }
 
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
+      this.runtimeConfig,
     );
     if (clientReferenceKey) {
       const existing = await this.store.getOrderByClientReference(
         input.actor.userId,
         clientReferenceKey,
       );
+      if (
+        existing?.provider === "waffo" &&
+        (existing.kind !== "subscription" ||
+          existing.planFamily !== planFamily ||
+          existing.billingInterval !== billingInterval ||
+          existing.quantity !== quantity ||
+          existing.metadata.existingTeamId !== input.existingTeamId)
+      ) {
+        throw new BillingError(
+          "BILLING_CHECKOUT_REFERENCE_CONFLICT",
+          409,
+          "This checkout reference belongs to a different purchase",
+        );
+      }
       if (existing && hasCheckoutUrl(existing)) {
         return toCheckoutResponse(existing);
       }
@@ -418,6 +455,7 @@ export class BillingOrderService {
       });
       if (
         reusable &&
+        checkoutMatchesProvider(reusable, this.runtimeConfig) &&
         REUSABLE_ORDER_STATUSES.has(reusable.status) &&
         hasCheckoutUrl(reusable)
       ) {
@@ -445,6 +483,9 @@ export class BillingOrderService {
       cancelUrl: input.request.cancelUrl ?? null,
       metadata: {
         source: input.request.source,
+        ...(input.existingTeamId
+          ? { existingTeamId: input.existingTeamId }
+          : {}),
         audience: catalogEntry.audience,
         minQuantity: catalogEntry.minQuantity,
         ...(planFamily === TEAM_STANDARD_PLAN && input.request.teamName
@@ -498,6 +539,7 @@ export class BillingOrderService {
       unitType === "page" ? catalogEntry.unitAmount * quantity : 0;
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
+      this.runtimeConfig,
     );
 
     if (clientReferenceKey) {
@@ -506,7 +548,29 @@ export class BillingOrderService {
         clientReferenceKey,
       );
       if (existing) {
-        return toTopupResponse(existing);
+        if (
+          existing.kind !== catalogEntry.kind ||
+          existing.quantity !== quantity ||
+          existing.unitType !== unitType ||
+          existing.teamId !== input.teamId ||
+          existing.provider !== this.runtimeConfig.provider
+        )
+          throw new BillingError(
+            "BILLING_CHECKOUT_REFERENCE_CONFLICT",
+            409,
+            "This checkout reference belongs to a different purchase",
+          );
+        if (hasCheckoutUrl(existing) || existing.paymentStatus === "paid")
+          return toTopupResponse(existing);
+        if (RECOVERABLE_CHECKOUT_STATUSES.has(existing.status))
+          return toTopupResponse(
+            await this.createProviderTopupCheckout(existing, input.actor),
+          );
+        throw new BillingError(
+          "BILLING_ORDER_NOT_RETRYABLE",
+          409,
+          "Start a new checkout for this purchase",
+        );
       }
     }
 
@@ -537,43 +601,72 @@ export class BillingOrderService {
       input.request.successUrl ??
       defaultSuccessUrl(this.runtimeConfig, draft.id);
 
-    let order = await this.store.insertOrder(draft);
-    const providerResult = await this.provider.createCheckout({
-      orderId: order.id,
-      persistedOrder: true,
-      kind: order.kind,
-      teamId: order.teamId,
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
-      planFamily: null,
-      billingInterval: null,
-      quantity,
-      unitType,
-      unitAmount: catalogEntry.unitAmount,
-      grantedCredits,
-      grantedPages,
-      externalProductId: catalogEntry.productId,
-      amountTotal: order.amountTotal,
-      currency: order.currency,
-      successUrl: order.successUrl ?? undefined,
-      cancelUrl: order.cancelUrl ?? undefined,
-      metadata: order.metadata,
-    });
+    const order = await this.store.insertOrder(draft);
+    return toTopupResponse(
+      await this.createProviderTopupCheckout(order, input.actor),
+    );
+  }
 
-    order = await this.store.updateOrder({
+  private async createProviderTopupCheckout(
+    order: BillingOrderState,
+    actor: Actor,
+  ) {
+    let providerResult;
+    try {
+      providerResult = await this.provider.createCheckout({
+        orderId: order.id,
+        persistedOrder: true,
+        kind: order.kind,
+        teamId: order.teamId,
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
+        planFamily: null,
+        billingInterval: null,
+        quantity: order.quantity,
+        unitType: order.unitType,
+        unitAmount: order.unitAmount,
+        grantedCredits: order.grantedCredits,
+        grantedPages: order.grantedPages,
+        externalProductId: order.externalProductId ?? "",
+        amountTotal: order.amountTotal,
+        currency: order.currency,
+        successUrl: order.successUrl ?? undefined,
+        cancelUrl: order.cancelUrl ?? undefined,
+        metadata: order.metadata,
+      });
+    } catch (error) {
+      await this.store.updateOrder({
+        ...order,
+        status: "payment_failed",
+        paymentStatus: "failed",
+        errorCode:
+          error instanceof BillingError
+            ? error.code
+            : "BILLING_CHECKOUT_CREATE_FAILED",
+        errorMessage: "Unable to create payment checkout",
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+    return this.store.updateOrder({
       ...order,
       provider: providerResult.provider,
       status: "checkout_created",
+      paymentStatus: "unpaid",
       externalCheckoutId: providerResult.externalCheckoutId,
       externalCustomerId: providerResult.externalCustomerId,
+      externalProductId:
+        providerResult.externalProductId ?? order.externalProductId,
+      expiresAt: providerResult.expiresAt ?? order.expiresAt,
       metadata: {
         ...order.metadata,
+        ...providerResult.metadata,
         checkoutUrl: providerResult.checkoutUrl,
       },
+      errorCode: null,
+      errorMessage: null,
       updatedAt: new Date().toISOString(),
     });
-
-    return toTopupResponse(order);
   }
 
   private async createProviderCheckoutForSubscriptionOrder(input: {
@@ -628,8 +721,12 @@ export class BillingOrderService {
       paymentStatus: "unpaid",
       externalCheckoutId: providerResult.externalCheckoutId,
       externalCustomerId: providerResult.externalCustomerId,
+      externalProductId:
+        providerResult.externalProductId ?? input.order.externalProductId,
+      expiresAt: providerResult.expiresAt ?? input.order.expiresAt,
       metadata: {
         ...input.order.metadata,
+        ...providerResult.metadata,
         checkoutUrl: providerResult.checkoutUrl,
       },
       errorCode: null,
@@ -961,6 +1058,8 @@ export class BillingOrderService {
   }
 
   private async ensurePaidTeamOrganization(order: BillingOrderState) {
+    if (typeof order.metadata.existingTeamId === "string")
+      return order.metadata.existingTeamId;
     if (order.teamId) {
       return order.teamId;
     }

@@ -666,7 +666,9 @@ export class BillingSubscriptionService {
     teamId: string,
     actorUserId: string,
   ): Promise<CreateTeamBillingPortalResponse> {
-    ensureTeamBillingEnabled(this.runtimeConfig);
+    if (this.runtimeConfig.provider === "waffo")
+      ensureBillingCheckoutEnabled(this.runtimeConfig);
+    else ensureTeamBillingEnabled(this.runtimeConfig);
 
     return this.accountService.withRepresentativeTeamAccount(
       teamId,
@@ -684,6 +686,12 @@ export class BillingSubscriptionService {
           );
         }
 
+        if (subscription.provider !== this.runtimeConfig.provider)
+          throw new BillingError(
+            "BILLING_PROVIDER_MISMATCH",
+            409,
+            "Manage this subscription through its original payment provider",
+          );
         const customerId = await this.resolvePortalCustomerId(
           subscription,
           actorUserId,
@@ -718,7 +726,9 @@ export class BillingSubscriptionService {
     teamId: string,
     actorUserId: string,
   ): Promise<CancelTeamSubscriptionResponse> {
-    ensureTeamBillingEnabled(this.runtimeConfig);
+    if (this.runtimeConfig.provider === "waffo")
+      ensureBillingCheckoutEnabled(this.runtimeConfig);
+    else ensureTeamBillingEnabled(this.runtimeConfig);
 
     return this.accountService.withRepresentativeTeamAccount(
       teamId,
@@ -736,6 +746,12 @@ export class BillingSubscriptionService {
           );
         }
 
+        if (subscription.provider !== this.runtimeConfig.provider)
+          throw new BillingError(
+            "BILLING_PROVIDER_MISMATCH",
+            409,
+            "Manage this subscription through its original payment provider",
+          );
         const customerId = await this.resolvePortalCustomerId(
           subscription,
           actorUserId,

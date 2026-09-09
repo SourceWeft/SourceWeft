@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingUiHost } from "./context";
 import type { BillingClient } from "@sourceweft/sdk";
 
 import { toast } from "sonner";
@@ -165,8 +165,13 @@ function PricingToggleInner({
   billingTeamId: string | null;
   plans: PlanConfig[];
 }) {
-  const { trackBeginCheckout, trackCheckoutError, authClient, billingClient } =
-    useBillingUiHost();
+  const {
+    trackBeginCheckout,
+    trackCheckoutError,
+    authClient,
+    billingClient,
+    openCheckout,
+  } = useBillingUiHost();
 
   const [yearly, setYearly] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<"pro" | "team" | null>(null);
@@ -199,7 +204,7 @@ function PricingToggleInner({
     return () => {
       cancelled = true;
     };
-  }, [billingTeamId]);
+  }, [billingTeamId, billingClient]);
 
   const currentPlanId = planFamilyToPricingPlanId(summary?.planFamily);
   const teamPlan = plans.find((plan) => plan.id === "team");
@@ -252,7 +257,7 @@ function PricingToggleInner({
         plan: planId,
         source: "landing",
       });
-      window.location.assign(result.checkoutUrl);
+      openCheckout(result);
     } catch (error) {
       trackCheckoutError({
         billingInterval,

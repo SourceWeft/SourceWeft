@@ -53,6 +53,7 @@ function makeConfig(provider: BillingRuntimeConfig["provider"]) {
       creditTopupProductId: "",
       pageTopupProductId: "",
     },
+    waffo: { merchantId: "", privateKey: "", environment: "test" as const },
     catalog: {
       individualProMonthlyAmountCents: 0,
       individualProYearlyAmountCents: 0,

@@ -39,7 +39,7 @@ if (edition === "core") {
         continue;
       const text = await readFile(file, "utf8");
       assert.ok(
-        !/from\s*["']@sourceweft\/billing|import\s*\(["']@sourceweft\/billing|["']@creem_io\/better-auth/.test(
+        !/from\s*["']@sourceweft\/billing|import\s*\(["']@sourceweft\/billing|["']@creem_io\/better-auth|["']@waffo\/pancake-ts/.test(
           text,
         ),
         `Commercial dependency in core: ${file}`,

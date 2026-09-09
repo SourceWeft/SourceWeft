@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { billingModeSchema } from "./billing";
+import { billingModeSchema, billingProviderSchema } from "./billing";
 
 export const deploymentCapabilitiesSchema = z.discriminatedUnion("edition", [
   z.object({
@@ -18,6 +18,8 @@ export const deploymentCapabilitiesSchema = z.discriminatedUnion("edition", [
     billingRuntimeApiVersion: z.literal(1),
     billing: z.object({
       available: z.literal(true),
+      provider: billingProviderSchema.optional(),
+      paymentEnvironment: z.enum(["test", "prod"]).optional(),
       mode: billingModeSchema,
       checkout: z.boolean(),
       teamSubscriptions: z.boolean(),

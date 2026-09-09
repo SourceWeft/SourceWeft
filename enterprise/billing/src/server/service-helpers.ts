@@ -37,7 +37,10 @@ export function ensureTeamBillingEnabled(runtimeConfig: BillingRuntimeConfig) {
 export function ensureBillingCheckoutEnabled(
   runtimeConfig: BillingRuntimeConfig,
 ) {
-  if (!runtimeConfig.saasEnabled || runtimeConfig.provider !== "creem") {
+  if (
+    !runtimeConfig.saasEnabled ||
+    !(["creem", "waffo"] as string[]).includes(runtimeConfig.provider)
+  ) {
     throw new BillingError(
       "BILLING_CHECKOUT_DISABLED",
       409,

@@ -28,7 +28,7 @@ type BillingOperationType =
   | "topup"
   | "usage"
   | "quota_adjustment";
-type BillingProvider = "none" | "creem" | "stripe" | "manual";
+type BillingProvider = "none" | "creem" | "waffo" | "stripe" | "manual";
 type BillingSubscriptionStatus =
   | "inactive"
   | "trialing"
@@ -358,7 +358,7 @@ export const billingOrders = pgTable(
     ),
     check(
       "billing_orders_provider_check",
-      sql`${table.provider} in ('none', 'creem', 'stripe', 'manual')`,
+      sql`${table.provider} in ('none', 'creem', 'waffo', 'stripe', 'manual')`,
     ),
     check(
       "billing_orders_kind_check",
@@ -485,7 +485,7 @@ export const subscriptions = pgTable(
     index("subscriptions_billing_order_idx").on(table.billingOrderId),
     check(
       "subscriptions_provider_check",
-      sql`${table.provider} in ('none', 'creem', 'stripe', 'manual')`,
+      sql`${table.provider} in ('none', 'creem', 'waffo', 'stripe', 'manual')`,
     ),
     check(
       "subscriptions_status_check",
@@ -547,7 +547,7 @@ export const billingWebhookEvents = pgTable(
     ),
     check(
       "billing_webhook_events_provider_check",
-      sql`${table.provider} in ('none', 'creem', 'stripe', 'manual')`,
+      sql`${table.provider} in ('none', 'creem', 'waffo', 'stripe', 'manual')`,
     ),
     index("billing_webhook_events_team_status_idx").on(
       table.teamId,
@@ -557,6 +557,33 @@ export const billingWebhookEvents = pgTable(
     index("billing_webhook_events_status_received_idx").on(
       table.status,
       desc(table.receivedAt),
+    ),
+  ],
+);
+
+/** Non-secret payment catalog bindings; private keys remain deployment credentials. */
+export const billingProviderSettings = pgTable(
+  "billing_provider_settings",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    merchantId: text("merchant_id").notNull(),
+    environment: text("environment").$type<"test" | "prod">().notNull(),
+    storeId: text("store_id").notNull(),
+    products: jsonb("products").$type<Record<string, string>>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_provider_settings_merchant_env_uq").on(
+      table.provider,
+      table.merchantId,
+      table.environment,
+    ),
+    check(
+      "billing_provider_settings_environment_check",
+      sql`${table.environment} in ('test', 'prod')`,
     ),
   ],
 );
