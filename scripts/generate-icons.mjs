@@ -4,13 +4,14 @@
  * Usage: node scripts/generate-icons.mjs
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import {
   existsSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
   copyFileSync,
+  rmSync,
 } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -23,18 +24,12 @@ function ensureDir(dir) {
 }
 
 async function loadSharp() {
-  try {
-    const { default: sharp } = await import("sharp");
-    return sharp;
-  } catch {
-    console.log("sharp not found, installing...");
-    execSync("pnpm add -D sharp", { cwd: ROOT, stdio: "inherit" });
-    const { default: sharp } = await import("sharp");
-    return sharp;
-  }
+  const { default: sharp } = await import("sharp");
+  return sharp;
 }
 
-const SVG_PATH = join(ROOT, "assets/logo.svg");
+const LOGO_PATH = join(ROOT, "assets/logo.svg");
+const SVG_PATH = join(ROOT, "assets/app-icon.svg");
 const ICON_DENSITY = 300;
 const SQUARE_ICON_SIZE = 1024;
 
@@ -45,6 +40,11 @@ const TARGETS = {
   docsApp: join(ROOT, "apps/docs/app"),
   extPublic: join(ROOT, "apps/extension/public"),
   tauriIcons: join(ROOT, "apps/desktop/src-tauri/icons"),
+  mobileIcons: join(ROOT, "apps/mobile/src-tauri/icons"),
+  iosIcons: join(
+    ROOT,
+    "apps/mobile/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset",
+  ),
 };
 
 async function getSourcePNG(sharp) {
@@ -60,6 +60,7 @@ async function renderPngBuffer(sharp, size, opts = {}) {
 
   return sharp(source)
     .resize(size, size, { fit: "contain", background: bg })
+    .flatten({ background: "white" })
     .png()
     .toBuffer();
 }
@@ -204,15 +205,67 @@ async function genICNS(sharp, tauriIconsDir) {
     await genPNG(sharp, size, join(iconsetDir, name));
   }
 
-  try {
-    execSync(
-      `iconutil -c icns "${iconsetDir}" -o "${join(tauriIconsDir, "icon.icns")}"`,
-      { stdio: "pipe" },
-    );
-    console.log(`  ✓ apps/desktop/src-tauri/icons/icon.icns`);
-    execSync(`rm -rf "${iconsetDir}"`);
-  } catch {
-    console.warn("  ⚠ iconutil not available, skipping icon.icns generation");
+  execFileSync(
+    "iconutil",
+    ["-c", "icns", iconsetDir, "-o", join(tauriIconsDir, "icon.icns")],
+    { stdio: "pipe" },
+  );
+  console.log(
+    `  ✓ ${join(tauriIconsDir, "icon.icns").replace(ROOT + "/", "")}`,
+  );
+  rmSync(iconsetDir, { recursive: true });
+}
+
+async function genMobileIcons(sharp) {
+  const sizes = {
+    "32x32.png": 32,
+    "64x64.png": 64,
+    "128x128.png": 128,
+    "128x128@2x.png": 256,
+    "icon.png": 512,
+    "StoreLogo.png": 50,
+  };
+  for (const size of [30, 44, 71, 89, 107, 142, 150, 284, 310]) {
+    sizes[`Square${size}x${size}Logo.png`] = size;
+  }
+  for (const [name, size] of Object.entries(sizes)) {
+    await genPNG(sharp, size, join(TARGETS.mobileIcons, name));
+  }
+  await genICO(sharp, join(TARGETS.mobileIcons, "icon.ico"));
+  await genICNS(sharp, TARGETS.mobileIcons);
+
+  const catalog = JSON.parse(
+    readFileSync(join(TARGETS.iosIcons, "Contents.json"), "utf8"),
+  );
+  for (const entry of catalog.images) {
+    const size = Number.parseFloat(entry.size) * Number.parseFloat(entry.scale);
+    await genPNG(sharp, size, join(TARGETS.iosIcons, entry.filename));
+  }
+
+  for (const [density, scale] of Object.entries({
+    mdpi: 1,
+    hdpi: 1.5,
+    xhdpi: 2,
+    xxhdpi: 3,
+    xxxhdpi: 4,
+  })) {
+    const dir = join(TARGETS.mobileIcons, "android", `mipmap-${density}`);
+    ensureDir(dir);
+    await genPNG(sharp, 48 * scale, join(dir, "ic_launcher.png"));
+    await genPNG(sharp, 48 * scale, join(dir, "ic_launcher_round.png"));
+    // Keep the mark within Android's central 66/108 adaptive-icon safe area.
+    const foreground = await renderPngBuffer(sharp, 66 * scale);
+    await sharp({
+      create: {
+        width: 108 * scale,
+        height: 108 * scale,
+        channels: 4,
+        background: "white",
+      },
+    })
+      .composite([{ input: foreground, gravity: "centre" }])
+      .png()
+      .toFile(join(dir, "ic_launcher_foreground.png"));
   }
 }
 
@@ -226,7 +279,7 @@ async function main() {
 
   if (shouldGenerate("web")) {
     console.log("📱 Web (apps/web):");
-    copyFileSync(SVG_PATH, join(TARGETS.webPublic, "logo.svg"));
+    copyFileSync(LOGO_PATH, join(TARGETS.webPublic, "logo.svg"));
     console.log(`  ✓ apps/web/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.webPublic, "apple-touch-icon.png"));
     await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"));
@@ -238,10 +291,12 @@ async function main() {
 
   if (shouldGenerate("docs")) {
     console.log("\n📚 Docs (apps/docs):");
-    copyFileSync(SVG_PATH, join(TARGETS.docsPublic, "logo.svg"));
+    copyFileSync(LOGO_PATH, join(TARGETS.docsPublic, "logo.svg"));
     console.log(`  ✓ apps/docs/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.docsPublic, "apple-touch-icon.png"));
     await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"));
+    genSquareSVG(join(TARGETS.docsPublic, "icon.svg"));
+    genSquareSVG(join(TARGETS.docsApp, "icon.svg"));
     await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"));
   }
 
@@ -261,6 +316,11 @@ async function main() {
     await genPNG(sharp, 512, join(TARGETS.tauriIcons, "icon.png"));
     await genICO(sharp, join(TARGETS.tauriIcons, "icon.ico"));
     await genICNS(sharp, TARGETS.tauriIcons);
+  }
+
+  if (shouldGenerate("mobile")) {
+    console.log("\n📱 Mobile (apps/mobile):");
+    await genMobileIcons(sharp);
   }
 
   console.log("\n✅ All icons generated successfully!\n");
