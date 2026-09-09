@@ -17,6 +17,21 @@ assert brotli.decompress(brotli.compress(payload)) == payload
 print('Python 3.11, fontTools 4.60.2, Brotli 1.2.0 and compression round-trip verified')
 PY
 
+NODE_PATH="$(npm root -g)" node - <<'JS'
+const assert = require('node:assert/strict');
+const sharp = require('sharp');
+assert.equal(sharp.versions.sharp, '0.35.4');
+assert.equal(sharp.versions.heif, '1.23.2');
+(async () => {
+  const avif = await sharp({ create: { width: 8, height: 6, channels: 3, background: 'white' } }).avif().toBuffer();
+  const metadata = await sharp(await sharp(avif).png().toBuffer()).metadata();
+  assert.equal(metadata.format, 'png');
+  assert.equal(metadata.width, 8);
+  assert.equal(metadata.height, 6);
+  console.log('Patched sharp/libheif and real AVIF decoding verified');
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+JS
+
 security_work_dir="$(mktemp -d /tmp/sourceweft-security.XXXXXX)"
 trap 'rm -rf "$security_work_dir"' EXIT
 cat > "$security_work_dir/page.html" <<'HTML'

@@ -197,7 +197,7 @@ npm install -g \
     react \
     react-dom \
     react-icons \
-    sharp \
+    sharp@0.35.4 \
     playwright@1.59.1 \
     parse5@7.3.0 \
     postcss@8.5.26 \
