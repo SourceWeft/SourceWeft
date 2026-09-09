@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { billingUiAvailable } from "../../../../lib/billing-edition/catalog";
 import { BillingCheckoutClient } from "./billing-checkout-client";
 
 type CheckoutSearchParams = {
@@ -14,6 +16,7 @@ export default async function BillingCheckoutPage({
 }: {
   searchParams: Promise<CheckoutSearchParams>;
 }) {
+  if (!billingUiAvailable) redirect("/dashboard");
   const params = await searchParams;
 
   return (

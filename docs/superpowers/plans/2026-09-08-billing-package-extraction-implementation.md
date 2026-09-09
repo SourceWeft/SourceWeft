@@ -216,7 +216,7 @@ pnpm --filter @sourceweft/credits-core check-types
 4. 分开 client、server、Auth 插件入口，保持 React client directive 和 Next server 边界；实施前按 `apps/web/AGENTS.md` 阅读安装版本的本地 Next 文档。
 5. `lib/auth-client.ts` 由绑定贡献 Creem client；core 空贡献不丢失其他插件或推导类型。
 6. 余额刷新事件、chat stream 通知、settings usage、侧边栏、定价 CTA 和 checkout URL 参数都依据 capabilities。core 不发 summary/订阅请求、不显示假余额；能力获取失败显示错误。
-7. core 已知旧账单 URL 显示功能未启用。commercial 保持原购买与账单行为，校验前后端 edition 不匹配。
+7. core 隐藏计费和额度入口，旧账单 URL 无提示跳转 Dashboard。commercial 保持原购买与账单行为，校验前后端 edition 不匹配。
 8. SDK/client 构造不自动加载支付功能；回归 desktop/mobile/extension 的共享入口。
 
 **验证**：Web 独立 typecheck、原相关 tests、浏览器真实导航；核心 Auth 无 Creem 依赖；core 网络请求没有 billing summary；未认证、非管理员和错误 capability 分支；client bundle 不含服务端代码。
@@ -311,7 +311,7 @@ pnpm --filter @sourceweft/billing test
 | C02 | core 注册/组织/邀请 | 成功且 billing account 无业务读写，权限保持 | 集成/真实 DB |
 | C03 | core 对话/流式/标题/工具/长任务 | 功能完成，无 summary、ledger 或支付请求 | 集成/E2E |
 | C04 | core 文档/连接器/产物 | 成功，事实校验与资源限制保持 | 集成/E2E |
-| C05 | core UI/旧账单 URL | 无假余额与死循环请求，稳定 unavailable | Web/API |
+| C05 | core UI/旧账单 URL | UI 无提示、无计费入口，旧 URL 回 Dashboard；API 保持 unavailable 契约 | Web/API |
 | C06 | core 显式要求 commercial | 配置/构建失败而非忽略 | 负向 |
 | C07 | core 用量与成本回查 | 观测仍写入，缺失成本有标记，不调用商业调账 | 集成 |
 | B01 | commercial 所有原 billing 场景 | 与基线的账务不变量一致 | 单元/集成 |

@@ -1,4 +1,5 @@
 "use client";
+import { billingUiAvailable } from "../../../lib/billing-edition/catalog";
 import { SidebarUsageSummary } from "../../../lib/billing-edition/client";
 import { useState } from "react";
 import {
@@ -722,9 +723,11 @@ export function DashboardSidebarChatPanel({
         </div>
       </SidebarFooter>
 
-      <div className="border-t border-sidebar-border px-3.5 py-2.5">
-        <SidebarUsageSummary onOpenUsage={onOpenUsage} />
-      </div>
+      {billingUiAvailable && (
+        <div className="border-t border-sidebar-border px-3.5 py-2.5">
+          <SidebarUsageSummary onOpenUsage={onOpenUsage} />
+        </div>
+      )}
     </div>
   );
 }

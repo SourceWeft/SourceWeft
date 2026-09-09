@@ -25,7 +25,7 @@ Core and commercial builds are explicit source projections with separate frozen 
 - Source preparation: 6 tests passed, including missing commercial bindings and version/script overlays.
 - Local baseline compatibility: old d33c9df5 and new commercial API read identical balances without changing ledger rows.
 - Core and commercial API E2E: 9 checks passed for each edition.
-- Core browser: real login, Dashboard, team creation and member list, Billing unavailable page passed.
+- Core browser: real login, Dashboard, team creation and member list, Billing unavailable page passed at the initial extraction checkpoint (superseded by the UI refinement below).
 - Core/commercial turbo-pruned source and license layout: passed.
 - Core migration and commercial schema-only migration: passed; historical Drizzle files unchanged.
 
@@ -51,3 +51,7 @@ The committed runner is scripts/e2e/billing-editions.mjs. It restricts targets t
 No external Creem transaction or live paid-model generation was performed. Provider transport and BYOK behavior were covered by the existing isolated integration fixtures, not presented as live-provider E2E. The new CI workflow is configured but has not been executed remotely in this task. A complete Docker image pull/build and production deployment were not performed; local application builds and Docker prune/license input layout were verified.
 
 The local baseline compatibility check passed: d33c9df5 read the new commercial account balances, and switching reads back to the new API left balances and ledger rows unchanged. Final core/commercial frozen verification, refreshed backend builds and Web type checks passed. Both editions' actual worker and scheduler startup probes passed. The commercial suite finished with 70 passing tests. Changed Web files passed ESLint with zero warnings. Production infrastructure rollback and live external transactions were not exercised. This work does not revoke pre-existing Apache grants and does not claim that a production commercial agreement has been signed.
+
+## UI refinement — 2026-09-09
+
+Core billing and quota entries are hidden on desktop/mobile and in loading skeletons. No billing-unavailable notice or replacement usage prompt is rendered. Old billing/checkout page URLs redirect to Dashboard. The commercial catalog binding keeps these entries available. This refinement was checked with both edition type checks and the 580-test Web suite; it does not claim a new browser run.

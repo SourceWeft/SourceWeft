@@ -3,3 +3,5 @@ import type { PlanConfig } from "@sourceweft/contracts/pricing";
 export function getPricingConfig(): PlanConfig[] {
   return [];
 }
+
+export const billingUiAvailable = false;

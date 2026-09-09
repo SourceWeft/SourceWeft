@@ -1,6 +1,10 @@
 "use client";
 
 import * as React from "react";
+import {
+  isSettingsTabAvailable,
+  resolveSettingsTab,
+} from "../../../../lib/billing-edition/visibility";
 import { LayoutGrid, Receipt, ShieldCheck, User, Users, X } from "lucide-react";
 import {
   Dialog,
@@ -50,8 +54,9 @@ export function DashboardSettingsCenterModal({
   initialTab: SettingsCenterTab;
   hasTeam?: boolean;
 }) {
-  const [activeTab, setActiveTab] =
-    React.useState<SettingsCenterTab>(initialTab);
+  const [activeTab, setActiveTab] = React.useState<SettingsCenterTab>(() =>
+    resolveSettingsTab(initialTab),
+  );
   const [scope, setScope] = React.useState<BillingScope>(
     hasTeam ? "team" : "personal",
   );
@@ -59,7 +64,7 @@ export function DashboardSettingsCenterModal({
 
   React.useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setActiveTab(initialTab);
+      setActiveTab(resolveSettingsTab(initialTab));
     }
     wasOpenRef.current = open;
   }, [open, initialTab]);
@@ -99,26 +104,28 @@ export function DashboardSettingsCenterModal({
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
-                {menuItems.map((item) => {
-                  const Icon = item.icon;
-                  const active = activeTab === item.key;
-                  return (
-                    <button
-                      className={cn(
-                        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors",
-                        active
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                      )}
-                      key={item.key}
-                      onClick={() => setActiveTab(item.key)}
-                      type="button"
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0" />
-                      {item.label}
-                    </button>
-                  );
-                })}
+                {menuItems
+                  .filter((item) => isSettingsTabAvailable(item.key))
+                  .map((item) => {
+                    const Icon = item.icon;
+                    const active = activeTab === item.key;
+                    return (
+                      <button
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors",
+                          active
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                        )}
+                        key={item.key}
+                        onClick={() => setActiveTab(item.key)}
+                        type="button"
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
               </div>
             </nav>
           </aside>

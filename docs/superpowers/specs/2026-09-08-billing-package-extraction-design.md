@@ -212,6 +212,8 @@ UI 使用 props 注入 SDK、组织上下文、导航/刷新回调；不得 impo
 
 `apps/web/lib/auth-client.ts` 通过 auth-client binding 接收插件贡献，core 是空贡献、commercial 是 Creem client；三类 binding 分离防止 client 间接导入 server。
 
+核心界面不显示 billing 不可用说明，隐藏计费及额度入口，包括移动端与加载骨架。旧 billing/checkout 页面无提示跳转 Dashboard。
+
 补充处理：侧边栏 credits、settings 的 usage/账单混排、聊天流结束刷新、定价 CTA、URL 参数进入 checkout、账务错误展示。核心保留现有用量观测入口，不承诺另建一个新的分析产品。
 
 `trust-rules-panel` 使用 `billing-utils` 中的组织解析是命名耦合：先将通用组织解析迁到开放宿主 helper，再搬计费工具。不能把信任规则一起变成商业能力。

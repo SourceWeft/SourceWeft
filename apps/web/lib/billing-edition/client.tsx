@@ -10,19 +10,10 @@ import {
 import { authClient } from "../auth-client";
 import type { PlanConfig } from "@sourceweft/contracts/pricing";
 export function BillingPanel() {
-  return (
-    <p className="p-6 text-sm text-muted-foreground">
-      Billing is not available for this deployment.
-    </p>
-  );
+  return null;
 }
 export function UsagePanel() {
-  return (
-    <p className="p-6 text-sm text-muted-foreground">
-      Usage and provider cost remain available in run details. Credit and page
-      balances are not applied to this deployment.
-    </p>
-  );
+  return null;
 }
 export function BillingSuccessClient(_props: { orderId?: string | null }) {
   void _props;
@@ -50,16 +41,9 @@ export function PricingToggle(_props: {
   void _props;
   return null;
 }
-export function SidebarUsageSummary({
-  onOpenUsage,
-}: {
-  onOpenUsage?: () => void;
-}) {
-  return (
-    <Button variant="ghost" size="sm" onClick={onOpenUsage}>
-      Usage and run details
-    </Button>
-  );
+export function SidebarUsageSummary(props: { onOpenUsage?: () => void }) {
+  void props;
+  return null;
 }
 export function TeamCheckoutDialog({
   open,
