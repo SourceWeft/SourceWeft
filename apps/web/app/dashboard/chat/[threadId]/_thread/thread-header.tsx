@@ -2,6 +2,7 @@
 
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import dynamic from "next/dynamic";
+import { useChatHubContext } from "../../_components/chat-hub-context";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
@@ -80,11 +81,15 @@ export function ThreadHeader({
   threadTitle: string;
   presenceSlot?: ReactNode;
 }) {
-  const hubButtonTitle = isPersistentLayout
-    ? sourcesVisible
-      ? "Hide sources"
-      : "Show sources"
-    : "Open Hub";
+  const hub = useChatHubContext();
+  const hubButtonTitle =
+    hub?.desktop.mode === "detached"
+      ? "Show Hub window"
+      : isPersistentLayout
+        ? sourcesVisible
+          ? "Hide sources"
+          : "Show sources"
+        : "Open Hub";
 
   return (
     <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
@@ -118,6 +123,15 @@ export function ThreadHeader({
           <Button
             className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
             onClick={() => {
+              if (hub?.desktop.mode === "detached") {
+                void hub.desktop.open();
+                return;
+              }
+              if (hub?.desktop.inlineVisible === false) {
+                hub.desktop.showInline();
+                if (!sourcesVisible) onToggleSources();
+                return;
+              }
               if (isPersistentLayout) {
                 onToggleSources();
                 return;

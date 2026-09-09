@@ -1,5 +1,8 @@
 "use client";
 
+import { authClient } from "../../../../../lib/auth-client";
+import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatSkillItem,
@@ -140,7 +143,25 @@ export function useThreadSources({
   const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
   const [capabilityCatalog, setCapabilityCatalog] =
     useState<ListCapabilityCatalogResponse | null>(null);
+  const { data: hubSession } = authClient.useSession();
+  const accountId = hubSession?.user.id;
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const skillScope = useRef("");
+  useEffect(() => {
+    if (!accountId || !workspaceId) return;
+    skillScope.current = "";
+    setActiveSkillIds(hubSkillMemory.read(accountId, workspaceId, threadId));
+  }, [accountId, workspaceId, threadId]);
+  useEffect(() => {
+    if (
+      accountId &&
+      workspaceId &&
+      skillScope.current === JSON.stringify([accountId, workspaceId, threadId])
+    ) {
+      hubSkillMemory.write(accountId, workspaceId, threadId, activeSkillIds);
+    }
+    skillScope.current = JSON.stringify([accountId, workspaceId, threadId]);
+  }, [accountId, workspaceId, threadId, activeSkillIds]);
   const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
     const { skillIds: nextSkillIds, wasLimited } =
       coerceSkillIdsSelection(skillIds);

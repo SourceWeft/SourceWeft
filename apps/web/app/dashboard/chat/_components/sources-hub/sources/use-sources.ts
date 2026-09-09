@@ -117,6 +117,7 @@ function countSelectedSourceCoverage(
 }
 
 export function useSources(input: {
+  expansionScope?: string;
   workspaceId?: string | null;
   currentWorkspaceIdRef: { current: string | null | undefined };
   initialSources: SourceItem[];
@@ -125,6 +126,7 @@ export function useSources(input: {
   onSourceMerge?: (sources: SourceItem[]) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  onAutomaticSelectionChange?: (ids: string[]) => void;
   manualConnectorSyncSourcesRef: {
     current: Map<string, { knownSourceIds: Set<string> }>;
   };
@@ -132,6 +134,7 @@ export function useSources(input: {
 }) {
   const {
     workspaceId,
+    expansionScope,
     currentWorkspaceIdRef,
     initialSources,
     initialSourcesLoaded,
@@ -139,6 +142,7 @@ export function useSources(input: {
     onSourceMerge,
     selectedIds,
     onSelectionChange,
+    onAutomaticSelectionChange = onSelectionChange,
     manualConnectorSyncSourcesRef,
     addSourceDialog,
   } = input;
@@ -177,11 +181,17 @@ export function useSources(input: {
   const [isDeletingSelectedSources, setIsDeletingSelectedSources] =
     useState(false);
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(
-    () => readStoredSourceTreeExpansion(workspaceId).expandedDirectoryIds,
+    () =>
+      readStoredSourceTreeExpansion(expansionScope ?? workspaceId)
+        .expandedDirectoryIds,
   );
   const [userCollapsedDirectoryIds, setUserCollapsedDirectoryIds] = useState<
     Set<string>
-  >(() => readStoredSourceTreeExpansion(workspaceId).userCollapsedDirectoryIds);
+  >(
+    () =>
+      readStoredSourceTreeExpansion(expansionScope ?? workspaceId)
+        .userCollapsedDirectoryIds,
+  );
   const expandedDirectoryIdsRef = useRef<Set<string>>(expandedDirectoryIds);
   const userCollapsedDirectoryIdsRef = useRef<Set<string>>(
     userCollapsedDirectoryIds,
@@ -255,14 +265,14 @@ export function useSources(input: {
       );
       if (!areStringArraysEqual(nextSelectedIds, currentSelectedIds)) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       for (const sourceId of nextSelectedIds) {
         pendingAutoSelectSourceIdsRef.current.delete(sourceId);
       }
     },
-    [fullSourceTree, onSelectionChange],
+    [fullSourceTree, onAutomaticSelectionChange],
   );
 
   const selectPendingAutoSources = useCallback(
@@ -291,7 +301,7 @@ export function useSources(input: {
 
       if (!areStringArraysEqual(nextSelectedIds, currentSelectedIds)) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       const selectedSourceIds = new Set(
@@ -305,7 +315,7 @@ export function useSources(input: {
         }
       }
     },
-    [onSelectionChange],
+    [onAutomaticSelectionChange],
   );
 
   const selectNewManualConnectorSources = useCallback(
@@ -352,7 +362,7 @@ export function useSources(input: {
         !areStringArraysEqual(nextSelectedIds, currentSelectedIds)
       ) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       const selectedSourceIds = new Set(
@@ -368,7 +378,7 @@ export function useSources(input: {
         }
       }
     },
-    [manualConnectorSyncSourcesRef, onSelectionChange],
+    [manualConnectorSyncSourcesRef, onAutomaticSelectionChange],
   );
 
   useEffect(() => {
@@ -499,12 +509,12 @@ export function useSources(input: {
       setExpandedDirectoryIds(nextExpanded);
       setUserCollapsedDirectoryIds(nextCollapsed);
       persistSourceTreeExpansion({
-        workspaceId,
+        workspaceId: expansionScope ?? workspaceId,
         expandedDirectoryIds: nextExpanded,
         userCollapsedDirectoryIds: nextCollapsed,
       });
     },
-    [workspaceId],
+    [workspaceId, expansionScope],
   );
 
   const mergeIncrementalSources = useCallback(
@@ -590,7 +600,9 @@ export function useSources(input: {
     }
     initializedSourcesWorkspaceIdRef.current =
       sourceHydration.initializedWorkspaceId;
-    const storedExpansion = readStoredSourceTreeExpansion(workspaceId);
+    const storedExpansion = readStoredSourceTreeExpansion(
+      expansionScope ?? workspaceId,
+    );
     expansionWorkspaceIdRef.current = workspaceId;
     expandedDirectoryIdsRef.current = storedExpansion.expandedDirectoryIds;
     userCollapsedDirectoryIdsRef.current =
@@ -617,6 +629,7 @@ export function useSources(input: {
   }, [
     commitSources,
     workspaceId,
+    expansionScope,
     initialSources,
     initialSourcesLoaded,
     refreshSources,

@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod hub_window;
 mod local_bridge;
 mod remote_host;
 
@@ -96,6 +97,8 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            hub_window::hub_window_action,
+            hub_window::hub_window_send,
             desktop_info,
             show_main_window,
             get_autostart,
@@ -142,7 +145,14 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if !IS_QUITTING.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == hub_window::LABEL {
+                        let _ = window.emit(
+                            hub_window::EVENT,
+                            serde_json::json!({"kind":"close-requested"}),
+                        );
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         })

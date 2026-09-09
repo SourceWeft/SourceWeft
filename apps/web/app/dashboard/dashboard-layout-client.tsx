@@ -1,6 +1,11 @@
 "use client";
 
 import type * as React from "react";
+import { desktopHubBridge } from "../../lib/desktop-hub-bridge";
+import { desktopBridge } from "../../lib/desktop-bridge";
+import { toast } from "sonner";
+import { hubSkillMemory } from "../../lib/hub-skill-memory";
+import { ChatHubProvider } from "./chat/_components/chat-hub-context";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
@@ -34,9 +39,9 @@ function hasActiveSessionResult(result: unknown) {
   const sessionResult = result as SessionResult | undefined;
   return Boolean(
     sessionResult?.data?.session ||
-      sessionResult?.data?.user ||
-      sessionResult?.session ||
-      sessionResult?.user,
+    sessionResult?.data?.user ||
+    sessionResult?.session ||
+    sessionResult?.user,
   );
 }
 
@@ -61,6 +66,22 @@ export function DashboardLayoutClient({
   const [redirecting, setRedirecting] = useState(false);
   const [hasConfirmedSession, setHasConfirmedSession] = useState(false);
   const { data, isPending, refetch } = authClient.useSession();
+  const previousAccountId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const accountId = data?.user?.id;
+    if (
+      previousAccountId.current &&
+      previousAccountId.current !== accountId &&
+      !isPending
+    ) {
+      hubSkillMemory.clear();
+      if (pathname !== "/dashboard/hub-window" && desktopBridge.isAvailable())
+        void desktopHubBridge
+          .action("logout")
+          .catch((error) => toast.error(error.message));
+    }
+    if (!isPending) previousAccountId.current = accountId;
+  }, [data?.user?.id, isPending, pathname]);
   const hasSession = hasActiveSession(data as SessionData | undefined);
   const routePathname = pathname || "/dashboard";
   const redirectTo = useMemo(() => {
@@ -118,7 +139,11 @@ export function DashboardLayoutClient({
       setSessionConfirming(true);
 
       try {
-        for (let attempt = 0; attempt < SESSION_CONFIRM_ATTEMPTS; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < SESSION_CONFIRM_ATTEMPTS;
+          attempt += 1
+        ) {
           const session = await authClient.getSession({
             query: {
               disableCookieCache: true,
@@ -160,13 +185,7 @@ export function DashboardLayoutClient({
     }
 
     void confirmSessionOrRedirect();
-  }, [
-    hasSession,
-    isPending,
-    redirecting,
-    refetch,
-    router,
-  ]);
+  }, [hasSession, isPending, redirecting, refetch, router]);
 
   if (
     sessionConfirming ||
@@ -176,18 +195,28 @@ export function DashboardLayoutClient({
     return <DashboardShellRouteSkeleton pathname={pathname} />;
   }
 
+  if (pathname === "/dashboard/hub-window") {
+    return (
+      <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
+        {children}
+      </main>
+    );
+  }
+
   return (
     <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
-        <DashboardMobileNavProvider>
-          <div className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
-            <DashboardSidebar />
-            <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-              <DashboardMobileContent>{children}</DashboardMobileContent>
-            </main>
-            <DashboardMobileBottomNav />
-          </div>
-        </DashboardMobileNavProvider>
+        <ChatHubProvider key={data?.user?.id}>
+          <DashboardMobileNavProvider>
+            <div className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
+              <DashboardSidebar />
+              <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+                <DashboardMobileContent>{children}</DashboardMobileContent>
+              </main>
+              <DashboardMobileBottomNav />
+            </div>
+          </DashboardMobileNavProvider>
+        </ChatHubProvider>
       </DashboardChatStateProvider>
     </SidebarProvider>
   );

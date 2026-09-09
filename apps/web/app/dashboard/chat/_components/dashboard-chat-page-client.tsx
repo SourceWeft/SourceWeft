@@ -1,4 +1,5 @@
 "use client";
+import { synchronizeHubBeforeSend } from "../../../../lib/hub-send-barrier";
 import { LocalExecutionSelector } from "./local-execution-selector";
 import { LOCAL_TARGET_KEY } from "../../../../lib/local-execution";
 
@@ -854,6 +855,12 @@ export function DashboardChatPageClient() {
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
+      try {
+        await synchronizeHubBeforeSend();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        return;
+      }
       if (isStartingChatRef.current) {
         return;
       }
@@ -940,6 +947,7 @@ export function DashboardChatPageClient() {
             composerOptions,
           },
         });
+        chatHubContext?.desktop.promoteDraft(result.thread.id);
         adoptChat(result.thread);
         writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
         writeStoredByokState(
@@ -999,6 +1007,7 @@ export function DashboardChatPageClient() {
       }
     },
     [
+      chatHubContext?.desktop,
       workspaceId,
       adoptChat,
       activeSourceIds,
@@ -1091,6 +1100,15 @@ export function DashboardChatPageClient() {
               <Button
                 className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
                 onClick={() => {
+                  if (chatHubContext?.desktop.mode === "detached") {
+                    void chatHubContext.desktop.open();
+                    return;
+                  }
+                  if (chatHubContext?.desktop.inlineVisible === false) {
+                    chatHubContext.desktop.showInline();
+                    if (!sourcesVisible) toggleSourcesVisible();
+                    return;
+                  }
                   if (isPersistentLayout) {
                     toggleSourcesVisible();
                     return;
@@ -1099,11 +1117,13 @@ export function DashboardChatPageClient() {
                 }}
                 size="icon-sm"
                 title={
-                  isPersistentLayout
-                    ? sourcesVisible
-                      ? "Hide sources"
-                      : "Show sources"
-                    : "Open Hub"
+                  chatHubContext?.desktop.mode === "detached"
+                    ? "Show Hub window"
+                    : isPersistentLayout
+                      ? sourcesVisible
+                        ? "Hide sources"
+                        : "Show sources"
+                      : "Open Hub"
                 }
                 type="button"
                 variant="outline"
@@ -1114,11 +1134,13 @@ export function DashboardChatPageClient() {
                   <PanelRightOpen className="h-4 w-4" />
                 )}
                 <span className="sr-only">
-                  {isPersistentLayout
-                    ? sourcesVisible
-                      ? "Hide sources"
-                      : "Show sources"
-                    : "Open Hub"}
+                  {chatHubContext?.desktop.mode === "detached"
+                    ? "Show Hub window"
+                    : isPersistentLayout
+                      ? sourcesVisible
+                        ? "Hide sources"
+                        : "Show sources"
+                      : "Open Hub"}
                 </span>
               </Button>
             </div>
