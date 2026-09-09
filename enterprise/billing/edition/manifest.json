@@ -20,7 +20,8 @@
     "apps/web/app/dashboard/billing/page.tsx": "routes/billing/page.tsx",
     "apps/web/app/dashboard/billing/loading.tsx": "routes/billing/loading.tsx",
     "apps/web/app/dashboard/billing/checkout/page.tsx": "routes/billing/checkout/page.tsx",
-    "apps/web/app/dashboard/billing/checkout/loading.tsx": "routes/billing/checkout/loading.tsx"
+    "apps/web/app/dashboard/billing/checkout/loading.tsx": "routes/billing/checkout/loading.tsx",
+    "apps/backend/src/scripts/setup-waffo.ts": "scripts/setup-waffo.ts"
   },
   "overrides": {
     "creem": "1.6.0"
@@ -28,7 +29,8 @@
   "scripts": {
     "apps/backend/package.json": {
       "creem:product:create": "tsx src/scripts/create-creem-product.ts",
-      "creem:product:delete": "tsx src/scripts/delete-creem-product.ts"
+      "creem:product:delete": "tsx src/scripts/delete-creem-product.ts",
+      "waffo:setup": "tsx src/scripts/setup-waffo.ts"
     }
   }
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingUiHost } from "./context";
 
 import * as React from "react";
 import { CreditCard, Minus, Plus } from "lucide-react";
@@ -37,6 +37,7 @@ import type {
   BillingSummary,
   SeatPreview,
 } from "./types";
+import { TopupActions } from "./topup-actions";
 import { useBillingPlanAction } from "./use-billing-plan-action";
 
 export function BillingPanel() {
@@ -107,7 +108,7 @@ export function BillingPanel() {
         }
       }
     },
-    [resolvingPersonalTeamId, teamId],
+    [resolvingPersonalTeamId, teamId, billingClient],
   );
 
   React.useEffect(() => {
@@ -258,6 +259,7 @@ export function BillingPanel() {
   }
 
   const canUpdateSeats =
+    subscription?.capabilities?.updateSeats === true &&
     !isPersonal &&
     isSubscriptionActive &&
     targetSeatCount >= minimumSeatCount &&
@@ -388,6 +390,8 @@ export function BillingPanel() {
             </div>
           </div>
         </div>
+
+        <TopupActions teamId={teamId} />
 
         {!isPersonal && (
           <div className="pt-7">
@@ -587,7 +591,11 @@ export function BillingPanel() {
               Cancel
             </Button>
             <Button
-              disabled={seatActionLoading || !seatPreview}
+              disabled={
+                subscription?.provider === "waffo" ||
+                seatActionLoading ||
+                !seatPreview
+              }
               onClick={() => void handleConfirmSeatChange()}
               size="sm"
               type="button"

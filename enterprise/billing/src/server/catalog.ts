@@ -42,6 +42,16 @@ export type PricingDisplayPlan = {
 export function createBillingCatalog(
   runtimeConfig: BillingRuntimeConfig,
 ): BillingCatalog {
+  const products = ["waffo", "stripe"].includes(runtimeConfig.provider)
+    ? {
+        individualProMonthlyProductId: "",
+        individualProYearlyProductId: "",
+        teamStandardMonthlyProductId: "",
+        teamStandardYearlyProductId: "",
+        creditTopupProductId: "",
+        pageTopupProductId: "",
+      }
+    : runtimeConfig.creem;
   return {
     subscriptions: {
       individual_pro: {
@@ -53,8 +63,8 @@ export function createBillingCatalog(
         monthlyAmountCents:
           runtimeConfig.catalog.individualProMonthlyAmountCents,
         yearlyAmountCents: runtimeConfig.catalog.individualProYearlyAmountCents,
-        monthlyProductId: runtimeConfig.creem.individualProMonthlyProductId,
-        yearlyProductId: runtimeConfig.creem.individualProYearlyProductId,
+        monthlyProductId: products.individualProMonthlyProductId,
+        yearlyProductId: products.individualProYearlyProductId,
       },
       team_standard: {
         planFamily: "team_standard",
@@ -65,8 +75,8 @@ export function createBillingCatalog(
         monthlyAmountCents:
           runtimeConfig.catalog.teamStandardMonthlyAmountCents,
         yearlyAmountCents: runtimeConfig.catalog.teamStandardYearlyAmountCents,
-        monthlyProductId: runtimeConfig.creem.teamStandardMonthlyProductId,
-        yearlyProductId: runtimeConfig.creem.teamStandardYearlyProductId,
+        monthlyProductId: products.teamStandardMonthlyProductId,
+        yearlyProductId: products.teamStandardYearlyProductId,
       },
     },
     topups: {
@@ -75,14 +85,14 @@ export function createBillingCatalog(
         unitType: "credit",
         unitAmount: runtimeConfig.catalog.creditTopupUnitAmount,
         amountCents: runtimeConfig.catalog.creditTopupAmountCents,
-        productId: runtimeConfig.creem.creditTopupProductId,
+        productId: products.creditTopupProductId,
       },
       page: {
         kind: "page_topup",
         unitType: "page",
         unitAmount: runtimeConfig.catalog.pageTopupUnitAmount,
         amountCents: runtimeConfig.catalog.pageTopupAmountCents,
-        productId: runtimeConfig.creem.pageTopupProductId,
+        productId: products.pageTopupProductId,
       },
     },
   };

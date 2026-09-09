@@ -162,6 +162,7 @@ test("stale provider monthly snapshot is rejected before subscription upsert", a
   await assertRejectsWithBillingCode(
     () =>
       billingService.syncSubscriptionSnapshot({
+        confirmCoverage: true,
         teamId: "team_1",
         provider: "creem",
         planFamily: "team_standard",
@@ -215,6 +216,7 @@ test("active provider snapshot without usable period is rejected before subscrip
   await assertRejectsWithBillingCode(
     () =>
       billingService.syncSubscriptionSnapshot({
+        confirmCoverage: true,
         teamId: "team_1",
         provider: "creem",
         planFamily: "team_standard",

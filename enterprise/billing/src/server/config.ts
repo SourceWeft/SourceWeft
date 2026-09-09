@@ -1,3 +1,4 @@
+import { createWaffoClient } from "./providers/waffo/client";
 import { validateBillingCatalog } from "./catalog";
 import type {
   BillingMode,
@@ -57,6 +58,7 @@ const billingScopes: ReadonlySet<BillingScope> = new Set([
 const billingProviders: ReadonlySet<BillingProvider> = new Set([
   "none",
   "creem",
+  "waffo",
   "stripe",
   "manual",
 ]);
@@ -116,6 +118,13 @@ function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
   return normalized;
 }
 
+function parseWaffoEnvironment(value: string | undefined): "test" | "prod" {
+  const mode = value?.trim().toLowerCase() ?? "test";
+  if (mode !== "test" && mode !== "prod")
+    throw new Error("Invalid WAFFO_ENVIRONMENT");
+  return mode;
+}
+
 export function readBillingConfig(
   env: Readonly<Record<string, string | undefined>>,
   webBaseUrl: string,
@@ -125,13 +134,21 @@ export function readBillingConfig(
     env.BACKEND_BILLING_PROVIDER,
     "none",
   );
-  if (saasEnabled && !["none", "creem"].includes(requestedBillingProvider)) {
+  if (
+    saasEnabled &&
+    !["none", "creem", "waffo", "stripe"].includes(requestedBillingProvider)
+  ) {
     throw new Error(
       `BACKEND_BILLING_PROVIDER=${requestedBillingProvider} is not supported for checkout`,
     );
   }
   const effectiveBillingProvider =
-    saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
+    saasEnabled &&
+    (requestedBillingProvider === "creem" ||
+      requestedBillingProvider === "waffo" ||
+      requestedBillingProvider === "stripe")
+      ? requestedBillingProvider
+      : "none";
   return {
     saasEnabled,
     mode: parseBillingMode(env.BACKEND_BILLING_MODE, "enforced"),
@@ -159,8 +176,10 @@ export function readBillingConfig(
       env.BACKEND_DEFAULT_MONTHLY_CREDITS,
       3000,
     ),
-    reconcileEnabled:
-      saasEnabled && parseBoolean(env.BACKEND_BILLING_RECONCILE_ENABLED, false),
+    reconcileEnabled: parseBoolean(
+      env.BACKEND_BILLING_RECONCILE_ENABLED,
+      false,
+    ),
     defaultSuccessUrl: `${webBaseUrl.replace(/\/$/, "")}/dashboard/billing?checkout=success`,
     creem: {
       apiKey: env.CREEM_API_KEY || "",
@@ -176,6 +195,16 @@ export function readBillingConfig(
         env.CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID || "",
       creditTopupProductId: env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
       pageTopupProductId: env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
+    },
+    stripe: {
+      secretKey: env.STRIPE_SECRET_KEY?.trim() || "",
+      webhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+      testMode: parseBoolean(env.STRIPE_TEST_MODE, true),
+    },
+    waffo: {
+      merchantId: env.WAFFO_MERCHANT_ID?.trim() || "",
+      privateKey: env.WAFFO_PRIVATE_KEY || "",
+      environment: parseWaffoEnvironment(env.WAFFO_ENVIRONMENT),
     },
     catalog: {
       individualProMonthlyAmountCents: parsePositiveNumber(
@@ -218,6 +247,30 @@ export function readBillingConfig(
 export function validateBillingConfiguration(
   config: BillingRuntimeConfig,
 ): void {
+  if (config.saasEnabled && config.provider === "stripe") {
+    const prefix = config.stripe.testMode
+      ? /^(sk|rk)_test_\S+$/
+      : /^(sk|rk)_live_\S+$/;
+    if (!prefix.test(config.stripe.secretKey))
+      throw new Error(
+        "STRIPE_SECRET_KEY must match STRIPE_TEST_MODE and be a server-side secret key",
+      );
+    if (!/^whsec_\S+$/.test(config.stripe.webhookSecret))
+      throw new Error(
+        "STRIPE_WEBHOOK_SECRET is required for enabled Stripe checkout",
+      );
+  }
+  if (config.saasEnabled && config.provider === "waffo") {
+    if (!/^MER_[A-Za-z0-9]{22}$/.test(config.waffo.merchantId))
+      throw new Error(
+        "WAFFO_MERCHANT_ID must be the Merchant ID from API & Development, not a Store ID",
+      );
+    if (!config.waffo.privateKey.trim())
+      throw new Error(
+        "WAFFO_PRIVATE_KEY is required for enabled Waffo checkout",
+      );
+    createWaffoClient(config);
+  }
   if (config.saasEnabled && config.provider === "creem") {
     for (const [name, value] of [
       ["CREEM_API_KEY", config.creem.apiKey],

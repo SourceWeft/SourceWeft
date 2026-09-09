@@ -37,7 +37,10 @@ export function ensureTeamBillingEnabled(runtimeConfig: BillingRuntimeConfig) {
 export function ensureBillingCheckoutEnabled(
   runtimeConfig: BillingRuntimeConfig,
 ) {
-  if (!runtimeConfig.saasEnabled || runtimeConfig.provider !== "creem") {
+  if (
+    !runtimeConfig.saasEnabled ||
+    !(["creem", "waffo", "stripe"] as string[]).includes(runtimeConfig.provider)
+  ) {
     throw new BillingError(
       "BILLING_CHECKOUT_DISABLED",
       409,
@@ -79,7 +82,20 @@ export function toSubscriptionSummary(input: {
   subscription: BillingSubscriptionState | null;
   provider: BillingRuntimeConfig["provider"];
 }): BillingSubscriptionResponse {
+  const managed =
+    !!input.subscription &&
+    input.subscription.provider === input.provider &&
+    ["creem", "stripe", "waffo"].includes(input.provider);
   return {
+    capabilities: {
+      managePortal: managed && !!input.subscription?.externalSubscriptionId,
+      cancelViaPortal: managed && !!input.subscription?.externalSubscriptionId,
+      updateSeats:
+        managed &&
+        ["creem", "stripe"].includes(input.provider) &&
+        input.subscription?.planFamily === "team_standard" &&
+        input.subscription.status === "active",
+    },
     teamId: input.account.teamId,
     provider: input.subscription?.provider ?? input.provider,
     planFamily: input.subscription?.planFamily ?? input.account.planFamily,

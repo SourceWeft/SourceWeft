@@ -1,8 +1,4 @@
-import {
-  createCheckout,
-  createCreemClient,
-  createPortal,
-} from "@creem_io/better-auth/server";
+import { createCreemClient, createPortal } from "@creem_io/better-auth/server";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,
@@ -99,6 +95,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     }
   }
 
+  async checkoutMetadata() {
+    return { paymentEnvironment: this.options.testMode ? "test" : "prod" };
+  }
+
   private resolveProductId(input: BillingProviderCheckoutInput) {
     const productId = input.externalProductId;
 
@@ -154,25 +154,25 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       ...(input.grantedPages ? { grantedPages: input.grantedPages } : {}),
     };
 
-    const response = await createCheckout(
-      this.options as any,
-      {
-        productId,
-        units:
-          input.kind === "subscription" && input.planFamily === "individual_pro"
-            ? undefined
-            : input.quantity,
-        successUrl,
-        customer: {
-          email: input.actorEmail,
-        },
-        skipTrial: true,
-        metadata,
-        requestId: `order:${input.orderId}`,
-      } as any,
-    );
+    const response = await createCreemClient(this.options).checkouts.create({
+      productId,
+      units:
+        input.kind === "subscription" && input.planFamily === "individual_pro"
+          ? undefined
+          : input.quantity,
+      successUrl,
+      customer: { email: input.actorEmail },
+      metadata: { ...metadata, skipTrial: true },
+      requestId: `order:${input.orderId}`,
+    });
+    if (response.mode !== (this.options.testMode ? "test" : "prod"))
+      throw new BillingError(
+        "CREEM_ENVIRONMENT_MISMATCH",
+        502,
+        "Checkout returned in the wrong environment",
+      );
 
-    if (!response.url) {
+    if (!response.checkoutUrl) {
       throw new BillingError(
         "CREEM_CHECKOUT_URL_MISSING",
         502,
@@ -182,9 +182,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
 
     return {
       provider: "creem",
-      checkoutUrl: response.url,
-      externalCheckoutId: null,
-      externalCustomerId: null,
+      checkoutUrl: response.checkoutUrl,
+      externalCheckoutId: response.id,
+      externalCustomerId: resolveEntityId(response.customer),
+      metadata: await this.checkoutMetadata(),
     };
   }
 
@@ -249,6 +250,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       );
     }
 
+    const existing = toObjectRecord(subscription);
+    const existingItems = Array.isArray(existing?.items) ? existing.items : [];
+    if (toObjectRecord(existingItems[0])?.units === input.seatCount)
+      return { provider: "creem", seatCount: input.seatCount };
     await creemClient.subscriptions.update(input.externalSubscriptionId, {
       items: [item],
       updateBehavior: input.updateBehavior,

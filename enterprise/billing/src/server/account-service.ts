@@ -1,3 +1,7 @@
+import {
+  confirmedSubscriptionPeriod,
+  hasCurrentCoverage,
+} from "./subscription-entitlements";
 import { getPerSeatQuota, type PlanQuota } from "./plans";
 import type { PoolClient } from "pg";
 import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
@@ -112,6 +116,11 @@ export class BillingAccountService {
     const normalizedUserId = normalizeUserId(userId);
 
     return this.store.runInTransaction(async (client) => {
+      await this.store.lockSubscriptionTarget(
+        `team:${normalizedTeamId}`,
+        client,
+        true,
+      );
       const account = await this.getOrCreateAccountLocked(
         normalizedTeamId,
         normalizedUserId,
@@ -142,12 +151,16 @@ export class BillingAccountService {
     const normalizedTeamId = normalizeTeamId(teamId);
 
     return this.store.runInTransaction(async (client) => {
+      await this.store.lockSubscriptionTarget(
+        `team:${normalizedTeamId}`,
+        client,
+      );
       const memberUserIds = await this.store.listTeamMemberUserIds(
         normalizedTeamId,
         client,
       );
       const accounts: BillingAccountState[] = [];
-      for (const memberUserId of memberUserIds) {
+      for (const memberUserId of memberUserIds.sort()) {
         const account = await this.getOrCreateAccountLocked(
           normalizedTeamId,
           memberUserId,
@@ -192,6 +205,10 @@ export class BillingAccountService {
     const normalizedTeamId = normalizeTeamId(teamId);
 
     return this.store.runInTransaction(async (client) => {
+      await this.store.lockSubscriptionTarget(
+        `team:${normalizedTeamId}`,
+        client,
+      );
       const existing = await this.store.getAnyTeamAccount(
         normalizedTeamId,
         client,
@@ -581,6 +598,12 @@ export class BillingAccountService {
       }
     }
 
+    account.subscriptionBindingId =
+      input.cycleSource === "free_account"
+        ? null
+        : typeof input.metadata.subscriptionBindingId === "string"
+          ? input.metadata.subscriptionBindingId
+          : account.subscriptionBindingId;
     account.cycleAnchorAt = input.cycleAnchorAt;
     account.cycleSource = input.cycleSource;
     account.cycleStartAt = input.cycleStartAt;
@@ -638,48 +661,33 @@ export class BillingAccountService {
     spendHardCapUsd: number | null;
   }> {
     const sibling = await this.store.getAnyTeamAccount(teamId, client);
-    if (sibling) {
-      return {
-        planFamily: sibling.planFamily,
-        cycleSource: sibling.cycleSource,
-        cycleAnchorAt: sibling.cycleAnchorAt,
-        cycleStartAt: sibling.cycleStartAt,
-        cycleEndAt: sibling.cycleEndAt,
-        seatCount: sibling.seatCount,
-        spendSoftCapUsd: sibling.spendSoftCapUsd,
-        spendHardCapUsd: sibling.spendHardCapUsd,
-      };
-    }
-
     const now = new Date();
     const subscription = await this.store.getSubscriptionByTeam(teamId, client);
-    const planFamily = subscription
-      ? resolvePlanFromSubscription({
-          status: subscription.status,
-          planFamily: subscription.planFamily,
-          defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
-        })
+    const period = confirmedSubscriptionPeriod(subscription);
+    const covered = hasCurrentCoverage(subscription, now.getTime());
+    const planFamily = covered
+      ? subscription!.planFamily
       : this.runtimeConfig.defaultPlanFamily;
-
-    const isProviderCycle =
-      subscription != null &&
-      ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES.has(subscription.status) &&
-      subscription.currentPeriodStart != null &&
-      subscription.currentPeriodEnd != null;
-
-    if (isProviderCycle) {
+    if (covered && period) {
+      const monthly =
+        subscription!.billingInterval === "yearly"
+          ? getAnchoredMonthlyCycleWindow(now, new Date(period.start))
+          : { startAt: new Date(period.start), endAt: new Date(period.end) };
       return {
         planFamily,
-        cycleSource: "provider_subscription",
-        cycleAnchorAt: subscription.currentPeriodStart as string,
-        cycleStartAt: subscription.currentPeriodStart as string,
-        cycleEndAt: subscription.currentPeriodEnd as string,
-        // seatCount is a replicated team attribute; the plan-activation fan-out
-        // sets the real purchased-seat count on every member row. A lazily
-        // created row between activations defaults to 1 (grants don't scale by it).
-        seatCount: 1,
-        spendSoftCapUsd: null,
-        spendHardCapUsd: null,
+        cycleSource:
+          subscription!.provider === "manual"
+            ? "manual"
+            : "provider_subscription",
+        cycleAnchorAt: period.start,
+        cycleStartAt: monthly.startAt.toISOString(),
+        cycleEndAt: new Date(
+          Math.min(monthly.endAt.getTime(), Date.parse(period.end)),
+        ).toISOString(),
+        seatCount:
+          sibling?.seatCount ?? Number(subscription!.metadata.seatCount ?? 1),
+        spendSoftCapUsd: sibling?.spendSoftCapUsd ?? null,
+        spendHardCapUsd: sibling?.spendHardCapUsd ?? null,
       };
     }
 
@@ -704,6 +712,10 @@ export class BillingAccountService {
     const context = await this.resolveMemberAccountContext(teamId, client);
     const quota = resolvePerSeatQuota(this.runtimeConfig, context.planFamily);
     const nowIso = new Date().toISOString();
+    const currentSubscription = await this.store.getSubscriptionByTeam(
+      teamId,
+      client,
+    );
 
     const account: BillingAccountState = {
       teamId,
@@ -711,6 +723,10 @@ export class BillingAccountService {
       planFamily: context.planFamily,
       cycleAnchorAt: context.cycleAnchorAt,
       cycleSource: context.cycleSource,
+      subscriptionBindingId:
+        context.cycleSource === "free_account"
+          ? null
+          : currentSubscription?.currentBindingId,
       cycleStartAt: context.cycleStartAt,
       cycleEndAt: context.cycleEndAt,
       pagesLimit: quota.monthlyPagesLimit,
@@ -785,10 +801,49 @@ export class BillingAccountService {
       return account;
     }
 
-    const subscription = await this.store.getSubscriptionByTeam(
+    const storedSubscription = await this.store.getSubscriptionByTeam(
       account.teamId,
       client,
     );
+    const coverage = confirmedSubscriptionPeriod(storedSubscription);
+    const subscription = storedSubscription
+      ? {
+          ...storedSubscription,
+          currentPeriodStart: coverage?.start ?? null,
+          currentPeriodEnd: coverage?.end ?? null,
+        }
+      : null;
+    if (
+      ["provider_subscription", "manual"].includes(account.cycleSource) &&
+      (!coverage || Date.parse(coverage.end) <= now.getTime())
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "confirmed_coverage_ended",
+      });
+      if (
+        storedSubscription?.cancelAtPeriodEnd ||
+        storedSubscription?.provider === "manual"
+      ) {
+        await this.applyPlanFamilyLocked(
+          account,
+          this.runtimeConfig.defaultPlanFamily,
+          client,
+          { source: "local_expiry", suppressImmediateGrant: true },
+        );
+        const freeCycle = getAnchoredMonthlyCycleWindow(now, now);
+        await this.realignCycleLocked(account, client, {
+          cycleAnchorAt: now.toISOString(),
+          cycleSource: "free_account",
+          cycleStartAt: freeCycle.startAt.toISOString(),
+          cycleEndAt: freeCycle.endAt.toISOString(),
+          expireCurrentMonthly: false,
+          grantNewMonthly: true,
+          metadata: { source: "local_expiry" },
+        });
+      }
+      return account;
+    }
 
     if (
       account.cycleSource === "provider_subscription" &&

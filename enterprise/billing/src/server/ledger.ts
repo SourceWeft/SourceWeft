@@ -78,6 +78,22 @@ export async function appendBillingLedger(input: {
   account: BillingAccountState;
   entry: LedgerWriteInput;
 }) {
+  // Two distinct subscriptions may start in the same second. Cycle identity includes the local binding.
+  if (
+    input.account.subscriptionBindingId &&
+    input.entry.idempotencyKey?.startsWith("cycle-")
+  ) {
+    input = {
+      ...input,
+      entry: {
+        ...input.entry,
+        idempotencyKey: `binding:${input.account.subscriptionBindingId}:${input.entry.idempotencyKey}`,
+        operationId: input.entry.operationId
+          ? `binding:${input.account.subscriptionBindingId}:${input.entry.operationId}`
+          : undefined,
+      },
+    };
+  }
   const entry: BillingLedgerEntry = {
     id: randomUUID(),
     teamId: input.account.teamId,

@@ -1,3 +1,4 @@
+import type { WaffoStateStore } from "./providers/waffo/state";
 import { BillingService } from "./service";
 import { createBillingProvider } from "./provider";
 import {
@@ -11,6 +12,7 @@ import { BillingError } from "./errors";
 
 export function createBilling(input: {
   config: BillingRuntimeConfig;
+  waffoState?: WaffoStateStore;
   store: BillingStore;
   host: BillingServiceHost;
   alerts: BillingAlertSink;
@@ -37,7 +39,7 @@ export function createBilling(input: {
   const service = new BillingService(
     input.store,
     input.config,
-    createBillingProvider(input.config),
+    createBillingProvider(input.config, input.waffoState),
     input.alerts,
     input.host,
   );

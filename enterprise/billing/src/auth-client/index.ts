@@ -1,5 +1,3 @@
 "use client";
-import { creemClient } from "@creem_io/better-auth/client";
-export const billingAuthClientPlugins: ReturnType<typeof creemClient>[] = [
-  creemClient(),
-];
+// Subscription commands use the common billing SDK, not provider-specific Auth routes.
+export const billingAuthClientPlugins = [];

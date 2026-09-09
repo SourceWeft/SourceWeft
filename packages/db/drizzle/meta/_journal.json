@@ -218,6 +218,20 @@
       "when": 1788888824746,
       "tag": "0030_purple_wallow",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788933789089,
+      "tag": "0031_waffo_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788955095080,
+      "tag": "0032_subscription_lifecycle",
+      "breakpoints": true
     }
   ]
 }

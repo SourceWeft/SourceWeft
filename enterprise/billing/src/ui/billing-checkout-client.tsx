@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingUiHost } from "./context";
 
 import * as React from "react";
 import Link from "next/link";
@@ -110,8 +110,12 @@ export function BillingCheckoutClient({
   source: string | null;
   teamName: string | null;
 }) {
-  const { trackBeginCheckout, trackCheckoutError, billingClient } =
-    useBillingUiHost();
+  const {
+    trackBeginCheckout,
+    trackCheckoutError,
+    billingClient,
+    openCheckout,
+  } = useBillingUiHost();
 
   const [state, setState] = React.useState<CheckoutState>("preparing");
   const [error, setError] = React.useState<string | null>(null);
@@ -174,7 +178,7 @@ export function BillingCheckoutClient({
           source: normalizedSource,
         });
         setState("opening");
-        window.location.assign(result.checkoutUrl);
+        openCheckout(result);
       } catch (checkoutError) {
         trackCheckoutError({
           billingInterval: checkoutBillingInterval,
@@ -192,7 +196,18 @@ export function BillingCheckoutClient({
     }
 
     void startCheckout();
-  }, [billingInterval, intent, plan, seatCount, source, teamName]);
+  }, [
+    billingInterval,
+    intent,
+    plan,
+    seatCount,
+    source,
+    teamName,
+    billingClient,
+    openCheckout,
+    trackBeginCheckout,
+    trackCheckoutError,
+  ]);
 
   const resolvedPlan = isPricingPlan(plan) ? plan : null;
   const title =

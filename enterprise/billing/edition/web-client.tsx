@@ -68,6 +68,8 @@ function Provider({ children }: { children: ReactNode }) {
     <UI.BillingUiProvider
       value={{
         ...host,
+        billingProvider: capabilities.billing.provider,
+        billingTopupEnabled: capabilities.billing.topup,
         billingCheckoutEnabled:
           capabilities.billing.checkout && deploymentCheckoutEnabled,
       }}
