@@ -6,6 +6,9 @@ fn main() {
             "get_autostart",
             "set_autostart",
             "open_external_url",
+            "local_host_status",
+            "enable_local_host",
+            "disconnect_local_host",
         ]),
     ))
     .expect("failed to build Tauri application metadata");

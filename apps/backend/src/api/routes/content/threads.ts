@@ -198,6 +198,7 @@ export function registerThreadRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
+      executionTarget: parsed.data.executionTarget,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
     });
@@ -242,6 +243,7 @@ export function registerThreadRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
+      executionTarget: parsed.data.executionTarget,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
       content,

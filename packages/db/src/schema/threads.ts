@@ -49,6 +49,10 @@ export const threads = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    executionTargetJson: jsonb("execution_target_json")
+      .$type<{ kind: "cloud" } | { kind: "local"; deviceId: string }>()
+      .notNull()
+      .default(sql`'{"kind":"cloud"}'::jsonb`),
     modelSettingsJson: jsonb("model_settings_json")
       .$type<ThreadModelSettings>()
       .notNull()

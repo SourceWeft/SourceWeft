@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod local_bridge;
+mod remote_host;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -93,13 +95,15 @@ fn main() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        .append_invoke_initialization_script(desktop_bridge_script())
         .invoke_handler(tauri::generate_handler![
             desktop_info,
             show_main_window,
             get_autostart,
             set_autostart,
             open_external_url,
+            local_bridge::local_host_status,
+            local_bridge::enable_local_host,
+            local_bridge::disconnect_local_host,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {
@@ -108,6 +112,17 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
+                    &app.path().app_data_dir()?,
+                )?);
+                app.manage(
+                    remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
+                        .map_err(std::io::Error::other)?,
+                );
+                app.manage(host);
+            }
             let settings_path = resolve_settings_path(app.handle())?;
             let settings = read_settings(&settings_path);
             app.manage(DesktopState {
@@ -147,6 +162,7 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
 
     let handle = app.handle().clone();
     WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+        .initialization_script(desktop_bridge_script())
         .on_navigation(move |url| handle_navigation(&handle, url))
         .on_new_window(move |url, _features| {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -374,7 +390,11 @@ fn is_allowed_external_url(url: &Url) -> bool {
         return matches!(url.port_or_known_default(), Some(3000));
     }
 
-    url.scheme() == "https" && matches!(url.host_str(), Some("sourceweft.com" | "www.sourceweft.com"))
+    url.scheme() == "https"
+        && matches!(
+            url.host_str(),
+            Some("sourceweft.com" | "www.sourceweft.com")
+        )
 }
 
 fn same_origin(left: &Url, right: &Url) -> bool {
@@ -497,6 +517,9 @@ fn handle_tray_action(app: &AppHandle, menu_id: &str) {
             let _ = focus_main_window(app);
         }
         "quit" => {
+            if let Some(host) = app.try_state::<remote_host::RemoteHost>() {
+                host.disconnect();
+            }
             IS_QUITTING.store(true, Ordering::SeqCst);
             app.exit(0);
         }

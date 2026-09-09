@@ -2,10 +2,20 @@
 
 import * as React from "react";
 import {
+  LayoutGrid,
+  Receipt,
+  ShieldCheck,
+  User,
+  Users,
+  X,
+  Monitor,
+} from "lucide-react";
+import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { LocalHostPanel } from "./local-host-panel";
+import {
   isSettingsTabAvailable,
   resolveSettingsTab,
 } from "../../../../lib/billing-edition/visibility";
-import { LayoutGrid, Receipt, ShieldCheck, User, Users, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +71,13 @@ export function DashboardSettingsCenterModal({
     hasTeam ? "team" : "personal",
   );
   const wasOpenRef = React.useRef(open);
+  const [isLocalPc, setIsLocalPc] = React.useState(false);
+  React.useEffect(() => {
+    setIsLocalPc(desktopBridge.isAvailable());
+  }, []);
+  const visibleMenuItems = isLocalPc
+    ? [...menuItems, { key: "local" as const, label: "本机", icon: Monitor }]
+    : menuItems;
 
   React.useEffect(() => {
     if (open && !wasOpenRef.current) {
@@ -104,7 +121,7 @@ export function DashboardSettingsCenterModal({
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
-                {menuItems
+                {visibleMenuItems
                   .filter((item) => isSettingsTabAvailable(item.key))
                   .map((item) => {
                     const Icon = item.icon;
@@ -163,6 +180,7 @@ export function DashboardSettingsCenterModal({
               {activeTab === "usage" && <UsagePanel />}
               {activeTab === "billing" && <BillingPanel />}
               {activeTab === "approvals" && <TrustRulesPanel />}
+              {activeTab === "local" && isLocalPc && <LocalHostPanel />}
             </div>
           </div>
         </div>

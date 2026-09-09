@@ -187,6 +187,7 @@ export type SourceDetailRecord = {
 };
 
 export type ThreadRecord = {
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   id: string;
   teamId: string;
   workspaceId: string;

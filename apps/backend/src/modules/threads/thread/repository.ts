@@ -14,12 +14,14 @@ import {
   type ThreadChatPreferencesPatch,
 } from "../chat-preferences";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 
 type RawThreadRow = {
   id: string;
   team_id: string;
   workspace_id: string;
   title: string;
+  execution_target_json?: ThreadExecutionTarget;
   model_settings_json: ThreadModelSettingsInput | undefined;
   chat_preferences_json: unknown;
   visibility: ThreadRecord["visibility"];
@@ -34,6 +36,7 @@ const THREAD_RETURNING_SQL = `
   team_id,
   workspace_id,
   title,
+  execution_target_json,
   model_settings_json,
   chat_preferences_json,
   visibility,
@@ -69,6 +72,7 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     teamId: row.team_id,
     workspaceId: row.workspace_id,
     title: row.title,
+    executionTarget: row.execution_target_json ?? { kind: "cloud" },
     modelSettings: normalizePersistedThreadModelSettings(
       row.model_settings_json,
     ),
@@ -132,6 +136,7 @@ export async function createThreadRecord(input: {
   createdBy: string;
   modelSettings?: Partial<ThreadModelSettings>;
   chatPreferences?: Partial<ThreadChatPreferences>;
+  executionTarget?: ThreadExecutionTarget;
 }) {
   const id = randomUUID();
   const modelSettings = normalizeThreadModelSettings(input.modelSettings);
@@ -145,9 +150,10 @@ export async function createThreadRecord(input: {
         title,
         model_settings_json,
         chat_preferences_json,
-        created_by
+        created_by,
+        execution_target_json
       )
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb)
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -158,6 +164,7 @@ export async function createThreadRecord(input: {
       JSON.stringify(modelSettings),
       JSON.stringify(chatPreferences),
       input.createdBy,
+      JSON.stringify(input.executionTarget ?? { kind: "cloud" }),
     ],
   );
   const row = result.rows[0];

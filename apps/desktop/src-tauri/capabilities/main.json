@@ -5,6 +5,9 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "allow-local-host-status",
+    "allow-enable-local-host",
+    "allow-disconnect-local-host",
     "allow-desktop-info",
     "allow-show-main-window",
     "allow-get-autostart",

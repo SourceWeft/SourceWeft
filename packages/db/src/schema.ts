@@ -11,3 +11,4 @@ export * from "./schema/retrieval";
 export * from "./schema/skills-market";
 export * from "./schema/notes";
 export * from "./schema/artifacts";
+export * from "./schema/local-execution";

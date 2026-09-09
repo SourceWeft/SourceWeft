@@ -33,7 +33,7 @@ import {
 } from "./dashboard-team-selector-shared";
 import { RawImage } from "../../_components/raw-image";
 
-type MobileMePanel = SettingsCenterTab;
+type MobileMePanel = Exclude<SettingsCenterTab, "local">;
 
 const panelItems: Array<{
   description: string;

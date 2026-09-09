@@ -21,7 +21,8 @@ import {
   initializeSandboxProviderRegistry,
 } from "./provider-registry";
 import { DrizzleSandboxOperationStore, DrizzleSandboxStore } from "./stores";
-
+import { localProviderForTurn } from "../../../devices/provider";
+import { ContentError } from "../../../content/errors";
 
 const CLEANUP_LIMIT = 25;
 const STALE_OPERATION_LIMIT = 100;
@@ -53,7 +54,6 @@ const sandboxService = new AgentSandboxService({
   logWarn: (message, meta) => logger.warn(message, meta),
 });
 
-
 /**
  * Every entry point that can reach a provider awaits provider discovery first.
  *
@@ -68,6 +68,25 @@ export const agentSandboxService = {
   async createRuntimeForTurn(
     input: SandboxRuntimeRequest,
   ): Promise<AgentSandboxRuntimeForTurn | null> {
+    if (input.executionTarget?.kind === "local") {
+      const localFactory = await localProviderForTurn(input.context);
+      if (!localFactory) throw new ContentError(409, "EXECUTION_TARGET_MISMATCH", "The persisted conversation no longer matches its local execution target.");
+      const localService = new AgentSandboxService({
+        getConfig: () => ({
+          ...currentSandboxServiceConfig(),
+          enabled: true,
+          provider: "local",
+          toolApprovalEnabled: true,
+        }),
+        getProviderFactory: (id) => (id === "local" ? localFactory : null),
+        logWarn: (message, meta) => logger.warn(message, meta),
+      });
+      return localService.createRuntimeForTurn(
+        input,
+        new DrizzleSandboxStore(),
+        new DrizzleSandboxOperationStore(),
+      );
+    }
     await initializeSandboxProviderRegistry();
     return sandboxService.createRuntimeForTurn(
       input,
@@ -157,22 +176,26 @@ export const agentSandboxService = {
       const startedAt = Date.now();
       const operationId = randomUUID();
       const operationToolCallId = `cleanup:${sandbox.id}`;
-      const claimed = await db.insert(agentSandboxOperations).values({
-        id: operationId,
-        sandboxId: sandbox.id,
-        operationType: "cleanup",
-        teamId: sandbox.teamId,
-        workspaceId: sandbox.workspaceId,
-        threadId: sandbox.threadId,
-        userId: sandbox.userId,
-        status: "running",
-        toolCallId: operationToolCallId,
-        requestJsonRedacted: {
-          provider: factory.id,
-          providerSandboxId: sandbox.providerSandboxId,
-          reason: "ttl_expired",
-        },
-      }).onConflictDoNothing().returning({ id: agentSandboxOperations.id });
+      const claimed = await db
+        .insert(agentSandboxOperations)
+        .values({
+          id: operationId,
+          sandboxId: sandbox.id,
+          operationType: "cleanup",
+          teamId: sandbox.teamId,
+          workspaceId: sandbox.workspaceId,
+          threadId: sandbox.threadId,
+          userId: sandbox.userId,
+          status: "running",
+          toolCallId: operationToolCallId,
+          requestJsonRedacted: {
+            provider: factory.id,
+            providerSandboxId: sandbox.providerSandboxId,
+            reason: "ttl_expired",
+          },
+        })
+        .onConflictDoNothing()
+        .returning({ id: agentSandboxOperations.id });
 
       if (claimed.length === 0) {
         continue;
@@ -180,35 +203,43 @@ export const agentSandboxService = {
 
       try {
         await provider.deleteSandbox(sandbox.providerSandboxId);
-        await db.update(agentSandboxes)
+        await db
+          .update(agentSandboxes)
           .set({ status: "expired", updatedAt: new Date() })
           .where(eq(agentSandboxes.id, sandbox.id));
-        await db.update(agentSandboxOperations).set({
-          status: "succeeded",
-          resultJsonRedacted: {
-            provider: factory.id,
-            providerSandboxId: sandbox.providerSandboxId,
-            finalStatus: "expired",
-          },
-          durationMs: Date.now() - startedAt,
-        }).where(eq(agentSandboxOperations.id, operationId));
-        cleaned += 1;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (isSandboxInstanceMissingError(error)) {
-          await db.update(agentSandboxes)
-            .set({ status: "expired", updatedAt: new Date() })
-            .where(eq(agentSandboxes.id, sandbox.id));
-          await db.update(agentSandboxOperations).set({
+        await db
+          .update(agentSandboxOperations)
+          .set({
             status: "succeeded",
             resultJsonRedacted: {
               provider: factory.id,
               providerSandboxId: sandbox.providerSandboxId,
               finalStatus: "expired",
-              providerAlreadyDeleted: true,
             },
             durationMs: Date.now() - startedAt,
-          }).where(eq(agentSandboxOperations.id, operationId));
+          })
+          .where(eq(agentSandboxOperations.id, operationId));
+        cleaned += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (isSandboxInstanceMissingError(error)) {
+          await db
+            .update(agentSandboxes)
+            .set({ status: "expired", updatedAt: new Date() })
+            .where(eq(agentSandboxes.id, sandbox.id));
+          await db
+            .update(agentSandboxOperations)
+            .set({
+              status: "succeeded",
+              resultJsonRedacted: {
+                provider: factory.id,
+                providerSandboxId: sandbox.providerSandboxId,
+                finalStatus: "expired",
+                providerAlreadyDeleted: true,
+              },
+              durationMs: Date.now() - startedAt,
+            })
+            .where(eq(agentSandboxOperations.id, operationId));
           cleaned += 1;
           continue;
         }
@@ -219,16 +250,19 @@ export const agentSandboxService = {
           providerSandboxId: sandbox.providerSandboxId,
           error: message,
         });
-        await db.update(agentSandboxOperations).set({
-          status: "failed",
-          resultJsonRedacted: {
-            provider: factory.id,
-            providerSandboxId: sandbox.providerSandboxId,
-            error: message,
-            finalStatus: sandbox.status,
-          },
-          durationMs: Date.now() - startedAt,
-        }).where(eq(agentSandboxOperations.id, operationId));
+        await db
+          .update(agentSandboxOperations)
+          .set({
+            status: "failed",
+            resultJsonRedacted: {
+              provider: factory.id,
+              providerSandboxId: sandbox.providerSandboxId,
+              error: message,
+              finalStatus: sandbox.status,
+            },
+            durationMs: Date.now() - startedAt,
+          })
+          .where(eq(agentSandboxOperations.id, operationId));
       }
     }
 
@@ -289,7 +323,8 @@ export const agentSandboxService = {
 
     let released = 0;
     for (const operation of rows) {
-      const updated = await db.update(agentSandboxOperations)
+      const updated = await db
+        .update(agentSandboxOperations)
         .set({
           status: "failed",
           resultJsonRedacted: {

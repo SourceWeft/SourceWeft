@@ -1,3 +1,5 @@
+import { validateThreadExecutionTarget } from "../devices/service";
+import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import { findCitationByMessageRank } from "../citations";
 import { sharingService } from "../sharing";
 import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
@@ -138,6 +140,7 @@ function sanitizeClientMessagePage(input: {
 }
 
 export type StartThreadTurnInput = {
+  executionTarget?: ThreadExecutionTarget;
   workspaceId: string;
   userId: string;
   title?: string;
@@ -471,6 +474,7 @@ class ContentThreadService {
   }
 
   async createThread(input: {
+    executionTarget?: ThreadExecutionTarget;
     workspaceId: string;
     userId: string;
     title?: string;
@@ -486,6 +490,7 @@ class ContentThreadService {
       userId: input.userId,
     });
 
+    await validateThreadExecutionTarget(input.userId, input.executionTarget);
     const modelSettings = await pruneUnavailableThreadModelAliases(
       normalizeThreadModelSettings(input.modelSettings),
     );
@@ -500,6 +505,7 @@ class ContentThreadService {
       createdBy: input.userId,
       modelSettings: resolvedModelSettings,
       chatPreferences: input.chatPreferences,
+      executionTarget: input.executionTarget,
     });
 
     return { thread };
@@ -528,9 +534,24 @@ class ContentThreadService {
       if (!existingThread || !canViewThread(input.userId, existingThread)) {
         throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
       }
+      const previous = existingThread.executionTarget ?? { kind: "cloud" };
+      const requested = input.executionTarget ?? { kind: "cloud" };
+      if (
+        previous.kind !== requested.kind ||
+        (previous.kind === "local" &&
+          requested.kind === "local" &&
+          previous.deviceId !== requested.deviceId)
+      ) {
+        throw new ContentError(
+          409,
+          "EXECUTION_TARGET_IMMUTABLE",
+          "A conversation execution environment cannot be changed. Create a new conversation.",
+        );
+      }
       return { thread: existingThread, run: existingRun };
     }
 
+    await validateThreadExecutionTarget(input.userId, input.executionTarget);
     const modelSettings = await pruneUnavailableThreadModelAliases(
       normalizeThreadModelSettings(input.modelSettings),
     );
@@ -545,6 +566,7 @@ class ContentThreadService {
       createdBy: input.userId,
       modelSettings: resolvedModelSettings,
       chatPreferences: input.chatPreferences,
+      executionTarget: input.executionTarget,
     });
 
     const mode: ChatThreadRunMode = "send";
