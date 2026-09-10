@@ -22,6 +22,7 @@ type SourceWeftDesktopBridge = {
 declare global {
   interface Window {
     __SOURCEWEFT_DESKTOP__?: SourceWeftDesktopBridge;
+    __SOURCEWEFT_TITLEBAR_OVERLAY__?: boolean;
   }
 }
 
@@ -117,6 +118,9 @@ export const desktopBridge = {
   },
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");
+  },
+  titlebarAction(action: "drag" | "toggleMaximize") {
+    return invokeDesktop<void>("desktop_titlebar_action", { action });
   },
   chooseLocalFolder(ticket: string, userId: string) {
     return invokeDesktop<{ id: string; name: string }>("choose_local_folder", {

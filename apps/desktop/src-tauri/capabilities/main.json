@@ -12,6 +12,7 @@
     "allow-disconnect-local-host",
     "allow-choose-working-directory",
     "allow-desktop-info",
+    "allow-desktop-titlebar-action",
     "allow-show-main-window",
     "allow-get-autostart",
     "allow-set-autostart",

@@ -2,8 +2,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Archive,
-  ArrowLeft,
-  ChevronRight,
   Link2,
   ListFilter,
   MessagesSquare,
@@ -57,7 +55,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import {
   getSidebarChatItems,
-  type ChatVisibilityFilter,
+  type SidebarChatFilter,
 } from "./dashboard-sidebar-chat-list";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
@@ -341,7 +339,8 @@ function ChatListRow({
           "flex h-auto w-full items-start gap-2 px-3 py-2 text-left text-sm leading-snug transition-colors",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
-            : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+            : "text-sidebar-foreground group-hover/menu-item:bg-sidebar-accent/60 group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent/60",
+          menuOpen && !active && "bg-sidebar-accent/60",
         )}
         onClick={() => onOpen(item.id, item.title)}
         onFocus={() => onPrefetch?.(item.id)}
@@ -392,14 +391,6 @@ function ChatListRow({
         </div>
       </button>
 
-      <div
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute inset-y-1.5 right-2.5 w-8 rounded-r-md bg-gradient-to-l from-sidebar via-sidebar/70 to-transparent invisible opacity-0 transition-opacity",
-          "group-hover/menu-item:visible group-hover/menu-item:opacity-100 group-focus-within/menu-item:visible group-focus-within/menu-item:opacity-100",
-          menuOpen && "visible opacity-100",
-        )}
-      />
       <div
         className={cn(
           "absolute right-3 top-2 z-10 shrink-0 invisible opacity-0 pointer-events-none transition-opacity",
@@ -496,21 +487,19 @@ function ChatList({
   onPrefetch?: (id: string) => void;
 }) {
   const [isClearing, setIsClearing] = useState(false);
-  const [view, setView] = useState<"chats" | "archived">("chats");
-  const [filter, setFilter] = useState<ChatVisibilityFilter>("all");
-  const isArchived = view === "archived";
+  const [filter, setFilter] = useState<SidebarChatFilter>("all");
+  const isArchived = filter === "archived";
   const items = useMemo(
     () =>
       getSidebarChatItems({
         privateChats,
         sharedChats,
         archivedChats,
-        view,
         filter,
       }).filter((item) =>
         item.title.toLowerCase().includes(search.trim().toLowerCase()),
       ),
-    [privateChats, sharedChats, archivedChats, view, filter, search],
+    [privateChats, sharedChats, archivedChats, filter, search],
   );
   const canLoadMore = !isArchived && hasMore;
   // Clear actions keep their original scope, regardless of the visible subset.
@@ -523,10 +512,6 @@ function ChatList({
         : undefined;
   const clearItems = isArchived ? archivedChats : privateChats;
   const clearTitle = isArchived ? "archived chats" : "private chats";
-  const switchView = (nextView: "chats" | "archived") => {
-    setView(nextView);
-    setFilter("all");
-  };
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -542,19 +527,8 @@ function ChatList({
   return (
     <>
       <div className="group/section-label flex shrink-0 items-center gap-1 px-3.5 py-2">
-        {isArchived ? (
-          <Button
-            onClick={() => switchView("chats")}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-            aria-label="Back to chats"
-          >
-            <ArrowLeft className="size-3.5" />
-          </Button>
-        ) : null}
         <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          {isArchived ? "Archived" : "Chats"}
+          Chats
         </span>
         {headerActions}
         {onClear && clearItems.length > 0 ? (
@@ -609,7 +583,11 @@ function ChatList({
             variant="secondary"
             aria-label={`Clear ${filter} filter`}
           >
-            {filter === "shared" ? "Shared" : "Private"}
+            {filter === "shared"
+              ? "Shared"
+              : filter === "archived"
+                ? "Archived"
+                : "Private"}
             <X className="size-3" />
           </Button>
         ) : null}
@@ -632,7 +610,7 @@ function ChatList({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Visibility
+              Filter chats
             </DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={filter}
@@ -640,7 +618,8 @@ function ChatList({
                 if (
                   value === "all" ||
                   value === "shared" ||
-                  value === "private"
+                  value === "private" ||
+                  value === "archived"
                 ) {
                   setFilter(value);
                 }
@@ -658,14 +637,15 @@ function ChatList({
                 <Lock className="size-4" />
                 Private
               </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="archived">
+                <Archive className="size-4" />
+                Archived
+              </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <SidebarContent
-        key={`${view}-${filter}`}
-        className="min-h-0 overflow-y-auto"
-      >
+      <SidebarContent key={filter} className="min-h-0 overflow-y-auto">
         <SidebarGroup className="px-0 pt-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-1 py-0.5">
@@ -693,10 +673,8 @@ function ChatList({
                   : canLoadMore
                     ? "No matching chats loaded. Load more to see older chats."
                     : filter !== "all"
-                      ? `No ${filter} chats${isArchived ? " in archive" : ""}.`
-                      : isArchived
-                        ? "No archived chats."
-                        : "No chats yet."}
+                      ? `No ${filter} chats.`
+                      : "No chats yet."}
               </p>
             ) : null}
             {canLoadMore && onLoadMore ? (
@@ -716,31 +694,13 @@ function ChatList({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      {!isArchived ? (
-        <div className="shrink-0 border-t px-3.5 py-1.5">
-          <Button
-            className="w-full justify-start gap-2 text-xs text-muted-foreground"
-            onClick={() => switchView("archived")}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <Archive className="size-3.5" />
-            <span className="flex-1 text-left">Archived</span>
-            {archivedChats.length > 0 ? (
-              <span className="text-[11px] tabular-nums">
-                {archivedChats.length}
-              </span>
-            ) : null}
-            <ChevronRight className="size-3.5" />
-          </Button>
-        </div>
-      ) : null}
     </>
   );
 }
 
 export function DashboardSidebarChatPanel({
+  brand,
+  desktopTitlebar = false,
   heading,
   navigation,
   footer,
@@ -769,7 +729,9 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange,
   workspaceName,
 }: {
+  brand?: ReactNode;
   heading: ReactNode;
+  desktopTitlebar?: boolean;
   navigation: ReactNode;
   footer: ReactNode;
   search: string;
@@ -805,9 +767,12 @@ export function DashboardSidebarChatPanel({
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className={cn("flex h-full min-h-0 flex-col", desktopTitlebar && "pt-14")}
+    >
       <SidebarHeader className="shrink-0 gap-1 px-3 pb-2 pt-0">
-        <div className="flex h-12 min-w-0 items-center gap-1 sm:h-14">
+        {brand}
+        <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
           <div className="min-w-0 flex-1">
             <WorkspaceSwitcher
               activeWorkspace={workspaceName}

@@ -7,7 +7,6 @@ import {
   ArrowUp,
   RefreshCw,
   Download,
-  X,
   Eye,
   ChevronRight,
 } from "lucide-react";
@@ -32,7 +31,6 @@ type Preview = {
 type LocalFilesPanelProps = {
   workspaceId: string;
   threadId: string;
-  onClose?: () => void;
   variant?: "panel" | "hub";
   computerName?: string;
   searchQuery?: string;
@@ -51,7 +49,6 @@ export function LocalFilesPanel(props: LocalFilesPanelProps) {
 function LocalFilesBrowser({
   workspaceId,
   threadId,
-  onClose,
   variant = "panel",
   computerName,
   searchQuery = "",
@@ -188,16 +185,6 @@ function LocalFilesBrowser({
         >
           <RefreshCw size={15} />
         </button>
-        {onClose && (
-          <button
-            type="button"
-            aria-label="Close files"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-accent"
-          >
-            <X size={15} />
-          </button>
-        )}
       </header>
       {directory && (
         <div className="flex items-center gap-2 border-y px-4 py-1 text-xs">

@@ -18,6 +18,7 @@ import {
   PopoverTrigger,
 } from "@sourceweft/ui-web/components/ui/popover";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -210,11 +211,13 @@ export function ChatWorkContext({
   threadId,
   creation,
   disabled = false,
+  compact = false,
 }: {
   workspaceId: string | null;
   threadId?: string;
   creation?: ChatCreationContext;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const { setWorkTarget } = useDashboardChatState();
   const [info, setInfo] = useState<ExecutionInfo | null>(null);
@@ -270,8 +273,9 @@ export function ChatWorkContext({
         workingDirectory)
       : "Task folder"
     : "Directory pending";
-  const triggerClassName =
-    "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
+  const triggerClassName = compact
+    ? "flex h-8 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+    : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
   const icon =
     target?.kind === "cloud" ? (
       <Cloud className="size-3.5 shrink-0" />
@@ -280,7 +284,12 @@ export function ChatWorkContext({
     );
   return (
     <div
-      className="flex min-w-0 max-w-[55%] shrink-0 items-center text-xs text-muted-foreground sm:w-full sm:max-w-full sm:shrink"
+      className={cn(
+        "flex min-w-0 items-center text-xs text-muted-foreground",
+        compact
+          ? "min-w-0 max-w-[220px] shrink"
+          : "max-w-[55%] shrink-0 sm:w-full sm:max-w-full sm:shrink",
+      )}
       data-testid="chat-work-context"
     >
       {threadId ? (
@@ -457,7 +466,6 @@ export function ChatWorkContext({
                 key={`${workspaceId}:${threadId}`}
                 workspaceId={workspaceId}
                 threadId={threadId}
-                onClose={() => setFilesOpen(false)}
               />
             )}
           </DialogContent>

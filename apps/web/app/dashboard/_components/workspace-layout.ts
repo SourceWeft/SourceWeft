@@ -2,12 +2,14 @@
 export function resolveWorkspaceLayout(
   width: number,
   conversationPreference = true,
+  desktopTitlebar = false,
 ) {
   const mode = width >= 1440 ? "wide" : width >= 1120 ? "standard" : "compact";
   const conversationWidth = 248;
   const canDockConversations = width >= 768;
   const conversationsDocked = canDockConversations && conversationPreference;
-  const railWidth = canDockConversations && !conversationsDocked ? 56 : 0;
+  const railWidth =
+    canDockConversations && !conversationsDocked && !desktopTitlebar ? 56 : 0;
   const contentWidth = Math.max(
     0,
     width - (conversationsDocked ? conversationWidth : railWidth),

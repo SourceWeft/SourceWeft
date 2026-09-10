@@ -4,6 +4,7 @@ mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
+mod window_chrome;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -105,6 +106,7 @@ fn main() {
             preview_window::read_file_preview,
             preview_window::close_file_preview,
             desktop_info,
+            window_chrome::desktop_titlebar_action,
             show_main_window,
             get_autostart,
             set_autostart,
@@ -194,7 +196,14 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?,
     );
     let handle = app.handle().clone();
-    WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+    let builder = WebviewWindowBuilder::from_config(app.handle(), &window_config)?;
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0))
+        .initialization_script(window_chrome::INITIALIZATION_SCRIPT);
+    builder
         .initialization_script(desktop_bridge_script())
         .on_navigation(move |url| handle_navigation(&handle, url))
         .on_new_window(move |url, _features| {

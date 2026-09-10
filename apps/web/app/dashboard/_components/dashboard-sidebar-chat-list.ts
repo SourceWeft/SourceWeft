@@ -1,23 +1,21 @@
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
-export type ChatVisibilityFilter = "all" | "shared" | "private";
+export type SidebarChatFilter = "all" | "shared" | "private" | "archived";
 
 export function getSidebarChatItems({
   privateChats,
   sharedChats,
   archivedChats,
-  view,
   filter,
 }: {
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
   archivedChats: ChatItem[];
-  view: "chats" | "archived";
-  filter: ChatVisibilityFilter;
+  filter: SidebarChatFilter;
 }): ChatItem[] {
   const archivedIds = new Set(archivedChats.map((item) => item.id));
   const candidates =
-    view === "archived"
+    filter === "archived"
       ? archivedChats
       : [...sharedChats, ...privateChats].filter(
           (item) => !archivedIds.has(item.id),
@@ -37,6 +35,7 @@ export function getSidebarChatItems({
     .filter(
       (item) =>
         filter === "all" ||
+        filter === "archived" ||
         (filter === "shared" ? isSharedChat(item) : !isSharedChat(item)),
     )
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));

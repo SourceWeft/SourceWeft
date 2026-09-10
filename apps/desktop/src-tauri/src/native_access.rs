@@ -12,6 +12,7 @@ pub fn web_capability(base: &Url) -> CapabilityBuilder {
         .remote(base.origin().ascii_serialization())
         .permission("core:default")
         .permission("allow-desktop-info")
+        .permission("allow-desktop-titlebar-action")
         .permission("allow-show-main-window")
         .permission("allow-get-autostart")
         .permission("allow-set-autostart")
@@ -86,6 +87,12 @@ mod tests {
             };
             assert!(!capability.local);
             assert_eq!(capability.windows, vec!["main"]);
+            let permissions = serde_json::to_value(&capability.permissions).unwrap();
+            assert!(permissions
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|permission| permission == "allow-desktop-titlebar-action"));
             let patterns: Vec<RemoteUrlPattern> = capability
                 .remote
                 .unwrap()
@@ -126,6 +133,7 @@ mod tests {
         let permissions = permissions.as_array().unwrap();
         assert!(permissions.iter().any(|p| p == "allow-hub-window-send"));
         for denied in [
+            "allow-desktop-titlebar-action",
             "allow-authenticate-local-host",
             "allow-choose-local-folder",
             "allow-enable-local-host",

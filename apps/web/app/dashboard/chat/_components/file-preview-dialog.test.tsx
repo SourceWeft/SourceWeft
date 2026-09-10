@@ -24,6 +24,27 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
 });
+test("file actions stay in the dialog header, including when preview fails", async () => {
+  const download = vi.fn();
+  await act(async () =>
+    root.render(
+      createElement(FilePreviewDialog, {
+        open: true,
+        onOpenChange: () => {},
+        path: "/local/report.pdf",
+        error: "Could not load file",
+        onDownload: download,
+      }),
+    ),
+  );
+  const dialog = document.querySelector('[role="dialog"]');
+  const buttons = dialog!.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Download file"]',
+  );
+  assert.equal(buttons.length, 1);
+  await act(async () => buttons[0]!.click());
+  assert.equal(download.mock.calls.length, 1);
+});
 test("text preview forwards its source to the shared preview inside the application dialog", async () => {
   await act(async () =>
     root.render(

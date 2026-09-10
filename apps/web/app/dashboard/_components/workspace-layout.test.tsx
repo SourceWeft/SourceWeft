@@ -143,3 +143,16 @@ test("desktop collapse keeps a 56px rail and only phone sizes hide navigation en
     assert.equal(resolveWorkspaceLayout(width, false).contentWidth, width - 56);
   }
 });
+
+test("the macOS overlay returns the full content width when its sidebar is collapsed", () => {
+  for (const width of [800, 960, 1280, 1440, 1920]) {
+    const collapsed = resolveWorkspaceLayout(width, false, true);
+    assert.equal(collapsed.railWidth, 0);
+    assert.equal(collapsed.contentWidth, width);
+    assert.equal(collapsed.conversationsDocked, false);
+    assert.equal(
+      resolveWorkspaceLayout(width, true, true).contentWidth,
+      width - 248,
+    );
+  }
+});

@@ -7,6 +7,7 @@ fn main() {
             "read_file_preview",
             "close_file_preview",
             "desktop_info",
+            "desktop_titlebar_action",
             "show_main_window",
             "get_autostart",
             "set_autostart",

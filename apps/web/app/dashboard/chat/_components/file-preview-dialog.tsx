@@ -148,7 +148,7 @@ export function FilePreviewDialog({
           ) : contentText === "" ? (
             <p className="text-sm text-muted-foreground">This file is empty.</p>
           ) : previewSource ? (
-            <Preview key={path} className="h-full" source={previewSource} onDownload={onDownload} />
+            <Preview key={path} className="h-full" source={previewSource} />
           ) : null}
         </div>
       </DialogContent>

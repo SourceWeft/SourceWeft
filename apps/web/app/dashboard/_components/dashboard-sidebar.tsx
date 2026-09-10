@@ -35,6 +35,7 @@ import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
+import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
 
 type NavItem = {
   title: string;
@@ -105,6 +106,7 @@ export function DashboardSidebar() {
   const { openMobile, setOpenMobile } = useSidebar();
   const {
     conversationsDocked,
+    desktopTitlebar,
     conversationWidth,
     canDockConversations,
     railWidth,
@@ -316,11 +318,14 @@ export function DashboardSidebar() {
     </nav>
   );
 
-  const renderPanel = () => (
+  const renderPanel = (desktopTitlebar = false) => (
     <DashboardSidebarChatPanel
+      brand={<DashboardSidebarBrand />}
+      desktopTitlebar={desktopTitlebar}
       heading={
-        canDockConversations &&
-        pathname.startsWith("/dashboard/chat") ? null : (
+        desktopTitlebar ||
+        (canDockConversations &&
+          pathname.startsWith("/dashboard/chat")) ? null : (
           <Button
             variant="ghost"
             size="icon-xs"
@@ -374,6 +379,7 @@ export function DashboardSidebar() {
       style={{ width: railWidth }}
       className="flex h-svh shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar px-2 py-3"
     >
+      <DashboardSidebarBrand collapsed />
       {!pathname.startsWith("/dashboard/chat") && (
         <Button
           variant="ghost"
@@ -437,7 +443,7 @@ export function DashboardSidebar() {
           style={{ width: conversationWidth }}
           className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         >
-          {renderPanel()}
+          {renderPanel(desktopTitlebar)}
         </aside>
       )}
 

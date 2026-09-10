@@ -28,7 +28,6 @@ const input = {
     chat("archived-private", "private", 6),
     chat("archived-shared", "workspace", 3),
   ],
-  view: "chats" as const,
   filter: "all" as const,
 };
 
@@ -64,18 +63,8 @@ test("archived chats stay isolated even when another loaded page contains the sa
     false,
   );
   assert.deepEqual(
-    getSidebarChatItems({ ...reloaded, view: "archived" }).map(
-      (item) => item.id,
-    ),
+    getSidebarChatItems({ ...reloaded, filter: "archived" }).map((item) => item.id),
     ["archived-private", "archived-shared"],
-  );
-  assert.deepEqual(
-    getSidebarChatItems({
-      ...reloaded,
-      view: "archived",
-      filter: "shared",
-    }).map((item) => item.id),
-    ["archived-shared"],
   );
 });
 
