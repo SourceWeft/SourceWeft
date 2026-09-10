@@ -126,23 +126,36 @@ pub fn hub_window_action(
                 .ok()
                 .and_then(|p| std::fs::read(p.join("hub-window.json")).ok())
                 .and_then(|bytes| serde_json::from_slice::<Geometry>(&bytes).ok());
-            // Remember size, but place each newly opened Hub beside its owner.
+            // Remember width, but match the owner's height on each new opening.
             // Old absolute positions must not send it to another display.
             let width = saved
                 .as_ref()
                 .map_or(560.0, |g| g.width)
                 .max(420.0)
                 .min(area.size.width as f64 / scale);
-            let height = saved
-                .as_ref()
-                .map_or(760.0, |g| g.height)
-                .max(480.0)
-                .min((area.size.height as f64 / scale - 40.0).max(1.0));
+            let height = (main_size.height.min(area.size.height) as f64 / scale - 40.0).max(1.0);
             builder = builder
                 .inner_size(width, height)
                 .min_inner_size(width.min(420.0), height.min(480.0));
             let hub = builder.build().map_err(|e| e.to_string())?;
             let position_result = (|| -> Result<(), String> {
+                // Establish the owner's monitor while hidden, before measuring
+                // frame pixels; the initial monitor may use a different scale.
+                hub.set_position(area.position).map_err(|e| e.to_string())?;
+                let outer = hub.outer_size().map_err(|e| e.to_string())?;
+                let inner = hub.inner_size().map_err(|e| e.to_string())?;
+                let content_height = placement::matching_inner_height(
+                    main_size.height,
+                    area.size.height,
+                    outer.height.saturating_sub(inner.height),
+                );
+                hub.set_min_size(Some(tauri::PhysicalSize::new(
+                    inner.width.min((420.0 * scale) as u32),
+                    content_height.min((480.0 * scale) as u32),
+                )))
+                .map_err(|e| e.to_string())?;
+                hub.set_size(tauri::PhysicalSize::new(inner.width, content_height))
+                    .map_err(|e| e.to_string())?;
                 let outer = hub.outer_size().map_err(|e| e.to_string())?;
                 let (x, y) = placement::adjacent_position(
                     placement::Rect {

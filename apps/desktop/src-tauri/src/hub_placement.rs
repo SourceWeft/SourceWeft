@@ -7,6 +7,11 @@ pub struct Rect {
     pub height: f64,
 }
 
+/// Match visible outer bounds, including a different titlebar/frame on Hub.
+pub fn matching_inner_height(main_outer: u32, work_height: u32, hub_frame: u32) -> u32 {
+    main_outer.min(work_height).saturating_sub(hub_frame).max(1)
+}
+
 pub fn adjacent_position(main: Rect, work: Rect, width: f64, height: f64, gap: f64) -> (i32, i32) {
     let right = main.x + main.width + gap;
     let left = main.x - width - gap;
@@ -38,6 +43,17 @@ mod tests {
         width: 1920.0,
         height: 1055.0,
     };
+    #[test]
+    fn matches_main_outer_height_instead_of_a_saved_hub_height() {
+        assert_eq!(matching_inner_height(840, 1055, 28), 812);
+        assert_eq!(matching_inner_height(600, 1055, 28), 572);
+    }
+    #[test]
+    fn accounts_for_scaled_frames_and_limits_height_to_the_screen() {
+        assert_eq!(matching_inner_height(1680, 2160, 56), 1624);
+        assert_eq!(matching_inner_height(840, 600, 28), 572);
+        assert_eq!(matching_inner_height(840, 600, 0), 600);
+    }
     #[test]
     fn opens_beside_the_main_window_on_the_right() {
         assert_eq!(
