@@ -1,4 +1,5 @@
 "use client";
+import { isHubFileWindow, requestHubFile } from "./hub-file-relay";
 import { apiBaseUrl } from "./api-base-url";
 import {
   cachedLocalHostHeaders,
@@ -7,6 +8,10 @@ import {
 
 /** Binary downloads need the same account-bound native proof as directory reads. */
 export async function downloadLocalFile(path: string, filename: string) {
+  if (isHubFileWindow()) {
+    await requestHubFile(path, filename);
+    return;
+  }
   const response = await fetch(`${apiBaseUrl}${path}`, {
     credentials: "include",
     cache: "no-store",

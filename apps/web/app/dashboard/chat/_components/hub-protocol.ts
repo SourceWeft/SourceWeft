@@ -51,6 +51,14 @@ export type HubCommand = {
   action: HubAction;
 };
 export type HubMessage =
+  | {
+      kind: "local-file-request";
+      request: import("../../../../lib/hub-file-relay").HubFileRequest;
+    }
+  | {
+      kind: "local-file-result";
+      result: import("../../../../lib/hub-file-relay").HubFileResult;
+    }
   | { kind: "barrier"; id: string }
   | { kind: "barrier-result"; id: string; pending: boolean }
   | { kind: "ready"; accountId: string; protocolVersion: number }

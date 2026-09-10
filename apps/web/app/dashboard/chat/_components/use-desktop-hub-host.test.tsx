@@ -14,6 +14,18 @@ const state = vi.hoisted(() => ({
   action: vi.fn().mockResolvedValue(undefined),
   error: vi.fn(),
   docked: vi.fn(),
+  fileRead: vi.fn().mockResolvedValue({ files: [{ path: "note.txt" }] }),
+  fileDownload: vi.fn().mockResolvedValue(undefined),
+  fileAuthorize: vi.fn().mockResolvedValue({ proof: "main-only-proof" }),
+}));
+vi.mock("../../../../lib/local-execution", () => ({
+  localRequest: state.fileRead,
+}));
+vi.mock("../../../../lib/local-file-download", () => ({
+  downloadLocalFile: state.fileDownload,
+}));
+vi.mock("../../../../lib/local-host-session", () => ({
+  ensureLocalHostSession: state.fileAuthorize,
 }));
 vi.mock("next/navigation", () => ({
   usePathname: () => state.pathname,
@@ -97,6 +109,32 @@ function latest() {
     .filter((m) => m.kind === "snapshot")
     .at(-1).snapshot as HubSnapshot;
 }
+
+it("serves detached Workfiles through the current main conversation without relaying its proof", async () => {
+  await render(registration("A"));
+  await emit({ kind: "ready", accountId: "user", protocolVersion: 1 });
+  const s = latest();
+  await emit({
+    kind: "local-file-request",
+    request: {
+      id: "file",
+      sessionId: s.sessionId,
+      contextKey: s.contextKey,
+      path: "/v1/workspaces/ws/threads/A/local-files",
+    },
+  });
+  expect(state.fileAuthorize).toHaveBeenCalledWith("user");
+  expect(state.fileRead).toHaveBeenCalledWith(
+    "/v1/workspaces/ws/threads/A/local-files",
+  );
+  const reply = state.send.mock.calls
+    .map(([m]) => m)
+    .find((m) => m.kind === "local-file-result");
+  expect(JSON.parse(reply.result.chunk)).toEqual({
+    files: [{ path: "note.txt" }],
+  });
+  expect(JSON.stringify(reply)).not.toContain("main-only-proof");
+});
 beforeEach(() => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }

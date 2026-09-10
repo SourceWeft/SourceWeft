@@ -1,4 +1,5 @@
 "use client";
+import { isHubFileWindow, requestHubFile } from "./hub-file-relay";
 import { apiBaseUrl } from "./api-base-url";
 import {
   cachedLocalHostHeaders,
@@ -17,6 +18,11 @@ export async function localRequest<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  if (isHubFileWindow() && /\/local-files(?:\?|$)/.test(path)) {
+    if (body !== undefined)
+      throw new Error("Hub file relay supports reads and downloads only.");
+    return (await requestHubFile(path)) as T;
+  }
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: body === undefined ? "GET" : "POST",
     credentials: "include",

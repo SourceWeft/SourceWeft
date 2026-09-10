@@ -5,6 +5,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::Url;
 
+#[path = "hub_placement.rs"]
+mod placement;
+
 pub const LABEL: &str = "hub";
 pub const PATH: &str = "/dashboard/hub-window";
 pub const EVENT: &str = "sourceweft:hub";
@@ -103,51 +106,68 @@ pub fn hub_window_action(
                     }
                     tauri::webview::NewWindowResponse::Deny
                 });
-            // Clamp saved coordinates to a currently attached monitor.
-            if let Some(main) = app.get_webview_window("main") {
-                if let Ok(monitors) = main.available_monitors() {
-                    let saved = app
-                        .path()
-                        .app_data_dir()
-                        .ok()
-                        .and_then(|p| std::fs::read(p.join("hub-window.json")).ok())
-                        .and_then(|b| serde_json::from_slice::<Geometry>(&b).ok());
-                    let monitor = monitors
-                        .iter()
-                        .find(|m| {
-                            saved.as_ref().is_some_and(|g| {
-                                let area = m.work_area();
-                                let s = m.scale_factor();
-                                g.x >= area.position.x as f64 / s
-                                    && g.x < (area.position.x as f64 + area.size.width as f64) / s
-                                    && g.y >= area.position.y as f64 / s
-                                    && g.y < (area.position.y as f64 + area.size.height as f64) / s
-                            })
-                        })
-                        .or_else(|| monitors.first());
-                    if let Some(m) = monitor {
-                        let area = m.work_area();
-                        let s = m.scale_factor();
-                        let x = area.position.x as f64 / s;
-                        let y = area.position.y as f64 / s;
-                        let w = area.size.width as f64 / s;
-                        let h = area.size.height as f64 / s;
-                        let g = saved.unwrap_or(Geometry {
-                            x: x + 40.0,
-                            y: y + 40.0,
-                            width: 560.0,
-                            height: 760.0,
-                        });
-                        let width = g.width.max(420.0).min(w);
-                        let height = g.height.max(480.0).min((h - 40.0).max(1.0));
-                        builder = builder.inner_size(width, height).position(
-                            g.x.max(x).min(x + w - width),
-                            g.y.max(y).min(y + h - height - 30.0),
-                        );
-                    }
-                }
-            }
+            let main = app
+                .get_webview_window("main")
+                .ok_or("Main window was not found")?;
+            let monitor = match main.current_monitor().map_err(|e| e.to_string())? {
+                Some(monitor) => monitor,
+                None => main
+                    .primary_monitor()
+                    .map_err(|e| e.to_string())?
+                    .ok_or("No monitor is available for Hub")?,
+            };
+            let area = monitor.work_area();
+            let scale = monitor.scale_factor();
+            let main_position = main.outer_position().map_err(|e| e.to_string())?;
+            let main_size = main.outer_size().map_err(|e| e.to_string())?;
+            let saved = app
+                .path()
+                .app_data_dir()
+                .ok()
+                .and_then(|p| std::fs::read(p.join("hub-window.json")).ok())
+                .and_then(|bytes| serde_json::from_slice::<Geometry>(&bytes).ok());
+            // Remember size, but place each newly opened Hub beside its owner.
+            // Old absolute positions must not send it to another display.
+            let width = saved
+                .as_ref()
+                .map_or(560.0, |g| g.width)
+                .max(420.0)
+                .min(area.size.width as f64 / scale);
+            let height = saved
+                .as_ref()
+                .map_or(760.0, |g| g.height)
+                .max(480.0)
+                .min((area.size.height as f64 / scale - 40.0).max(1.0));
+            builder = builder
+                .inner_size(width, height)
+                .min_inner_size(width.min(420.0), height.min(480.0));
             let hub = builder.build().map_err(|e| e.to_string())?;
+            let position_result = (|| -> Result<(), String> {
+                let outer = hub.outer_size().map_err(|e| e.to_string())?;
+                let (x, y) = placement::adjacent_position(
+                    placement::Rect {
+                        x: main_position.x as f64,
+                        y: main_position.y as f64,
+                        width: main_size.width as f64,
+                        height: main_size.height as f64,
+                    },
+                    placement::Rect {
+                        x: area.position.x as f64,
+                        y: area.position.y as f64,
+                        width: area.size.width as f64,
+                        height: area.size.height as f64,
+                    },
+                    outer.width as f64,
+                    outer.height as f64,
+                    12.0 * scale,
+                );
+                hub.set_position(tauri::PhysicalPosition::new(x, y))
+                    .map_err(|e| e.to_string())
+            })();
+            if let Err(error) = position_result {
+                let _ = hub.destroy();
+                return Err(error);
+            }
             hub.on_window_event(move |event| {
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     let _ = handle.emit_to("main", EVENT, json!({"kind":"destroyed"}));
@@ -180,11 +200,22 @@ fn message_allowed(label: &str, message: &Value) -> bool {
     match label {
         "main" => matches!(
             kind,
-            "snapshot" | "result" | "dock-applied" | "disconnected" | "barrier"
+            "snapshot"
+                | "result"
+                | "dock-applied"
+                | "disconnected"
+                | "barrier"
+                | "local-file-result"
         ),
         LABEL => matches!(
             kind,
-            "ready" | "applied" | "command" | "dock" | "view" | "barrier-result"
+            "ready"
+                | "applied"
+                | "command"
+                | "dock"
+                | "view"
+                | "barrier-result"
+                | "local-file-request"
         ),
         _ => false,
     }
@@ -255,5 +286,21 @@ mod tests {
         assert!(!message_allowed("hub", &json!({"kind":"snapshot"})));
         assert!(!message_allowed("main", &json!({"kind":"command"})));
         assert!(!message_allowed("hub", &json!({"kind":"eval"})));
+        assert!(message_allowed(
+            "hub",
+            &json!({"kind":"local-file-request"})
+        ));
+        assert!(!message_allowed(
+            "main",
+            &json!({"kind":"local-file-request"})
+        ));
+        assert!(message_allowed(
+            "main",
+            &json!({"kind":"local-file-result"})
+        ));
+        assert!(!message_allowed(
+            "hub",
+            &json!({"kind":"local-file-result"})
+        ));
     }
 }

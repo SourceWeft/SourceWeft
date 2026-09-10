@@ -9,6 +9,10 @@ import {
 import { flushSync } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { serveHubFileRequest } from "../../../../lib/hub-file-relay";
+import { localRequest } from "../../../../lib/local-execution";
+import { downloadLocalFile } from "../../../../lib/local-file-download";
+import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 import { hubSkillMemory } from "../../../../lib/hub-skill-memory";
 import { registerHubSendBarrier } from "../../../../lib/hub-send-barrier";
 import { authClient } from "../../../../lib/auth-client";
@@ -163,7 +167,15 @@ export function useDesktopHubHost(
   const handle = useRef<(message: HubMessage) => Promise<void>>(async () => {});
   handle.current = async (message) => {
     const snapshot = current.current;
-    if (message.kind === "barrier-result") {
+    if (message.kind === "local-file-request") {
+      await serveHubFileRequest(message.request, {
+        current: () => current.current,
+        authorize: ensureLocalHostSession,
+        read: localRequest,
+        download: downloadLocalFile,
+        send: (result) => bridge.send({ kind: "local-file-result", result }),
+      });
+    } else if (message.kind === "barrier-result") {
       barriers.current.get(message.id)?.(message.pending);
       barriers.current.delete(message.id);
     } else if (message.kind === "ready") {

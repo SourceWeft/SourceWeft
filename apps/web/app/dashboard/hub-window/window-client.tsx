@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, X, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
+import {
+  createHubFileClient,
+  registerHubFileRequester,
+} from "../../../lib/hub-file-relay";
 import { contentClient } from "../../../lib/sdk";
 import { authClient } from "../../../lib/auth-client";
 import { desktopBridge } from "../../../lib/desktop-bridge";
@@ -60,6 +64,15 @@ export function DesktopHubWindow() {
   activityRef.current = activity;
   visible.current = snapshot;
 
+  const fileClient = useMemo(
+    () =>
+      createHubFileClient({
+        current: () => visible.current,
+        connected: () => connectedRef.current,
+        send: (request) => bridge.send({ kind: "local-file-request", request }),
+      }),
+    [],
+  );
   const apply = useCallback((next: HubSnapshot) => {
     if (visible.current?.contextKey !== next.contextKey) {
       setPreview(null);
@@ -102,12 +115,15 @@ export function DesktopHubWindow() {
     if (!desktopBridge.isAvailable() || !session?.user.id) return;
     let disposed = false;
     let unlisten: (() => Promise<void>) | undefined;
+    const unregisterFiles = registerHubFileRequester(fileClient.request);
     const accountId = session.user.id;
     const pendingCommands = pending.current;
     const hello = () =>
       bridge.send({ kind: "ready", accountId, protocolVersion: HUB_PROTOCOL });
     const handle = (message: HubMessage) => {
-      if (message.kind === "barrier") {
+      if (message.kind === "local-file-result") {
+        fileClient.receive(message.result);
+      } else if (message.kind === "barrier") {
         void bridge
           .send({
             kind: "barrier-result",
@@ -214,6 +230,8 @@ export function DesktopHubWindow() {
     }, 5000);
     return () => {
       disposed = true;
+      unregisterFiles();
+      fileClient.cancel("Hub session ended.");
       clearInterval(heartbeat);
       if (dockTimer.current) clearTimeout(dockTimer.current);
       void unlisten?.();
@@ -225,7 +243,7 @@ export function DesktopHubWindow() {
       newest.current = null;
       visible.current = null;
     };
-  }, [session?.user.id, apply, close]);
+  }, [session?.user.id, apply, close, fileClient]);
 
   useEffect(() => {
     if (
