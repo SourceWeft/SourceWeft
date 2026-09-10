@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeAll, test, vi } from "vitest";
 import { connectorAdaptersReady } from "../../../connectors";
-import {
-  AIMessage,
-  HumanMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
 import {
   normalizeGeneratedImageProgressEvent,
@@ -360,9 +356,7 @@ test("tool stream handler attaches persisted sandbox operations on completion", 
   );
 
   assert.equal(getSandboxOperationTimeline.mock.calls.length, 1);
-  const resultEvent = events.find(
-    (event) => event.type === "tool-call-result",
-  );
+  const resultEvent = events.find((event) => event.type === "tool-call-result");
   const endEvent = events.find((event) => event.type === "tool-call-end");
   const expectedOutput = {
     exitCode: 0,
@@ -421,9 +415,7 @@ test("tool stream handler attaches persisted sandbox operations on errors", asyn
 
   const errorEvent = events.find((event) => event.type === "tool-call-error");
   assert.deepEqual(
-    errorEvent?.type === "tool-call-error"
-      ? errorEvent.toolCall.output
-      : null,
+    errorEvent?.type === "tool-call-error" ? errorEvent.toolCall.output : null,
     { content: null, operations },
   );
 });
@@ -1088,10 +1080,7 @@ test("messages stream handler preserves whitespace across streamed reasoning chu
     secondEvents[0]?.type === "reasoning" ? secondEvents[0].reasoning : null,
     "asking about black holes.",
   );
-  assert.equal(
-    runtime.modelReasoning,
-    "The user is asking about black holes.",
-  );
+  assert.equal(runtime.modelReasoning, "The user is asking about black holes.");
 });
 
 test("messages stream handler promotes pending run id tool stream when LangChain tool call id arrives", async () => {
@@ -4236,4 +4225,42 @@ test("runtime prompt omits the artifact-tools section when nothing contributes",
 
   assert.ok(!prompt.includes("Available artifact tools this turn"));
   assert.ok(!prompt.includes(SYNTHETIC_PROMPT_MARKER));
+});
+
+test("file completion keeps its tracked physical scope when the end event omits input", async () => {
+  const prepared = createToolLoggingPreparedTurn();
+  const runtime = createTurnRuntime({ prepared });
+  const currentToolCall = {
+    id: "physical-read",
+    tool: "read_file",
+    input: { file_path: "/Users/test/project/report.txt" },
+    output: null,
+    status: "running" as const,
+    latencyMs: null,
+    error: null,
+    sequence: 1,
+  };
+  const events = await collectToolStreamEvents(
+    handleToolEndStreamChunk({
+      prepared,
+      runtime,
+      snapshot: {
+        currentToolCall,
+        event: "on_tool_end",
+        normalizedInput: {},
+        toolCallId: currentToolCall.id,
+        toolName: currentToolCall.tool,
+        toolPayload: { output: { content: "disk text" } },
+      },
+    }),
+  );
+  const step = events.find((event) => event.type === "thinking-step");
+  assert.equal(
+    step?.type === "thinking-step" ? step.step.metadata?.filesystemScope : null,
+    "files",
+  );
+  assert.equal(
+    step?.type === "thinking-step" ? step.step.title : null,
+    "Read file",
+  );
 });

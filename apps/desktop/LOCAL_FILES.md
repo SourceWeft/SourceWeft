@@ -1,8 +1,9 @@
 # PC conversation files
 
 PC conversations use one physical working directory. Agent file tools, command
-execution, and the Files panel access the same files. Sources remains the indexed
-reference library. Database Workfiles and prepare/collect tools are available only
+execution, the Files panel, and the Hub Workfiles tab access the same files.
+Sources remains the indexed reference library. The Hub retains Workfiles for both
+cloud and PC conversations; the label does not imply a second storage copy. Database Workfiles and prepare/collect tools are available only
 in cloud conversations; existing PC Workfile records are preserved without an
 implicit migration, synchronization, or fallback.
 
@@ -19,11 +20,16 @@ selected directory can be reused by multiple conversations. Deleting a conversat
 never deletes the physical directory. Missing/replaced directories, invalid grants,
 and offline devices return errors; they do not create replacement storage.
 
-The execution-location bar displays the directory once resolved and provides a
-separate Files button. The panel lists directories, previews text, and downloads
-files directly from the bound PC. It refreshes every three seconds while open and
-clears unavailable content on errors. Changes made by a command or external editor
-appear on the next read. Workfiles is hidden in the Sources hub for PC conversations.
+After creation, the conversation header keeps the chosen directory name visible
+beside the computer name; the full path is available on hover and in Conversation
+details. The selection is read-only after creation.
+
+Hub Workfiles shows “Cloud · saved with this conversation” for database-backed
+cloud files. For PC conversations it shows “This computer” and the device name,
+then lists the bound physical directory. The local view supports directory
+navigation, text preview, download and filtering. It refreshes every three seconds
+while open and clears unavailable content on errors. External edits appear on the
+next read. The separate Files view uses the same endpoint and disk files.
 
 Agent reads, writes, edits, glob and grep use physical paths under this directory.
 Edits compare the previous content before writing, so intervening external edits
@@ -44,14 +50,15 @@ second editable Workfiles copy. Artifact publication remains explicit.
 - Text search: at most 200 candidate text files and 1 MiB total; up to 50 matches.
 - The native folder picker requires the selected Mac's connected desktop client.
   A browser on another device can use automatic allocation and inspect files when
-  the selected PC is online.
+  the selected PC is online, has enabled access from other devices, and the
+  browser session has connected to it.
 - Existing skill/runtime asset installation retains its own provider constraints;
   this change does not validate arbitrary cloud-only dependencies on macOS.
 
 ## Rollout
 
-Apply database migration `0033_local_directory_grants.sql` using the usual backend
-migration command, then rebuild/restart the desktop client and backend/Web services.
+Apply database migrations through `0034_local_work_contexts.sql` using the usual
+backend migration command, then rebuild/restart the desktop client and backend/Web services.
 The desktop automatically upgrades its local SQLite schema to version 3. Selected
 directory requests require both this migration and the updated native host. There
 is no automatic migration of old DB Workfiles into user directories.

@@ -97,6 +97,7 @@ import {
   DeleteWorkfileDialog,
   WorkfilePreviewDialog,
 } from "./workfiles/dialogs";
+import { LocalFilesPanel } from "../local-files-panel";
 import { WorkfilesTab } from "./workfiles/tab";
 import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
 import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
@@ -255,8 +256,9 @@ export function SourcesHub({
   const [execution, setExecution] = useState<{
     threadId: string;
     kind: "local" | "cloud";
+    computerName?: string;
   } | null>(null);
-  const showWorkfiles =
+  const cloudWorkfiles =
     mode === "thread" &&
     execution?.threadId === threadId &&
     execution.kind === "cloud";
@@ -270,7 +272,11 @@ export function SourcesHub({
       )
         .then((value) => {
           if (live)
-            setExecution({ threadId, kind: value.executionTarget.kind });
+            setExecution({
+              threadId,
+              kind: value.executionTarget.kind,
+              computerName: value.target?.name,
+            });
         })
         .catch((error) => {
           if (live) {
@@ -285,16 +291,6 @@ export function SourcesHub({
       live = false;
     };
   }, [workspaceId, threadId, mode]);
-  useEffect(() => {
-    // Keep a restored cloud Workfiles tab while its execution location loads.
-    // A confirmed local conversation must never expose the cloud file surface.
-    if (
-      activeTab === "Workfiles" &&
-      (mode === "new" ||
-        (execution?.threadId === threadId && execution?.kind === "local"))
-    )
-      setActiveTab("Sources");
-  }, [mode, execution, threadId, activeTab]);
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
     Workfiles: "",
@@ -346,7 +342,7 @@ export function SourcesHub({
     handleConfirmDeleteWorkfile,
   } = useWorkfiles({
     mode,
-    enabled: showWorkfiles,
+    enabled: cloudWorkfiles,
     workspaceId,
     threadId,
     workfilesRefreshKey,
@@ -677,6 +673,7 @@ export function SourcesHub({
   }, [sources, isLoading, setPreviewSource]);
   useEffect(() => {
     if (
+      !cloudWorkfiles ||
       restoredWorkfile.current ||
       !initialPreview.current?.workfilePath ||
       isLoadingWorkfiles
@@ -689,7 +686,7 @@ export function SourcesHub({
       restoredWorkfile.current = true;
       void handleOpenWorkfile(file);
     }
-  }, [workfiles, isLoadingWorkfiles, handleOpenWorkfile]);
+  }, [cloudWorkfiles, workfiles, isLoadingWorkfiles, handleOpenWorkfile]);
 
   useEffect(() => {
     updateTabScrollState();
@@ -738,7 +735,7 @@ export function SourcesHub({
 
   const tabCounts: Partial<Record<HubTab, number>> = {
     Sources: selectedSourceCoverageCount,
-    Workfiles: workfiles.length,
+    Workfiles: cloudWorkfiles ? workfiles.length : undefined,
     Artifacts: artifacts.length,
     Skills: selectedSkillIds.length,
     MCP: selectedMcpInstallIds.length + selectedMcpToolIds.length,
@@ -918,28 +915,26 @@ export function SourcesHub({
               onScroll={updateTabScrollState}
               ref={tabStripRef}
             >
-              {tabs
-                .filter((tab) => tab !== "Workfiles" || showWorkfiles)
-                .map((tab) => (
-                  <button
-                    className={cn(
-                      "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
-                      activeTab === tab
-                        ? "border-border bg-secondary text-foreground shadow-xs"
-                        : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-                    )}
-                    key={tab}
-                    onClick={() => handleActiveTabChange(tab)}
-                    type="button"
-                  >
-                    <span>{tab}</span>
-                    {tabCounts[tab] !== undefined ? (
-                      <span className="ml-1.5 text-[10px] text-current/70">
-                        {tabCounts[tab]}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
+              {tabs.map((tab) => (
+                <button
+                  className={cn(
+                    "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
+                    activeTab === tab
+                      ? "border-border bg-secondary text-foreground shadow-xs"
+                      : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  key={tab}
+                  onClick={() => handleActiveTabChange(tab)}
+                  type="button"
+                >
+                  <span>{tab}</span>
+                  {tabCounts[tab] !== undefined ? (
+                    <span className="ml-1.5 text-[10px] text-current/70">
+                      {tabCounts[tab]}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
             </div>
             <div
               aria-hidden="true"
@@ -1130,7 +1125,7 @@ export function SourcesHub({
             </section>
           )}
 
-          {showWorkfiles && activeTab === "Workfiles" && (
+          {cloudWorkfiles && activeTab === "Workfiles" && (
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1157,6 +1152,12 @@ export function SourcesHub({
                   <span className="sr-only">Refresh workfiles</span>
                 </Button>
               </div>
+              <p
+                className="mb-2 text-xs text-muted-foreground"
+                data-testid="workfiles-storage-source"
+              >
+                Cloud · saved with this conversation
+              </p>
               <WorkfilesTab
                 files={workfiles}
                 isLoading={isLoadingWorkfiles}
@@ -1169,6 +1170,33 @@ export function SourcesHub({
               />
             </section>
           )}
+
+          {activeTab === "Workfiles" &&
+            !cloudWorkfiles &&
+            (mode === "new" ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                Workfiles will appear when the conversation starts.
+              </p>
+            ) : execution?.threadId === threadId &&
+              execution.kind === "local" &&
+              workspaceId &&
+              threadId ? (
+              <LocalFilesPanel
+                key={threadId}
+                workspaceId={workspaceId}
+                threadId={threadId}
+                variant="hub"
+                computerName={execution.computerName}
+                searchQuery={deferredSearchQueries.Workfiles}
+              />
+            ) : (
+              <p
+                role={executionError ? "alert" : "status"}
+                className="p-4 text-sm text-muted-foreground"
+              >
+                {executionError ?? "Loading Workfiles location…"}
+              </p>
+            ))}
 
           {activeTab === "Artifacts" && (
             <section className="space-y-3">

@@ -3,7 +3,15 @@ import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { authClient } from "../../../../lib/auth-client";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Cloud, Laptop, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
+import {
+  Cloud,
+  Laptop,
+  Folder,
+  ChevronDown,
+  Check,
+  Plus,
+  Loader2,
+} from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -254,6 +262,14 @@ export function ChatWorkContext({
         : contextError || (info && target?.kind === "local")
           ? "Computer unavailable"
           : "Connecting…";
+  const workingDirectory =
+    threadId && target?.kind === "local" ? info?.workingDirectory : null;
+  const directoryLabel = workingDirectory
+    ? target?.kind === "local" && (target.folderId || target.directoryGrantId)
+      ? (workingDirectory.split(/[\\/]/).filter(Boolean).at(-1) ??
+        workingDirectory)
+      : "Task folder"
+    : "Directory pending";
   const triggerClassName =
     "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
   const icon =
@@ -274,7 +290,7 @@ export function ChatWorkContext({
               type="button"
               aria-label="Conversation details"
               className={triggerClassName}
-              title={label}
+              title={workingDirectory ? `${label}\n${workingDirectory}` : label}
             >
               <span
                 role="status"
@@ -282,7 +298,22 @@ export function ChatWorkContext({
                 className="flex min-w-0 items-center gap-1"
               >
                 {icon}
-                <span className="truncate">{label}</span>
+                <span className="max-w-32 truncate">{label}</span>
+                {target?.kind === "local" && (
+                  <>
+                    <span aria-hidden="true" className="shrink-0">
+                      ·
+                    </span>
+                    <Folder className="size-3 shrink-0" />
+                    <span
+                      data-testid="thread-working-directory"
+                      title={workingDirectory ?? undefined}
+                      className="min-w-0 truncate"
+                    >
+                      {directoryLabel}
+                    </span>
+                  </>
+                )}
               </span>
             </button>
           </PopoverTrigger>

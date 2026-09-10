@@ -16,10 +16,16 @@ export function LocalFilesPanel({
   workspaceId,
   threadId,
   onClose,
+  variant = "panel",
+  computerName,
+  searchQuery = "",
 }: {
   workspaceId: string;
   threadId: string;
-  onClose: () => void;
+  onClose?: () => void;
+  variant?: "panel" | "hub";
+  computerName?: string;
+  searchQuery?: string;
 }) {
   const [directory, setDirectory] = useState<Directory | null>(null);
   const [path, setPath] = useState<string>();
@@ -85,14 +91,24 @@ export function LocalFilesPanel({
       clearInterval(timer);
     };
   }, [base, path, previewPath, revision]);
+  const visibleFiles =
+    directory?.files.filter(
+      (file) =>
+        !searchQuery.trim() ||
+        file.path.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+    ) ?? [];
   return (
     <section
       aria-label="Local files"
-      className="flex max-h-[50vh] shrink-0 flex-col border-b bg-background"
+      className={
+        variant === "hub"
+          ? "flex min-h-0 flex-col bg-background"
+          : "flex max-h-[50vh] shrink-0 flex-col border-b bg-background"
+      }
     >
-      <header className="flex items-center gap-2 px-4 py-2 text-sm">
+      <header className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
         <Folder size={16} />
-        <strong>Files</strong>
+        <strong>{variant === "hub" ? "Workfiles" : "Files"}</strong>
         {previewPath && (
           <button
             type="button"
@@ -103,7 +119,9 @@ export function LocalFilesPanel({
           </button>
         )}
         <span className="text-xs text-muted-foreground">
-          Stored on this computer
+          {computerName
+            ? `This computer · ${computerName}`
+            : "Stored on this computer"}
         </span>
         <button
           type="button"
@@ -113,14 +131,16 @@ export function LocalFilesPanel({
         >
           <RefreshCw size={15} />
         </button>
-        <button
-          type="button"
-          aria-label="Close files"
-          onClick={onClose}
-          className="rounded p-1 hover:bg-accent"
-        >
-          <X size={15} />
-        </button>
+        {onClose && (
+          <button
+            type="button"
+            aria-label="Close files"
+            onClick={onClose}
+            className="rounded p-1 hover:bg-accent"
+          >
+            <X size={15} />
+          </button>
+        )}
       </header>
       {directory && (
         <div className="flex items-center gap-2 border-y px-4 py-1 text-xs">
@@ -150,7 +170,13 @@ export function LocalFilesPanel({
         </p>
       )}
       {directory && (
-        <div className="flex min-h-0 overflow-auto">
+        <div
+          className={
+            variant === "hub"
+              ? "flex min-h-0 flex-col overflow-auto"
+              : "flex min-h-0 overflow-auto"
+          }
+        >
           <div className="min-w-56 flex-1 p-2">
             {directory.files.length === 0 && (
               <p className="p-2 text-sm text-muted-foreground">
@@ -158,7 +184,12 @@ export function LocalFilesPanel({
                 automatically.
               </p>
             )}
-            {[...directory.files]
+            {directory.files.length > 0 && visibleFiles.length === 0 && (
+              <p className="p-2 text-sm text-muted-foreground">
+                No files match your search.
+              </p>
+            )}
+            {[...visibleFiles]
               .sort(
                 (a, b) =>
                   Number(Boolean(b.is_dir)) - Number(Boolean(a.is_dir)) ||
@@ -209,7 +240,13 @@ export function LocalFilesPanel({
               ))}
           </div>
           {(preview !== undefined || previewError) && (
-            <div className="min-w-0 flex-[2] overflow-auto border-l p-3">
+            <div
+              className={
+                variant === "hub"
+                  ? "min-w-0 overflow-auto border-t p-3"
+                  : "min-w-0 flex-[2] overflow-auto border-l p-3"
+              }
+            >
               <p className="mb-2 break-all text-xs text-muted-foreground">
                 {previewPath}
               </p>

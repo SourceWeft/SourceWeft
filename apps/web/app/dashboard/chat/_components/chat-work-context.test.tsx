@@ -187,3 +187,52 @@ test("an unavailable status endpoint is shown as an error, not an offline or clo
   assert.equal(container.textContent?.includes("Offline"), false);
   assert.equal(container.textContent?.includes("Cloud"), false);
 });
+
+test("selected directory remains visible after creation and survives an offline reload", async () => {
+  const info = {
+    executionTarget: {
+      kind: "local",
+      deviceId: "a",
+      folderId: "picked-folder",
+    },
+    workingDirectory: "/Users/example/Projects/selected-directory",
+    target: { deviceId: "a", name: "Mac A", online: true },
+  };
+  mocks.request.mockResolvedValue(info);
+  const render = () =>
+    root.render(
+      createElement(ChatWorkContext, {
+        workspaceId: "w",
+        threadId: "selected-thread",
+      }),
+    );
+  await act(async () => render());
+  assert.equal(
+    container.querySelector('[data-testid="thread-working-directory"]')
+      ?.textContent,
+    "selected-directory",
+  );
+  assert.ok(
+    container
+      .querySelector('[aria-label="Conversation details"]')
+      ?.getAttribute("title")
+      ?.includes(info.workingDirectory),
+  );
+  assert.equal(
+    container.querySelector('[aria-label="Choose cloud or computer"]'),
+    null,
+  );
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  mocks.request.mockResolvedValue({
+    ...info,
+    target: { ...info.target, online: false },
+  });
+  await act(async () => render());
+  assert.match(container.textContent ?? "", /Offline/);
+  assert.equal(
+    container.querySelector('[data-testid="thread-working-directory"]')
+      ?.textContent,
+    "selected-directory",
+  );
+});
