@@ -45,11 +45,15 @@ function normalizedAbsolutePath(value: string) {
   return `/${components.join("/")}` || "/";
 }
 
-function assertAllowedPath(value: string, rootAllowed = false) {
+function validateAllowedPath(
+  value: string,
+  roots: readonly string[],
+  rootAllowed = false,
+) {
   const normalized = normalizedAbsolutePath(value);
   if (rootAllowed && normalized === "/") return normalized;
   if (
-    !ALLOWED_ROOTS.some(
+    !roots.some(
       (root) => normalized === root || normalized.startsWith(`${root}/`),
     )
   ) {
@@ -58,7 +62,7 @@ function assertAllowedPath(value: string, rootAllowed = false) {
   return normalized;
 }
 
-function assertSafePattern(value: string) {
+function validateSafePattern(value: string, roots: readonly string[]) {
   if (
     value.length === 0 ||
     value.length > MAX_PATTERN_CHARS ||
@@ -69,7 +73,7 @@ function assertSafePattern(value: string) {
     throw new InterpreterError("PATH_DENIED");
   }
   if (value.startsWith("/")) {
-    assertAllowedPath(value);
+    validateAllowedPath(value, roots);
   }
   return value;
 }
@@ -158,6 +162,11 @@ function searchSourcesPtcTool(
 export function createInterpreterReadTools(
   options: SourceWeftInterpreterOptions,
 ): StructuredToolInterface[] {
+  const roots = options.readRoots ?? ALLOWED_ROOTS;
+  const assertAllowedPath = (value: string, rootAllowed = false) =>
+    validateAllowedPath(value, roots, rootAllowed);
+  const assertSafePattern = (value: string) =>
+    validateSafePattern(value, roots);
   const allowed = new Set(options.allowedTools);
   for (const name of allowed) {
     if (
@@ -188,7 +197,7 @@ export function createInterpreterReadTools(
             const files =
               safePath === "/"
                 ? result.files?.filter((file) =>
-                    ALLOWED_ROOTS.some(
+                    roots.some(
                       (root) =>
                         file.path === root || file.path.startsWith(`${root}/`),
                     ),
@@ -198,8 +207,7 @@ export function createInterpreterReadTools(
           }),
         {
           name: "ls",
-          description:
-            "List files under /kb or /workfiles. The root listing is filtered to those mounts.",
+          description: `List files under ${roots.join(", ")}. The root listing is filtered to those mounts.`,
           schema: z.object({ path: z.string().optional().default("/") }),
         },
       ),
@@ -230,7 +238,7 @@ export function createInterpreterReadTools(
           }),
         {
           name: "read_file",
-          description: "Read a text file under /kb or /workfiles. Read-only.",
+          description: `Read a text file under ${roots.join(", ")}. Read-only.`,
           schema: z.object({
             file_path: z.string(),
             offset: z.coerce.number().int().min(0).optional().default(0),
@@ -264,7 +272,7 @@ export function createInterpreterReadTools(
           }),
         {
           name: "glob",
-          description: "Match files under /kb or /workfiles. Read-only.",
+          description: `Match files under ${roots.join(", ")}. Read-only.`,
           schema: z.object({
             pattern: z.string().min(1).max(MAX_PATTERN_CHARS),
             path: z.string().optional(),
@@ -301,7 +309,7 @@ export function createInterpreterReadTools(
           }),
         {
           name: "grep",
-          description: "Search text under /kb or /workfiles. Read-only.",
+          description: `Search text under ${roots.join(", ")}. Read-only.`,
           schema: z.object({
             pattern: z.string().min(1).max(MAX_PATTERN_CHARS),
             path: z.string().optional().default("/kb"),

@@ -9,7 +9,11 @@ import type {
 import { localCall } from "./service";
 
 export async function localProviderForTurn(
-  context: SandboxRuntimeContext,
+  context: Pick<
+    SandboxRuntimeContext,
+    "teamId" | "workspaceId" | "threadId" | "userId"
+  > &
+    Partial<Pick<SandboxRuntimeContext, "runId">>,
 ): Promise<SandboxProviderFactory | null> {
   const thread = await db.query.threads.findFirst({
     where: and(
@@ -63,7 +67,10 @@ export async function localProviderForTurn(
       action,
       payload,
     });
-  const workspace = await call("workspace.ensure", {});
+  const directorySelection = thread.executionTargetJson.directoryGrantId
+    ? { directoryGrantId: thread.executionTargetJson.directoryGrantId }
+    : {};
+  const workspace = await call("workspace.ensure", directorySelection);
   if (
     typeof workspace.id !== "string" ||
     typeof workspace.path !== "string" ||
@@ -98,8 +105,9 @@ export async function localProviderForTurn(
       readWriteRoots: [root],
     },
     createSandbox: async () => ({ id }),
-    getSandbox: async () => call("workspace.ensure", {}),
-    checkSandboxHealth: async () => call("workspace.ensure", {}),
+    getSandbox: async () => call("workspace.ensure", directorySelection),
+    checkSandboxHealth: async () =>
+      call("workspace.ensure", directorySelection),
     deleteSandbox: async () => ({ persistentWorkspacePreserved: true }),
     execute: async (input) => {
       if (input.providerSandboxId !== id)
@@ -152,10 +160,12 @@ export async function localProviderForTurn(
     },
     ensureDirectory: async (input) =>
       call("file.mkdir", { workspaceId: id, path: relative(input.directory) }),
+    nativeFileOperations: true,
     listFiles: async (input) => {
       const result = await call("file.list", {
         workspaceId: id,
         path: relative(input.sandboxPath),
+        recursive: input.recursive === true,
       });
       return (
         result.files as Array<{ path: string; is_dir?: boolean; size?: number }>
@@ -166,10 +176,17 @@ export async function localProviderForTurn(
         workspaceId: id,
         path: relative(input.sandboxPath),
       });
-      return Buffer.from(String(result.content ?? ""), "base64").toString(
-        "utf8",
+      return new TextDecoder("utf-8", { fatal: true }).decode(
+        Buffer.from(String(result.content ?? ""), "base64"),
       );
     },
+    replaceTextFile: async (input) =>
+      call("file.replace", {
+        workspaceId: id,
+        path: relative(input.sandboxPath),
+        content: Buffer.from(input.content).toString("base64"),
+        expected: Buffer.from(input.expected).toString("base64"),
+      }),
     writeTextFile: async (input) =>
       call("file.write", {
         workspaceId: id,

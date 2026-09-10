@@ -86,3 +86,64 @@ fn proxy_rejects_loopback_and_direct_egress() {
     let result=host.dispatch(&Executions::default(),"network","a","t","command.execute",json!({"workspaceId":w.id,"command":"/usr/bin/curl --max-time 5 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/","timeoutMs":10000})).unwrap();
     assert_eq!(result["output"], "403", "{result}");
 }
+
+#[test]
+#[ignore = "requires real macOS sandbox_apply"]
+fn selected_directory_command_and_file_tools_share_physical_files() {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let app = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    let (grant, root) = host.grant_directory("owner", directory.path()).unwrap();
+    let w = host
+        .ensure_workspace_with_grant("owner", "t", Some(&grant))
+        .unwrap();
+    let calls = Executions::default();
+    host.dispatch(
+        &calls,
+        "write-input",
+        "owner",
+        "t",
+        "file.write",
+        json!({"workspaceId":w.id,"path":"input.txt","content":STANDARD.encode("original")}),
+    )
+    .unwrap();
+    let executed = host.dispatch(&calls, "execute", "owner", "t", "command.execute", json!({"workspaceId":w.id,"command":"cat input.txt > output.txt; /bin/pwd","timeoutMs":10000})).unwrap();
+    assert_eq!(executed["exitCode"], 0, "{executed}");
+    assert_eq!(
+        executed["output"].as_str().unwrap().trim(),
+        root.to_str().unwrap()
+    );
+    let listed = host
+        .dispatch(
+            &calls,
+            "list",
+            "owner",
+            "t",
+            "file.list",
+            json!({"workspaceId":w.id,"path":"."}),
+        )
+        .unwrap();
+    assert_eq!(listed["files"].as_array().unwrap().len(), 2);
+    host.dispatch(&calls, "edit", "owner", "t", "file.replace", json!({"workspaceId":w.id,"path":"output.txt","expected":STANDARD.encode("original"),"content":STANDARD.encode("edited")})).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("output.txt")).unwrap(),
+        "edited"
+    );
+    fs::write(root.join("output.txt"), "external").unwrap();
+    let read = host
+        .dispatch(
+            &calls,
+            "read",
+            "owner",
+            "t",
+            "file.read",
+            json!({"workspaceId":w.id,"path":"output.txt"}),
+        )
+        .unwrap();
+    assert_eq!(
+        STANDARD.decode(read["content"].as_str().unwrap()).unwrap(),
+        b"external"
+    );
+}

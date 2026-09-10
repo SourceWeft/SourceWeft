@@ -58,13 +58,29 @@ export function filterReadOnlyBusinessTools(
  */
 export function readOnlyChildMiddleware(input: {
   backend: AnyBackendProtocol;
+  workingDirectory?: string;
   middleware: readonly AgentMiddleware[];
 }): AgentMiddleware[] {
   return [
     createFilesystemMiddleware({
       backend: input.backend,
       tools: [...READ_ONLY_FILESYSTEM_TOOLS],
-      permissions: READ_ONLY_FILESYSTEM_PERMISSIONS,
+      permissions: input.workingDirectory
+        ? [
+            {
+              operations: ["read"],
+              paths: [
+                "/",
+                "/kb",
+                "/kb/**",
+                input.workingDirectory,
+                `${input.workingDirectory}/**`,
+              ],
+              mode: "allow",
+            },
+            { operations: ["read", "write"], paths: ["/**"], mode: "deny" },
+          ]
+        : READ_ONLY_FILESYSTEM_PERMISSIONS,
     }),
     ...input.middleware,
   ];

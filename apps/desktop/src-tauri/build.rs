@@ -9,6 +9,7 @@ fn main() {
             "local_host_status",
             "enable_local_host",
             "disconnect_local_host",
+            "choose_working_directory",
         ]),
     ))
     .expect("failed to build Tauri application metadata");

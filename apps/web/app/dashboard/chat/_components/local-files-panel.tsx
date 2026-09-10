@@ -1,0 +1,214 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { File, Folder, ArrowUp, RefreshCw, Download, X } from "lucide-react";
+import { localRequest } from "../../../../lib/local-execution";
+import { apiBaseUrl } from "../../../../lib/api-base-url";
+
+type Directory = {
+  root: string;
+  path: string;
+  files: Array<{ path: string; is_dir?: boolean; size?: number }>;
+};
+
+/** Every refresh reads the bound PC. A failed request removes stale disk content. */
+export function LocalFilesPanel({
+  workspaceId,
+  threadId,
+  onClose,
+}: {
+  workspaceId: string;
+  threadId: string;
+  onClose: () => void;
+}) {
+  const [directory, setDirectory] = useState<Directory | null>(null);
+  const [path, setPath] = useState<string>();
+  const [previewPath, setPreviewPath] = useState<string>();
+  const [preview, setPreview] = useState<string>();
+  const [previewError, setPreviewError] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const sequence = useRef(0);
+  const base = `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-files`;
+  useEffect(() => {
+    let live = true;
+    let busy = false;
+    setDirectory(null);
+    setPreview(undefined);
+    setError(undefined);
+    setPreviewError(undefined);
+    setLoading(true);
+    const refresh = async () => {
+      if (busy) return;
+      busy = true;
+      const current = ++sequence.current;
+      try {
+        const result = await localRequest<Directory>(
+          `${base}${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+        );
+        let text: { content: string } | null = null;
+        let previewFailure: string | undefined;
+        if (previewPath) {
+          try {
+            text = await localRequest<{ content: string }>(
+              `${base}?path=${encodeURIComponent(previewPath)}&content=true`,
+            );
+          } catch (cause) {
+            if ((cause as { status?: number }).status === 415)
+              previewFailure = "此文件无法作为文本预览，请使用下载。";
+            else throw cause;
+          }
+        }
+        if (live && current === sequence.current) {
+          setDirectory(result);
+          setPreview(text?.content);
+          setPreviewError(previewFailure);
+          setError(undefined);
+        }
+      } catch (cause) {
+        if (live && current === sequence.current) {
+          setDirectory(null);
+          setPreview(undefined);
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        busy = false;
+        if (live) setLoading(false);
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 3000);
+    return () => {
+      live = false;
+      ++sequence.current;
+      clearInterval(timer);
+    };
+  }, [base, path, previewPath, revision]);
+  return (
+    <section
+      aria-label="本地文件"
+      className="flex max-h-[50vh] shrink-0 flex-col border-b bg-background"
+    >
+      <header className="flex items-center gap-2 px-4 py-2 text-sm">
+        <Folder size={16} />
+        <strong>文件</strong>
+        {previewPath && (
+          <button
+            type="button"
+            className="text-xs underline"
+            onClick={() => setPreviewPath(undefined)}
+          >
+            返回目录
+          </button>
+        )}
+        <span className="text-xs text-muted-foreground">保存在此电脑</span>
+        <button
+          type="button"
+          aria-label="刷新文件"
+          onClick={() => setRevision((value) => value + 1)}
+          className="ml-auto rounded p-1 hover:bg-accent"
+        >
+          <RefreshCw size={15} />
+        </button>
+        <button
+          type="button"
+          aria-label="关闭文件"
+          onClick={onClose}
+          className="rounded p-1 hover:bg-accent"
+        >
+          <X size={15} />
+        </button>
+      </header>
+      {directory && (
+        <div className="flex items-center gap-2 border-y px-4 py-1 text-xs">
+          <button
+            type="button"
+            aria-label="上级目录"
+            disabled={directory.path === directory.root}
+            onClick={() => {
+              setPath(directory.path.slice(0, directory.path.lastIndexOf("/")));
+              setPreviewPath(undefined);
+            }}
+            className="rounded p-1 disabled:opacity-30"
+          >
+            <ArrowUp size={14} />
+          </button>
+          <span className="break-all font-mono">{directory.path}</span>
+        </div>
+      )}
+      {loading && (
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          正在读取电脑上的文件…
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="p-4 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {directory && (
+        <div className="flex min-h-0 overflow-auto">
+          <div className="min-w-56 flex-1 p-2">
+            {directory.files.length === 0 && (
+              <p className="p-2 text-sm text-muted-foreground">
+                此目录暂无文件。Agent 创建的文件会直接出现在这里。
+              </p>
+            )}
+            {[...directory.files]
+              .sort(
+                (a, b) =>
+                  Number(Boolean(b.is_dir)) - Number(Boolean(a.is_dir)) ||
+                  a.path.localeCompare(b.path),
+              )
+              .map((file) => (
+                <div
+                  key={file.path}
+                  className="flex items-center rounded hover:bg-accent"
+                >
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
+                    onClick={() => {
+                      if (file.is_dir) {
+                        setPath(file.path);
+                        setPreviewPath(undefined);
+                      } else setPreviewPath(file.path);
+                    }}
+                  >
+                    {file.is_dir ? <Folder size={15} /> : <File size={15} />}
+                    <span className="truncate">
+                      {file.path.split("/").pop()}
+                    </span>
+                  </button>
+                  {!file.is_dir && (
+                    <a
+                      aria-label={`下载 ${file.path.split("/").pop()}`}
+                      className="p-2 text-muted-foreground"
+                      href={`${apiBaseUrl}${base}?path=${encodeURIComponent(file.path)}&download=true`}
+                    >
+                      <Download size={14} />
+                    </a>
+                  )}
+                </div>
+              ))}
+          </div>
+          {(preview !== undefined || previewError) && (
+            <div className="min-w-0 flex-[2] overflow-auto border-l p-3">
+              <p className="mb-2 break-all text-xs text-muted-foreground">
+                {previewPath}
+              </p>
+              {previewError ? (
+                <p className="text-sm text-muted-foreground">{previewError}</p>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words text-xs">
+                  {preview}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

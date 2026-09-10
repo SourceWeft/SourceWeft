@@ -104,7 +104,9 @@ function sandboxExecuteDetailLines(
   const command = sandboxExecuteCommandText({ confirmation, toolCallInput });
   const cwdRecord = record(confirmation.preview.requestJson).cwd;
   const cwd =
-    typeof cwdRecord === "string" && cwdRecord ? cwdRecord : "/workspace";
+    typeof cwdRecord === "string" && cwdRecord
+      ? cwdRecord
+      : "conversation working directory";
   const summary = command
     ? sandboxExecuteSummary(command)
     : "command not provided";

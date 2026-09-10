@@ -95,6 +95,7 @@ function createEventSink(traceContext?: TraceContext) {
 export function createInterpreterMiddlewareForTurn(input: {
   allowedTools: readonly InterpreterReadToolName[];
   backend: AnyBackendProtocol;
+  readRoots?: readonly string[];
   context: InterpreterEventContext;
   searchSourcesTool?: StructuredToolInterface;
   traceContext?: TraceContext;
@@ -102,6 +103,7 @@ export function createInterpreterMiddlewareForTurn(input: {
   if (!config.chat.agent.interpreter.enabled) return [];
   return createSourceWeftInterpreterMiddleware({
     backend: input.backend,
+    readRoots: input.readRoots,
     allowedTools: input.allowedTools,
     searchSourcesTool: input.searchSourcesTool,
     limits: config.chat.agent.interpreter.limits,

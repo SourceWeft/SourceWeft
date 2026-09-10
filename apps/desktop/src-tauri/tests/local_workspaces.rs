@@ -169,3 +169,143 @@ fn replaced_real_directory_is_not_treated_as_the_original_workspace() {
         "WORKSPACE_REPLACED"
     );
 }
+
+#[test]
+fn selected_directory_is_owned_immutable_shared_and_persistent() {
+    let app = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    fs::write(folder.path().join("existing.txt"), "user content").unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let (grant, root) = host.grant_directory("owner", folder.path()).unwrap();
+    assert!(host
+        .ensure_workspace_with_grant("other", "t", Some(&grant))
+        .is_err());
+    let first = host
+        .ensure_workspace_with_grant("owner", "t", Some(&grant))
+        .unwrap();
+    assert_eq!(first.path, root);
+    assert_eq!(
+        host.read_text("owner", "t", &first.id, "existing.txt")
+            .unwrap(),
+        "user content"
+    );
+    assert!(host.ensure_workspace("owner", "t").is_err());
+    let second = host
+        .ensure_workspace_with_grant("owner", "t2", Some(&grant))
+        .unwrap();
+    assert_eq!(first.path, second.path);
+    assert_ne!(first.id, second.id);
+    drop(host);
+    let host = LocalHost::open(app.path()).unwrap();
+    assert_eq!(
+        host.ensure_workspace_with_grant("owner", "t", Some(&grant))
+            .unwrap()
+            .id,
+        first.id
+    );
+    assert_eq!(
+        fs::read_dir(folder.path()).unwrap().count(),
+        1,
+        "No ownership metadata added to user directory"
+    );
+    assert!(host.grant_directory("owner", app.path()).is_err());
+    assert!(host
+        .grant_directory("owner", std::path::Path::new("/"))
+        .is_err());
+    fs::rename(
+        folder.path().join("existing.txt"),
+        folder.path().join("renamed.txt"),
+    )
+    .unwrap();
+    assert!(host
+        .read_text("owner", "t", &first.id, "existing.txt")
+        .is_err());
+    assert_eq!(
+        host.read_text("owner", "t", &first.id, "renamed.txt")
+            .unwrap(),
+        "user content"
+    );
+}
+
+#[test]
+fn local_edits_detect_external_changes_and_reject_links() {
+    let app = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let w = host.ensure_workspace("owner", "t").unwrap();
+    host.write_bytes("owner", "t", &w.id, "a.txt", b"before", None)
+        .unwrap();
+    host.write_bytes("owner", "t", &w.id, "a.txt", b"after", Some(b"before"))
+        .unwrap();
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"after");
+    fs::write(w.path.join("a.txt"), b"external").unwrap();
+    assert_eq!(
+        host.write_bytes("owner", "t", &w.id, "a.txt", b"wrong", Some(b"after"))
+            .unwrap_err()
+            .code,
+        "FILE_CHANGED"
+    );
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"external");
+    assert!(host
+        .write_bytes("owner", "t", &w.id, "a.txt", b"overwrite", None)
+        .is_err());
+    symlink(w.path.join("a.txt"), w.path.join("link")).unwrap();
+    fs::hard_link(w.path.join("a.txt"), w.path.join("hard")).unwrap();
+    for path in ["link", "hard", "../outside"] {
+        assert!(host
+            .write_bytes("owner", "t", &w.id, path, b"bad", Some(b"external"))
+            .is_err());
+    }
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"external");
+    host.write_bytes("owner", "t", &w.id, "binary", &[0, 255, 1], None)
+        .unwrap();
+    assert_eq!(
+        host.read_bytes("owner", "t", &w.id, "binary").unwrap(),
+        [0, 255, 1]
+    );
+    assert!(host.read_text("owner", "t", &w.id, "binary").is_err());
+}
+
+#[test]
+fn selected_directory_replacement_is_not_adopted() {
+    let app = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let chosen = parent.path().join("chosen");
+    fs::create_dir(&chosen).unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let (grant, _) = host.grant_directory("owner", &chosen).unwrap();
+    let w = host
+        .ensure_workspace_with_grant("owner", "t", Some(&grant))
+        .unwrap();
+    fs::rename(&chosen, parent.path().join("original")).unwrap();
+    fs::create_dir(&chosen).unwrap();
+    assert_eq!(
+        host.ensure_workspace_with_grant("owner", "t", Some(&grant))
+            .unwrap_err()
+            .code,
+        "WORKSPACE_REPLACED"
+    );
+    assert!(host.get_workspace("owner", "t", &w.id).is_err());
+}
+
+#[test]
+fn malformed_directory_grants_do_not_allocate_an_automatic_directory() {
+    use serde_json::json;
+    use sourceweft_desktop::local_host::execution::Executions;
+    let app = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    for (index, grant) in [json!(null), json!(123), json!("")].into_iter().enumerate() {
+        let error = host
+            .dispatch(
+                &Executions::default(),
+                &format!("invalid-{index}"),
+                "owner",
+                "t",
+                "workspace.ensure",
+                json!({"directoryGrantId":grant}),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "INVALID_DIRECTORY_GRANT");
+    }
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+}

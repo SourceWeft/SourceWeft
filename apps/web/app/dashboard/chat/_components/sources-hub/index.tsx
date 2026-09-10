@@ -41,6 +41,10 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import {
+  localRequest,
+  type ExecutionInfo,
+} from "../../../../../lib/local-execution";
 import { contentClient } from "../../../../../lib/sdk";
 import { McpIcon, SkillIcon } from "../../../_components/dashboard-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
@@ -228,6 +232,43 @@ export function SourcesHub({
   variant?: "panel" | "drawer";
 }) {
   const [activeTab, setActiveTab] = useState<HubTab>(getLastHubActiveTab);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [execution, setExecution] = useState<{
+    threadId: string;
+    kind: "local" | "cloud";
+  } | null>(null);
+  const showWorkfiles =
+    mode === "thread" &&
+    execution?.threadId === threadId &&
+    execution.kind === "cloud";
+  useEffect(() => {
+    let live = true;
+    setExecution(null);
+    setExecutionError(null);
+    if (workspaceId && threadId && mode === "thread") {
+      void localRequest<ExecutionInfo>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-execution`,
+      )
+        .then((value) => {
+          if (live)
+            setExecution({ threadId, kind: value.executionTarget.kind });
+        })
+        .catch((error) => {
+          if (live) {
+            setExecution(null);
+            setExecutionError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        });
+    }
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, threadId, mode]);
+  useEffect(() => {
+    if (!showWorkfiles && activeTab === "Workfiles") setActiveTab("Sources");
+  }, [showWorkfiles, activeTab]);
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
     Workfiles: "",
@@ -270,6 +311,7 @@ export function SourcesHub({
     handleConfirmDeleteWorkfile,
   } = useWorkfiles({
     mode,
+    enabled: showWorkfiles,
     workspaceId,
     threadId,
     workfilesRefreshKey,
@@ -698,32 +740,39 @@ export function SourcesHub({
             )}
           </div>
 
+          {executionError && (
+            <p role="alert" className="mt-2 text-xs text-destructive">
+              无法读取文件位置：{executionError}
+            </p>
+          )}
           <div className="relative mt-2 border-t pt-2">
             <div
               className="subtle-scrollbar flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain"
               onScroll={updateTabScrollState}
               ref={tabStripRef}
             >
-              {tabs.map((tab) => (
-                <button
-                  className={cn(
-                    "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
-                    activeTab === tab
-                      ? "border-border bg-secondary text-foreground shadow-xs"
-                      : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                  key={tab}
-                  onClick={() => handleActiveTabChange(tab)}
-                  type="button"
-                >
-                  <span>{tab}</span>
-                  {tabCounts[tab] !== undefined ? (
-                    <span className="ml-1.5 text-[10px] text-current/70">
-                      {tabCounts[tab]}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+              {tabs
+                .filter((tab) => tab !== "Workfiles" || showWorkfiles)
+                .map((tab) => (
+                  <button
+                    className={cn(
+                      "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
+                      activeTab === tab
+                        ? "border-border bg-secondary text-foreground shadow-xs"
+                        : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                    key={tab}
+                    onClick={() => handleActiveTabChange(tab)}
+                    type="button"
+                  >
+                    <span>{tab}</span>
+                    {tabCounts[tab] !== undefined ? (
+                      <span className="ml-1.5 text-[10px] text-current/70">
+                        {tabCounts[tab]}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
             </div>
             <div
               aria-hidden="true"
@@ -914,7 +963,7 @@ export function SourcesHub({
             </section>
           )}
 
-          {activeTab === "Workfiles" && (
+          {showWorkfiles && activeTab === "Workfiles" && (
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">

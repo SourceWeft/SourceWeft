@@ -115,3 +115,39 @@ mod tests {
         assert!(!allowed_caller("main", &development, None));
     }
 }
+
+/// Paths come from the OS chooser, never from renderer arguments.
+#[tauri::command]
+pub async fn choose_working_directory(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<Option<serde_json::Value>, String> {
+    let url = window.url().map_err(|e| e.to_string())?;
+    let dev = if cfg!(debug_assertions) {
+        app.config().build.dev_url.as_ref()
+    } else {
+        None
+    };
+    if !allowed_caller(window.label(), &url, dev) {
+        return Err("LOCAL_HOST_ACCESS_DENIED".into());
+    }
+    let host = app
+        .try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM")?;
+    let owner = host.directory_owner()?;
+    let local = host.host.clone();
+    let device_id = host.status().device_id;
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = std::process::Command::new("/usr/bin/osascript")
+            .args(["-e", "POSIX path of (choose folder with prompt \"选择此对话的工作目录。Agent 将直接读写其中的文件。\")"])
+            .output().map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            if error.contains("(-128)") { return Ok(None); }
+            return Err(format!("DIRECTORY_PICKER_FAILED: {error}"));
+        }
+        let path = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+        let (id,path) = local.grant_directory(&owner, std::path::Path::new(path.trim_end_matches('\n'))).map_err(|e|e.to_string())?;
+        Ok(Some(serde_json::json!({"directoryGrantId":id,"path":path,"deviceId":device_id})))
+    }).await.map_err(|e| e.to_string())?
+}

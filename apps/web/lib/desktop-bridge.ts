@@ -121,6 +121,13 @@ export const desktopBridge = {
       error: string | null;
     }>("enable_local_host", { ticket });
   },
+  chooseWorkingDirectory() {
+    return invokeDesktop<{
+      directoryGrantId: string;
+      path: string;
+      deviceId: string;
+    } | null>("choose_working_directory");
+  },
   disconnectLocalHost() {
     return invokeDesktop<void>("disconnect_local_host");
   },

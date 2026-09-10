@@ -113,7 +113,17 @@ impl LocalHost {
         payload: &Value,
     ) -> Result<Value> {
         if action == "workspace.ensure" {
-            return serde_json::to_value(self.ensure_workspace(owner, thread)?)
+            let grant = match payload.get("directoryGrantId") {
+                None => None,
+                Some(Value::String(value)) if !value.is_empty() => Some(value.as_str()),
+                _ => {
+                    return Err(HostError::new(
+                        "INVALID_DIRECTORY_GRANT",
+                        "A non-empty native directory grant is required.",
+                    ))
+                }
+            };
+            return serde_json::to_value(self.ensure_workspace_with_grant(owner, thread, grant)?)
                 .map_err(|e| HostError::new("INVALID_RESULT", e.to_string()));
         }
         if action == "command.cancel" {
@@ -159,34 +169,36 @@ impl LocalHost {
         let relative = text(payload, "path")?;
         match action {
             "file.read" => {
-                // Current Agent file tools request text; bounded descriptor reads retain
-                // traversal/link protection. Binary transfer is an explicit later capability.
-                let content = self.read_text(owner, thread, &workspace.id, relative)?;
-                Ok(json!({"content":STANDARD.encode(content.as_bytes())}))
+                let content = self.read_bytes(owner, thread, &workspace.id, relative)?;
+                Ok(json!({"content":STANDARD.encode(&content)}))
             }
-            "file.write" => {
+            "file.write" | "file.replace" => {
                 let bytes = STANDARD
                     .decode(text(payload, "content")?)
                     .map_err(|e| HostError::new("INVALID_CONTENT", e.to_string()))?;
-                if bytes.len() > 1024 * 1024 {
-                    return Err(HostError::new("FILE_TOO_LARGE", "File exceeds 1 MiB"));
-                }
-                let path = checked_path(&workspace.path, relative, false)?;
-                // Workspace mutation is serialized by the device dispatcher. Refuse
-                // replacing files in this first delivery; generated outputs use new names.
-                use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)?;
-                file.write_all(&bytes)?;
-                file.sync_all()?;
+                let expected = if action == "file.replace" {
+                    Some(
+                        STANDARD
+                            .decode(text(payload, "expected")?)
+                            .map_err(|e| HostError::new("INVALID_CONTENT", e.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                self.write_bytes(
+                    owner,
+                    thread,
+                    &workspace.id,
+                    relative,
+                    &bytes,
+                    expected.as_deref(),
+                )?;
                 Ok(json!({"bytes":bytes.len()}))
             }
             "file.mkdir" => {
                 let path = checked_path(&workspace.path, relative, false)?;
                 if !path.exists() {
-                    std::fs::create_dir(&path)?;
+                    std::fs::create_dir_all(&path)?;
                 }
                 if !path.is_dir() {
                     return Err(HostError::new("NOT_A_DIRECTORY", "Path is not a directory"));
@@ -196,13 +208,55 @@ impl LocalHost {
             "file.list" => {
                 let path = checked_path(&workspace.path, relative, true)?;
                 let mut files = Vec::new();
-                for entry in std::fs::read_dir(path)?.take(500) {
-                    let entry = entry?;
-                    let meta = entry.path().symlink_metadata()?;
-                    if meta.file_type().is_symlink() {
-                        continue;
+                let meta = path.symlink_metadata()?;
+                if meta.is_file() {
+                    use std::os::unix::fs::MetadataExt;
+                    if meta.nlink() > 1 {
+                        return Err(HostError::new(
+                            "HARDLINK_NOT_ALLOWED",
+                            "Hard-linked files cannot be searched.",
+                        ));
                     }
-                    files.push(json!({"path":entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?.to_string_lossy(),"is_dir":meta.is_dir(),"size":meta.len()}));
+                    return Ok(
+                        json!({"files":[{"path":relative,"is_dir":false,"size":meta.len()}]}),
+                    );
+                }
+                let recursive = payload
+                    .get("recursive")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let mut pending = vec![path];
+                while let Some(directory) = pending.pop() {
+                    // Recheck each visited path; never traverse a symbolic link.
+                    let rel = directory
+                        .strip_prefix(&workspace.path)
+                        .map_err(|_| HostError::new("PATH_DENIED", "Outside directory"))?;
+                    let directory = checked_path(
+                        &workspace.path,
+                        rel.to_str()
+                            .ok_or_else(|| HostError::new("INVALID_PATH", "Non-UTF8 path"))?,
+                        true,
+                    )?;
+                    for entry in std::fs::read_dir(directory)? {
+                        let entry = entry?;
+                        let meta = entry.path().symlink_metadata()?;
+                        use std::os::unix::fs::MetadataExt;
+                        if meta.file_type().is_symlink()
+                            || (!meta.is_dir() && (!meta.is_file() || meta.nlink() > 1))
+                        {
+                            continue;
+                        }
+                        if files.len() >= 500 {
+                            return Err(HostError::new(
+                                "DIRECTORY_TOO_LARGE",
+                                "More than 500 entries. Choose a narrower directory.",
+                            ));
+                        }
+                        if recursive && meta.is_dir() {
+                            pending.push(entry.path());
+                        }
+                        files.push(json!({"path":entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?.to_string_lossy(),"is_dir":meta.is_dir(),"size":meta.len()}));
+                    }
                 }
                 Ok(json!({"files":files}))
             }

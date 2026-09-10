@@ -2,7 +2,13 @@ import { z } from "zod";
 
 export const threadExecutionTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cloud") }).strict(),
-  z.object({ kind: z.literal("local"), deviceId: z.string().uuid() }).strict(),
+  z
+    .object({
+      kind: z.literal("local"),
+      deviceId: z.string().uuid(),
+      directoryGrantId: z.string().uuid().optional(),
+    })
+    .strict(),
 ]);
 export type ThreadExecutionTarget = z.infer<typeof threadExecutionTargetSchema>;
 

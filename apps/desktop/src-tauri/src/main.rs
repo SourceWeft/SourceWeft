@@ -104,6 +104,7 @@ fn main() {
             local_bridge::local_host_status,
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
+            local_bridge::choose_working_directory,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {

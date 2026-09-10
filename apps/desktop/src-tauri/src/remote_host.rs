@@ -33,6 +33,7 @@ pub struct RemoteHost {
     stop: Arc<AtomicBool>,
     executions: Arc<Executions>,
     keychain_service: String,
+    owner_id: Mutex<Option<String>>,
 }
 
 impl RemoteHost {
@@ -45,7 +46,20 @@ impl RemoteHost {
             stop: Arc::new(AtomicBool::new(false)),
             executions: Arc::new(Executions::default()),
             keychain_service: service,
+            owner_id: Mutex::new(None),
         })
+    }
+    pub fn directory_owner(&self) -> Result<String, String> {
+        if !self.status().connected {
+            return Err(
+                "DEVICE_OFFLINE: Connect this computer before choosing a directory.".into(),
+            );
+        }
+        self.owner_id
+            .lock()
+            .map_err(|_| "HOST_UNAVAILABLE")?
+            .clone()
+            .ok_or_else(|| "HOST_NOT_ENROLLED".into())
     }
     pub fn status(&self) -> RemoteStatus {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
@@ -115,6 +129,9 @@ impl RemoteHost {
     }
 
     fn start(&self, credential: Credentials) {
+        if let Ok(mut owner) = self.owner_id.lock() {
+            *owner = Some(credential.user_id.clone());
+        }
         let host = self.host.clone();
         let status = self.status.clone();
         let stop = self.stop.clone();

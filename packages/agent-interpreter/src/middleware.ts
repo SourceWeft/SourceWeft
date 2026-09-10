@@ -93,7 +93,10 @@ export function createSourceWeftInterpreterMiddleware(
     executionTimeoutMs: options.limits.executionTimeoutMs,
     maxPtcCalls: options.limits.maxPtcCallsPerEval,
     maxResultChars: options.limits.maxResultChars,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: SYSTEM_PROMPT.replace(
+      "/kb and /workfiles",
+      (options.readRoots ?? ["/kb", "/workfiles"]).join(" and "),
+    ),
     subagents: false,
     toolName: "eval",
   });

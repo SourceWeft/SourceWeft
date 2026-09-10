@@ -232,6 +232,13 @@
       "when": 1788955095080,
       "tag": "0032_subscription_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788977052266,
+      "tag": "0033_local_directory_grants",
+      "breakpoints": true
     }
   ]
 }

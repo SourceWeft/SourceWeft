@@ -134,3 +134,12 @@ test("confirmation display shows sandbox collect review details", () => {
     "Outputs become durable only after collection into /workfiles or a supported artifact path.",
   ]);
 });
+
+test("command approval never invents a cloud cwd when the directory is omitted", () => {
+  const request = confirmation({ toolName: "execute" });
+  request.action.type = "sandbox.execute";
+  expectNoGuessedCloudPath(requestDetailLines(request));
+});
+function expectNoGuessedCloudPath(lines: string[]) {
+  assert.ok(!lines.some((line) => line === "CWD: /workspace"));
+}

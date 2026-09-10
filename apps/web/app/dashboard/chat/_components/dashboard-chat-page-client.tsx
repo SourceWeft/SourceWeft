@@ -1,6 +1,9 @@
 "use client";
 import { LocalExecutionSelector } from "./local-execution-selector";
-import { LOCAL_TARGET_KEY } from "../../../../lib/local-execution";
+import {
+  LOCAL_TARGET_KEY,
+  readDirectorySelection,
+} from "../../../../lib/local-execution";
 
 import {
   useCallback,
@@ -931,6 +934,9 @@ export function DashboardChatPageClient() {
             ? {
                 kind: "local",
                 deviceId: sessionStorage.getItem(LOCAL_TARGET_KEY)!,
+                directoryGrantId: readDirectorySelection(
+                  sessionStorage.getItem(LOCAL_TARGET_KEY)!,
+                )?.directoryGrantId,
               }
             : { kind: "cloud" },
           modelSettings: resolvedThreadModelSettings,

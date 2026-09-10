@@ -1561,3 +1561,101 @@ test("required runtime asset staging exposes its resolved executable path", asyn
     "/workspace/.sourceweft-assets/chrome-headless-shell/149.0.7790.0/chrome-headless-shell",
   );
 });
+
+test("native file tools share disk state without invoking Linux shell helpers", async () => {
+  const { files, provider } = createProvider();
+  provider.nativeFileOperations = true;
+  provider.listFiles = async (input) =>
+    [...files.entries()]
+      .filter(
+        ([path]) =>
+          path.startsWith(`${input.sandboxPath}/`) ||
+          path === input.sandboxPath,
+      )
+      .map(([path, bytes]) => ({ path, size: bytes.length, is_dir: false }));
+  provider.readTextFile = async (input) =>
+    new TextDecoder("utf-8", { fatal: true }).decode(
+      files.get(input.sandboxPath),
+    );
+  provider.replaceTextFile = async (input) => {
+    assert.equal(
+      new TextDecoder().decode(files.get(input.sandboxPath)),
+      input.expected,
+    );
+    files.set(input.sandboxPath, new TextEncoder().encode(input.content));
+  };
+  const { backend } = createBackendWithProvider(provider);
+  await backend.write("/workspace/note.txt", "before\nline2");
+  assert.equal(
+    (await backend.ls("/workspace")).files?.[0]?.path,
+    "/workspace/note.txt",
+  );
+  assert.equal((await backend.glob("*.txt", "/workspace")).files?.length, 1);
+  assert.equal(
+    (await backend.read("/workspace/note.txt", 1, 1)).content,
+    "line2",
+  );
+  assert.equal(
+    (await backend.grep("before", "/workspace")).matches?.[0]?.line,
+    1,
+  );
+  assert.equal(
+    (await backend.edit("/workspace/note.txt", "before", "after")).occurrences,
+    1,
+  );
+  files.set("/workspace/note.txt", new TextEncoder().encode("external change"));
+  assert.equal(
+    (await backend.read("/workspace/note.txt")).content,
+    "external change",
+  );
+  assert.ok((await backend.write("/workfiles/wrong.txt", "wrong")).error);
+  assert.deepEqual(provider.systemExecuted, []);
+  assert.deepEqual(provider.executed, []);
+});
+
+test("PC runtime removes prepare/collect while cloud runtime retains the bridge", async () => {
+  const { AgentSandboxService } = await import("../../src/sandbox-service");
+  const { provider } = createProvider();
+  const service = new AgentSandboxService({
+    getConfig: () => ({
+      enabled: true,
+      provider: "fake",
+      toolApprovalEnabled: true,
+      limits,
+    }),
+    getProviderFactory: () => ({
+      id: "fake",
+      createProvider: () => provider,
+      getConfigurationStatus: () => ({ configured: true, missing: [] }),
+    }),
+    logWarn: () => {},
+  });
+  const input = {
+    context,
+    filesystem: {} as import("deepagents").BackendProtocolV2,
+  };
+  const pc = service.createRuntimeForTurn(
+    { ...input, executionTarget: { kind: "local", deviceId: "pc" } },
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.ok(
+    !pc.tools.some((tool) =>
+      ["prepare_sandbox_workspace", "collect_sandbox_outputs"].includes(
+        tool.name,
+      ),
+    ),
+  );
+  assert.match(pc.buildRuntimePrompt(), /only|same physical files/);
+  const cloud = service.createRuntimeForTurn(
+    input,
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.ok(
+    cloud.tools.some((tool) => tool.name === "prepare_sandbox_workspace"),
+  );
+  assert.ok(
+    cloud.tools.some((tool) => tool.name === "collect_sandbox_outputs"),
+  );
+});

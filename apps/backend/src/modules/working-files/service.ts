@@ -84,6 +84,13 @@ export class WorkingFilesService {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
 
+    if (thread.executionTarget?.kind === "local") {
+      throw new ContentError(
+        409,
+        "LOCAL_FILES_USE_DIRECTORY",
+        "This PC conversation uses its local working directory. Open Files instead of Workfiles.",
+      );
+    }
     return { workspace, thread };
   }
 
@@ -125,7 +132,11 @@ export class WorkingFilesService {
     });
 
     if (!file) {
-      throw new ContentError(404, "WORKING_FILE_NOT_FOUND", "Working file not found");
+      throw new ContentError(
+        404,
+        "WORKING_FILE_NOT_FOUND",
+        "Working file not found",
+      );
     }
 
     return { file };
@@ -241,7 +252,11 @@ export class WorkingFilesService {
     });
 
     if (!deletedPath) {
-      throw new ContentError(404, "WORKING_FILE_NOT_FOUND", "Working file not found");
+      throw new ContentError(
+        404,
+        "WORKING_FILE_NOT_FOUND",
+        "Working file not found",
+      );
     }
 
     return { deleted: true as const, path: deletedPath };
