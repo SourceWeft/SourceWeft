@@ -2,7 +2,7 @@
 
 import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceItem } from "../source-types";
 
@@ -40,6 +40,17 @@ const emptyResult = {
 const listArtifactSummariesMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
 );
+const listWorkingFilesMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ items: [] }),
+);
+const localRequestMock = vi.hoisted(() => vi.fn());
+vi.mock("../../../../../lib/local-execution", () => ({
+  localRequest: localRequestMock,
+}));
+
+beforeEach(() => {
+  localRequestMock.mockResolvedValue({ executionTarget: { kind: "cloud" } });
+});
 
 function makeStubClient(overrides: Record<string, unknown> = {}) {
   return new Proxy(overrides, {
@@ -55,6 +66,7 @@ vi.mock("../../../../../lib/sdk", () => ({
   connectorsClient: makeStubClient(),
   contentClient: makeStubClient({
     listArtifactSummaries: listArtifactSummariesMock,
+    listWorkingFiles: listWorkingFilesMock,
   }),
 }));
 
@@ -121,8 +133,49 @@ test("mounts in new mode and renders the hub tab strip", async () => {
   const el = await renderHub({ mode: "new" });
   // The hub renders one <button> per tab; assert a couple of stable labels.
   expect(el.textContent).toContain("Sources");
-  expect(el.textContent).toContain("Workfiles");
+  expect(el.textContent).not.toContain("Workfiles");
   expect(el.querySelectorAll("button").length).toBeGreaterThan(3);
+});
+
+test("restores the detached cloud Workfiles tab after execution metadata loads", async () => {
+  let resolveExecution!: (value: unknown) => void;
+  localRequestMock.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveExecution = resolve;
+    }),
+  );
+  const viewChanged = vi.fn();
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "cloud-restore",
+    variant: "window",
+    initialView: { tab: "Workfiles" },
+    onViewChange: viewChanged,
+  });
+  expect(listWorkingFilesMock).not.toHaveBeenCalled();
+  await act(async () =>
+    resolveExecution({ executionTarget: { kind: "cloud" } }),
+  );
+  expect(el.textContent).toContain("Workfiles");
+  expect(listWorkingFilesMock).toHaveBeenCalledWith("ws1", "cloud-restore");
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Workfiles");
+});
+
+test("a detached local conversation never loads cloud Workfiles from a saved tab", async () => {
+  localRequestMock.mockResolvedValueOnce({
+    executionTarget: { kind: "local" },
+  });
+  const viewChanged = vi.fn();
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "local-restore",
+    variant: "window",
+    initialView: { tab: "Workfiles" },
+    onViewChange: viewChanged,
+  });
+  expect(el.textContent).not.toContain("Workfiles");
+  expect(listWorkingFilesMock).not.toHaveBeenCalled();
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Sources");
 });
 
 test("mounts in thread mode with a threadId", async () => {

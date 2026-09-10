@@ -1,22 +1,44 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Sheet,
   SheetContent,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { ChatHubProvider, useChatHubContext } from "./chat-hub-context";
-import type { ChatHubMode } from "./chat-hub-context";
+import { contentClient } from "../../../../lib/sdk";
+import { toast } from "sonner";
+import { useChatHubContext } from "./chat-hub-context";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
 import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
-function HubSlot() {
+export function HubSlot() {
   const context = useChatHubContext();
   const registration = context?.registration;
+
+  const savedArtifactId = context?.desktop.getView()?.artifactId;
+  useEffect(() => {
+    if (
+      !savedArtifactId ||
+      !registration?.workspaceId ||
+      registration.previewArtifact
+    )
+      return;
+    let cancelled = false;
+    void contentClient
+      .getArtifact(registration.workspaceId, savedArtifactId)
+      .then(({ artifact }) => {
+        if (!cancelled) registration.onArtifactOpen(artifact);
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [savedArtifactId, registration]);
 
   if (!registration) {
     return null;
@@ -27,7 +49,13 @@ function HubSlot() {
       <ArtifactPreviewPanel
         artifact={registration.previewArtifact}
         className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
-        onClose={registration.onArtifactPreviewClose}
+        onClose={() => {
+          context?.desktop.saveView({
+            ...context.desktop.getView(),
+            artifactId: undefined,
+          });
+          registration.onArtifactPreviewClose();
+        }}
         workspaceId={registration.workspaceId}
       />
     );
@@ -35,6 +63,7 @@ function HubSlot() {
 
   return (
     <SourcesHub
+      key={`${context?.desktop.contextKey}:${context?.desktop.viewVersion}`}
       activeCitationIndex={registration.activeCitationIndex}
       artifactsRefreshKey={registration.artifactsRefreshKey}
       citations={registration.displayedCitations}
@@ -46,7 +75,13 @@ function HubSlot() {
       hubSkills={registration.hubSkills}
       capabilityCatalog={registration.capabilityCatalog}
       mode={registration.mode}
-      onArtifactOpen={registration.onArtifactOpen}
+      onArtifactOpen={(artifact) => {
+        context?.desktop.saveView({
+          ...context.desktop.getView(),
+          artifactId: artifact.id,
+        });
+        registration.onArtifactOpen(artifact);
+      }}
       onCitationLocate={registration.onCitationLocate}
       onCitationOpen={registration.onCitationOpen}
       onConnectorsChange={registration.onConnectorsChange}
@@ -62,6 +97,11 @@ function HubSlot() {
       selectedSkillIds={registration.activeSkillIds}
       threadCitations={registration.threadCitations}
       threadId={registration.threadId}
+      onPopOut={context?.desktop.available ? context.desktop.open : undefined}
+      windowBusy={context?.desktop.mode === "opening"}
+      initialView={context?.desktop.getView()}
+      onViewChange={context?.desktop.saveView}
+      viewKey={context?.desktop.contextKey}
       variant="panel"
       workfilesRefreshKey={registration.workfilesRefreshKey}
       workspaceId={registration.workspaceId}
@@ -127,26 +167,25 @@ function MobileHubDrawer() {
   );
 }
 
-function ChatHubScaffold({
-  children,
-  mode,
-}: {
-  children: ReactNode;
-  mode: ChatHubMode;
-}) {
-  const { sourcesVisible, workspaceId, workspaceName } =
-    useDashboardChatState();
+function ChatHubScaffold({ children }: { children: ReactNode }) {
+  const { sourcesVisible } = useDashboardChatState();
+  const context = useChatHubContext();
   const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
   const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
 
   return (
-    <ChatHubProvider initialValue={{ mode, workspaceId, workspaceName }}>
+    <>
       <div className="flex h-full min-h-0 w-full overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
-        {sourcesVisible && isPersistentLayout ? <HubSlot /> : null}
+        {sourcesVisible &&
+        isPersistentLayout &&
+        context?.desktop.mode !== "detached" &&
+        context?.desktop.inlineVisible !== false ? (
+          <HubSlot />
+        ) : null}
       </div>
       {!isDesktopPanel ? <MobileHubDrawer /> : null}
-    </ChatHubProvider>
+    </>
   );
 }
 
@@ -155,8 +194,5 @@ export default function ChatWorkspaceShell({
 }: {
   children: ReactNode;
 }) {
-  const pathname = usePathname();
-  const mode: ChatHubMode = pathname?.endsWith("/chat") ? "new" : "thread";
-
-  return <ChatHubScaffold mode={mode}>{children}</ChatHubScaffold>;
+  return <ChatHubScaffold>{children}</ChatHubScaffold>;
 }

@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "allow-hub-window-action",
+    "allow-hub-window-send",
     "allow-local-host-status",
     "allow-enable-local-host",
     "allow-disconnect-local-host",

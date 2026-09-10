@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderPlus,
+  ExternalLink,
   Loader2,
   RotateCcw,
   Search,
@@ -125,7 +126,6 @@ const hubTabStorage = createHubTabStorage<HubTab>({
   storageKey: HUB_ACTIVE_TAB_STORAGE_KEY,
 });
 
-const readStoredHubTab = hubTabStorage.readStoredHubTab;
 const persistHubTab = hubTabStorage.persistHubTab;
 const getLastHubActiveTab = hubTabStorage.getLastHubActiveTab;
 
@@ -162,6 +162,12 @@ function countFilteredSources(items: SourceItem[], searchQuery: string) {
 }
 
 export function SourcesHub({
+  onPopOut,
+  windowBusy = false,
+  onActivityChange,
+  initialView,
+  onViewChange,
+  viewKey,
   activeCitationIndex = null,
   citations = [],
   currentCitationMessageId = null,
@@ -170,6 +176,7 @@ export function SourcesHub({
   onCitationLocate,
   selectedIds,
   onSelectionChange,
+  onAutomaticSelectionChange,
   threadCitations = [],
   threadId = null,
   artifactsRefreshKey = 0,
@@ -195,6 +202,12 @@ export function SourcesHub({
   onClose,
   variant = "panel",
 }: {
+  onPopOut?: () => void;
+  windowBusy?: boolean;
+  onActivityChange?: (activity: { editing: boolean; busy: boolean }) => void;
+  initialView?: import("../hub-protocol").HubViewState;
+  onViewChange?: (view: import("../hub-protocol").HubViewState) => void;
+  viewKey?: string;
   activeCitationIndex?: number | null;
   citations?: CitationRecord[];
   currentCitationMessageId?: string | null;
@@ -206,6 +219,7 @@ export function SourcesHub({
   onCitationLocate?: (messageId: string) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  onAutomaticSelectionChange?: (ids: string[]) => void;
   threadCitations?: ThreadCitationRecord[];
   threadId?: string | null;
   artifactsRefreshKey?: number;
@@ -229,9 +243,14 @@ export function SourcesHub({
   onMcpSelectionChange?: (selection: McpToolSelection) => void;
   disabledToolNames?: string[];
   onClose?: () => void;
-  variant?: "panel" | "drawer";
+  variant?: "panel" | "drawer" | "window";
 }) {
-  const [activeTab, setActiveTab] = useState<HubTab>(getLastHubActiveTab);
+  const [activeTab, setActiveTab] = useState<HubTab>(
+    () =>
+      (initialView?.tab && [...tabs, "Citations"].includes(initialView.tab)
+        ? initialView.tab
+        : getLastHubActiveTab()) as HubTab,
+  );
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [execution, setExecution] = useState<{
     threadId: string;
@@ -267,8 +286,15 @@ export function SourcesHub({
     };
   }, [workspaceId, threadId, mode]);
   useEffect(() => {
-    if (!showWorkfiles && activeTab === "Workfiles") setActiveTab("Sources");
-  }, [showWorkfiles, activeTab]);
+    // Keep a restored cloud Workfiles tab while its execution location loads.
+    // A confirmed local conversation must never expose the cloud file surface.
+    if (
+      activeTab === "Workfiles" &&
+      (mode === "new" ||
+        (execution?.threadId === threadId && execution?.kind === "local"))
+    )
+      setActiveTab("Sources");
+  }, [mode, execution, threadId, activeTab]);
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
     Workfiles: "",
@@ -277,8 +303,17 @@ export function SourcesHub({
     MCP: "",
     Citations: "",
     Connectors: "",
+    ...initialView?.queries,
   });
   const searchQuery = searchQueries[activeTab];
+  const viewRef = useRef(onViewChange);
+  viewRef.current = onViewChange;
+  const scrollPositions = useRef(initialView?.scroll ?? {});
+  const hubRoot = useRef<HTMLElement | null>(null);
+  const lastViewKey = useRef(viewKey);
+  const initialPreview = useRef(initialView);
+  const restoredSource = useRef(false);
+  const restoredWorkfile = useRef(false);
   const deferredSearchQueries = useDeferredValue(searchQueries);
   const deferredSearchQuery = deferredSearchQueries[activeTab];
   const skillsForHub = hubSkills ?? installedSkills;
@@ -420,6 +455,7 @@ export function SourcesHub({
     handleDirectoryExpandedChange,
   } = useSources({
     workspaceId,
+    expansionScope: viewKey,
     currentWorkspaceIdRef,
     initialSources,
     initialSourcesLoaded,
@@ -427,6 +463,7 @@ export function SourcesHub({
     onSourceMerge,
     selectedIds,
     onSelectionChange,
+    onAutomaticSelectionChange,
     manualConnectorSyncSourcesRef,
     addSourceDialog,
   });
@@ -591,11 +628,68 @@ export function SourcesHub({
   }, []);
 
   useEffect(() => {
-    const storedTab = readStoredHubTab();
-    if (storedTab) {
-      setActiveTab(storedTab);
+    if (lastViewKey.current === viewKey) return;
+    lastViewKey.current = viewKey;
+    if (initialView?.tab && [...tabs, "Citations"].includes(initialView.tab))
+      setActiveTab(initialView.tab as HubTab);
+    setSearchQueries({
+      Sources: "",
+      Workfiles: "",
+      Artifacts: "",
+      Skills: "",
+      MCP: "",
+      Citations: "",
+      Connectors: "",
+      ...initialView?.queries,
+    });
+    scrollPositions.current = initialView?.scroll ?? {};
+  }, [viewKey, initialView]);
+  useEffect(() => {
+    viewRef.current?.({
+      tab: activeTab,
+      queries: searchQueries,
+      sourceId: previewSource?.id,
+      workfilePath: previewWorkfile?.path,
+      scroll: scrollPositions.current,
+    });
+  }, [activeTab, searchQueries, previewSource?.id, previewWorkfile?.path]);
+  useEffect(() => {
+    const root = hubRoot.current;
+    if (!root) return;
+    const scroller = root.querySelector<HTMLElement>(".overflow-y-auto");
+    if (scroller) scroller.scrollTop = scrollPositions.current[activeTab] ?? 0;
+  }, [activeTab, viewKey, isLoading, isLoadingArtifacts, isLoadingWorkfiles]);
+
+  useEffect(() => {
+    if (
+      restoredSource.current ||
+      !initialPreview.current?.sourceId ||
+      isLoading
+    )
+      return;
+    const source = sources.find(
+      (item) => item.id === initialPreview.current?.sourceId,
+    );
+    if (source) {
+      restoredSource.current = true;
+      setPreviewSource(source);
     }
-  }, []);
+  }, [sources, isLoading, setPreviewSource]);
+  useEffect(() => {
+    if (
+      restoredWorkfile.current ||
+      !initialPreview.current?.workfilePath ||
+      isLoadingWorkfiles
+    )
+      return;
+    const file = workfiles.find(
+      (item) => item.path === initialPreview.current?.workfilePath,
+    );
+    if (file) {
+      restoredWorkfile.current = true;
+      void handleOpenWorkfile(file);
+    }
+  }, [workfiles, isLoadingWorkfiles, handleOpenWorkfile]);
 
   useEffect(() => {
     updateTabScrollState();
@@ -685,12 +779,49 @@ export function SourcesHub({
     [onArtifactOpen, workspaceId],
   );
 
+  const editing = Boolean(
+    addSourceDialog.isOpen ||
+    editingSourceId ||
+    readmeSource ||
+    isCreateDirectoryOpen ||
+    moveSource ||
+    isManageConnectorsOpen ||
+    connectorSettingsConnector ||
+    isSkillsGalleryOpen ||
+    isMcpMarketOpen,
+  );
+  const busy =
+    isSubmitting ||
+    isDeletingSelectedSources ||
+    Object.values(rowBusyById).some(Boolean) ||
+    Object.values(workfileBusyByPath).some(Boolean);
+  const activityRef = useRef(onActivityChange);
+  activityRef.current = onActivityChange;
+  useEffect(() => {
+    activityRef.current?.({ editing, busy });
+  }, [editing, busy]);
+
   return (
     <>
       <aside
+        ref={hubRoot}
+        onScrollCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.scrollHeight > target.clientHeight) {
+            scrollPositions.current = {
+              ...scrollPositions.current,
+              [activeTab]: target.scrollTop,
+            };
+            viewRef.current?.({
+              tab: activeTab,
+              queries: searchQueries,
+              scroll: scrollPositions.current,
+            });
+          }
+        }}
         className={cn(
           "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
-          variant === "drawer" ? "w-full min-w-0" : "w-[410px] border-l",
+          variant !== "panel" ? "w-full min-w-0" : "w-[410px] border-l",
         )}
       >
         <div className="min-w-0 shrink-0 border-b px-3 py-3">
@@ -702,6 +833,28 @@ export function SourcesHub({
                   <Loader2 className="size-3 animate-spin" />
                   syncing {pendingSourceIds.length}
                 </span>
+              ) : null}
+              {onPopOut ? (
+                <Button
+                  aria-label="Open Hub in a separate window"
+                  title={
+                    editing || busy
+                      ? "Finish editing or uploading before moving Hub"
+                      : "Open Hub in a separate window"
+                  }
+                  disabled={windowBusy || editing || busy}
+                  className="size-7"
+                  size="icon-xs"
+                  variant="ghost"
+                  type="button"
+                  onClick={onPopOut}
+                >
+                  {windowBusy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ExternalLink className="size-4" />
+                  )}
+                </Button>
               ) : null}
               {onClose ? (
                 <Button

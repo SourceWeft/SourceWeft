@@ -55,18 +55,23 @@ async function getSourcePNG(sharp) {
 }
 
 async function renderPngBuffer(sharp, size, opts = {}) {
-  const { bg = { r: 255, g: 255, b: 255, alpha: 0 } } = opts;
+  const { bg = { r: 255, g: 255, b: 255, alpha: 0 }, rgba = false } = opts;
   const source = await getSourcePNG(sharp);
 
-  return sharp(source)
+  const pipeline = sharp(source)
     .resize(size, size, { fit: "contain", background: bg })
-    .flatten({ background: "white" })
-    .png()
-    .toBuffer();
+    .flatten({ background: "white" });
+  // Tauri embeds desktop PNGs at compile time and requires an RGBA buffer.
+  // Keep the white artwork opaque; iOS app icons continue to omit alpha.
+  if (rgba) pipeline.ensureAlpha();
+  return pipeline.png().toBuffer();
 }
 
 async function genPNG(sharp, size, outPath, opts = {}) {
-  const pngBuffer = await renderPngBuffer(sharp, size, opts);
+  const pngBuffer = await renderPngBuffer(sharp, size, {
+    rgba: outPath.startsWith(TARGETS.tauriIcons),
+    ...opts,
+  });
   writeFileSync(outPath, pngBuffer);
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
