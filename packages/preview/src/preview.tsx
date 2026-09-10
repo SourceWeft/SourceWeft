@@ -82,7 +82,7 @@ export function Preview({
     <section
       className={className}
       aria-label="File preview"
-      style={{ height: "100%", minHeight: 240, width: "100%" }}
+      style={{ height: "100%", minHeight: 0, minWidth: 0, width: "100%" }}
     >
       {current?.error ? (
         <div role="alert" style={{ padding: 24 }}>

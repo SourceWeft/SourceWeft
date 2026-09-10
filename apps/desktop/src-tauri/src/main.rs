@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod hub_window;
+mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
@@ -100,6 +101,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hub_window::hub_window_action,
             hub_window::hub_window_send,
+            preview_window::open_file_preview,
+            preview_window::read_file_preview,
+            preview_window::close_file_preview,
             desktop_info,
             show_main_window,
             get_autostart,
@@ -137,12 +141,15 @@ fn main() {
                 settings_path,
             });
 
+            app.manage(preview_window::PreviewState::default());
             setup_deep_links(app.handle());
             register_deep_links(app.handle());
             let base =
                 resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?;
             app.add_capability(native_access::web_capability(&base))?;
             app.add_capability(native_access::hub_capability(&base))?;
+            app.add_capability(preview_window::opener_capability(&base))?;
+            app.add_capability(preview_window::reader_capability(&base))?;
             create_main_window(app)?;
             setup_tray(app)?;
             emit_startup_deep_links(app.handle());
@@ -151,6 +158,11 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == preview_window::LABEL {
+                    api.prevent_close();
+                    preview_window::clear(window.app_handle(), true);
+                    return;
+                }
                 if !IS_QUITTING.load(Ordering::SeqCst) {
                     api.prevent_close();
                     if window.label() == hub_window::LABEL {
@@ -201,6 +213,9 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
     }
 
     if is_desktop_web_url(app, url) {
+        if url.path() == "/auth" || url.path().starts_with("/auth/") {
+            preview_window::clear(app, false);
+        }
         if is_allowed_desktop_path(url.path()) {
             return true;
         }
@@ -314,7 +329,9 @@ fn desktop_bridge_script() -> &'static str {
 
 #[tauri::command]
 fn desktop_info(app: AppHandle, window: tauri::WebviewWindow) -> Result<DesktopInfo, String> {
-    if window.label() == hub_window::LABEL {
+    if window.label() == preview_window::LABEL {
+        preview_window::authorize(&app, &window)?;
+    } else if window.label() == hub_window::LABEL {
         hub_window::authorize(&app, &window)?;
     } else {
         authorize_desktop_window(&app, &window, false)?;

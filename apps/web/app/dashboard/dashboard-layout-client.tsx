@@ -60,6 +60,7 @@ export function DashboardLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const isAuxiliaryWindow = pathname === "/dashboard/hub-window" || pathname === "/dashboard/preview-window";
   const router = useRouter();
   const searchParams = useSearchParams();
   const mountedRef = useRef(false);
@@ -78,25 +79,25 @@ export function DashboardLayoutClient({
       !isPending
     ) {
       hubSkillMemory.clear();
-      if (pathname !== "/dashboard/hub-window" && desktopBridge.isAvailable())
+      if (!isAuxiliaryWindow && desktopBridge.isAvailable())
         void desktopHubBridge
           .action("logout")
           .catch((error) => toast.error(error.message));
     }
     if (!isPending) previousAccountId.current = accountId;
-  }, [data?.user?.id, isPending, pathname]);
+  }, [data?.user?.id, isPending, isAuxiliaryWindow]);
   const hasSession = hasActiveSession(data as SessionData | undefined);
   const userId = data?.user?.id;
   const sessionId = data?.session?.id;
   useLayoutEffect(() => {
-    if (isPending || pathname === "/dashboard/hub-window") return;
+    if (isPending || isAuxiliaryWindow) return;
     void synchronizeLocalHostScope(
       hasSession ? userId : undefined,
       hasSession ? sessionId : undefined,
     ).catch((error) =>
       console.error("Local host initialization unavailable", error),
     );
-  }, [hasSession, isPending, userId, sessionId, pathname]);
+  }, [hasSession, isPending, userId, sessionId, isAuxiliaryWindow]);
   const routePathname = pathname || "/dashboard";
   const redirectTo = useMemo(() => {
     const query = searchParams.toString();
@@ -209,7 +210,7 @@ export function DashboardLayoutClient({
     return <DashboardShellRouteSkeleton pathname={pathname} />;
   }
 
-  if (pathname === "/dashboard/hub-window") {
+  if (isAuxiliaryWindow) {
     return (
       <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
         {children}

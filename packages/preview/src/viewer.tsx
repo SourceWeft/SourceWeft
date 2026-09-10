@@ -10,6 +10,7 @@ import type {
   FileViewerRenderedInstance,
 } from "@file-viewer/core";
 import { previewFamily } from "./index";
+import "./viewer.css";
 
 function EnginePreview({
   file,
@@ -47,6 +48,7 @@ function EnginePreview({
     );
   return (
     <FileViewer
+      className="sourceweft-file-viewer"
       file={file}
       options={options}
       onStateChange={onStateChange}
@@ -62,6 +64,7 @@ export async function createPreviewView(name: string) {
     rendererMode: "replace" as const,
     autoRenderers: false,
     styleIsolation: "shadow" as const,
+    toolbar: { position: "top" as const },
   };
   if (family === "lite") {
     const { default: preset } = await import("@file-viewer/preset-lite");

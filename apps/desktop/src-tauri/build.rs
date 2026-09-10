@@ -3,6 +3,9 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "hub_window_action",
             "hub_window_send",
+            "open_file_preview",
+            "read_file_preview",
+            "close_file_preview",
             "desktop_info",
             "show_main_window",
             "get_autostart",

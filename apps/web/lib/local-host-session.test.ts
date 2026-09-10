@@ -42,8 +42,8 @@ test("unsupported desktops keep cloud without enrolling a local host", async () 
   assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
 });
 
-test("the auxiliary Hub never initializes or disconnects the main native host", async () => {
-  window.history.replaceState({}, "", "/dashboard/hub-window");
+test.each(["/dashboard/hub-window", "/dashboard/preview-window"])("auxiliary %s never initializes or disconnects the main native host", async (path) => {
+  window.history.replaceState({}, "", path);
   await synchronizeLocalHostScope("hub-user", "hub-session");
   await synchronizeLocalHostScope();
   assert.equal(native.localHostStatus.mock.calls.length, 0);

@@ -146,7 +146,7 @@ export async function synchronizeLocalHostScope(
   // enrollment, proof rotation, or disconnection. These belong to main.
   if (
     typeof window !== "undefined" &&
-    window.location.pathname === "/dashboard/hub-window"
+    ["/dashboard/hub-window", "/dashboard/preview-window"].includes(window.location.pathname)
   )
     return;
   const next = userId && sessionId ? `${userId}:${sessionId}` : null;

@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use url::Url;
 
 #[path = "hub_placement.rs"]
-mod placement;
+pub(crate) mod placement;
 
 pub const LABEL: &str = "hub";
 pub const PATH: &str = "/dashboard/hub-window";
@@ -77,6 +77,9 @@ pub fn hub_window_action(
     action: String,
 ) -> Result<(), String> {
     authorize(&app, &window)?;
+    if window.label() == "main" && action == "logout" {
+        crate::preview_window::clear(&app, false);
+    }
     match (window.label(), action.as_str()) {
         ("main", "open" | "focus") => {
             if let Some(hub) = app.get_webview_window(LABEL) {

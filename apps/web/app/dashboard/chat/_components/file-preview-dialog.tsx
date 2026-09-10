@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
 import { Preview } from "@sourceweft/preview/react";
 import type { PreviewSource } from "@sourceweft/preview";
 import { Download, Loader2, RefreshCw } from "lucide-react";
@@ -13,6 +13,11 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { basename } from "./workfile-content-preview";
+import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { DesktopFilePreviewLauncher } from "./desktop-file-preview-launcher";
+
+const subscribeToDesktop = () => () => {};
+const serverDesktop = () => false;
 
 /** Shared in-app reader for cloud Workfiles and physical PC files. */
 export function FilePreviewDialog({
@@ -43,6 +48,11 @@ export function FilePreviewDialog({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const desktop = useSyncExternalStore(
+    subscribeToDesktop,
+    desktopBridge.isAvailable,
+    serverDesktop,
+  );
   const previewSource = useMemo(
     () =>
       source ??
@@ -55,10 +65,22 @@ export function FilePreviewDialog({
           }),
     [source, contentText, path, mimeType],
   );
+  if (desktop)
+    return (
+      <DesktopFilePreviewLauncher
+        open={open}
+        source={previewSource}
+        description={description ?? path}
+        loading={loading}
+        error={error}
+        onOpened={() => onOpenChange(false)}
+        onRetry={onRetry}
+      />
+    );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="grid h-[min(720px,calc(100svh-2rem))] w-[900px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 p-0"
+        className="grid h-svh w-full max-w-full grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[min(720px,calc(100svh-2rem))] sm:w-[900px] sm:max-w-[calc(100%-2rem)] sm:rounded-xl sm:border"
         constrainWidth={false}
         onCloseAutoFocus={onCloseAutoFocus}
         onOpenAutoFocus={(event) => {
@@ -66,7 +88,7 @@ export function FilePreviewDialog({
           contentRef.current?.focus();
         }}
       >
-        <DialogHeader className="space-y-3 border-b px-5 py-4 text-left">
+        <DialogHeader className="min-w-0 space-y-2 border-b px-4 py-3 text-left">
           <div className="flex min-w-0 items-center gap-2 pr-7">
             <DialogTitle className="min-w-0 flex-1 truncate" title={path}>
               {path ? basename(path) : "File preview"}
@@ -93,7 +115,10 @@ export function FilePreviewDialog({
               </Button>
             )}
           </div>
-          <DialogDescription className="break-all text-xs">
+          <DialogDescription
+            className="truncate text-xs"
+            title={description ?? path}
+          >
             {description ?? path}
           </DialogDescription>
         </DialogHeader>
@@ -102,7 +127,7 @@ export function FilePreviewDialog({
           role="document"
           aria-label="File contents"
           tabIndex={-1}
-          className="min-h-0 overflow-auto px-5 py-5 outline-none"
+          className="min-h-0 min-w-0 overflow-hidden outline-none"
           aria-busy={loading}
         >
           {loading ? (
@@ -123,12 +148,7 @@ export function FilePreviewDialog({
           ) : contentText === "" ? (
             <p className="text-sm text-muted-foreground">This file is empty.</p>
           ) : previewSource ? (
-            <Preview
-              key={path}
-              className="h-full"
-              source={previewSource}
-              onDownload={onDownload}
-            />
+            <Preview key={path} className="h-full" source={previewSource} onDownload={onDownload} />
           ) : null}
         </div>
       </DialogContent>

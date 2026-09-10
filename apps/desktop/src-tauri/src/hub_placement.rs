@@ -12,6 +12,16 @@ pub fn matching_inner_height(main_outer: u32, work_height: u32, hub_frame: u32) 
     main_outer.min(work_height).saturating_sub(hub_frame).max(1)
 }
 
+pub fn centered_position(main: Rect, work: Rect, width: f64, height: f64) -> (i32, i32) {
+    let x = (main.x + (main.width - width) / 2.0)
+        .max(work.x)
+        .min(work.x + (work.width - width).max(0.0));
+    let y = (main.y + (main.height - height) / 2.0)
+        .max(work.y)
+        .min(work.y + (work.height - height).max(0.0));
+    (x.round() as i32, y.round() as i32)
+}
+
 pub fn adjacent_position(main: Rect, work: Rect, width: f64, height: f64, gap: f64) -> (i32, i32) {
     let right = main.x + main.width + gap;
     let left = main.x - width - gap;
@@ -43,6 +53,45 @@ mod tests {
         width: 1920.0,
         height: 1055.0,
     };
+    #[test]
+    fn centers_a_default_size_preview_over_a_resized_main() {
+        assert_eq!(
+            centered_position(
+                Rect {
+                    x: 400.0,
+                    y: 200.0,
+                    width: 800.0,
+                    height: 600.0
+                },
+                WORK,
+                1280.0,
+                840.0
+            ),
+            (160, 80)
+        );
+    }
+    #[test]
+    fn keeps_a_centered_preview_inside_a_negative_origin_monitor() {
+        let work = Rect {
+            x: -1920.0,
+            y: 25.0,
+            ..WORK
+        };
+        assert_eq!(
+            centered_position(
+                Rect {
+                    x: -1920.0,
+                    y: 25.0,
+                    width: 800.0,
+                    height: 600.0
+                },
+                work,
+                1280.0,
+                840.0
+            ),
+            (-1920, 25)
+        );
+    }
     #[test]
     fn matches_main_outer_height_instead_of_a_saved_hub_height() {
         assert_eq!(matching_inner_height(840, 1055, 28), 812);

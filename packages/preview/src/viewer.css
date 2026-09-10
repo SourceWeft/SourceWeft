@@ -1,0 +1,27 @@
+/* Use the viewer's public Shadow DOM parts without leaking host CSS into files. */
+.sourceweft-file-viewer::part(toolbar) {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.sourceweft-file-viewer::part(toolbar-group) {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.sourceweft-file-viewer::part(button),
+.sourceweft-file-viewer::part(toolbar-status) {
+  flex-shrink: 0;
+}
+
+.sourceweft-file-viewer::part(input) {
+  width: 160px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
