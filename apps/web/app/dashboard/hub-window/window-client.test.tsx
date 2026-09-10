@@ -224,6 +224,24 @@ it("hides the old form immediately when the destination workspace starts loading
   ).not.toBeNull();
 });
 
+it("allows explicitly discarding an old-workspace form without allowing edits to that workspace", async () => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  await emit({ kind: "snapshot", snapshot: snapshot("A") });
+  await click("edit");
+  const destination = snapshot("B", 2);
+  destination.data.workspaceId = "other-workspace";
+  await emit({ kind: "snapshot", snapshot: destination });
+  expect(document.documentElement.dataset.hubHidden).toBe("true");
+  const discard = Array.from(container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Discard and follow",
+  )!;
+  await act(async () => discard.click());
+  expect(
+    container.querySelector("[data-thread]")?.getAttribute("data-thread"),
+  ).toBe("B");
+  expect(document.documentElement.dataset.hubHidden).toBeUndefined();
+});
+
 it("reports unconfirmed selections to the composer barrier and clears them only on acknowledgment", async () => {
   await emit({ kind: "snapshot", snapshot: snapshot("A") });
   await click("select");

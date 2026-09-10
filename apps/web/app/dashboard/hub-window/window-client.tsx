@@ -242,7 +242,10 @@ export function DesktopHubWindow() {
       if (
         connectedRef.current &&
         newest.current?.phase === "active" &&
-        visible.current?.data.workspaceId === newest.current.data.workspaceId
+        visible.current?.data.workspaceId ===
+          (newest.current.targetWorkspaceId !== undefined
+            ? newest.current.targetWorkspaceId
+            : newest.current.data.workspaceId)
       )
         return;
       const target = event.target;
@@ -516,7 +519,11 @@ export function DesktopHubWindow() {
         </div>
       ) : null}
       {paused ? (
-        <div role="status" className="border-b bg-muted/50 p-3 text-xs">
+        <div
+          data-hub-toolbar
+          role="status"
+          className="border-b bg-muted/50 p-3 text-xs"
+        >
           {crossWorkspace
             ? "The main window changed workspaces. Return to the original workspace to finish your open form."
             : `Finish or cancel the open form in “${snapshot.title}” to follow “${newest.current?.title}”.`}
