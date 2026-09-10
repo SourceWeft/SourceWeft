@@ -31,6 +31,13 @@ navigation, text preview, download and filtering. It refreshes every three secon
 while open and clears unavailable content on errors. External edits appear on the
 next read. The separate Files view uses the same endpoint and disk files.
 
+Click a file to open the shared in-app preview dialog; clicking a directory only
+navigates into it. Text and code use line numbers and copying, and Markdown offers
+rendered Preview and Source tabs. The original list stays mounted while preview
+loads and while it is open; closing returns keyboard focus to the selected file.
+Preview reads refresh independently and discard late results after closing or
+switching conversations. Unsupported binary content shows a download action.
+
 Agent reads, writes, edits, glob and grep use physical paths under this directory.
 Edits compare the previous content before writing, so intervening external edits
 are rejected. Descriptor-relative reads and writes reject symlinks, hardlinks,

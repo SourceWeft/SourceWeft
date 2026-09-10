@@ -1,0 +1,123 @@
+"use client";
+
+import { useRef } from "react";
+import { Download, Loader2, RefreshCw } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@sourceweft/ui-web/components/ui/dialog";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { WorkfileContentViewer } from "./workfile-content-viewer";
+import { basename } from "./workfile-content-preview";
+
+/** Shared in-app reader for cloud Workfiles and physical PC files. */
+export function FilePreviewDialog({
+  open,
+  onOpenChange,
+  path,
+  description,
+  contentText,
+  mimeType,
+  loading = false,
+  error,
+  onRetry,
+  onDownload,
+  onCloseAutoFocus,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  path: string;
+  description?: string;
+  contentText?: string;
+  mimeType?: string | null;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
+  onDownload?: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="grid h-[min(720px,calc(100svh-2rem))] w-[900px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 p-0"
+        constrainWidth={false}
+        onCloseAutoFocus={onCloseAutoFocus}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          contentRef.current?.focus();
+        }}
+      >
+        <DialogHeader className="space-y-3 border-b px-5 py-4 text-left">
+          <div className="flex min-w-0 items-center gap-2 pr-7">
+            <DialogTitle className="min-w-0 flex-1 truncate" title={path}>
+              {path ? basename(path) : "File preview"}
+            </DialogTitle>
+            {onRetry && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Refresh preview"
+                disabled={loading}
+                onClick={onRetry}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            )}
+            {onDownload && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Download file"
+                onClick={onDownload}
+              >
+                <Download className="size-4" />
+              </Button>
+            )}
+          </div>
+          <DialogDescription className="break-all text-xs">
+            {description ?? path}
+          </DialogDescription>
+        </DialogHeader>
+        <div
+          ref={contentRef}
+          role="document"
+          aria-label="File contents"
+          tabIndex={-1}
+          className="min-h-0 overflow-auto px-5 py-5 outline-none"
+          aria-busy={loading}
+        >
+          {loading ? (
+            <div
+              role="status"
+              className="flex h-full min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground"
+            >
+              <Loader2 className="size-4 animate-spin" />
+              Loading file preview…
+            </div>
+          ) : error ? (
+            <div
+              role="alert"
+              className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground"
+            >
+              {error}
+            </div>
+          ) : contentText === "" ? (
+            <p className="text-sm text-muted-foreground">This file is empty.</p>
+          ) : contentText !== undefined ? (
+            <WorkfileContentViewer
+              key={path}
+              className="h-full"
+              contentText={contentText}
+              mimeType={mimeType}
+              path={path}
+            />
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

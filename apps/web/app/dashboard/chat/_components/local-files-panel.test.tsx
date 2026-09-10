@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), download: vi.fn() }));
 vi.mock("../../../../lib/local-execution", () => ({
   localRequest: mocks.request,
 }));
 vi.mock("../../../../lib/local-file-download", () => ({
-  downloadLocalFile: vi.fn(),
+  downloadLocalFile: mocks.download,
 }));
 import { LocalFilesPanel } from "./local-files-panel";
 let root: Root, container: HTMLDivElement;
@@ -18,19 +18,16 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  mocks.request
-    .mockReset()
-    .mockImplementation(async (path: string) =>
-      path.includes("content=true")
-        ? { content: "physical file content" }
-        : {
-            root: "/local/task",
-            path: "/local/task",
-            files: [
-              { path: "/local/task/report.txt", size: 21, is_dir: false },
-            ],
-          },
-    );
+  mocks.download.mockReset().mockResolvedValue(undefined);
+  mocks.request.mockReset().mockImplementation(async (path: string) =>
+    path.includes("content=true")
+      ? { content: "physical file content" }
+      : {
+          root: "/local/task",
+          path: "/local/task",
+          files: [{ path: "/local/task/report.txt", size: 21, is_dir: false }],
+        },
+  );
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -58,11 +55,27 @@ test("Hub Workfiles reads the PC directory and clears its preview when offline",
   );
   assert(file);
   await act(async () => file.click());
-  assert.match(container.textContent ?? "", /physical file content/);
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog);
+  assert.match(dialog.textContent ?? "", /physical file content/);
+  assert.ok(dialog.querySelector('[aria-label="Copy preview"]'));
+  assert.equal(
+    container.contains(dialog),
+    false,
+    "Preview is an in-app overlay, not inline list content",
+  );
+  assert.equal(
+    file.isConnected,
+    true,
+    "Opening preview keeps the original list mounted",
+  );
   mocks.request.mockRejectedValue(new Error("DEVICE_OFFLINE"));
   await act(async () => vi.advanceTimersByTimeAsync(3000));
   assert.match(container.textContent ?? "", /DEVICE_OFFLINE/);
-  assert.equal(container.textContent?.includes("physical file content"), false);
+  assert.equal(
+    document.body.textContent?.includes("physical file content"),
+    false,
+  );
   assert.ok(
     mocks.request.mock.calls.every(
       ([path]) =>
@@ -84,4 +97,138 @@ test("Hub search filters physical filenames without changing the file store", as
   );
   assert.match(container.textContent ?? "", /No files match/);
   assert.equal(container.textContent?.includes("report.txt"), false);
+});
+
+test("directories navigate instead of opening a file preview", async () => {
+  mocks.request.mockImplementation(async (url: string) => ({
+    root: "/local/task",
+    path: url.includes("?path=") ? "/local/task/docs" : "/local/task",
+    files: url.includes("?path=")
+      ? []
+      : [{ path: "/local/task/docs", is_dir: true }],
+  }));
+  await act(async () =>
+    root.render(
+      createElement(LocalFilesPanel, {
+        workspaceId: "w",
+        threadId: "t",
+        variant: "hub",
+      }),
+    ),
+  );
+  const folder = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Open folder docs"]',
+  );
+  assert(folder);
+  await act(async () => folder.click());
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.match(container.textContent ?? "", /\/local\/task\/docs/);
+  assert.ok(
+    mocks.request.mock.calls.every(
+      ([url]) => !String(url).includes("content=true"),
+    ),
+  );
+});
+
+test("preview opens immediately without refetching the list and ignores a late response after closing", async () => {
+  let finish!: (value: { content: string }) => void;
+  const pending = new Promise<{ content: string }>((resolve) => {
+    finish = resolve;
+  });
+  const original = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation((url: string) =>
+    url.includes("content=true") ? pending : original(url),
+  );
+  await act(async () =>
+    root.render(
+      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+    ),
+  );
+  const file = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Preview report.txt"]',
+  );
+  assert(file);
+  await act(async () => file.click());
+  const dialog = document.querySelector('[role="dialog"]');
+  assert(dialog);
+  assert.match(dialog.textContent ?? "", /Loading file preview/);
+  assert.equal(file.isConnected, true);
+  assert.equal(
+    mocks.request.mock.calls.filter(
+      ([url]) => !String(url).includes("content=true"),
+    ).length,
+    1,
+  );
+  const close = [...dialog.querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === "Close",
+  );
+  assert(close);
+  await act(async () => close.click());
+  await act(async () => finish({ content: "late content" }));
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  assert.equal(
+    document.activeElement,
+    file,
+    "Closing preview restores keyboard focus to its file row",
+  );
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(document.body.textContent?.includes("late content"), false);
+});
+
+test("binary preview explains the unsupported format and offers an in-app download action", async () => {
+  const original = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation((url: string) =>
+    url.includes("content=true")
+      ? Promise.reject(Object.assign(new Error("binary"), { status: 415 }))
+      : original(url),
+  );
+  await act(async () =>
+    root.render(
+      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+    ),
+  );
+  const file = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Preview report.txt"]',
+  );
+  assert(file);
+  await act(async () => file.click());
+  const dialog = document.querySelector('[role="dialog"]');
+  assert(dialog);
+  assert.match(dialog.textContent ?? "", /cannot be previewed as text/);
+  const download = dialog.querySelector<HTMLButtonElement>(
+    '[aria-label="Download file"]',
+  );
+  assert(download);
+  await act(async () => download.click());
+  assert.equal(mocks.download.mock.calls[0]?.[1], "report.txt");
+  assert.match(mocks.download.mock.calls[0]?.[0], /download=true/);
+});
+
+test("changing conversations closes the old preview and resets directory navigation", async () => {
+  await act(async () =>
+    root.render(
+      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "first" }),
+    ),
+  );
+  const file = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Preview report.txt"]',
+  );
+  assert(file);
+  await act(async () => file.click());
+  assert.ok(document.querySelector('[role="dialog"]'));
+  await act(async () =>
+    root.render(
+      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "second" }),
+    ),
+  );
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(
+    document.body.textContent?.includes("physical file content"),
+    false,
+  );
+  assert.ok(
+    mocks.request.mock.calls.some(
+      ([url]) => url === "/v1/workspaces/w/threads/second/local-files",
+    ),
+  );
 });

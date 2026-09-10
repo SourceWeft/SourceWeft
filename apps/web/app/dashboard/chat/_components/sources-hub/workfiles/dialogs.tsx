@@ -11,15 +11,8 @@ import {
   AlertDialogTitle,
 } from "@sourceweft/ui-web/components/ui/alert-dialog";
 import { buttonVariants } from "@sourceweft/ui-web/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@sourceweft/ui-web/components/ui/dialog";
-import { WorkfileContentViewer } from "../../workfile-content-viewer";
-import { basename, formatBytes } from "../lib/format";
+import { FilePreviewDialog } from "../../file-preview-dialog";
+import { formatBytes } from "../lib/format";
 import {
   workfilePurposeLabel,
   type WorkfileDetail,
@@ -34,33 +27,18 @@ export function WorkfilePreviewDialog({
   previewWorkfile: WorkfileDetail | null;
 }) {
   return (
-    <Dialog onOpenChange={onOpenChange} open={Boolean(previewWorkfile)}>
-      <DialogContent
-        className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
-        constrainWidth={false}
-      >
-        <DialogHeader className="border-b px-5 py-4 text-left">
-          <DialogTitle>
-            {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
-          </DialogTitle>
-          <DialogDescription>
-            {previewWorkfile
-              ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-              : "Assistant-created working material from this thread."}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-5">
-          {previewWorkfile ? (
-            <WorkfileContentViewer
-              className="h-full min-h-[360px]"
-              contentText={previewWorkfile.contentText}
-              mimeType={previewWorkfile.mimeType}
-              path={previewWorkfile.path}
-            />
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <FilePreviewDialog
+      onOpenChange={onOpenChange}
+      open={Boolean(previewWorkfile)}
+      path={previewWorkfile?.path ?? ""}
+      description={
+        previewWorkfile
+          ? `Cloud · ${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
+          : "Assistant-created working material from this thread."
+      }
+      contentText={previewWorkfile?.contentText}
+      mimeType={previewWorkfile?.mimeType}
+    />
   );
 }
 
