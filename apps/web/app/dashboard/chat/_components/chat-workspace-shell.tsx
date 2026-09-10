@@ -129,6 +129,10 @@ function MobileHubDrawer() {
     <Sheet open={context.mobileHubOpen} onOpenChange={context.setMobileHubOpen}>
       <SheetContent
         onCloseAutoFocus={(event) => {
+          if (context.desktop.mode === "detached") {
+            event.preventDefault();
+            return;
+          }
           const trigger =
             document.querySelector<HTMLButtonElement>("[data-hub-toggle]");
           if (trigger) {
@@ -141,6 +145,7 @@ function MobileHubDrawer() {
       >
         <SheetTitle className="sr-only">Hub</SheetTitle>
         <SourcesHub
+          key={`${context.desktop.contextKey}:${context.desktop.viewVersion}`}
           activeCitationIndex={registration.activeCitationIndex}
           artifactsRefreshKey={registration.artifactsRefreshKey}
           citations={registration.displayedCitations}
@@ -172,6 +177,13 @@ function MobileHubDrawer() {
           threadCitations={registration.threadCitations}
           threadId={registration.threadId}
           onClose={() => context.setMobileHubOpen(false)}
+          onPopOut={
+            context.desktop.available ? context.desktop.open : undefined
+          }
+          windowBusy={context.desktop.mode === "opening"}
+          initialView={context.desktop.getView()}
+          onViewChange={context.desktop.saveView}
+          viewKey={context.desktop.contextKey}
           variant="drawer"
           workfilesRefreshKey={registration.workfilesRefreshKey}
           workspaceId={registration.workspaceId}

@@ -41,6 +41,16 @@ test("unsupported desktops keep cloud without enrolling a local host", async () 
   assert.equal(await ensureLocalHostSession("user"), null);
   assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
 });
+
+test("the auxiliary Hub never initializes or disconnects the main native host", async () => {
+  window.history.replaceState({}, "", "/dashboard/hub-window");
+  await synchronizeLocalHostScope("hub-user", "hub-session");
+  await synchronizeLocalHostScope();
+  assert.equal(native.localHostStatus.mock.calls.length, 0);
+  assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
+  assert.equal(native.disconnectLocalHost.mock.calls.length, 0);
+  assert.equal(vi.mocked(fetch).mock.calls.length, 0);
+});
 test("cloud conversation streaming does not wait for Keychain", async () => {
   vi.mocked(fetch).mockResolvedValue({
     ok: true,

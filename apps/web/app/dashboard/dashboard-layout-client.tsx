@@ -89,14 +89,14 @@ export function DashboardLayoutClient({
   const userId = data?.user?.id;
   const sessionId = data?.session?.id;
   useLayoutEffect(() => {
-    if (isPending) return;
+    if (isPending || pathname === "/dashboard/hub-window") return;
     void synchronizeLocalHostScope(
       hasSession ? userId : undefined,
       hasSession ? sessionId : undefined,
     ).catch((error) =>
       console.error("Local host initialization unavailable", error),
     );
-  }, [hasSession, isPending, userId, sessionId]);
+  }, [hasSession, isPending, userId, sessionId, pathname]);
   const routePathname = pathname || "/dashboard";
   const redirectTo = useMemo(() => {
     const query = searchParams.toString();

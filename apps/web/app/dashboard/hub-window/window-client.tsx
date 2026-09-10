@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, PanelRightClose, RefreshCw, Loader2 } from "lucide-react";
+import { ArrowLeft, X, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
 import { contentClient } from "../../../lib/sdk";
@@ -467,28 +467,28 @@ export function DesktopHubWindow() {
         <Button
           variant="ghost"
           size="icon-sm"
-          title="Return to conversation"
-          aria-label="Return to conversation"
-          onClick={() => fire({ type: "return" })}
-        >
-          <ArrowLeft className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
           title={
             activity.editing || activity.busy
               ? "Finish editing or uploading before docking Hub"
-              : "Dock Hub in main window"
+              : snapshot.phase === "active" && connected
+                ? "Close window and return Hub to main window"
+                : "Close Hub window"
           }
-          aria-label="Dock Hub in main window"
-          disabled={blocked || activity.editing || activity.busy || paused}
-          onClick={() => void dock()}
+          aria-label="Close Hub window"
+          className="size-7 shrink-0 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          disabled={
+            docking || pendingCount > 0 || activity.editing || activity.busy
+          }
+          onClick={() => {
+            void (
+              snapshot.phase === "active" && connected ? dock() : close()
+            ).catch((e) => setError(e.message));
+          }}
         >
           {docking ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
-            <PanelRightClose className="size-4" />
+            <X className="size-4" />
           )}
         </Button>
       </header>
@@ -553,8 +553,18 @@ export function DesktopHubWindow() {
         </div>
       ) : null}
       {snapshot.phase === "away" ? (
-        <div className="border-b p-3 text-xs text-muted-foreground">
-          The main window has left this conversation. Return to make changes.
+        <div
+          data-hub-toolbar
+          className="border-b p-3 text-xs text-muted-foreground"
+        >
+          The main window has left this conversation.
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => fire({ type: "return" })}
+          >
+            Return to conversation
+          </Button>
         </div>
       ) : null}
       <SourcePreviewPanel

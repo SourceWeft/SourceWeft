@@ -30,7 +30,10 @@ import {
 export function useDesktopHubHost(
   registration: ChatHubRegistration,
   registered: boolean,
+  onDock?: () => void,
 ) {
+  const dockPresentation = useRef(onDock);
+  dockPresentation.current = onDock;
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = authClient.useSession();
@@ -114,7 +117,7 @@ export function useDesktopHubHost(
       revision: previous?.revision ?? 0,
       title: active
         ? routeId
-          ? dashboard.threadTitle
+          ? (registration.threadTitle ?? dashboard.threadTitle)
           : "New conversation"
         : (previous?.title ?? "Hub"),
       phase: !match ? "away" : active ? "active" : "transition",
@@ -206,6 +209,7 @@ export function useDesktopHubHost(
       setInlineVisible(true);
       if (!dashboard.sourcesVisible) dashboard.toggleSourcesVisible();
       setMode("inline");
+      dockPresentation.current?.();
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );

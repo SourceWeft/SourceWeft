@@ -161,6 +161,22 @@ it("registers the listener before requesting a snapshot and only shows the nativ
   });
 });
 
+it("uses one close control and returns Hub to main before destroying its window", async () => {
+  await emit({ kind: "snapshot", snapshot: snapshot("A") });
+  expect(
+    container.querySelector('[aria-label="Return to conversation"]'),
+  ).toBeNull();
+  const closeButton = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Close Hub window"]',
+  )!;
+  expect(closeButton.title).toContain("return Hub to main window");
+  await act(async () => closeButton.click());
+  expect(state.send.mock.calls.some(([m]) => m.kind === "dock")).toBe(true);
+  expect(state.action).not.toHaveBeenCalledWith("docked");
+  await emit({ kind: "dock-applied", sessionId: "session" });
+  expect(state.action).toHaveBeenCalledWith("docked");
+});
+
 it("follows a new conversation without keeping old content under the new title", async () => {
   await emit({ kind: "snapshot", snapshot: snapshot("A") });
   await emit({

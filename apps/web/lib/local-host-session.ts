@@ -142,6 +142,13 @@ export async function synchronizeLocalHostScope(
   userId?: string,
   sessionId?: string,
 ) {
+  // The auxiliary Hub shares web authentication but never owns native host
+  // enrollment, proof rotation, or disconnection. These belong to main.
+  if (
+    typeof window !== "undefined" &&
+    window.location.pathname === "/dashboard/hub-window"
+  )
+    return;
   const next = userId && sessionId ? `${userId}:${sessionId}` : null;
   if (next === authenticatedScope) return;
   const previous = authenticatedScope;

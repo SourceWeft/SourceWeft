@@ -147,15 +147,24 @@ export function useThreadSources({
   const accountId = hubSession?.user.id;
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const skillScope = useRef("");
+  const preserveSkillChoice = useRef(false);
+  const skillChoiceReady = useRef(false);
   useEffect(() => {
     if (!accountId || !workspaceId) return;
     skillScope.current = "";
+    preserveSkillChoice.current = hubSkillMemory.has(
+      accountId,
+      workspaceId,
+      threadId,
+    );
+    skillChoiceReady.current = preserveSkillChoice.current;
     setActiveSkillIds(hubSkillMemory.read(accountId, workspaceId, threadId));
   }, [accountId, workspaceId, threadId]);
   useEffect(() => {
     if (
       accountId &&
       workspaceId &&
+      skillChoiceReady.current &&
       skillScope.current === JSON.stringify([accountId, workspaceId, threadId])
     ) {
       hubSkillMemory.write(accountId, workspaceId, threadId, activeSkillIds);
@@ -163,6 +172,8 @@ export function useThreadSources({
     skillScope.current = JSON.stringify([accountId, workspaceId, threadId]);
   }, [accountId, workspaceId, threadId, activeSkillIds]);
   const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
+    preserveSkillChoice.current = true;
+    skillChoiceReady.current = true;
     const { skillIds: nextSkillIds, wasLimited } =
       coerceSkillIdsSelection(skillIds);
     if (wasLimited) {
@@ -300,6 +311,11 @@ export function useThreadSources({
 
   const loadAvailableSkills = useCallback(async () => {
     const loadGeneration = ++skillsLoadGenerationRef.current;
+    const expectedSkillScope = JSON.stringify([
+      accountId,
+      workspaceId,
+      threadId,
+    ]);
     if (!workspaceId) {
       setAvailableSkills([]);
       setHubSkills([]);
@@ -315,6 +331,7 @@ export function useThreadSources({
       ]);
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
+        skillScope.current !== expectedSkillScope ||
         activeWorkspaceId !== workspaceId
       ) {
         return;
@@ -332,24 +349,31 @@ export function useThreadSources({
       setAvailableSkills(enabledSkills);
       setHubSkills([...builtinOptionSkills, ...workspaceInstalledSkills]);
 
-      const optionControlledIds = new Set(
-        builtinOptionSkills.map((skill) => skill.id),
-      );
+      const availableIds = new Set(enabledSkills.map((skill) => skill.id));
+      skillChoiceReady.current = true;
       setActiveSkillIds((current) =>
-        resolveDefaultActiveSkillIds({
-          availableSkills: builtinOptionSkills,
-          currentSkillIds: current.filter((id) => optionControlledIds.has(id)),
-        }),
+        preserveSkillChoice.current
+          ? coerceSkillIdsSelection(
+              current.filter((id) => availableIds.has(id)),
+            ).skillIds
+          : resolveDefaultActiveSkillIds({
+              availableSkills: builtinOptionSkills,
+              currentSkillIds: current.filter((id) => availableIds.has(id)),
+            }),
       );
     } catch {
-      if (skillsLoadGenerationRef.current !== loadGeneration) {
+      if (
+        skillsLoadGenerationRef.current !== loadGeneration ||
+        skillScope.current !== expectedSkillScope
+      ) {
         return;
       }
       setAvailableSkills([]);
       setHubSkills([]);
+      skillChoiceReady.current = false;
       setActiveSkillIds([]);
     }
-  }, [workspaceId]);
+  }, [workspaceId, threadId, accountId]);
 
   useEffect(() => {
     void loadAvailableSkills();

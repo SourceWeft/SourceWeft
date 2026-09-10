@@ -32,6 +32,7 @@ export type ChatHubRegistration = {
   workspaceId: string | null;
   workspaceName: string | null;
   threadId: string | null;
+  threadTitle?: string;
   activeCitationIndex: number | null;
   activeCitationMessageId: string | null;
   displayedCitations: CitationRecord[];
@@ -141,11 +142,19 @@ export function ChatHubProvider({
       ...initialValue,
     }),
   );
-  const { hubDrawerOpen: mobileHubOpen, setHubDrawerOpen: setMobileHubOpen } =
-    useWorkspaceLayout();
+  const {
+    hubDrawerOpen: mobileHubOpen,
+    setHubDrawerOpen: setMobileHubOpen,
+    canDockHub,
+  } = useWorkspaceLayout();
   const [registered, setRegistered] = useState(false);
   const activeRegistration = useRef<ChatHubRegistration | null>(null);
-  const desktop = useDesktopHubHost(registration, registered);
+  const desktop = useDesktopHubHost(registration, registered, () => {
+    setMobileHubOpen(!canDockHub);
+  });
+  useEffect(() => {
+    if (desktop.mode === "detached") setMobileHubOpen(false);
+  }, [desktop.mode, setMobileHubOpen]);
 
   const setRegistration = useCallback(
     (partial: Partial<ChatHubRegistration>) => {

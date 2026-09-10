@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   send: vi.fn().mockResolvedValue(undefined),
   action: vi.fn().mockResolvedValue(undefined),
   error: vi.fn(),
+  docked: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   usePathname: () => state.pathname,
@@ -79,7 +80,7 @@ const registration = (threadId: string): ChatHubRegistration => ({
   onSourceMerge: vi.fn(),
 });
 function Harness({ value }: { value: ChatHubRegistration }) {
-  host = useDesktopHubHost(value, true);
+  host = useDesktopHubHost(value, true, state.docked);
   return null;
 }
 async function render(value: ChatHubRegistration) {
@@ -154,6 +155,48 @@ it("retains the last conversation in read-only mode after leaving chat", async (
   expect(latest().phase).toBe("away");
   expect(latest().data.threadId).toBe("A");
   expect(latest().contextKey).toBe(old.contextKey);
+});
+
+it("uses the registered conversation title rather than a stale dashboard draft title", async () => {
+  state.title = "New chat";
+  await render({ ...registration("A"), threadTitle: "Actual conversation A" });
+  await emit({ kind: "ready", accountId: "user", protocolVersion: 1 });
+  expect(latest().title).toBe("Actual conversation A");
+});
+
+it("restores the main Hub presentation before acknowledging a dock request", async () => {
+  const frame = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+  try {
+    await render(registration("A"));
+    await emit({ kind: "ready", accountId: "user", protocolVersion: 1 });
+    const s = latest();
+    await emit({
+      kind: "applied",
+      sessionId: s.sessionId,
+      contextKey: s.contextKey,
+      revision: s.revision,
+    });
+    await emit({
+      kind: "dock",
+      sessionId: s.sessionId,
+      contextKey: s.contextKey,
+      view: { tab: "Skills", queries: { Skills: "HTML" } },
+    });
+    expect(state.docked).toHaveBeenCalledTimes(1);
+    expect(host.mode).toBe("inline");
+    expect(state.send).toHaveBeenLastCalledWith({
+      kind: "dock-applied",
+      sessionId: s.sessionId,
+    });
+    expect(host.getView()?.queries?.Skills).toBe("HTML");
+  } finally {
+    frame.mockRestore();
+  }
 });
 
 it("keeps inline Hub until the matching ready/applied handshake, rejects a wrong account", async () => {

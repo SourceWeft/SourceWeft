@@ -827,8 +827,20 @@ export function SourcesHub({
         )}
       >
         <div className="min-w-0 shrink-0 border-b px-3 py-3">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <h2 className="text-sm font-medium text-foreground">Hub</h2>
+          <div
+            className={cn(
+              "flex min-w-0 items-start justify-between gap-2",
+              variant === "window" && pendingSourceIds.length === 0 && "hidden",
+            )}
+          >
+            <h2
+              className={cn(
+                "text-sm font-medium text-foreground",
+                variant === "window" && "sr-only",
+              )}
+            >
+              Hub
+            </h2>
             <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
               {pendingSourceIds.length > 0 ? (
                 <span className="inline-flex max-w-32 items-center gap-1 truncate text-[10px] text-muted-foreground">
@@ -873,7 +885,7 @@ export function SourcesHub({
             </div>
           </div>
 
-          <div className="relative mt-2">
+          <div className={cn("relative", variant !== "window" && "mt-2")}>
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-8 rounded-xl bg-muted/35 pr-8 pl-8 text-xs sm:pr-20"
