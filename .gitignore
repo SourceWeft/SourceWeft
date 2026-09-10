@@ -46,6 +46,7 @@ apps/web/.next-dev-*.log
 dist/
 
 # local docs
+/apps/desktop/LOCAL_FILES_E2E_REPORT.md
 /docs/
 /.docs/
 
