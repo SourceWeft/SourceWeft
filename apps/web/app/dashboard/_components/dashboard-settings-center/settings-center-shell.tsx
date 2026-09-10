@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { LocalHostPanel } from "./local-host-panel";
+import { useBillingAvailable } from "../../../../lib/billing-edition/capabilities";
 import {
   isSettingsTabAvailable,
   resolveSettingsTab,
@@ -64,9 +65,10 @@ export function DashboardSettingsCenterModal({
   initialTab: SettingsCenterTab;
   hasTeam?: boolean;
 }) {
-  const [activeTab, setActiveTab] = React.useState<SettingsCenterTab>(() =>
-    resolveSettingsTab(initialTab),
-  );
+  const billingAvailable = useBillingAvailable();
+  const [requestedTab, setActiveTab] =
+    React.useState<SettingsCenterTab>(initialTab);
+  const activeTab = resolveSettingsTab(requestedTab, billingAvailable);
   const [scope, setScope] = React.useState<BillingScope>(
     hasTeam ? "team" : "personal",
   );
@@ -96,10 +98,10 @@ export function DashboardSettingsCenterModal({
 
   React.useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setActiveTab(resolveSettingsTab(initialTab));
+      setActiveTab(initialTab);
     }
     wasOpenRef.current = open;
-  }, [open, initialTab]);
+  }, [open, initialTab, billingAvailable]);
 
   React.useEffect(() => {
     if (!hasTeam) setScope("personal");
@@ -137,7 +139,9 @@ export function DashboardSettingsCenterModal({
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
                 {visibleMenuItems
-                  .filter((item) => isSettingsTabAvailable(item.key))
+                  .filter((item) =>
+                    isSettingsTabAvailable(item.key, billingAvailable),
+                  )
                   .map((item) => {
                     const Icon = item.icon;
                     const active = activeTab === item.key;

@@ -119,9 +119,10 @@ export function createApp() {
   registerWorkspaceRoutes(app);
   registerDashboardRoutes(app);
   registerUserSettingsRoutes(app);
-  app.get("/v1/deployment/capabilities", (c) =>
-    c.json(getBillingDeploymentCapabilities()),
-  );
+  app.get("/v1/deployment/capabilities", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json(getBillingDeploymentCapabilities());
+  });
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerMarketRoutes(app);

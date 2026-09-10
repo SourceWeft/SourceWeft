@@ -1,18 +1,11 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": [
-    "NODE_ENV"
-  ],
+  "globalEnv": ["NODE_ENV", "SOURCEWEFT_COMMERCIAL_ENABLED"],
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
-      ],
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [
         "dist/**",
         ".next/**",
@@ -22,28 +15,15 @@
       ]
     },
     "lint": {
-      "dependsOn": [
-        "^lint"
-      ]
+      "dependsOn": ["^lint"]
     },
     "check-types": {
-      "dependsOn": [
-        "^check-types",
-        "^build"
-      ],
-      "outputs": [
-        "tsconfig*.tsbuildinfo",
-        ".next/types/**"
-      ]
+      "dependsOn": ["^check-types", "^build"],
+      "outputs": ["tsconfig*.tsbuildinfo", ".next/types/**"]
     },
     "test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
-      ],
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "passThroughEnv": [
         "DATABASE_URL",
         "REDIS_URL",
@@ -79,5 +59,15 @@
         "SKILL_E2E_REQUIRE_ALL"
       ]
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "SOURCEWEFT_SAAS_ENABLED",
+    "BACKEND_BILLING_*",
+    "BACKEND_CREDITS_ENABLED",
+    "BACKEND_PAGES_ENABLED",
+    "BACKEND_TEAM_BILLING_ENABLED",
+    "CREEM_*",
+    "WAFFO_*",
+    "STRIPE_*"
+  ]
 }

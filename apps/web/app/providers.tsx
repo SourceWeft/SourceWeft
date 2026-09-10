@@ -1,5 +1,6 @@
 "use client";
 
+import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
 import { AuthUIProvider } from "@daveyplate/better-auth-ui";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
@@ -196,7 +197,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <ThemeSettingsSync />
         <GoogleOneTap />
         <TooltipProvider>
-          <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+          <DeploymentCapabilitiesProvider>
+            <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+          </DeploymentCapabilitiesProvider>
         </TooltipProvider>
         <Toaster closeButton position="top-right" richColors />
       </AuthUIProvider>

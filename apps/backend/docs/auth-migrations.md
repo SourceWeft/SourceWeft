@@ -21,14 +21,14 @@ stay schema-focused: include schema-bearing plugins, but keep runtime email
 handlers, webhook callbacks, onboarding hooks, and workspace side effects out of
 migration mode.
 
-## Billing editions
+## Optional commercial module
 
-The core source binds no Creem plugin, including in migration mode. The
-commercial source projection contributes Creem schema through a schema-only
-factory; it does not register runtime webhooks or require checkout credentials
-for migration. Use the same edition for migration and deployment. Existing
-Creem fields/tables must not be dropped when a core migration sees an older
-commercial database. Drizzle still does not own those Auth fields.
+Both module states use the same migration command and shared schema. The current
+commercial Auth factory returns no provider plugin: signed payment webhooks are
+handled by the host. Migration never needs checkout credentials to register a
+provider plugin. Retain historical billing/Auth tables and fields; disabling the
+module is not a request to delete commercial data. Run migrations before enabling
+features on an older database, and restart API, worker and scheduler together.
 
 ## Commands
 

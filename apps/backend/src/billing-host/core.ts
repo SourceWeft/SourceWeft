@@ -4,7 +4,7 @@ import type {
 } from "@sourceweft/contracts/billing-runtime";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
 
-/** Selected by the core edition binding, never by catching a commercial failure. */
+/** Explicitly disabled module runtime, never selected after a commercial failure. */
 export function createCoreBillingRuntime(): BillingRuntime {
   return {
     async getExecutionState() {

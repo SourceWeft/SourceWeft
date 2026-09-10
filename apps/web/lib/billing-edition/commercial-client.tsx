@@ -1,16 +1,10 @@
 "use client";
-// Generated commercial billing bindings; subject to enterprise/LICENSE.
-import {
-  useEffect,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+// Commercial UI adapter; subject to enterprise/LICENSE.
+import { type ComponentProps, type ReactNode } from "react";
+import { useDeploymentCapabilities } from "./capabilities";
 import * as UI from "@sourceweft/billing/ui";
-import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
 import { authClient } from "../auth-client";
-import { billingCheckoutEnabled as deploymentCheckoutEnabled } from "../deployment-config";
-import { billingClient, deploymentClient } from "../sdk";
+import { billingClient } from "../sdk";
 import {
   trackBeginCheckout,
   trackCheckoutError,
@@ -38,40 +32,19 @@ const host = {
   subscribeDashboardBillingSummaryRefresh,
 };
 function Provider({ children }: { children: ReactNode }) {
-  const [capabilities, setCapabilities] =
-    useState<DeploymentCapabilities | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    deploymentClient
-      .getCapabilities()
-      .then((value) => {
-        if (active) setCapabilities(value);
-      })
-      .catch((error) => {
-        if (active)
-          setError(
-            error instanceof Error
-              ? error.message
-              : "Unable to load billing capabilities",
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-  if (error) return <p role="alert">{error}</p>;
-  if (!capabilities) return <p role="status">Loading billing…</p>;
-  if (capabilities.edition !== "commercial")
-    return <p role="alert">Web and API deployment editions do not match.</p>;
+  const state = useDeploymentCapabilities();
+  if (state.status === "error") return <p role="alert">{state.error}</p>;
+  if (state.status === "loading") return <p role="status">Loading billing…</p>;
+  const capabilities = state.capabilities;
+  if (!capabilities.billing.available)
+    return <p>Commercial features are disabled.</p>;
   return (
     <UI.BillingUiProvider
       value={{
         ...host,
         billingProvider: capabilities.billing.provider,
         billingTopupEnabled: capabilities.billing.topup,
-        billingCheckoutEnabled:
-          capabilities.billing.checkout && deploymentCheckoutEnabled,
+        billingCheckoutEnabled: capabilities.billing.checkout,
       }}
     >
       {children}

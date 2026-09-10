@@ -1,7 +1,7 @@
 # SourceWeft Billing
 
 The commercial billing application-service package. Core execution depends on
-`@sourceweft/contracts/billing-runtime`; it does not load this package. Core
+`@sourceweft/contracts/billing-runtime`; the module switch gates loading this package. Core
 runs without credit/page billing, while retaining authorization, resource limits
 and provider usage/cost observations. This package is not an agent capability.
 
@@ -17,66 +17,84 @@ and provider usage/cost observations. This package is not an agent capability.
 - `/ui`: billing, usage, checkout, pricing and sidebar components; requires an
   explicit BillingUiProvider containing host SDK/auth/UI adapters.
 - `/catalog`: concrete pricing presentation, isolated from open contracts.
-- `/auth-client`: Creem client plugin contribution for commercial builds only.
+- `/auth-client`: shared Auth client integration (currently no provider plugins).
 
 Database structure and historical migrations remain owned by the open DB
 package. This store imports `@sourceweft/db/schema`, not the DB singleton. The
 host owns Better Auth member/invitation tables and passes its query adapter,
 including the same PoolClient when a billing transaction is active.
 
-The commercial projection also restores the backend `creem:product:create` and
+The unified workspace includes the backend `creem:product:create` and
 `creem:product:delete` operator commands; core does not include these commands.
 
-## Core and commercial builds
+## One source tree, optional commercial module
 
-The repository source is the core edition. Prepare a separate commercial source
-workspace before installing dependencies:
-
-```sh
-node scripts/editions/prepare.mjs --edition=commercial --out=/private/tmp/sourceweft-commercial
-```
-
-In the prepared workspace:
+Develop, build and run from the repository root. The workspace and its single
+lockfile include `enterprise/billing`; no source projection, template replacement,
+separate checkout, or edition-specific image is required.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @sourceweft/market-contracts build
-pnpm --filter @sourceweft/ui-web build
-pnpm --filter @sourceweft/backend check-types
-pnpm --filter web check-types
-pnpm --filter @sourceweft/billing check-types
-pnpm --filter @sourceweft/billing test
-pnpm --filter @sourceweft/billing test:database
+pnpm dev
 ```
 
-Database tests require an isolated `sourceweft_billing_test*` database with the
-actual migrations applied. Unit tests need no backend environment, database or
-payment credentials. The source preparation script excludes secrets, installed
-modules and build artifacts. Existing generated output is replaced only with
-`--replace=true`, which explicitly deletes that generated workspace.
+The API, worker and scheduler read the same backend environment. Set this in
+`apps/backend/.env` locally, or the Compose `.env` for deployment:
 
-The commercial projection contributes application dependencies, runtime/Auth/UI
-bindings and operator scripts. It uses its own committed lockfile; its Creem SDK
-is pinned to the pre-extraction version. Lockfile maintenance uses
-`--refresh-lockfile=true` and pnpm's normal lockfile generation, followed by
-saving the generated lockfile in `edition/pnpm-lock.yaml`. CI never refreshes it.
+```dotenv
+SOURCEWEFT_COMMERCIAL_ENABLED=false
+```
 
-A core build cannot be converted by setting a key or runtime environment.
-`SOURCEWEFT_EDITION`, when supplied, must match the built edition. Explicit
-billing activation in a core build fails. Enabled commercial checkout validates
-credentials and configured products; it never falls back to unmetered core.
-Front-end checkout flags can further restrict what the server enables.
+Unset defaults to false. Only true/false/1/0 are accepted, ignoring case and
+surrounding whitespace. Credentials never enable the module. Enabling a child
+billing feature with the module disabled is a configuration error. Remove the
+old `SOURCEWEFT_EDITION` selector; it does not activate a module.
 
-Docker builds select `--build-arg SOURCEWEFT_EDITION=core` (default) or
-`--build-arg SOURCEWEFT_EDITION=commercial`. The source projection is pruned
-before building; root and commercial license files are explicitly preserved.
-Use matching API, worker, scheduler and Web images/configuration.
+For local billing evaluation without payment credentials:
+
+```dotenv
+SOURCEWEFT_COMMERCIAL_ENABLED=true
+SOURCEWEFT_SAAS_ENABLED=false
+BACKEND_BILLING_PROVIDER=none
+BACKEND_BILLING_MODE=shadow
+```
+
+This runs real usage/account/ledger logic. Shadow mode records usage without
+credit enforcement; use enforced to test balance checks. It does not simulate a
+successful payment or claim payment-provider validation.
+
+For a provider's test checkout, keep commercial enabled, set
+`SOURCEWEFT_SAAS_ENABLED=true`, select `BACKEND_BILLING_PROVIDER=creem`, `stripe`
+or `waffo`, and configure that provider's test credentials, signed webhook and
+product catalog. Use `CREEM_TEST_MODE=true`, `STRIPE_TEST_MODE=true`, or
+`WAFFO_ENVIRONMENT=test`, respectively. Missing required configuration fails
+startup; the application never switches provider or falls back to unmetered mode.
+
+Restart API, worker and scheduler together after changing module settings. Their
+startup capabilities must agree. The same image supports both states. Web and PC
+read `/v1/deployment/capabilities` at runtime; obsolete
+`NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED` and `NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED`
+are unused and can be removed. Capability-loading errors are shown, not treated
+as a disabled commercial module. Reload open clients after a deployment switch.
+
+When disabled, the commercial backend module is not imported, payment SDKs and
+commercial jobs are not initialized, and no billing accounts/ledger writes occur.
+Authentication, authorization, core resource limits and cost observations remain.
+Commercial UI loads on demand only after the server reports it available; direct
+billing routes remain gated on the server as well as the client.
+
+The unified image includes separately licensed commercial code and notices. The
+repository root license does not replace `enterprise/LICENSE` or package notices.
+
+Verify using the normal workspace commands, the module-mode CI matrix, and
+`node scripts/editions/check-boundaries.mjs`. PostgreSQL tests still require an
+isolated `sourceweft_billing_test*` database.
 
 ## Migration and compatibility
 
 Run the edition's Auth migration, shared Drizzle migration, then the existing
-extension OAuth provisioning command. Commercial Auth migration includes
-Creem's schema without registering runtime webhook side effects. No historical
+extension OAuth provisioning command. The current commercial Auth adapter registers no payment-provider plugin; shared
+billing migrations are applied independently of the module switch. No historical
 application migration is rewritten and no billing table is renamed or moved.
 
 Core preserves historical billing tables but does not create accounts or write

@@ -2,6 +2,7 @@
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
+import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
@@ -100,6 +101,7 @@ function getInitials(name?: string, email?: string) {
 }
 
 export function DashboardMobileMe() {
+  const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
   const sessionState = authState.data as
     | {
@@ -200,7 +202,9 @@ export function DashboardMobileMe() {
             </div>
 
             {panelItems
-              .filter((item) => isSettingsTabAvailable(item.key))
+              .filter((item) =>
+                isSettingsTabAvailable(item.key, billingAvailable),
+              )
               .map((item) => {
                 const Icon = item.icon;
                 return (

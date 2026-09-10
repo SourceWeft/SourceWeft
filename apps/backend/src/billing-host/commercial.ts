@@ -1,4 +1,4 @@
-// SourceWeft Commercial License: generated from enterprise/billing/edition.
+// Commercial module host adapter; subject to enterprise/LICENSE.
 import "dotenv/config";
 import type { Hono } from "hono";
 import type {
@@ -39,10 +39,8 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { createSourceweftOrganizationMetadata } from "../modules/auth/organization-metadata";
 import { createBillingMembershipSource } from "./membership-source";
-import { assertEditionConfiguration } from "./config";
 import type { BillingHttpHost } from "./http-host";
 import type { CheckResult } from "../checks/types";
-assertEditionConfiguration("commercial", process.env);
 const billingConfig = readBillingConfig(process.env, config.auth.webBaseUrl);
 const alerts: BillingAlertSink = {
   async trigger(input) {

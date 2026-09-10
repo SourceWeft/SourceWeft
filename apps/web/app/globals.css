@@ -20,6 +20,8 @@
 
 /* Scan shared UI package so app Tailwind sees utilities used in workspace components. */
 @source "../../../packages/ui/src";
+/* Optional commercial UI ships in the same build and loads at runtime. */
+@source "../../../enterprise/billing/src/ui";
 /* Streamdown supplies runtime markup, including negative margins for its toolbar. */
 @source "../node_modules/streamdown/dist/*.js";
 

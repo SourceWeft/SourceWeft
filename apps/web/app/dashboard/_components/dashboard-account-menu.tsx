@@ -1,5 +1,6 @@
 "use client";
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
+import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 
 import * as React from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
@@ -69,6 +70,7 @@ export function DashboardAccountMenu({
   settingsRequest?: { id: number; tab: SettingsCenterTab } | null;
 }) {
   const { isMobile } = useSidebar();
+  const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
   const sessionState = authState.data as
     | {
@@ -236,14 +238,18 @@ export function DashboardAccountMenu({
                   <User />
                   Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openSettings("usage")}>
-                  <LayoutGrid />
-                  Usage
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openSettings("billing")}>
-                  <CreditCard />
-                  Billing
-                </DropdownMenuItem>
+                {billingAvailable ? (
+                  <>
+                    <DropdownMenuItem onClick={() => openSettings("usage")}>
+                      <LayoutGrid />
+                      Usage
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openSettings("billing")}>
+                      <CreditCard />
+                      Billing
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void handleSignOut()}>

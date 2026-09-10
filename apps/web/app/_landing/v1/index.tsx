@@ -10,6 +10,7 @@ import {
   useLandingAuthState,
 } from "../components/use-landing-auth-state";
 import { getPricingConfig } from "../pricing-config";
+import { useDeploymentCapabilities } from "../../../lib/billing-edition/capabilities";
 import { PricingToggle } from "./pricing-toggle";
 
 // ─── tiny SVG icons (inline, no external dep) ────────────────────────────────
@@ -654,7 +655,10 @@ function HowItWorks() {
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
 function PricingSection({ authState }: { authState: LandingAuthState }) {
+  const state = useDeploymentCapabilities();
   const plans = getPricingConfig();
+  if (state.status !== "ready" || !state.capabilities.billing.checkout)
+    return null;
 
   return (
     <section

@@ -1,71 +1,43 @@
 import assert from "node:assert/strict";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 const root = process.cwd();
-const edition = process.argv[2];
-assert.ok(
-  ["core", "commercial"].includes(edition),
-  "Specify core or commercial",
-);
-async function files(dir) {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries
-      .filter(
-        (e) =>
-          !["node_modules", ".next", "dist", ".git", "coverage"].includes(
-            e.name,
-          ),
-      )
-      .map((e) =>
-        e.isDirectory()
-          ? files(path.join(dir, e.name))
-          : [path.join(dir, e.name)],
-      ),
+for (const app of ["backend", "web"]) {
+  const manifest = JSON.parse(
+    await readFile(`apps/${app}/package.json`, "utf8"),
   );
-  return nested.flat();
+  assert.equal(manifest.dependencies["@sourceweft/billing"], "workspace:*");
 }
-if (edition === "core") {
-  await assert.rejects(stat(path.join(root, "enterprise")), { code: "ENOENT" });
-  await assert.rejects(
-    stat(path.join(root, "apps/web/app/dashboard/billing")),
-    {
-      code: "ENOENT",
-    },
-  );
-  for (const dir of ["apps/backend/src", "apps/web", "packages"]) {
-    for (const file of await files(path.join(root, dir))) {
-      if (!/\.(?:ts|tsx|json)$/.test(file) || file.endsWith(".test.ts"))
-        continue;
-      const text = await readFile(file, "utf8");
-      assert.ok(
-        !/from\s*["']@sourceweft\/billing|import\s*\(["']@sourceweft\/billing|["']@creem_io\/better-auth|["']@waffo\/pancake-ts|from\s*["']stripe["']|import\s*\(["']stripe["']|["']stripe["']\s*:/.test(
-          text,
-        ),
-        `Commercial dependency in core: ${file}`,
-      );
+const bindings = await readFile(
+  "apps/backend/src/billing-host/bindings.ts",
+  "utf8",
+);
+assert.match(bindings, /resolveCommercialEnabled\(process.env\)/);
+assert.match(bindings, /await import\("\.\/commercial"\)/);
+assert.doesNotMatch(
+  bindings,
+  /catch\s*\(/,
+  "Never downgrade after an enabled module fails",
+);
+async function check(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await check(file);
+      continue;
     }
-  }
-} else {
-  for (const route of ["page.tsx", "checkout/page.tsx"]) {
-    assert.ok(
-      (
-        await stat(path.join(root, "apps/web/app/dashboard/billing", route))
-      ).isFile(),
-    );
-  }
-  for (const file of await files(path.join(root, "enterprise/billing/src"))) {
     if (!/\.tsx?$/.test(file)) continue;
     const text = await readFile(file, "utf8");
-    for (const m of text.matchAll(/(?:from\s*|import\s*\()["']([^"']+)/g)) {
-      if (m[1].startsWith("."))
+    for (const match of text.matchAll(/(?:from\s*|import\s*\()["']([^"']+)/g)) {
+      if (match[1].startsWith("."))
         assert.ok(
           path
-            .resolve(path.dirname(file), m[1])
+            .resolve(path.dirname(file), match[1])
             .startsWith(path.join(root, "enterprise/billing") + path.sep),
           `Application import in billing: ${file}`,
         );
     }
   }
 }
-console.log(`PASS: ${edition} billing source dependency boundary`);
+await check(path.join(root, "enterprise/billing/src"));
+console.log("PASS: unified module dependency boundary");

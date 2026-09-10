@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import type { LandingAuthState } from "./use-landing-auth-state";
@@ -59,6 +60,7 @@ export function SourceWeftFooter({
       authState?.isSignedIn ? "Dashboard" : "Get started",
     ],
   ] as const;
+  const checkoutAvailable = useCheckoutAvailable();
 
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
@@ -71,7 +73,12 @@ export function SourceWeftFooter({
             </p>
           </div>
 
-          <FooterColumn title="Product" links={productLinks} />
+          <FooterColumn
+            title="Product"
+            links={productLinks.filter(
+              ([href]) => href !== "/#pricing" || checkoutAvailable,
+            )}
+          />
           <FooterColumn title="Company" links={COMPANY_LINKS} />
           <FooterColumn title="Legal" links={LEGAL_LINKS} />
         </div>

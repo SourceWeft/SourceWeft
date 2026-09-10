@@ -1,4 +1,4 @@
-name: Billing editions
+name: Commercial module modes
 on:
   pull_request:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
         image: redis:8-alpine
         ports: ["6379:6379"]
     env:
-      SOURCEWEFT_EDITION: ${{ matrix.edition }}
+      SOURCEWEFT_COMMERCIAL_ENABLED: ${{ matrix.edition == 'commercial' && 'true' || 'false' }}
       DATABASE_URL: postgresql://sourceweft:sourceweft@127.0.0.1:5432/sourceweft_billing_test
       REDIS_URL: redis://127.0.0.1:6379/0
       BETTER_AUTH_SECRET: billing-ci-test-auth-secret-at-least-32
@@ -49,10 +49,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
-      - name: Prepare an independent source workspace
-        run: node scripts/editions/prepare.mjs --edition=${{ matrix.edition }} --out=${{ runner.temp }}/billing-edition
       - name: Verify source boundary and locked installation
-        working-directory: ${{ runner.temp }}/billing-edition
         run: |
           node scripts/editions/check-boundaries.mjs ${{ matrix.edition }}
           pnpm install --frozen-lockfile
@@ -62,27 +59,22 @@ jobs:
           pnpm --filter @sourceweft/market-contracts build
           pnpm --filter @sourceweft/ui-web build
       - name: Typecheck and build both applications
-        working-directory: ${{ runner.temp }}/billing-edition
         run: |
           pnpm --filter @sourceweft/backend check-types
           pnpm --filter web check-types
           pnpm --filter @sourceweft/backend build
           pnpm --filter web build
       - name: Apply the actual edition migrations
-        working-directory: ${{ runner.temp }}/billing-edition
         run: pnpm --filter @sourceweft/backend db:migrate
       - name: Commercial unit and PostgreSQL tests
         if: matrix.edition == 'commercial'
-        working-directory: ${{ runner.temp }}/billing-edition
         run: |
           pnpm --filter @sourceweft/billing check-types
           pnpm --filter @sourceweft/billing test
           pnpm --filter @sourceweft/billing test:database
       - name: Worker and scheduler startup smoke
-        working-directory: ${{ runner.temp }}/billing-edition
         run: node scripts/e2e/billing-startup.mjs
       - name: API end-to-end smoke
-        working-directory: ${{ runner.temp }}/billing-edition
         env:
           E2E_EDITION: ${{ matrix.edition }}
           E2E_API_URL: http://127.0.0.1:3411

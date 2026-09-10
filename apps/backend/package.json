@@ -30,7 +30,10 @@
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
     "benchmark:video-render": "tsx src/scripts/benchmark-video-render.ts",
     "check-types": "tsc --noEmit",
-    "check-types:build": "tsc --noEmit -p tsconfig.build.json"
+    "check-types:build": "tsc --noEmit -p tsconfig.build.json",
+    "creem:product:create": "tsx src/scripts/create-creem-product.ts",
+    "creem:product:delete": "tsx src/scripts/delete-creem-product.ts",
+    "waffo:setup": "tsx src/scripts/setup-waffo.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.67",
@@ -102,7 +105,8 @@
     "unique-names-generator": "^4.7.1",
     "ws": "^8.21.3",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@sourceweft/billing": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

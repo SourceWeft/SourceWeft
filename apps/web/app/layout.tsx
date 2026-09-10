@@ -11,6 +11,7 @@ import {
 
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { Providers } from "./providers";
+import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
@@ -77,7 +78,10 @@ export default async function RootLayout({
         <SeoJsonLd />
       </head>
       <body className="flex min-h-svh flex-col antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          <DesktopWindowChrome />
+          {children}
+        </Providers>
       </body>
       {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
     </html>
