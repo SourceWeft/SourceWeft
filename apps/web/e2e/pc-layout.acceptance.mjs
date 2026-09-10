@@ -195,7 +195,7 @@ export default async function (page) {
   );
   assert(
     (await page
-      .getByRole("button", { name: "选择云端或电脑", exact: true })
+      .getByRole("button", { name: "Choose cloud or computer", exact: true })
       .count()) === 0,
     "Existing context became editable",
   );
@@ -285,7 +285,7 @@ export default async function (page) {
     .getByRole("heading", { name: "New chat", exact: true })
     .waitFor({ state: "visible" });
   await page
-    .getByRole("button", { name: "选择云端或电脑", exact: true })
+    .getByRole("button", { name: "Choose cloud or computer", exact: true })
     .waitFor({ state: "visible" });
   const newSend = await page
     .getByRole("button", { name: "Submit", exact: true })

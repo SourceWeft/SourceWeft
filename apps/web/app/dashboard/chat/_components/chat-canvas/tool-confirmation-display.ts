@@ -111,7 +111,7 @@ function sandboxExecuteDetailLines(
   return [
     sandboxRiskLine(confirmation),
     `Command: ${summary}`,
-    `CWD: ${cwd}`,
+    `Working directory: ${cwd}`,
     "Review network, dependency, and secret-access risk before approving.",
     confirmation.editableArgs ? "Editable before approval" : null,
   ].filter((line): line is string => Boolean(line));
@@ -217,7 +217,7 @@ export function requestDetailLines(
   const sandboxLines = sandboxRequestDetailLines(confirmation, toolCallInput);
   if (sandboxLines) {
     return sandboxLines.map((line) =>
-      line.startsWith("CWD: ") ? line : compactText(line, 160),
+      line.startsWith("Working directory: ") ? line : compactText(line, 160),
     );
   }
   const toolMetadata = confirmationToolMetadata(confirmation);

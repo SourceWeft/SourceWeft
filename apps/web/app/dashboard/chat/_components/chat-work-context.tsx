@@ -74,12 +74,14 @@ export function useChatCreationContext() {
           typeof value !== "object" ||
           Object.values(value).some((folder) => typeof folder !== "string")
         )
-          throw new Error("工作文件夹草稿数据不可用。");
+          throw new Error("Working directory draft data is unavailable.");
         folderByComputer.current = value;
       }
     } catch (e) {
       setDraftMetadataError(
-        e instanceof Error ? e.message : "无法恢复工作文件夹选择。",
+        e instanceof Error
+          ? e.message
+          : "Could not restore the working directory selection.",
       );
     }
   }, [folderStorageKey]);
@@ -138,7 +140,9 @@ export function useChatCreationContext() {
           JSON.stringify(folderByComputer.current),
         );
       } catch {
-        setDraftMetadataError("工作文件夹选择保存失败，请暂勿刷新。");
+        setDraftMetadataError(
+          "Could not save the working directory selection. Keep this page open and try again.",
+        );
         return;
       }
     }
@@ -164,7 +168,7 @@ export function useChatCreationContext() {
     devices,
     nativeId,
     error: invalid
-      ? "所选电脑不可用，请重新选择。"
+      ? "This computer is unavailable. Choose another computer."
       : (draftMetadataError ?? error),
     ready,
     select,
@@ -236,14 +240,17 @@ export function ChatWorkContext({
   }, [workspaceId, threadId, setWorkTarget]);
   const target = threadId ? info?.executionTarget : creation?.target;
   const device = threadId ? info?.target : creation?.selectedDevice;
+  const contextError = error || creation?.error;
   const label =
     target?.kind === "cloud"
-      ? "云端工作"
+      ? "Cloud"
       : device
-        ? `${!threadId && creation?.nativeId === ("deviceId" in device ? device.deviceId : device.id) ? "这台电脑 · " : ""}${device.name} · ${device.online ? "在线" : "离线"}`
-        : error || creation?.error
-          ? "电脑信息不可用"
-          : "正在连接…";
+        ? `${device.name}${contextError ? " · Status unavailable" : device.online ? "" : " · Offline"}`
+        : contextError || (info && target?.kind === "local")
+          ? "Computer unavailable"
+          : "Connecting…";
+  const triggerClassName =
+    "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
   const icon =
     target?.kind === "cloud" ? (
       <Cloud className="size-3.5 shrink-0" />
@@ -252,28 +259,59 @@ export function ChatWorkContext({
     );
   return (
     <div
-      className="flex min-w-0 items-center gap-2 pl-14 pr-4 pb-2 text-xs text-muted-foreground"
+      className="flex min-w-0 max-w-[55%] shrink-0 items-center text-xs text-muted-foreground sm:w-full sm:max-w-full sm:shrink"
       data-testid="chat-work-context"
     >
       {threadId ? (
-        <span
-          className="flex min-w-0 items-center gap-1.5"
-          role="status"
-          data-testid="thread-work-context"
-        >
-          {icon}
-          <span className="truncate" title={label}>
-            {label}
-          </span>
-        </span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label="Conversation details"
+              className={triggerClassName}
+              title={label}
+            >
+              <span
+                role="status"
+                data-testid="thread-work-context"
+                className="flex min-w-0 items-center gap-1"
+              >
+                {icon}
+                <span className="truncate">{label}</span>
+              </span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-72 max-w-[calc(100vw-2rem)] space-y-2 text-sm"
+          >
+            <p className="break-words font-medium">{device?.name ?? label}</p>
+            <p className="text-xs text-muted-foreground">
+              {target?.kind === "cloud"
+                ? "This conversation runs in the cloud."
+                : "This conversation uses a fixed computer and working directory."}
+              {device &&
+                !contextError &&
+                (device.online
+                  ? " The computer is online."
+                  : " The computer is offline. Local tasks can continue when it reconnects.")}
+            </p>
+            {contextError && (
+              <p role="alert" className="break-words text-xs text-destructive">
+                {contextError}
+              </p>
+            )}
+          </PopoverContent>
+        </Popover>
       ) : (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <button
               type="button"
               disabled={disabled}
-              aria-label="选择云端或电脑"
-              className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded px-1 hover:bg-muted disabled:opacity-50"
+              aria-label="Choose cloud or computer"
+              className={triggerClassName}
+              title={label}
             >
               {icon}
               <span className="truncate">{label}</span>
@@ -293,10 +331,20 @@ export function ChatWorkContext({
               }}
             >
               <Cloud className="size-4" />
-              云端工作
+              Cloud
               {target?.kind === "cloud" && <Check className="ml-auto size-4" />}
             </Button>
-            <p className="px-2 py-2 text-xs text-muted-foreground">我的电脑</p>
+            {contextError && (
+              <p
+                role="alert"
+                className="break-words px-2 py-1 text-xs text-destructive"
+              >
+                {contextError}
+              </p>
+            )}
+            <p className="px-2 py-2 text-xs text-muted-foreground">
+              My computers
+            </p>
             <div className="max-h-64 overflow-y-auto">
               {creation?.devices
                 .filter((d) => d.connected)
@@ -313,7 +361,7 @@ export function ChatWorkContext({
                   >
                     <Laptop className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate text-left">
-                      {d.id === creation.nativeId ? "这台电脑 · " : ""}
+                      {d.id === creation.nativeId ? "This computer · " : ""}
                       {d.name}
                       {creation.devices.filter((other) => other.name === d.name)
                         .length > 1
@@ -321,7 +369,7 @@ export function ChatWorkContext({
                         : ""}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {d.online ? "在线" : "离线"}
+                      {d.online ? "Online" : "Offline"}
                     </span>
                     {target?.kind === "local" && target.deviceId === d.id && (
                       <Check className="size-4 shrink-0" />
@@ -338,26 +386,18 @@ export function ChatWorkContext({
               }}
             >
               <Plus className="mr-2 size-4" />
-              连接电脑…
+              Connect a computer…
             </Button>
           </PopoverContent>
         </Popover>
       )}
-      {(error || creation?.error) && (
-        <span
-          role="alert"
-          className="min-w-0 truncate text-destructive"
-          title={error || creation?.error || ""}
-        >
-          {error || creation?.error}
-        </span>
-      )}
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>连接电脑</DialogTitle>
+            <DialogTitle>Connect a computer</DialogTitle>
             <DialogDescription>
-              请在目标 PC 登录同一账号，并在“设置 → 本机”开启允许其他设备连接。
+              Sign in with the same account on that computer, then enable access
+              from other devices in Settings → This computer.
             </DialogDescription>
           </DialogHeader>
           {creation?.devices
@@ -391,18 +431,18 @@ export function ChatWorkContext({
                   {busy === d.id ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : d.connected ? (
-                    "进入"
+                    "Open"
                   ) : d.remoteEnabled ? (
-                    "连接"
+                    "Connect"
                   ) : (
-                    "未开启许可"
+                    "Access disabled"
                   )}
                 </Button>
               </div>
             ))}
           {!creation?.devices.length && (
             <p className="text-sm text-muted-foreground">
-              还没有可连接的电脑。
+              No computers are available yet.
             </p>
           )}
           {error && (
@@ -459,7 +499,7 @@ export function WorkingFolderPicker({
         >
           <span className="truncate">
             {folder?.name ??
-              (target.folderId ? "工作文件夹不可用" : "选择工作文件夹")}
+              (target.folderId ? "Folder unavailable" : "Working directory")}
           </span>
           <ChevronDown className="size-3 shrink-0" />
         </button>
@@ -476,7 +516,7 @@ export function WorkingFolderPicker({
             setOpen(false);
           }}
         >
-          自动创建任务文件夹
+          Default task folder
         </Button>
         {folders.map((f) => (
           <Button
@@ -515,7 +555,7 @@ export function WorkingFolderPicker({
             }}
           >
             <Plus className="mr-2 size-4" />
-            添加工作文件夹…
+            Select folder…
           </Button>
         )}
         {error && (

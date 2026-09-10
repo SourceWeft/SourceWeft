@@ -95,8 +95,7 @@ export function DesktopLoginView({ path }: { path: string }) {
         }
 
         const body = (await response.json()) as
-          | { status: "pending" }
-          | { status: "complete"; token: string };
+          { status: "pending" } | { status: "complete"; token: string };
 
         if (body.status === "complete") {
           const result = await authClient.oneTimeToken.verify({
@@ -109,7 +108,7 @@ export function DesktopLoginView({ path }: { path: string }) {
 
           clearPendingDesktopAuth(pendingAuth.state);
           if (!cancelled) {
-            router.replace("/dashboard");
+            router.replace("/dashboard/chat");
             router.refresh();
           }
           return;

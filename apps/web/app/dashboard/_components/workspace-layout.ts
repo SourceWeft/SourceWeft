@@ -4,17 +4,18 @@ export function resolveWorkspaceLayout(
   conversationPreference = true,
 ) {
   const mode = width >= 1440 ? "wide" : width >= 1120 ? "standard" : "compact";
-  const railWidth = width >= 768 ? 56 : 0;
-  const conversationWidth = mode === "wide" ? 256 : 240;
-  const canDockConversations = width >= 1120;
+  const conversationWidth = 248;
+  const canDockConversations = width >= 768;
   const conversationsDocked = canDockConversations && conversationPreference;
+  const railWidth = canDockConversations && !conversationsDocked ? 56 : 0;
   const contentWidth = Math.max(
     0,
-    width - railWidth - (conversationsDocked ? conversationWidth : 0),
+    width - (conversationsDocked ? conversationWidth : railWidth),
   );
   return {
     mode,
     conversationWidth,
+    railWidth,
     canDockConversations,
     conversationsDocked,
     contentWidth,

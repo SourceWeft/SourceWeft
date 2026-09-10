@@ -125,7 +125,7 @@ export async function validateThreadExecutionTarget(
       throw new ApiError(
         403,
         "LOCAL_FOLDER_NOT_AUTHORIZED",
-        "工作文件夹未获授权。",
+        "This working directory has not been authorized.",
       );
   }
   // Being temporarily offline does not change a local conversation into cloud.
@@ -159,7 +159,7 @@ export async function localCall(input: {
     throw new ContentError(
       403,
       "LOCAL_BINDING_INVALID",
-      "调用不属于此电脑上的对话。",
+      "This action does not belong to a conversation on this computer.",
     );
   if (bound.folderId) {
     const folder = await db.query.localFolderGrants.findFirst({
@@ -174,7 +174,7 @@ export async function localCall(input: {
       throw new ContentError(
         403,
         "LOCAL_FOLDER_REVOKED",
-        "工作文件夹授权已撤销。",
+        "Access to this working directory has been revoked.",
       );
   }
 
@@ -191,6 +191,12 @@ export async function localCall(input: {
       "DEVICE_OFFLINE",
       "The bound computer is offline. This conversation will not switch execution environments.",
     );
+  // Compare exactly what JSONB stores and the native host receives. Optional
+  // undefined properties disappear on the wire; they are not changed args.
+  const payload = JSON.parse(JSON.stringify(input.payload)) as Record<
+    string,
+    unknown
+  >;
   const id = input.id ?? randomUUID();
   const timeout = Math.min(input.timeoutMs ?? 30_000, 180_000);
   const deadline = new Date(Date.now() + timeout);
@@ -204,7 +210,7 @@ export async function localCall(input: {
       runId: input.runId,
       accessId: access.id,
       action: input.action,
-      payload: input.payload,
+      payload,
       deadline,
     })
     .onConflictDoNothing();
@@ -217,7 +223,7 @@ export async function localCall(input: {
     record.threadId !== input.threadId ||
     record.userId !== input.userId ||
     record.action !== input.action ||
-    canonical(record.payload) !== canonical(input.payload)
+    canonical(record.payload) !== canonical(payload)
   ) {
     throw new ContentError(
       409,

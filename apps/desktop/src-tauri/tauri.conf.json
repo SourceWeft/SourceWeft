@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "nicelab.sourceweft",
   "build": {
-    "devUrl": "http://localhost:3000/dashboard",
+    "devUrl": "http://localhost:3000/dashboard/chat",
     "frontendDist": "../placeholder-dist"
   },
   "bundle": {
@@ -29,8 +29,8 @@
       {
         "label": "main",
         "title": "SourceWeft",
-        "width": 1200,
-        "height": 800,
+        "width": 1280,
+        "height": 840,
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,

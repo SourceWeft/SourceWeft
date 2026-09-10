@@ -70,7 +70,12 @@ export const agentSandboxService = {
   ): Promise<AgentSandboxRuntimeForTurn | null> {
     if (input.executionTarget?.kind === "local") {
       const localFactory = await localProviderForTurn(input.context);
-      if (!localFactory) throw new ContentError(409, "EXECUTION_TARGET_MISMATCH", "The persisted conversation no longer matches its local execution target.");
+      if (!localFactory)
+        throw new ContentError(
+          409,
+          "EXECUTION_TARGET_MISMATCH",
+          "The persisted conversation no longer matches its local execution target.",
+        );
       const localService = new AgentSandboxService({
         getConfig: () => ({
           ...currentSandboxServiceConfig(),
@@ -81,11 +86,19 @@ export const agentSandboxService = {
         getProviderFactory: (id) => (id === "local" ? localFactory : null),
         logWarn: (message, meta) => logger.warn(message, meta),
       });
-      return localService.createRuntimeForTurn(
+      const runtime = await localService.createRuntimeForTurn(
         input,
         new DrizzleSandboxStore(),
         new DrizzleSandboxOperationStore(),
       );
+      if (runtime) {
+        const buildRuntimePrompt = runtime.buildRuntimePrompt.bind(runtime);
+        runtime.buildRuntimePrompt = () => `${buildRuntimePrompt()}
+<local_execution_presentation>
+Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.
+</local_execution_presentation>`;
+      }
+      return runtime;
     }
     await initializeSandboxProviderRegistry();
     return sandboxService.createRuntimeForTurn(

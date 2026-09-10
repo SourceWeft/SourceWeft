@@ -91,67 +91,25 @@ function DashboardSkeletonContentForPath({
   return <DashboardHomeSkeletonContent />;
 }
 
-function DashboardSidebarSkeleton({ pathname }: { pathname?: string | null }) {
-  // When pathname is unknown (null/empty), default to showing the chat panel
-  // since chat is the primary dashboard surface.
-  const hasChatPanel = pathname ? isChatRoute(pathname) : true;
-
+function DashboardSidebarSkeleton() {
   return (
-    <aside
-      className={cx(
-        "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
-        hasChatPanel ? "w-[360px] border-r border-border" : "w-14",
-      )}
-    >
-      <div className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-sidebar-border px-2 py-4">
-        <div className="flex flex-col items-center gap-2">
-          <SkeletonBlock className="size-10 rounded-xl" />
-          <div className="mt-2 flex flex-col items-center gap-1">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <SkeletonBlock className="size-10 rounded-xl" key={index} />
-            ))}
-          </div>
-        </div>
-        <SkeletonBlock className="size-10 rounded-full" />
+    <aside className="hidden h-svh w-[248px] shrink-0 flex-col border-r border-border bg-sidebar p-3 md:flex">
+      <div className="flex h-11 items-center gap-2">
+        <SkeletonBlock className="size-6 rounded-md" />
+        <SkeletonLine className="w-28" />
       </div>
-
-      {hasChatPanel ? (
-        <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
-          <div className="shrink-0 border-b border-border px-3 py-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonLine className="h-3.5 w-28" />
-                <SkeletonLine className="w-40" />
-              </div>
-              <SkeletonBlock className="size-8 rounded-md" />
-            </div>
-            <SkeletonBlock className="mt-3 h-9 rounded-xl" />
-          </div>
-          <div className="min-h-0 flex-1 space-y-5 overflow-hidden px-3 py-3">
-            {Array.from({ length: 2 }).map((_, groupIndex) => (
-              <section className="space-y-2" key={groupIndex}>
-                <div className="flex items-center justify-between">
-                  <SkeletonLine className="w-24" />
-                  <SkeletonBlock className="h-6 w-12" />
-                </div>
-                {Array.from({ length: groupIndex === 0 ? 4 : 3 }).map(
-                  (_, rowIndex) => (
-                    <div
-                      className="rounded-lg border border-transparent px-2 py-2"
-                      key={rowIndex}
-                    >
-                      <SkeletonLine
-                        className={rowIndex % 2 ? "w-40" : "w-52"}
-                      />
-                      <SkeletonLine className="mt-2 w-24" />
-                    </div>
-                  ),
-                )}
-              </section>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      <SkeletonBlock className="my-2 h-9 rounded-lg" />
+      <div className="space-y-3 py-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <SkeletonLine key={index} className="w-28" />
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 space-y-5 overflow-hidden border-t pt-4">
+        {Array.from({ length: 6 }, (_, index) => (
+          <SkeletonLine key={index} className="w-44" />
+        ))}
+      </div>
+      <SkeletonBlock className="h-10 rounded-lg" />
     </aside>
   );
 }
@@ -185,7 +143,7 @@ export function DashboardShellRouteSkeleton({
 }) {
   return (
     <main className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
-      <DashboardSidebarSkeleton pathname={pathname} />
+      <DashboardSidebarSkeleton />
       <section className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <DashboardSkeletonContentForPath pathname={pathname} />
       </section>

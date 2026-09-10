@@ -36,7 +36,7 @@ export async function resolveLocalCaller(
     throw new ApiError(
       403,
       "NATIVE_PROOF_EXPIRED",
-      "本机身份已失效，请重新连接本机。",
+      "This computer session has expired. Reconnect to continue.",
     );
   return { sessionId, nativeAccessId: row.id };
 }
@@ -57,10 +57,14 @@ export async function requireDeviceAccess(
     throw new ApiError(
       404,
       "LOCAL_DEVICE_NOT_FOUND",
-      "未找到属于此账号的电脑。",
+      "No computer was found for this account.",
     );
   if (!caller)
-    throw new ApiError(403, "LOCAL_CONNECTION_REQUIRED", "请先连接这台电脑。");
+    throw new ApiError(
+      403,
+      "LOCAL_CONNECTION_REQUIRED",
+      "Connect to this computer first.",
+    );
   const native = caller.nativeAccessId
     ? await db.query.localDeviceAccess.findFirst({
         where: and(
@@ -79,7 +83,7 @@ export async function requireDeviceAccess(
     throw new ApiError(
       403,
       "REMOTE_ACCESS_DISABLED",
-      "请在目标 PC 开启允许其他设备连接。",
+      "Enable access from other devices on that computer.",
     );
   const remote = await db.query.localDeviceAccess.findFirst({
     where: and(
@@ -93,7 +97,11 @@ export async function requireDeviceAccess(
     ),
   });
   if (!remote)
-    throw new ApiError(403, "LOCAL_CONNECTION_REQUIRED", "请先连接这台电脑。");
+    throw new ApiError(
+      403,
+      "LOCAL_CONNECTION_REQUIRED",
+      "Connect to this computer first.",
+    );
   return remote;
 }
 
@@ -142,7 +150,11 @@ export async function createNativeAccess(
       ),
     });
     if (!device)
-      throw new ApiError(403, "DEVICE_CREDENTIAL_INVALID", "本机凭据不可用。");
+      throw new ApiError(
+        403,
+        "DEVICE_CREDENTIAL_INVALID",
+        "The computer credentials are unavailable.",
+      );
     const [enrollment] = await tx
       .delete(localDeviceEnrollments)
       .where(
@@ -157,7 +169,7 @@ export async function createNativeAccess(
       throw new ApiError(
         403,
         "NATIVE_SESSION_MISMATCH",
-        "本机与登录账号不一致或验证已过期。",
+        "The computer does not match the signed-in account, or verification has expired.",
       );
     await tx
       .update(localDevices)
@@ -200,7 +212,7 @@ export async function connectRemote(
     throw new ApiError(
       403,
       "REMOTE_ACCESS_DISABLED",
-      "请在目标 PC 开启允许其他设备连接。",
+      "Enable access from other devices on that computer.",
     );
   const id = randomUUID();
   await db.insert(localDeviceAccess).values({
@@ -226,7 +238,7 @@ export async function setRemotePolicy(
     throw new ApiError(
       403,
       "LOCAL_SETTINGS_ONLY",
-      "此设置只能在目标 PC 上修改。",
+      "This setting can only be changed on that computer.",
     );
   const [device] = await db
     .update(localDevices)
@@ -341,7 +353,7 @@ export async function resolveCreationContext(
       throw new ApiError(
         409,
         "CREATION_CONTEXT_REQUIRED",
-        "请使用新的电脑选择入口创建对话。",
+        "Choose a computer before starting a new chat.",
       );
     return legacyTarget ?? { kind: "cloud" as const };
   }
@@ -357,10 +369,14 @@ export async function resolveCreationContext(
     throw new ApiError(
       409,
       "CREATION_CONTEXT_EXPIRED",
-      "新建上下文已过期，请重新发送。",
+      "The new chat context has expired. Send your message again.",
     );
   if (legacyTarget && targetKey(context.target) !== targetKey(legacyTarget))
-    throw new ApiError(409, "CREATION_CONTEXT_MISMATCH", "新建目标不一致。");
+    throw new ApiError(
+      409,
+      "CREATION_CONTEXT_MISMATCH",
+      "The new chat destination does not match.",
+    );
   if (context.target.kind === "local")
     await requireDeviceAccess(userId, context.target.deviceId, caller);
   return context.target;
@@ -385,7 +401,7 @@ export async function revokeFolderAccess(
     throw new ApiError(
       403,
       "LOCAL_SETTINGS_ONLY",
-      "文件夹授权只能在目标 PC 修改。",
+      "Folder access can only be changed on that computer.",
     );
   const { localFolderGrants, localThreadBindings } =
     await import("@sourceweft/db");
@@ -401,7 +417,11 @@ export async function revokeFolderAccess(
     )
     .returning();
   if (!folder)
-    throw new ApiError(404, "LOCAL_FOLDER_NOT_FOUND", "工作文件夹不存在。");
+    throw new ApiError(
+      404,
+      "LOCAL_FOLDER_NOT_FOUND",
+      "The working directory was not found.",
+    );
   const bindings = await db
     .select({ threadId: localThreadBindings.threadId })
     .from(localThreadBindings)

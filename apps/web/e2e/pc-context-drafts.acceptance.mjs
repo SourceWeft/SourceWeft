@@ -89,15 +89,15 @@ export default async (page) => {
     "Restored image is not readable",
   );
   assert(page.url() === draftUrl, "Reload changed draft identity");
-  await page.getByRole("button", { name: "选择云端或电脑" }).click();
-  await page.getByRole("button", { name: /我的 Mac.*离线/ }).click();
+  await page.getByRole("button", { name: "Choose cloud or computer" }).click();
+  await page.getByRole("button", { name: /我的 Mac.*Offline/ }).click();
   await page.waitForURL(
     (url) =>
       url.searchParams.get("computer") !== null &&
       url.searchParams.get("computer") !== "cloud",
   );
   await page
-    .getByRole("button", { name: "选择云端或电脑" })
+    .getByRole("button", { name: "Choose cloud or computer" })
     .filter({ hasText: "我的 Mac" })
     .waitFor();
   await editor().waitFor();
@@ -121,12 +121,12 @@ export default async (page) => {
     (await images().count()) === 0,
     "Local reload inherited another draft's attachment",
   );
-  await page.getByRole("button", { name: "选择云端或电脑" }).click();
-  await page.getByRole("button", { name: "云端工作", exact: true }).click();
+  await page.getByRole("button", { name: "Choose cloud or computer" }).click();
+  await page.getByRole("button", { name: "Cloud", exact: true }).click();
   await page.waitForURL(/computer=cloud/);
   await page
-    .getByRole("button", { name: "选择云端或电脑" })
-    .filter({ hasText: "云端工作" })
+    .getByRole("button", { name: "Choose cloud or computer" })
+    .filter({ hasText: "Cloud" })
     .waitFor();
   await editor().waitFor();
   assert(
@@ -200,8 +200,8 @@ export default async (page) => {
   );
   assert((await images().count()) === 0, "New chat inherited an attachment");
   await page
-    .getByRole("button", { name: "选择云端或电脑" })
-    .filter({ hasText: "云端工作" })
+    .getByRole("button", { name: "Choose cloud or computer" })
+    .filter({ hasText: "Cloud" })
     .waitFor();
   await page.goBack();
   await page.waitForURL(oldUrl);

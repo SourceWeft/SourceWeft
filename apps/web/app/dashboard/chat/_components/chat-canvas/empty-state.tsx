@@ -116,12 +116,9 @@ export function EmptyState({
           <div className="mx-auto flex w-full max-w-4xl flex-col items-start justify-center gap-8">
             <ConversationEmptyState className="w-full items-start gap-4 p-0 text-left">
               <div className="space-y-2">
-                <p className="chat-empty-eyebrow text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-                  New chat
-                </p>
                 <div className="space-y-3">
-                  <h1 className="chat-empty-title max-w-2xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                    Work with your agent across your selected sources.
+                  <h1 className="chat-empty-title max-w-2xl text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                    What would you like to work on?
                   </h1>
                   <p className="chat-empty-description max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                     Start with a prompt, compare evidence, or have the agent

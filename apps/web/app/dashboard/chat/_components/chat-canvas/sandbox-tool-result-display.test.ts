@@ -404,7 +404,7 @@ test("formats sandbox prepare operation details for tool cards", () => {
       },
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Inputs", value: "2 files" },
       { label: "Size", value: "2 KiB" },
       {
@@ -442,7 +442,7 @@ test("formats sandbox prepare recoverable failure details for tool cards", () =>
       },
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Status", value: "Failed" },
       { label: "Code", value: "ENOENT" },
       { label: "Message", value: "ENOENT: no such file" },
@@ -471,7 +471,7 @@ test("formats sandbox prepare request details when execution fails before result
       output: {},
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Inputs", value: "1 file" },
       {
         label: "Requested transfer",
@@ -529,7 +529,7 @@ test("formats sandbox collect operation details for tool cards", () => {
       },
     }),
     [
-      { label: "Operation", value: "Collected sandbox outputs" },
+      { label: "Operation", value: "Collected output files" },
       { label: "Outputs", value: "2 files" },
       { label: "Size", value: "512 B" },
       {
@@ -596,7 +596,7 @@ test("formats sandbox execute operation details for tool cards", () => {
       },
     }),
     [
-      { label: "Operation", value: "Executed sandbox command" },
+      { label: "Operation", value: "Executed command" },
       { label: "Exit code", value: "1" },
       { label: "Output", value: "Truncated" },
     ],
@@ -638,7 +638,7 @@ test("formats sandbox operation timeline for tool cards", () => {
     [
       {
         key: "0-create",
-        label: "Created sandbox",
+        label: "Prepared workspace",
         status: "succeeded",
         detail: "Sandbox ready",
         duration: "120ms",
@@ -681,11 +681,11 @@ test("surfaces the command output text in the operation timeline", () => {
   assert.equal(items[0]?.detail, "Exit code 0 · 2 output chars");
 });
 
-test("orders 'Created sandbox' before the command that triggered its cold start", () => {
+test("orders 'Prepared workspace' before the command that triggered its cold start", () => {
   // Real-world shape: the execute row is claimed at start (createdAt = T0), but
   // the sandbox `create` row is written at completion (createdAt = T0 + 13s),
   // because the execute triggered the cold start. Recovered start ordering must
-  // still put "Created sandbox" first.
+  // still put "Prepared workspace" first.
   const labels = getSandboxToolOperationTimeline({
     toolName: "execute",
     output: {
@@ -708,7 +708,7 @@ test("orders 'Created sandbox' before the command that triggered its cold start"
     },
   }).map((item) => item.label);
 
-  assert.deepEqual(labels, ["Created sandbox", "Executed command"]);
+  assert.deepEqual(labels, ["Prepared workspace", "Executed command"]);
 });
 
 test("keeps command ops in claim (createdAt) order", () => {
@@ -742,7 +742,7 @@ test("keeps command ops in claim (createdAt) order", () => {
 
   // create (start ≈ 07:00:00) first, then the two executes by their createdAt.
   assert.deepEqual(labels, [
-    "Created sandbox",
+    "Prepared workspace",
     "Executed command",
     "Executed command",
   ]);
@@ -885,7 +885,7 @@ test("maps sandbox transfer errors to user-safe messages", () => {
       toolName: "prepare_sandbox_workspace",
       error: "SANDBOX_TOTAL_SIZE_EXCEEDED: prepared files exceed total limit.",
     }),
-    "The selected files exceed the total sandbox transfer limit. Reduce the number or size of files and try again.",
+    "The selected files exceed the total file transfer limit. Reduce the number or size of files and try again.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
@@ -893,7 +893,7 @@ test("maps sandbox transfer errors to user-safe messages", () => {
       error:
         "SANDBOX_PREPARE_PATH_DENIED: sourcePath must be under /workfiles/.",
     }),
-    "Prepare requires sourcePath under SourceWeft DB-backed /workfiles and sandboxPath under a provider-allowed prepare target root.",
+    "Choose an existing workfile and an authorized destination directory.",
   );
 });
 
@@ -904,14 +904,14 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_COMMAND_TIMEOUT: sandbox command exceeded the configured timeout.",
     }),
-    "The sandbox command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
+    "The command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
       toolName: "execute",
       error: "SANDBOX_PROVIDER_AUTH_FAILED: sandbox credentials failed.",
     }),
-    "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
+    "The execution service could not authenticate. Contact your administrator.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
@@ -919,7 +919,7 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include /workfiles.",
     }),
-    "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+    "The command referenced a file that is not available in the working directory. Prepare the required files before running the command.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
@@ -927,7 +927,7 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_SKILL_STAGING_UNAVAILABLE: skill bundles could not be staged into this sandbox, so /skills paths are not executable here.",
     }),
-    "Skill files could not be staged into this sandbox, so /skills paths cannot be executed here. Read the skill file with file tools, save the needed content as a Workfile, prepare it into /workspace, then run that copy.",
+    "The required skill files could not be prepared in the working directory. Check the skill files and try again.",
   );
 });
 

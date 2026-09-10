@@ -92,7 +92,7 @@ test("a late authentication reply cannot restore a signed-out session", async ()
     proof: "late-proof",
     expiresAt: new Date(Date.now() + 600000).toISOString(),
   });
-  await assert.rejects(attempt, /本机登录已结束/);
+  await assert.rejects(attempt, /The local session has ended/);
   assert.deepEqual(
     await cachedLocalHostHeaders("/v1/workspaces/w/threads"),
     {},
@@ -147,7 +147,7 @@ test("switching accounts cancels an older pending native authentication", async 
     proof: "proof-a",
     expiresAt: new Date(Date.now() + 600000).toISOString(),
   });
-  await assert.rejects(old, /本机登录已结束/);
+  await assert.rejects(old, /The local session has ended/);
   assert.deepEqual(await cachedLocalHostHeaders("/v1/workspaces/w/threads"), {
     "X-Local-Proof": "proof-b",
   });
@@ -158,7 +158,7 @@ test("old native protocol fails explicitly without registering another computer"
     platformSupported: true,
     protocolVersion: 1,
   });
-  await assert.rejects(ensureLocalHostSession("user"), /更新 PC 客户端/);
+  await assert.rejects(ensureLocalHostSession("user"), /Update the PC app/);
   assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
 });
 

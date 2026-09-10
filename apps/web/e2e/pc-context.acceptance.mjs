@@ -16,7 +16,9 @@ export default async (page) => {
     "Existing thread must show read-only context",
   );
   assert(
-    (await page.getByRole("button", { name: "选择云端或电脑" }).count()) === 0,
+    (await page
+      .getByRole("button", { name: "Choose cloud or computer" })
+      .count()) === 0,
     "Existing thread cannot switch its binding",
   );
   await page.getByRole("button", { name: "New chat", exact: true }).click();
@@ -24,8 +26,8 @@ export default async (page) => {
   await editor().waitFor();
   const localUrl = page.url();
   await editor().fill("本地草稿验收");
-  await page.getByRole("button", { name: "选择云端或电脑" }).click();
-  await page.getByRole("button", { name: "云端工作", exact: true }).click();
+  await page.getByRole("button", { name: "Choose cloud or computer" }).click();
+  await page.getByRole("button", { name: "Cloud", exact: true }).click();
   await page.waitForURL(/computer=cloud/);
   await editor().waitFor();
   assert(
@@ -33,8 +35,8 @@ export default async (page) => {
     "Cloud must not inherit the local draft",
   );
   await editor().fill("云端草稿验收");
-  await page.getByRole("button", { name: "选择云端或电脑" }).click();
-  await page.getByRole("button", { name: /我的 Mac.*离线/ }).click();
+  await page.getByRole("button", { name: "Choose cloud or computer" }).click();
+  await page.getByRole("button", { name: /我的 Mac.*Offline/ }).click();
   await page.waitForURL(localUrl);
   assert(
     (await editor().innerText()).trim() === "本地草稿验收",
@@ -52,10 +54,12 @@ export default async (page) => {
       (width) => document.documentElement.clientWidth === width,
       width,
     );
-    await page.getByRole("button", { name: "选择云端或电脑" }).click();
-    await page.getByRole("button", { name: "云端工作", exact: true }).waitFor();
+    await page
+      .getByRole("button", { name: "Choose cloud or computer" })
+      .click();
+    await page.getByRole("button", { name: "Cloud", exact: true }).waitFor();
     const bounds = await page
-      .getByRole("button", { name: "云端工作", exact: true })
+      .getByRole("button", { name: "Cloud", exact: true })
       .boundingBox();
     assert(
       bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1,

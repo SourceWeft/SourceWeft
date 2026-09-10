@@ -88,7 +88,10 @@ export function DashboardSettingsCenterModal({
     };
   }, []);
   const visibleMenuItems = isLocalPc
-    ? [...menuItems, { key: "local" as const, label: "本机", icon: Monitor }]
+    ? [
+        ...menuItems,
+        { key: "local" as const, label: "This computer", icon: Monitor },
+      ]
     : menuItems;
 
   React.useEffect(() => {

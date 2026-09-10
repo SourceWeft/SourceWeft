@@ -19,14 +19,14 @@ const HeaderModelSelector = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-8 w-28 shrink-0 animate-pulse rounded-md bg-muted" />
+      <div className="h-8 w-8 shrink-0 animate-pulse rounded-md bg-muted sm:w-28" />
     ),
   },
 );
 
 type Props = Omit<
   ComponentProps<typeof HeaderModelSelector>,
-  "isLoading" | "compact"
+  "isLoading" | "compact" | "iconOnly"
 > & {
   creationContext?: ChatCreationContext;
   creationDisabled?: boolean;
@@ -57,23 +57,28 @@ export function ChatHeader({
   ...models
 }: Props) {
   const { ref, width } = useElementSize<HTMLDivElement>();
-  const { conversationsOpen, toggleConversations } = useWorkspaceLayout();
+  const { conversationsOpen, canDockConversations, toggleConversations } =
+    useWorkspaceLayout();
   const hubOpen = isPersistentLayout && sourcesVisible;
   const hubLabel = isPersistentLayout
     ? hubOpen
       ? "Hide sources"
       : "Show sources"
     : "Open Hub";
-  const conversationLabel = conversationsOpen
-    ? "Hide conversations"
-    : "Show conversations";
+  const conversationLabel = canDockConversations
+    ? conversationsOpen
+      ? "Collapse sidebar"
+      : "Expand sidebar"
+    : conversationsOpen
+      ? "Hide sidebar"
+      : "Show sidebar";
   return (
     <header
       ref={ref}
       data-testid="chat-header"
-      className="sticky top-0 z-10 min-w-0 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur"
+      className="sticky top-0 z-10 h-12 min-w-0 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur sm:h-14"
     >
-      <div className="flex h-12 min-w-0 items-center gap-2 px-3 sm:h-14 sm:px-4">
+      <div className="flex h-full min-w-0 items-center gap-2 px-3 sm:px-4">
         <Button
           data-conversations-toggle
           aria-label={conversationLabel}
@@ -90,18 +95,27 @@ export function ChatHeader({
             <PanelLeftOpen className="size-4" />
           )}
         </Button>
-        <h1
-          className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground sm:text-base"
-          title={threadTitle}
-        >
-          {threadTitle}
-        </h1>
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-col sm:items-start sm:justify-center sm:gap-0">
+          <h1
+            className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-foreground sm:w-full sm:flex-none"
+            title={threadTitle}
+          >
+            {threadTitle}
+          </h1>
+          <ChatWorkContext
+            workspaceId={workspaceId}
+            threadId={threadId}
+            creation={creationContext}
+            disabled={creationDisabled}
+          />
+        </div>
         {presenceSlot && width >= 700 ? (
           <div className="shrink-0">{presenceSlot}</div>
         ) : null}
         <HeaderModelSelector
           {...models}
-          compact={width < 1000}
+          compact
+          iconOnly={width < 640}
           isLoading={isModelCatalogLoading}
         />
         <Button
@@ -120,12 +134,6 @@ export function ChatHeader({
           )}
         </Button>
       </div>
-      <ChatWorkContext
-        workspaceId={workspaceId}
-        threadId={threadId}
-        creation={creationContext}
-        disabled={creationDisabled}
-      />
     </header>
   );
 }

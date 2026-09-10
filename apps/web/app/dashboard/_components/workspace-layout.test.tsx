@@ -18,7 +18,7 @@ import {
 
 let root: Root;
 let container: HTMLDivElement;
-let width = 960;
+let width = 390;
 let notifyResize: (() => void) | undefined;
 
 function Harness() {
@@ -50,7 +50,7 @@ const click = async (index: number) => {
 };
 
 beforeEach(async () => {
-  width = 960;
+  width = 390;
   localStorage.clear();
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
     () => width,
@@ -92,7 +92,7 @@ test("supported PC sizes preserve at least 640px for chat when panels are docked
         assert(layout.contentWidth - layout.previewWidth >= 640);
     }
   }
-  assert.equal(resolveWorkspaceLayout(960).conversationsDocked, false);
+  assert.equal(resolveWorkspaceLayout(960).conversationsDocked, true);
   assert.equal(resolveWorkspaceLayout(1200).canDockHub, false);
   assert.equal(resolveWorkspaceLayout(1440).canDockHub, true);
 });
@@ -102,7 +102,7 @@ test("automatic collapse and restoration preserve both a draft DOM node and expl
   draft.value = "未发送的草稿 / draft";
   await resize(1440);
   assert.equal(state().conversationsDocked, true);
-  await resize(960);
+  await resize(390);
   assert.equal(state().conversationsDocked, false);
   await resize(1440);
   assert.equal(state().conversationsDocked, true);
@@ -113,7 +113,7 @@ test("automatic collapse and restoration preserve both a draft DOM node and expl
     localStorage.getItem("sourceweft:conversations-expanded"),
     "false",
   );
-  await resize(960);
+  await resize(390);
   await resize(1440);
   assert.equal(state().conversationsDocked, false);
 });
@@ -128,7 +128,18 @@ test("compact drawers are mutually exclusive and resize closes overlays without 
   assert.equal(state().hubDrawerOpen, false);
   assert.equal(state().conversationsOpen, true);
   await resize(1440);
-  await resize(960);
+  await resize(390);
   assert.equal(state().conversationsOpen, false);
   assert.equal(localStorage.getItem("sourceweft:conversations-expanded"), null);
+});
+
+test("desktop collapse keeps a 56px rail and only phone sizes hide navigation entirely", () => {
+  for (const width of [320, 390, 767]) {
+    assert.equal(resolveWorkspaceLayout(width).contentWidth, width);
+    assert.equal(resolveWorkspaceLayout(width).conversationsDocked, false);
+  }
+  for (const width of [768, 800, 960, 1120, 1280, 1440]) {
+    assert.equal(resolveWorkspaceLayout(width).contentWidth, width - 248);
+    assert.equal(resolveWorkspaceLayout(width, false).contentWidth, width - 56);
+  }
 });

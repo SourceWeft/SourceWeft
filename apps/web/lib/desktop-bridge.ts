@@ -86,7 +86,14 @@ async function invokeDesktop<TResult>(
     throw new Error("SourceWeft desktop bridge is not available.");
   }
 
-  return bridge.invoke<TResult>(command, args);
+  try {
+    return await bridge.invoke<TResult>(command, args);
+  } catch (error) {
+    // Tauri rejects Rust Result errors and IPC denials as strings.
+    // Preserve that diagnosis instead of losing it at Error-only UI boundaries.
+    if (typeof error === "string") throw new Error(error);
+    throw error;
+  }
 }
 
 async function listenDesktop<TPayload>(

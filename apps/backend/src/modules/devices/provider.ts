@@ -62,7 +62,7 @@ export async function localProviderForTurn(
       throw new ContentError(
         409,
         "LOCAL_HOST_UPGRADE_REQUIRED",
-        "请在目标 PC 登录一次以恢复本机目录信息。",
+        "Sign in on that computer to restore its working directory information.",
       );
     const reservedId = randomUUID();
     const [saved] = await db
@@ -90,7 +90,7 @@ export async function localProviderForTurn(
     throw new ContentError(
       409,
       "LOCAL_BINDING_INVALID",
-      "本地目录绑定不可用。",
+      "The working directory binding is unavailable.",
     );
   const workspaceRoot = root;
   const workspaceId = id;
@@ -120,7 +120,7 @@ export async function localProviderForTurn(
         throw new ContentError(
           409,
           "LOCAL_WORKSPACE_MISMATCH",
-          "本机返回的目录与对话绑定不一致。",
+          "The computer returned a working directory that does not match this conversation.",
         );
       return value;
     })());

@@ -29,7 +29,7 @@ export async function ensureLocalHostSession(
   const status = await desktopBridge.localHostStatus();
   if (!status.platformSupported) return null;
   if (status.protocolVersion !== 2)
-    throw new Error("请更新 PC 客户端后使用本机能力。");
+    throw new Error("Update the PC app to use local features.");
   if (pending) return ensureLocalHostSession(expectedUserId);
   const startedGeneration = generation;
   initializingUserId = expectedUserId;
@@ -41,18 +41,22 @@ export async function ensureLocalHostSession(
         headers: { "Content-Type": "application/json" },
         body: "{}",
       });
-      if (!response.ok) throw new Error("本机初始化失败，请确认已登录。");
+      if (!response.ok)
+        throw new Error(
+          "Could not initialize this computer. Check that you are signed in.",
+        );
       const { ticket, userId } = await response.json();
       if (
         startedGeneration !== generation ||
         (expectedUserId && userId !== expectedUserId)
       )
-        throw new Error("登录账号已变化，请重试。");
+        throw new Error("Your account changed. Try again.");
       const value = await desktopBridge.authenticateLocalHost(ticket, userId);
-      if (startedGeneration !== generation) throw new Error("本机登录已结束。");
+      if (startedGeneration !== generation)
+        throw new Error("The local session has ended.");
       if (value.needsProof) continue;
       if (!value.deviceId || !value.proof || !value.expiresAt)
-        throw new Error("本机未返回有效身份。");
+        throw new Error("This computer did not return a valid identity.");
       session = {
         deviceId: value.deviceId,
         userId,
@@ -61,7 +65,7 @@ export async function ensureLocalHostSession(
       };
       return session;
     }
-    throw new Error("本机登记未完成。");
+    throw new Error("Computer setup is incomplete.");
   })();
   pending = attempt;
   void attempt.then(
@@ -104,11 +108,14 @@ export async function localHostHeaders(thread?: {
       `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(thread.workspaceId)}/threads/${encodeURIComponent(thread.threadId)}/local-execution`,
       { credentials: "include" },
     );
-    if (!response.ok) throw new Error("无法确认对话的工作环境。");
+    if (!response.ok)
+      throw new Error("Could not verify the conversation environment.");
     const info = await response.json();
     if (info.executionTarget?.kind === "cloud") return {};
     if (typeof info.userId !== "string")
-      throw new Error("无法确认本机对话的登录账号。");
+      throw new Error(
+        "Could not verify the account for this local conversation.",
+      );
     threadUserId = info.userId;
   }
   const value = await ensureLocalHostSession(threadUserId);

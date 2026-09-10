@@ -1,3 +1,5 @@
+/* Shared precompiled utilities precede app utilities so responsive variants win. */
+@import "@sourceweft/ui-web/styles.css";
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
@@ -10,9 +12,11 @@
 @import "@fontsource-variable/noto-sans-sc";
 @import "@fontsource-variable/noto-sans-tc";
 @import "@fontsource-variable/noto-sans-thai";
-@import "@sourceweft/ui-web/styles.css";
 @import "@sourceweft/tailwind-config";
 @import "@daveyplate/better-auth-ui/css";
+
+/* Explicit app scanning also works in Git worktrees under ignored parent directories. */
+@source ".";
 
 /* Scan shared UI package so app Tailwind sees utilities used in workspace components. */
 @source "../../../packages/ui/src";

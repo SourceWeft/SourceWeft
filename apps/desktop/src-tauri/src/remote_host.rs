@@ -65,7 +65,7 @@ impl RemoteHost {
             std::process::Command::new("/usr/bin/osascript")
                 .args([
                     "-e",
-                    "POSIX path of (choose folder with prompt \"选择工作文件夹\")",
+                    "POSIX path of (choose folder with prompt \"Choose a working directory\")",
                 ])
                 .output()
         })
@@ -241,7 +241,7 @@ impl RemoteHost {
                 "{}/v1/local-devices/claim",
                 api_base.trim_end_matches('/')
             ))
-            .json(&json!({"ticket":ticket,"name":"我的 Mac"}))
+            .json(&json!({"ticket":ticket,"name":"My Mac"}))
             .send()
             .await
             .map_err(|e| e.to_string())?;

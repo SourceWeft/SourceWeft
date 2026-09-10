@@ -303,3 +303,90 @@ test("Web sign-out revokes only its connection; PC sign-out disables remote acce
     false,
   );
 });
+
+test("local invocations compare JSON wire payloads while rejecting real parameter changes", async () => {
+  const h = await host();
+  const workspaceId = randomUUID(),
+    threadId = randomUUID(),
+    teamId = randomUUID();
+  await schema.db
+    .insert(schema.workspaces)
+    .values({
+      id: workspaceId,
+      organizationId: teamId,
+      name: "Wire payload",
+      slug: workspaceId,
+    });
+  await schema.db
+    .insert(schema.threads)
+    .values({
+      id: threadId,
+      teamId,
+      workspaceId,
+      createdBy: h.userId,
+      title: "Wire payload",
+      executionTargetJson: { kind: "local", deviceId: h.id },
+    });
+  await schema.db
+    .update(schema.localDevices)
+    .set({ heartbeatAt: new Date() })
+    .where(eq(schema.localDevices.id, h.id));
+  const id = randomUUID();
+  const input = {
+    id,
+    deviceId: h.id,
+    userId: h.userId,
+    threadId,
+    caller: h.caller,
+    action: "workspace.ensure",
+    payload: {
+      workspaceId: "local-workspace",
+      folderId: undefined,
+      options: { optional: undefined },
+    },
+    timeoutMs: 3000,
+  };
+  const completion = service.localCall(input).then(
+    (value) => ({ value, error: null }),
+    (error) => ({ value: null, error }),
+  );
+  let record: typeof schema.localToolInvocations.$inferSelect | undefined;
+  for (let i = 0; i < 50; i++) {
+    record = await schema.db.query.localToolInvocations.findFirst({
+      where: eq(schema.localToolInvocations.id, id),
+    });
+    if (record) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(record);
+  assert.deepEqual(record.payload, {
+    workspaceId: "local-workspace",
+    options: {},
+  });
+  // Simulate the native acknowledgement against a real JSONB invocation row.
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ status: "succeeded", result: { id: "local-workspace" } })
+    .where(eq(schema.localToolInvocations.id, id));
+  const first = await completion;
+  assert.equal(first.error, null);
+  assert.deepEqual(first.value, { id: "local-workspace" });
+  assert.deepEqual(
+    await service.localCall({
+      ...input,
+      payload: { options: {}, workspaceId: "local-workspace" },
+    }),
+    { id: "local-workspace" },
+  );
+  await assert.rejects(
+    service.localCall({
+      ...input,
+      payload: { workspaceId: "different-workspace" },
+    }),
+    { code: "LOCAL_INVOCATION_CONFLICT" },
+  );
+  await assert.rejects(
+    service.localCall({ ...input, action: "command.execute" }),
+    { code: "LOCAL_INVOCATION_CONFLICT" },
+  );
+});

@@ -9,6 +9,7 @@ import { DashboardChatStateProvider } from "./_components/dashboard-chat-state";
 import { DashboardMobileBottomNav } from "./_components/dashboard-mobile-bottom-nav";
 import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
+import { DashboardPageNavigation } from "./_components/dashboard-page-navigation";
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
@@ -194,6 +195,7 @@ export function DashboardLayoutClient({
           <DashboardWorkspaceLayout>
             <DashboardSidebar />
             <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+              <DashboardPageNavigation />
               <DashboardMobileContent>{children}</DashboardMobileContent>
             </main>
             <DashboardMobileBottomNav />

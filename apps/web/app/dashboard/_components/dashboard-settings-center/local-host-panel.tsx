@@ -58,30 +58,34 @@ export function LocalHostPanel() {
   if (dataOwner && dataOwner !== userId)
     return (
       <section>
-        <h2 className="text-lg font-semibold">本机</h2>
-        <p className="mt-3 text-sm text-muted-foreground">正在确认当前账号…</p>
+        <h2 className="text-lg font-semibold">This computer</h2>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Checking your account…
+        </p>
       </section>
     );
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">本机</h2>
+        <h2 className="text-lg font-semibold">This computer</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          在这台 Mac 处理文件和命令任务。未选择文件夹时，自动创建独立任务目录。
+          Work with files and run commands on this Mac. Each conversation gets
+          its own folder unless you select one.
         </p>
         <p role="status" className="mt-3 text-sm">
           {status?.connected
-            ? "本机在线"
+            ? "This computer is online"
             : status?.deviceId
-              ? "本机正在连接…"
-              : "正在初始化本机…"}
+              ? "Connecting this computer…"
+              : "Setting up this computer…"}
         </p>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="font-medium">允许其他设备连接</h3>
+        <h3 className="font-medium">Allow access from other devices</h3>
         <p className="text-sm text-muted-foreground">
-          开启后，同账号的 Web、手机或另一台 PC
-          可以连接这台电脑，使用自动任务目录和已授权的工作文件夹。关闭后仍可在本机工作。
+          Let your other devices use this computer with the same account. They
+          can access task folders and authorized working directories. You can
+          still work on this computer when remote access is off.
         </p>
         <Button
           disabled={busy || !device}
@@ -102,13 +106,17 @@ export function LocalHostPanel() {
             }
           }}
         >
-          {device?.remoteEnabled ? "关闭远程连接" : "允许其他设备连接"}
+          {device?.remoteEnabled
+            ? "Turn off remote access"
+            : "Allow access from other devices"}
         </Button>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="font-medium">工作文件夹</h3>
+        <h3 className="font-medium">Working directories</h3>
         <p className="text-sm text-muted-foreground">
-          自动任务目录始终按对话独立创建。移除文件夹授权会停止相关任务的后续本地操作，保留原文件。
+          Each conversation gets a separate task folder. Removing folder access
+          stops further local operations for affected tasks and preserves the
+          files.
         </p>
         {folders.map((folder) => (
           <div key={folder.id} className="flex items-center gap-3">
@@ -138,7 +146,7 @@ export function LocalHostPanel() {
                 }
               }}
             >
-              移除授权
+              Remove access
             </Button>
           </div>
         ))}
@@ -165,7 +173,7 @@ export function LocalHostPanel() {
             }
           }}
         >
-          添加工作文件夹
+          Add folder
         </Button>
       </div>
       {error && (

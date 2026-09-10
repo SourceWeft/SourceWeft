@@ -26,9 +26,8 @@ function toolCall(input: Partial<ToolCallRecord>): ToolCallRecord {
 function commandInputValue(element: HTMLElement) {
   // Single-line commands render in a readonly Snippet <input>, whose value is
   // not part of textContent.
-  return element.querySelector<HTMLInputElement>(
-    'input[aria-label="Sandbox command"]',
-  )?.value;
+  return element.querySelector<HTMLInputElement>('input[aria-label="Command"]')
+    ?.value;
 }
 
 async function renderToolCard(input: {
@@ -74,7 +73,7 @@ test("AssistantToolCard renders execute command and output together", async () =
     }),
   });
 
-  assert.match(element.textContent ?? "", /Execute sandbox command/);
+  assert.match(element.textContent ?? "", /Run command/);
   assert.equal(commandInputValue(element), "pnpm test");
   assert.match(element.textContent ?? "", /tests failed/);
   assert.match(element.textContent ?? "", /exit 1/);
@@ -91,7 +90,7 @@ test("AssistantToolCard shows the running execute command with pending output", 
 
   assert.match(element.textContent ?? "", /Running/);
   assert.equal(commandInputValue(element), "pnpm build");
-  assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
+  assert.ok(element.querySelector('button[aria-label="Copy command"]'));
   assert.match(
     element.textContent ?? "",
     /Command is running\. Output will appear/,
@@ -126,17 +125,17 @@ test("AssistantToolCard renders persisted sandbox operations", async () => {
     }),
   });
 
-  assert.match(element.textContent ?? "", /Recorded operations/);
+  assert.match(element.textContent ?? "", /Details/);
   // Collapsed by default — the timeline content is behind the toggle.
-  assert.doesNotMatch(element.textContent ?? "", /Created sandbox/);
+  assert.doesNotMatch(element.textContent ?? "", /Prepared workspace/);
   const opsToggle = Array.from(element.querySelectorAll("button")).find(
-    (button) => (button.textContent ?? "").includes("Recorded operations"),
+    (button) => (button.textContent ?? "").includes("Details"),
   );
-  assert.ok(opsToggle, "expected a Recorded operations toggle button");
+  assert.ok(opsToggle, "expected a Details toggle button");
   await act(async () => {
     opsToggle.click();
   });
-  assert.match(element.textContent ?? "", /Created sandbox/);
+  assert.match(element.textContent ?? "", /Prepared workspace/);
   assert.match(element.textContent ?? "", /Executed command/);
   assert.match(element.textContent ?? "", /Exit code 0 · 4 output chars/);
   assert.match(element.textContent ?? "", /120ms/);
@@ -159,7 +158,7 @@ test("AssistantToolCard renders recoverable execute preflight failures as errors
   assert.doesNotMatch(element.textContent ?? "", /Completed/);
   assert.match(
     element.textContent ?? "",
-    /Execute commands referenced a SourceWeft VFS path/,
+    /The command referenced a file that is not available in the working directory/,
   );
   assert.match(element.textContent ?? "", /SANDBOX_EXECUTE_VFS_PATH_DENIED/);
 });
@@ -190,7 +189,7 @@ test("AssistantToolCard renders prepare as a directional transfer card", async (
     }),
   });
 
-  assert.match(element.textContent ?? "", /Prepare sandbox workspace/);
+  assert.match(element.textContent ?? "", /Prepare workspace/);
   assert.match(element.textContent ?? "", /artifact:artifact-1/);
   assert.match(element.textContent ?? "", /\/workspace\/input\/image\.png/);
   assert.match(element.textContent ?? "", /1 KiB/);
@@ -325,5 +324,5 @@ test("AssistantToolCard renders denied execute calls with the command", async ()
 
   assert.match(element.textContent ?? "", /Rejected/);
   assert.equal(commandInputValue(element), "curl https://example.com");
-  assert.ok(element.querySelector('button[aria-label="Copy sandbox command"]'));
+  assert.ok(element.querySelector('button[aria-label="Copy command"]'));
 });

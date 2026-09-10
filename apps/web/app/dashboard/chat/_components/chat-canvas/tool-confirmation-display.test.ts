@@ -102,7 +102,7 @@ test("confirmation display shows sandbox execute review details", () => {
   assert.deepEqual(requestDetailLines(sandboxConfirmation), [
     "Risk: High",
     "Command: npm test",
-    "CWD: /workspace/ppt-deck",
+    "Working directory: /workspace/ppt-deck",
     "Review network, dependency, and secret-access risk before approving.",
     "Editable before approval",
   ]);
@@ -139,5 +139,5 @@ test("approval retains the complete local directory even when it is long", () =>
   const value = confirmation({ toolName: "execute" });
   const cwd = `/Users/example/Library/Application Support/${"project-".repeat(24)}/files`;
   value.preview.requestJson = { command: "pwd", cwd };
-  assert.ok(requestDetailLines(value).includes(`CWD: ${cwd}`));
+  assert.ok(requestDetailLines(value).includes(`Working directory: ${cwd}`));
 });

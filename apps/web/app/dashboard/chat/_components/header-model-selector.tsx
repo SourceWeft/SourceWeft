@@ -1216,6 +1216,7 @@ export function HeaderModelSelector({
   byokSelections = {},
   isLoading = false,
   compact = false,
+  iconOnly = false,
   onAddByokModel,
   onByokSelect,
   onModelSelect,
@@ -1229,6 +1230,7 @@ export function HeaderModelSelector({
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   isLoading?: boolean;
   compact?: boolean;
+  iconOnly?: boolean;
   onAddByokModel?: (input: {
     credentialId?: string;
     providerKind?: string;
@@ -1274,18 +1276,22 @@ export function HeaderModelSelector({
               aria-busy={isLoading && !primaryModel}
               disabled={isLoading && !primaryModel}
               onClick={() => setActiveTab("llm")}
-              className="flex h-8 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 text-xs text-foreground shadow-xs"
+              className={
+                iconOnly
+                  ? "flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-2"
+                  : "flex h-8 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 text-xs text-foreground shadow-xs"
+              }
             >
               <ModelTypeIcon type="llm" />
-              <span className="min-w-0 truncate">
+              <span className={iconOnly ? "sr-only" : "min-w-0 truncate"}>
                 {isLoading && !primaryModel
                   ? "Loading models…"
                   : (primaryModel?.name ?? "Auto")}
               </span>
-              {byokSelections.llm?.mode === "byok" ? (
+              {!iconOnly && byokSelections.llm?.mode === "byok" ? (
                 <KeyRound className="size-3 shrink-0" />
               ) : null}
-              <ChevronDown className="size-3 shrink-0" />
+              {!iconOnly && <ChevronDown className="size-3 shrink-0" />}
             </button>
           </ModelSelectorTrigger>
         ) : (

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod local_bridge;
+mod native_access;
 mod remote_host;
 
 use serde::{Deserialize, Serialize};
@@ -135,27 +136,8 @@ fn main() {
             setup_deep_links(app.handle());
             register_deep_links(app.handle());
             let base =
-                resolve_app_url(app.handle(), "/dashboard").map_err(std::io::Error::other)?;
-            let origin = base.origin().ascii_serialization();
-            app.add_capability(
-                tauri::ipc::CapabilityBuilder::new("configured-web-window")
-                    .window("main")
-                    .local(false)
-                    .remote(format!("{origin}/dashboard"))
-                    .remote(format!("{origin}/dashboard/*"))
-                    .remote(format!("{origin}/auth"))
-                    .remote(format!("{origin}/auth/*"))
-                    .permission("core:default")
-                    .permission("allow-desktop-info")
-                    .permission("allow-show-main-window")
-                    .permission("allow-get-autostart")
-                    .permission("allow-set-autostart")
-                    .permission("allow-open-external-url")
-                    .permission("allow-local-host-status")
-                    .permission("allow-authenticate-local-host")
-                    .permission("allow-choose-local-folder")
-                    .permission("allow-disconnect-local-host"),
-            )?;
+                resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?;
+            app.add_capability(native_access::web_capability(&base))?;
             create_main_window(app)?;
             setup_tray(app)?;
             emit_startup_deep_links(app.handle());
@@ -185,7 +167,7 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .unwrap_or_else(|| app.config().app.windows[0].clone());
 
     window_config.url = tauri::WebviewUrl::External(
-        resolve_app_url(app.handle(), "/dashboard").map_err(std::io::Error::other)?,
+        resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?,
     );
     let handle = app.handle().clone();
     WebviewWindowBuilder::from_config(app.handle(), &window_config)?
@@ -211,7 +193,7 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
             return true;
         }
 
-        let _ = navigate_main_window(app, "/dashboard");
+        let _ = navigate_main_window(app, "/dashboard/chat");
         return false;
     }
 
@@ -319,8 +301,9 @@ fn desktop_bridge_script() -> &'static str {
 }
 
 #[tauri::command]
-fn desktop_info(app: AppHandle) -> DesktopInfo {
-    DesktopInfo {
+fn desktop_info(app: AppHandle, window: tauri::WebviewWindow) -> Result<DesktopInfo, String> {
+    authorize_desktop_window(&app, &window, false)?;
+    Ok(DesktopInfo {
         kind: "desktop",
         is_native: true,
         is_desktop: true,
@@ -329,16 +312,22 @@ fn desktop_info(app: AppHandle) -> DesktopInfo {
         app_name: app.package_info().name.clone(),
         app_version: app.package_info().version.to_string(),
         tauri_version: tauri::VERSION,
-    }
+    })
 }
 
 #[tauri::command]
-fn show_main_window(app: AppHandle) -> Result<(), String> {
+fn show_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    authorize_desktop_window(&app, &window, false)?;
     focus_main_window(&app)
 }
 
 #[tauri::command]
-fn get_autostart(state: State<'_, DesktopState>) -> Result<AutostartState, String> {
+fn get_autostart(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, DesktopState>,
+) -> Result<AutostartState, String> {
+    authorize_desktop_window(&app, &window, true)?;
     let settings = state
         .settings
         .lock()
@@ -357,9 +346,12 @@ fn get_autostart(state: State<'_, DesktopState>) -> Result<AutostartState, Strin
 
 #[tauri::command]
 fn set_autostart(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
     input: SetAutostartInput,
     state: State<'_, DesktopState>,
 ) -> Result<AutostartState, String> {
+    authorize_desktop_window(&app, &window, true)?;
     let snapshot = {
         let mut settings = state
             .settings
@@ -382,39 +374,40 @@ fn set_autostart(
 }
 
 #[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
+fn open_external_url(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    url: String,
+) -> Result<(), String> {
+    authorize_desktop_window(&app, &window, false)?;
     let parsed = Url::parse(url.trim()).map_err(|error| error.to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Only http and https URLs can be opened externally.".to_string());
     }
 
-    if !is_allowed_external_url(&parsed) {
+    let base = resolve_app_url(&app, "/dashboard")?;
+    if !native_access::is_allowed_auth_url(&parsed, &base) {
         return Err("Only SourceWeft authentication URLs can be opened externally.".to_string());
     }
 
     tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>).map_err(|error| error.to_string())
 }
 
-fn is_allowed_external_url(url: &Url) -> bool {
-    if !url.path().starts_with("/auth/") && url.path() != "/auth" {
-        return false;
-    }
-
-    if let Ok(web_base_url) = std::env::var("NEXT_PUBLIC_WEB_BASE_URL") {
-        if let Ok(web_base_url) = Url::parse(web_base_url.trim()) {
-            return same_origin(url, &web_base_url);
-        }
-    }
-
-    if url.scheme() == "http" && url.host_str() == Some("localhost") {
-        return matches!(url.port_or_known_default(), Some(3000));
-    }
-
-    url.scheme() == "https"
-        && matches!(
-            url.host_str(),
-            Some("sourceweft.com" | "www.sourceweft.com")
+fn authorize_desktop_window(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    dashboard_only: bool,
+) -> Result<(), String> {
+    let url = window.url().map_err(|error| error.to_string())?;
+    let base = resolve_app_url(app, "/dashboard")?;
+    if native_access::is_allowed_caller(window.label(), &url, &base, dashboard_only) {
+        Ok(())
+    } else {
+        Err(
+            "DESKTOP_ACCESS_DENIED: Use the configured SourceWeft page in the main PC window."
+                .into(),
         )
+    }
 }
 
 fn same_origin(left: &Url, right: &Url) -> bool {
@@ -451,7 +444,7 @@ fn focus_main_window(app: &AppHandle) -> Result<(), String> {
         .as_ref()
         .is_some_and(|url| is_desktop_web_url(app, url) && !is_allowed_desktop_path(url.path()))
     {
-        let _ = navigate_main_window(app, "/dashboard");
+        let _ = navigate_main_window(app, "/dashboard/chat");
     }
 
     window.show().map_err(|error| error.to_string())?;

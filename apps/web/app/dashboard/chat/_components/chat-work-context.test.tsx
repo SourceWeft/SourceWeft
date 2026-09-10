@@ -49,6 +49,7 @@ function Harness() {
   );
 }
 beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mocks.query = new URLSearchParams();
   mocks.native.mockReset().mockResolvedValue(null);
   mocks.request.mockReset().mockResolvedValue({
@@ -66,6 +67,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 test("Web defaults to cloud; a native bootstrap selects this computer", async () => {
   await act(async () => root.render(createElement(Harness)));
@@ -130,7 +132,10 @@ test("existing conversation shows its bound host without a target switcher", asy
     ),
   );
   assert.match(container.textContent ?? "", /Mac A/);
-  assert.equal(container.querySelector('[aria-label="选择云端或电脑"]'), null);
+  assert.equal(
+    container.querySelector('[aria-label="Choose cloud or computer"]'),
+    null,
+  );
   assert.equal(container.textContent?.includes("执行位置"), false);
 });
 
@@ -142,4 +147,43 @@ test("explicit cloud remains available when this PC cannot initialize", async ()
   assert.equal(context.ready, true);
   assert.equal(context.error, null);
   assert.equal(mocks.native.mock.calls.length, 0);
+});
+
+test("an offline bound computer retains its identity without offering another execution target", async () => {
+  mocks.request.mockResolvedValue({
+    executionTarget: { kind: "local", deviceId: "b" },
+    target: { deviceId: "b", name: "Mac B", online: false },
+  });
+  await act(async () =>
+    root.render(
+      createElement(ChatWorkContext, {
+        workspaceId: "w",
+        threadId: "thread-b",
+      }),
+    ),
+  );
+  assert.match(container.textContent ?? "", /Mac B · Offline/);
+  assert.equal(
+    document.querySelector('[aria-label="Choose cloud or computer"]'),
+    null,
+  );
+  assert.equal(
+    document.body.textContent?.includes("Connect a computer…"),
+    false,
+  );
+});
+
+test("an unavailable status endpoint is shown as an error, not an offline or cloud target", async () => {
+  mocks.request.mockRejectedValue(new Error("Status service unavailable"));
+  await act(async () =>
+    root.render(
+      createElement(ChatWorkContext, {
+        workspaceId: "w",
+        threadId: "thread-b",
+      }),
+    ),
+  );
+  assert.match(container.textContent ?? "", /Computer unavailable/);
+  assert.equal(container.textContent?.includes("Offline"), false);
+  assert.equal(container.textContent?.includes("Cloud"), false);
 });
