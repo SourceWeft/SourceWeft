@@ -142,6 +142,7 @@ export async function createNativeAccess(
   ticket: string,
   credential: string,
   workspaceBase: string,
+  name?: string,
 ) {
   return db.transaction(async (tx) => {
     const device = await tx.query.localDevices.findFirst({
@@ -174,7 +175,7 @@ export async function createNativeAccess(
       );
     await tx
       .update(localDevices)
-      .set({ workspaceBase })
+      .set({ workspaceBase, ...(name ? { name } : {}) })
       .where(eq(localDevices.id, device.id));
     const proof = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);

@@ -466,6 +466,7 @@ export function ChatWorkContext({
                 key={`${workspaceId}:${threadId}`}
                 workspaceId={workspaceId}
                 threadId={threadId}
+                computerName={info?.target?.name}
               />
             )}
           </DialogContent>

@@ -11,6 +11,24 @@ use std::{
 };
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
+#[cfg(target_os = "macos")]
+fn computer_name() -> Result<String, String> {
+    let output = std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .map_err(|error| format!("Could not read computer name: {error}"))?;
+    if !output.status.success() {
+        return Err("Could not read macOS computer name".into());
+    }
+    let name = String::from_utf8(output.stdout)
+        .map_err(|_| "Computer name is not valid UTF-8")?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("macOS computer name is empty".into());
+    }
+    Ok(name.to_owned())
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct Credentials {
     id: String,
@@ -155,7 +173,7 @@ impl RemoteHost {
                 credentials.api_base.trim_end_matches('/')
             ))
             .bearer_auth(&credentials.token)
-            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base()}))
+            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base(),"name":computer_name()?}))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -241,7 +259,7 @@ impl RemoteHost {
                 "{}/v1/local-devices/claim",
                 api_base.trim_end_matches('/')
             ))
-            .json(&json!({"ticket":ticket,"name":"My Mac"}))
+            .json(&json!({"ticket":ticket,"name":computer_name()?}))
             .send()
             .await
             .map_err(|e| e.to_string())?;

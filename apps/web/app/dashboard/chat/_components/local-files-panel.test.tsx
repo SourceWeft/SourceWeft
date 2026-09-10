@@ -61,7 +61,8 @@ test("Hub Workfiles reads the PC directory and clears its preview when offline",
     ),
   );
   assert.match(container.textContent ?? "", /Workfiles/);
-  assert.match(container.textContent ?? "", /This computer · Mac A/);
+  assert.match(container.textContent ?? "", /Mac A/);
+  assert.doesNotMatch(container.textContent ?? "", /This computer|Stored on this computer/);
   assert.match(container.textContent ?? "", /report.txt/);
   assert.equal(container.querySelector('[aria-label="Close files"]'), null);
   const file = [...container.querySelectorAll("button")].find(

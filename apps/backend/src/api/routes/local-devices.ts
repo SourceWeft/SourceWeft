@@ -153,6 +153,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
       .object({
         ticket: z.string().min(32),
         workspaceBase: z.string().startsWith("/").max(4096),
+        name: z.string().trim().min(1).max(256).optional(),
       })
       .parse(await c.req.json());
     const credential = c.req
@@ -161,7 +162,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
     if (!credential) throw ApiError.unauthorized();
     return ApiResponse.success(
       c,
-      await createNativeAccess(data.ticket, credential, data.workspaceBase),
+      await createNativeAccess(data.ticket, credential, data.workspaceBase, data.name),
     );
   });
   app.post("/v1/local-devices/:deviceId/connect", async (c) => {
@@ -269,7 +270,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
     const data = z
       .object({
         ticket: z.string().min(32).max(128),
-        name: z.string().trim().min(1).max(80),
+        name: z.string().trim().min(1).max(256),
       })
       .parse(await c.req.json());
     return ApiResponse.success(

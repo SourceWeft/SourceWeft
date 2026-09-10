@@ -63,9 +63,7 @@ function LocalFilesBrowser({
   const [previewRevision, setPreviewRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const base = `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-files`;
-  const sourceLabel = computerName
-    ? `This computer · ${computerName}`
-    : "Stored on this computer";
+  const sourceLabel = computerName;
 
   // Listing and preview requests have separate lifecycles. Opening a file does
   // not reset the list, scroll position, current directory or search results.
@@ -302,7 +300,7 @@ function LocalFilesBrowser({
         }}
         path={previewPath ?? ""}
         description={
-          previewPath ? `${sourceLabel} · ${previewPath}` : sourceLabel
+          [sourceLabel, previewPath].filter(Boolean).join(" · ")
         }
         loading={!visiblePreview || visiblePreview.status === "loading"}
         source={
