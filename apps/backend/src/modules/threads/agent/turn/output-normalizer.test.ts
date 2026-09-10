@@ -62,10 +62,7 @@ test("redacts skills read_file output for client observability", () => {
     skillFileName: "SKILL.md",
     skillPath: "/skills/feynman/SKILL.md",
   });
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(output, "content"),
-    false,
-  );
+  assert.equal(Object.prototype.hasOwnProperty.call(output, "content"), false);
 });
 
 test("normalizes read_file output to display-safe bounded content", () => {
@@ -284,7 +281,10 @@ test("execute recoverable failures normalize as filesystem tool errors", () => {
     "Command failed with exit code 2.",
   );
   assert.equal(
-    getFilesystemToolOutputError("read_file", "[Command failed with exit code 1]"),
+    getFilesystemToolOutputError(
+      "read_file",
+      "[Command failed with exit code 1]",
+    ),
     null,
   );
 });
@@ -465,4 +465,24 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
       title: "Load Feynman skill instructions",
     },
   ]);
+});
+
+test("physical PC paths are files, distinct from Sources and DB Workfiles", () => {
+  const input = { file_path: "/Users/example/Local task/report.txt" };
+  assert.equal(getFilesystemToolStartTitle("read_file", input), "Reading file");
+  assert.equal(getFilesystemToolEndTitle("read_file", input), "Read file");
+  assert.equal(
+    getFilesystemToolClientMetadata("read_file", input).filesystemScope,
+    "files",
+  );
+  assert.equal(
+    getFilesystemToolEndTitle("read_file", { file_path: "/kb/report.txt" }),
+    "Read source content",
+  );
+  assert.equal(
+    getFilesystemToolEndTitle("read_file", {
+      file_path: "/workfiles/report.txt",
+    }),
+    "Read Workfile",
+  );
 });

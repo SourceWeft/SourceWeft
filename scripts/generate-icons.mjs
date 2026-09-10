@@ -79,7 +79,8 @@ async function genPNG(sharp, size, outPath, opts = {}) {
 async function genICO(sharp, outPath) {
   const sizes = [16, 32, 48];
   const pngBuffers = await Promise.all(
-    sizes.map((sz) => renderPngBuffer(sharp, sz)),
+    // ICO entries declare 32 bits per pixel; decoders require RGBA PNG payloads.
+    sizes.map((sz) => renderPngBuffer(sharp, sz, { rgba: true })),
   );
 
   const ico = buildICO(pngBuffers, sizes);
