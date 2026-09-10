@@ -9,7 +9,7 @@ for (const path of [
   "apps/desktop/src-tauri/icons/icon.ico",
   "apps/mobile/src-tauri/icons/icon.ico",
 ]) {
-  test(`${path} has decodable opaque RGBA PNG entries`, async () => {
+  test(`${path} has decodable RGBA PNG entries with the expected artwork`, async () => {
     const ico = await readFile(new URL(`../${path}`, import.meta.url));
     assert.equal(ico.readUInt16LE(2), 1);
     const count = ico.readUInt16LE(4);
@@ -26,8 +26,22 @@ for (const path of [
       assert.equal(info.channels, 4, "32-bit ICO payload must include alpha");
       assert.equal(info.width, ico[entry] || 256);
       assert.equal(info.height, ico[entry + 1] || 256);
-      for (let pixel = 3; pixel < data.length; pixel += 4)
-        assert.equal(data[pixel], 255, "white artwork remains opaque");
+      if (!path.startsWith("apps/mobile/")) {
+        assert.equal(data[3], 0, "rounded icon corners are transparent");
+        let blackPixels = 0;
+        let whitePixels = 0;
+        for (let pixel = 0; pixel < data.length; pixel += 4) {
+          if (data[pixel + 3] !== 255) continue;
+          const rgb = [...data.subarray(pixel, pixel + 3)];
+          if (rgb.every((channel) => channel < 32)) blackPixels++;
+          if (rgb.every((channel) => channel > 223)) whitePixels++;
+        }
+        assert.ok(blackPixels > info.width * info.height * 0.1, "black SW mark is visible");
+        assert.ok(whitePixels > info.width * info.height * 0.3, "white rounded background is visible");
+      } else {
+        for (let pixel = 3; pixel < data.length; pixel += 4)
+          assert.equal(data[pixel], 255, "app artwork remains opaque");
+      }
     }
   });
 }

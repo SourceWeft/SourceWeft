@@ -2,7 +2,14 @@ import FileViewer, {
   type ViewerOptions,
   type ViewerState,
 } from "@file-viewer/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { setDefaultFileViewerAssetBaseUrl } from "@file-viewer/core";
 import type {
   FileViewerRendererPlugin,
@@ -10,6 +17,11 @@ import type {
   FileViewerRenderedInstance,
 } from "@file-viewer/core";
 import { previewFamily } from "./index";
+import {
+  previewChromeStyles,
+  readHostPreviewTheme,
+  subscribeHostPreviewTheme,
+} from "./theme";
 import "./viewer.css";
 
 function EnginePreview({
@@ -19,6 +31,36 @@ function EnginePreview({
   file: File;
   options: ViewerOptions;
 }) {
+  const host = useRef<HTMLDivElement>(null);
+  const theme = useSyncExternalStore(
+    subscribeHostPreviewTheme,
+    readHostPreviewTheme,
+    () => "light" as const,
+  );
+  const themedOptions = useMemo<ViewerOptions>(
+    () => ({
+      ...options,
+      theme,
+      toolbar: {
+        ...(typeof options.toolbar === "object" ? options.toolbar : {}),
+        theme: false,
+        print: false,
+        download: false,
+        exportHtml: false,
+      },
+      ui: { ...options.ui, surfaceBackground: "var(--background, Canvas)" },
+    }),
+    [options, theme],
+  );
+  useEffect(() => {
+    const boundary = host.current?.firstElementChild?.shadowRoot;
+    if (!boundary) return;
+    const style = document.createElement("style");
+    style.dataset.sourceweftPreviewTheme = "true";
+    style.textContent = previewChromeStyles;
+    boundary.appendChild(style);
+    return () => style.remove();
+  }, []);
   const [error, setError] = useState<string>();
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -47,13 +89,18 @@ function EnginePreview({
       </p>
     );
   return (
-    <FileViewer
-      className="sourceweft-file-viewer"
-      file={file}
-      options={options}
-      onStateChange={onStateChange}
-      style={{ height: "100%", width: "100%" }}
-    />
+    <div
+      ref={host}
+      style={{ height: "100%", minHeight: 0, minWidth: 0, width: "100%" }}
+    >
+      <FileViewer
+        className="sourceweft-file-viewer"
+        file={file}
+        options={themedOptions}
+        onStateChange={onStateChange}
+        style={{ height: "100%", width: "100%" }}
+      />
+    </div>
   );
 }
 

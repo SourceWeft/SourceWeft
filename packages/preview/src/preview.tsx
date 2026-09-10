@@ -12,15 +12,10 @@ import {
 export type PreviewProps = {
   source: PreviewSource;
   className?: string;
-  onDownload?: () => void;
 };
 
 /** Import the DOM engine only after mounting, including in Next.js SSR. */
-export function Preview({
-  source: input,
-  className,
-  onDownload,
-}: PreviewProps) {
+export function Preview({ source: input, className }: PreviewProps) {
   const source = useMemo(
     () => input,
     [input.name, input.mimeType, input.url, input.blob, input.text],
@@ -87,11 +82,6 @@ export function Preview({
       {current?.error ? (
         <div role="alert" style={{ padding: 24 }}>
           <p>{current.error}</p>
-          {onDownload && (
-            <button type="button" onClick={onDownload}>
-              Download file
-            </button>
-          )}
         </div>
       ) : View && current?.file ? (
         <View file={current.file} />

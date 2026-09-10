@@ -1,7 +1,7 @@
 /* Use the viewer's public Shadow DOM parts without leaking host CSS into files. */
 .sourceweft-file-viewer::part(toolbar) {
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 6px;
   max-width: 100%;
   overflow: visible;

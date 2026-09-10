@@ -30,7 +30,14 @@ async function loadSharp() {
 
 const LOGO_PATH = join(ROOT, "assets/logo.svg");
 const SVG_PATH = join(ROOT, "assets/app-icon.svg");
+const DESKTOP_SVG_PATH = join(ROOT, "assets/desktop-icon.svg");
 const MACOS_SVG_PATH = join(ROOT, "assets/macos-icon.svg");
+// Browser tabs share the rounded white plate used by the desktop icon.
+const BROWSER_ICON_OPTIONS = {
+  svgPath: DESKTOP_SVG_PATH,
+  transparent: true,
+  rgba: true,
+};
 const ICON_DENSITY = 300;
 const SQUARE_ICON_SIZE = 1024;
 
@@ -81,11 +88,17 @@ async function genPNG(sharp, size, outPath, opts = {}) {
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
 
-async function genICO(sharp, outPath) {
+async function genICO(sharp, outPath, opts = {}) {
   const sizes = [16, 32, 48];
+  const desktop = outPath.startsWith(TARGETS.tauriIcons);
   const pngBuffers = await Promise.all(
     // ICO entries declare 32 bits per pixel; decoders require RGBA PNG payloads.
-    sizes.map((sz) => renderPngBuffer(sharp, sz, { rgba: true })),
+    sizes.map((sz) => renderPngBuffer(sharp, sz, {
+      rgba: true,
+      transparent: desktop,
+      svgPath: desktop ? DESKTOP_SVG_PATH : SVG_PATH,
+      ...opts,
+    })),
   );
 
   const ico = buildICO(pngBuffers, sizes);
@@ -124,8 +137,8 @@ function getSvgViewBox(svg) {
   return values;
 }
 
-function renderSquareSvgIcon() {
-  const source = readFileSync(SVG_PATH, "utf8");
+function renderSquareSvgIcon(svgPath) {
+  const source = readFileSync(svgPath, "utf8");
   const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] =
     getSvgViewBox(source);
   const scale = SQUARE_ICON_SIZE / Math.max(viewBoxWidth, viewBoxHeight);
@@ -147,8 +160,8 @@ ${body}
 `;
 }
 
-function genSquareSVG(outPath) {
-  writeFileSync(outPath, renderSquareSvgIcon());
+function genSquareSVG(outPath, svgPath = SVG_PATH) {
+  writeFileSync(outPath, renderSquareSvgIcon(svgPath));
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
 
@@ -293,11 +306,11 @@ async function main() {
     copyFileSync(LOGO_PATH, join(TARGETS.webPublic, "logo.svg"));
     console.log(`  ✓ apps/web/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.webPublic, "apple-touch-icon.png"));
-    await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"));
-    await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"));
-    genSquareSVG(join(TARGETS.webPublic, "icon.svg"));
-    genSquareSVG(join(TARGETS.webApp, "icon.svg"));
-    await genICO(sharp, join(TARGETS.webApp, "favicon.ico"));
+    await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"), BROWSER_ICON_OPTIONS);
+    await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"), BROWSER_ICON_OPTIONS);
+    genSquareSVG(join(TARGETS.webPublic, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    genSquareSVG(join(TARGETS.webApp, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    await genICO(sharp, join(TARGETS.webApp, "favicon.ico"), BROWSER_ICON_OPTIONS);
   }
 
   if (shouldGenerate("docs")) {
@@ -305,10 +318,10 @@ async function main() {
     copyFileSync(LOGO_PATH, join(TARGETS.docsPublic, "logo.svg"));
     console.log(`  ✓ apps/docs/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.docsPublic, "apple-touch-icon.png"));
-    await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"));
-    genSquareSVG(join(TARGETS.docsPublic, "icon.svg"));
-    genSquareSVG(join(TARGETS.docsApp, "icon.svg"));
-    await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"));
+    await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"), BROWSER_ICON_OPTIONS);
+    genSquareSVG(join(TARGETS.docsPublic, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    genSquareSVG(join(TARGETS.docsApp, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"), BROWSER_ICON_OPTIONS);
   }
 
   if (shouldGenerate("extension")) {
