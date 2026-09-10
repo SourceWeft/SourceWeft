@@ -202,6 +202,8 @@ export function useThreadPageController({
     activeMcpToolIds,
     activeSkillIds,
     activeSourceIds,
+    sourceSelectionReady,
+    sourceSelectionRevision,
     availableSkills,
     hubSkills,
     capabilityCatalog,
@@ -885,6 +887,10 @@ export function useThreadPageController({
         return;
       }
 
+      if (!sourceSelectionReady) {
+        toast.error("Sources are still loading or saving. Wait for completion before sending.");
+        return;
+      }
       const contextSourceIds = resolveContextSourceIds({
         messages,
         activeSourceIds,
@@ -964,6 +970,7 @@ export function useThreadPageController({
           images,
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
+          sourceSelectionRevision,
           skillIds: selectedSkillIds,
           tools,
           command: input.command,
@@ -983,6 +990,7 @@ export function useThreadPageController({
         images,
         mentionedSourceIds,
         sourceIds: sendSourceIds,
+        sourceSelectionRevision,
         skillIds: selectedSkillIds,
         tools,
         command: input.command,
@@ -1003,6 +1011,8 @@ export function useThreadPageController({
       messageGroups,
       messages,
       activeSourceIds,
+      sourceSelectionReady,
+      sourceSelectionRevision,
       activeMcpInstallIds,
       activeMcpToolIds,
       effectiveActiveSkillIds,
@@ -1078,6 +1088,10 @@ export function useThreadPageController({
         turnId: assistantGroup?.turnId,
       };
 
+      if (!sourceSelectionReady) {
+        toast.error("Sources are still loading or saving.");
+        return;
+      }
       const refreshSourceIds = resolveRefreshSourceIds({
         activeSourceIds,
         assistantMessageId: input.assistantMessageId,
@@ -1092,6 +1106,7 @@ export function useThreadPageController({
       await streamThreadAction({
         mode: "refresh",
         sourceIds: refreshSourceIds,
+        sourceSelectionRevision,
         skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
@@ -1103,6 +1118,8 @@ export function useThreadPageController({
     },
     [
       activeSourceIds,
+      sourceSelectionReady,
+      sourceSelectionRevision,
       effectiveActiveSkillIds,
       isStreaming,
       messageGroups,

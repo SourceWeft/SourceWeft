@@ -337,6 +337,7 @@ export const streamThreadRequestSchema = z.object({
   content: z.string().trim().max(20000).optional(),
   images: z.array(chatInputImageSchema).max(8).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
+  sourceSelectionRevision: z.number().int().nonnegative().optional(),
   mentionedSourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
   command: threadCommandRequestSchema.optional(),

@@ -14,7 +14,7 @@ redesign slides while repairing syntax or sandbox path problems.
 | `UNKNOWN-LAYOUT` | Wrong PptxGenJS layout name | Use `pres.layout = "LAYOUT_16x9"` exactly |
 | `Cannot create property 'options' on string` | Raw string mixed into rich text array | Use `slide.addText("✓", opts)` separately or `rich([{ text, options }])` |
 | `newObject.text.forEach is not a function` | Invalid first argument to `addText` | Pass a string or a rich text array only |
-| Error says a Workfile path is not a sandbox path | Confused SourceWeft Workfiles with sandbox filesystem | Use sandbox workspace paths in `execute`; create Workfiles with SourceWeft file tools, then prepare them |
+| Error says a Workfile path is not a sandbox path | Confused SourceWeft Files with sandbox filesystem | Use sandbox workspace paths in `execute`; create Files with SourceWeft file tools, then prepare them |
 | `SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters` | Command contains NUL or another unsafe control character | Remove the unsafe character; multiline shell commands are allowed |
 | `PPTX_ARTIFACT_PATH` missing | Program did not print the required stdout protocol | Add the required `console.log` lines after `writeFile` |
 | LibreOffice render fails | Bad PPTX, missing file, or sandbox render issue | Verify path, rerun generation, then convert the actual artifact path |
@@ -52,10 +52,10 @@ slide.addText("为什么"讲出来"能让你真正学会", titleOpts);
 
 ## Sandbox Path Rules
 
-Follow the sandbox runtime rules for Workfiles, prepare, and command execution.
+Follow the sandbox runtime rules for Files, prepare, and command execution.
 The deck builder, source data, and other command inputs should start as
-Workfiles, then be prepared into the sandbox workspace before `execute` uses
-them. Do not assume Workfiles are mounted inside command execution.
+Files, then be prepared into the sandbox workspace before `execute` uses
+them. Do not assume Files are mounted inside command execution.
 
 ## QA Process
 

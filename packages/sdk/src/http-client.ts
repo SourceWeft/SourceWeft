@@ -105,7 +105,32 @@ export class HttpClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  async getBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+    return (
+      await this.response(path, { method: "GET", signal, cache: "no-store" })
+    ).blob();
+  }
+
+  async putBytes<T>(
+    path: string,
+    body: Blob,
+    expectedRevision?: string,
+  ): Promise<T> {
+    return this.request<T>(path, {
+      method: "PUT",
+      body,
+      headers: {
+        "content-type": body.type || "application/octet-stream",
+        ...(expectedRevision ? { "if-match": `"${expectedRevision}"` } : {}),
+      },
+    });
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<T> {
+    return (await (await this.response(path, init)).json()) as T;
+  }
+
+  private async response(path: string, init: RequestInit): Promise<Response> {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     const token = await this.getToken?.();
     const headers = new Headers(init.headers);
@@ -127,7 +152,7 @@ export class HttpClient {
       throw await this.toHttpError(response);
     }
 
-    return (await response.json()) as T;
+    return response;
   }
 
   private async toHttpError(response: Response): Promise<HttpClientError> {

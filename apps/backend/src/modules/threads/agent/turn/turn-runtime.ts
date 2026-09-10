@@ -50,7 +50,10 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const renderBlocks = createMessageRenderBlockBuilder();
   const runStartedAt = Date.now();
   let currentReasoningSegmentStartedAt: number | null = null;
-  const citationRegistry = new AgentCitationRegistry();
+  const citationRegistry = new AgentCitationRegistry({
+    workspaceId: input.prepared.workspace.id,
+    threadId: input.prepared.thread.id,
+  });
   const traceSequenceAllocator = createTraceSequenceAllocator({
     traceContinuation: input.prepared.traceContinuation,
   });
@@ -96,8 +99,7 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     suppressRawToolCallText: false,
     suppressLeakedCommandSpecText: false,
     currentReasoningSegment: null as
-      | DeepAgentTurnOutcome["reasoningSegments"][number]
-      | null,
+      DeepAgentTurnOutcome["reasoningSegments"][number] | null,
     nextReasoningContext: { phase: "initial" } as
       | { phase: "initial" }
       | { phase: "after_tool"; toolCallId: string; tool: string },

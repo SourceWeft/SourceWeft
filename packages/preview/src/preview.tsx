@@ -7,22 +7,24 @@ import {
   previewFileName,
   readPreviewBlob,
   type PreviewSource,
+  type PreviewLocation,
 } from "./index";
 
 export type PreviewProps = {
   source: PreviewSource;
   className?: string;
+  location?: PreviewLocation;
 };
 
 /** Import the DOM engine only after mounting, including in Next.js SSR. */
-export function Preview({ source: input, className }: PreviewProps) {
+export function Preview({ source: input, className, location }: PreviewProps) {
   const source = useMemo(
     () => input,
     [input.name, input.mimeType, input.url, input.blob, input.text],
   );
   const [state, setState] = useState<{
     source: PreviewSource;
-    View?: ComponentType<{ file: File }>;
+    View?: ComponentType<{ file: File; location?: PreviewLocation }>;
     file?: File;
     error?: string;
   }>();
@@ -84,7 +86,7 @@ export function Preview({ source: input, className }: PreviewProps) {
           <p>{current.error}</p>
         </div>
       ) : View && current?.file ? (
-        <View file={current.file} />
+        <View file={current.file} location={location} />
       ) : (
         <p role="status" style={{ padding: 24 }}>
           Loading file preview…

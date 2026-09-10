@@ -99,6 +99,7 @@ import {
 } from "./workfiles/dialogs";
 import { LocalFilesPanel } from "../local-files-panel";
 import { WorkfilesTab } from "./workfiles/tab";
+import { UploadFilesButton } from "./workfiles/upload-button";
 import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
 import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 import { useConnectorSyncRuns } from "./use-connector-sync-runs";
@@ -111,7 +112,7 @@ export type { HubSkillItem } from "./skills/use-skills";
 
 const tabs = [
   "Sources",
-  "Workfiles",
+  "Files",
   "Artifacts",
   "Connectors",
   "Skills",
@@ -132,7 +133,7 @@ const getLastHubActiveTab = hubTabStorage.getLastHubActiveTab;
 
 const searchPlaceholders: Record<HubTab, string> = {
   Sources: "Search sources...",
-  Workfiles: "Search workfiles...",
+  Files: "Filter files by name or path...",
   Artifacts: "Search artifacts...",
   Skills: "Search installed skills...",
   MCP: "Search MCP tools...",
@@ -142,7 +143,7 @@ const searchPlaceholders: Record<HubTab, string> = {
 
 const searchScopeLabels: Record<HubTab, string> = {
   Sources: "Sources",
-  Workfiles: "Workfiles",
+  Files: "Files",
   Artifacts: "Artifacts",
   Skills: "Skills",
   MCP: "MCP",
@@ -293,7 +294,7 @@ export function SourcesHub({
   }, [workspaceId, threadId, mode]);
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
-    Workfiles: "",
+    Files: "",
     Artifacts: "",
     Skills: "",
     MCP: "",
@@ -536,11 +537,11 @@ export function SourcesHub({
     [capabilityCatalog, skillsForHub],
   );
   const filteredWorkfileCount = useMemo(() => {
-    const q = deferredSearchQueries.Workfiles.trim().toLowerCase();
+    const q = deferredSearchQueries.Files.trim().toLowerCase();
     return q
       ? workfiles.filter((file) => workfileMatchesQuery(file, q)).length
       : workfiles.length;
-  }, [deferredSearchQueries.Workfiles, workfiles]);
+  }, [deferredSearchQueries.Files, workfiles]);
   const filteredArtifactCount = useMemo(() => {
     const q = deferredSearchQueries.Artifacts.trim().toLowerCase();
     return q
@@ -630,7 +631,7 @@ export function SourcesHub({
       setActiveTab(initialView.tab as HubTab);
     setSearchQueries({
       Sources: "",
-      Workfiles: "",
+      Files: "",
       Artifacts: "",
       Skills: "",
       MCP: "",
@@ -735,7 +736,7 @@ export function SourcesHub({
 
   const tabCounts: Partial<Record<HubTab, number>> = {
     Sources: selectedSourceCoverageCount,
-    Workfiles: cloudWorkfiles ? workfiles.length : undefined,
+    Files: cloudWorkfiles ? workfiles.length : undefined,
     Artifacts: artifacts.length,
     Skills: selectedSkillIds.length,
     MCP: selectedMcpInstallIds.length + selectedMcpToolIds.length,
@@ -1125,31 +1126,32 @@ export function SourcesHub({
             </section>
           )}
 
-          {cloudWorkfiles && activeTab === "Workfiles" && (
+          {cloudWorkfiles && activeTab === "Files" && (
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Workfiles
+                    Files
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {workfiles.length} workfiles
+                    {workfiles.length} files
                   </span>
-                  {deferredSearchQueries.Workfiles ? (
+                  {deferredSearchQueries.Files ? (
                     <span className="text-[10px] text-primary">
                       {filteredWorkfileCount} found
                     </span>
                   ) : null}
                 </div>
+                {workspaceId && threadId && <UploadFilesButton workspaceId={workspaceId} threadId={threadId} onUploaded={() => void refreshWorkfiles()} />}
                 <Button
                   onClick={() => void refreshWorkfiles()}
                   size="icon-xs"
-                  title="Refresh workfiles"
+                  title="Refresh files"
                   type="button"
                   variant="ghost"
                 >
                   <RotateCcw className="size-3.5" />
-                  <span className="sr-only">Refresh workfiles</span>
+                  <span className="sr-only">Refresh files</span>
                 </Button>
               </div>
               <p
@@ -1171,11 +1173,11 @@ export function SourcesHub({
             </section>
           )}
 
-          {activeTab === "Workfiles" &&
+          {activeTab === "Files" &&
             !cloudWorkfiles &&
             (mode === "new" ? (
               <p className="p-4 text-sm text-muted-foreground">
-                Workfiles will appear when the conversation starts.
+                Files will appear when the conversation starts.
               </p>
             ) : execution?.threadId === threadId &&
               execution.kind === "local" &&
@@ -1187,14 +1189,14 @@ export function SourcesHub({
                 threadId={threadId}
                 variant="hub"
                 computerName={execution.computerName}
-                searchQuery={deferredSearchQueries.Workfiles}
+                searchQuery={deferredSearchQueries.Files}
               />
             ) : (
               <p
                 role={executionError ? "alert" : "status"}
                 className="p-4 text-sm text-muted-foreground"
               >
-                {executionError ?? "Loading Workfiles location…"}
+                {executionError ?? "Loading Files location…"}
               </p>
             ))}
 

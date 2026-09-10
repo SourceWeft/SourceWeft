@@ -118,11 +118,11 @@ function assertWorkFileSourcePath(value: string) {
     /[\x00-\x1f\x7f]/u.test(path) ||
     path.includes("..") ||
     path.includes("~") ||
-    (path !== "/workfiles" && !path.startsWith("/workfiles/"))
+    (path !== "/files" && !path.startsWith("/files/"))
   ) {
     throw new ArtifactPublishError(
       "ARTIFACT_SOURCE_INVALID",
-      "work_file source.path must be under /workfiles.",
+      "work_file source.path must be under /files.",
     );
   }
   return path;

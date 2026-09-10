@@ -1,4 +1,10 @@
 import type { RetrievalCandidate } from "@sourceweft/builtin-retrieval";
+import { createHash } from "node:crypto";
+import type {
+  FileRef,
+  FileLocator,
+  FileReference,
+} from "@sourceweft/contracts";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 
 type SourceCitationOrigin =
@@ -6,11 +12,13 @@ type SourceCitationOrigin =
   | typeof AGENT_TOOL_NAMES.readFile
   | typeof AGENT_TOOL_NAMES.grep;
 type ExternalCitationOrigin =
-  | typeof AGENT_TOOL_NAMES.webSearch
-  | typeof AGENT_TOOL_NAMES.webFetch;
-type AgentCitationOrigin = SourceCitationOrigin | ExternalCitationOrigin;
+  typeof AGENT_TOOL_NAMES.webSearch | typeof AGENT_TOOL_NAMES.webFetch;
+type FileCitationOrigin = "read_document" | "search_files" | "view_image";
+type AgentCitationOrigin =
+  SourceCitationOrigin | ExternalCitationOrigin | FileCitationOrigin;
 
 export type AgentCitation = {
+  fileReference?: FileReference;
   citation: string;
   sourceId: string | null;
   sourceTitle: string;
@@ -27,6 +35,8 @@ export type AgentCitation = {
 };
 
 export type CitationRecordInput = {
+  referenceKey?: string;
+  fileReference?: FileReference;
   citationKey: string;
   sourceId: string | null;
   documentId: string | null;
@@ -62,9 +72,53 @@ function cleanCitationContent(content: string) {
 }
 
 export class AgentCitationRegistry {
+  constructor(
+    private readonly fileScope?: { workspaceId: string; threadId: string },
+  ) {}
   private byChunkId = new Map<string, AgentCitation>();
   private byExternalUri = new Map<string, AgentCitation>();
   private order: string[] = [];
+
+  addFile(input: {
+    file: FileRef;
+    locator: FileLocator;
+    content: string;
+    origin: FileCitationOrigin;
+  }) {
+    if (!this.fileScope) throw new Error("FILE_CITATION_SCOPE_REQUIRED");
+    const key = `file:${createHash("sha256")
+      .update(
+        JSON.stringify([
+          this.fileScope,
+          input.file.fileId,
+          input.file.revision,
+          input.locator,
+          input.content,
+        ]),
+      )
+      .digest("hex")}`;
+    const existing = this.byChunkId.get(key);
+    if (existing) return existing;
+    return this.addEvidence(key, {
+      citation: `c${this.order.length + 1}`,
+      sourceId: null,
+      documentId: null,
+      chunkId: key,
+      sourceTitle: input.file.name,
+      score: 1,
+      excerpt: input.content.slice(0, 400),
+      quoteText: input.content.slice(0, 400),
+      origin: input.origin,
+      path: input.file.relativePath,
+      content: input.content.slice(0, 20_000),
+      fileReference: {
+        presentation: input.origin === "view_image" ? "visual" : "text",
+        ...this.fileScope,
+        file: input.file,
+        locator: input.locator,
+      },
+    });
+  }
 
   private addEvidence(key: string, evidence: AgentCitation) {
     this.byChunkId.set(key, evidence);
@@ -173,9 +227,14 @@ export class AgentCitationRegistry {
   toCitationRecords(): CitationRecordInput[] {
     return this.list().map((citation, index) => ({
       citationKey: citation.citation,
+      referenceKey: citation.chunkId,
       sourceId: citation.sourceId,
       documentId: citation.documentId,
-      chunkId: citation.externalUri ? null : citation.chunkId,
+      chunkId:
+        citation.externalUri || citation.fileReference
+          ? null
+          : citation.chunkId,
+      fileReference: citation.fileReference,
       quoteText: citation.quoteText,
       rank: index + 1,
       score: citation.score,

@@ -51,7 +51,7 @@ export function buildSandboxRuntimePrompt(
       : null,
     `- ${EXECUTE_TOOL_NAME} runs commands in the provider sandbox filesystem and uses ${defaultCwd} by default.`,
     capabilities.collectToolAvailable
-      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use it for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`
+      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Files. Do not use it for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`
       : null,
   ].filter((line): line is string => line !== null);
 
@@ -103,21 +103,21 @@ export function buildSandboxRuntimePrompt(
 
   return `<sandbox_rules>
 - SourceWeft VFS and the provider sandbox filesystem are separate namespaces.
-- ${SOURCEWEFT_WORK_ROOT} is SourceWeft DB-backed VFS Workfiles: database-persisted, thread-scoped working files accessed only through SourceWeft file tools.
+- ${SOURCEWEFT_WORK_ROOT} is SourceWeft DB-backed VFS Files: database-persisted, thread-scoped working files accessed only through SourceWeft file tools.
 - ${SOURCEWEFT_KB_ROOT} is SourceWeft DB-backed VFS source evidence accessed only through SourceWeft source/file tools.
 ${skillsVfsLine}
 - SourceWeft VFS logical paths are not mounted into sandbox command execution and are not automatically synced with the sandbox filesystem.
 - Preparing files is explicit selected-content materialization, not a ${SOURCEWEFT_WORK_ROOT} directory mount, mirror, root-level copy, or bidirectional sync.
 ${executeNamespaceLines}
 ${providerPolicyLines}
-- Sandbox files become SourceWeft durable state only when explicitly collected back into ${SOURCEWEFT_WORK_ROOT} as text Workfiles or published through explicit artifact pipelines.
+- Sandbox files become SourceWeft durable state only when explicitly collected back into ${SOURCEWEFT_WORK_ROOT} as text Files or published through explicit artifact pipelines.
 - Put all scratch files, QA renders, thumbnails, and artifacts that SourceWeft may need to read, inspect, collect, or publish under the provider sandbox read/write roots, normally ${defaultCwd}. Do not use /tmp for those files.
 - Use the sandbox for command execution, dependency installation, format conversion, batch processing, testing, or computation.
 ${bridgeInstructions.join("\n")}
-- Commands needing Workfiles should prepare the selected ${SOURCEWEFT_WORK_ROOT}/... files into one of the provider prepare target roots, then explicitly work from those sandbox paths.
+- Commands needing Files should prepare the selected ${SOURCEWEFT_WORK_ROOT}/... files into one of the provider prepare target roots, then explicitly work from those sandbox paths.
 ${virtualPathExecutionRule}
 ${skillsPrepareRule}
-- Prepared files, collected Workfiles, and sandbox outputs are not citable evidence.
+- Prepared files, collected Files, and sandbox outputs are not citable evidence.
 - Verify factual claims against ${SOURCEWEFT_KB_ROOT}, retrieval, web, or another citable source before final answers.
 </sandbox_rules>${environmentSummary}`;
 }

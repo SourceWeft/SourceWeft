@@ -1,7 +1,7 @@
 import type { ExecuteResponse } from "deepagents";
 import type { SandboxCommandBudget } from "./command-budgets";
 
-export const SOURCEWEFT_WORK_ROOT = "/workfiles";
+export const SOURCEWEFT_WORK_ROOT = "/files";
 export const SOURCEWEFT_KB_ROOT = "/kb";
 /**
  * Platform skill-staging contract root (docs/architecture/sandbox-skill-staging.md).
@@ -237,6 +237,20 @@ export type SandboxProvider = {
       text: string;
     }>
   >;
+  nativeGrep?(input: {
+    providerSandboxId: string;
+    paths: string[];
+    pattern: string;
+    literal?: boolean;
+    ignoreCase?: boolean;
+    firstPerFile?: boolean;
+    signal?: AbortSignal;
+  }): Promise<{
+    matches: Array<{ path: string; line: number; text: string }>;
+    visitedPaths: string[];
+    skipped: string[];
+    truncated: boolean;
+  }>;
   globFiles?(input: {
     providerSandboxId: string;
     pattern: string;

@@ -59,6 +59,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sourceweft/agent-interpreter": "workspace:*",
     "@sourceweft/agent-tool-registry": "workspace:*",
+    "@sourceweft/billing": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
@@ -87,6 +88,7 @@
     "deepagents": "1.13.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "fast-xml-parser": "5.7.3",
     "fflate": "^0.8.3",
     "hono": "^4.13.5",
     "html-to-text": "^9.0.5",
@@ -105,8 +107,7 @@
     "unique-names-generator": "^4.7.1",
     "ws": "^8.21.3",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3",
-    "@sourceweft/billing": "workspace:*"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

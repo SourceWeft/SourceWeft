@@ -1,4 +1,5 @@
 import { isDeviceAccessActive } from "./access";
+import { storeLocalFileReply } from "./binary-transfer";
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
@@ -110,6 +111,11 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             ),
           );
       } else {
+        const invocation = await db.query.localToolInvocations.findFirst({ where: target });
+        if (!invocation) throw new Error("Unknown device invocation reply");
+        const result = message.ok && (invocation.action === "file.read" || invocation.action === "file.binary.chunk")
+          ? await storeLocalFileReply({ userId, deviceId, invocationId: message.id }, message.result ?? {})
+          : message.result ?? null;
         await db
           .update(localToolInvocations)
           .set({
@@ -121,7 +127,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
                     message.error?.includes("CALL_EXPIRED")
                   ? "cancelled"
                   : "failed",
-            result: message.result ?? null,
+            result,
             error: message.error ?? null,
           })
           .where(

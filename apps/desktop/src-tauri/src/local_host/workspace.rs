@@ -20,6 +20,7 @@ pub struct Workspace {
 /// never assembled from model-controlled paths, account IDs or conversation titles.
 pub struct LocalHost {
     pub(crate) db: Mutex<Connection>,
+    pub(crate) binary_reads: Mutex<std::collections::HashMap<String, super::files::BinaryReadSession>>,
     base: PathBuf,
 }
 
@@ -126,6 +127,7 @@ impl LocalHost {
             }
             Ok(Self {
                 db: Mutex::new(connection),
+                binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
             })
         }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FileCitationPreview } from "./file-citation-preview";
 import {
   Code2,
   Download,
@@ -160,7 +161,7 @@ export function SourcePreviewPanel({
   useEffect(() => {
     if (open) {
       const isChunkCitation = Boolean(
-        citation?.chunkId && !citation.externalUri,
+        citation?.chunkId && !citation.externalUri && !citation.fileReference,
       );
       setPreviewMode(isChunkCitation ? "chunks" : "preview");
       setRawChunkIds(new Set());
@@ -171,6 +172,7 @@ export function SourcePreviewPanel({
     if (
       !open ||
       citation?.externalUri ||
+      citation?.fileReference ||
       !workspaceId ||
       (!citation && !source)
     ) {
@@ -311,6 +313,7 @@ export function SourcePreviewPanel({
     });
   };
 
+  if (citation?.fileReference) return <FileCitationPreview reference={citation.fileReference} excerpt={citation.content ?? citation.excerpt} open={open} onOpenChange={onOpenChange} />;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent

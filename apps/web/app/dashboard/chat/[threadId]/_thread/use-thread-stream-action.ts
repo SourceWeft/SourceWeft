@@ -72,6 +72,7 @@ export type ThreadStreamActionInput = {
   content?: string;
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   skillIds?: string[];
   tools?: ChatSendInput["tools"];
   images?: ChatSendInput["images"];
@@ -277,6 +278,7 @@ export function useThreadStreamAction({
               ? { effectiveMentionedSourceIds: input.mentionedSourceIds }
               : {}),
             ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+    ...(input.sourceSelectionRevision !== undefined ? { sourceSelectionRevision: input.sourceSelectionRevision } : {}),
             ...(localEffectiveSourceIds.length > 0
               ? { effectiveSourceIds: localEffectiveSourceIds }
               : {}),
@@ -796,6 +798,7 @@ export function useThreadStreamAction({
           shouldRenderToolCall,
           skillIds: input.skillIds,
           sourceIds: input.sourceIds,
+          sourceSelectionRevision: input.sourceSelectionRevision,
           streamRenderBuffer,
           streamThinkingStepsById,
           streamToolCallsById,

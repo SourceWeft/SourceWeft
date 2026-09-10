@@ -81,6 +81,12 @@ export const WRITE_FILE_TOOL_NAME = writeFileAgentTool.name;
 export const EDIT_FILE_TOOL_NAME = editFileAgentTool.name;
 
 export const filesystemAgentToolDefs = [
+  defineAgentTool({ id: "readDocument", name: "read_document", domain: "filesystem", capabilities: ["filesystem"], activation: filesystemActivation, defaultPermission: "allow", riskLevel: "low" }),
+  defineAgentTool({ id: "searchFiles", name: "search_files", domain: "filesystem", capabilities: ["filesystem"], activation: filesystemActivation, defaultPermission: "allow", riskLevel: "low" }),
+  defineAgentTool({
+    id: "viewImage", name: "view_image", domain: "filesystem", capabilities: ["filesystem"],
+    activation: filesystemActivation, defaultPermission: "allow", riskLevel: "low",
+  }),
   editFileAgentTool,
   globAgentTool,
   grepAgentTool,

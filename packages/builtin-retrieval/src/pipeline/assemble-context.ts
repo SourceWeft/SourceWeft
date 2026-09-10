@@ -16,6 +16,7 @@ import {
   type RetrievalDocumentChunk,
 } from "../index";
 import type { RetrievalDataAccess } from "../data-access";
+import { assertSourceScope, assertDocumentScope } from "../scope";
 import { requirePreparedRetrievalState } from "./state";
 import type { RetrievalPipelineStage, RetrievalPipelineState } from "./types";
 
@@ -28,6 +29,7 @@ export function createAssembleContextStage(deps: {
       const prepared = requirePreparedRetrievalState(state);
       const { input } = prepared;
       const primaryCandidates = state.candidates.final.map(asPrimaryCandidate);
+      assertSourceScope(primaryCandidates, prepared.retrievalSourceIds);
 
       if (
         prepared.retrievalSourceIds.length === 0 ||
@@ -99,6 +101,7 @@ export function createAssembleContextStage(deps: {
               }),
               primary,
             );
+          assertDocumentScope(chunks, primary);
           if (!documentChunkCache.has(key)) {
             documentChunkCache.set(key, chunks);
           }
@@ -134,6 +137,7 @@ export function createAssembleContextStage(deps: {
               }),
               primary,
             );
+          assertDocumentScope(chunks, primary);
           if (!rangeChunkCache.has(rangeKey)) {
             rangeChunkCache.set(rangeKey, chunks);
           }

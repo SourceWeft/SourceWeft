@@ -6,8 +6,113 @@ use std::{
 };
 
 pub const MAX_TEXT_BYTES: u64 = 1024 * 1024;
+pub const MAX_BINARY_BYTES: u64 = 20 * 1024 * 1024;
+const BINARY_CHUNK_BYTES: usize = 512 * 1024;
+
+pub(crate) struct BinaryReadSession {
+    owner: String,
+    thread: String,
+    workspace_id: String,
+    path: String,
+    content: Vec<u8>,
+    created: std::time::Instant,
+}
 
 impl LocalHost {
+    pub fn grep_files(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        paths: &[String],
+        pattern: &str,
+        ignore_case: bool,
+        first_per_file: bool,
+        literal: bool,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> Result<serde_json::Value> {
+        if paths.len() > 100 || pattern.len() > 4096 {
+            return Err(HostError::new(
+                "SEARCH_LIMIT",
+                "Search at most 100 files with a bounded pattern.",
+            ));
+        }
+        self.get_workspace(owner, thread, workspace_id)?;
+        let expression_pattern = if literal {
+            regex::escape(pattern)
+        } else {
+            pattern.to_owned()
+        };
+        let expression = regex::RegexBuilder::new(&expression_pattern)
+            .case_insensitive(ignore_case)
+            .size_limit(2 * 1024 * 1024)
+            .build()
+            .map_err(|error| HostError::new("INVALID_PATTERN", error.to_string()))?;
+        let started = std::time::Instant::now();
+        let mut matches = Vec::new();
+        let mut skipped = Vec::new();
+        let mut visited = 0;
+        let mut truncated = false;
+        'files: for path in paths {
+            if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+                return Err(HostError::new("CALL_CANCELLED", "File search cancelled"));
+            }
+            if started.elapsed().as_secs() >= 25 {
+                truncated = true;
+                break;
+            }
+            let content = match self.read_bytes_limited(
+                owner,
+                thread,
+                workspace_id,
+                path,
+                MAX_BINARY_BYTES,
+            ) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) if !text.contains('\0') => text,
+                    _ => {
+                        skipped.push(path.clone());
+                        visited += 1;
+                        continue;
+                    }
+                },
+                Err(error)
+                    if error.code == "FILE_TOO_LARGE"
+                        || error.code == "FILE_CHANGED"
+                        || error.code == "HARDLINK_NOT_ALLOWED" =>
+                {
+                    skipped.push(path.clone());
+                    visited += 1;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            visited += 1;
+            for (index, line) in content.lines().enumerate() {
+                if let Some(found) = expression.find(line) {
+                    let start = line[..found.start()]
+                        .char_indices()
+                        .rev()
+                        .nth(159)
+                        .map(|(index, _)| index)
+                        .unwrap_or(0);
+                    matches.push(serde_json::json!({"path":path,"line":index+1,"text":line[start..].chars().take(1000).collect::<String>()}));
+                    if matches.len() >= 100 {
+                        truncated = !first_per_file || visited < paths.len();
+                        break 'files;
+                    }
+                    if first_per_file {
+                        break;
+                    }
+                }
+            }
+        }
+        self.get_workspace(owner, thread, workspace_id)?;
+        Ok(
+            serde_json::json!({"matches":matches,"visited":visited,"skipped":skipped,"truncated":truncated}),
+        )
+    }
+
     /// Descriptor-relative traversal rejects symlinks in every component, including
     /// the final file. Authorization is checked before resolving any user path.
     pub fn read_text(
@@ -48,7 +153,7 @@ impl LocalHost {
         if !metadata.is_file() {
             return Err(HostError::new(
                 "NOT_A_FILE",
-                "Only ordinary text files can be read.",
+                "Only ordinary files can be read.",
             ));
         }
         #[cfg(unix)]
@@ -64,7 +169,7 @@ impl LocalHost {
         if metadata.len() > max_bytes {
             return Err(HostError::new(
                 "FILE_TOO_LARGE",
-                "Text reads are limited to 1 MiB.",
+                format!("File exceeds the read limit of {max_bytes} bytes."),
             ));
         }
         let mut bytes = Vec::new();
@@ -72,10 +177,140 @@ impl LocalHost {
         if bytes.len() as u64 > max_bytes {
             return Err(HostError::new(
                 "FILE_TOO_LARGE",
-                "The file grew beyond the text limit.",
+                "The file grew beyond the read limit.",
             ));
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let after = file.metadata()?;
+            if metadata.len() != after.len()
+                || metadata.mtime() != after.mtime()
+                || metadata.mtime_nsec() != after.mtime_nsec()
+                || metadata.ctime() != after.ctime()
+                || metadata.ctime_nsec() != after.ctime_nsec()
+            {
+                return Err(HostError::new(
+                    "FILE_CHANGED",
+                    "File changed during the read. Read it again.",
+                ));
+            }
+        }
         Ok(bytes)
+    }
+
+    pub fn begin_binary_read(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        path: &str,
+    ) -> Result<serde_json::Value> {
+        let mut sessions = self
+            .binary_reads
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "File transfer lock failed"))?;
+        sessions.retain(|_, session| session.created.elapsed().as_secs() < 60);
+        if sessions.len() >= 4
+            || sessions
+                .values()
+                .filter(|session| session.owner == owner)
+                .count()
+                >= 2
+        {
+            return Err(HostError::new(
+                "FILE_TRANSFER_BUSY",
+                "Too many active file transfers",
+            ));
+        }
+        let content =
+            self.read_bytes_limited(owner, thread, workspace_id, path, MAX_BINARY_BYTES)?;
+        let size = content.len();
+        let id = uuid::Uuid::new_v4().to_string();
+        sessions.insert(
+            id.clone(),
+            BinaryReadSession {
+                owner: owner.into(),
+                thread: thread.into(),
+                workspace_id: workspace_id.into(),
+                path: path.into(),
+                content,
+                created: std::time::Instant::now(),
+            },
+        );
+        Ok(
+            serde_json::json!({"transferId": id, "sizeBytes": size, "chunkBytes": BINARY_CHUNK_BYTES}),
+        )
+    }
+
+    pub fn read_binary_chunk(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        path: &str,
+        transfer_id: &str,
+        offset: usize,
+    ) -> Result<serde_json::Value> {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        self.get_workspace(owner, thread, workspace_id)?;
+        let sessions = self
+            .binary_reads
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "File transfer lock failed"))?;
+        let session = sessions.get(transfer_id).ok_or_else(|| {
+            HostError::new("FILE_TRANSFER_EXPIRED", "File transfer is unavailable")
+        })?;
+        if session.owner != owner
+            || session.thread != thread
+            || session.workspace_id != workspace_id
+            || session.path != path
+        {
+            return Err(HostError::new(
+                "FILE_ACCESS_DENIED",
+                "File transfer scope mismatch",
+            ));
+        }
+        if session.created.elapsed().as_secs() >= 60 {
+            return Err(HostError::new(
+                "FILE_TRANSFER_EXPIRED",
+                "File transfer expired",
+            ));
+        }
+        if offset > session.content.len() || offset % BINARY_CHUNK_BYTES != 0 {
+            return Err(HostError::new("INVALID_RANGE", "Invalid file chunk offset"));
+        }
+        let end = (offset + BINARY_CHUNK_BYTES).min(session.content.len());
+        Ok(
+            serde_json::json!({"transferId": transfer_id, "offset": offset, "content": STANDARD.encode(&session.content[offset..end]), "done": end == session.content.len()}),
+        )
+    }
+
+    pub fn close_binary_read(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        transfer_id: &str,
+    ) -> Result<serde_json::Value> {
+        self.get_workspace(owner, thread, workspace_id)?;
+        let mut sessions = self
+            .binary_reads
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "File transfer lock failed"))?;
+        if let Some(session) = sessions.get(transfer_id) {
+            if session.owner != owner
+                || session.thread != thread
+                || session.workspace_id != workspace_id
+            {
+                return Err(HostError::new(
+                    "FILE_ACCESS_DENIED",
+                    "File transfer scope mismatch",
+                ));
+            }
+        }
+        sessions.remove(transfer_id);
+        Ok(serde_json::json!({"closed": true}))
     }
 }
 

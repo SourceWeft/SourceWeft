@@ -1,4 +1,5 @@
 import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
+import { consumeLocalFileReply } from "./binary-transfer";
 import { ContentError } from "../content/errors";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, gt, isNull, inArray } from "drizzle-orm";
@@ -279,7 +280,13 @@ export async function localCall(input: {
     const current = await db.query.localToolInvocations.findFirst({
       where: eq(localToolInvocations.id, id),
     });
-    if (current?.status === "succeeded") return current.result ?? {};
+    if (current?.status === "succeeded") {
+      if (input.action === "file.read" || input.action === "file.binary.chunk") {
+        await requireDeviceAccess(input.userId, input.deviceId, input.caller);
+        return consumeLocalFileReply({ userId: input.userId, deviceId: input.deviceId, invocationId: id }, current.result ?? {});
+      }
+      return current.result ?? {};
+    }
     if (
       current &&
       ["failed", "cancelled", "outcome_unknown"].includes(current.status)

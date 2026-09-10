@@ -173,7 +173,7 @@ function LocalFilesBrowser({
     >
       <header className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
         <Folder size={16} />
-        <strong>{variant === "hub" ? "Workfiles" : "Files"}</strong>
+        <strong>Files</strong>
         <span className="text-xs text-muted-foreground">{sourceLabel}</span>
         <button
           type="button"

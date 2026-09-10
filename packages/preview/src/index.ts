@@ -1,4 +1,6 @@
 /** Hosts supply authorized bytes or URLs; no artifact or native bridge dependencies. */
+export type PreviewLocation = { page?: number; line?: number; quote?: string };
+
 export type PreviewSource = {
   name: string;
   mimeType?: string | null;

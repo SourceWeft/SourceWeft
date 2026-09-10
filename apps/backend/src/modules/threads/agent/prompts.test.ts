@@ -14,17 +14,17 @@ test("base chat system prompt does not mention optional web tools", () => {
 
 test("base chat system prompt treats kb as source evidence and work as user-visible working material", () => {
   assert.match(CHAT_SYSTEM_PROMPT, /\/kb: Source Library knowledge/);
-  assert.match(CHAT_SYSTEM_PROMPT, /\/workfiles: Workfiles/);
+  assert.match(CHAT_SYSTEM_PROMPT, /\/files: Files/);
   assert.match(CHAT_SYSTEM_PROMPT, /read_file reads UTF-8 text only/);
   assert.match(
     CHAT_SYSTEM_PROMPT,
-    /Database-persisted, thread-scoped Workfiles/,
+    /Database-persisted, thread-scoped Files/,
   );
-  assert.match(CHAT_SYSTEM_PROMPT, /Read \/workfiles to continue prior work/);
-  assert.match(CHAT_SYSTEM_PROMPT, /Create Workfiles when a task is complex/);
+  assert.match(CHAT_SYSTEM_PROMPT, /Read \/files to continue prior work/);
+  assert.match(CHAT_SYSTEM_PROMPT, /Create Files when a task is complex/);
   assert.match(
     CHAT_SYSTEM_PROMPT,
-    /Do not create Workfiles just to answer a simple question/,
+    /Do not create Files just to answer a simple question/,
   );
   assert.match(
     CHAT_SYSTEM_PROMPT,
@@ -45,13 +45,13 @@ test("base chat system prompt treats kb as source evidence and work as user-visi
   );
   assert.match(
     CHAT_SYSTEM_PROMPT,
-    /Do not convert @mentioned source filenames into \/workfiles paths/,
+    /Do not convert @mentioned source filenames into \/files paths/,
   );
   assert.match(
     CHAT_SYSTEM_PROMPT,
-    /Do not use \/workfiles as the first evidence source for source-grounded factual questions/,
+    /Do not use \/files as the first evidence source for source-grounded factual questions/,
   );
-  assert.match(CHAT_SYSTEM_PROMPT, /\/workfiles Workfiles are non-citable/);
+  assert.match(CHAT_SYSTEM_PROMPT, /\/files Files are non-citable/);
   assert.match(
     CHAT_SYSTEM_PROMPT,
     /Sensitive tool actions are reviewed by SourceWeft before execution/,
@@ -95,9 +95,9 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
   const withoutSkills = buildFilesystemToolDescriptions();
   assert.match(
     withoutSkills.read_file,
-    /\/workfiles are database-persisted, thread-scoped Workfiles/,
+    /\/files are database-persisted, thread-scoped Files/,
   );
-  assert.match(withoutSkills.read_file, /\/workfiles is non-citable/);
+  assert.match(withoutSkills.read_file, /\/files is non-citable/);
   assert.match(withoutSkills.read_file, /default limit is 100 source lines/);
   assert.match(withoutSkills.read_file, /explicit limits are capped at 1000/);
   assert.match(withoutSkills.read_file, /Do not use read_file for binary files/);
@@ -107,7 +107,7 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
     /Only \/kb read_file output may include valid/,
   );
   assert.equal(withoutSkills.read_file.includes("/skills"), false);
-  assert.match(withoutSkills.write_file, /Writable mounts: \/workfiles/);
+  assert.match(withoutSkills.write_file, /Writable mounts: \/files/);
   assert.match(
     withoutSkills.write_file,
     /Create a Workfile when the task is complex/,

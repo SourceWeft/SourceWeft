@@ -133,11 +133,11 @@ test("mounts in new mode and renders the hub tab strip", async () => {
   const el = await renderHub({ mode: "new" });
   // The hub renders one <button> per tab; assert a couple of stable labels.
   expect(el.textContent).toContain("Sources");
-  expect(el.textContent).not.toContain("Workfiles");
+  expect(el.textContent).not.toContain("Files");
   expect(el.querySelectorAll("button").length).toBeGreaterThan(3);
 });
 
-test("restores the detached cloud Workfiles tab after execution metadata loads", async () => {
+test("restores the detached cloud Files tab after execution metadata loads", async () => {
   let resolveExecution!: (value: unknown) => void;
   localRequestMock.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -149,19 +149,19 @@ test("restores the detached cloud Workfiles tab after execution metadata loads",
     mode: "thread",
     threadId: "cloud-restore",
     variant: "window",
-    initialView: { tab: "Workfiles" },
+    initialView: { tab: "Files" },
     onViewChange: viewChanged,
   });
   expect(listWorkingFilesMock).not.toHaveBeenCalled();
   await act(async () =>
     resolveExecution({ executionTarget: { kind: "cloud" } }),
   );
-  expect(el.textContent).toContain("Workfiles");
+  expect(el.textContent).toContain("Files");
   expect(listWorkingFilesMock).toHaveBeenCalledWith("ws1", "cloud-restore");
-  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Workfiles");
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Files");
 });
 
-test("a detached local conversation never loads cloud Workfiles from a saved tab", async () => {
+test("a detached local conversation never loads cloud Files from a saved tab", async () => {
   localRequestMock.mockResolvedValueOnce({
     executionTarget: { kind: "local" },
   });
@@ -170,10 +170,10 @@ test("a detached local conversation never loads cloud Workfiles from a saved tab
     mode: "thread",
     threadId: "local-restore",
     variant: "window",
-    initialView: { tab: "Workfiles" },
+    initialView: { tab: "Files" },
     onViewChange: viewChanged,
   });
-  expect(el.textContent).not.toContain("Workfiles");
+  expect(el.textContent).not.toContain("Files");
   expect(listWorkingFilesMock).not.toHaveBeenCalled();
   expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Sources");
 });

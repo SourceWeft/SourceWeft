@@ -49,6 +49,10 @@ export const threads = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    sourceSelectionJson: jsonb("source_selection_json")
+      .$type<import("@sourceweft/contracts").ThreadSourceSelection>()
+      .notNull()
+      .default(sql`'{"revision":0,"selectedSourceIds":[]}'::jsonb`),
     executionTargetJson: jsonb("execution_target_json")
       .$type<
         | { kind: "cloud" }
@@ -326,6 +330,21 @@ export const workingFiles = pgTable(
       .references(() => threads.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
     contentText: text("content_text").notNull().default(""),
+    payloadKind: text("payload_kind")
+      .$type<"inline_text" | "object">()
+      .notNull()
+      .default("inline_text"),
+    storageBucket: text("storage_bucket"),
+    storageKey: text("storage_key"),
+    contentHash: text("content_hash")
+      .notNull()
+      .default(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ),
+    origin: text("origin")
+      .$type<"user_provided" | "agent_created" | "external" | "unknown">()
+      .notNull()
+      .default("unknown"),
     mimeType: text("mime_type").notNull().default("text/plain"),
     sizeBytes: integer("size_bytes").notNull().default(0),
     purpose: text("purpose").$type<WorkingFilePurpose>(),
@@ -356,13 +375,25 @@ export const workingFiles = pgTable(
     ),
     check(
       "working_files_path_check",
-      sql`${table.path} ~ '^/workfiles/[^[:cntrl:]]+$' and ${table.path} not like '%..%' and ${table.path} not like '%~%' and ${table.path} not like '%//%'`,
+      sql`${table.path} ~ '^/files/[^[:cntrl:]]+$' and ${table.path} not like '%..%' and ${table.path} not like '%~%' and ${table.path} not like '%//%'`,
     ),
     check(
       "working_files_purpose_check",
       sql`${table.purpose} is null or ${table.purpose} in (${sqlEnumList(workingFilePurposeSchema.options)})`,
     ),
     check("working_files_size_bytes_check", sql`${table.sizeBytes} >= 0`),
+    check(
+      "working_files_payload_check",
+      sql`(${table.payloadKind} = 'inline_text' and ${table.storageBucket} is null and ${table.storageKey} is null) or (${table.payloadKind} = 'object' and ${table.storageBucket} is not null and ${table.storageKey} is not null and ${table.contentText} = '')`,
+    ),
+    check(
+      "working_files_hash_check",
+      sql`${table.contentHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "working_files_origin_check",
+      sql`${table.origin} in ('user_provided', 'agent_created', 'external', 'unknown')`,
+    ),
     index("working_files_thread_updated_idx").on(
       table.teamId,
       table.workspaceId,

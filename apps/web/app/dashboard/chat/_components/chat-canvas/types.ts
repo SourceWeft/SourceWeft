@@ -205,6 +205,7 @@ export type ChatSkillItem = {
 };
 
 export type CitationRecord = {
+  fileReference?: import("@sourceweft/contracts").FileReference;
   citation: string;
   sourceId: string | null;
   sourceTitle?: string;

@@ -62,7 +62,7 @@ test("AssistantToolCard renders write_file workfile preview and opens workfile",
     toolCall: toolCall({
       input: {
         content: "console.log('deck');\n",
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       tool: "write_file",
     }),
@@ -76,7 +76,7 @@ test("AssistantToolCard renders write_file workfile preview and opens workfile",
   const pathInput = element.querySelector<HTMLInputElement>(
     'input[aria-label="Workfile path"]',
   );
-  assert.equal(pathInput?.value, "/workfiles/ppt/deck.js");
+  assert.equal(pathInput?.value, "/files/ppt/deck.js");
 
   const openButton = [...element.querySelectorAll("button")].find(
     (button) => button.textContent === "Open Workfile",
@@ -88,7 +88,7 @@ test("AssistantToolCard renders write_file workfile preview and opens workfile",
   });
 
   assert.equal(onWorkfileClick.mock.calls.length, 1);
-  assert.equal(onWorkfileClick.mock.calls[0]?.[0], "/workfiles/ppt/deck.js");
+  assert.equal(onWorkfileClick.mock.calls[0]?.[0], "/files/ppt/deck.js");
 });
 
 test("AssistantToolCard renders truncated write_file preview", async () => {
@@ -97,7 +97,7 @@ test("AssistantToolCard renders truncated write_file preview", async () => {
     toolCall: toolCall({
       input: {
         content,
-        path: "/workfiles/ppt/deck.ts",
+        path: "/files/ppt/deck.ts",
       },
       tool: "write_file",
     }),
@@ -115,12 +115,12 @@ test("AssistantToolCard renders edit_file workfile diff preview", async () => {
       input: {
         newString: "const title = 'New';",
         oldString: "const title = 'Old';",
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
         replace_all: true,
       },
       output: {
         occurrences: 2,
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       tool: "edit_file",
     }),

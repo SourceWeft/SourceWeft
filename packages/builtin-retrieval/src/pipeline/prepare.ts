@@ -21,18 +21,13 @@ export function createPrepareRetrievalStage(deps: {
       const anchorSourceIds = [
         ...new Set(state.input.anchorSourceIds ?? []),
       ].filter(
-        (sourceId) => sourceIds.length === 0 || sourceIds.includes(sourceId),
+        (sourceId) => sourceIds.includes(sourceId),
       );
 
       return {
         ...state,
         anchorSourceIds,
-        retrievalSourceIds:
-          sourceIds.length > 0
-            ? sourceIds
-            : anchorSourceIds.length > 0
-              ? anchorSourceIds
-              : [],
+        retrievalSourceIds: sourceIds,
         sourceIds,
         profile,
         planner,

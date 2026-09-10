@@ -1,6 +1,8 @@
 # Files, Sources, and scoped retrieval
 
-日期：2026-09-10。状态：设计方案；实现尚未开始。
+日期：2026-09-10；2026-09-11 更新。状态：P1 实施中。
+
+用户补充：产品尚未发布，不需要历史数据恢复或兼容层。新状态从明确默认值开始，旧接口/旧 payload 不提供兼容别名；数据库只执行新结构所需变更，不以此自动删除用户本地原件。
 
 用户已确认方向：Cloud Files 使用 VFS，Local Files 使用真实 FS；图片通过视觉输入读取，文档按需解析。本文件补齐产品行为、检索边界、数据契约、权限与验收标准。所有用户界面名称保持英文。
 
@@ -16,7 +18,7 @@
 | Files | 当前任务直接使用的文件，包括原有文件和生成文件 | Cloud VFS 或 Local FS | Read / Search / Cite / Create / Edit，受任务授权限制 |
 | Artifacts | 值得交付和集中预览的结果 | 引用实际文件或明确发布的版本 | Preview / Download / Revise |
 
-- 面向用户的 `Workfiles` 改为 `Files`。内部 `/workfiles` 路由及表名可以保留，不为改名破坏旧数据、路径或消息。
+- 面向用户的 `Workfiles` 改为 `Files`。公开文件路径/API 使用新 Files 契约，不保留 `/workfiles` 兼容别名。内部表名按实现需要调整，不作为旧接口兼容约束。
 - `Working directory` 仅表示命令执行和相对路径的起点，持续显示在对话顶部及详情中。
 - 文件被用于参考不改变分类，也不要求加入 Sources。Sources 的额外保证是 AI 不覆盖原文。
 - Artifacts 不是第三个检索库；标记为结果不自动复制文件，不自动加入 Sources。已有公开发布流程继续创建明确的发布版本，不能因打开预览而上传本地文件。
@@ -36,7 +38,7 @@
 
 ### Cloud
 
-Files 显示 `Cloud · This conversation`，访问当前对话的 VFS。上传到 Files 的原件和 AI 生成文件按同一文件模型管理。现有文本 Workfiles 直接保留，逐步扩展二进制存储。
+Files 显示 `Cloud · This conversation`，访问当前对话的 VFS。上传到 Files 的原件和 AI 生成文件按同一文件模型管理。Cloud 使用统一的文本/二进制文件模型。
 
 Cloud sandbox 是执行设施，不自动成为持久 Files。已有明确的 prepare/collect 或发布流程继续负责传输；本方案不声称 VFS 和 sandbox 自动同步。用户可见的持久文件必须成功写入 VFS 后才能标记 Saved。
 
@@ -58,9 +60,9 @@ Cloud sandbox 是执行设施，不自动成为持久 Files。已有明确的 pr
 
 范围计算：用户/组织权限 ∩ 对话关联 ∩ 已选择 Sources ∩ 可访问的当前版本。目录展开、mentions、历史引用和缓存不允许越过该集合。有效范围为空时返回 `NO_SOURCES_SELECTED`，不得表示整个 workspace。
 
-Source 选择使用显式替换语义：省略字段表示使用持久化选择，`[]` 表示清空。读取历史消息只用于一次性的旧数据初始化，不可每轮覆盖用户的清空操作。mention 不隐式选择已排除的 Source；UI 的显式 `Use source` 操作可更新选择，文本中的名称只能缩小或请求澄清。
+Source 选择使用显式替换语义：省略字段表示使用持久化选择，`[]` 表示清空。不从历史消息恢复选择。mention 不隐式选择已排除的 Source；UI 的显式 `Use source` 操作可更新选择，文本中的名称只能缩小或请求澄清。
 
-持久化到 `threads.source_selection_json`，结构为 `{ initialized, revision, selectedSourceIds }`；更新使用 expected revision 防止两个窗口互相覆盖。新对话 initialized=true、选择为空；旧记录默认 initialized=false，首次读取时完成一次受权限过滤的初始化。客户端不得通过修改其他 chat preferences 覆盖该状态。
+持久化到 `threads.source_selection_json`，结构为 `{ revision, selectedSourceIds }`；更新使用 expected revision 防止两个窗口互相覆盖。默认 revision=0、选择为空，没有 initialized 或历史初始化状态。客户端不得通过修改其他 chat preferences 覆盖该状态。Turn 请求只能缩小当前持久选择，不能用旧 sourceIds 扩大范围。
 
 ### File search
 
@@ -128,11 +130,11 @@ VFS 是文件接口及逻辑命名空间，不代表所有内容必须进入数�
 
 对 `working_files` 做增量扩展：原 inline text 保留；新增 payload kind、object reference、content hash、revision、provenance 字段。inline text 与 object bytes 使用互斥约束，不能同一版本双写后随机选取。
 
-数据字段：`payloadKind`（inline_text/object）、`storageBucket`、`storageKey`、`contentHash`、`revision`、`provenanceJson`。原 `contentText` 保留，object 模式下必须为空字符串；inline 模式不得有 object reference。空文本文件是合法 inline payload，不以空字符串判定存储类型。新字段保留旧记录可读的默认值，旧内容 hash 在首次访问时按原字节生成。
+数据字段：`payloadKind`（inline_text/object）、`storageBucket`、`storageKey`、`contentHash`、`revision`、`provenanceJson`。原 `contentText` 保留，object 模式下必须为空字符串；inline 模式不得有 object reference。空文本文件是合法 inline payload，不以空字符串判定存储类型。新文件写入时必须生成 hash 和 revision，不实现历史记录懒迁移。
 
 二进制先上传暂存对象、检查 MIME/长度/hash，再事务提交 metadata 和 revision。失败清理孤立暂存对象。读取按 scope 授权，不返回可长期绕过鉴权的公开 URL。写入带 expectedRevision，冲突显式报错。
 
-保留 `/workfiles` 路径和现有 API，对外展示 Files。旧 256 KiB 文本与每对话 200 文件限制不因改名暗中改变；binary 引入明确配置及总量配额，纳入存储计量。旧文件 provenance 为 unknown/legacy，不伪造作者。
+公开路径/API 统一使用 Files，不设置旧路径兼容层。旧 256 KiB 文本与每对话 200 文件限制不因改名暗中改变；binary 引入明确配置及总量配额，纳入存储计量。无法确认来源的文件 provenance 为 unknown，不伪造作者。
 
 ### Local
 
@@ -178,7 +180,7 @@ Cache key = scope owner + resource identity + revision + parser/version/options�
 
 ## 8. 引用与 Artifacts
 
-扩展引用类型为 `source` / `file` / `web`，而不是为 File 伪造 sourceId 或 Source chunk。保留旧 Source/Web 引用兼容读取。
+扩展引用类型为 `source` / `file` / `web`，而不是为 File 伪造 sourceId 或 Source chunk。Source/Web/File 统一使用新引用契约，不增加旧格式兼容读取。
 
 File citation 包含：授权作用域标识、fileId、引用时路径/名称、revision、locator、实际读取的 bounded excerpt、origin。locator 是 line/page/paragraph/slide/sheet-cell/image 的带类型结构。
 
@@ -237,7 +239,7 @@ Release B：本地只读 Sources、明确 Source indexing、设备/权限/版本
 7. 外部修改文件后新检索读取新内容，旧引用显示变化；删除、离线和撤权均不返回误导性当前内容。
 8. Agent edit 与真实 sandbox shell 都不能修改只读 Source；普通 Files 仍可按任务要求修改，多个对话共享目录的冲突不被覆盖。
 9. 本地副本不写入 Cloud Files；生成文件不自动加入 Sources；Artifacts 不重复进入索引，预览不触发发布。
-10. 原有 Cloud 文本 Workfiles、历史引用、已有本地目录绑定可继续使用，无用户原件迁移或删除。
+10. 新建 Cloud/Local 会话按同一契约运行，不包含历史选择恢复、旧引用兼容或旧接口别名；不会自动迁移或删除用户本地原件。
 
 ## 13. 参考依据
 

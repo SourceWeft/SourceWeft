@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fileReferenceSchema } from "./files";
 import { meterIngestionResponseSchema } from "./billing";
 
 const retrievalVectorStrategySchema = z.enum([
@@ -45,6 +46,7 @@ export const sourceDocumentStatusSchema = z.enum([
 ]);
 
 export const retrievalCitationSchema = z.object({
+  fileReference: fileReferenceSchema.optional(),
   citation: z.string().min(1),
   sourceId: z.string().nullable(),
   sourceTitle: z.string().optional(),

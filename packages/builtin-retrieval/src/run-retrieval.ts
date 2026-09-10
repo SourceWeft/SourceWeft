@@ -23,6 +23,9 @@ export async function runRetrieval(
     planStrategy: (profile: EmbeddingProfile) => RetrievalPlannerResult;
   },
 ) {
+  if (input.sourceIds.length === 0) {
+    throw new Error("NO_SOURCES_SELECTED");
+  }
   const stages = createRetrievalPipeline(deps);
   const state = await runPipeline(createInitialRetrievalState(input), stages);
   const prepared = requirePreparedRetrievalState(state);

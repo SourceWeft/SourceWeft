@@ -280,7 +280,7 @@ function recoverableExecuteFailureHint(errorCode: string, localRoot?: string) {
       "SANDBOX_SKILL_STAGING_UNAVAILABLE",
     ].includes(errorCode)
   ) {
-    return `Use actual files under the local working directory ${localRoot}. /kb and /skills are read-only logical sources; /workfiles and prepare/collect are unavailable for this PC conversation. Resolve the reported path or staging error before retrying.`;
+    return `Use actual files under the local working directory ${localRoot}. /kb and /skills are read-only logical sources; /files and prepare/collect are unavailable for this PC conversation. Resolve the reported path or staging error before retrying.`;
   }
   if (errorCode === "SANDBOX_EXECUTE_COMMAND_DENIED") {
     return "Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.";
@@ -289,10 +289,10 @@ function recoverableExecuteFailureHint(errorCode: string, localRoot?: string) {
     return "Use the configured sandbox workspace as the working directory, or run commands with absolute paths under the sandbox workspace.";
   }
   if (errorCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED") {
-    return "Create or edit /workfiles/... with SourceWeft file tools, then use prepare_sandbox_workspace to materialize it under /workspace/...; rerun execute only against /workspace/... paths.";
+    return "Create or edit /files/... with SourceWeft file tools, then use prepare_sandbox_workspace to materialize it under /workspace/...; rerun execute only against /workspace/... paths.";
   }
   if (errorCode === "SANDBOX_SKILL_STAGING_UNAVAILABLE") {
-    return "Skill bundle staging is unavailable in this sandbox, so /skills paths cannot be executed. Read the needed skill file with SourceWeft file tools, save the required content as a /workfiles/... Workfile, prepare it into /workspace/..., then rerun execute against the /workspace/... copy.";
+    return "Skill bundle staging is unavailable in this sandbox, so /skills paths cannot be executed. Read the needed skill file with SourceWeft file tools, save the required content as a /files/... Workfile, prepare it into /workspace/..., then rerun execute against the /workspace/... copy.";
   }
   return "Revise the execute request before trying again.";
 }
@@ -758,6 +758,38 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     );
   }
 
+  async searchNativeFiles(
+    paths: string[],
+    pattern: string,
+    options: SandboxBackendHostOperationOptions & {
+      literal?: boolean;
+      ignoreCase?: boolean;
+      firstPerFile?: boolean;
+    } = {},
+  ) {
+    return this.runPinnedFileOperation(
+      options,
+      async ({ provider, sandbox, signal }) => {
+        if (!provider.nativeGrep)
+          throw new Error(
+            "NATIVE_SEARCH_UNAVAILABLE: Native text search is unavailable.",
+          );
+        const allowed = paths.map((path) =>
+          assertSandboxReadPath(path, provider.pathPolicy),
+        );
+        return provider.nativeGrep({
+          providerSandboxId: sandbox.providerSandboxId,
+          paths: allowed,
+          pattern,
+          literal: options.literal,
+          ignoreCase: options.ignoreCase,
+          firstPerFile: options.firstPerFile,
+          signal,
+        });
+      },
+    );
+  }
+
   async grep(
     pattern: string,
     path: string | null = "/",
@@ -783,15 +815,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       return { matches: [] };
     }
     if (this.input.manager.providerForSandbox().nativeFileOperations) {
-      let expression: RegExp;
-      try {
-        expression = new RegExp(pattern);
-      } catch {
-        return { error: "Invalid regular expression." };
-      }
       return this.runPinnedFileOperation(
         options,
-        async ({ provider, sandbox }) => {
+        async ({ provider, sandbox, signal }) => {
           const files = await provider.listFiles!({
             providerSandboxId: sandbox.providerSandboxId,
             sandboxPath: normalized,
@@ -817,23 +843,17 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
                 "Search exceeds 200 text files or 1 MiB. Choose a narrower path or glob.",
             };
           }
-          const matches: GrepMatch[] = [];
-          for (const file of candidates) {
-            const text = await provider.readTextFile!({
-              providerSandboxId: sandbox.providerSandboxId,
-              sandboxPath: file.path,
-            });
-            for (const [index, line] of text.split(/\r?\n/).entries()) {
-              if (expression.test(line))
-                matches.push({ path: file.path, line: index + 1, text: line });
-              if (matches.length >= 50)
-                return applyGrepMaxCount({
-                  result: { matches, truncated: true },
-                  maxCount,
-                });
-            }
-          }
-          return applyGrepMaxCount({ result: { matches }, maxCount });
+          if (!provider.nativeGrep)
+            throw new Error(
+              "NATIVE_SEARCH_UNAVAILABLE: This computer does not support native text search.",
+            );
+          const result = await provider.nativeGrep({
+            providerSandboxId: sandbox.providerSandboxId,
+            paths: candidates.map((file) => file.path),
+            pattern,
+            signal,
+          });
+          return applyGrepMaxCount({ result, maxCount });
         },
       );
     }
@@ -1206,7 +1226,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     let executionId: string | null = null;
     try {
       // Two-phase path policy (docs/architecture/sandbox-skill-staging.md D2):
-      // /workfiles and /kb fail fast here; a /skills-referencing command is
+      // /files and /kb fail fast here; a /skills-referencing command is
       // admitted optimistically when staging is configured, then re-judged
       // after sandbox acquisition ran the staging attempt.
       const skillsDeferred =

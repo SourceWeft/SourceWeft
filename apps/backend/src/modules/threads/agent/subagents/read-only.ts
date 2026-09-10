@@ -21,6 +21,9 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
  */
 export const READ_ONLY_BUSINESS_TOOL_NAMES = new Set<string>([
   AGENT_TOOL_NAMES.searchSources,
+  AGENT_TOOL_NAMES.readDocument,
+  AGENT_TOOL_NAMES.searchFiles,
+  AGENT_TOOL_NAMES.viewImage,
 ]);
 
 /** Deny-write filesystem policy: read the knowledge base and working files only. */
@@ -28,7 +31,7 @@ export const READ_ONLY_FILESYSTEM_PERMISSIONS: FilesystemPermission[] = [
   { operations: ["read"], paths: ["/"], mode: "allow" },
   {
     operations: ["read"],
-    paths: ["/kb", "/kb/**", "/workfiles", "/workfiles/**"],
+    paths: ["/kb", "/kb/**", "/files", "/files/**"],
     mode: "allow",
   },
   { operations: ["read"], paths: ["/**"], mode: "deny" },

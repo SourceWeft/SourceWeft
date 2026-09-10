@@ -1,3 +1,4 @@
+import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
   ThreadRunFailureSummary,
@@ -574,13 +575,13 @@ export class ContentClient {
 
   listWorkingFiles(workspaceId: string, threadId: string) {
     return this.http.get<ListWorkingFilesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files`,
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files`,
     );
   }
 
   getWorkingFile(workspaceId: string, threadId: string, path: string) {
     return this.http.get<GetWorkingFileResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files/content?path=${encode(path)}`,
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files/content?path=${encode(path)}`,
     );
   }
 
@@ -591,14 +592,34 @@ export class ContentClient {
     input: PutWorkingFileRequest,
   ) {
     return this.http.put<PutWorkingFileResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files/content?path=${encode(path)}`,
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files/content?path=${encode(path)}`,
       input,
     );
   }
 
   deleteWorkingFile(workspaceId: string, threadId: string, path: string) {
     return this.http.delete<DeleteWorkingFileResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files?path=${encode(path)}`,
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files?path=${encode(path)}`,
+    );
+  }
+
+  readFileBlob(workspaceId: string, threadId: string, path: string, signal?: AbortSignal) {
+    return this.http.getBlob(`/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files/bytes?path=${encode(path)}`, signal);
+  }
+
+  uploadFileBytes(workspaceId: string, threadId: string, path: string, file: Blob, expectedRevision?: string) {
+    return this.http.putBytes<PutWorkingFileResponse>(`/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/files/bytes?path=${encode(path)}`, file, expectedRevision);
+  }
+
+  getThreadSourceSelection(workspaceId: string, threadId: string) {
+    return this.http.get<ThreadSourceSelectionResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/source-selection`,
+    );
+  }
+
+  updateThreadSourceSelection(workspaceId: string, threadId: string, input: UpdateThreadSourceSelectionRequest) {
+    return this.http.put<ThreadSourceSelectionResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/source-selection`, input,
     );
   }
 

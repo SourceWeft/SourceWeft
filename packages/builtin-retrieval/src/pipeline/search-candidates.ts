@@ -1,4 +1,5 @@
 import { type RetrievalCandidate } from "../index";
+import { assertSourceScope } from "../scope";
 import type {
   RetrievalDataAccess,
   RetrievalEmbeddingGateway,
@@ -154,6 +155,8 @@ export function createSearchCandidatesStage(deps: {
               })
           : [];
 
+      assertSourceScope([...bm25Candidates, ...vectorCandidates], retrievalSourceIds);
+      assertSourceScope([...anchorBm25Candidates, ...anchorVectorCandidates], anchorSourceIds);
       return {
         ...state,
         degradations,

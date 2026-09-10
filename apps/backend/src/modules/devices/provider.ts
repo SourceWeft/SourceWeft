@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { readLocalBinaryFile } from "./read-binary-file";
+import { grepLocalFilePaths } from "./native-grep";
+import { logger } from "../../shared/logger";
 import { ContentError } from "../content/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, localDevices, localThreadBindings, threads } from "@sourceweft/db";
@@ -262,16 +265,56 @@ export async function localProviderForTurn(
       return result;
     },
     downloadFile: async (input) => {
-      const result = await call(
-        "file.read",
-        { workspaceId: id, path: relative(input.sandboxPath) },
-        { signal: input.signal },
-      );
-      return Buffer.from(String(result.content ?? ""), "base64");
+      return readLocalBinaryFile({
+        call,
+        workspaceId: id,
+        path: relative(input.sandboxPath),
+        signal: input.signal,
+        onCleanupError: (error) =>
+          logger.warn("Local file transfer cleanup failed", {
+            error: String(error),
+          }),
+      });
     },
     ensureDirectory: async (input) =>
       call("file.mkdir", { workspaceId: id, path: relative(input.directory) }),
     nativeFileOperations: true,
+    nativeGrep: async (input) => {
+      const matches: Array<{ path: string; line: number; text: string }> = [];
+      const visitedPaths: string[] = [],
+        skipped: string[] = [];
+      let truncated = false;
+      for (let offset = 0; offset < input.paths.length; offset += 100) {
+        const result = await grepLocalFilePaths({
+          userId: context.userId,
+          deviceId: binding.deviceId,
+          threadId: context.threadId,
+          workspaceId: id,
+          root: workspaceRoot,
+          paths: input.paths.slice(offset, offset + 100),
+          pattern: input.pattern,
+          caller: context.localCaller,
+          signal: input.signal,
+          literal: input.literal,
+          ignoreCase: input.ignoreCase,
+          firstPerFile: input.firstPerFile,
+        });
+        matches.push(...result.matches);
+        visitedPaths.push(...result.visitedPaths);
+        skipped.push(...result.skipped);
+        truncated ||= result.truncated || result.skipped.length > 0;
+        if (matches.length >= 100) {
+          truncated ||= offset + 100 < input.paths.length;
+          break;
+        }
+      }
+      return {
+        matches: matches.slice(0, 100),
+        visitedPaths,
+        skipped,
+        truncated,
+      };
+    },
     listFiles: async (input) => {
       const result = await call("file.list", {
         workspaceId: id,

@@ -11,7 +11,7 @@ import type {
   SourceWeftInterpreterOptions,
 } from "./types";
 
-const ALLOWED_ROOTS = ["/kb", "/workfiles"] as const;
+const ALLOWED_ROOTS = ["/kb", "/files"] as const;
 const MAX_PATH_CHARS = 4_096;
 const MAX_PATTERN_CHARS = 2_000;
 const MAX_READ_LINES = 500;

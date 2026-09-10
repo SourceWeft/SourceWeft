@@ -145,7 +145,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     ];
     this.defaultMount =
       this.mounts.find(
-        (mount) => mount.capability.evidenceRole === "source_evidence",
+        (mount) => mount.capability.root === WORK_MOUNT.root,
       ) ?? this.mounts[0]!;
     this.writableMounts = this.mounts.filter(
       (mount) => mount.capability.writable,

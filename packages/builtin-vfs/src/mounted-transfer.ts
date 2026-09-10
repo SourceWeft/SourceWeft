@@ -87,7 +87,7 @@ export async function downloadMountedFiles(input: {
   const encoder = new TextEncoder();
   for (const [backend, batch] of batches) {
     const mount = input.mounts.find((item) => item.backend === backend);
-    if (mount?.capability.citable) {
+    if (!mount?.capability.readable || mount.capability.evidenceRole === "source_evidence") {
       batch.forEach((item) => {
         results[item.index] = downloadError(
           item.originalPath,

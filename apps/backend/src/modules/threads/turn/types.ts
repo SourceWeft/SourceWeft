@@ -158,6 +158,7 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   existingImageParts?: ChatMessageImagePart[];
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   tools?: ThreadToolsSelection;
   command?: ThreadCommandSelection;
   invocation?: ThreadInvocationSelection;
@@ -216,6 +217,7 @@ export type PreparedThreadTurn = {
   mentionedSourceIds: string[];
   effectiveMentionedSourceIds: string[];
   selectedSourceIds: string[];
+  sourceSelectionRevision: number;
   sourceIds: string[];
   sourceScope: {
     requestedSourceIds: string[];

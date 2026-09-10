@@ -875,7 +875,7 @@ test("SourceWeftSandboxBackend returns recoverable failure for VFS paths in exec
     operationStore,
   );
 
-  const result = await backend.execute("mkdir -p /workfiles/ppt-deck");
+  const result = await backend.execute("mkdir -p /files/ppt-deck");
 
   assert.equal(result.exitCode, 1);
   assert.equal(result.truncated, false);
@@ -944,10 +944,10 @@ test("SourceWeftSandboxBackend escalates repeated VFS path execute failures in t
     false,
   );
 
-  const first = await backend.execute("ls /workfiles", {
+  const first = await backend.execute("ls /files", {
     toolCallId: "call-vfs-1",
   });
-  const second = await backend.execute("ls /workfiles", {
+  const second = await backend.execute("ls /files", {
     toolCallId: "call-vfs-2",
   });
 
@@ -1318,14 +1318,14 @@ test("SourceWeftSandboxBackend rejects SourceWeft DB-backed VFS paths for sandbo
   const { backend, provider } = createBackend();
 
   assert.match(
-    (await backend.write("/workfiles/output.md", "x")).error ?? "",
+    (await backend.write("/files/output.md", "x")).error ?? "",
     /SANDBOX_FILE_PATH_DENIED|SANDBOX_READ_PATH_DENIED/u,
   );
-  const executeResult = await backend.execute("node /workfiles/output.js");
+  const executeResult = await backend.execute("node /files/output.js");
   assert.equal(executeResult.exitCode, 1);
   assert.equal(executeResult.truncated, false);
   assert.match(executeResult.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
-  assert.match(executeResult.output, /\/workfiles/u);
+  assert.match(executeResult.output, /\/files/u);
   assert.deepEqual(provider.executed, []);
   assert.deepEqual(provider.ensuredDirectories, []);
   assert.deepEqual(provider.uploadedFiles, []);
@@ -1335,7 +1335,7 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
   const { backend } = createBackend();
 
   const downloads = await backend.downloadFiles([
-    "/workfiles/output.md",
+    "/files/output.md",
     "/workspace/ppt-deck/missing.md",
   ]);
 
@@ -1349,7 +1349,7 @@ test("SourceWeftSandboxBackend returns recoverable error for absolute glob patte
   const { backend } = createBackend();
 
   const result = await backend.glob(
-    "/workfiles/**/*.md",
+    "/files/**/*.md",
     "/workspace/ppt-deck",
   );
 
@@ -1490,9 +1490,9 @@ test("skill staging leaves non-/skills commands and unconfigured runtimes untouc
   assert.deepEqual(plainProvider.executed, []);
 
   // Configured runtime, command without /skills: no deferral in play, and
-  // /workfiles stays denied fast even with staging configured.
+  // /files stays denied fast even with staging configured.
   const { backend } = createSkillStagingBackend({});
-  const workfiles = await backend.execute("cat /workfiles/notes.md", {
+  const workfiles = await backend.execute("cat /files/notes.md", {
     toolCallId: "tool-call-skill-6",
   });
   assert.equal(workfiles.exitCode, 1);
@@ -1608,7 +1608,7 @@ test("native file tools share disk state without invoking Linux shell helpers", 
     (await backend.read("/workspace/note.txt")).content,
     "external change",
   );
-  assert.ok((await backend.write("/workfiles/wrong.txt", "wrong")).error);
+  assert.ok((await backend.write("/files/wrong.txt", "wrong")).error);
   assert.deepEqual(provider.systemExecuted, []);
   assert.deepEqual(provider.executed, []);
 });

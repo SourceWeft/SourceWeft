@@ -141,7 +141,7 @@ test("sandbox_path source adapter honors provider allowed roots", async () => {
 test("work_file source adapter reads binary bytes from VFS download", async () => {
   const downloadFiles = vi.fn().mockResolvedValue([
     {
-      path: "/workfiles/deck.pptx",
+      path: "/files/deck.pptx",
       content: new Uint8Array([0x50, 0x4b]),
       error: null,
     },
@@ -165,21 +165,21 @@ test("work_file source adapter reads binary bytes from VFS download", async () =
   });
 
   assert.deepEqual([...output.bytes], [0x50, 0x4b]);
-  assert.equal(output.path, "/workfiles/deck.pptx");
-  assert.deepEqual(downloadFiles.mock.calls[0]?.[0], ["/workfiles/deck.pptx"]);
+  assert.equal(output.path, "/files/deck.pptx");
+  assert.deepEqual(downloadFiles.mock.calls[0]?.[0], ["/files/deck.pptx"]);
 });
 
 test("work_file source adapter falls back to readRaw text content", async () => {
   const adapter = adapterForSource({
     kind: "work_file",
-    path: "/workfiles/deck.pptx",
+    path: "/files/deck.pptx",
   });
   assert.ok(adapter);
 
   const output = await adapter.read({
     publishInput: validInput({
       kind: "work_file",
-      path: "/workfiles/deck.pptx",
+      path: "/files/deck.pptx",
     }),
     services: {
       filesystem: {
@@ -204,7 +204,7 @@ test("work_file source adapter falls back to readRaw text content", async () => 
 test("work_file source adapter returns recoverable missing source error", async () => {
   const adapter = adapterForSource({
     kind: "work_file",
-    path: "/workfiles/missing.pptx",
+    path: "/files/missing.pptx",
   });
   assert.ok(adapter);
 
@@ -213,7 +213,7 @@ test("work_file source adapter returns recoverable missing source error", async 
       adapter.read({
         publishInput: validInput({
           kind: "work_file",
-          path: "/workfiles/missing.pptx",
+          path: "/files/missing.pptx",
         }),
         services: {
           filesystem: {
@@ -229,7 +229,7 @@ test("work_file source adapter returns recoverable missing source error", async 
   );
 });
 
-test("work_file source adapter rejects paths outside /workfiles", async () => {
+test("work_file source adapter rejects paths outside /files", async () => {
   const adapter = adapterForSource({
     kind: "work_file",
     path: "/kb/source.pdf",
@@ -252,6 +252,6 @@ test("work_file source adapter rejects paths outside /workfiles", async () => {
     (error) =>
       error instanceof PptxOutputError &&
       error.code === "ARTIFACT_SOURCE_INVALID" &&
-      /under \/workfiles/u.test(error.message),
+      /under \/files/u.test(error.message),
   );
 });

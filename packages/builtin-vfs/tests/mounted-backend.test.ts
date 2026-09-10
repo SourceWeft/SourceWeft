@@ -14,7 +14,7 @@ function textData(content: string) {
   };
 }
 
-test("mounted backend exposes roots, defaults search to /kb, and restricts writes", async () => {
+test("mounted backend exposes roots, defaults file search to /files, and restricts writes", async () => {
   const knowledge = {
     ls: async () => ({ files: [{ path: "/kb/source.md", is_dir: false }] }),
     read: async () => ({ content: "kb" }),
@@ -27,13 +27,13 @@ test("mounted backend exposes roots, defaults search to /kb, and restricts write
     edit: async () => ({ error: "readonly" }),
   };
   const working = {
-    ls: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    ls: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     read: async () => ({ content: "work" }),
     readRaw: async () => textData("work"),
     grep: async () => ({
-      matches: [{ path: "/workfiles/a.md", line: 1, text: "work" }],
+      matches: [{ path: "/files/a.md", line: 1, text: "work" }],
     }),
-    glob: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    glob: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     write: async (path: string) => ({ path }),
     edit: async (path: string) => ({ path, occurrences: 1 }),
   };
@@ -42,21 +42,21 @@ test("mounted backend exposes roots, defaults search to /kb, and restricts write
 
   assert.deepEqual(
     (await backend.ls("/")).files?.map((item: FileInfo) => item.path),
-    ["/kb/", "/workfiles/"],
+    ["/files/", "/kb/"],
   );
   assert.equal(
     (await backend.write("/kb/a.md", "x")).error?.startsWith("EROFS"),
     true,
   );
   assert.equal(
-    (await backend.write("/workfiles/a.md", "x")).path,
-    "/workfiles/a.md",
+    (await backend.write("/files/a.md", "x")).path,
+    "/files/a.md",
   );
   assert.deepEqual((await backend.grep("anything", "/")).matches, [
-    { path: "/kb/source.md", line: 1, text: "kb" },
+    { path: "/files/a.md", line: 1, text: "work" },
   ]);
-  assert.deepEqual((await backend.glob("/workfiles/**/*.md", "/")).files, [
-    { path: "/workfiles/a.md", is_dir: false },
+  assert.deepEqual((await backend.glob("/files/**/*.md", "/")).files, [
+    { path: "/files/a.md", is_dir: false },
   ]);
 });
 
@@ -101,7 +101,7 @@ test("mounted backend exposes optional /skills mount as read-only", async () => 
 
   assert.deepEqual(
     (await backend.ls("/")).files?.map((item: FileInfo) => item.path),
-    ["/kb/", "/skills/", "/workfiles/"],
+    ["/files/", "/kb/", "/skills/"],
   );
   assert.deepEqual((await backend.ls("/skills")).files, [
     { path: "/skills/skill-a/SKILL.md", is_dir: false },
@@ -174,7 +174,7 @@ test("mounted backend routes upload and download by mount", async () => {
       calls.push(`${path}:${content}`);
       return { path };
     },
-    edit: async () => ({ path: "/workfiles/a.md", occurrences: 1 }),
+    edit: async () => ({ path: "/files/a.md", occurrences: 1 }),
   };
   const skills = {
     ls: async () => ({ files: [] }),
@@ -199,7 +199,7 @@ test("mounted backend routes upload and download by mount", async () => {
 
   const downloads = await backend.downloadFiles([
     "/kb/a.md",
-    "/workfiles/a.md",
+    "/files/a.md",
     "/skills/skill-a/SKILL.md",
     "/conversation_history/session.md",
   ]);
@@ -207,7 +207,7 @@ test("mounted backend routes upload and download by mount", async () => {
   assert.equal(downloads[0]!.content, null);
   assert.equal(
     new TextDecoder().decode(downloads[1]!.content!),
-    "work:/workfiles/a.md",
+    "work:/files/a.md",
   );
   assert.equal(
     new TextDecoder().decode(downloads[2]!.content!),
@@ -217,14 +217,14 @@ test("mounted backend routes upload and download by mount", async () => {
   assert.equal(knowledgeReadRawCalls, 0);
 
   const uploads = await backend.uploadFiles([
-    ["/workfiles/a.md", new TextEncoder().encode("hello")],
+    ["/files/a.md", new TextEncoder().encode("hello")],
     ["/kb/a.md", new TextEncoder().encode("no")],
     ["/conversation_history/session.md", new TextEncoder().encode("no")],
   ]);
   assert.equal(uploads[0]!.error, null);
   assert.equal(uploads[1]!.error, "permission_denied");
   assert.equal(uploads[2]!.error, "permission_denied");
-  assert.deepEqual(calls, ["/workfiles/a.md:hello"]);
+  assert.deepEqual(calls, ["/files/a.md:hello"]);
 });
 
 test("a mount whose service is unreachable reports an error instead of throwing", async () => {
@@ -278,7 +278,7 @@ test("a mount whose service is unreachable reports an error instead of throwing"
   assert.equal((await backend.read("/kb/source.md")).content, "ok");
 });
 
-test("omitting working storage removes Workfiles instead of recreating the mount", async () => {
+test("omitting working storage removes Files instead of recreating the mount", async () => {
   const denied = async () => ({ error: "readonly" });
   const backend = new MountedAgentFilesystemBackend({
     knowledge: {
@@ -296,6 +296,6 @@ test("omitting working storage removes Workfiles instead of recreating the mount
     (await backend.ls("/")).files?.map((file) => file.path),
     ["/kb/"],
   );
-  assert.ok((await backend.read("/workfiles/old.txt")).error);
-  assert.ok((await backend.write("/workfiles/new.txt", "no DB write")).error);
+  assert.ok((await backend.read("/files/old.txt")).error);
+  assert.ok((await backend.write("/files/new.txt", "no DB write")).error);
 });

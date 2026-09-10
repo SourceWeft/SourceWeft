@@ -153,7 +153,7 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
     prepareSandboxWorkspaceSchema.parse({
       files: [
         {
-          sourcePath: "/workfiles/a.txt",
+          sourcePath: "/files/a.txt",
           sandboxPath: "/workspace/input/a.txt",
         },
       ],
@@ -165,7 +165,7 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
       outputs: [
         {
           sandboxPath: "/workspace/output/a.txt",
-          target: { kind: "workfile", path: "/workfiles/a.txt" },
+          target: { kind: "workfile", path: "/files/a.txt" },
         },
       ],
     }).outputs.length,
@@ -173,7 +173,7 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.equal(
     sandboxToolInterruptDescriptions.prepare_sandbox_workspace,
-    "Materialize selected SourceWeft DB-backed /workfiles Workfile content as ordinary provider sandbox files. Review paths and sizes before transfer.",
+    "Materialize selected SourceWeft DB-backed /files Workfile content as ordinary provider sandbox files. Review paths and sizes before transfer.",
   );
   assert.equal(
     sandboxToolInterruptDescriptions.execute,
@@ -181,11 +181,11 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.equal(
     sandboxToolInterruptDescriptions.collect_sandbox_outputs,
-    "Persist selected provider sandbox text outputs into SourceWeft DB-backed /workfiles Workfiles. Review destination paths before persisting output.",
+    "Persist selected provider sandbox text outputs into SourceWeft DB-backed /files Files. Review destination paths before persisting output.",
   );
   assert.match(
     sandboxToolDescriptions.execute,
-    /Never include SourceWeft DB-backed VFS logical paths such as \/workfiles, \/kb, or \/skills/u,
+    /Never include SourceWeft DB-backed VFS logical paths such as \/files, \/kb, or \/skills/u,
   );
   assert.match(
     sandboxToolDescriptions.execute,
@@ -197,11 +197,11 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.match(
     sandboxToolDescriptions.prepareSandboxWorkspace,
-    /Materialize explicitly selected SourceWeft DB-backed VFS \/workfiles Workfile content as ordinary provider sandbox files/u,
+    /Materialize explicitly selected SourceWeft DB-backed VFS \/files Workfile content as ordinary provider sandbox files/u,
   );
   assert.match(
     sandboxToolDescriptions.prepareSandboxWorkspace,
-    /Put generated code, data files, plans, and QA notes in \/workfiles first/u,
+    /Put generated code, data files, plans, and QA notes in \/files first/u,
   );
   assert.match(
     sandboxToolDescriptions.prepareSandboxWorkspace,
@@ -292,22 +292,22 @@ test("sandbox package owns agent-facing runtime prompt", () => {
     prompt,
     /SourceWeft VFS and the provider sandbox filesystem are separate namespaces/u,
   );
-  assert.match(prompt, /\/workfiles is SourceWeft DB-backed VFS Workfiles/u);
+  assert.match(prompt, /\/files is SourceWeft DB-backed VFS Files/u);
   assert.match(prompt, /\/kb is SourceWeft DB-backed VFS source evidence/u);
   assert.match(prompt, /\/skills is SourceWeft DB-backed VFS skill guidance/u);
   assert.match(prompt, /not mounted into sandbox command execution/u);
   assert.match(prompt, /not automatically synced/u);
   assert.match(
     prompt,
-    /not a \/workfiles directory mount, mirror, root-level copy, or bidirectional sync/u,
+    /not a \/files directory mount, mirror, root-level copy, or bidirectional sync/u,
   );
   assert.match(
     prompt,
-    /\/workfiles, \/kb, and \/skills inside execute are provider sandbox filesystem paths only/u,
+    /\/files, \/kb, and \/skills inside execute are provider sandbox filesystem paths only/u,
   );
   assert.match(
     prompt,
-    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+    /Never include \/files, \/kb, or \/skills in an execute command/u,
   );
   assert.match(
     prompt,
@@ -321,24 +321,24 @@ test("sandbox package owns agent-facing runtime prompt", () => {
   assert.match(prompt, /explicit selected-content materialization/u);
   assert.match(
     prompt,
-    /Put command inputs such as generated code, data files, plans, and QA notes in \/workfiles first/u,
+    /Put command inputs such as generated code, data files, plans, and QA notes in \/files first/u,
   );
   assert.match(
     prompt,
-    /Commands needing Workfiles should prepare the selected \/workfiles\/\.\.\. files/u,
+    /Commands needing Files should prepare the selected \/files\/\.\.\. files/u,
   );
   assert.match(prompt, /provider sandbox filesystem paths/u);
   assert.match(prompt, /explicit artifact pipelines/u);
   assert.match(
     prompt,
-    /Prepared files, collected Workfiles, and sandbox outputs are not citable evidence/u,
+    /Prepared files, collected Files, and sandbox outputs are not citable evidence/u,
   );
   assert.doesNotMatch(prompt, /copy selected SourceWeft/u);
   assert.doesNotMatch(prompt, /copies selected SourceWeft/u);
-  assert.doesNotMatch(prompt, /copy \/workfiles/u);
+  assert.doesNotMatch(prompt, /copy \/files/u);
   assert.doesNotMatch(prompt, /\/workspace\/work/u);
   assert.doesNotMatch(prompt, /Daytona sandbox filesystem/u);
-  assert.doesNotMatch(prompt, /\/workfiles directory into sandbox/u);
+  assert.doesNotMatch(prompt, /\/files directory into sandbox/u);
   assert.doesNotMatch(prompt, /Enabled sandbox skills/u);
   assert.doesNotMatch(prompt, /\/skills\/<skill-name>/u);
   assert.doesNotMatch(prompt, /\/tmp\/sourceweft/u);
@@ -369,14 +369,14 @@ test("sandbox runtime prompt admits staged /skills scripts only when skill stagi
   assert.match(staged, /run bundled skill scripts directly/u);
   assert.match(
     staged,
-    /Never include \/workfiles or \/kb in an execute command/u,
+    /Never include \/files or \/kb in an execute command/u,
   );
   assert.match(staged, /Never write to \/skills from execute commands/u);
   assert.match(staged, /Skill bundles are already staged under \/skills/u);
   // The staged prompt must not carry the unstaged prohibitions.
   assert.doesNotMatch(
     staged,
-    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+    /Never include \/files, \/kb, or \/skills in an execute command/u,
   );
   assert.doesNotMatch(staged, /\/kb and \/skills are not prepared directly/u);
 
@@ -388,7 +388,7 @@ test("sandbox runtime prompt admits staged /skills scripts only when skill stagi
   );
   assert.match(
     unstaged,
-    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+    /Never include \/files, \/kb, or \/skills in an execute command/u,
   );
   assert.doesNotMatch(unstaged, /run bundled skill scripts directly/u);
 });
@@ -486,7 +486,7 @@ test("collect_sandbox_outputs returns a recoverable error for binary PPTX output
           sandboxPath: "/workspace/ppt-deck/output/feynman-method.pptx",
           target: {
             kind: "workfile",
-            path: "/workfiles/ppt-deck/feynman-method.pptx",
+            path: "/files/ppt-deck/feynman-method.pptx",
           },
         },
       ],
@@ -582,7 +582,7 @@ test("prepare_sandbox_workspace returns a recoverable error instead of throwing"
     {
       files: [
         {
-          sourcePath: "/workfiles/ppt-deck/missing.js",
+          sourcePath: "/files/ppt-deck/missing.js",
           sandboxPath: "/workspace/input/missing.js",
         },
       ],
@@ -709,7 +709,7 @@ test("prepare_sandbox_workspace forwards Stop through the Host side channel and 
     {
       files: [
         {
-          sourcePath: "/workfiles/presentation.js",
+          sourcePath: "/files/presentation.js",
           sandboxPath: "/workspace/input/presentation.js",
         },
       ],
@@ -849,7 +849,7 @@ test("collect_sandbox_outputs forwards Host timeout and never persists late sand
           sandboxPath: outputPath,
           target: {
             kind: "workfile",
-            path: "/workfiles/result.txt",
+            path: "/files/result.txt",
           },
         },
       ],

@@ -8,6 +8,9 @@ export const workingFilePurposeSchema = z.enum([
 ]);
 
 export const workingFileSchema = z.object({
+  payloadKind: z.enum(["inline_text", "object"]),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  origin: z.enum(["user_provided", "agent_created", "external", "unknown"]),
   id: z.string(),
   teamId: z.string(),
   workspaceId: z.string(),
@@ -33,6 +36,10 @@ export const getWorkingFileResponseSchema = z.object({
 export const putWorkingFileRequestSchema = z
   .object({
     contentText: z.string().max(256 * 1024),
+    expectedRevision: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .optional(),
     mimeType: z.string().trim().min(1).max(128).optional(),
     purpose: workingFilePurposeSchema.nullable().optional(),
   })

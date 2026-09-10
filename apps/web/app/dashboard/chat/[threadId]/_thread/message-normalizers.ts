@@ -1,3 +1,4 @@
+import { fileReferenceSchema } from "@sourceweft/contracts";
 import { sanitizeClientErrorMessage } from "../../_components/chat-canvas/client-error-message";
 import {
   HttpClientError,
@@ -535,18 +536,22 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       const excerpt = toNullableString(record.excerpt);
       const content = toNullableString(record.content) ?? undefined;
       const externalUri = toNullableString(record.externalUri) ?? undefined;
+      const parsedFile = record.fileReference === undefined ? null : fileReferenceSchema.safeParse(record.fileReference);
+      if (parsedFile && !parsedFile.success) return null;
+      const fileReference = parsedFile?.success ? parsedFile.data : undefined;
 
       if (
         citation === null ||
         !chunkId ||
         score === null ||
         excerpt === null ||
-        (!externalUri && (!sourceId || !documentId))
+        (!externalUri && !fileReference && (!sourceId || !documentId))
       ) {
         return null;
       }
 
       const citationRecord: CitationRecord = {
+        ...(fileReference ? { fileReference } : {}),
         citation,
         sourceId,
         documentId,
@@ -1371,7 +1376,7 @@ function getToolCallPath(value: Record<string, unknown>) {
 }
 
 function isWorkPath(value: string | null | undefined) {
-  return value === "/workfiles" || Boolean(value?.startsWith("/workfiles/"));
+  return value === "/files" || Boolean(value?.startsWith("/files/"));
 }
 
 function outputContainsWorkPath(output: unknown) {
@@ -1385,7 +1390,7 @@ function outputContainsWorkPath(output: unknown) {
   }
 
   const content = toNullableString(record.content);
-  return Boolean(content?.includes("/workfiles/"));
+  return Boolean(content?.includes("/files/"));
 }
 
 function isCompletedWorkfileWriteToolCall(

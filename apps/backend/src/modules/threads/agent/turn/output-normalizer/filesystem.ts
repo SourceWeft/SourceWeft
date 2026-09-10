@@ -39,7 +39,7 @@ export function scopeFromPath(path: string) {
   if (path === "/skills" || path.startsWith("/skills/")) {
     return "skills";
   }
-  if (path === "/workfiles" || path.startsWith("/workfiles/")) {
+  if (path === "/files" || path.startsWith("/files/")) {
     return "work";
   }
   if (path === "/kb" || path.startsWith("/kb/")) {
@@ -368,13 +368,13 @@ export function sanitizeThreadMessageMetadataForClient(
 export const FILESYSTEM_TOOL_PRESENTERS = {
   [AGENT_TOOL_NAMES.ls]: {
     start: {
-      work: "Listing Workfiles",
+      work: "Listing Files",
       files: "Listing files",
       skills: "Listing selected skills",
       sources: "Listing selected sources",
     },
     end: {
-      work: "Listed Workfiles",
+      work: "Listed Files",
       files: "Listed files",
       skills: "Listed selected skills",
       sources: "Listed selected sources",
@@ -386,13 +386,13 @@ export const FILESYSTEM_TOOL_PRESENTERS = {
   },
   [AGENT_TOOL_NAMES.glob]: {
     start: {
-      work: "Finding matching Workfiles",
+      work: "Finding matching Files",
       files: "Finding matching files",
       skills: "Finding matching skill files",
       sources: "Finding matching sources",
     },
     end: {
-      work: "Found matching Workfiles",
+      work: "Found matching Files",
       files: "Found matching files",
       skills: "Found matching skill files",
       sources: "Found matching sources",
@@ -404,13 +404,13 @@ export const FILESYSTEM_TOOL_PRESENTERS = {
   },
   [AGENT_TOOL_NAMES.grep]: {
     start: {
-      work: "Searching Workfiles",
+      work: "Searching Files",
       files: "Searching files",
       skills: "Searching skill instructions",
       sources: "Searching exact terms",
     },
     end: {
-      work: "Searched Workfiles",
+      work: "Searched Files",
       files: "Searched files",
       skills: "Searched skill instructions",
       sources: "Searched exact terms",

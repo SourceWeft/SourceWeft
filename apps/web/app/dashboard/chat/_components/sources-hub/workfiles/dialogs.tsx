@@ -1,4 +1,6 @@
 import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { contentClient } from "../../../../../../lib/sdk";
 
 import {
   AlertDialog,
@@ -26,6 +28,52 @@ export function WorkfilePreviewDialog({
   onOpenChange: (open: boolean) => void;
   previewWorkfile: WorkfileDetail | null;
 }) {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<{
+    key: string;
+    blob?: Blob;
+    error?: string;
+  } | null>(null);
+  const key = previewWorkfile
+    ? `${previewWorkfile.workspaceId}:${previewWorkfile.threadId}:${previewWorkfile.path}:${previewWorkfile.contentHash}`
+    : "";
+  const binary = previewWorkfile?.payloadKind === "object";
+  useEffect(() => {
+    if (!previewWorkfile || !binary) return;
+    const controller = new AbortController();
+    setState({ key });
+    void contentClient
+      .readFileBlob(
+        previewWorkfile.workspaceId,
+        previewWorkfile.threadId,
+        previewWorkfile.path,
+        controller.signal,
+      )
+      .then((blob) => {
+        if (!controller.signal.aborted) setState({ key, blob });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setState({
+            key,
+            error:
+              error instanceof Error ? error.message : "Could not read file.",
+          });
+      });
+    return () => controller.abort();
+  }, [key, binary, attempt, previewWorkfile]);
+  const current = state?.key === key ? state : null;
+  const source = useMemo(
+    () =>
+      previewWorkfile && current?.blob
+        ? {
+            name: previewWorkfile.path.split("/").pop()!,
+            mimeType: previewWorkfile.mimeType,
+            blob: current.blob,
+          }
+        : undefined,
+    [previewWorkfile, current?.blob],
+  );
   return (
     <FilePreviewDialog
       onOpenChange={onOpenChange}
@@ -34,9 +82,13 @@ export function WorkfilePreviewDialog({
       description={
         previewWorkfile
           ? `Cloud · ${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-          : "Assistant-created working material from this thread."
+          : "Files in this conversation."
       }
-      contentText={previewWorkfile?.contentText}
+      contentText={binary ? undefined : previewWorkfile?.contentText}
+      source={source}
+      loading={Boolean(binary && !current?.blob && !current?.error)}
+      error={current?.error}
+      onRetry={binary ? () => setAttempt((value) => value + 1) : undefined}
       mimeType={previewWorkfile?.mimeType}
     />
   );
@@ -61,9 +113,9 @@ export function DeleteWorkfileDialog({
     <AlertDialog onOpenChange={onOpenChange} open={Boolean(deleteWorkfile)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
+          <AlertDialogTitle>Delete file?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will remove the Workfile from this thread. This action cannot
+            This will remove the file from this conversation. This action cannot
             be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>

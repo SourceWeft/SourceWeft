@@ -49,7 +49,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-test("Hub Workfiles reads the PC directory and clears its preview when offline", async () => {
+test("Hub Files reads the PC directory and clears its preview when offline", async () => {
   await act(async () =>
     root.render(
       createElement(LocalFilesPanel, {
@@ -60,7 +60,7 @@ test("Hub Workfiles reads the PC directory and clears its preview when offline",
       }),
     ),
   );
-  assert.match(container.textContent ?? "", /Workfiles/);
+  assert.match(container.textContent ?? "", /Files/);
   assert.match(container.textContent ?? "", /Mac A/);
   assert.doesNotMatch(container.textContent ?? "", /This computer|Stored on this computer/);
   assert.match(container.textContent ?? "", /report.txt/);
@@ -95,7 +95,7 @@ test("Hub Workfiles reads the PC directory and clears its preview when offline",
     mocks.request.mock.calls.every(
       ([path]) =>
         String(path).includes("/local-files") &&
-        !String(path).includes("/working-files"),
+        !String(path).includes("/files"),
     ),
   );
 });

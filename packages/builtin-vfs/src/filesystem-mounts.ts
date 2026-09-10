@@ -85,19 +85,19 @@ export const KNOWLEDGE_MOUNT: AgentFilesystemMountCapability = {
 };
 
 export const WORK_MOUNT: AgentFilesystemMountCapability = {
-  root: "/workfiles",
+  root: "/files",
   backendKind: "workfiles",
-  label: "Workfiles",
+  label: "Files",
   readable: true,
   writable: true,
-  citable: false,
+  citable: true,
   persisted: true,
   threadScoped: true,
   internal: false,
   userVisible: true,
   evidenceRole: "working_memory",
   purpose:
-    "Database-persisted, thread-scoped Workfiles for assistant-created process notes, plans, drafts, extracted intermediate records, outlines, calculations, and candidate final outputs.",
+    "Thread-scoped Cloud VFS for uploaded task files, scripts, notes, drafts, calculations, and outputs. Files may be read as reference material without becoming Sources.",
   readFile: {
     contentKind: "utf8-text-only",
     pagination: "line-offset",
@@ -120,16 +120,16 @@ export const WORK_MOUNT: AgentFilesystemMountCapability = {
     ],
   },
   binaryHandling: {
-    preferredTools: ["publish_artifact", "artifact preview"],
+    preferredTools: ["read_document", "view_image"],
   },
   readPolicy:
-    "Read /workfiles to continue prior work in the same thread, reuse drafts, inspect intermediate records, or supplement the current task with persisted working context.",
+    "Read /files to continue prior work in the same thread, reuse drafts, inspect intermediate records, or supplement the current task with persisted working context.",
   writePolicy:
-    "Write and edit only /workfiles paths. Create Workfiles when a task is complex, multi-step, long-running, resumable, or benefits from persisted plans, notes, extracted data, calculations, drafts, or candidate outputs; skip Workfiles for simple one-shot answers where the final response is enough. Choose clear nested paths for multi-step or multi-output work.",
+    "Write and edit only /files paths. Create Files when a task is complex, multi-step, long-running, resumable, or benefits from persisted plans, notes, extracted data, calculations, drafts, or candidate outputs; skip Files for simple one-shot answers where the final response is enough. Choose clear nested paths for multi-step or multi-output work.",
   citationPolicy:
-    "/workfiles is not workspace source evidence and never provides citations. If /workfiles contains factual claims, verify them against /kb or another citable source before using them in a source-grounded final answer.",
+    "Use read_document, search_files or view_image to obtain versioned File citations. read_file and grep inspect file text without producing citation markers. A File citation identifies observed content; it does not turn generated claims into independent source evidence.",
   pathPolicy:
-    "/workfiles paths are user-visible as Workfiles and may be mentioned when relevant to persistent working material.",
+    "/files paths are user-visible as Files and may be mentioned when relevant to persistent working material.",
 };
 
 export const SKILLS_MOUNT: AgentFilesystemMountCapability = {

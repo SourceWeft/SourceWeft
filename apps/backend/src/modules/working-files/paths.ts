@@ -1,6 +1,6 @@
 import { ContentError } from "../content/errors";
 
-export const WORK_ROOT = "/workfiles";
+export const WORK_ROOT = "/files";
 
 export function normalizeWorkingFilePath(path: string | undefined | null) {
   const raw = typeof path === "string" ? path.trim() : "";

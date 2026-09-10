@@ -78,7 +78,6 @@ import type {
 } from "@sourceweft/contracts";
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 import type { ArtifactListItem } from "./sources-hub";
-import { writeStoredSourceSelection } from "./source-selection-storage";
 import { writeStoredMcpSelection } from "./mcp-selection-storage";
 import {
   setPendingThreadTurn,
@@ -1010,7 +1009,6 @@ export function DashboardChatPageClient() {
         }
         chatHubContext?.desktop.promoteDraft(result.thread.id);
         adoptChat(result.thread);
-        writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
         writeStoredByokState(
           workspaceId,
           {

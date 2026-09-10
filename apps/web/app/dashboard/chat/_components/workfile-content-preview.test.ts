@@ -6,7 +6,7 @@ test("resolveWorkfileContentPreview detects JavaScript files", () => {
   assert.deepEqual(
     resolveWorkfileContentPreview({
       contentText: "console.log('deck');\n",
-      path: "/workfiles/ppt/deck.js",
+      path: "/files/ppt/deck.js",
     }),
     {
       contentText: "console.log('deck');\n",
@@ -14,7 +14,7 @@ test("resolveWorkfileContentPreview detects JavaScript files", () => {
       kind: "code",
       language: "javascript",
       lineCount: 2,
-      path: "/workfiles/ppt/deck.js",
+      path: "/files/ppt/deck.js",
     },
   );
 });
@@ -22,7 +22,7 @@ test("resolveWorkfileContentPreview detects JavaScript files", () => {
 test("resolveWorkfileContentPreview detects TSX files", () => {
   const preview = resolveWorkfileContentPreview({
     contentText: "export function Deck() { return <div />; }",
-    path: "/workfiles/ppt/deck.tsx",
+    path: "/files/ppt/deck.tsx",
   });
 
   assert.equal(preview.kind, "code");
@@ -32,7 +32,7 @@ test("resolveWorkfileContentPreview detects TSX files", () => {
 test("resolveWorkfileContentPreview detects markdown by extension", () => {
   const preview = resolveWorkfileContentPreview({
     contentText: "# Deck",
-    path: "/workfiles/ppt/README.md",
+    path: "/files/ppt/README.md",
   });
 
   assert.equal(preview.kind, "markdown");
@@ -43,7 +43,7 @@ test("resolveWorkfileContentPreview detects markdown by mime type", () => {
   const preview = resolveWorkfileContentPreview({
     contentText: "# Deck",
     mimeType: "text/markdown; charset=utf-8",
-    path: "/workfiles/ppt/README",
+    path: "/files/ppt/README",
   });
 
   assert.equal(preview.kind, "markdown");
@@ -53,7 +53,7 @@ test("resolveWorkfileContentPreview detects markdown by mime type", () => {
 test("resolveWorkfileContentPreview falls unknown text back to log", () => {
   const preview = resolveWorkfileContentPreview({
     contentText: "plain text",
-    path: "/workfiles/ppt/notes.txt",
+    path: "/files/ppt/notes.txt",
   });
 
   assert.equal(preview.kind, "text");

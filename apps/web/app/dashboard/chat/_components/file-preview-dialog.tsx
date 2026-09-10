@@ -19,7 +19,7 @@ import { DesktopFilePreviewLauncher } from "./desktop-file-preview-launcher";
 const subscribeToDesktop = () => () => {};
 const serverDesktop = () => false;
 
-/** Shared in-app reader for cloud Workfiles and physical PC files. */
+/** Shared in-app reader for cloud Files and physical PC files. */
 export function FilePreviewDialog({
   open,
   onOpenChange,

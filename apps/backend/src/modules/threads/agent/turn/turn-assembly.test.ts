@@ -1,3 +1,4 @@
+import { AgentCitationRegistry } from "../citation-registry";
 import assert from "node:assert/strict";
 import {
   StateBackend,
@@ -353,6 +354,7 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
   } satisfies BackendProtocolV2;
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
@@ -372,11 +374,11 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
     "/large_tool_results/tool-call.txt",
     "large result",
   );
-  await backend.write("/workfiles/notes.md", "notes");
+  await backend.write("/files/notes.md", "notes");
 
   assert.equal(history.error, undefined);
   assert.equal(largeResult.error, undefined);
-  assert.deepEqual(workingWrites, ["/workfiles/notes.md"]);
+  assert.deepEqual(workingWrites, ["/files/notes.md"]);
   assert.equal(
     (await backend.read("/kb/source.md")).content,
     "kb:read:/kb/source.md",
@@ -386,6 +388,7 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
 test("agent backend routes VFS paths while execute stays on sandbox default", async () => {
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -421,8 +424,8 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
     "sandbox:read:/workspace/ppt-deck/a.txt",
   );
   assert.equal(
-    (await backend.read("/workfiles/notes.md")).content,
-    "work:read:/workfiles/notes.md",
+    (await backend.read("/files/notes.md")).content,
+    "work:read:/files/notes.md",
   );
   assert.equal(
     (await backend.read("/kb/source.md")).content,
@@ -439,6 +442,7 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
     [];
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -500,6 +504,7 @@ test("preconstructed agent backend receives the host invocation signal", async (
   }> = [];
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -541,6 +546,7 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
   } satisfies BackendProtocolV2;
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
@@ -574,7 +580,7 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
       ["/workspace/a.txt", new TextEncoder().encode("a")],
     ]);
     await sandboxBackend.downloadFiles?.(["/workspace/a.txt"]);
-    await backend.read("/workfiles/a.txt");
+    await backend.read("/files/a.txt");
   });
 
   assert.deepEqual(
@@ -606,6 +612,7 @@ description: Create a PowerPoint deck in the sandbox.
 Read this before creating slides.`;
   const backend = buildAgentBackend({
     filesystemBackend: {
+      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -789,13 +796,13 @@ describe("sandbox runtime assembly tool permissions", () => {
     );
     assert.equal(
       prompt.includes(
-        "/workfiles, /kb, and /skills inside execute are provider sandbox filesystem paths only",
+        "/files, /kb, and /skills inside execute are provider sandbox filesystem paths only",
       ),
       true,
     );
     assert.equal(
       prompt.includes(
-        "Never include /workfiles, /kb, or /skills in an execute command",
+        "Never include /files, /kb, or /skills in an execute command",
       ),
       true,
     );
@@ -828,7 +835,7 @@ describe("sandbox runtime assembly tool permissions", () => {
   });
 });
 
-test("PC assembly omits the DB Workfiles route and exposes a durable physical mount", async () => {
+test("PC assembly omits the DB Files route and exposes a durable physical mount", async () => {
   const dbWrite = vi.fn(async (path: string) => ({ path, filesUpdate: null }));
   const localFilesystem = {
     ...filesystemBackend, localFiles: true,
@@ -840,10 +847,10 @@ test("PC assembly omits the DB Workfiles route and exposes a durable physical mo
     pathPolicy: { ...SANDBOX_PATH_POLICY_STUB, workspaceRoot: root, defaultCwd: root },
   } as never;
   const mounts = filesystemMountsForPrompt({ filesystemBackend: localFilesystem, sandboxRuntime });
-  assert.ok(!mounts.some((mount) => mount.root === "/workfiles"));
+  assert.ok(!mounts.some((mount) => mount.root === "/files"));
   assert.equal(mounts.find((mount) => mount.root === root)?.persisted, true);
   const backend = buildAgentBackend({ filesystemBackend: localFilesystem, sandboxRuntime });
   await backend.write(`${root}/note.txt`, "local");
-  await backend.write("/workfiles/note.txt", "old path");
+  await backend.write("/files/note.txt", "old path");
   assert.equal(dbWrite.mock.calls.length, 0);
 });

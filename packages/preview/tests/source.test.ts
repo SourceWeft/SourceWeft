@@ -9,7 +9,7 @@ import {
 describe("preview sources", () => {
   it("routes legacy PowerPoint separately, including MIME-only files and PC paths", () => {
     expect(previewFamily("C:\\files\\DECK.PPT")).toBe("legacyPresentation");
-    expect(previewFamily("/workfiles/template.pot")).toBe("legacyPresentation");
+    expect(previewFamily("/files/template.pot")).toBe("legacyPresentation");
     const name = previewFileName(
       "Presentation",
       "application/vnd.ms-powerpoint",

@@ -253,7 +253,7 @@ export async function resolveSourceTreeScope(input: {
   });
   const expandedDescendantSourceIds = descendants.map((source) => source.id);
   const effectiveSourceIds = Array.from(
-    new Set([...requestedSourceIds, ...expandedDescendantSourceIds]),
+    new Set([...requestedSourceIds.filter((id) => selectedById.has(id)), ...expandedDescendantSourceIds]),
   );
 
   return {

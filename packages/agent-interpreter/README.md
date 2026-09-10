@@ -10,7 +10,7 @@ budgets, concurrency control, stable errors, and metadata-only events.
   `require`, network APIs, a shell, or dynamic subagent dispatch.
 - PTC is a static read-only allowlist: `search_sources`, `ls`, `read_file`,
   `glob`, and `grep`.
-- Filesystem PTC accepts only `/kb` and `/workfiles`; `/skills`, traversal,
+- Filesystem PTC accepts only `/kb` and `/files`; `/skills`, traversal,
   writes, execution, MCP, connector, and sandbox tools are not bridged.
 - The package enforces per-eval and per-turn budgets, process and turn
   concurrency limits, queue and PTC timeouts, code-size limits, memory/stack

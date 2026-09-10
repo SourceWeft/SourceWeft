@@ -705,7 +705,7 @@ export function getSandboxCollectedWorkfilePaths(input: {
 
   return Array.from(
     new Set(
-      result.outputPaths.filter((path) => path.startsWith("/workfiles/")),
+      result.outputPaths.filter((path) => path.startsWith("/files/")),
     ),
   );
 }
@@ -772,7 +772,7 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
   SANDBOX_BINARY_OUTPUT_UNSUPPORTED:
     "This output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
   SANDBOX_COLLECT_CONFLICT:
-    "A target /workfiles file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+    "A target /files file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
   SANDBOX_COLLECT_PATH_DENIED:
     "The requested output path is outside the provider-allowed collection area. Use an authorized output directory.",
   SANDBOX_COMMAND_TIMEOUT:

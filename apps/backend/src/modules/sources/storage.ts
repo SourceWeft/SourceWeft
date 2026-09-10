@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { sanitizeArtifactStorageSegment } from "@sourceweft/contracts/artifact-files";
 import {
@@ -187,6 +188,33 @@ export async function uploadSourceObject(input: {
   contentType: string;
 }) {
   await putObject(input);
+}
+
+export async function uploadFileObject(input: { key: string; body: Buffer; contentType: string; signal?: AbortSignal }) {
+  await putObject(input);
+  return { bucket: getConfiguredBucket(), key: input.key };
+}
+
+export async function downloadFileObject(input: { bucket: string; key: string; maxBytes: number; signal?: AbortSignal }) {
+  const response = await s3Client.send(new GetObjectCommand({ Bucket: input.bucket, Key: input.key }), { abortSignal: input.signal });
+  const body = response.Body as Readable | undefined;
+  if ((response.ContentLength ?? 0) > input.maxBytes) {
+    body?.destroy();
+    throw new Error("FILE_TOO_LARGE: Stored file exceeds the download limit");
+  }
+  if (!body) throw new Error("FILE_UNAVAILABLE: Stored file has no body");
+  const parts: Buffer[] = [];
+  let size = 0;
+  for await (const part of body as AsyncIterable<Uint8Array>) {
+    input.signal?.throwIfAborted();
+    size += part.length;
+    if (size > input.maxBytes) {
+      body.destroy();
+      throw new Error("FILE_TOO_LARGE: Stored file exceeds the download limit");
+    }
+    parts.push(Buffer.from(part));
+  }
+  return Buffer.concat(parts, size);
 }
 
 export async function uploadArtifactObject(input: {

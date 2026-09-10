@@ -416,7 +416,7 @@ test("ToolConfirmationRunner resumes rejected sandbox HITL locally", async () =>
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { kind: "workfile", path: "/workfiles/report.md" },
+            target: { kind: "workfile", path: "/files/report.md" },
           },
         ],
       },

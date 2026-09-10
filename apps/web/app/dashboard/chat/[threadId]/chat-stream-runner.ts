@@ -191,6 +191,7 @@ type RunChatStreamInput = {
   ) => boolean;
   skillIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   streamRenderBuffer?: StreamingRenderBuffer;
   streamThinkingStepsById: Map<string, ThinkingStepRecord>;
   streamToolCallsById: Map<string, ToolCallRecord>;
@@ -267,6 +268,7 @@ export async function runChatStream(
     mode: input.mode,
     mentionedSourceIds: input.mentionedSourceIds,
     sourceIds: input.sourceIds,
+    sourceSelectionRevision: input.sourceSelectionRevision,
     timezone: input.timezone,
     durableRunKey: input.durableRunKey,
     command: input.command,

@@ -144,11 +144,11 @@ test("AssistantToolCard renders persisted sandbox operations", async () => {
 test("AssistantToolCard renders recoverable execute preflight failures as errors", async () => {
   const element = await renderToolCard({
     toolCall: toolCall({
-      input: { command: "cat /workfiles/report.md" },
+      input: { command: "cat /files/report.md" },
       output: {
         exitCode: 1,
         output:
-          "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute cannot use /workfiles/report.md\nHint: prepare the file first.",
+          "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute cannot use /files/report.md\nHint: prepare the file first.",
         truncated: false,
       },
     }),
@@ -201,7 +201,7 @@ test("AssistantToolCard labels unfinished transfer mappings as planned", async (
       input: {
         files: [
           {
-            sourcePath: "/workfiles/report.md",
+            sourcePath: "/files/report.md",
             sandboxPath: "/workspace/input/report.md",
           },
         ],
@@ -215,7 +215,7 @@ test("AssistantToolCard labels unfinished transfer mappings as planned", async (
   assert.match(element.textContent ?? "", /Running/);
 });
 
-test("AssistantToolCard opens collected Workfiles from transfer targets", async () => {
+test("AssistantToolCard opens collected Files from transfer targets", async () => {
   const onWorkfileClick = vi.fn();
   const element = await renderToolCard({
     onWorkfileClick,
@@ -224,7 +224,7 @@ test("AssistantToolCard opens collected Workfiles from transfer targets", async 
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { kind: "workfile", path: "/workfiles/report.md" },
+            target: { kind: "workfile", path: "/files/report.md" },
           },
         ],
       },
@@ -234,7 +234,7 @@ test("AssistantToolCard opens collected Workfiles from transfer targets", async 
           {
             sandboxPath: "/workspace/output/report.md",
             sizeBytes: 512,
-            targetPath: "/workfiles/report.md",
+            targetPath: "/files/report.md",
           },
         ],
         totalBytes: 512,
@@ -244,7 +244,7 @@ test("AssistantToolCard opens collected Workfiles from transfer targets", async 
   });
 
   const targetButton = [...element.querySelectorAll("button")].find(
-    (button) => button.textContent === "/workfiles/report.md",
+    (button) => button.textContent === "/files/report.md",
   );
   assert.ok(targetButton);
 
@@ -253,7 +253,7 @@ test("AssistantToolCard opens collected Workfiles from transfer targets", async 
   });
 
   assert.equal(onWorkfileClick.mock.calls.length, 1);
-  assert.equal(onWorkfileClick.mock.calls[0]?.[0], "/workfiles/report.md");
+  assert.equal(onWorkfileClick.mock.calls[0]?.[0], "/files/report.md");
 });
 
 test("AssistantToolCard does not open planned Workfile targets", async () => {
@@ -265,7 +265,7 @@ test("AssistantToolCard does not open planned Workfile targets", async () => {
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { kind: "workfile", path: "/workfiles/report.md" },
+            target: { kind: "workfile", path: "/files/report.md" },
           },
         ],
       },
@@ -277,7 +277,7 @@ test("AssistantToolCard does not open planned Workfile targets", async () => {
   assert.match(element.textContent ?? "", /1 planned file/);
   assert.equal(
     [...element.querySelectorAll("button")].some(
-      (button) => button.textContent === "/workfiles/report.md",
+      (button) => button.textContent === "/files/report.md",
     ),
     false,
   );
@@ -291,7 +291,7 @@ test("AssistantToolCard uses safe messages for transfer failures", async () => {
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { kind: "workfile", path: "/workfiles/report.md" },
+            target: { kind: "workfile", path: "/files/report.md" },
           },
         ],
       },
@@ -309,7 +309,7 @@ test("AssistantToolCard uses safe messages for transfer failures", async () => {
   assert.match(element.textContent ?? "", /Failed/);
   assert.match(
     element.textContent ?? "",
-    /A target \/workfiles file already exists/,
+    /A target \/files file already exists/,
   );
   assert.doesNotMatch(element.textContent ?? "", /internal storage detail/);
 });

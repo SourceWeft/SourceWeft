@@ -198,9 +198,33 @@ impl LocalHost {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
         let relative = text(payload, "path")?;
         match action {
+            "file.grep" => {
+                let pattern = text(payload, "pattern")?;
+                let paths: Vec<String> = serde_json::from_value(payload.get("paths").cloned().unwrap_or_default())
+                    .map_err(|_| HostError::new("INVALID_PATHS", "An explicit file list is required"))?;
+                let cancel = Arc::new(AtomicBool::new(false));
+                {
+                    let mut active = calls.active.lock().map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?;
+                    if active.len() >= 4 { return Err(HostError::new("HOST_BUSY", "Too many active file operations")); }
+                    active.insert(id.into(), cancel.clone());
+                }
+                let result = self.grep_files(owner, thread, &workspace.id, &paths, pattern,
+                    payload.get("ignoreCase").and_then(Value::as_bool).unwrap_or(false),
+                    payload.get("firstPerFile").and_then(Value::as_bool).unwrap_or(false),
+                    payload.get("literal").and_then(Value::as_bool).unwrap_or(false), Some(&cancel));
+                if let Ok(mut active) = calls.active.lock() { active.remove(id); }
+                result
+            }
+            "file.binary.begin" => self.begin_binary_read(owner, thread, &workspace.id, relative),
+            "file.binary.chunk" => {
+                let offset = payload.get("offset").and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| HostError::new("INVALID_RANGE", "A valid offset is required"))?;
+                self.read_binary_chunk(owner, thread, &workspace.id, relative, text(payload, "transferId")?, offset)
+            }
+            "file.binary.close" => self.close_binary_read(owner, thread, &workspace.id, text(payload, "transferId")?),
             "file.read" => {
-                // Current Agent file tools request text; bounded descriptor reads retain
-                // traversal/link protection. Binary transfer is an explicit later capability.
+                // Text reads retain the smaller bound; binary reads use explicit sessions.
                 let content =
                     self.read_bytes_limited(owner, thread, &workspace.id, relative, 1024 * 1024)?;
                 Ok(json!({"content":STANDARD.encode(&content)}))

@@ -24,7 +24,7 @@ export function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
   if (purpose === "draft") return "Draft";
   if (purpose === "note") return "Note";
   if (purpose === "output_candidate") return "Candidate";
-  return "Workfile";
+  return "File";
 }
 
 export function workfileMatchesQuery(file: WorkfileListItem, q: string) {
@@ -114,7 +114,7 @@ export function useWorkfiles(input: {
     } catch (error) {
       if (liveScope.current !== requestScope) return;
       setWorkfilesLoadingError(
-        getErrorMessage(error, "Failed to load workfiles."),
+        getErrorMessage(error, "Failed to load files."),
       );
     } finally {
       if (
@@ -166,7 +166,7 @@ export function useWorkfiles(input: {
         );
         setPreviewWorkfile(result.file);
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to load workfile."));
+        toast.error(getErrorMessage(error, "Could not read file."));
       } finally {
         setWorkfileBusy(file.path, false);
       }
@@ -184,14 +184,14 @@ export function useWorkfiles(input: {
         threadId,
         deleteWorkfile.path,
       );
-      toast.success("Workfile deleted.");
+      toast.success("File deleted.");
       setDeleteWorkfile(null);
       if (previewWorkfile?.path === deleteWorkfile.path) {
         setPreviewWorkfile(null);
       }
       await refreshWorkfiles();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to delete workfile."));
+      toast.error(getErrorMessage(error, "Could not delete file."));
     } finally {
       setWorkfileBusy(deleteWorkfile.path, false);
     }

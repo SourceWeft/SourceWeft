@@ -19,7 +19,7 @@ function mount(): BackendProtocolV2 {
   };
 }
 
-const paths = ["/workfiles/a", "/workfiles/b"];
+const paths = ["/files/a", "/files/b"];
 const bytes = new Uint8Array([0, 255, 128]);
 const files: Array<[string, Uint8Array]> = paths.map((path) => [path, bytes]);
 function filesystem(working: Partial<BackendProtocolV2>) {

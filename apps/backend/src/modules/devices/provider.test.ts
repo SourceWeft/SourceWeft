@@ -77,7 +77,7 @@ test("all PC file operations use the bound directory and native grant", async ()
     },
   });
   for (const path of [
-    "/workfiles/a.txt",
+    "/files/a.txt",
     "/Users/test/task-other/a",
     "/Users/test/task/../a",
   ]) {

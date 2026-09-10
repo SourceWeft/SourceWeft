@@ -1,4 +1,10 @@
 import { createThreadAgent } from "..";
+import { createFileReader } from "../file-reader";
+import type { AgentCitationRegistry } from "../citation-registry";
+import { createFileDocumentTools } from "../file-document-tools";
+import { workingFilesService } from "../../../working-files";
+import { createViewImageTool, FileImageContext } from "../file-images";
+import { assertThreadSourceSelection } from "../../source-selection-service";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "../..";
@@ -106,6 +112,7 @@ export interface FilesystemBackendInput {
 }
 
 export interface FilesystemBackend {
+  citationRegistry: AgentCitationRegistry;
   backend: MountedAgentFilesystemBackend;
   knowledgeBackend: DatabaseKnowledgeBackend;
   workingFilesBackend: WorkingFilesBackend;
@@ -122,9 +129,13 @@ export function buildFilesystemBackend(
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: prepared.workspace.organizationId,
     workspaceId: prepared.workspace.id,
-    sourceIds: Array.from(
-      new Set([...prepared.sourceIds, ...prepared.effectiveMentionedSourceIds]),
-    ),
+    sourceIds: prepared.sourceIds,
+    validateScope: () => assertThreadSourceSelection({
+      workspaceId: prepared.workspace.id,
+      threadId: prepared.thread.id,
+      userId: prepared.userId,
+      revision: prepared.sourceSelectionRevision,
+    }),
     citationRegistry: runtime.citationRegistry,
   });
 
@@ -155,6 +166,7 @@ export function buildFilesystemBackend(
 
   return {
     backend,
+    citationRegistry: runtime.citationRegistry,
     knowledgeBackend: databaseBackend,
     workingFilesBackend,
     localFiles,
@@ -180,7 +192,9 @@ export function filesystemMountsForPrompt(input: {
       ...createSandboxFilesystemMount({ root: sandboxRoot }),
       ...(input.filesystemBackend.localFiles
         ? {
-            label: "Local working directory",
+            label: "Files",
+            citable: true,
+            citationPolicy: "Use read_document, search_files or view_image for versioned File citations. These are references to task files, not Source Library evidence.",
             persisted: true,
             userVisible: true,
             threadScoped: false,
@@ -222,7 +236,7 @@ export function buildAgentBackend(input: {
     // Deep Agents uses these paths to preserve context that no longer fits in
     // the model request. They must be backed by LangGraph state even when the
     // turn has no execution sandbox; the mounted SourceWeft VFS deliberately
-    // permits writes only under /workfiles.
+    // permits writes only under /files.
     "/conversation_history/": new PrefixedBackendAdapter(
       "/conversation_history",
       internalContextBackend,
@@ -237,8 +251,8 @@ export function buildAgentBackend(input: {
     ),
     ...(!filesystemBackend.localFiles
       ? {
-          "/workfiles/": new PrefixedBackendAdapter(
-            "/workfiles",
+          "/files/": new PrefixedBackendAdapter(
+            "/files",
             filesystemBackend.workingFilesBackend,
           ),
         }
@@ -691,7 +705,28 @@ export async function buildThreadAgentAssembly(
   const filesystemPermissions = filesystemPermissionsForMounts(
     promptFilesystemMounts,
   );
+  const fileImages = new FileImageContext();
+  const fileRoot = filesystemBackend.localFiles ? sandboxRuntime?.pathPolicy.workspaceRoot : "/files";
+  const fileScopeId = JSON.stringify([prepared.workspace.organizationId, prepared.workspace.id, prepared.thread.id]);
+  const fileReader = fileRoot ? createFileReader({
+    backend, root: fileRoot, backendKind: filesystemBackend.localFiles ? "local_fs" : "cloud_vfs", scopeId: fileScopeId, signal: abortSignal,
+    download: filesystemBackend.localFiles
+      ? (path, signal) => sandboxRuntime!.trustedHost.downloadCurrentFile({ sandboxPath: path, signal })
+      : async (path, signal) => { const { file, bytes } = await workingFilesService.readBytes({ workspaceId: prepared.workspace.id, threadId: prepared.thread.id, userId: prepared.userId, path, signal }); return { bytes, metadata: { fileId: file.id, origin: file.origin, revision: `sha256:${file.contentHash}` } }; },
+  }) : null;
+  const fileTools = fileReader && fileRoot ? [
+    createViewImageTool({ read: fileReader, images: fileImages, signal: abortSignal, citationRegistry: filesystemBackend.citationRegistry, supportsImageInput: (prepared.chatProfile.configJson as Record<string, unknown> | null)?.supportsImageInput === true }),
+    ...createFileDocumentTools({ read: fileReader, backend, root: fileRoot, scopeId: fileScopeId, signal: abortSignal, citationRegistry: filesystemBackend.citationRegistry,
+      nativeSearch: filesystemBackend.localFiles ? async (paths, query, signal) => {
+        const target = prepared.thread.executionTarget;
+        if (target?.kind !== "local" || !sandboxRuntime) throw new ContentError(409, "LOCAL_FILES_UNAVAILABLE", "The bound computer is unavailable.");
+        const result = await sandboxRuntime.backend.searchNativeFiles(paths, query, { literal: true, ignoreCase: true, firstPerFile: true, signal });
+        return { matchedPaths: result.matches.map((match) => match.path), visitedPaths: result.visitedPaths, skipped: result.skipped };
+      } : undefined,
+    }),
+  ] : [];
   const boundTools = filterCommandPolicyTools(prepared, [
+    ...filterAllowedTools(prepared, fileTools),
     ...filterAllowedTools(prepared, capabilityTools),
     ...filterAllowedTools(prepared, skillTools),
     ...connectorActionTools,
@@ -758,7 +793,7 @@ export async function buildThreadAgentAssembly(
 
   const skills = skillsBackend ? ["/skills/"] : undefined;
   const childMiddleware = (subagentType: string) =>
-    createSourceWeftSubagentMiddlewareStack({
+    [fileImages.middleware(), ...createSourceWeftSubagentMiddlewareStack({
       backend,
       chatProfileConfig: prepared.chatProfile.configJson,
       model,
@@ -772,7 +807,7 @@ export async function buildThreadAgentAssembly(
         userMessageId: prepared.userMessage.id,
         subagentType,
       },
-    });
+    })];
 
   // Define general-purpose explicitly so child retries, limits, summary policy,
   // billing model, skills, HITL, and observability do not depend on Deep Agents'
@@ -817,7 +852,7 @@ export async function buildThreadAgentAssembly(
     runtimePrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
-    extraMiddleware: interpreterMiddleware,
+    extraMiddleware: [...interpreterMiddleware, fileImages.middleware()],
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
     toolObservabilityContext: {

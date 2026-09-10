@@ -110,7 +110,7 @@ function latest() {
     .at(-1).snapshot as HubSnapshot;
 }
 
-it("serves detached Workfiles through the current main conversation without relaying its proof", async () => {
+it("serves detached Files through the current main conversation without relaying its proof", async () => {
   await render(registration("A"));
   await emit({ kind: "ready", accountId: "user", protocolVersion: 1 });
   const s = latest();

@@ -1,3 +1,5 @@
+import { loadThreadSourceSelection } from "../source-selection-service";
+import { resolveTurnSourceSelection, selectedSourceAnchors } from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
 import { randomUUID } from "node:crypto";
 import type {
@@ -48,7 +50,6 @@ import {
   filterMessagesBeforeEditAnchor,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
-  resolveSourceIdsFromMessage,
 } from "./context";
 import {
   resolveActiveChatProfileByAlias,
@@ -1039,7 +1040,6 @@ export const testExports = {
   parsePromptMarkers,
   parseRequestedCommand,
   resolveLatestAssistantFinalCheckpoint,
-  resolveLatestSourceIds,
   resolveTraceContinuationMetadata,
   resolveThreadCommand,
   resolveThreadInvocation,
@@ -1285,18 +1285,11 @@ export async function prepareThreadTurn(
     workspaceId: workspace.id,
     titles: markerSourceTitles(parsedPrompt.markers),
   });
-  const mentionedSourceIds = dedupeSourceIds([
+  const requestedMentionedSourceIds = dedupeSourceIds([
     ...markerMentionedSourceIds,
     ...markerSourceTitleIds,
     ...(input.mentionedSourceIds ?? []),
   ]);
-  const mentionedSourceScope = await resolveSourceTreeScope({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    selectedSourceIds: mentionedSourceIds,
-  });
-  const effectiveMentionedSourceIds = mentionedSourceScope.effectiveSourceIds;
-  const requestedSourceIds = dedupeSourceIds(input.sourceIds);
   const overrideUserMessage = await resolveExistingOverrideUserMessage({
     createdBy: input.userId,
     messageId: input.userMessageIdOverride,
@@ -1316,15 +1309,23 @@ export async function prepareThreadTurn(
     messages: messageRecords,
   });
 
-  const fallbackSourceIds = resolveLatestSourceIds(contextMessageRecords);
-  const selectedSourceIds =
-    requestedSourceIds.length > 0 ? requestedSourceIds : fallbackSourceIds;
+  const persistedSourceSelection = await loadThreadSourceSelection({
+    teamId: workspace.organizationId, workspaceId: workspace.id, threadId: thread.id,
+  });
+  if (input.sourceSelectionRevision !== undefined && input.sourceSelectionRevision !== persistedSourceSelection.revision) {
+    throw new ContentError(409, "SOURCE_SELECTION_CONFLICT", "Sources changed in another window. Reload the selection before sending.");
+  }
+  const selectedSourceIds = resolveTurnSourceSelection(input.sourceIds, persistedSourceSelection);
   const sourceScope = await resolveSourceTreeScope({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    selectedSourceIds,
+    teamId: workspace.organizationId, workspaceId: workspace.id, selectedSourceIds,
   });
   const sourceIds = sourceScope.effectiveSourceIds;
+  const mentionedSourceIds = selectedSourceAnchors(sourceIds, requestedMentionedSourceIds);
+  const mentionedSourceScope = await resolveSourceTreeScope({
+    teamId: workspace.organizationId, workspaceId: workspace.id,
+    selectedSourceIds: mentionedSourceIds,
+  });
+  const effectiveMentionedSourceIds = selectedSourceAnchors(sourceIds, mentionedSourceScope.effectiveSourceIds);
   const markerToolCommand = lastToolCommandMarker(parsedPrompt.markers);
   const requestedCommand = parseRequestedCommand({
     command: markerToolCommand
@@ -1827,6 +1828,7 @@ export async function prepareThreadTurn(
     effectiveMentionedSourceIds,
     selectedSourceIds,
     sourceIds,
+    sourceSelectionRevision: persistedSourceSelection.revision,
     sourceScope,
     webAccessEnabled,
     command: resolvedCommand,
@@ -1893,28 +1895,6 @@ function mcpInstallIdsFromTools(
     )
     .slice(0, 10);
   return ids.length > 0 ? ids : undefined;
-}
-
-function resolveLatestSourceIds(
-  messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>,
-) {
-  const messages = collapseSupersededMessages(messageRecords).filter(
-    (message) => !isContextExcludedMessage(message),
-  );
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== "user") {
-      continue;
-    }
-
-    const sourceIds = resolveSourceIdsFromMessage(message);
-    if (sourceIds.length > 0) {
-      return sourceIds;
-    }
-  }
-
-  return [] as string[];
 }
 
 function resolveLatestAssistantFinalCheckpoint(

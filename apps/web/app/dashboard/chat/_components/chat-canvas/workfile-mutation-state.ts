@@ -77,7 +77,7 @@ function getNumberField(
 export function isWorkfilePath(
   value: string | null | undefined,
 ): value is string {
-  return Boolean(value?.startsWith("/workfiles/"));
+  return Boolean(value?.startsWith("/files/"));
 }
 
 /** Code authored directly into the provider sandbox (`/workspace`). */

@@ -140,7 +140,7 @@ export class AgentSandboxService {
 - Working directory and default cwd: ${provider.pathPolicy.workspaceRoot}.
 - File tools and execute operate on the same physical files on the bound PC. Write scripts, data, drafts and outputs directly here.
 - Files persist on this computer. External edits are visible on the next read. They are not automatically uploaded or synchronized.
-- /workfiles is unavailable in PC conversations. Do not use prepare_sandbox_workspace or collect_sandbox_outputs.
+- /files is unavailable in PC conversations. Do not use prepare_sandbox_workspace or collect_sandbox_outputs.
 - /kb remains a read-only source library; /skills contains instructions. These are logical paths, not local command paths.
 - Publish artifacts explicitly when a shareable result is needed. A local file already exists durably without publication.
 - Never assume cloud image dependencies or cloud paths such as /workspace exist on this PC.

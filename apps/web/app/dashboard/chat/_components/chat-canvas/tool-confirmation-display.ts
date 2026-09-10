@@ -59,7 +59,7 @@ function sandboxPrepareDetailLines(confirmation: ToolConfirmationDisplayInput) {
     );
   }
   lines.push(
-    "Selected SourceWeft /workfiles Workfile content will be materialized as ordinary sandbox files.",
+    "Selected SourceWeft /files Workfile content will be materialized as ordinary sandbox files.",
   );
   return lines;
 }
@@ -140,7 +140,7 @@ function sandboxCollectDetailLines(confirmation: ToolConfirmationDisplayInput) {
     );
   }
   lines.push(
-    "Outputs become durable only after collection into /workfiles or a supported artifact path.",
+    "Outputs become durable only after collection into /files or a supported artifact path.",
   );
   return lines;
 }

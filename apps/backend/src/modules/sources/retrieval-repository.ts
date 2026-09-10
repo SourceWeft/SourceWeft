@@ -151,6 +151,7 @@ export async function listSourceChunksByProfile(input: {
   embeddingProfileId: string;
   sourceIds?: string[];
 }) {
+  if (!input.sourceIds?.length) return [];
   const conditions = [
     eq(chunks.teamId, input.teamId),
     eq(chunks.workspaceId, input.workspaceId),

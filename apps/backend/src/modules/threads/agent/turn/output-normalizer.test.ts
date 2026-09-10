@@ -219,7 +219,7 @@ test("filesystem tool descriptions remain unchanged for work and source reads", 
     getFilesystemToolDescription(
       "read_file",
       { chunkCount: 1 },
-      { path: "/workfiles/notes.md" },
+      { path: "/files/notes.md" },
     ),
     "Read 1 Workfile chunk.",
   );
@@ -357,7 +357,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
       },
       {
         id: "call-work",
-        input: { path: "/workfiles/notes.md" },
+        input: { path: "/files/notes.md" },
         output: { content: "safe work notes" },
         status: "completed",
         tool: "read_file",
@@ -415,7 +415,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
     },
     {
       id: "call-work",
-      input: { path: "/workfiles/notes.md" },
+      input: { path: "/files/notes.md" },
       output: { content: "safe work notes" },
       status: "completed",
       tool: "read_file",
@@ -467,7 +467,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
   ]);
 });
 
-test("physical PC paths are files, distinct from Sources and DB Workfiles", () => {
+test("physical PC paths are files, distinct from Sources and DB Files", () => {
   const input = { file_path: "/Users/example/Local task/report.txt" };
   assert.equal(getFilesystemToolStartTitle("read_file", input), "Reading file");
   assert.equal(getFilesystemToolEndTitle("read_file", input), "Read file");
@@ -481,7 +481,7 @@ test("physical PC paths are files, distinct from Sources and DB Workfiles", () =
   );
   assert.equal(
     getFilesystemToolEndTitle("read_file", {
-      file_path: "/workfiles/report.txt",
+      file_path: "/files/report.txt",
     }),
     "Read Workfile",
   );

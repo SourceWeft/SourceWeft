@@ -1,13 +1,28 @@
 # Files and Sources implementation plan
 
-日期：2026-09-10。状态：待实施。本文只制定计划，不表示功能已完成。
+日期：2026-09-10；2026-09-11 更新。状态：Release A 核心实现已落地，集成验收尚未完成。
+
+最新约束：未正式发布，不处理历史数据，不提供兼容层。以下步骤使用新的统一契约。
+
+## 当前实现与未完成项
+
+- Sources 选择已独立持久化并使用 revision 控制更新；默认空，不读取历史消息或旧浏览器缓存。检索和 `/kb` 读取校验当前选择版本。
+- 产品名称和公开路径已统一为 Files、`/files`；旧 API 和路径不提供别名。Cloud 使用 VFS，Local 使用绑定的真实目录。
+- Cloud 支持二进制对象、字节校验、覆盖冲突和上传入口；Local 支持有界分块读取和宿主文本搜索。对象存储与 WebSocket/Redis 的真实链路验收仍待完成。
+- `read_document`、`search_files`、`view_image` 已接入。文档读取覆盖文本、PDF、DOCX、PPTX、XLSX、CSV；图片和 PDF 页面的像素通过模型消息中间件注入。尚未完成真实模型视觉回答验收，当前仅支持本轮主模型自身具备视觉输入能力。
+- File 引用独立于 Source chunk，包含 scope、内容 hash 与定位；预览校验当前内容版本。列表搜索框明确表示名称/路径过滤，内容检索使用 `search_files`。
+- 当前解析缓存仅为单轮内存缓存；计划中的宿主持久派生缓存、Cloud scope cache、独立解析策略/计费和 Office 视觉 renderer 尚未实现。Cloud sandbox 的 `collect_sandbox_outputs` 仍只收集文本，二进制采集尚待接入。
+- Local readonly Sources 尚未实现。静态原生 sandbox 无法撤销旧进程已有的工作目录写权限，因此重叠目录的 Live Sources 方案尚不能交付；等待确定 Snapshot Sources 或独立只读目录的 Live Sources。
+- macOS 当前锁屏，真实桌面 E2E 暂停；尚未迁移既有测试服务的数据库，也未将构建部署到运行中的桌面测试应用。
+
+已验证：数据库范围与约束 5 项、文件读取/图像/二进制 21 项、前端选择与引用 9 项、Agent runner/assembly/Files 132 项、VFS 26 项、sandbox 契约 12 项、原生二进制/文本搜索 3 项。PDF 测试包含实际页面渲染。此记录不是 Release A 或 Release B 验收通过声明。
 
 设计：[Files, Sources, and scoped retrieval](../specs/2026-09-10-files-sources-retrieval-design.md)。
 
 ## 工作规则
 
 - 按用户要求直接在本地 main 工作；不新建独立工作空间、不 push。
-- 本轮只交付本计划和设计文档。后续功能实施按以下依赖顺序执行，每步完成后提交自身改动。
+- 用户已授权实施。按以下依赖顺序执行，每步完成后提交自身改动。
 - main 存在其他任务的 billing、preview、Hub、native chrome 等改动。开始每步前检查 diff，不覆盖、不顺带提交。
 - 使用现有依赖和明确配置的服务。依赖、sandbox 或提供方缺失时报告具体阻塞；不得换模型、解析器、包管理器或测试方式掩盖失败。
 - 不把“UI 已改名”“文本测试通过”或“类型检查通过”作为多模态、本机权限已完成的证据。
@@ -55,8 +70,8 @@ P1 的检索边界是后续所有步骤的前置条件。P4/P5 不通过创建 S
 
 实施：
 
-1. 在 `threads` 增加 `source_selection_json`（initialized/revision/selectedSourceIds），独立于通用 chat preferences；使用 expected revision 更新，不以每轮历史扫描代替当前状态。
-2. 区分 omitted、`[]` 和非空列表。历史初始化只执行一次，按最新一次明确提交的选择恢复；无法证明时保留为空，并在 UI 展示。
+1. 在 `threads` 增加 `source_selection_json`（revision/selectedSourceIds），独立于通用 chat preferences；使用 expected revision 更新，不以每轮历史扫描代替当前状态。
+2. 区分 omitted、`[]` 和非空列表；默认空选择，不读取历史消息或浏览器旧缓存初始化。Turn 请求仅允许缩小当前选择。
 3. 固定 TurnSourceScope：effectiveSourceIds、source revisions、scopeRevision。Folder 展开是权限过滤后的集合。
 4. 在 retrieval、/kb read、grep、anchors、邻近片段、citation fetch 各入口检查 scope。空集合在模型/embedding 调用前返回空范围状态。
 5. 模型提交的 source IDs 必须为有效集合子集；mentions 不绕过 deselection。删除/撤权立即校验，不能只依赖已准备的 turn snapshot。
@@ -74,18 +89,18 @@ P1 的检索边界是后续所有步骤的前置条件。P4/P5 不通过创建 S
 
 1. 定义 FileRef/FileRevision/FileCapabilities/FileSearchCoverage、locator union 和 file operation error codes。新增模块采用现有 export/registry 规范。
 2. 在现有文件访问模块上形成 File access service，隔离 scope authorization、backend adapter 与内容 reader。不要在调用方复制两套权限判断。
-3. 将用户可见 label 定为 Files，内部 `/workfiles`、旧 tool names 保留。将“文件能被引用”和“属于 Source evidence”拆开。
-4. 引用类型加入 File reference；标记必须由工具读取注册。保持工作文件内伪造 Source citation 的清理逻辑。
+3. 将用户可见 label 定为 Files，公开路径统一为 `/files`，工具名按新能力定义，不增加旧接口别名。将“文件能被引用”和“属于 Source evidence”拆开。
+4. 引用类型加入 File reference；标记必须由工具读取注册。继续拒绝工作文件内伪造的 Source citation。
 5. 固定工具路由：显式 `/kb` 使用 SourceScope；当前 FS/VFS 使用 FileScope；禁止 `/` 跨挂载内容搜索。
 6. 注册 `read_document`、`search_files`、`view_image`，按 capability 提供工具；尚未完成的实现不得对 Agent 宣告可用。
 
-测试：adapter contract tests、scope spoof、cross-mount、引用注入、旧 Source/Web citation 兼容，以及 capability/prompt 一致性。此步不为新增 citation 而伪造 Source 数据。
+测试：adapter contract tests、scope spoof、cross-mount、引用注入、新 Source/Web/File citation 契约，以及 capability/prompt 一致性。此步不为新增 citation 而伪造 Source 数据。
 
 ## P3 — Cloud binary and Local native access
 
 Cloud 重点路径：`packages/db/src/schema/threads.ts`、迁移目录、`modules/working-files/{service,repository}.ts`、`api/routes/content/working-files.ts`、对象存储现有入口。
 
-1. 增量增加 payload kind/object reference/hash/revision/provenance；旧 inline text 保留，构造互斥约束与旧数据安全初始化。
+1. 增加 payload kind/object reference/hash/revision/provenance，定义 inline text/object bytes 互斥约束；不做历史数据回填。
 2. 实现上传暂存、MIME/size/hash 校验、metadata 提交与孤立对象清理。扩展通用 binary read，禁止 UTF-8 解码二进制。
 3. expectedRevision 控制覆盖；冲突不自动改名或覆写。沿用文件数限制，引入公开配置的 binary 大小和空间配额。
 4. 验证 Cloud sandbox 与持久 VFS 的明确传输边界，不能把 sandbox 文件误报为已持久化。
@@ -147,7 +162,7 @@ Local 重点路径：`devices/{provider,gateway,access}.ts`、`api/routes/local-
 
 通过真实 Agent turn 检查工具 trace、有效范围、模型输入和输出引用；仅答案偶然正确不算范围验证通过。Source-only 请求不得发起 Files/Web 查询；指定文件请求不得创建 Sources；混合任务必须分别调用两条链路。
 
-检查已有 Cloud 文本文件、历史引用、本地目录绑定、文件写入和命令共用根目录均未退化。native build 后实际重启本测试应用，确认运行二进制版本，避免只验证 Rust 源码。
+检查新建 Cloud 文本/二进制文件、新引用、本地目录绑定以及文件工具和命令共用根目录。native build 后实际重启本测试应用，确认运行二进制版本，避免只验证 Rust 源码。
 
 Release A 完成不代表 Local Sources 已支持；UI 不显示尚未可用的 Add local source action。
 
@@ -164,13 +179,12 @@ Release A 完成不代表 Local Sources 已支持；UI 不显示尚未可用的 
 
 验收：真实 sandbox shell 的覆写、rename、unlink、replace、链接绕过均失败；普通 Files 写入成功。撤权后历史 cache/citation fetch 拒绝；离线检索不默用索引；源更新后只返回验证过的新 revision。
 
-## 数据迁移与回退
+## 数据结构与启用
 
-- 迁移均为 additive。先部署可读取新增类型的代码，再启用 binary/typed citations/local Sources 写入；开关控制启用，不选择替代 backend。
-- 不移动或删除本地原件，不批量将 Files 导入 Sources，不自动重建用户目录。
-- Source selection 旧历史只初始化一次，保留显式空选择。文件 provenance 不确定时标 unknown。
-- 新功能关闭后，保留对象数据和 typed refs。回退版本仍须能保留/安全展示新增记录；不能回到不理解 binary payload 的代码后继续接受写入。
-- 清理孤立 objects/cache 与用户原件删除分开；只清理可证明属于暂存或过期派生数据的内容。
+- 按新契约修改 schema 并生成结构迁移；Source selection 默认空，不做历史回填、浏览器缓存恢复、旧引用读取或旧接口别名。
+- 新功能只在依赖能力通过验证后启用。关闭功能不切换到另一个 backend，也不自动恢复旧接口。
+- 不自动移动、上传或删除用户本地原件，不批量将 Files 导入 Sources。
+- 清理仅限可确认的暂存对象和派生缓存。正式验收使用新建测试会话与隔离数据。
 
 ## 验证执行方式
 

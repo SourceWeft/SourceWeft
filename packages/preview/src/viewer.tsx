@@ -1,6 +1,7 @@
 import FileViewer, {
   type ViewerOptions,
   type ViewerState,
+  type FileViewerHandle,
 } from "@file-viewer/react";
 import {
   useCallback,
@@ -16,7 +17,7 @@ import type {
   FileRenderHandler,
   FileViewerRenderedInstance,
 } from "@file-viewer/core";
-import { previewFamily } from "./index";
+import { previewFamily, type PreviewLocation } from "./index";
 import {
   previewChromeStyles,
   readHostPreviewTheme,
@@ -27,11 +28,20 @@ import "./viewer.css";
 function EnginePreview({
   file,
   options,
+  location,
 }: {
   file: File;
   options: ViewerOptions;
+  location?: PreviewLocation;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const viewer = useRef<FileViewerHandle>(null);
+  const positioned = useRef(false);
+  const [locationMessage, setLocationMessage] = useState<string>();
+  useEffect(() => {
+    positioned.current = false;
+    setLocationMessage(undefined);
+  }, [file, location]);
   const theme = useSyncExternalStore(
     subscribeHostPreviewTheme,
     readHostPreviewTheme,
@@ -73,15 +83,54 @@ function EnginePreview({
     );
     return () => clearTimeout(timer.current);
   }, []);
-  const onStateChange = useCallback((state: ViewerState) => {
-    if (state.ready || state.error) clearTimeout(timer.current);
-    if (state.error)
-      setError(
-        state.error instanceof Error
-          ? state.error.message
-          : "Could not render this file. It may be damaged or unsupported.",
-      );
-  }, []);
+  const onStateChange = useCallback(
+    (state: ViewerState) => {
+      if (state.ready || state.error) clearTimeout(timer.current);
+      if (state.error)
+        setError(
+          state.error instanceof Error
+            ? state.error.message
+            : "Could not render this file. It may be damaged or unsupported.",
+        );
+      if (state.ready && location && viewer.current && !positioned.current) {
+        positioned.current = true;
+        const controller = viewer.current;
+        void (async () => {
+          if (location.page)
+            return (
+              (await controller.applyViewState({ page: location.page }))
+                ?.page === location.page
+            );
+          if (location.line) return controller.scrollToLine(location.line);
+          if (location.quote) {
+            const normalize = (value: string) =>
+              value.replace(/\s+/g, " ").trim();
+            const quote = normalize(location.quote).slice(0, 160);
+            const matches = quote
+              ? controller
+                  .getDocumentTextChunks()
+                  .filter((chunk) => normalize(chunk.text).includes(quote))
+              : [];
+            if (matches.length === 1)
+              return controller.scrollToAnchor(matches[0]!.anchor);
+          }
+          return false;
+        })()
+          .then((located) => {
+            if (!located)
+              setLocationMessage(
+                "Automatic positioning is unavailable for this location. Refer to the cited excerpt and location label.",
+              );
+          })
+          .catch(() =>
+            setLocationMessage(
+              "Could not position this location. Refer to the cited excerpt and location label.",
+            ),
+          );
+      }
+    },
+    [location],
+  );
   if (error)
     return (
       <p role="alert" style={{ padding: 24 }}>
@@ -94,12 +143,18 @@ function EnginePreview({
       style={{ height: "100%", minHeight: 0, minWidth: 0, width: "100%" }}
     >
       <FileViewer
+        ref={viewer}
         className="sourceweft-file-viewer"
         file={file}
         options={themedOptions}
         onStateChange={onStateChange}
         style={{ height: "100%", width: "100%" }}
       />
+      {locationMessage && (
+        <p role="status" style={{ padding: 8, fontSize: 12 }}>
+          {locationMessage}
+        </p>
+      )}
     </div>
   );
 }
@@ -115,8 +170,20 @@ export async function createPreviewView(name: string) {
   };
   if (family === "lite") {
     const { default: preset } = await import("@file-viewer/preset-lite");
-    return function LightweightPreview({ file }: { file: File }) {
-      return <EnginePreview file={file} options={{ ...options, preset }} />;
+    return function LightweightPreview({
+      file,
+      location,
+    }: {
+      file: File;
+      location?: PreviewLocation;
+    }) {
+      return (
+        <EnginePreview
+          file={file}
+          location={location}
+          options={{ ...options, preset }}
+        />
+      );
     };
   }
   const renderer: FileViewerRendererPlugin<
@@ -133,12 +200,19 @@ export async function createPreviewView(name: string) {
             : family === "legacyPresentation"
               ? (await import("@file-viewer/renderer-ppt")).pptRenderer
               : (await import("@file-viewer/renderer-epub")).default;
-  return function DocumentPreview({ file }: { file: File }) {
+  return function DocumentPreview({
+    file,
+    location,
+  }: {
+    file: File;
+    location?: PreviewLocation;
+  }) {
     // Upstream's public type uses HTMLElement while its React host and official
     // renderer handlers use HTMLDivElement. This adapter owns that boundary.
     return (
       <EnginePreview
         file={file}
+        location={location}
         options={{
           ...options,
           renderers: [renderer] as unknown as ViewerOptions["renderers"],

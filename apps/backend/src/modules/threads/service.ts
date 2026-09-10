@@ -1,3 +1,4 @@
+import { fileReferenceSchema } from "@sourceweft/contracts";
 import { targetKey } from "../devices/access";
 import { validateThreadExecutionTarget } from "../devices/service";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
@@ -156,6 +157,7 @@ export type StartThreadTurnInput = {
   images?: StreamThreadEventInput["images"];
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   tools?: StreamThreadEventInput["tools"];
   command?: StreamThreadEventInput["command"];
   invocation?: StreamThreadEventInput["invocation"];
@@ -604,6 +606,7 @@ class ContentThreadService {
       images: input.images,
       mentionedSourceIds: input.mentionedSourceIds,
       sourceIds: input.sourceIds,
+      sourceSelectionRevision: input.sourceSelectionRevision,
       tools: input.tools,
       command: input.command,
       invocation: input.invocation,
@@ -640,6 +643,7 @@ class ContentThreadService {
     });
 
     const citation = await findCitationByMessageRank({
+      userId: input.userId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       messageId: input.messageId,
@@ -650,7 +654,11 @@ class ContentThreadService {
       throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     }
 
+    const thread = await findThreadRecord({ teamId: workspace.organizationId, workspaceId: workspace.id, threadId: citation.threadId });
+    if (!thread || !canViewThread(input.userId, thread)) throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     const snapshot = toObjectRecord(citation.metadataJson);
+    if (!snapshot) throw new ContentError(500, "CITATION_INVALID", "Citation metadata is invalid.");
+    const fileReference = snapshot.fileReference === undefined ? undefined : fileReferenceSchema.parse(snapshot.fileReference);
     const sourceTitleSnapshot = getMetadataString(snapshot, "sourceTitle");
     const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
     const excerptSnapshot = getMetadataString(snapshot, "excerpt");
@@ -659,12 +667,14 @@ class ContentThreadService {
     return {
       citation: {
         citation: citation.citationKey,
+        fileReference,
         score: citation.score,
         sourceId: citation.sourceId,
         sourceTitle: citation.sourceTitle ?? sourceTitleSnapshot,
         documentId: citation.documentId,
         chunkId:
           citation.chunkId ??
+          getMetadataString(snapshot, "referenceKey") ??
           citation.externalUri ??
           `external:${citation.citationKey}`,
         chunkNo: chunkNoSnapshot,

@@ -102,6 +102,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
           providerSandboxId,
           sandboxPath: path,
         });
+        if (bytes.length > 1024 * 1024) throw new ApiError(413, "FILE_TOO_LARGE", "Text previews are limited to 1 MiB.");
         let content: string;
         try {
           content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

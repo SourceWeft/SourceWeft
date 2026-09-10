@@ -251,12 +251,12 @@ test("failed sandbox retry diagnostics include operation and message context", (
       messageId: "message-old",
       status: "failed",
       requestJsonRedacted: {
-        files: [{ sourcePath: "/workfiles/ppt-deck/deck.js" }],
+        files: [{ sourcePath: "/files/ppt-deck/deck.js" }],
       },
       resultJsonRedacted: { error: "ENOENT" },
     },
     request: {
-      files: [{ sourcePath: "/workfiles/ppt-deck/deck.js" }],
+      files: [{ sourcePath: "/files/ppt-deck/deck.js" }],
     },
   });
 
@@ -426,7 +426,7 @@ test("beginToolOperation scopes replay records by message id", async () => {
     context: baseContext,
     operationType: "prepare",
     toolCallId: "call-repeat",
-    request: { files: [{ sourcePath: "/workfiles/ppt-deck/deck.js" }] },
+    request: { files: [{ sourcePath: "/files/ppt-deck/deck.js" }] },
   });
   assert.equal(first.kind, "claimed");
   await manager.completeToolOperation({
@@ -441,7 +441,7 @@ test("beginToolOperation scopes replay records by message id", async () => {
         context: baseContext,
         operationType: "prepare",
         toolCallId: "call-repeat",
-        request: { files: [{ sourcePath: "/workfiles/ppt-deck/deck.js" }] },
+        request: { files: [{ sourcePath: "/files/ppt-deck/deck.js" }] },
       }),
     /SANDBOX_OPERATION_FAILED_RETRY_REQUIRED/u,
   );
@@ -450,7 +450,7 @@ test("beginToolOperation scopes replay records by message id", async () => {
     context: { ...baseContext, messageId: "message-new", runId: "run-2" },
     operationType: "prepare",
     toolCallId: "call-repeat",
-    request: { files: [{ sourcePath: "/workfiles/ppt-deck/deck.js" }] },
+    request: { files: [{ sourcePath: "/files/ppt-deck/deck.js" }] },
   });
 
   assert.equal(second.kind, "claimed");

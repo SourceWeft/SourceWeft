@@ -70,7 +70,7 @@ test("confirmation display shows sandbox prepare review details", () => {
   sandboxConfirmation.preview.requestJson = {
     files: [
       {
-        sourcePath: "/workfiles/input.md",
+        sourcePath: "/files/input.md",
         sandboxPath: "/workspace/input/input.md",
         sizeBytes: 2048,
       },
@@ -80,8 +80,8 @@ test("confirmation display shows sandbox prepare review details", () => {
   assert.deepEqual(requestDetailLines(sandboxConfirmation), [
     "Risk: High",
     "Prepare 1 file",
-    "/workfiles/input.md -> /workspace/input/input.md · 2.0 KB",
-    "Selected SourceWeft /workfiles Workfile content will be materialized as ordinary sandbox files.",
+    "/files/input.md -> /workspace/input/input.md · 2.0 KB",
+    "Selected SourceWeft /files Workfile content will be materialized as ordinary sandbox files.",
   ]);
 });
 
@@ -119,7 +119,7 @@ test("confirmation display shows sandbox collect review details", () => {
         sandboxPath: "/workspace/output/report.md",
         target: {
           kind: "workfile",
-          path: "/workfiles/report.md",
+          path: "/files/report.md",
           overwrite: true,
         },
         sizeBytes: 512,
@@ -130,8 +130,8 @@ test("confirmation display shows sandbox collect review details", () => {
   assert.deepEqual(requestDetailLines(sandboxConfirmation), [
     "Risk: High",
     "Collect 1 output",
-    "/workspace/output/report.md -> /workfiles/report.md · overwrite: yes · 512 B",
-    "Outputs become durable only after collection into /workfiles or a supported artifact path.",
+    "/workspace/output/report.md -> /files/report.md · overwrite: yes · 512 B",
+    "Outputs become durable only after collection into /files or a supported artifact path.",
   ]);
 });
 

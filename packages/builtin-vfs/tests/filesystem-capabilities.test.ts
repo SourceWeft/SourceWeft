@@ -29,10 +29,10 @@ test("filesystem mounts default to citable knowledge and writable work roots", (
         evidenceRole: "source_evidence",
       },
       {
-        root: "/workfiles",
+        root: "/files",
         readable: true,
         writable: true,
-        citable: false,
+        citable: true,
         evidenceRole: "working_memory",
       },
     ],
@@ -45,7 +45,7 @@ test("filesystem mount prompt includes skills only when the mount is enabled", (
   const defaultPrompt = buildFilesystemMountPrompt();
 
   assert.match(defaultPrompt, /\/kb: Source Library knowledge/);
-  assert.match(defaultPrompt, /\/workfiles: Workfiles/);
+  assert.match(defaultPrompt, /\/files: Files/);
   assert.match(defaultPrompt, /read_file reads UTF-8 text only/);
   assert.match(defaultPrompt, /read_file contract: markdown-source-view/);
   assert.match(
@@ -91,7 +91,7 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
     withoutSkills.read_file,
     /Only \/kb read_file output may include valid/,
   );
-  assert.match(withoutSkills.write_file, /Writable mounts: \/workfiles/);
+  assert.match(withoutSkills.write_file, /Writable mounts: \/files/);
   assert.match(
     withoutSkills.write_file,
     /rewrites them to Markdown footnote references/,

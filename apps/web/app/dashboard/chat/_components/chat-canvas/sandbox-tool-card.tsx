@@ -630,7 +630,7 @@ function SandboxTransferCard({
                 const canOpenTarget =
                   view.direction === "collect" &&
                   view.resultSucceeded &&
-                  mapping.target.startsWith("/workfiles/") &&
+                  mapping.target.startsWith("/files/") &&
                   Boolean(onWorkfileClick);
                 return (
                   <div
