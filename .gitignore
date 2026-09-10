@@ -70,6 +70,7 @@ apps/mobile/src-tauri/gen/apple/*.dSYM.zip
 .agents
 .claude
 .tmp
+.superpowers/
 
 reference-*
 .anycrawl
