@@ -3,6 +3,14 @@ import assert from "node:assert/strict";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, test, vi } from "vitest";
+vi.mock("@sourceweft/preview/react", () => ({
+  Preview: ({ source }: { source: { name: string; text?: string } }) =>
+    createElement(
+      "div",
+      { "data-testid": "shared-preview", "data-name": source.name },
+      source.text,
+    ),
+}));
 import { FilePreviewDialog } from "./file-preview-dialog";
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
@@ -16,7 +24,7 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
 });
-test("text preview is an application dialog with a filename, path and copy action", async () => {
+test("text preview forwards its source to the shared preview inside the application dialog", async () => {
   await act(async () =>
     root.render(
       createElement(FilePreviewDialog, {
@@ -31,13 +39,18 @@ test("text preview is an application dialog with a filename, path and copy actio
   assert(dialog);
   assert.match(dialog.textContent ?? "", /report.txt/);
   assert.match(dialog.textContent ?? "", /first line/);
-  assert.ok(dialog.querySelector('[aria-label="Copy preview"]'));
+  assert.equal(
+    dialog
+      .querySelector('[data-testid="shared-preview"]')
+      ?.getAttribute("data-name"),
+    "/local/report.txt",
+  );
   assert.equal(
     document.activeElement,
     dialog.querySelector('[aria-label="File contents"]'),
   );
 });
-test("markdown offers rendered preview and source while empty text is explicit", async () => {
+test("markdown uses the shared preview while empty text is explicit", async () => {
   await act(async () =>
     root.render(
       createElement(FilePreviewDialog, {
@@ -50,9 +63,8 @@ test("markdown offers rendered preview and source while empty text is explicit",
   );
   const dialog = document.querySelector('[role="dialog"]');
   assert(dialog);
-  assert.ok(dialog.querySelector('[role="tab"]'));
-  assert.match(dialog.textContent ?? "", /Preview/);
-  assert.match(dialog.textContent ?? "", /Source/);
+  assert.ok(dialog.querySelector('[data-testid="shared-preview"]'));
+  assert.match(dialog.textContent ?? "", /Local document/);
   await act(async () =>
     root.render(
       createElement(FilePreviewDialog, {

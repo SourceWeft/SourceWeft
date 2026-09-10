@@ -5,9 +5,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
-    "dev:fast": "next dev --port 3000",
-    "build": "next build",
+    "dev": "pnpm --filter @sourceweft/preview assets ../../apps/web/public/file-viewer && next dev --port 3000",
+    "dev:fast": "pnpm --filter @sourceweft/preview assets ../../apps/web/public/file-viewer && next dev --port 3000",
+    "build": "pnpm --filter @sourceweft/preview assets ../../apps/web/public/file-viewer && next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit",
@@ -19,6 +19,7 @@
     "test:e2e:skills:full": "SKILL_E2E_REQUIRE_ALL=1 SKILL_E2E_FIXTURES_FILE=e2e/fixtures/public-registry.json playwright test e2e/skills-registry.spec.ts"
   },
   "dependencies": {
+    "@sourceweft/preview": "workspace:*",
     "@better-auth/api-key": "1.7.2",
     "@better-auth/core": "1.7.2",
     "@better-auth/oauth-provider": "1.7.2",

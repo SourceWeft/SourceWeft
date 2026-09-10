@@ -6,6 +6,7 @@ export type HubFileRequest = {
   contextKey: string;
   path: string;
   downloadName?: string;
+  preview?: boolean;
 };
 export type HubFileResult = {
   id: string;
@@ -19,6 +20,7 @@ export type HubFileResult = {
 export type HubFileRequester = (
   path: string,
   downloadName?: string,
+  preview?: boolean,
 ) => Promise<unknown>;
 let requester: HubFileRequester | undefined;
 export function registerHubFileRequester(value: HubFileRequester) {
@@ -33,14 +35,18 @@ export function isHubFileWindow() {
     window.location.pathname === "/dashboard/hub-window"
   );
 }
-export function requestHubFile(path: string, downloadName?: string) {
+export function requestHubFile(
+  path: string,
+  downloadName?: string,
+  preview?: boolean,
+) {
   if (!requester)
     return Promise.reject(
       new Error(
         "Hub is not connected to the main window. Reopen Hub to access this computer's files.",
       ),
     );
-  return requester(path, downloadName);
+  return requester(path, downloadName, preview);
 }
 
 export function validateHubFileRequest(
@@ -79,7 +85,10 @@ export function validateHubFileRequest(
       url.searchParams.get("content") !== "true") ||
     (url.searchParams.has("download") &&
       url.searchParams.get("download") !== "true") ||
-    url.searchParams.has("download") !== (request.downloadName !== undefined) ||
+    url.searchParams.has("download") !==
+      (request.downloadName !== undefined || request.preview === true) ||
+    (request.preview !== undefined && request.preview !== true) ||
+    (request.preview === true && request.downloadName !== undefined) ||
     (url.searchParams.has("download") && url.searchParams.has("content"))
   )
     throw new Error("Invalid Hub file operation.");
@@ -102,6 +111,7 @@ export async function serveHubFileRequest(
     current: () => HubSnapshot | null;
     authorize: (accountId: string) => Promise<unknown>;
     read: (path: string) => Promise<unknown>;
+    preview?: (path: string) => Promise<unknown>;
     download: (path: string, name: string) => Promise<void>;
     send: (result: HubFileResult) => Promise<void>;
   },
@@ -116,9 +126,15 @@ export async function serveHubFileRequest(
     await dependencies.authorize(snapshot.accountId);
     validateHubFileRequest(request, dependencies.current());
     const data =
-      request.downloadName !== undefined
-        ? await dependencies.download(request.path, request.downloadName)
-        : await dependencies.read(request.path);
+      request.preview === true
+        ? await (() => {
+            if (!dependencies.preview)
+              throw new Error("Binary preview is unavailable.");
+            return dependencies.preview(request.path);
+          })()
+        : request.downloadName !== undefined
+          ? await dependencies.download(request.path, request.downloadName)
+          : await dependencies.read(request.path);
     validateHubFileRequest(request, dependencies.current());
     const json = JSON.stringify(data ?? null);
     const total = Math.max(1, Math.ceil(json.length / CHUNK_SIZE));
@@ -172,7 +188,11 @@ export function createHubFileClient(dependencies: {
     pending.clear();
   };
   return {
-    request(path: string, downloadName?: string): Promise<unknown> {
+    request(
+      path: string,
+      downloadName?: string,
+      preview?: boolean,
+    ): Promise<unknown> {
       const snapshot = dependencies.current();
       if (!snapshot || !dependencies.connected())
         return Promise.reject(
@@ -184,6 +204,7 @@ export function createHubFileClient(dependencies: {
         contextKey: snapshot.contextKey,
         path,
         downloadName,
+        preview,
       };
       try {
         validateHubFileRequest(request, snapshot);

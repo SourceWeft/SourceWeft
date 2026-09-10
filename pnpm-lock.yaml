@@ -549,6 +549,9 @@ importers:
       streamdown:
         specifier: ^2.5.0
         version: 2.5.0(patch_hash=faad4c942d28867f04ea267d249edaf9fd1a42e3d57b4b54fa1067bee70340bd)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@sourceweft/preview':
+        specifier: workspace:*
+        version: link:../../packages/preview
     devDependencies:
       '@next/eslint-plugin-next':
         specifier: 16.3.3
@@ -1523,6 +1526,58 @@ importers:
       tsc-alias:
         specifier: ^1.9.1
         version: 1.9.1
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.11)(jsdom@26.1.0)(msw@2.15.0(@types/node@26.2.0)(typescript@5.9.2))(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/preview:
+    dependencies:
+      '@file-viewer/assets-ppt':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/assets-standard':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/core':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/preset-lite':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/react':
+        specifier: 3.0.3
+        version: 3.0.3(react@19.2.8)
+      '@file-viewer/renderer-epub':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/renderer-pdf':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/renderer-ppt':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/renderer-pptx':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/renderer-spreadsheet':
+        specifier: 3.0.3
+        version: 3.0.3
+      '@file-viewer/renderer-word':
+        specifier: 3.0.3
+        version: 3.0.3
+      react:
+        specifier: ^19.2.1
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.1
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -10409,6 +10464,126 @@ packages:
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
+
+  '@file-viewer/asset-installer@3.0.3':
+    resolution: {integrity: sha512-i0UpsC0YuFDUJiDdWe7NpAoUNLYp8PywP8ODCSIe7kwuqZhlnV8fYsh7345fu3mtpimU9yNR+M6lf8bMw4ubIQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@file-viewer/assets-ppt@3.0.3':
+    resolution: {integrity: sha512-6wFKlVaKdLYXODIDTqHqjeQq1dkb68vSc43Qndc1nkYCmKAqBeY7eA5gxLT47guG6Xvnbo5TjXA6z74cUJxeDw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@file-viewer/assets-standard@3.0.3':
+    resolution: {integrity: sha512-rPFeLrNwMbw1rt2/WvRgp6NNebMEk88HDoTYUmd8x/IPn3F/PYDrcgM9Tkkc877j4gPl4W6Ky8Yovhip7aaEQg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@file-viewer/core@3.0.3':
+    resolution: {integrity: sha512-BZtYtkh8SD8HrvTbj5lCKQp5dFETZcjrwdIYEHUgJJJRafn5WdI/iUD5eTq212+qGt/CnXo/IJenc0WuyK1gow==}
+
+  '@file-viewer/doc@3.0.3':
+    resolution: {integrity: sha512-1cT5c3rbLCZX9bAjDJpjSDbDn5TKt5KtRNiSRwTeuqiVQy+3nJjNZe+q6X9mPFIgazffgXMq+zYkNhAykNaBaQ==}
+
+  '@file-viewer/docx@0.3.31':
+    resolution: {integrity: sha512-EjWia6/DC8LVJVg+T7XuKbEWz57t8ZgfyrFqcWfoT2md4NxEams+k/bOjuLSLUR7RJ4NGTme9+S9VcUyz6nsig==}
+
+  '@file-viewer/ppt@0.3.4':
+    resolution: {integrity: sha512-9I0rCheWYlPO7peC4DjflCcBTJJxbGMkEvqIZfueG7Lgh/VLow/Ol1YqWSr3kuNHr4FBojQJOa+lqmfx3iJsSg==}
+    engines: {node: '>=18'}
+
+  '@file-viewer/pptx@3.0.3':
+    resolution: {integrity: sha512-Cmsm0af2D8t6gg0jX8g4E7sEOZ2zKNwewStiFZxDXWEhlvDr5J/pnpACDd2bU1I6OkNZ647FWnZmNxvTDgw8TA==}
+
+  '@file-viewer/preset-lite@3.0.3':
+    resolution: {integrity: sha512-dEPfc5AII4eibux7FrHIoINnXqNqaZxLiweoHJ9xUGSEqCLNlrpAGDY2E1h6gOx8tf2YXLpHA+/9hUlNiaVCIg==}
+
+  '@file-viewer/react@3.0.3':
+    resolution: {integrity: sha512-SdcqPHjHupSElOGKZZgsY/CuqUqND5GmecQ83IhKvD1VhAGr3KShbZTZJrWm5VUZdvkJ1me0KGbb3cESWuRwxw==}
+    peerDependencies:
+      react: '>=17 <20'
+
+  '@file-viewer/renderer-epub@3.0.3':
+    resolution: {integrity: sha512-gN3lA7SKvj03BGni654Hy0pSabMHmD6NMMUEvWgF/WqBhKUNEhF7V1X915mqE7jSsLZoFRqbB+1C50by85BSGQ==}
+
+  '@file-viewer/renderer-image@3.0.3':
+    resolution: {integrity: sha512-QcNauUpjceIg1IpD98pvVHPXR/VjTnwor2rN9iuYWa9aZEf0BtfQWQ3y6Miuw5I0ezhwqr9GyHUD3srlifyqlQ==}
+
+  '@file-viewer/renderer-media@3.0.3':
+    resolution: {integrity: sha512-nsj7hWGXTE9PfPMBqNnHqydm+9FIwIf2YB+q/3gOfvv//8bhfQeSs8OBUPEgOUzfTL8JfxYTybEJqtZN+4pp3w==}
+
+  '@file-viewer/renderer-pdf@3.0.3':
+    resolution: {integrity: sha512-1AM5dLVCXvrziueuPSuOVREduzwpPMnGxksuhhhHW3uawbRjn6EIye5hIB4BnvyqGwKIW20/unJjIWTH5EEzYQ==}
+    peerDependencies:
+      pdf-lib: 1.17.1
+    peerDependenciesMeta:
+      pdf-lib:
+        optional: true
+
+  '@file-viewer/renderer-ppt@3.0.3':
+    resolution: {integrity: sha512-tTQ1Xor2/TLqsTuzf+c5J/T9pfPx2/vmRJf9Xe8sMlnM69UUTI4g8Vk3Oiakxf/faGWrhMwa2jYU3YytCdud/g==}
+
+  '@file-viewer/renderer-pptx@3.0.3':
+    resolution: {integrity: sha512-0pHByP4nNrz+o/RmeoAe2LfxJ+3MVJlWNCVHsS/7SXh42OmkRc34qr69qj50yQ5uMFZ7GCElCALRY2ssiOa/Kg==}
+
+  '@file-viewer/renderer-spreadsheet@3.0.3':
+    resolution: {integrity: sha512-NbiLt7sgS6jlL2/fOh3/05+rduXAnF6uqk4oShs9PWindhX9mU0Uhu1jlxGWcProi+2Dcau/CEd3FM4b05DbRw==}
+
+  '@file-viewer/renderer-text@3.0.3':
+    resolution: {integrity: sha512-LYxe8VWTUcdlgfrygNdjQb3XN7PUx7/wcaE/har9d0H+//i56wBqr7wvhUUHTO6Yfd/DJmkHL+0YzNj8NK+/Kg==}
+
+  '@file-viewer/renderer-word@3.0.3':
+    resolution: {integrity: sha512-UxXKDvinoSKHa9h1qPGdcYzZWICX05K7NVmx4WVKopeMF1iRy5q6iBkKyl66zNOF8QQ60DhISOxOD+VuPZQ6AA==}
+
+  '@prettier/plugin-xml@3.4.2':
+    resolution: {integrity: sha512-/UyNlHfkuLXG6Ed85KB0WBF283xn2yavR+UtRibBRUcvEJId2DSLdGXwJ/cDa1X++SWDPzq3+GSFniHjkNy7yg==}
+    peerDependencies:
+      prettier: ^3.0.0
+
+  '@xml-tools/parser@1.0.11':
+    resolution: {integrity: sha512-aKqQ077XnR+oQtHJlrAflaZaL7qZsulWc/i/ZEooar5JiWj1eLt0+Wg28cpa+XLney107wXqneC+oG1IZvxkTA==}
+
+  chevrotain@7.1.1:
+    resolution: {integrity: sha512-wy3mC1x4ye+O+QkEinVJkPf5u2vsrDIYW9G7ZuwFl6v/Yu0LwUuT2POsb+NUWApebyxfkQq6+yDfRExbnI5rcw==}
+
+  dingbat-to-unicode@1.0.1:
+    resolution: {integrity: sha512-98l0sW87ZT58pU4i61wa2OHwxbiYSbuxsCBozaVnYX2iCnr3bLM3fIes1/ej7h1YdOKuKt/MLs706TVnALA65w==}
+
+  dompurify@3.4.15:
+    resolution: {integrity: sha512-EUBjM+B+lkDE41iE82DDSCfkoPGfXx8IxFxPMjNzm/Uk4xDet77rTN9wqlxlVg71kK7XGuUMv6wUxJUwwv+Xyw==}
+
+  e-virt-table@1.4.15:
+    resolution: {integrity: sha512-yLKQH0ftkTuQHJ9fRadf9ZL9QJSUAktdi8b3uFhwjqFd8p5VgTPBon5K8/W8kM1VZ/WyIGfNLqNgfGme0YvGAg==}
+
+  heic2any@0.0.4:
+    resolution: {integrity: sha512-3lLnZiDELfabVH87htnRolZ2iehX9zwpRyGNz22GKXIu0fznlblf0/ftppXKNqS26dqFSeqfIBhAmAj/uSp0cA==}
+
+  highlight.js@11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
+    engines: {node: '>=12.0.0'}
+
+  jszip@3.10.2:
+    resolution: {integrity: sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==}
+
+  marked@18.0.12:
+    resolution: {integrity: sha512-LEm4ga2YeI2T3GVHj9b0BaDPPk93LLTHMFeMyQbNIzPxc8vCI0y/scy0ZA6z6lXKyT9j9Nhl/OC6ZYKYGuFScA==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
+  regexp-to-ast@0.5.0:
+    resolution: {integrity: sha512-tlbJqcMHnPKI9zSrystikWKwHkBqu2a/Sgw01h3zFjvYrMxEDYHzzoMZnUrbIfpTFEsoRnnviOXNCzFiSc54Qw==}
+
+  styled-exceljs@0.21.6:
+    resolution: {integrity: sha512-n3lHSH5rKn7wlu6+rBIv1/anXDDJd1+IAWI60iCfXW9QlYRDHQDEN6P2Vq9b/6TxT+hUiLTNFy9Hoo0TGk5t8g==}
+    engines: {node: '>=0.8'}
+    hasBin: true
+
+  tinycolor2@1.6.0:
+    resolution: {integrity: sha512-XPaBkWQJdsf3pLKJV9p4qN/S+fm2Oj8AIPo1BTUhg5oxkvm9+SVEGFdhyOz7tTdUTfvxMiAs4sp6/eZO2Ew+pw==}
+
+  utif@3.1.0:
+    resolution: {integrity: sha512-WEo4D/xOvFW53K5f5QTaTbbiORcm2/pCL9P6qmJnup+17eYfKaEhDeX9PeQkuyEoIxlbGklDuGl8xwuXYMrrXQ==}
 
 snapshots:
 
@@ -20238,3 +20413,148 @@ snapshots:
       react: 19.2.8
 
   zwitch@2.0.4: {}
+
+  '@file-viewer/asset-installer@3.0.3': {}
+
+  '@file-viewer/assets-ppt@3.0.3':
+    dependencies:
+      '@file-viewer/asset-installer': 3.0.3
+
+  '@file-viewer/assets-standard@3.0.3':
+    dependencies:
+      '@file-viewer/asset-installer': 3.0.3
+
+  '@file-viewer/core@3.0.3':
+    dependencies:
+      dompurify: 3.4.15
+
+  '@file-viewer/doc@3.0.3':
+    dependencies:
+      dompurify: 3.4.15
+
+  '@file-viewer/docx@0.3.31':
+    dependencies:
+      jszip: 3.10.2
+
+  '@file-viewer/ppt@0.3.4': {}
+
+  '@file-viewer/pptx@3.0.3':
+    dependencies:
+      dingbat-to-unicode: 1.0.1
+      dompurify: 3.4.15
+      jszip: 3.10.2
+      tinycolor2: 1.6.0
+      utif: 3.1.0
+
+  '@file-viewer/preset-lite@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@file-viewer/renderer-image': 3.0.3
+      '@file-viewer/renderer-media': 3.0.3
+      '@file-viewer/renderer-text': 3.0.3
+
+  '@file-viewer/react@3.0.3(react@19.2.8)':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      react: 19.2.8
+
+  '@file-viewer/renderer-epub@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      pako: 2.2.0
+
+  '@file-viewer/renderer-image@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      heic2any: 0.0.4
+      utif: 3.1.0
+
+  '@file-viewer/renderer-media@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+
+  '@file-viewer/renderer-pdf@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+
+  '@file-viewer/renderer-ppt@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@file-viewer/ppt': 0.3.4
+
+  '@file-viewer/renderer-pptx@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@file-viewer/pptx': 3.0.3
+
+  '@file-viewer/renderer-spreadsheet@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@xmldom/xmldom': 0.8.15
+      e-virt-table: 1.4.15
+      jszip: 3.10.2
+      styled-exceljs: 0.21.6
+      tinycolor2: 1.6.0
+      utif: 3.1.0
+
+  '@file-viewer/renderer-text@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@prettier/plugin-xml': 3.4.2(prettier@3.9.6)
+      dompurify: 3.4.15
+      highlight.js: 11.12.0
+      marked: 18.0.12
+      prettier: 3.9.6
+
+  '@file-viewer/renderer-word@3.0.3':
+    dependencies:
+      '@file-viewer/core': 3.0.3
+      '@file-viewer/doc': 3.0.3
+      '@file-viewer/docx': 0.3.31
+      jszip: 3.10.2
+
+  '@prettier/plugin-xml@3.4.2(prettier@3.9.6)':
+    dependencies:
+      '@xml-tools/parser': 1.0.11
+      prettier: 3.9.6
+
+  '@xml-tools/parser@1.0.11':
+    dependencies:
+      chevrotain: 7.1.1
+
+  chevrotain@7.1.1:
+    dependencies:
+      regexp-to-ast: 0.5.0
+
+  dingbat-to-unicode@1.0.1: {}
+
+  dompurify@3.4.15:
+    optionalDependencies:
+      '@types/trusted-types': 2.0.7
+
+  e-virt-table@1.4.15:
+    dependencies:
+      '@floating-ui/dom': 1.8.0
+
+  heic2any@0.0.4: {}
+
+  highlight.js@11.12.0: {}
+
+  jszip@3.10.2:
+    dependencies:
+      lie: 3.3.0
+      pako: 1.0.11
+      readable-stream: 2.3.8
+      setimmediate: 1.0.5
+
+  marked@18.0.12: {}
+
+  regexp-to-ast@0.5.0: {}
+
+  styled-exceljs@0.21.6: {}
+
+  tinycolor2@1.6.0: {}
+
+  utif@3.1.0:
+    dependencies:
+      pako: 1.0.11

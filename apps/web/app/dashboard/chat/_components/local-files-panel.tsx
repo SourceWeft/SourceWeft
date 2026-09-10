@@ -15,6 +15,8 @@ import { localRequest } from "../../../../lib/local-execution";
 import { downloadLocalFile } from "../../../../lib/local-file-download";
 import { FilePreviewDialog } from "./file-preview-dialog";
 import { basename } from "./workfile-content-preview";
+import { readLocalPreviewBlob } from "../../../../lib/local-file-preview";
+import type { PreviewSource } from "@sourceweft/preview";
 
 type Directory = {
   root: string;
@@ -24,7 +26,7 @@ type Directory = {
 type Preview = {
   path: string;
   status: "loading" | "ready" | "error";
-  content?: string;
+  source?: PreviewSource;
   error?: string;
 };
 type LocalFilesPanelProps = {
@@ -91,6 +93,8 @@ function LocalFilesBrowser({
         if (live) {
           setDirectory(null);
           setError(cause instanceof Error ? cause.message : String(cause));
+          setPreviewPath(undefined);
+          setPreview(null);
         }
       } finally {
         busy = false;
@@ -108,6 +112,7 @@ function LocalFilesBrowser({
   useEffect(() => {
     if (!previewPath) return;
     const requestedPath = previewPath;
+    const controller = new AbortController();
     let live = true;
     let busy = false;
     setPreview({ path: requestedPath, status: "loading" });
@@ -115,42 +120,31 @@ function LocalFilesBrowser({
       if (busy) return;
       busy = true;
       try {
-        const result = await localRequest<{ content: string }>(
-          `${base}?path=${encodeURIComponent(requestedPath)}&content=true`,
+        const blob = await readLocalPreviewBlob(
+          `${base}?path=${encodeURIComponent(requestedPath)}&download=true`,
+          controller.signal,
         );
         if (live)
-          setPreview((previous) =>
-            previous?.path === requestedPath &&
-            previous.status === "ready" &&
-            previous.content === result.content
-              ? previous
-              : {
-                  path: requestedPath,
-                  status: "ready",
-                  content: result.content,
-                },
-          );
+          setPreview({
+            path: requestedPath,
+            status: "ready",
+            source: { name: requestedPath, blob },
+          });
       } catch (cause) {
         if (live)
           setPreview({
             path: requestedPath,
             status: "error",
-            error:
-              (cause as { status?: number }).status === 415
-                ? "This file cannot be previewed as text. Download it to open it."
-                : cause instanceof Error
-                  ? cause.message
-                  : String(cause),
+            error: cause instanceof Error ? cause.message : String(cause),
           });
       } finally {
         busy = false;
       }
     };
     void refresh();
-    const timer = setInterval(() => void refresh(), 3000);
     return () => {
       live = false;
-      clearInterval(timer);
+      controller.abort();
     };
   }, [base, previewPath, previewRevision]);
 
@@ -324,10 +318,8 @@ function LocalFilesBrowser({
           previewPath ? `${sourceLabel} · ${previewPath}` : sourceLabel
         }
         loading={!visiblePreview || visiblePreview.status === "loading"}
-        contentText={
-          visiblePreview?.status === "ready"
-            ? visiblePreview.content
-            : undefined
+        source={
+          visiblePreview?.status === "ready" ? visiblePreview.source : undefined
         }
         error={
           visiblePreview?.status === "error" ? visiblePreview.error : undefined

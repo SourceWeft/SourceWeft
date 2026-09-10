@@ -25,6 +25,43 @@ const request: HubFileRequest = {
 };
 afterEach(() => vi.useRealTimers());
 
+it("binary preview uses the authorized reader and rejects mixed operations", async () => {
+  const previewRequest = {
+    ...request,
+    path: path + "?path=deck.pptx&download=true",
+    preview: true,
+  };
+  expect(validateHubFileRequest(previewRequest, snapshot)).toBe(snapshot);
+  expect(() =>
+    validateHubFileRequest(
+      { ...previewRequest, downloadName: "deck.pptx" },
+      snapshot,
+    ),
+  ).toThrow();
+  expect(() =>
+    validateHubFileRequest({ ...previewRequest, path }, snapshot),
+  ).toThrow();
+  const preview = vi.fn(async () => ({
+    base64: "AP8=",
+    mimeType: "application/octet-stream",
+  }));
+  const download = vi.fn();
+  const read = vi.fn();
+  const send = vi.fn();
+  await serveHubFileRequest(previewRequest, {
+    current: () => snapshot,
+    authorize: vi.fn(),
+    preview,
+    read,
+    download,
+    send,
+  });
+  expect(preview).toHaveBeenCalledWith(previewRequest.path);
+  expect(download).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+  expect(JSON.parse(send.mock.calls[0]![0].chunk).base64).toBe("AP8=");
+});
+
 it("only relays the active conversation's local file endpoint", () => {
   expect(validateHubFileRequest(request, snapshot)).toBe(snapshot);
   for (const invalid of [

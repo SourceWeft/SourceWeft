@@ -7,9 +7,23 @@ import { resolveArtifactPreview } from "@sourceweft/agent-tool-registry/ui";
 import type { ArtifactPreviewContext, ArtifactPreviewRenderer } from "./types";
 import "../artifact-render-host";
 import { videoFilePreviewRenderer } from "./adapters/video-file-preview";
+import { Preview } from "@sourceweft/preview/react";
 
 export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
   videoFilePreviewRenderer,
+  {
+    id: "file-preview",
+    match: ({ artifact, proxyFileUrl }) =>
+      artifact.status === "ready" && Boolean(proxyFileUrl),
+    render: ({ artifact, proxyFileUrl, title }) => (
+      <Preview
+        source={{
+          url: proxyFileUrl!,
+          name: artifact.storageKey?.split("/").pop() || title,
+        }}
+      />
+    ),
+  },
 ];
 
 export function resolveArtifactPreviewRenderer(

@@ -3,12 +3,23 @@ import assert from "node:assert/strict";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ request: vi.fn(), download: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  download: vi.fn(),
+  preview: vi.fn(),
+}));
 vi.mock("../../../../lib/local-execution", () => ({
   localRequest: mocks.request,
 }));
 vi.mock("../../../../lib/local-file-download", () => ({
   downloadLocalFile: mocks.download,
+}));
+vi.mock("../../../../lib/local-file-preview", () => ({
+  readLocalPreviewBlob: mocks.preview,
+}));
+vi.mock("@sourceweft/preview/react", () => ({
+  Preview: ({ source }: { source: { name: string } }) =>
+    createElement("div", { "data-testid": "shared-preview" }, source.name),
 }));
 import { LocalFilesPanel } from "./local-files-panel";
 let root: Root, container: HTMLDivElement;
@@ -18,6 +29,9 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  mocks.preview
+    .mockReset()
+    .mockResolvedValue(new Blob(["physical file content"]));
   mocks.download.mockReset().mockResolvedValue(undefined);
   mocks.request.mockReset().mockImplementation(async (path: string) =>
     path.includes("content=true")
@@ -57,8 +71,8 @@ test("Hub Workfiles reads the PC directory and clears its preview when offline",
   await act(async () => file.click());
   const dialog = document.querySelector('[role="dialog"]');
   assert.ok(dialog);
-  assert.match(dialog.textContent ?? "", /physical file content/);
-  assert.ok(dialog.querySelector('[aria-label="Copy preview"]'));
+  assert.ok(dialog.querySelector('[data-testid="shared-preview"]'));
+  assert.ok(mocks.preview.mock.calls[0]?.[0].includes("download=true"));
   assert.equal(
     container.contains(dialog),
     false,
@@ -131,14 +145,11 @@ test("directories navigate instead of opening a file preview", async () => {
 });
 
 test("preview opens immediately without refetching the list and ignores a late response after closing", async () => {
-  let finish!: (value: { content: string }) => void;
-  const pending = new Promise<{ content: string }>((resolve) => {
+  let finish!: (value: Blob) => void;
+  const pending = new Promise<Blob>((resolve) => {
     finish = resolve;
   });
-  const original = mocks.request.getMockImplementation()!;
-  mocks.request.mockImplementation((url: string) =>
-    url.includes("content=true") ? pending : original(url),
-  );
+  mocks.preview.mockReturnValue(pending);
   await act(async () =>
     root.render(
       createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
@@ -164,7 +175,7 @@ test("preview opens immediately without refetching the list and ignores a late r
   );
   assert(close);
   await act(async () => close.click());
-  await act(async () => finish({ content: "late content" }));
+  await act(async () => finish(new Blob(["late content"])));
   await act(async () => vi.advanceTimersByTimeAsync(0));
   assert.equal(
     document.activeElement,
@@ -175,13 +186,8 @@ test("preview opens immediately without refetching the list and ignores a late r
   assert.equal(document.body.textContent?.includes("late content"), false);
 });
 
-test("binary preview explains the unsupported format and offers an in-app download action", async () => {
-  const original = mocks.request.getMockImplementation()!;
-  mocks.request.mockImplementation((url: string) =>
-    url.includes("content=true")
-      ? Promise.reject(Object.assign(new Error("binary"), { status: 415 }))
-      : original(url),
-  );
+test("failed binary reads show the error and retain the download action", async () => {
+  mocks.preview.mockRejectedValue(new Error("File read failed"));
   await act(async () =>
     root.render(
       createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
@@ -194,7 +200,7 @@ test("binary preview explains the unsupported format and offers an in-app downlo
   await act(async () => file.click());
   const dialog = document.querySelector('[role="dialog"]');
   assert(dialog);
-  assert.match(dialog.textContent ?? "", /cannot be previewed as text/);
+  assert.match(dialog.textContent ?? "", /File read failed/);
   const download = dialog.querySelector<HTMLButtonElement>(
     '[aria-label="Download file"]',
   );

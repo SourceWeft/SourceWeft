@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
+import { Preview } from "@sourceweft/preview/react";
+import type { PreviewSource } from "@sourceweft/preview";
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import {
   Dialog,
@@ -10,7 +12,6 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { WorkfileContentViewer } from "./workfile-content-viewer";
 import { basename } from "./workfile-content-preview";
 
 /** Shared in-app reader for cloud Workfiles and physical PC files. */
@@ -20,6 +21,7 @@ export function FilePreviewDialog({
   path,
   description,
   contentText,
+  source,
   mimeType,
   loading = false,
   error,
@@ -32,6 +34,7 @@ export function FilePreviewDialog({
   path: string;
   description?: string;
   contentText?: string;
+  source?: PreviewSource;
   mimeType?: string | null;
   loading?: boolean;
   error?: string;
@@ -40,6 +43,18 @@ export function FilePreviewDialog({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const previewSource = useMemo(
+    () =>
+      source ??
+      (contentText === undefined
+        ? undefined
+        : {
+            name: path,
+            mimeType,
+            text: contentText,
+          }),
+    [source, contentText, path, mimeType],
+  );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -107,13 +122,12 @@ export function FilePreviewDialog({
             </div>
           ) : contentText === "" ? (
             <p className="text-sm text-muted-foreground">This file is empty.</p>
-          ) : contentText !== undefined ? (
-            <WorkfileContentViewer
+          ) : previewSource ? (
+            <Preview
               key={path}
               className="h-full"
-              contentText={contentText}
-              mimeType={mimeType}
-              path={path}
+              source={previewSource}
+              onDownload={onDownload}
             />
           ) : null}
         </div>

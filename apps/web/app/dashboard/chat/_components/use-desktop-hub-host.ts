@@ -10,6 +10,7 @@ import { flushSync } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { serveHubFileRequest } from "../../../../lib/hub-file-relay";
+import { readLocalPreviewForHub } from "../../../../lib/local-file-preview";
 import { localRequest } from "../../../../lib/local-execution";
 import { downloadLocalFile } from "../../../../lib/local-file-download";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
@@ -172,6 +173,7 @@ export function useDesktopHubHost(
         current: () => current.current,
         authorize: ensureLocalHostSession,
         read: localRequest,
+        preview: readLocalPreviewForHub,
         download: downloadLocalFile,
         send: (result) => bridge.send({ kind: "local-file-result", result }),
       });
