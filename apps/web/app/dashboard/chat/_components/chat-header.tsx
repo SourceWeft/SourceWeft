@@ -13,6 +13,8 @@ import { useElementSize } from "../../../../lib/use-element-size";
 import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
 import { ChatWorkContext, type ChatCreationContext } from "./chat-work-context";
 
+import { useChatHubContext } from "./chat-hub-context";
+
 const HeaderModelSelector = dynamic(
   () =>
     import("./header-model-selector").then((mod) => mod.HeaderModelSelector),
@@ -59,12 +61,16 @@ export function ChatHeader({
   const { ref, width } = useElementSize<HTMLDivElement>();
   const { conversationsOpen, canDockConversations, toggleConversations } =
     useWorkspaceLayout();
+  const hub = useChatHubContext();
   const hubOpen = isPersistentLayout && sourcesVisible;
-  const hubLabel = isPersistentLayout
-    ? hubOpen
-      ? "Hide sources"
-      : "Show sources"
-    : "Open Hub";
+  const hubLabel =
+    hub?.desktop.mode === "detached"
+      ? "Show Hub window"
+      : isPersistentLayout
+        ? hubOpen
+          ? "Hide sources"
+          : "Show sources"
+        : "Open Hub";
   const conversationLabel = canDockConversations
     ? conversationsOpen
       ? "Collapse sidebar"
@@ -125,7 +131,21 @@ export function ChatHeader({
           variant="ghost"
           title={hubLabel}
           aria-label={hubLabel}
-          onClick={isPersistentLayout ? onToggleSources : onOpenHub}
+          onClick={() => {
+            if (hub?.desktop.mode === "detached") {
+              void hub.desktop.open();
+              return;
+            }
+            if (hub?.desktop.inlineVisible === false) {
+              hub.desktop.showInline();
+              if (isPersistentLayout) {
+                if (!sourcesVisible) onToggleSources();
+              } else onOpenHub();
+              return;
+            }
+            if (isPersistentLayout) onToggleSources();
+            else onOpenHub();
+          }}
         >
           {hubOpen ? (
             <PanelRightClose className="size-4" />

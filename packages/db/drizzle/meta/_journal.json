@@ -222,8 +222,29 @@
     {
       "idx": 31,
       "version": "7",
-      "when": 1788955870125,
-      "tag": "0031_local_work_contexts",
+      "when": 1788933789089,
+      "tag": "0031_waffo_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788955095080,
+      "tag": "0032_subscription_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788977052266,
+      "tag": "0033_local_directory_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788977052267,
+      "tag": "0034_local_work_contexts",
       "breakpoints": true
     }
   ]

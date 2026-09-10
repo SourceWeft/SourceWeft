@@ -42,7 +42,10 @@ export function buildFilesystemMountPrompt(
   const mounts = input.mounts ?? createDefaultFilesystemMounts();
   const hasSkills = mounts.some((mount) => mount.root === SKILLS_MOUNT.root);
 
-  return `<filesystem_mounts>
+  const hasWorkfiles = mounts.some(
+    (mount) => mount.backendKind === "workfiles",
+  );
+  const prompt = `<filesystem_mounts>
 ${mounts.map(mountSummary).join("\n")}
 </filesystem_mounts>
 
@@ -60,4 +63,10 @@ ${hasSkills ? "- Use /skills only to guide workflow, output shape, templates, or
 - Do not call ${LS_TOOL_NAME}('/') just to discover /kb; call ${LS_TOOL_NAME}('/kb') directly when source enumeration is needed.
 - Never narrate tool use, inspection steps, or intentions. Use tools directly, then answer.
 </filesystem_rules>`;
+  return hasWorkfiles
+    ? prompt
+    : prompt
+        .split("\n")
+        .filter((line) => !line.includes("/workfiles"))
+        .join("\n");
 }

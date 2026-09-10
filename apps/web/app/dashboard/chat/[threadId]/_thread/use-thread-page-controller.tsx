@@ -1,4 +1,5 @@
 "use client";
+import { synchronizeHubBeforeSend } from "../../../../../lib/hub-send-barrier";
 
 import {
   useCallback,
@@ -828,6 +829,12 @@ export function useThreadPageController({
         attempts?: number;
       },
     ) => {
+      try {
+        await synchronizeHubBeforeSend();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        return;
+      }
       // Set only when replaying a queued send: on a 409 re-queue the same item.
       const onRunAlreadyActive =
         options?.durableRunKey && options.queuedSendId

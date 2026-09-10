@@ -4,6 +4,8 @@ import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@sourceweft/db/schema";
 import {
+  billingSubscriptionBindings,
+  billingSubscriptionOperations,
   billingAccounts,
   billingOrders,
   billingWebhookEvents,
@@ -11,6 +13,8 @@ import {
   usageLedgers,
 } from "@sourceweft/db/schema";
 import type {
+  SubscriptionBinding,
+  SubscriptionOperation,
   BillingAccountState,
   BillingLedgerRow,
   BillingOrderState,
@@ -43,6 +47,7 @@ function mapAccount(row: BillingAccountRow): BillingAccountState {
     planFamily: row.planFamily,
     cycleAnchorAt: row.cycleAnchorAt.toISOString(),
     cycleSource: row.cycleSource,
+    subscriptionBindingId: row.subscriptionBindingId,
     cycleStartAt: row.cycleStartAt.toISOString(),
     cycleEndAt: row.cycleEndAt.toISOString(),
     pagesLimit: row.pagesLimit,
@@ -92,6 +97,10 @@ function mapSubscription(
 ): BillingSubscriptionState {
   return {
     id: row.id,
+    currentBindingId: row.currentBindingId,
+    version: row.version,
+    confirmedPeriodStart: row.confirmedPeriodStart?.toISOString() ?? null,
+    confirmedPeriodEnd: row.confirmedPeriodEnd?.toISOString() ?? null,
     teamId: row.teamId,
     provider: row.provider,
     planFamily: row.planFamily,
@@ -343,6 +352,7 @@ export class PostgresBillingStore implements BillingStore {
         planFamily: account.planFamily,
         cycleAnchorAt: parseDate(account.cycleAnchorAt),
         cycleSource: account.cycleSource,
+        subscriptionBindingId: account.subscriptionBindingId,
         cycleStartAt: parseDate(account.cycleStartAt),
         cycleEndAt: parseDate(account.cycleEndAt),
         pagesLimit: account.pagesLimit,
@@ -371,6 +381,7 @@ export class PostgresBillingStore implements BillingStore {
         planFamily: account.planFamily,
         cycleAnchorAt: parseDate(account.cycleAnchorAt),
         cycleSource: account.cycleSource,
+        subscriptionBindingId: account.subscriptionBindingId,
         cycleStartAt: parseDate(account.cycleStartAt),
         cycleEndAt: parseDate(account.cycleEndAt),
         pagesLimit: account.pagesLimit,
@@ -481,6 +492,83 @@ export class PostgresBillingStore implements BillingStore {
     const rows = limit !== undefined ? await query.limit(limit) : await query;
 
     return rows.map(mapLedger);
+  }
+
+  async lockSubscriptionTarget(
+    target: string,
+    client: PoolClient,
+    shared = false,
+  ) {
+    await client.query(
+      shared
+        ? "select pg_advisory_xact_lock_shared(hashtextextended($1, 0))"
+        : "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`billing-target:${target}`],
+    );
+  }
+  async getSubscriptionBinding(
+    identity: string,
+    client: PoolClient,
+  ): Promise<SubscriptionBinding | null> {
+    const [row] = await this.pickDb(client)
+      .select()
+      .from(billingSubscriptionBindings)
+      .where(eq(billingSubscriptionBindings.identity, identity));
+    return row
+      ? { ...row, provider: row.provider as SubscriptionBinding["provider"] }
+      : null;
+  }
+  async insertSubscriptionBinding(
+    binding: SubscriptionBinding,
+    client: PoolClient,
+  ) {
+    await this.pickDb(client)
+      .insert(billingSubscriptionBindings)
+      .values(binding);
+  }
+  async getOpenSubscriptionOperation(
+    target: string,
+    client: PoolClient,
+  ): Promise<SubscriptionOperation | null> {
+    const [row] = await this.pickDb(client)
+      .select()
+      .from(billingSubscriptionOperations)
+      .where(
+        and(
+          eq(billingSubscriptionOperations.targetKey, target),
+          sql`${billingSubscriptionOperations.status} in ('reserved','remote_pending','awaiting_confirmation','needs_resolution')`,
+        ),
+      );
+    return row
+      ? {
+          ...row,
+          kind: row.kind as SubscriptionOperation["kind"],
+          status: row.status as SubscriptionOperation["status"],
+        }
+      : null;
+  }
+  async saveSubscriptionOperation(
+    operation: SubscriptionOperation,
+    client: PoolClient,
+  ) {
+    await this.pickDb(client)
+      .insert(billingSubscriptionOperations)
+      .values(operation)
+      .onConflictDoUpdate({
+        target: billingSubscriptionOperations.id,
+        set: { ...operation, updatedAt: new Date() },
+      });
+  }
+  async completeSubscriptionPurchase(orderId: string, client: PoolClient) {
+    await this.pickDb(client)
+      .update(billingSubscriptionOperations)
+      .set({ status: "succeeded", updatedAt: new Date() })
+      .where(
+        and(
+          eq(billingSubscriptionOperations.orderId, orderId),
+          eq(billingSubscriptionOperations.kind, "purchase"),
+        ),
+      );
   }
 
   async getOrderById(orderId: string, client?: PoolClient) {
@@ -782,6 +870,14 @@ export class PostgresBillingStore implements BillingStore {
       .values({
         id: randomUUID(),
         teamId: snapshot.teamId,
+        currentBindingId: snapshot.currentBindingId,
+        version: snapshot.version,
+        confirmedPeriodStart: parseDateOrNull(
+          snapshot.confirmedPeriodStart ?? null,
+        ),
+        confirmedPeriodEnd: parseDateOrNull(
+          snapshot.confirmedPeriodEnd ?? null,
+        ),
         provider: snapshot.provider,
         planFamily: snapshot.planFamily,
         status: snapshot.status,
@@ -802,6 +898,14 @@ export class PostgresBillingStore implements BillingStore {
       .onConflictDoUpdate({
         target: [subscriptions.teamId],
         set: {
+          currentBindingId: snapshot.currentBindingId,
+          version: snapshot.version,
+          confirmedPeriodStart: parseDateOrNull(
+            snapshot.confirmedPeriodStart ?? null,
+          ),
+          confirmedPeriodEnd: parseDateOrNull(
+            snapshot.confirmedPeriodEnd ?? null,
+          ),
           provider: snapshot.provider,
           planFamily: snapshot.planFamily,
           status: snapshot.status,

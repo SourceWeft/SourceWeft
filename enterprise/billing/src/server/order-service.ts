@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { BillingSubscriptionService } from "./subscription-service";
+import { assertSubscriptionPurchaseAllowed } from "./subscription-policy";
+import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import {
   adjectives,
@@ -13,7 +15,6 @@ import type {
   CreateTopupCheckoutRequest,
   CreateTopupCheckoutResponse,
 } from "@sourceweft/contracts";
-import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
 import type { BillingServiceHost } from "./host";
 import { BillingAccountService } from "./account-service";
 import {
@@ -84,25 +85,23 @@ export type BillingOrderReconcileResult = {
   failed: number;
 };
 
-const REUSABLE_ORDER_STATUSES = new Set<BillingOrderState["status"]>([
-  "pending",
-  "checkout_created",
-]);
-
 const RECOVERABLE_CHECKOUT_STATUSES = new Set<BillingOrderState["status"]>([
   "pending",
   "checkout_created",
   "payment_failed",
+  "expired",
 ]);
 
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 const TEAM_SEAT_MIN = 2;
 const TEAM_SEAT_MAX = 99;
 
 function hasCheckoutUrl(order: BillingOrderState) {
   return (
+    order.status !== "expired" &&
+    order.status !== "payment_failed" &&
     typeof order.metadata.checkoutUrl === "string" &&
-    order.metadata.checkoutUrl.trim().length > 0
+    order.metadata.checkoutUrl.trim().length > 0 &&
+    (!order.expiresAt || Date.parse(order.expiresAt) > Date.now())
   );
 }
 
@@ -202,15 +201,18 @@ function defaultSuccessUrl(
   return `${configured}${separator}orderId=${encodeURIComponent(orderId)}`;
 }
 
-function addMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
-}
-
-function normalizeClientReferenceKey(value: string | undefined) {
+function normalizeClientReferenceKey(
+  value: string | undefined,
+  config: BillingRuntimeConfig,
+  scope?: string,
+) {
   const trimmed = value?.trim();
-  return trimmed || null;
+  if (!trimmed) return null;
+  if (config.provider === "stripe")
+    return `stripe:${scope}:${config.stripe.testMode ? "test" : "live"}:${trimmed}`;
+  return config.provider === "waffo"
+    ? `waffo:${config.waffo.merchantId}:${config.waffo.environment}:${trimmed}`
+    : trimmed;
 }
 
 function normalizeTeamSeatCount(value: number | undefined) {
@@ -333,6 +335,7 @@ export class BillingOrderService {
     request: CreatePricingCheckoutRequest;
     actor: Actor;
     personalTeamId?: string | null;
+    existingTeamId?: string;
   }): Promise<CreatePricingCheckoutResponse> {
     const planFamily = pricingPlanToPlanFamily(input.request.plan);
     ensureBillingCheckoutEnabled(this.runtimeConfig);
@@ -373,58 +376,12 @@ export class BillingOrderService {
       );
     }
 
-    if (planFamily === INDIVIDUAL_PRO_PLAN) {
-      await this.rejectIfActiveSubscription(teamId);
-    }
-
+    const checkoutScope = await this.provider.getCheckoutScope?.();
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
+      this.runtimeConfig,
+      checkoutScope,
     );
-    if (clientReferenceKey) {
-      const existing = await this.store.getOrderByClientReference(
-        input.actor.userId,
-        clientReferenceKey,
-      );
-      if (existing && hasCheckoutUrl(existing)) {
-        return toCheckoutResponse(existing);
-      }
-      if (
-        existing &&
-        RECOVERABLE_CHECKOUT_STATUSES.has(existing.status) &&
-        existing.kind === "subscription" &&
-        existing.planFamily === planFamily &&
-        existing.billingInterval === billingInterval
-      ) {
-        const recovered = await this.createProviderCheckoutForSubscriptionOrder(
-          {
-            order: existing,
-            actor: input.actor,
-            planFamily,
-            billingInterval,
-            quantity,
-            productId: product.productId,
-          },
-        );
-        return toCheckoutResponse(recovered);
-      }
-    }
-
-    if (planFamily === INDIVIDUAL_PRO_PLAN) {
-      const reusable = await this.store.findOpenSubscriptionOrder({
-        userId: input.actor.userId,
-        teamId,
-        planFamily,
-        billingInterval,
-      });
-      if (
-        reusable &&
-        REUSABLE_ORDER_STATUSES.has(reusable.status) &&
-        hasCheckoutUrl(reusable)
-      ) {
-        return toCheckoutResponse(reusable);
-      }
-    }
-
     const draft = createOrderBase({
       provider: this.runtimeConfig.provider,
       kind: "subscription",
@@ -445,6 +402,9 @@ export class BillingOrderService {
       cancelUrl: input.request.cancelUrl ?? null,
       metadata: {
         source: input.request.source,
+        ...(input.existingTeamId
+          ? { existingTeamId: input.existingTeamId }
+          : {}),
         audience: catalogEntry.audience,
         minQuantity: catalogEntry.minQuantity,
         ...(planFamily === TEAM_STANDARD_PLAN && input.request.teamName
@@ -456,17 +416,244 @@ export class BillingOrderService {
       input.request.successUrl ??
       defaultSuccessUrl(this.runtimeConfig, draft.id);
 
-    let order = await this.store.insertOrder(draft);
-    order = await this.createProviderCheckoutForSubscriptionOrder({
-      order,
-      actor: input.actor,
-      planFamily,
-      billingInterval,
-      quantity,
-      productId: product.productId,
+    const target = input.existingTeamId ?? teamId;
+    const targetKey = target
+      ? `team:${target}`
+      : `purchase:${input.actor.userId}:${clientReferenceKey ?? draft.id}`;
+    draft.metadata = {
+      ...draft.metadata,
+      ...(await this.provider.checkoutMetadata?.()),
+      subscriptionTarget: targetKey,
+      checkoutActorEmail: input.actor.email,
+    };
+    const requestHash = createHash("sha256")
+      .update(
+        JSON.stringify([
+          input.actor.userId,
+          this.runtimeConfig.provider,
+          checkoutScope,
+          this.runtimeConfig.provider === "waffo"
+            ? this.runtimeConfig.waffo.environment
+            : this.runtimeConfig.provider === "stripe"
+              ? this.runtimeConfig.stripe.testMode
+              : this.runtimeConfig.creem.testMode,
+          planFamily,
+          billingInterval,
+          quantity,
+          product.amountCents,
+          input.request.successUrl ?? null,
+        ]),
+      )
+      .digest("hex");
+    // A different purchase can replace an abandoned operation only after the provider
+    // confirms the original checkout is no longer payable. Time alone is not proof.
+    const candidate = await this.store.runInTransaction((client) =>
+      this.store.getOpenSubscriptionOperation(targetKey, client),
+    );
+    if (
+      candidate?.kind === "purchase" &&
+      candidate.requestHash !== requestHash &&
+      candidate.orderId &&
+      candidate.status === "awaiting_confirmation" &&
+      this.provider.inspectCheckout
+    ) {
+      const previous = await this.store.getOrderById(candidate.orderId);
+      const sameScope =
+        previous?.provider === this.runtimeConfig.provider &&
+        (previous.provider !== "stripe" ||
+          (previous.metadata.stripeAccountId === checkoutScope &&
+            previous.metadata.stripeTestMode ===
+              this.runtimeConfig.stripe.testMode)) &&
+        (previous.provider !== "waffo" ||
+          (previous.metadata.waffoMerchantId ===
+            this.runtimeConfig.waffo.merchantId &&
+            previous.metadata.waffoEnvironment ===
+              this.runtimeConfig.waffo.environment));
+      if (
+        previous &&
+        sameScope &&
+        (await this.provider.inspectCheckout(previous)) === "expired"
+      ) {
+        await this.store.runInTransaction(async (client) => {
+          await this.store.lockSubscriptionTarget(targetKey, client);
+          const latest = await this.store.getOpenSubscriptionOperation(
+            targetKey,
+            client,
+          );
+          const order = await this.store.getOrderById(previous.id, client);
+          if (
+            latest?.id === candidate.id &&
+            latest.status === "awaiting_confirmation" &&
+            order?.paymentStatus !== "paid"
+          )
+            await this.store.saveSubscriptionOperation(
+              { ...latest, status: "failed" },
+              client,
+            );
+        });
+      }
+    }
+    const reserve = await this.store.runInTransaction(async (client) => {
+      await this.store.lockSubscriptionTarget(targetKey, client);
+      if (target) {
+        assertSubscriptionPurchaseAllowed(
+          await this.store.getSubscriptionByTeam(target, client),
+        );
+        if (planFamily === TEAM_STANDARD_PLAN) {
+          const occupied =
+            (await this.store.countTeamMembers(target, client)) +
+            (await this.store.countPendingTeamInvitations(target, client));
+          if (quantity < occupied)
+            throw new BillingError(
+              "SEAT_COUNT_BELOW_ALLOCATED_SEATS",
+              409,
+              "Seats cannot be fewer than members and pending invitations",
+            );
+        }
+      }
+      const open = await this.store.getOpenSubscriptionOperation(
+        targetKey,
+        client,
+      );
+      if (open) {
+        if (open.kind !== "purchase" || open.requestHash !== requestHash)
+          throw new BillingError(
+            "SUBSCRIPTION_OPERATION_CONFLICT",
+            409,
+            "Another subscription operation is awaiting resolution",
+          );
+        const order = open.orderId
+          ? await this.store.getOrderById(open.orderId, client)
+          : null;
+        if (!order)
+          throw new BillingError(
+            "SUBSCRIPTION_OPERATION_INVALID",
+            409,
+            "The purchase operation has no order",
+          );
+        return { order, operation: open, create: false };
+      }
+      if (
+        clientReferenceKey &&
+        (await this.store.getOrderByClientReference(
+          input.actor.userId,
+          clientReferenceKey,
+          client,
+        ))
+      )
+        throw new BillingError(
+          "BILLING_CHECKOUT_REFERENCE_CONFLICT",
+          409,
+          "Use a new purchase reference for a different checkout",
+        );
+      const order = await this.store.insertOrder(draft, client);
+      const operation = {
+        id: order.id,
+        targetKey,
+        kind: "purchase" as const,
+        requestHash,
+        orderId: order.id,
+        status: "remote_pending" as const,
+        metadata: { requestStartedAt: Date.now(), leaseAt: Date.now() },
+      };
+      await this.store.saveSubscriptionOperation(operation, client);
+      return { order, operation, create: true };
     });
+    if (!reserve.create) {
+      if (hasCheckoutUrl(reserve.order))
+        return toCheckoutResponse(reserve.order);
+      const retryWindow = this.provider.checkoutRetryWindowMs ?? 0;
+      const requestStartedAt = Number(
+        reserve.operation.metadata.requestStartedAt ?? 0,
+      );
+      const canReplay =
+        Date.now() - requestStartedAt < retryWindow &&
+        (reserve.operation.status === "needs_resolution" ||
+          (reserve.operation.status === "remote_pending" &&
+            Date.now() - Number(reserve.operation.metadata.leaseAt ?? 0) >
+              90_000));
+      const status =
+        !canReplay && this.provider.inspectCheckout
+          ? await this.provider.inspectCheckout(reserve.order)
+          : "unknown";
+      if (!canReplay && status !== "expired")
+        throw new BillingError(
+          "SUBSCRIPTION_PAYMENT_PENDING",
+          409,
+          "The previous payment result is not resolved; wait for confirmation before retrying",
+        );
+      await this.store.runInTransaction(async (client) => {
+        await this.store.lockSubscriptionTarget(targetKey, client);
+        const latest = await this.store.getOpenSubscriptionOperation(
+          targetKey,
+          client,
+        );
+        const order = await this.store.getOrderById(reserve.order.id, client);
+        if (
+          !latest ||
+          latest.status !== reserve.operation.status ||
+          latest.metadata.leaseAt !== reserve.operation.metadata.leaseAt ||
+          (!canReplay && latest.status !== "awaiting_confirmation") ||
+          !order ||
+          order.paymentStatus === "paid"
+        )
+          throw new BillingError(
+            "SUBSCRIPTION_OPERATION_CONFLICT",
+            409,
+            "Purchase changed during checkout recovery",
+          );
+        await this.store.saveSubscriptionOperation(
+          {
+            ...latest,
+            status: "remote_pending",
+            metadata: {
+              ...latest.metadata,
+              leaseAt: Date.now(),
+              requestStartedAt: canReplay ? requestStartedAt : Date.now(),
+            },
+          },
+          client,
+        );
+      });
+    }
 
-    return toCheckoutResponse(order);
+    try {
+      const order = await this.createProviderCheckoutForSubscriptionOrder({
+        order: reserve.order,
+        actor: input.actor,
+        planFamily,
+        billingInterval,
+        quantity,
+        productId: product.productId,
+      });
+      await this.store.runInTransaction(async (client) => {
+        await this.store.lockSubscriptionTarget(targetKey, client);
+        const latest = await this.store.getOpenSubscriptionOperation(
+          targetKey,
+          client,
+        );
+        if (latest?.id === reserve.operation.id)
+          await this.store.saveSubscriptionOperation(
+            { ...latest, status: "awaiting_confirmation" },
+            client,
+          );
+      });
+      return toCheckoutResponse(order);
+    } catch (error) {
+      await this.store.runInTransaction(async (client) => {
+        await this.store.lockSubscriptionTarget(targetKey, client);
+        const latest = await this.store.getOpenSubscriptionOperation(
+          targetKey,
+          client,
+        );
+        if (latest?.id === reserve.operation.id)
+          await this.store.saveSubscriptionOperation(
+            { ...latest, status: "needs_resolution" },
+            client,
+          );
+      });
+      throw error;
+    }
   }
 
   async createTopupCheckout(input: {
@@ -496,8 +683,11 @@ export class BillingOrderService {
       unitType === "credit" ? catalogEntry.unitAmount * quantity : 0;
     const grantedPages =
       unitType === "page" ? catalogEntry.unitAmount * quantity : 0;
+    const checkoutScope = await this.provider.getCheckoutScope?.();
     const clientReferenceKey = normalizeClientReferenceKey(
       input.request.clientReferenceKey,
+      this.runtimeConfig,
+      checkoutScope,
     );
 
     if (clientReferenceKey) {
@@ -506,7 +696,29 @@ export class BillingOrderService {
         clientReferenceKey,
       );
       if (existing) {
-        return toTopupResponse(existing);
+        if (
+          existing.kind !== catalogEntry.kind ||
+          existing.quantity !== quantity ||
+          existing.unitType !== unitType ||
+          existing.teamId !== input.teamId ||
+          existing.provider !== this.runtimeConfig.provider
+        )
+          throw new BillingError(
+            "BILLING_CHECKOUT_REFERENCE_CONFLICT",
+            409,
+            "This checkout reference belongs to a different purchase",
+          );
+        if (hasCheckoutUrl(existing) || existing.paymentStatus === "paid")
+          return toTopupResponse(existing);
+        if (RECOVERABLE_CHECKOUT_STATUSES.has(existing.status))
+          return toTopupResponse(
+            await this.createProviderTopupCheckout(existing, input.actor),
+          );
+        throw new BillingError(
+          "BILLING_ORDER_NOT_RETRYABLE",
+          409,
+          "Start a new checkout for this purchase",
+        );
       }
     }
 
@@ -537,43 +749,77 @@ export class BillingOrderService {
       input.request.successUrl ??
       defaultSuccessUrl(this.runtimeConfig, draft.id);
 
-    let order = await this.store.insertOrder(draft);
-    const providerResult = await this.provider.createCheckout({
-      orderId: order.id,
-      persistedOrder: true,
-      kind: order.kind,
-      teamId: order.teamId,
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
-      planFamily: null,
-      billingInterval: null,
-      quantity,
-      unitType,
-      unitAmount: catalogEntry.unitAmount,
-      grantedCredits,
-      grantedPages,
-      externalProductId: catalogEntry.productId,
-      amountTotal: order.amountTotal,
-      currency: order.currency,
-      successUrl: order.successUrl ?? undefined,
-      cancelUrl: order.cancelUrl ?? undefined,
-      metadata: order.metadata,
-    });
+    draft.metadata = {
+      ...draft.metadata,
+      ...(await this.provider.checkoutMetadata?.()),
+    };
+    const order = await this.store.insertOrder(draft);
+    return toTopupResponse(
+      await this.createProviderTopupCheckout(order, input.actor),
+    );
+  }
 
-    order = await this.store.updateOrder({
+  private async createProviderTopupCheckout(
+    order: BillingOrderState,
+    actor: Actor,
+  ) {
+    let providerResult;
+    try {
+      providerResult = await this.provider.createCheckout({
+        orderId: order.id,
+        persistedOrder: true,
+        previousCheckoutId: order.externalCheckoutId ?? undefined,
+        kind: order.kind,
+        teamId: order.teamId,
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
+        planFamily: null,
+        billingInterval: null,
+        quantity: order.quantity,
+        unitType: order.unitType,
+        unitAmount: order.unitAmount,
+        grantedCredits: order.grantedCredits,
+        grantedPages: order.grantedPages,
+        externalProductId: order.externalProductId ?? "",
+        amountTotal: order.amountTotal,
+        currency: order.currency,
+        successUrl: order.successUrl ?? undefined,
+        cancelUrl: order.cancelUrl ?? undefined,
+        metadata: order.metadata,
+      });
+    } catch (error) {
+      await this.store.updateOrder({
+        ...order,
+        status: "payment_failed",
+        paymentStatus: "failed",
+        errorCode:
+          error instanceof BillingError
+            ? error.code
+            : "BILLING_CHECKOUT_CREATE_FAILED",
+        errorMessage: "Unable to create payment checkout",
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+    return this.store.updateOrder({
       ...order,
       provider: providerResult.provider,
       status: "checkout_created",
+      paymentStatus: "unpaid",
       externalCheckoutId: providerResult.externalCheckoutId,
       externalCustomerId: providerResult.externalCustomerId,
+      externalProductId:
+        providerResult.externalProductId ?? order.externalProductId,
+      expiresAt: providerResult.expiresAt ?? order.expiresAt,
       metadata: {
         ...order.metadata,
+        ...providerResult.metadata,
         checkoutUrl: providerResult.checkoutUrl,
       },
+      errorCode: null,
+      errorMessage: null,
       updatedAt: new Date().toISOString(),
     });
-
-    return toTopupResponse(order);
   }
 
   private async createProviderCheckoutForSubscriptionOrder(input: {
@@ -589,10 +835,14 @@ export class BillingOrderService {
       providerResult = await this.provider.createCheckout({
         orderId: input.order.id,
         persistedOrder: true,
+        previousCheckoutId: input.order.externalCheckoutId ?? undefined,
         kind: input.order.kind,
         teamId: input.order.teamId,
         actorUserId: input.actor.userId,
-        actorEmail: input.actor.email,
+        actorEmail:
+          typeof input.order.metadata.checkoutActorEmail === "string"
+            ? input.order.metadata.checkoutActorEmail
+            : input.actor.email,
         planFamily: input.planFamily,
         billingInterval: input.billingInterval,
         quantity: input.quantity,
@@ -604,37 +854,74 @@ export class BillingOrderService {
         metadata: input.order.metadata,
       });
     } catch (error) {
-      await this.store.updateOrder({
-        ...input.order,
-        status: "payment_failed",
-        paymentStatus: "failed",
-        errorCode:
-          error instanceof BillingError
-            ? error.code
-            : "BILLING_CHECKOUT_CREATE_FAILED",
-        errorMessage:
-          error instanceof Error
-            ? error.message
-            : "Unable to create billing checkout",
-        updatedAt: new Date().toISOString(),
+      await this.store.runInTransaction(async (client) => {
+        await this.store.lockSubscriptionTarget(
+          String(input.order.metadata.subscriptionTarget),
+          client,
+        );
+        const current = await this.store.getOrderByIdForUpdate(
+          input.order.id,
+          client,
+        );
+        if (current && current.paymentStatus !== "paid")
+          await this.store.updateOrder(
+            {
+              ...current,
+              status: "payment_failed",
+              paymentStatus: "failed",
+              errorCode: "BILLING_CHECKOUT_RESULT_UNKNOWN",
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : "Checkout result is unresolved",
+              updatedAt: new Date().toISOString(),
+            },
+            client,
+          );
       });
       throw error;
     }
-
-    return this.store.updateOrder({
-      ...input.order,
-      provider: providerResult.provider,
-      status: "checkout_created",
-      paymentStatus: "unpaid",
-      externalCheckoutId: providerResult.externalCheckoutId,
-      externalCustomerId: providerResult.externalCustomerId,
-      metadata: {
-        ...input.order.metadata,
-        checkoutUrl: providerResult.checkoutUrl,
-      },
-      errorCode: null,
-      errorMessage: null,
-      updatedAt: new Date().toISOString(),
+    return this.store.runInTransaction(async (client) => {
+      await this.store.lockSubscriptionTarget(
+        String(input.order.metadata.subscriptionTarget),
+        client,
+      );
+      const current = await this.store.getOrderByIdForUpdate(
+        input.order.id,
+        client,
+      );
+      if (!current)
+        throw new BillingError(
+          "BILLING_ORDER_NOT_FOUND",
+          404,
+          "Order not found",
+        );
+      return this.store.updateOrder(
+        {
+          ...current,
+          provider: providerResult.provider,
+          status:
+            current.paymentStatus === "paid"
+              ? current.status
+              : "checkout_created",
+          paymentStatus: current.paymentStatus === "paid" ? "paid" : "unpaid",
+          externalCheckoutId: providerResult.externalCheckoutId,
+          externalCustomerId:
+            providerResult.externalCustomerId ?? current.externalCustomerId,
+          externalProductId:
+            providerResult.externalProductId ?? current.externalProductId,
+          expiresAt: providerResult.expiresAt ?? current.expiresAt,
+          metadata: {
+            ...current.metadata,
+            ...providerResult.metadata,
+            checkoutUrl: providerResult.checkoutUrl,
+          },
+          errorCode: null,
+          errorMessage: null,
+          updatedAt: new Date().toISOString(),
+        },
+        client,
+      );
     });
   }
 
@@ -681,6 +968,16 @@ export class BillingOrderService {
   async fulfillOrder(input: FulfillInput) {
     try {
       return await this.store.runInTransaction(async (client) => {
+        const observed = await this.store.getOrderById(input.orderId, client);
+        if (observed?.kind === "subscription") {
+          const team = observed.teamId ?? observed.metadata.existingTeamId;
+          await this.store.lockSubscriptionTarget(
+            typeof team === "string"
+              ? `team:${team}`
+              : `purchase:${observed.id}`,
+            client,
+          );
+        }
         const order = await this.store.getOrderByIdForUpdate(
           input.orderId,
           client,
@@ -715,6 +1012,12 @@ export class BillingOrderService {
             metadata: {
               ...order.metadata,
               ...(input.metadata ?? {}),
+              ...(input.currentPeriodStart
+                ? { currentPeriodStart: input.currentPeriodStart }
+                : {}),
+              ...(input.currentPeriodEnd
+                ? { currentPeriodEnd: input.currentPeriodEnd }
+                : {}),
               ...(input.externalSubscriptionItemId
                 ? {
                     externalSubscriptionItemId:
@@ -738,25 +1041,6 @@ export class BillingOrderService {
     } catch (error) {
       await this.markFulfillmentFailed(input.orderId, error);
       throw error;
-    }
-  }
-
-  private async rejectIfActiveSubscription(teamId: string | null) {
-    if (!teamId) {
-      return;
-    }
-
-    const subscription = await this.store.getSubscriptionByTeam(teamId);
-    if (
-      subscription &&
-      subscription.planFamily === INDIVIDUAL_PRO_PLAN &&
-      ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
-    ) {
-      throw new BillingError(
-        "SUBSCRIPTION_ALREADY_ACTIVE",
-        409,
-        "Pro is already active for this personal organization",
-      );
     }
   }
 
@@ -824,30 +1108,23 @@ export class BillingOrderService {
           : 1,
     };
 
-    // Activating (or changing) the team plan is a team-wide change: every
-    // current member's row must receive the new plan's per-seat allocation.
-    // We are already inside fulfillOrder's transaction (holding the order row
-    // locked), and runInTransaction opens a fresh connection rather than
-    // nesting, so we can't use withLockedTeamAccounts here — instead we fan out
-    // over the same client, ensuring+locking each member's row exactly as
-    // withLockedTeamAccounts would. The team-wide subscription upsert is emitted
-    // exactly once (on the first member).
-    const memberUserIds = await this.store.listTeamMemberUserIds(
-      teamId,
+    const applied = await new BillingSubscriptionService(
+      this.store,
+      this.runtimeConfig,
+      this.provider,
+      this.accountService,
+    ).applySubscriptionSnapshotLocked(
+      { ...snapshot, confirmCoverage: true },
       client,
+      true,
     );
-    let upsertSubscriptionOnce = true;
-    for (const memberUserId of memberUserIds) {
-      const account = await this.accountService.ensureAccountLocked(
-        teamId,
-        memberUserId,
-        client,
+    if (!applied)
+      throw new BillingError(
+        "SUBSCRIPTION_BINDING_CONFLICT",
+        409,
+        "This purchase no longer owns the current subscription",
       );
-      await this.applySubscriptionSnapshotLocked(account, snapshot, client, {
-        upsertSubscription: upsertSubscriptionOnce,
-      });
-      upsertSubscriptionOnce = false;
-    }
+    await this.store.completeSubscriptionPurchase(order.id, client);
 
     return this.store.updateOrder(
       {
@@ -961,6 +1238,8 @@ export class BillingOrderService {
   }
 
   private async ensurePaidTeamOrganization(order: BillingOrderState) {
+    if (typeof order.metadata.existingTeamId === "string")
+      return order.metadata.existingTeamId;
     if (order.teamId) {
       return order.teamId;
     }
@@ -1019,81 +1298,11 @@ export class BillingOrderService {
       return { startAt: providedStart, endAt: providedEnd };
     }
 
-    const startAt = new Date();
-    if (billingInterval === "monthly") {
-      return { startAt, endAt: addMonths(startAt, 1) };
-    }
-
-    return { startAt, endAt: addMonths(startAt, 12) };
-  }
-
-  private async applySubscriptionSnapshotLocked(
-    account: BillingAccountState,
-    snapshot: TeamSubscriptionSnapshot,
-    client: PoolClient,
-    options: { upsertSubscription: boolean } = { upsertSubscription: true },
-  ) {
-    // The subscription row is a team-wide record; only upsert it once even when
-    // this runs per-member as part of a team fan-out.
-    if (options.upsertSubscription) {
-      await this.store.upsertSubscription(snapshot, client);
-    }
-
-    const previousSeatCount = account.seatCount;
-    account.seatCount = snapshot.seatCount;
-    await this.accountService.applyPlanFamilyLocked(
-      account,
-      snapshot.planFamily,
-      client,
-      {
-        source: "billing_order_fulfillment",
-        provider: snapshot.provider,
-        orderId: snapshot.billingOrderId,
-        externalSubscriptionId: snapshot.externalSubscriptionId,
-        suppressImmediateGrant: true,
-      },
+    throw new BillingError(
+      "INVALID_PROVIDER_SUBSCRIPTION_PERIOD",
+      422,
+      "A confirmed subscription period is required",
     );
-
-    if (previousSeatCount !== account.seatCount) {
-      await this.accountService.refreshPlanQuotaLocked(account, client, {
-        source: "billing_order_fulfillment",
-        provider: snapshot.provider,
-        orderId: snapshot.billingOrderId,
-        externalSubscriptionId: snapshot.externalSubscriptionId,
-        reason: "subscription_created",
-        previousSeatCount,
-        nextSeatCount: account.seatCount,
-      });
-    }
-
-    const cycle =
-      snapshot.billingInterval === "monthly"
-        ? {
-            startAt: new Date(snapshot.currentPeriodStart ?? new Date()),
-            endAt: new Date(
-              snapshot.currentPeriodEnd ?? addMonths(new Date(), 1),
-            ),
-          }
-        : getAnchoredMonthlyCycleWindow(
-            new Date(),
-            new Date(snapshot.currentPeriodStart ?? new Date()),
-          );
-
-    await this.accountService.realignCycleLocked(account, client, {
-      cycleAnchorAt: snapshot.currentPeriodStart ?? new Date().toISOString(),
-      cycleSource: "provider_subscription",
-      cycleStartAt: cycle.startAt.toISOString(),
-      cycleEndAt: cycle.endAt.toISOString(),
-      expireCurrentMonthly: true,
-      grantNewMonthly: true,
-      metadata: {
-        source: "billing_order_fulfillment",
-        provider: snapshot.provider,
-        orderId: snapshot.billingOrderId,
-        planFamily: snapshot.planFamily,
-        billingInterval: snapshot.billingInterval,
-      },
-    });
   }
 
   private async markFulfillmentFailed(orderId: string, error: unknown) {

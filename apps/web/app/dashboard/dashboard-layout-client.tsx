@@ -3,6 +3,11 @@
 import { synchronizeLocalHostScope } from "../../lib/local-host-session";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { desktopHubBridge } from "../../lib/desktop-hub-bridge";
+import { desktopBridge } from "../../lib/desktop-bridge";
+import { toast } from "sonner";
+import { hubSkillMemory } from "../../lib/hub-skill-memory";
+import { ChatHubProvider } from "./chat/_components/chat-hub-context";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardChatStateProvider } from "./_components/dashboard-chat-state";
@@ -64,6 +69,22 @@ export function DashboardLayoutClient({
   const [redirecting, setRedirecting] = useState(false);
   const [hasConfirmedSession, setHasConfirmedSession] = useState(false);
   const { data, isPending, refetch } = authClient.useSession();
+  const previousAccountId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const accountId = data?.user?.id;
+    if (
+      previousAccountId.current &&
+      previousAccountId.current !== accountId &&
+      !isPending
+    ) {
+      hubSkillMemory.clear();
+      if (pathname !== "/dashboard/hub-window" && desktopBridge.isAvailable())
+        void desktopHubBridge
+          .action("logout")
+          .catch((error) => toast.error(error.message));
+    }
+    if (!isPending) previousAccountId.current = accountId;
+  }, [data?.user?.id, isPending, pathname]);
   const hasSession = hasActiveSession(data as SessionData | undefined);
   const userId = data?.user?.id;
   const sessionId = data?.session?.id;
@@ -188,17 +209,27 @@ export function DashboardLayoutClient({
     return <DashboardShellRouteSkeleton pathname={pathname} />;
   }
 
+  if (pathname === "/dashboard/hub-window") {
+    return (
+      <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
+        {children}
+      </main>
+    );
+  }
+
   return (
     <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
           <DashboardWorkspaceLayout>
-            <DashboardSidebar />
-            <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-              <DashboardPageNavigation />
-              <DashboardMobileContent>{children}</DashboardMobileContent>
-            </main>
-            <DashboardMobileBottomNav />
+            <ChatHubProvider key={data?.user?.id}>
+              <DashboardSidebar />
+              <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+                <DashboardPageNavigation />
+                <DashboardMobileContent>{children}</DashboardMobileContent>
+              </main>
+              <DashboardMobileBottomNav />
+            </ChatHubProvider>
           </DashboardWorkspaceLayout>
         </DashboardMobileNavProvider>
       </DashboardChatStateProvider>

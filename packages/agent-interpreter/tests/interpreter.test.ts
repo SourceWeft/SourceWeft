@@ -396,3 +396,19 @@ test("QuickJS interrupts non-terminating code", async () => {
     session.dispose();
   }
 });
+
+test("PC interpreter reads the physical working directory and denies DB Workfiles", async () => {
+  const calls: string[] = [];
+  const configuredLimits = limits();
+  const tools = createInterpreterReadTools({
+    backend: backendWithCalls(calls), readRoots: ["/kb", "/Users/test/task"],
+    allowedTools: ["read_file"], limits: configuredLimits,
+    gate: createInterpreterExecutionGate(configuredLimits), context: { turnId: "pc" },
+  });
+  const read = tools[0]!;
+  await read.invoke({ file_path: "/Users/test/task/note.txt" });
+  await assert.rejects(read.invoke({ file_path: "/workfiles/note.txt" }));
+  await assert.rejects(read.invoke({ file_path: "/Users/test/task-other/note.txt" }));
+  await assert.rejects(read.invoke({ file_path: "/Users/test/task/../private.txt" }));
+  assert.deepEqual(calls, ["/Users/test/task/note.txt"]);
+});

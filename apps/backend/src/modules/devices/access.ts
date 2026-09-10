@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, inArray, sql, or } from "drizzle-orm";
 import {
   db,
   localDevices,
@@ -7,6 +7,7 @@ import {
   localDeviceEnrollments,
   localToolInvocations,
   localCreationContexts,
+  threads,
 } from "@sourceweft/db";
 import { ApiError } from "../../api/response/api-response";
 import { tokenHash } from "./service";
@@ -387,7 +388,7 @@ export function targetKey(
 ) {
   return target.kind === "cloud"
     ? "cloud"
-    : `local:${target.deviceId}:${target.folderId ?? ""}`;
+    : `local:${target.deviceId}:folder:${target.folderId ?? ""}:directory:${target.directoryGrantId ?? ""}`;
 }
 
 export async function revokeFolderAccess(
@@ -425,9 +426,13 @@ export async function revokeFolderAccess(
   const bindings = await db
     .select({ threadId: localThreadBindings.threadId })
     .from(localThreadBindings)
+    .innerJoin(threads, eq(threads.id, localThreadBindings.threadId))
     .where(
       and(
-        eq(localThreadBindings.folderId, folderId),
+        or(
+          eq(localThreadBindings.folderId, folderId),
+          sql`${threads.executionTargetJson}->>'directoryGrantId' = ${folderId}`,
+        ),
         eq(localThreadBindings.deviceId, deviceId),
       ),
     );

@@ -20,6 +20,23 @@ pub fn web_capability(base: &Url) -> CapabilityBuilder {
         .permission("allow-authenticate-local-host")
         .permission("allow-choose-local-folder")
         .permission("allow-disconnect-local-host")
+        .permission("allow-choose-working-directory")
+        .permission("allow-enable-local-host")
+        .permission("allow-hub-window-action")
+        .permission("allow-hub-window-send")
+}
+
+pub fn hub_capability(base: &Url) -> CapabilityBuilder {
+    CapabilityBuilder::new("configured-hub-window")
+        .window("hub")
+        .local(false)
+        .remote(base.origin().ascii_serialization())
+        .permission("core:event:allow-listen")
+        .permission("core:event:allow-unlisten")
+        .permission("allow-desktop-info")
+        .permission("allow-open-external-url")
+        .permission("allow-hub-window-action")
+        .permission("allow-hub-window-send")
 }
 
 fn same_trusted_origin(url: &Url, base: &Url) -> bool {
@@ -94,6 +111,41 @@ mod tests {
                 assert!(!patterns.iter().any(|pattern| pattern.test(&url(unrelated))));
             }
         }
+    }
+
+    #[test]
+    fn hub_transport_grants_only_scoped_relay_and_view_actions() {
+        let CapabilityFile::Capability(capability) =
+            hub_capability(&url("http://localhost:3300")).build()
+        else {
+            panic!("expected capability")
+        };
+        assert_eq!(capability.windows, vec!["hub"]);
+        assert!(!capability.local);
+        let permissions = serde_json::to_value(&capability.permissions).unwrap();
+        let permissions = permissions.as_array().unwrap();
+        assert!(permissions.iter().any(|p| p == "allow-hub-window-send"));
+        for denied in [
+            "allow-authenticate-local-host",
+            "allow-choose-local-folder",
+            "allow-enable-local-host",
+            "allow-set-autostart",
+        ] {
+            assert!(!permissions.iter().any(|p| p == denied));
+        }
+        let patterns: Vec<RemoteUrlPattern> = capability
+            .remote
+            .unwrap()
+            .urls
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert!(patterns
+            .iter()
+            .any(|p| p.test(&url("http://localhost:3300"))));
+        assert!(!patterns
+            .iter()
+            .any(|p| p.test(&url("https://evil.example"))));
     }
 
     #[test]

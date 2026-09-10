@@ -564,7 +564,8 @@ class ContentThreadService {
         previous.kind !== requested.kind ||
         (previous.kind === "local" &&
           requested.kind === "local" &&
-          previous.deviceId !== requested.deviceId)
+          (previous.deviceId !== requested.deviceId ||
+            previous.directoryGrantId !== requested.directoryGrantId))
       ) {
         throw new ContentError(
           409,

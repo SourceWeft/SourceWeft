@@ -1,5 +1,5 @@
 {
-  "id": "b548ddae-6135-49ac-a1f2-dac12bf84ffc",
+  "id": "3fbcea20-2fea-4895-895b-cc05689292f0",
   "prevId": "ab85a972-58fb-4fc7-872b-599eb9329451",
   "version": "7",
   "dialect": "postgresql",
@@ -1259,7 +1259,7 @@
       "checkConstraints": {
         "billing_orders_provider_check": {
           "name": "billing_orders_provider_check",
-          "value": "\"billing_orders\".\"provider\" in ('none', 'creem', 'stripe', 'manual')"
+          "value": "\"billing_orders\".\"provider\" in ('none', 'creem', 'waffo', 'stripe', 'manual')"
         },
         "billing_orders_kind_check": {
           "name": "billing_orders_kind_check",
@@ -1332,6 +1332,95 @@
         "billing_orders_team_checkout_no_org_check": {
           "name": "billing_orders_team_checkout_no_org_check",
           "value": "\"billing_orders\".\"plan_family\" <> 'team_standard' or \"billing_orders\".\"status\" not in ('pending', 'checkout_created') or \"billing_orders\".\"team_id\" is null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.billing_provider_settings": {
+      "name": "billing_provider_settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "merchant_id": {
+          "name": "merchant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "environment": {
+          "name": "environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "products": {
+          "name": "products",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "billing_provider_settings_merchant_env_uq": {
+          "name": "billing_provider_settings_merchant_env_uq",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "merchant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "billing_provider_settings_environment_check": {
+          "name": "billing_provider_settings_environment_check",
+          "value": "\"billing_provider_settings\".\"environment\" in ('test', 'prod')"
         }
       },
       "isRLSEnabled": false
@@ -1525,7 +1614,7 @@
         },
         "billing_webhook_events_provider_check": {
           "name": "billing_webhook_events_provider_check",
-          "value": "\"billing_webhook_events\".\"provider\" in ('none', 'creem', 'stripe', 'manual')"
+          "value": "\"billing_webhook_events\".\"provider\" in ('none', 'creem', 'waffo', 'stripe', 'manual')"
         }
       },
       "isRLSEnabled": false
@@ -1807,7 +1896,7 @@
       "checkConstraints": {
         "subscriptions_provider_check": {
           "name": "subscriptions_provider_check",
-          "value": "\"subscriptions\".\"provider\" in ('none', 'creem', 'stripe', 'manual')"
+          "value": "\"subscriptions\".\"provider\" in ('none', 'creem', 'waffo', 'stripe', 'manual')"
         },
         "subscriptions_status_check": {
           "name": "subscriptions_status_check",
@@ -15873,131 +15962,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.local_creation_contexts": {
-      "name": "local_creation_contexts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target": {
-          "name": "target",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.local_device_access": {
-      "name": "local_device_access",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "native": {
-          "name": "native",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "policy_revision": {
-          "name": "policy_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "local_device_access_device_id_local_devices_id_fk": {
-          "name": "local_device_access_device_id_local_devices_id_fk",
-          "tableFrom": "local_device_access",
-          "tableTo": "local_devices",
-          "columnsFrom": [
-            "device_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.local_device_enrollments": {
       "name": "local_device_enrollments",
       "schema": "",
@@ -16013,12 +15977,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "expires_at": {
           "name": "expires_at",
@@ -16056,26 +16014,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "remote_enabled": {
-          "name": "remote_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "policy_revision": {
-          "name": "policy_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "workspace_base": {
-          "name": "workspace_base",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "token_hash": {
           "name": "token_hash",
@@ -16133,69 +16071,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.local_folder_grants": {
-      "name": "local_folder_grants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "local_folder_grants_device_id_local_devices_id_fk": {
-          "name": "local_folder_grants_device_id_local_devices_id_fk",
-          "tableFrom": "local_folder_grants",
-          "tableTo": "local_devices",
-          "columnsFrom": [
-            "device_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.local_thread_bindings": {
       "name": "local_thread_bindings",
       "schema": "",
@@ -16220,12 +16095,6 @@
         },
         "local_workspace_id": {
           "name": "local_workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "folder_id": {
-          "name": "folder_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -16309,12 +16178,6 @@
         },
         "run_id": {
           "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "access_id": {
-          "name": "access_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false

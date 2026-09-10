@@ -309,24 +309,20 @@ test("local invocations compare JSON wire payloads while rejecting real paramete
   const workspaceId = randomUUID(),
     threadId = randomUUID(),
     teamId = randomUUID();
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Wire payload",
-      slug: workspaceId,
-    });
-  await schema.db
-    .insert(schema.threads)
-    .values({
-      id: threadId,
-      teamId,
-      workspaceId,
-      createdBy: h.userId,
-      title: "Wire payload",
-      executionTargetJson: { kind: "local", deviceId: h.id },
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Wire payload",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    teamId,
+    workspaceId,
+    createdBy: h.userId,
+    title: "Wire payload",
+    executionTargetJson: { kind: "local", deviceId: h.id },
+  });
   await schema.db
     .update(schema.localDevices)
     .set({ heartbeatAt: new Date() })
@@ -388,5 +384,107 @@ test("local invocations compare JSON wire payloads while rejecting real paramete
   await assert.rejects(
     service.localCall({ ...input, action: "command.execute" }),
     { code: "LOCAL_INVOCATION_CONFLICT" },
+  );
+});
+
+test("legacy directory selection remains immutable and cannot bypass registered folder revocation", async () => {
+  const h = await host();
+  const workspaceId = randomUUID(),
+    teamId = randomUUID(),
+    threadId = randomUUID(),
+    folderId = randomUUID();
+  await schema.db
+    .insert(schema.workspaces)
+    .values({
+      id: workspaceId,
+      organizationId: teamId,
+      name: "Legacy directory",
+      slug: workspaceId,
+    });
+  await schema.db
+    .insert(schema.localFolderGrants)
+    .values({
+      id: folderId,
+      deviceId: h.id,
+      userId: h.userId,
+      name: "Selected folder",
+      path: "/Users/test/selected",
+    });
+  const target = {
+    kind: "local" as const,
+    deviceId: h.id,
+    directoryGrantId: folderId,
+  };
+  await schema.db
+    .insert(schema.threads)
+    .values({
+      id: threadId,
+      teamId,
+      workspaceId,
+      createdBy: h.userId,
+      title: "Legacy directory",
+      executionTargetJson: target,
+    });
+  const binding = await schema.db.query.localThreadBindings.findFirst({
+    where: eq(schema.localThreadBindings.threadId, threadId),
+  });
+  assert.equal(
+    binding?.workspacePath,
+    null,
+    "Legacy grants must be resolved by the native host, never reserved as a default directory",
+  );
+  assert.equal(binding?.localWorkspaceId, null);
+  const contextId = randomUUID();
+  await schema.db
+    .insert(schema.localCreationContexts)
+    .values({
+      id: contextId,
+      userId: h.userId,
+      sessionId: h.sessionId,
+      target,
+      expiresAt: new Date(Date.now() + 60000),
+    });
+  await assert.rejects(
+    access.resolveCreationContext(h.userId, h.caller, contextId, {
+      ...target,
+      directoryGrantId: randomUUID(),
+    }),
+    { code: "CREATION_CONTEXT_MISMATCH" },
+  );
+  await assert.rejects(
+    access.resolveCreationContext(h.userId, h.caller, contextId, {
+      kind: "local",
+      deviceId: h.id,
+      folderId,
+    }),
+    { code: "CREATION_CONTEXT_MISMATCH" },
+  );
+  await assert.rejects(
+    schema.db
+      .insert(schema.threads)
+      .values({
+        id: randomUUID(),
+        teamId,
+        workspaceId,
+        createdBy: h.userId,
+        title: "Invalid",
+        executionTargetJson: { ...target, folderId },
+      }),
+  );
+  await access.revokeFolderAccess(h.userId, h.id, folderId, h.caller);
+  await assert.rejects(
+    service.validateThreadExecutionTarget(h.userId, target),
+    { code: "LOCAL_FOLDER_REVOKED" },
+  );
+  await assert.rejects(
+    service.localCall({
+      deviceId: h.id,
+      userId: h.userId,
+      threadId,
+      caller: h.caller,
+      action: "workspace.ensure",
+      payload: { directoryGrantId: folderId },
+    }),
+    { code: "LOCAL_FOLDER_REVOKED" },
   );
 });

@@ -35,7 +35,9 @@ ALTER TABLE threads ADD CONSTRAINT threads_execution_target_check CHECK (COALESC
  execution_target_json='{"kind":"cloud"}'::jsonb OR (
  execution_target_json->>'kind'='local' AND jsonb_typeof(execution_target_json->'deviceId')='string'
  AND (NOT execution_target_json ? 'folderId' OR jsonb_typeof(execution_target_json->'folderId')='string')
- AND (execution_target_json-'kind'-'deviceId'-'folderId')='{}'::jsonb
+ AND (NOT execution_target_json ? 'directoryGrantId' OR (jsonb_typeof(execution_target_json->'directoryGrantId')='string' AND execution_target_json->>'directoryGrantId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'))
+ AND NOT (execution_target_json ? 'folderId' AND execution_target_json ? 'directoryGrantId')
+ AND (execution_target_json-'kind'-'deviceId'-'folderId'-'directoryGrantId')='{}'::jsonb
  )),false));
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION create_local_thread_binding() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -47,7 +49,7 @@ BEGIN
    IF folder IS NOT NULL THEN
      SELECT f.path INTO root FROM local_folder_grants f WHERE f.id=folder AND f.device_id=NEW.execution_target_json->>'deviceId' AND f.user_id=NEW.created_by AND f.revoked_at IS NULL;
      IF root IS NULL THEN RAISE EXCEPTION 'LOCAL_FOLDER_NOT_AUTHORIZED' USING ERRCODE='23514'; END IF;
-   ELSE
+   ELSIF NOT NEW.execution_target_json ? 'directoryGrantId' THEN
      SELECT d.workspace_base || '/' || allocation || '/files' INTO root FROM local_devices d WHERE d.id=NEW.execution_target_json->>'deviceId';
    END IF;
    INSERT INTO local_thread_bindings(thread_id,device_id,user_id,folder_id,local_workspace_id,workspace_path)

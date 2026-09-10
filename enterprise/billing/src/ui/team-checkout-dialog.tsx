@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingUiHost } from "./context";
 
 import * as React from "react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -134,8 +134,13 @@ export function TeamCheckoutDialog({
   source: CheckoutSource;
   yearlyPerSeatPrice?: number;
 }) {
-  const { trackBeginCheckout, trackCheckoutError, authClient, billingClient } =
-    useBillingUiHost();
+  const {
+    trackBeginCheckout,
+    trackCheckoutError,
+    authClient,
+    billingClient,
+    openCheckout,
+  } = useBillingUiHost();
 
   const [teamName, setTeamName] = React.useState("");
   const [seatCountInput, setSeatCountInput] = React.useState(
@@ -215,7 +220,7 @@ export function TeamCheckoutDialog({
         seatCount: requestedSeatCount,
         source,
       });
-      window.location.assign(result.checkoutUrl);
+      openCheckout(result);
     } catch (error) {
       trackCheckoutError({
         billingInterval: currentBillingInterval,

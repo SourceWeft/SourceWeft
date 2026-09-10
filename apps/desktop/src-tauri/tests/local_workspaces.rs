@@ -297,3 +297,206 @@ fn file_updates_require_read_version_and_backup_original_bytes() {
         b"unchanged"
     );
 }
+
+#[test]
+fn selected_directory_is_owned_immutable_shared_and_persistent() {
+    let app = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    fs::write(folder.path().join("existing.txt"), "user content").unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let (grant, root) = host.grant_directory("owner", folder.path()).unwrap();
+    assert!(host
+        .ensure_workspace_with_grant("other", "t", Some(&grant))
+        .is_err());
+    let first = host
+        .ensure_workspace_with_grant("owner", "t", Some(&grant))
+        .unwrap();
+    assert_eq!(first.path, root);
+    assert_eq!(
+        host.read_text("owner", "t", &first.id, "existing.txt")
+            .unwrap(),
+        "user content"
+    );
+    assert!(host.ensure_workspace("owner", "t").is_err());
+    let second = host
+        .ensure_workspace_with_grant("owner", "t2", Some(&grant))
+        .unwrap();
+    assert_eq!(first.path, second.path);
+    assert_ne!(first.id, second.id);
+    drop(host);
+    let host = LocalHost::open(app.path()).unwrap();
+    assert_eq!(
+        host.ensure_workspace_with_grant("owner", "t", Some(&grant))
+            .unwrap()
+            .id,
+        first.id
+    );
+    assert_eq!(
+        fs::read_dir(folder.path()).unwrap().count(),
+        1,
+        "No ownership metadata added to user directory"
+    );
+    assert!(host.grant_directory("owner", app.path()).is_err());
+    assert!(host
+        .grant_directory("owner", std::path::Path::new("/"))
+        .is_err());
+    fs::rename(
+        folder.path().join("existing.txt"),
+        folder.path().join("renamed.txt"),
+    )
+    .unwrap();
+    assert!(host
+        .read_text("owner", "t", &first.id, "existing.txt")
+        .is_err());
+    assert_eq!(
+        host.read_text("owner", "t", &first.id, "renamed.txt")
+            .unwrap(),
+        "user content"
+    );
+}
+
+#[test]
+fn local_edits_detect_external_changes_and_reject_links() {
+    let app = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let w = host.ensure_workspace("owner", "t").unwrap();
+    host.write_bytes("owner", "t", &w.id, "a.txt", b"before", None)
+        .unwrap();
+    host.write_bytes("owner", "t", &w.id, "a.txt", b"after", Some(b"before"))
+        .unwrap();
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"after");
+    fs::write(w.path.join("a.txt"), b"external").unwrap();
+    assert_eq!(
+        host.write_bytes("owner", "t", &w.id, "a.txt", b"wrong", Some(b"after"))
+            .unwrap_err()
+            .code,
+        "FILE_VERSION_CONFLICT"
+    );
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"external");
+    assert!(host
+        .write_bytes("owner", "t", &w.id, "a.txt", b"overwrite", None)
+        .is_err());
+    symlink(w.path.join("a.txt"), w.path.join("link")).unwrap();
+    fs::hard_link(w.path.join("a.txt"), w.path.join("hard")).unwrap();
+    for path in ["link", "hard", "../outside"] {
+        assert!(host
+            .write_bytes("owner", "t", &w.id, path, b"bad", Some(b"external"))
+            .is_err());
+    }
+    assert_eq!(fs::read(w.path.join("a.txt")).unwrap(), b"external");
+    host.write_bytes("owner", "t", &w.id, "binary", &[0, 255, 1], None)
+        .unwrap();
+    assert_eq!(
+        host.read_bytes("owner", "t", &w.id, "binary").unwrap(),
+        [0, 255, 1]
+    );
+    assert!(host.read_text("owner", "t", &w.id, "binary").is_err());
+}
+
+#[test]
+fn selected_directory_replacement_is_not_adopted() {
+    let app = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let chosen = parent.path().join("chosen");
+    fs::create_dir(&chosen).unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    let (grant, _) = host.grant_directory("owner", &chosen).unwrap();
+    let w = host
+        .ensure_workspace_with_grant("owner", "t", Some(&grant))
+        .unwrap();
+    fs::rename(&chosen, parent.path().join("original")).unwrap();
+    fs::create_dir(&chosen).unwrap();
+    assert_eq!(
+        host.ensure_workspace_with_grant("owner", "t", Some(&grant))
+            .unwrap_err()
+            .code,
+        "WORKSPACE_REPLACED"
+    );
+    assert!(host.get_workspace("owner", "t", &w.id).is_err());
+}
+
+#[test]
+fn malformed_directory_grants_do_not_allocate_an_automatic_directory() {
+    use serde_json::json;
+    use sourceweft_desktop::local_host::execution::Executions;
+    let app = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    for (index, grant) in [json!(null), json!(123), json!("")].into_iter().enumerate() {
+        let error = host
+            .dispatch(
+                &Executions::default(),
+                &format!("invalid-{index}"),
+                "owner",
+                "t",
+                "workspace.ensure",
+                json!({"directoryGrantId":grant}),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "INVALID_DIRECTORY_GRANT");
+    }
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+}
+
+#[test]
+fn both_v3_directory_schemas_upgrade_without_adopting_new_roots() {
+    use std::os::unix::fs::MetadataExt;
+    for legacy in [true, false] {
+        let app = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().canonicalize().unwrap();
+        fs::write(path.join("existing.txt"), "preserved").unwrap();
+        fs::create_dir(app.path().join("local-host")).unwrap();
+        let db_path = app.path().join("local-host/state.sqlite3");
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        let (table, selected, grant_column) = if legacy {
+            ("folder_grants", "attached_path", "folder_id")
+        } else {
+            ("directory_grants", "selected_path", "directory_grant_id")
+        };
+        db.execute_batch(&format!("CREATE TABLE workspaces(id TEXT PRIMARY KEY,owner_id TEXT,thread_id TEXT,state TEXT,root_device INTEGER,root_inode INTEGER,{selected} TEXT,{grant_column} TEXT,UNIQUE(owner_id,thread_id)); CREATE TABLE {table}(id TEXT PRIMARY KEY,owner_id TEXT,path TEXT,root_device INTEGER,root_inode INTEGER); PRAGMA user_version=3;")).unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let grant = uuid::Uuid::new_v4().to_string();
+        let meta = fs::metadata(&path).unwrap();
+        db.execute(
+            &format!("INSERT INTO {table} VALUES(?1,'owner',?2,?3,?4)"),
+            rusqlite::params![grant, path.to_str().unwrap(), meta.dev(), meta.ino()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO workspaces VALUES(?1,'owner','thread','ready',?2,?3,?4,?5)",
+            rusqlite::params![id, meta.dev(), meta.ino(), path.to_str().unwrap(), grant],
+        )
+        .unwrap();
+        drop(db);
+        let host = LocalHost::open(app.path()).unwrap();
+        assert_eq!(
+            host.ensure_bound_workspace("owner", "thread", Some(&id), Some(&grant))
+                .unwrap()
+                .path,
+            path
+        );
+        assert_eq!(
+            host.read_text("owner", "thread", &id, "existing.txt")
+                .unwrap(),
+            "preserved"
+        );
+        assert!(host
+            .ensure_bound_workspace("other", "other", None, Some(&grant))
+            .is_err());
+        drop(host);
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        drop(db);
+        // Reopening must not refresh the recorded inode of a replaced root.
+        let old = app.path().join("old-folder");
+        fs::rename(&path, &old).unwrap();
+        fs::create_dir(&path).unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        assert!(host.get_workspace("owner", "thread", &id).is_err());
+    }
+}

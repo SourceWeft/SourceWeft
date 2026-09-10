@@ -109,6 +109,7 @@ export interface FilesystemBackend {
   backend: MountedAgentFilesystemBackend;
   knowledgeBackend: DatabaseKnowledgeBackend;
   workingFilesBackend: WorkingFilesBackend;
+  localFiles: boolean;
   filesystemMounts: ReturnType<typeof createDefaultFilesystemMounts>;
   skillsBackend: SelectedSkillsBackend | null;
 }
@@ -140,13 +141,14 @@ export function buildFilesystemBackend(
       ? new SelectedSkillsBackend(prepared.enabledSkills)
       : null;
 
+  const localFiles = prepared.thread.executionTarget?.kind === "local";
   const filesystemMounts = createDefaultFilesystemMounts({
     skillsEnabled: Boolean(skillsBackend),
-  });
+  }).filter((mount) => !localFiles || mount.backendKind !== "workfiles");
 
   const backend = new MountedAgentFilesystemBackend({
     knowledge: databaseBackend,
-    working: workingFilesBackend,
+    working: localFiles ? null : workingFilesBackend,
     skills: skillsBackend,
     mounts: filesystemMounts,
   });
@@ -155,6 +157,7 @@ export function buildFilesystemBackend(
     backend,
     knowledgeBackend: databaseBackend,
     workingFilesBackend,
+    localFiles,
     filesystemMounts,
     skillsBackend,
   };
@@ -173,7 +176,23 @@ export function filesystemMountsForPrompt(input: {
     "/workspace";
   return [
     ...input.filesystemBackend.filesystemMounts,
-    createSandboxFilesystemMount({ root: sandboxRoot }),
+    {
+      ...createSandboxFilesystemMount({ root: sandboxRoot }),
+      ...(input.filesystemBackend.localFiles
+        ? {
+            label: "Local working directory",
+            persisted: true,
+            userVisible: true,
+            threadScoped: false,
+            purpose:
+              "Physical files on the bound PC, shared by file tools and command execution. This directory is the only working-file store for this conversation.",
+            writePolicy:
+              "Write and edit files directly under this physical directory. No prepare or collect step is needed. External edits are visible on the next read.",
+            pathPolicy:
+              "Use real paths under this working directory. Files remain on this PC and are not automatically synchronized or published.",
+          }
+        : {}),
+    },
   ];
 }
 
@@ -216,10 +235,14 @@ export function buildAgentBackend(input: {
       "/kb",
       filesystemBackend.knowledgeBackend,
     ),
-    "/workfiles/": new PrefixedBackendAdapter(
-      "/workfiles",
-      filesystemBackend.workingFilesBackend,
-    ),
+    ...(!filesystemBackend.localFiles
+      ? {
+          "/workfiles/": new PrefixedBackendAdapter(
+            "/workfiles",
+            filesystemBackend.workingFilesBackend,
+          ),
+        }
+      : {}),
     ...(filesystemBackend.skillsBackend
       ? { "/skills/": filesystemBackend.skillsBackend }
       : {}),
@@ -567,6 +590,7 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
         }
       : null;
   const sandboxRuntime =
+    prepared.thread.executionTarget?.kind !== "local" &&
     isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
     !commandNeedsTrustedSandbox
       ? null
@@ -686,7 +710,13 @@ export async function buildThreadAgentAssembly(
   );
   const interpreterMiddleware = createInterpreterMiddlewareForTurn({
     allowedTools: interpreterAllowedTools,
-    backend: filesystemBackend.backend,
+    backend: filesystemBackend.localFiles ? backend : filesystemBackend.backend,
+    readRoots: filesystemBackend.localFiles
+      ? [
+          "/kb",
+          ...(sandboxRuntime ? [sandboxRuntime.pathPolicy.workspaceRoot] : []),
+        ]
+      : undefined,
     context: {
       runId: prepared.runTraceId,
       teamId: prepared.workspace.organizationId,
@@ -759,11 +789,17 @@ export async function buildThreadAgentAssembly(
       availableTools: inheritableTools,
       backend,
       middleware: childMiddleware("explore"),
+      workingDirectory: filesystemBackend.localFiles
+        ? sandboxRuntime?.pathPolicy.workspaceRoot
+        : undefined,
     }),
     createPlanSubagent({
       availableTools: inheritableTools,
       backend,
       middleware: childMiddleware("plan"),
+      workingDirectory: filesystemBackend.localFiles
+        ? sandboxRuntime?.pathPolicy.workspaceRoot
+        : undefined,
     }),
   ];
 

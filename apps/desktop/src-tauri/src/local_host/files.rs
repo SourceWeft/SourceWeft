@@ -17,7 +17,8 @@ impl LocalHost {
         workspace_id: &str,
         relative: &str,
     ) -> Result<String> {
-        let bytes = self.read_bytes(owner, thread, workspace_id, relative, MAX_TEXT_BYTES)?;
+        let bytes =
+            self.read_bytes_limited(owner, thread, workspace_id, relative, MAX_TEXT_BYTES)?;
         String::from_utf8(bytes).map_err(|_| {
             HostError::new("INVALID_UTF8", "Use a binary file transfer for this file.")
         })
@@ -29,11 +30,20 @@ impl LocalHost {
         thread: &str,
         workspace_id: &str,
         relative: &str,
+    ) -> Result<Vec<u8>> {
+        self.read_bytes_limited(owner, thread, workspace_id, relative, MAX_TEXT_BYTES)
+    }
+    pub fn read_bytes_limited(
+        &self,
+        owner: &str,
+        thread: &str,
+        workspace_id: &str,
+        relative: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>> {
         let workspace = self.get_workspace(owner, thread, workspace_id)?;
         let parts = safe_components(relative)?;
-        let mut file = open_file_beneath(&workspace.path, &parts)?;
+        let mut file = open_file_beneath(&workspace.path, &parts, libc::O_RDONLY)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() {
             return Err(HostError::new(
@@ -95,7 +105,7 @@ fn safe_components(relative: &str) -> Result<Vec<&std::ffi::OsStr>> {
 }
 
 #[cfg(unix)]
-fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr]) -> Result<File> {
+fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr], final_flags: i32) -> Result<File> {
     use std::{
         ffi::CString,
         os::{
@@ -111,14 +121,18 @@ fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr]) -> Result<File> {
         let name = CString::new(part.as_bytes())
             .map_err(|_| HostError::new("INVALID_PATH", "NUL bytes are not allowed."))?;
         let final_part = index == parts.len() - 1;
-        let flags = libc::O_RDONLY
-            | libc::O_NOFOLLOW
+        let flags = (if final_part {
+            final_flags
+        } else {
+            libc::O_RDONLY
+        }) | libc::O_NOFOLLOW
             | libc::O_CLOEXEC
             | libc::O_NONBLOCK
             | if final_part { 0 } else { libc::O_DIRECTORY };
         // SAFETY: directory owns a valid descriptor; name is NUL-terminated. openat
         // returns a fresh descriptor whose sole owner is the File constructed below.
-        let descriptor = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+        let descriptor =
+            unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
         if descriptor < 0 {
             return Err(HostError::new(
                 "FILE_ACCESS_DENIED",
@@ -135,7 +149,7 @@ fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr]) -> Result<File> {
 }
 
 #[cfg(not(unix))]
-fn open_file_beneath(_: &Path, _: &[&std::ffi::OsStr]) -> Result<File> {
+fn open_file_beneath(_: &Path, _: &[&std::ffi::OsStr], _: i32) -> Result<File> {
     Err(HostError::new(
         "UNSUPPORTED_PLATFORM",
         "Local file access is currently implemented for macOS only.",

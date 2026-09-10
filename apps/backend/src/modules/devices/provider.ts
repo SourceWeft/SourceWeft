@@ -10,7 +10,11 @@ import type {
 import { localCall } from "./service";
 
 export async function localProviderForTurn(
-  context: SandboxRuntimeContext,
+  context: Pick<
+    SandboxRuntimeContext,
+    "teamId" | "workspaceId" | "threadId" | "userId"
+  > &
+    Partial<Pick<SandboxRuntimeContext, "runId" | "localCaller" | "messageId">>,
 ): Promise<SandboxProviderFactory | null> {
   const thread = await db.query.threads.findFirst({
     where: and(
@@ -50,11 +54,70 @@ export async function localProviderForTurn(
       "The local binding is missing or inconsistent. Cloud execution is not allowed.",
     );
   }
+  const dispatch = (
+    action: string,
+    payload: Record<string, unknown>,
+    extra: { id?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+  ) =>
+    localCall({
+      ...extra,
+      caller: context.localCaller,
+      deviceId: binding.deviceId,
+      userId: context.userId,
+      threadId: context.threadId,
+      runId: context.runId,
+      action,
+      payload,
+    });
   // Reserve identity from authenticated host metadata, without contacting the PC.
   // The physical directory is created/verified only when a tool acquires it.
   let root = binding.workspacePath;
   let id = binding.localWorkspaceId;
+  if ((!root || !id) && thread.executionTargetJson.directoryGrantId) {
+    const workspace = await dispatch("workspace.ensure", {
+      directoryGrantId: thread.executionTargetJson.directoryGrantId,
+    });
+    if (
+      typeof workspace.id !== "string" ||
+      typeof workspace.path !== "string" ||
+      !workspace.path.startsWith("/")
+    )
+      throw new ContentError(
+        409,
+        "LOCAL_WORKSPACE_MISMATCH",
+        "The computer returned an invalid working directory.",
+      );
+    const [saved] = await db
+      .update(localThreadBindings)
+      .set({ localWorkspaceId: workspace.id, workspacePath: workspace.path })
+      .where(
+        and(
+          eq(localThreadBindings.threadId, context.threadId),
+          isNull(localThreadBindings.localWorkspaceId),
+        ),
+      )
+      .returning();
+    const reserved =
+      saved ??
+      (await db.query.localThreadBindings.findFirst({
+        where: eq(localThreadBindings.threadId, context.threadId),
+      }));
+    root = reserved?.workspacePath ?? null;
+    id = reserved?.localWorkspaceId ?? null;
+    if (root !== workspace.path || id !== workspace.id)
+      throw new ContentError(
+        409,
+        "LOCAL_WORKSPACE_MISMATCH",
+        "The computer returned a different working directory.",
+      );
+  }
   if (!root || !id) {
+    if (binding.folderId)
+      throw new ContentError(
+        409,
+        "LOCAL_BINDING_INVALID",
+        "The selected folder binding is incomplete.",
+      );
     const device = await db.query.localDevices.findFirst({
       where: eq(localDevices.id, binding.deviceId),
     });
@@ -94,27 +157,16 @@ export async function localProviderForTurn(
     );
   const workspaceRoot = root;
   const workspaceId = id;
-  const dispatch = (
-    action: string,
-    payload: Record<string, unknown>,
-    extra: { id?: string; timeoutMs?: number; signal?: AbortSignal } = {},
-  ) =>
-    localCall({
-      ...extra,
-      caller: context.localCaller,
-      deviceId: binding.deviceId,
-      userId: context.userId,
-      threadId: context.threadId,
-      runId: context.runId,
-      action,
-      payload,
-    });
   let initialized: Promise<Record<string, unknown>> | undefined;
   const ensure = () =>
     (initialized ??= (async () => {
       const value = await dispatch("workspace.ensure", {
         workspaceId,
-        folderId: binding.folderId ?? undefined,
+        ...(binding.folderId ? { folderId: binding.folderId } : {}),
+        ...(thread.executionTargetJson.kind === "local" &&
+        thread.executionTargetJson.directoryGrantId
+          ? { directoryGrantId: thread.executionTargetJson.directoryGrantId }
+          : {}),
       });
       if (value.id !== workspaceId || value.path !== workspaceRoot)
         throw new ContentError(
@@ -219,10 +271,12 @@ export async function localProviderForTurn(
     },
     ensureDirectory: async (input) =>
       call("file.mkdir", { workspaceId: id, path: relative(input.directory) }),
+    nativeFileOperations: true,
     listFiles: async (input) => {
       const result = await call("file.list", {
         workspaceId: id,
         path: relative(input.sandboxPath),
+        recursive: input.recursive === true,
       });
       return (
         result.files as Array<{ path: string; is_dir?: boolean; size?: number }>
@@ -238,6 +292,13 @@ export async function localProviderForTurn(
         Buffer.from(String(result.content ?? ""), "base64"),
       );
     },
+    replaceTextFile: async (input) =>
+      call("file.replace", {
+        workspaceId: id,
+        path: relative(input.sandboxPath),
+        content: Buffer.from(input.content).toString("base64"),
+        expected: Buffer.from(input.expected).toString("base64"),
+      }),
     writeTextFile: async (input) => {
       const content = Buffer.from(input.content).toString("base64");
       const result = await call("file.write", {

@@ -11,6 +11,7 @@ import {
 } from "../../modules/devices/access";
 import type { Hono } from "hono";
 import { z } from "zod";
+import { localProviderForTurn } from "../../modules/devices/provider";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   db,
@@ -56,6 +57,89 @@ export function registerLocalDeviceRoutes(app: Hono) {
     });
     return ApiResponse.success(c, { id, target: data.target });
   });
+  app.get(
+    "/v1/workspaces/:workspaceId/threads/:threadId/local-files",
+    async (c) => {
+      c.header("Cache-Control", "no-store");
+      const session = await requireSession(c);
+      if (!session) throw ApiError.unauthorized();
+      const thread = await ownedThread(
+        session.user.id,
+        c.req.param("workspaceId"),
+        c.req.param("threadId"),
+      );
+      if (thread.executionTargetJson.kind !== "local")
+        throw new ApiError(
+          409,
+          "LOCAL_DIRECTORY_REQUIRED",
+          "This conversation does not use a PC directory.",
+        );
+      const localCaller = await resolveLocalCaller(
+        session.user.id,
+        session.session.id,
+        c.req.header("X-Local-Proof"),
+      );
+      const factory = await localProviderForTurn({
+        localCaller,
+        userId: session.user.id,
+        threadId: thread.id,
+        workspaceId: thread.workspaceId,
+        teamId: thread.teamId,
+      });
+      if (!factory)
+        throw new ApiError(
+          409,
+          "LOCAL_DIRECTORY_REQUIRED",
+          "Local directory is unavailable.",
+        );
+      const provider = factory.createProvider();
+      const root = provider.pathPolicy.workspaceRoot;
+      const path = c.req.query("path") ?? root;
+      const sandbox = await provider.getSandbox("");
+      const providerSandboxId = String((sandbox as { id: string }).id);
+      if (c.req.query("content") === "true") {
+        const bytes = await provider.downloadFile({
+          providerSandboxId,
+          sandboxPath: path,
+        });
+        let content: string;
+        try {
+          content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          throw new ApiError(
+            415,
+            "BINARY_FILE",
+            "This file is binary. Use Download to open it.",
+          );
+        }
+        if (content.includes("\0"))
+          throw new ApiError(
+            415,
+            "BINARY_FILE",
+            "This file is binary. Use Download to open it.",
+          );
+        return ApiResponse.success(c, { root, path, content });
+      }
+      if (c.req.query("download") === "true") {
+        const bytes = await provider.downloadFile({
+          providerSandboxId,
+          sandboxPath: path,
+        });
+        c.header("Content-Type", "application/octet-stream");
+        c.header(
+          "Content-Disposition",
+          `attachment; filename*=UTF-8''${encodeURIComponent(path.split("/").pop() ?? "file")}`,
+        );
+        return c.body(new Uint8Array(bytes));
+      }
+      const files = await provider.listFiles!({
+        providerSandboxId,
+        sandboxPath: path,
+      });
+      return ApiResponse.success(c, { root, path, files });
+    },
+  );
+
   app.post("/v1/local-devices/enroll", async (c) => {
     const session = await requireSession(c);
     if (!session) throw ApiError.unauthorized();
@@ -232,6 +316,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
   app.post(
     "/v1/workspaces/:workspaceId/threads/:threadId/local-execution",
     async (c) => {
+      c.header("Cache-Control", "no-store");
       const session = await requireSession(c);
       if (!session) throw ApiError.unauthorized();
       await ownedThread(
@@ -249,18 +334,26 @@ export function registerLocalDeviceRoutes(app: Hono) {
   app.get(
     "/v1/workspaces/:workspaceId/threads/:threadId/local-execution",
     async (c) => {
+      c.header("Cache-Control", "no-store");
       const session = await requireSession(c);
       if (!session) throw ApiError.unauthorized();
-      const visible = await contentThreadService.getThread({
+      const { thread: visibleThread } = await contentThreadService.getThread({
         userId: session.user.id,
         workspaceId: c.req.param("workspaceId"),
         threadId: c.req.param("threadId"),
       });
-      const thread = {
-        executionTargetJson: visible.thread.executionTarget ?? {
-          kind: "cloud" as const,
-        },
-      };
+      if (visibleThread.executionTarget?.kind !== "local") {
+        return ApiResponse.success(c, {
+          executionTarget: { kind: "cloud" },
+          workingDirectory: null,
+          target: null,
+        });
+      }
+      const thread = await ownedThread(
+        session.user.id,
+        c.req.param("workspaceId"),
+        c.req.param("threadId"),
+      );
       const binding = await db.query.localThreadBindings.findFirst({
         where: eq(localThreadBindings.threadId, c.req.param("threadId")),
       });
@@ -281,6 +374,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
         : null;
       return ApiResponse.success(c, {
         userId: session.user.id,
+        workingDirectory: binding?.workspacePath ?? null,
         executionTarget: thread.executionTargetJson,
         workspace: binding?.localWorkspaceId
           ? { id: binding.localWorkspaceId, path: binding.workspacePath }

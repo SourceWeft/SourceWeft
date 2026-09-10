@@ -271,7 +271,17 @@ function recoverableExecuteErrorCode(error: unknown) {
   return code && RECOVERABLE_EXECUTE_ERROR_CODES.has(code) ? code : null;
 }
 
-function recoverableExecuteFailureHint(errorCode: string) {
+function recoverableExecuteFailureHint(errorCode: string, localRoot?: string) {
+  if (
+    localRoot &&
+    [
+      "SANDBOX_EXECUTE_CWD_DENIED",
+      "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+      "SANDBOX_SKILL_STAGING_UNAVAILABLE",
+    ].includes(errorCode)
+  ) {
+    return `Use actual files under the local working directory ${localRoot}. /kb and /skills are read-only logical sources; /workfiles and prepare/collect are unavailable for this PC conversation. Resolve the reported path or staging error before retrying.`;
+  }
   if (errorCode === "SANDBOX_EXECUTE_COMMAND_DENIED") {
     return "Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.";
   }
@@ -478,26 +488,23 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     command: string,
     options: SandboxBackendHostOperationOptions,
   ) {
-    return this.runPinnedFileOperation(options, ({
-      sandbox,
-      provider,
-      executionId,
-      signal,
-      timeoutMs,
-    }) => {
-      const execute = provider.executeSystem
-        ? provider.executeSystem.bind(provider)
-        : provider.execute.bind(provider);
-      return execute({
-        providerSandboxId: sandbox.providerSandboxId,
-        executionId,
-        command,
-        cwd: assertExecuteCwd(undefined, provider.pathPolicy),
-        timeoutMs,
-        maxOutputChars: this.input.limits.maxOutputChars,
-        signal,
-      });
-    });
+    return this.runPinnedFileOperation(
+      options,
+      ({ sandbox, provider, executionId, signal, timeoutMs }) => {
+        const execute = provider.executeSystem
+          ? provider.executeSystem.bind(provider)
+          : provider.execute.bind(provider);
+        return execute({
+          providerSandboxId: sandbox.providerSandboxId,
+          executionId,
+          command,
+          cwd: assertExecuteCwd(undefined, provider.pathPolicy),
+          timeoutMs,
+          maxOutputChars: this.input.limits.maxOutputChars,
+          signal,
+        });
+      },
+    );
   }
 
   private async downloadFilesFromPinnedSandbox(input: {
@@ -526,10 +533,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           throwBackendOperationAbortReason(input.signal);
           return { path: filePath, content, error: null };
         } catch (error) {
-          if (
-            input.signal.aborted ||
-            isPinnedOperationProviderTimeout(error)
-          ) {
+          if (input.signal.aborted || isPinnedOperationProviderTimeout(error)) {
             throw error;
           }
           const message =
@@ -616,7 +620,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     return {
       data: {
         content: isTextMimeType(mimeType)
-          ? new TextDecoder().decode(result.content)
+          ? new TextDecoder("utf-8", { fatal: true }).decode(result.content)
           : result.content,
         mimeType,
         created_at: now,
@@ -641,6 +645,17 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       return {
         files: rootListings(policy),
       };
+    }
+    if (this.input.manager.providerForSandbox().nativeFileOperations) {
+      return this.runPinnedFileOperation(
+        options,
+        async ({ provider, sandbox }) => ({
+          files: await provider.listFiles!({
+            providerSandboxId: sandbox.providerSandboxId,
+            sandboxPath: normalized,
+          }),
+        }),
+      );
     }
     const result = await this.runInternalCommand(
       [
@@ -685,6 +700,28 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         error: readFileBinaryUnsupportedError(normalized, mimeType),
         mimeType,
       };
+    }
+    if (this.input.manager.providerForSandbox().nativeFileOperations) {
+      return this.runPinnedFileOperation(
+        options,
+        async ({ provider, sandbox }) => {
+          const text = await provider.readTextFile!({
+            providerSandboxId: sandbox.providerSandboxId,
+            sandboxPath: normalized,
+          });
+          const lines = text.split(/\r?\n/);
+          const start = Math.max(0, Math.floor(offset));
+          const count = Math.max(1, Math.min(Math.floor(limit), 1000));
+          return {
+            content:
+              lines.slice(start, start + count).join("\n") +
+              (start + count < lines.length
+                ? `\n[More lines available. Continue with offset=${start + count}.]`
+                : ""),
+            mimeType,
+          };
+        },
+      );
     }
     const startLine = Math.max(1, Math.floor(offset) + 1);
     const endLine =
@@ -732,12 +769,73 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     const policy = this.pathPolicy();
     let normalized: string;
     try {
-      normalized = assertSandboxBackendPath(path || policy.defaultCwd, policy);
+      normalized = assertSandboxBackendPath(
+        this.input.manager.providerForSandbox().nativeFileOperations &&
+          (!path || path === "/")
+          ? policy.defaultCwd
+          : path || policy.defaultCwd,
+        policy,
+      );
     } catch (error) {
       return { error: sandboxPathError(error) };
     }
     if (normalized === "/") {
       return { matches: [] };
+    }
+    if (this.input.manager.providerForSandbox().nativeFileOperations) {
+      let expression: RegExp;
+      try {
+        expression = new RegExp(pattern);
+      } catch {
+        return { error: "Invalid regular expression." };
+      }
+      return this.runPinnedFileOperation(
+        options,
+        async ({ provider, sandbox }) => {
+          const files = await provider.listFiles!({
+            providerSandboxId: sandbox.providerSandboxId,
+            sandboxPath: normalized,
+            recursive: true,
+          });
+          const matcher = glob ? globToRegExp(glob) : null;
+          const candidates = files.filter(
+            (file) =>
+              !file.is_dir &&
+              isTextMimeType(inferMimeType(file.path)) &&
+              (!matcher ||
+                matcher.test(
+                  file.path.slice(normalized.length).replace(/^\//, ""),
+                )),
+          );
+          if (
+            candidates.length > 200 ||
+            candidates.reduce((sum, file) => sum + (file.size ?? 0), 0) >
+              1024 * 1024
+          ) {
+            return {
+              error:
+                "Search exceeds 200 text files or 1 MiB. Choose a narrower path or glob.",
+            };
+          }
+          const matches: GrepMatch[] = [];
+          for (const file of candidates) {
+            const text = await provider.readTextFile!({
+              providerSandboxId: sandbox.providerSandboxId,
+              sandboxPath: file.path,
+            });
+            for (const [index, line] of text.split(/\r?\n/).entries()) {
+              if (expression.test(line))
+                matches.push({ path: file.path, line: index + 1, text: line });
+              if (matches.length >= 50)
+                return applyGrepMaxCount({
+                  result: { matches, truncated: true },
+                  maxCount,
+                });
+            }
+          }
+          return applyGrepMaxCount({ result: { matches }, maxCount });
+        },
+      );
     }
     const result = await this.runInternalCommand(
       `grep -RIn -- ${shellQuote(pattern)} ${shellQuote(normalized)} || true`,
@@ -781,7 +879,13 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     const policy = this.pathPolicy();
     let normalized: string;
     try {
-      normalized = assertSandboxBackendPath(path, policy);
+      normalized = assertSandboxBackendPath(
+        this.input.manager.providerForSandbox().nativeFileOperations &&
+          path === "/"
+          ? policy.defaultCwd
+          : path,
+        policy,
+      );
     } catch (error) {
       return { error: sandboxPathError(error) };
     }
@@ -798,6 +902,28 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         : pattern;
     } catch (error) {
       return { error: sandboxPathError(error) };
+    }
+    if (this.input.manager.providerForSandbox().nativeFileOperations) {
+      return this.runPinnedFileOperation(
+        options,
+        async ({ provider, sandbox }) => {
+          const files = await provider.listFiles!({
+            providerSandboxId: sandbox.providerSandboxId,
+            sandboxPath: normalized,
+            recursive: true,
+          });
+          const matcher = globToRegExp(normalizedPattern);
+          return {
+            files: files.filter((file) =>
+              matcher.test(
+                patternMatcherTargetIsAbsolute
+                  ? file.path
+                  : file.path.slice(normalized.length + 1),
+              ),
+            ),
+          };
+        },
+      );
     }
     const result = await this.runInternalCommand(
       `find ${shellQuote(normalized)} -exec stat -c '%F\t%s\t%Y\t%n' {} \\; | awk -F '\\t' '{type=($1=="directory"?"d":"f"); print type "\\t" $2 "\\t" $3 "\\t" $4}'`,
@@ -901,6 +1027,15 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         return { error: replaced };
       }
       const [content, occurrences] = replaced;
+      if (operationInput.provider.replaceTextFile) {
+        await operationInput.provider.replaceTextFile({
+          providerSandboxId: operationInput.sandbox.providerSandboxId,
+          sandboxPath: normalized,
+          content,
+          expected: raw.data.content,
+        });
+        return { path: normalized, filesUpdate: null, occurrences };
+      }
       const result = await this.uploadFilesToPinnedSandbox({
         ...operationInput,
         files: [[normalized, new TextEncoder().encode(content)]],
@@ -993,7 +1128,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     });
     const output = [
       message,
-      `Hint: ${recoverableExecuteFailureHint(failureCode)}`,
+      `Hint: ${recoverableExecuteFailureHint(failureCode, this.input.manager.providerForSandbox().nativeFileOperations ? this.pathPolicy().workspaceRoot : undefined)}`,
       `Diagnostics: toolName=${EXECUTE_TOOL_NAME} commandFingerprint=${commandFingerprint} failureCode=${failureCode} repeatCount=${repeatCount} runId=${this.input.context.runId}`,
       ...(repeatCount > 1
         ? [

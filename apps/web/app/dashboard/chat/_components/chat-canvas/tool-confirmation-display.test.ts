@@ -141,3 +141,11 @@ test("approval retains the complete local directory even when it is long", () =>
   value.preview.requestJson = { command: "pwd", cwd };
   assert.ok(requestDetailLines(value).includes(`Working directory: ${cwd}`));
 });
+test("command approval never invents a cloud cwd when the directory is omitted", () => {
+  const request = confirmation({ toolName: "execute" });
+  request.action.type = "sandbox.execute";
+  expectNoGuessedCloudPath(requestDetailLines(request));
+});
+function expectNoGuessedCloudPath(lines: string[]) {
+  assert.ok(!lines.some((line) => line === "CWD: /workspace"));
+}

@@ -9,3 +9,5 @@ This directory hosts the desktop application.
 Desktop frontend should reuse `packages/ui` (`@sourceweft/ui-web`) and `packages/sdk`.
 
 Environment template: `apps/desktop/.env.example`.
+
+PC 工作目录、文件面板、目录选择和升级说明：[LOCAL_FILES.md](./LOCAL_FILES.md)。

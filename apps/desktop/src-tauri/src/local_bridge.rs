@@ -84,3 +84,14 @@ pub async fn choose_local_folder(
         .choose_folder(ticket, user_id)
         .await
 }
+
+/// Compatibility entry point; all folder selection uses account-bound authorization.
+#[tauri::command]
+pub async fn choose_working_directory(
+    app: AppHandle,
+    window: WebviewWindow,
+    ticket: String,
+    user_id: String,
+) -> Result<serde_json::Value, String> {
+    choose_local_folder(app, window, ticket, user_id).await
+}

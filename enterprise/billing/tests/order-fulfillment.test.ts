@@ -9,7 +9,7 @@ import {
   assertRejectsWithBillingCode,
 } from "./test-fixtures";
 
-test("billing portal actions fall back to the payer customer", async () => {
+test("billing portal never uses a customer from an unrelated personal subscription", async () => {
   const store = new MemoryBillingStore();
   const portalInputs: Array<{
     externalCustomerId?: string | null;
@@ -103,11 +103,11 @@ test("billing portal actions fall back to the payer customer", async () => {
   assert.equal(cancel.portalUrl, "https://billing.example.test/portal");
   assert.deepEqual(portalInputs, [
     {
-      externalCustomerId: "cus_personal_1",
+      externalCustomerId: null,
       externalSubscriptionId: "ext_sub_1",
     },
     {
-      externalCustomerId: "cus_personal_1",
+      externalCustomerId: null,
       externalSubscriptionId: "ext_sub_1",
     },
   ]);
@@ -216,8 +216,8 @@ test("pricing pro order fulfillment works when team billing is disabled", async 
       externalCustomerId: "cus_1",
       externalSubscriptionId: "sub_pro_1",
       externalProductId: "prod_individual_monthly",
-      currentPeriodStart: "2026-05-15T00:00:00.000Z",
-      currentPeriodEnd: "2026-06-15T00:00:00.000Z",
+      currentPeriodStart: new Date(Date.now() - 60_000).toISOString(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(),
       status: "active",
     },
   });
@@ -230,7 +230,7 @@ test("pricing pro order fulfillment works when team billing is disabled", async 
   assert.equal(store.subscription?.planFamily, "individual_pro");
 });
 
-test("pricing pro checkout does not reuse failed provider orders", async () => {
+test("pricing checkout preserves unresolved provider operations without creating a second purchase", async () => {
   const store = new MemoryBillingStore();
   let shouldFail = true;
   const providerCalls: Array<unknown> = [];
@@ -280,22 +280,16 @@ test("pricing pro checkout does not reuse failed provider orders", async () => {
   assert.equal(store.order?.paymentStatus, "failed");
   assert.equal(store.order?.errorMessage, "provider unavailable");
 
-  const retry = await billingService.createPricingCheckout(
-    {
-      plan: "pro",
-      billingInterval: "monthly",
-      source: "dashboard",
-    },
-    {
-      userId: "user_1",
-      email: "user@example.com",
-    },
-    { personalTeamId: "personal_1" },
+  await assert.rejects(
+    () =>
+      billingService.createPricingCheckout(
+        { plan: "pro", billingInterval: "monthly", source: "dashboard" },
+        { userId: "user_1", email: "user@example.com" },
+        { personalTeamId: "personal_1" },
+      ),
+    (error: any) => error.code === "SUBSCRIPTION_PAYMENT_PENDING",
   );
-
-  assert.equal(providerCalls.length, 2);
-  assert.equal(retry.checkoutUrl, "https://checkout.example.test/pro-retry");
-  assert.equal(store.order?.status, "checkout_created");
+  assert.equal(providerCalls.length, 1);
 });
 
 test("non-creem provider disables checkout before creating orders", async () => {

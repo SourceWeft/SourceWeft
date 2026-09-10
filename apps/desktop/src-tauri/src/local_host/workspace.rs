@@ -48,13 +48,13 @@ impl LocalHost {
                     "The local database must be a regular file.",
                 ));
             }
-            let connection = Connection::open(db_path)?;
+            let mut connection = Connection::open(db_path)?;
             connection.busy_timeout(std::time::Duration::from_secs(5))?;
             connection.execute_batch(
                 "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
             )?;
             let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if version > 3 {
+            if version > 4 {
                 return Err(HostError::new(
                     "DATABASE_VERSION_UNSUPPORTED",
                     "Update the desktop app before opening this database.",
@@ -82,10 +82,48 @@ impl LocalHost {
                     PRAGMA user_version=2; COMMIT;",
                 )?;
             }
-            if version < 3 {
-                connection.execute_batch("BEGIN IMMEDIATE; ALTER TABLE workspaces ADD COLUMN attached_path TEXT; ALTER TABLE workspaces ADD COLUMN folder_id TEXT; PRAGMA user_version=3; COMMIT;")?;
+            if version < 4 {
+                // Both released development branches used v3. Inspect columns before
+                // upgrading, preserving their recorded root identities without adoption.
+                let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let columns: Vec<String> = tx
+                    .prepare("PRAGMA table_info(workspaces)")?
+                    .query_map([], |r| r.get(1))?
+                    .collect::<std::result::Result<_, _>>()?;
+                tx.execute_batch("CREATE TABLE IF NOT EXISTS directory_grants (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, path TEXT NOT NULL, root_device INTEGER NOT NULL, root_inode INTEGER NOT NULL);")?;
+                for name in ["selected_path", "directory_grant_id"] {
+                    if !columns.iter().any(|c| c == name) {
+                        tx.execute_batch(&format!(
+                            "ALTER TABLE workspaces ADD COLUMN {name} TEXT;"
+                        ))?;
+                    }
+                }
+                let legacy: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_grants')", [], |r| r.get(0))?;
+                if legacy {
+                    let conflicts: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM folder_grants f JOIN directory_grants d ON d.id=f.id WHERE f.owner_id IS NOT d.owner_id OR f.path IS NOT d.path OR f.root_device IS NOT d.root_device OR f.root_inode IS NOT d.root_inode)", [], |r| r.get(0))?;
+                    if conflicts {
+                        return Err(HostError::new(
+                            "DIRECTORY_MIGRATION_CONFLICT",
+                            "Directory grants need local recovery.",
+                        ));
+                    }
+                    tx.execute_batch("INSERT OR IGNORE INTO directory_grants SELECT id,owner_id,path,root_device,root_inode FROM folder_grants;")?;
+                }
+                if columns.iter().any(|c| c == "attached_path")
+                    && columns.iter().any(|c| c == "folder_id")
+                {
+                    let conflicts: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE (selected_path IS NOT NULL AND attached_path IS NOT NULL AND selected_path IS NOT attached_path) OR (directory_grant_id IS NOT NULL AND folder_id IS NOT NULL AND directory_grant_id IS NOT folder_id))", [], |r| r.get(0))?;
+                    if conflicts {
+                        return Err(HostError::new(
+                            "DIRECTORY_MIGRATION_CONFLICT",
+                            "Conversation bindings need local recovery.",
+                        ));
+                    }
+                    tx.execute_batch("UPDATE workspaces SET selected_path=COALESCE(selected_path,attached_path),directory_grant_id=COALESCE(directory_grant_id,folder_id);")?;
+                }
+                tx.execute_batch("PRAGMA user_version=4;")?;
+                tx.commit()?;
             }
-            connection.execute_batch("CREATE TABLE IF NOT EXISTS folder_grants(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,path TEXT NOT NULL,root_device INTEGER NOT NULL,root_inode INTEGER NOT NULL);")?;
             Ok(Self {
                 db: Mutex::new(connection),
                 base,
@@ -93,11 +131,40 @@ impl LocalHost {
         }
     }
 
+    /// Never expose a path-taking version of this method to the WebView or model.
+    pub fn grant_directory(&self, owner: &str, selected: &Path) -> Result<(String, PathBuf)> {
+        validate_identity(owner)?;
+        require_real_directory(selected)?;
+        let path = selected.canonicalize()?;
+        if self.base.starts_with(&path) || path.starts_with(&self.base) {
+            return Err(HostError::new(
+                "DIRECTORY_DENIED",
+                "Choose a task directory outside application storage.",
+            ));
+        }
+        let (device, inode) = root_identity(&path)?;
+        let id = Uuid::new_v4().to_string();
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Directory database lock failed."))?;
+        db.execute("INSERT INTO directory_grants(id,owner_id,path,root_device,root_inode) VALUES(?1,?2,?3,?4,?5)", params![id,owner,path.to_string_lossy(),device,inode])?;
+        Ok((id, path))
+    }
+
     pub(crate) fn backup_base(&self) -> Result<PathBuf> {
         let path = self.base.join("local-host/backups");
         private_dir(&path)?;
         Ok(path)
     }
+
+    pub fn register_folder(&self, owner: &str, path: &Path) -> Result<serde_json::Value> {
+        let (id, path) = self.grant_directory(owner, path)?;
+        Ok(
+            serde_json::json!({"id":id,"path":path,"name":path.file_name().unwrap_or_default().to_string_lossy()}),
+        )
+    }
+
     pub fn workspace_base(&self) -> PathBuf {
         self.base.join("task-workspaces")
     }
@@ -105,18 +172,17 @@ impl LocalHost {
     /// Call on the first committed message, not when opening an empty chat view.
     /// The first transaction reserves an ID. Recovery can finish ONLY that allocation.
     pub fn ensure_workspace(&self, owner: &str, thread: &str) -> Result<Workspace> {
-        self.ensure_bound_workspace(owner, thread, None, None)
+        self.ensure_workspace_with_grant(owner, thread, None)
     }
 
-    pub fn register_folder(&self, owner: &str, path: &Path) -> Result<serde_json::Value> {
-        validate_identity(owner)?;
-        let path = path.canonicalize()?;
-        let (device, inode) = root_identity(&path)?;
-        let id = Uuid::new_v4().to_string();
-        self.db.lock().map_err(|_|HostError::new("HOST_UNAVAILABLE","Database lock failed"))?.execute("INSERT INTO folder_grants(id,owner_id,path,root_device,root_inode) VALUES(?1,?2,?3,?4,?5)",params![id,owner,path.to_string_lossy(),device,inode])?;
-        Ok(
-            serde_json::json!({"id":id,"path":path,"name":path.file_name().unwrap_or_default().to_string_lossy()}),
-        )
+    /// This is called only with an opaque grant issued by the native picker.
+    pub fn ensure_workspace_with_grant(
+        &self,
+        owner: &str,
+        thread: &str,
+        grant: Option<&str>,
+    ) -> Result<Workspace> {
+        self.ensure_bound_workspace(owner, thread, None, grant)
     }
 
     pub fn ensure_bound_workspace(
@@ -124,56 +190,77 @@ impl LocalHost {
         owner: &str,
         thread: &str,
         requested_id: Option<&str>,
-        folder_id: Option<&str>,
+        grant: Option<&str>,
     ) -> Result<Workspace> {
-        validate_identity(owner)?;
-        validate_identity(thread)?;
         if requested_id.is_some_and(|id| Uuid::parse_str(id).is_err()) {
             return Err(HostError::new(
                 "INVALID_WORKSPACE_ID",
-                "Workspace ID must be a UUID",
+                "Workspace ID must be a UUID.",
             ));
         }
-        if let Some(folder) = folder_id {
-            let id = requested_id.ok_or_else(|| {
-                HostError::new("INVALID_WORKSPACE_ID", "Attached workspace requires an ID")
-            })?;
-            let db = self
-                .db
-                .lock()
-                .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Database lock failed"))?;
-            let grant:Option<(String,u64,u64)>=db.query_row("SELECT path,root_device,root_inode FROM folder_grants WHERE id=?1 AND owner_id=?2",params![folder,owner],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-            let (path, device, inode) = grant.ok_or_else(|| {
-                HostError::new(
-                    "FOLDER_NOT_AUTHORIZED",
-                    "Folder is not authorized on this computer",
-                )
-            })?;
-            if root_identity(Path::new(&path))? != (device, inode) {
-                return Err(HostError::new(
-                    "WORKSPACE_REPLACED",
-                    "Authorized folder was replaced",
-                ));
-            }
-            db.execute("INSERT INTO workspaces(id,owner_id,thread_id,state,root_device,root_inode,attached_path,folder_id) VALUES(?1,?2,?3,'ready',?4,?5,?6,?7) ON CONFLICT(owner_id,thread_id) DO NOTHING",params![id,owner,thread,device,inode,path,folder])?;
-            let matches:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE owner_id=?1 AND thread_id=?2 AND id=?3 AND folder_id=?4 AND attached_path=?5)",params![owner,thread,id,folder,path],|r|r.get(0))?;
-            if !matches {
-                return Err(HostError::new(
-                    "WORKSPACE_BINDING_IMMUTABLE",
-                    "Conversation already uses another folder",
-                ));
-            }
-            return Ok(Workspace {
-                id: id.into(),
-                thread_id: thread.into(),
-                path: path.into(),
-            });
-        }
+        validate_identity(owner)?;
+        validate_identity(thread)?;
         let mut db = self
             .db
             .lock()
             .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Workspace database lock failed."))?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let bound: Option<(String, Option<String>, Option<String>)> = tx.query_row(
+            "SELECT id,directory_grant_id,selected_path FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
+            params![owner,thread], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        if let Some((id, previous_grant, selected_path)) = &bound {
+            if requested_id.is_some_and(|requested| requested != id) {
+                return Err(HostError::new(
+                    "WORKSPACE_BINDING_IMMUTABLE",
+                    "Conversation already uses another directory.",
+                ));
+            }
+            if previous_grant.as_deref() != grant {
+                return Err(HostError::new(
+                    "LOCAL_WORKSPACE_IMMUTABLE",
+                    "The conversation directory cannot be changed.",
+                ));
+            }
+            if let Some(path) = selected_path {
+                let path = PathBuf::from(path);
+                self.check_selected_directory(&path)?;
+                verify_root(&tx, id, &path)?;
+                return Ok(Workspace {
+                    id: id.clone(),
+                    thread_id: thread.into(),
+                    path,
+                });
+            }
+        }
+        if let Some(grant) = grant {
+            let selected: Option<(String,u64,u64)> = tx.query_row(
+                "SELECT path,root_device,root_inode FROM directory_grants WHERE id=?1 AND owner_id=?2",
+                params![grant,owner], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+            let (path, device, inode) = selected.ok_or_else(|| {
+                HostError::new(
+                    "DIRECTORY_GRANT_DENIED",
+                    "Choose a directory on this computer using the native picker.",
+                )
+            })?;
+            let path = PathBuf::from(path);
+            self.check_selected_directory(&path)?;
+            if root_identity(&path)? != (device, inode) {
+                return Err(HostError::new(
+                    "WORKSPACE_REPLACED",
+                    "The selected directory was replaced.",
+                ));
+            }
+            let id = requested_id
+                .map(str::to_owned)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            tx.execute("INSERT INTO workspaces(id,owner_id,thread_id,state,root_device,root_inode,selected_path,directory_grant_id) VALUES(?1,?2,?3,'ready',?4,?5,?6,?7)", params![id,owner,thread,device,inode,path.to_string_lossy(),grant])?;
+            tx.commit()?;
+            return Ok(Workspace {
+                id,
+                thread_id: thread.into(),
+                path,
+            });
+        }
         let existing: Option<(String, String)> = tx
             .query_row(
                 "SELECT id,state FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
@@ -182,12 +269,6 @@ impl LocalHost {
             )
             .optional()?;
         let (id, _) = if let Some(found) = existing {
-            if requested_id.is_some_and(|id| id != found.0) {
-                return Err(HostError::new(
-                    "WORKSPACE_BINDING_IMMUTABLE",
-                    "Conversation already has a different workspace",
-                ));
-            }
             found
         } else {
             let id = requested_id
@@ -284,6 +365,16 @@ impl LocalHost {
         })
     }
 
+    fn check_selected_directory(&self, path: &Path) -> Result<()> {
+        if self.base.starts_with(path) || path.starts_with(&self.base) {
+            return Err(HostError::new(
+                "DIRECTORY_DENIED",
+                "Choose a task directory outside application storage.",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn get_workspace(&self, owner: &str, thread: &str, id: &str) -> Result<Workspace> {
         let db = self
             .db
@@ -302,13 +393,14 @@ impl LocalHost {
                 "No workspace is authorized for this account.",
             )
         })?;
-        let attached: Option<String> = db.query_row(
-            "SELECT attached_path FROM workspaces WHERE id=?1",
+        let selected: Option<String> = db.query_row(
+            "SELECT selected_path FROM workspaces WHERE id=?1",
             [id],
             |r| r.get(0),
         )?;
-        if let Some(path) = attached {
-            let path = PathBuf::from(path);
+        if let Some(selected) = selected {
+            let path = PathBuf::from(selected);
+            self.check_selected_directory(&path)?;
             verify_root(&db, id, &path)?;
             return Ok(Workspace {
                 id: id.into(),

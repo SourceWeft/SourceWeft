@@ -1,5 +1,7 @@
 import type { PoolClient } from "pg";
 import type {
+  SubscriptionBinding,
+  SubscriptionOperation,
   BillingAccountState,
   BillingLedgerRow,
   BillingOrderState,
@@ -10,6 +12,32 @@ import type {
 } from "./types";
 
 export type BillingStore = {
+  lockSubscriptionTarget(
+    target: string,
+    client: PoolClient,
+    shared?: boolean,
+  ): Promise<void>;
+  getSubscriptionBinding(
+    identity: string,
+    client: PoolClient,
+  ): Promise<SubscriptionBinding | null>;
+  insertSubscriptionBinding(
+    binding: SubscriptionBinding,
+    client: PoolClient,
+  ): Promise<void>;
+  getOpenSubscriptionOperation(
+    target: string,
+    client: PoolClient,
+  ): Promise<SubscriptionOperation | null>;
+  saveSubscriptionOperation(
+    operation: SubscriptionOperation,
+    client: PoolClient,
+  ): Promise<void>;
+  completeSubscriptionPurchase(
+    orderId: string,
+    client: PoolClient,
+  ): Promise<void>;
+
   runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T>;
   getAccount(
     teamId: string,

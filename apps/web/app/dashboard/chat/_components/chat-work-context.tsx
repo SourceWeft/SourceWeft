@@ -25,6 +25,8 @@ import {
 import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 
+import { LocalFilesPanel } from "./local-files-panel";
+
 export function useChatCreationContext() {
   const { setWorkTarget, workspaceId } = useDashboardChatState();
   const session = authClient.useSession();
@@ -191,6 +193,7 @@ export function useChatCreationContext() {
 export type ChatCreationContext = ReturnType<typeof useChatCreationContext>;
 
 type ExecutionInfo = {
+  workingDirectory: string | null;
   executionTarget: ThreadExecutionTarget;
   target: { deviceId: string; name: string; online: boolean } | null;
 };
@@ -210,11 +213,13 @@ export function ChatWorkContext({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     if (!threadId || !workspaceId) return;
     let active = true;
     setInfo(null);
+    setFilesOpen(false);
     setError(null);
     const refresh = () =>
       localRequest<ExecutionInfo>(
@@ -296,6 +301,22 @@ export function ChatWorkContext({
                   ? " The computer is online."
                   : " The computer is offline. Local tasks can continue when it reconnects.")}
             </p>
+            {target?.kind === "local" && (
+              <div className="space-y-2 border-t pt-2">
+                <p className="text-xs font-medium">Working directory</p>
+                <p className="break-all text-xs text-muted-foreground">
+                  {info?.workingDirectory ??
+                    "The working directory will be connected when first used."}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setFilesOpen(true)}
+                >
+                  Files
+                </Button>
+              </div>
+            )}
             {contextError && (
               <p role="alert" className="break-words text-xs text-destructive">
                 {contextError}
@@ -390,6 +411,26 @@ export function ChatWorkContext({
             </Button>
           </PopoverContent>
         </Popover>
+      )}
+      {threadId && workspaceId && target?.kind === "local" && (
+        <Dialog open={filesOpen} onOpenChange={setFilesOpen}>
+          <DialogContent className="max-w-3xl overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Files</DialogTitle>
+              <DialogDescription>
+                Files in this conversation’s working directory.
+              </DialogDescription>
+            </DialogHeader>
+            {filesOpen && (
+              <LocalFilesPanel
+                key={`${workspaceId}:${threadId}`}
+                workspaceId={workspaceId}
+                threadId={threadId}
+                onClose={() => setFilesOpen(false)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       )}
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
         <DialogContent className="max-w-md">

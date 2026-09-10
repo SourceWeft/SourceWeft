@@ -1,15 +1,24 @@
 import { z } from "zod";
 
-export const threadExecutionTargetSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("cloud") }).strict(),
-  z
-    .object({
-      kind: z.literal("local"),
-      deviceId: z.string().uuid(),
-      folderId: z.string().uuid().optional(),
-    })
-    .strict(),
-]);
+export const threadExecutionTargetSchema = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("cloud") }).strict(),
+    z
+      .object({
+        kind: z.literal("local"),
+        deviceId: z.string().uuid(),
+        folderId: z.string().uuid().optional(),
+        directoryGrantId: z.string().uuid().optional(),
+      })
+      .strict(),
+  ])
+  .refine(
+    (target) =>
+      target.kind !== "local" || !(target.folderId && target.directoryGrantId),
+    {
+      message: "Specify one working directory grant.",
+    },
+  );
 export type ThreadExecutionTarget = z.infer<typeof threadExecutionTargetSchema>;
 
 /** A failed run whose error cannot be rendered from a persisted assistant message. */

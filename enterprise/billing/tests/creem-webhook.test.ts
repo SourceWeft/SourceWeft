@@ -30,6 +30,7 @@ test("webhook with active snapshot without usable period is ignored without retr
     externalSubscriptionId: "ext_sub_1",
     metadata: {},
     snapshot: {
+      confirmCoverage: true,
       teamId: "team_1",
       provider: "creem",
       planFamily: "team_standard",
@@ -80,6 +81,25 @@ test("creem scheduled cancel webhook keeps paid access and marks period-end canc
   const currentEnd = new Date(Date.now() + 31 * 86_400_000).toISOString();
 
   await syncCreemSubscriptionEvent(
+    "subscription.paid",
+    {
+      webhookId: "paid-before-subscription.scheduled_cancel",
+      id: "ext_sub_1",
+      status: "active",
+      current_period_start_date: currentStart,
+      current_period_end_date: currentEnd,
+      product: { id: "prod_team_monthly" },
+      items: [{ id: "item_1", units: 3 }],
+      metadata: {
+        teamId: "team_1",
+        planFamily: "team_standard",
+        billingInterval: "monthly",
+      },
+    },
+    "active",
+  );
+
+  await syncCreemSubscriptionEvent(
     "subscription.scheduled_cancel",
     {
       webhookId: "evt_scheduled_cancel",
@@ -127,6 +147,25 @@ test("creem subscription update with scheduled_cancel status matches scheduled c
   });
   const currentStart = new Date().toISOString();
   const currentEnd = new Date(Date.now() + 31 * 86_400_000).toISOString();
+
+  await syncCreemSubscriptionEvent(
+    "subscription.paid",
+    {
+      webhookId: "paid-before-subscription.update",
+      id: "ext_sub_1",
+      status: "active",
+      current_period_start_date: currentStart,
+      current_period_end_date: currentEnd,
+      product: { id: "prod_team_monthly" },
+      items: [{ id: "item_1", units: 2 }],
+      metadata: {
+        teamId: "team_1",
+        planFamily: "team_standard",
+        billingInterval: "monthly",
+      },
+    },
+    "active",
+  );
 
   await syncCreemSubscriptionEvent(
     "subscription.update",
@@ -245,7 +284,7 @@ test("creem cancellation webhook without team metadata resolves existing subscri
     externalProductId: "prod_team_monthly",
     billingOrderId: null,
     cancelAtPeriodEnd: false,
-    metadata: {},
+    metadata: { paymentEnvironment: "test" },
     lastEventAt: now,
     createdAt: now,
     updatedAt: now,

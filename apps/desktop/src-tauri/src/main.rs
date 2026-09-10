@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod hub_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
@@ -97,6 +98,8 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            hub_window::hub_window_action,
+            hub_window::hub_window_send,
             desktop_info,
             show_main_window,
             get_autostart,
@@ -107,6 +110,7 @@ fn main() {
             local_bridge::choose_local_folder,
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
+            local_bridge::choose_working_directory,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {
@@ -138,6 +142,7 @@ fn main() {
             let base =
                 resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?;
             app.add_capability(native_access::web_capability(&base))?;
+            app.add_capability(native_access::hub_capability(&base))?;
             create_main_window(app)?;
             setup_tray(app)?;
             emit_startup_deep_links(app.handle());
@@ -148,7 +153,14 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if !IS_QUITTING.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == hub_window::LABEL {
+                        let _ = window.emit(
+                            hub_window::EVENT,
+                            serde_json::json!({"kind":"close-requested"}),
+                        );
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         })
@@ -302,7 +314,11 @@ fn desktop_bridge_script() -> &'static str {
 
 #[tauri::command]
 fn desktop_info(app: AppHandle, window: tauri::WebviewWindow) -> Result<DesktopInfo, String> {
-    authorize_desktop_window(&app, &window, false)?;
+    if window.label() == hub_window::LABEL {
+        hub_window::authorize(&app, &window)?;
+    } else {
+        authorize_desktop_window(&app, &window, false)?;
+    }
     Ok(DesktopInfo {
         kind: "desktop",
         is_native: true,
@@ -379,7 +395,11 @@ fn open_external_url(
     window: tauri::WebviewWindow,
     url: String,
 ) -> Result<(), String> {
-    authorize_desktop_window(&app, &window, false)?;
+    if window.label() == hub_window::LABEL {
+        hub_window::authorize(&app, &window)?;
+    } else {
+        authorize_desktop_window(&app, &window, false)?;
+    }
     let parsed = Url::parse(url.trim()).map_err(|error| error.to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Only http and https URLs can be opened externally.".to_string());

@@ -6,6 +6,7 @@ import {
   useChatCreationContext,
   WorkingFolderPicker,
 } from "./chat-work-context";
+import { synchronizeHubBeforeSend } from "../../../../lib/hub-send-barrier";
 
 import {
   useCallback,
@@ -879,6 +880,12 @@ export function DashboardChatPageClient() {
             key: (previous[creationContext.key]?.key ?? 0) + 1,
           },
         }));
+      try {
+        await synchronizeHubBeforeSend();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        return;
+      }
       if (isStartingChatRef.current) {
         return;
       }
@@ -995,10 +1002,13 @@ export function DashboardChatPageClient() {
             `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`,
           ).catch((e) =>
             toast.error(
-              e instanceof Error ? e.message : "已创建对话，但草稿清理失败。",
+              e instanceof Error
+                ? e.message
+                : "The conversation was created, but the draft could not be cleared.",
             ),
           );
         }
+        chatHubContext?.desktop.promoteDraft(result.thread.id);
         adoptChat(result.thread);
         writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
         writeStoredByokState(
@@ -1067,6 +1077,7 @@ export function DashboardChatPageClient() {
       }
     },
     [
+      chatHubContext?.desktop,
       workspaceId,
       creationContext,
       adoptChat,

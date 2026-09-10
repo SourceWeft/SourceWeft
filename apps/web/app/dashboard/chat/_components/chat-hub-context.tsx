@@ -6,7 +6,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -65,7 +65,11 @@ export type ChatHubRegistration = {
   onSourceMerge: (sources: SourceItem[]) => void;
 };
 
+import { useDesktopHubHost } from "./use-desktop-hub-host";
+
 type ChatHubContextValue = {
+  desktop: ReturnType<typeof useDesktopHubHost>;
+  clearRegistration: (registration: ChatHubRegistration) => void;
   registration: ChatHubRegistration;
   mobileHubOpen: boolean;
   setMobileHubOpen: (open: boolean) => void;
@@ -139,18 +143,30 @@ export function ChatHubProvider({
   );
   const { hubDrawerOpen: mobileHubOpen, setHubDrawerOpen: setMobileHubOpen } =
     useWorkspaceLayout();
+  const [registered, setRegistered] = useState(false);
+  const activeRegistration = useRef<ChatHubRegistration | null>(null);
+  const desktop = useDesktopHubHost(registration, registered);
 
   const setRegistration = useCallback(
     (partial: Partial<ChatHubRegistration>) => {
-      setRegistrationState((prev) => ({ ...prev, ...partial }));
+      activeRegistration.current = partial as ChatHubRegistration;
+      setRegistered(true);
+      setRegistrationState({ ...buildDefaultRegistration(), ...partial });
     },
     [],
   );
 
-  const value = useMemo(
-    () => ({ mobileHubOpen, registration, setMobileHubOpen, setRegistration }),
-    [mobileHubOpen, registration, setMobileHubOpen, setRegistration],
-  );
+  const clearRegistration = useCallback((value: ChatHubRegistration) => {
+    if (activeRegistration.current === value) setRegistered(false);
+  }, []);
+  const value = {
+    mobileHubOpen,
+    registration,
+    setMobileHubOpen,
+    setRegistration,
+    clearRegistration,
+    desktop,
+  };
 
   return (
     <ChatHubContext.Provider value={value}>{children}</ChatHubContext.Provider>
@@ -168,5 +184,6 @@ export function useRegisterChatHub(registration: ChatHubRegistration) {
   useBrowserLayoutEffect(() => {
     if (!setRegistration) return;
     setRegistration(registration);
-  }, [registration, setRegistration]);
+    return () => context?.clearRegistration(registration);
+  }, [registration, setRegistration, context?.clearRegistration]);
 }

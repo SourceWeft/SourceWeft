@@ -128,7 +128,36 @@ export async function validateThreadExecutionTarget(
         "This working directory has not been authorized.",
       );
   }
+  if (target.directoryGrantId)
+    await validateLegacyDirectoryGrant(
+      userId,
+      target.deviceId,
+      target.directoryGrantId,
+    );
   // Being temporarily offline does not change a local conversation into cloud.
+}
+
+// Older conversations use native-only grants. When the ID is a registered
+// folder, its server-side revocation and owner checks still apply.
+async function validateLegacyDirectoryGrant(
+  userId: string,
+  deviceId: string,
+  grantId: string,
+) {
+  const folder = await db.query.localFolderGrants.findFirst({
+    where: eq(localFolderGrants.id, grantId),
+  });
+  if (
+    folder &&
+    (folder.userId !== userId ||
+      folder.deviceId !== deviceId ||
+      folder.revokedAt)
+  )
+    throw new ContentError(
+      403,
+      "LOCAL_FOLDER_REVOKED",
+      "Access to this working directory has been revoked.",
+    );
 }
 
 export async function localCall(input: {
@@ -175,6 +204,21 @@ export async function localCall(input: {
         403,
         "LOCAL_FOLDER_REVOKED",
         "Access to this working directory has been revoked.",
+      );
+  }
+
+  if (!bound.folderId) {
+    const thread = await db.query.threads.findFirst({
+      where: eq(threads.id, input.threadId),
+    });
+    if (
+      thread?.executionTargetJson.kind === "local" &&
+      thread.executionTargetJson.directoryGrantId
+    )
+      await validateLegacyDirectoryGrant(
+        input.userId,
+        input.deviceId,
+        thread.executionTargetJson.directoryGrantId,
       );
   }
 

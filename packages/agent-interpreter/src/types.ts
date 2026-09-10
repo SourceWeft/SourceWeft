@@ -85,6 +85,8 @@ export interface InterpreterExecutionGate {
 }
 
 export interface SourceWeftInterpreterOptions {
+  /** Host-selected read roots; never model input. */
+  readRoots?: readonly string[];
   backend: AnyBackendProtocol;
   allowedTools: readonly InterpreterReadToolName[];
   searchSourcesTool?: StructuredToolInterface;

@@ -190,7 +190,9 @@ export type SandboxProvider = {
     signal?: AbortSignal;
     timeoutMs?: number;
   }): Promise<Buffer>;
+  nativeFileOperations?: boolean;
   listFiles?(input: {
+    recursive?: boolean;
     providerSandboxId: string;
     sandboxPath: string;
   }): Promise<
@@ -205,6 +207,12 @@ export type SandboxProvider = {
     providerSandboxId: string;
     sandboxPath: string;
   }): Promise<string>;
+  replaceTextFile?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+    content: string;
+    expected: string;
+  }): Promise<unknown>;
   writeTextFile?(input: {
     providerSandboxId: string;
     sandboxPath: string;

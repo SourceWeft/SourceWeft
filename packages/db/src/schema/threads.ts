@@ -52,7 +52,12 @@ export const threads = pgTable(
     executionTargetJson: jsonb("execution_target_json")
       .$type<
         | { kind: "cloud" }
-        | { kind: "local"; deviceId: string; folderId?: string }
+        | {
+            kind: "local";
+            deviceId: string;
+            folderId?: string;
+            directoryGrantId?: string;
+          }
       >()
       .notNull()
       .default(sql`'{"kind":"cloud"}'::jsonb`),

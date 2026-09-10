@@ -277,3 +277,25 @@ test("a mount whose service is unreachable reports an error instead of throwing"
   // A healthy mount is untouched by the guard.
   assert.equal((await backend.read("/kb/source.md")).content, "ok");
 });
+
+test("omitting working storage removes Workfiles instead of recreating the mount", async () => {
+  const denied = async () => ({ error: "readonly" });
+  const backend = new MountedAgentFilesystemBackend({
+    knowledge: {
+      ls: async () => ({ files: [] }),
+      read: denied,
+      readRaw: denied,
+      write: denied,
+      edit: denied,
+      grep: denied,
+      glob: denied,
+    },
+    working: null,
+  });
+  assert.deepEqual(
+    (await backend.ls("/")).files?.map((file) => file.path),
+    ["/kb/"],
+  );
+  assert.ok((await backend.read("/workfiles/old.txt")).error);
+  assert.ok((await backend.write("/workfiles/new.txt", "no DB write")).error);
+});

@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingUiHost } from "./context";
 
 import * as React from "react";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ export function useBillingPlanAction(input: {
     trackBillingPortalOpened,
     trackCheckoutError,
     billingClient,
+    openCheckout,
   } = useBillingUiHost();
 
   const [actionLoading, setActionLoading] = React.useState(false);
@@ -42,10 +43,16 @@ export function useBillingPlanAction(input: {
   const actionLabel = shouldManageBilling ? "Manage billing" : "Upgrade plan";
   const actionDisabled =
     actionLoading ||
+    (shouldManageBilling &&
+      input.subscription?.capabilities?.managePortal !== true) ||
     (shouldManageBilling ? !input.teamId : !input.isPersonal && !input.teamId);
 
   const handleAction = React.useCallback(async () => {
-    if (!billingCheckoutEnabled) {
+    if (
+      shouldManageBilling
+        ? input.subscription?.capabilities?.managePortal !== true
+        : !billingCheckoutEnabled
+    ) {
       return;
     }
 
@@ -99,7 +106,7 @@ export function useBillingPlanAction(input: {
           plan: "pro",
           source: "settings",
         });
-        window.location.assign(result.checkoutUrl);
+        openCheckout(result);
         return;
       }
 
@@ -129,7 +136,7 @@ export function useBillingPlanAction(input: {
         ),
         source: "settings",
       });
-      window.location.assign(result.checkoutUrl);
+      openCheckout(result);
     } catch (err) {
       trackCheckoutError({
         billingInterval: input.billingPeriod,
@@ -143,12 +150,19 @@ export function useBillingPlanAction(input: {
       setActionLoading(false);
     }
   }, [
+    billingCheckoutEnabled,
+    billingClient,
+    openCheckout,
+    trackBeginCheckout,
+    trackBillingPortalOpened,
+    trackCheckoutError,
     input.billingPeriod,
     input.isPersonal,
     input.summary?.seats.used,
     input.teamId,
     input.teamSeatCount,
     shouldManageBilling,
+    input.subscription?.capabilities?.managePortal,
   ]);
 
   return {

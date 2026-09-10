@@ -15,10 +15,7 @@ export class BillingReconcileService {
   ) {}
 
   async reconcileTeamSubscriptions(): Promise<TeamPlanReconcileResult> {
-    if (
-      !this.runtimeConfig.teamBillingEnabled ||
-      !this.runtimeConfig.reconcileEnabled
-    ) {
+    if (!this.runtimeConfig.reconcileEnabled) {
       return {
         checked: 0,
         realigned: 0,
@@ -26,6 +23,13 @@ export class BillingReconcileService {
       };
     }
 
+    const initial = await this.store.listAccountSubscriptionStates();
+    for (const teamId of new Set(initial.map((row) => row.teamId))) {
+      await this.accountService.withLockedTeamAccounts(
+        teamId,
+        async () => undefined,
+      );
+    }
     const states = await this.store.listAccountSubscriptionStates();
     const anomalies: TeamPlanReconcileAnomaly[] = [];
     let realigned = 0;

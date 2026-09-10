@@ -356,6 +356,7 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: null,
     },
@@ -388,6 +389,7 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: stubBackend("skills") as never,
     },
@@ -440,6 +442,7 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: null,
     },
@@ -500,6 +503,7 @@ test("preconstructed agent backend receives the host invocation signal", async (
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: null,
     },
@@ -540,6 +544,7 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: null,
     },
@@ -604,6 +609,7 @@ Read this before creating slides.`;
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
+      localFiles: false,
       filesystemMounts: [],
       skillsBackend: new SelectedSkillsBackend([
         {
@@ -820,4 +826,24 @@ describe("sandbox runtime assembly tool permissions", () => {
       false,
     );
   });
+});
+
+test("PC assembly omits the DB Workfiles route and exposes a durable physical mount", async () => {
+  const dbWrite = vi.fn(async (path: string) => ({ path, filesUpdate: null }));
+  const localFilesystem = {
+    ...filesystemBackend, localFiles: true,
+    workingFilesBackend: { ...stubBackend("work"), write: dbWrite } as never,
+  };
+  const root = "/Users/example/task";
+  const sandboxRuntime = {
+    backend: stubSandboxBackend(),
+    pathPolicy: { ...SANDBOX_PATH_POLICY_STUB, workspaceRoot: root, defaultCwd: root },
+  } as never;
+  const mounts = filesystemMountsForPrompt({ filesystemBackend: localFilesystem, sandboxRuntime });
+  assert.ok(!mounts.some((mount) => mount.root === "/workfiles"));
+  assert.equal(mounts.find((mount) => mount.root === root)?.persisted, true);
+  const backend = buildAgentBackend({ filesystemBackend: localFilesystem, sandboxRuntime });
+  await backend.write(`${root}/note.txt`, "local");
+  await backend.write("/workfiles/note.txt", "old path");
+  assert.equal(dbWrite.mock.calls.length, 0);
 });

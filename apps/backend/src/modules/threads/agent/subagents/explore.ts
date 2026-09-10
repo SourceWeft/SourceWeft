@@ -79,6 +79,7 @@ const EXPLORE_SYSTEM_PROMPT = [
 export function createExploreSubagent(input: {
   availableTools: readonly { readonly name: string }[];
   backend: AnyBackendProtocol;
+  workingDirectory?: string;
   middleware: readonly AgentMiddleware[];
 }): SubAgent {
   return {
@@ -90,6 +91,7 @@ export function createExploreSubagent(input: {
     ) as unknown as SubAgent["tools"],
     middleware: readOnlyChildMiddleware({
       backend: input.backend,
+      workingDirectory: input.workingDirectory,
       middleware: input.middleware,
     }),
     interruptOn: {},
