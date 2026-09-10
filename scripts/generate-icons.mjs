@@ -30,6 +30,7 @@ async function loadSharp() {
 
 const LOGO_PATH = join(ROOT, "assets/logo.svg");
 const SVG_PATH = join(ROOT, "assets/app-icon.svg");
+const MACOS_SVG_PATH = join(ROOT, "assets/macos-icon.svg");
 const ICON_DENSITY = 300;
 const SQUARE_ICON_SIZE = 1024;
 
@@ -47,29 +48,33 @@ const TARGETS = {
   ),
 };
 
-async function getSourcePNG(sharp) {
-  return sharp(SVG_PATH, { density: ICON_DENSITY })
+async function getSourcePNG(sharp, svgPath = SVG_PATH) {
+  return sharp(svgPath, { density: ICON_DENSITY })
     .ensureAlpha()
     .png()
     .toBuffer();
 }
 
 async function renderPngBuffer(sharp, size, opts = {}) {
-  const { bg = { r: 255, g: 255, b: 255, alpha: 0 }, rgba = false } = opts;
-  const source = await getSourcePNG(sharp);
+  const { bg = { r: 255, g: 255, b: 255, alpha: 0 }, rgba = false, transparent = false, svgPath = SVG_PATH } = opts;
+  const source = await getSourcePNG(sharp, svgPath);
 
   const pipeline = sharp(source)
-    .resize(size, size, { fit: "contain", background: bg })
-    .flatten({ background: "white" });
+    .resize(size, size, { fit: "contain", background: bg });
+  if (!transparent) pipeline.flatten({ background: "white" });
   // Tauri embeds desktop PNGs at compile time and requires an RGBA buffer.
-  // Keep the white artwork opaque; iOS app icons continue to omit alpha.
+  // Preserve desktop transparency; iOS app icons continue to omit alpha.
   if (rgba) pipeline.ensureAlpha();
   return pipeline.png().toBuffer();
 }
 
 async function genPNG(sharp, size, outPath, opts = {}) {
+  const desktop = outPath.startsWith(TARGETS.tauriIcons);
   const pngBuffer = await renderPngBuffer(sharp, size, {
-    rgba: outPath.startsWith(TARGETS.tauriIcons),
+    rgba: desktop,
+    transparent: desktop,
+    // Desktop PNGs also supply the native app icon during Tauri development.
+    svgPath: desktop ? MACOS_SVG_PATH : SVG_PATH,
     ...opts,
   });
   writeFileSync(outPath, pngBuffer);
