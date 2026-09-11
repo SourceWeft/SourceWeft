@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { SkillIntroduction } from "../../../../skills/_components/skill-introduction";
 
-import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,8 @@ export function SkillReadmeDialog({
     ReturnType<typeof contentClient.getSkillCatalogDetail>
   > | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!open || !workspaceId || !catalogId) {
@@ -37,6 +39,7 @@ export function SkillReadmeDialog({
     let cancelled = false;
     setIsLoading(true);
     setDetail(null);
+    setError(null);
     contentClient
       .getSkillCatalogDetail(workspaceId, catalogId)
       .then((result) => {
@@ -44,7 +47,7 @@ export function SkillReadmeDialog({
       })
       .catch((error) => {
         if (!cancelled) {
-          toast.error(getErrorMessage(error, "Failed to load skill details."));
+          setError(getErrorMessage(error, "Failed to load skill details."));
         }
       })
       .finally(() => {
@@ -53,7 +56,7 @@ export function SkillReadmeDialog({
     return () => {
       cancelled = true;
     };
-  }, [catalogId, open, workspaceId]);
+  }, [catalogId, open, workspaceId, reload]);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -74,15 +77,25 @@ export function SkillReadmeDialog({
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Loading skill...
             </div>
-          ) : detail?.readmeContent ? (
-            <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-              {detail.readmeContent}
-            </MessageResponse>
-          ) : (
-            <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
-              This skill does not include a README.md introduction yet.
+          ) : error ? (
+            <div role="alert" className="space-y-3 py-8 text-sm">
+              <p className="text-destructive">{error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReload((value) => value + 1)}
+              >
+                Retry
+              </Button>
             </div>
-          )}
+          ) : detail ? (
+            <SkillIntroduction
+              key={catalogId}
+              {...detail}
+              displayName={detail.skill.displayName}
+              description={detail.skill.description}
+            />
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

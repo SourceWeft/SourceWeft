@@ -259,6 +259,7 @@ export const listWorkspaceSkillsResponseSchema = z.object({
 export const getSkillCatalogDetailResponseSchema = z.object({
   skill: skillCatalogItemSchema,
   readmeContent: z.string().nullable(),
+  readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
 });
 
@@ -500,6 +501,8 @@ export type RegistryVersionsResponse = z.infer<
 >;
 export const registryVersionDetailSchema = z.object({
   version: registryVersionSchema,
+  readmeContent: z.string().nullable(),
+  readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
   files: z.array(
     z.object({

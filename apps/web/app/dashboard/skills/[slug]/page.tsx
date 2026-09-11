@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillIntroduction } from "../_components/skill-introduction";
+
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -48,14 +50,6 @@ function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
 
 function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
-}
-
-function readmeFallback(item: SkillCatalogItem) {
-  return [
-    `# ${item.displayName}`,
-    "",
-    item.description,
-  ].join("\n");
 }
 
 function SkillAvatar({ item }: { item: SkillCatalogItem }) {
@@ -226,9 +220,6 @@ export default function SkillDetailPage() {
   }
 
   const pageLoading = isResolvingWorkspace || isLoading;
-  const readmeContent = detail
-    ? detail.readmeContent ?? readmeFallback(detail.skill)
-    : "";
   const skillContent = detail?.skillContent ?? "";
   const canManageInstall = detail?.skill.installable !== false;
 
@@ -306,25 +297,24 @@ export default function SkillDetailPage() {
                   Loading skill...
                 </div>
               ) : error ? (
-                <div className="px-5 py-10 text-sm text-destructive">
-                  {error}
+                <div role="alert" className="space-y-3 px-5 py-10 text-sm">
+                  <p className="text-destructive">{error}</p>
+                  <Button variant="outline" size="sm" onClick={() => void loadDetail()}>Retry</Button>
                 </div>
               ) : (
-                <Tabs className="gap-0" defaultValue="readme">
+                <Tabs className="gap-0" defaultValue="overview">
                   <div className="border-b border-border px-5 py-3">
                     <TabsList className="h-8" variant="line">
-                      <TabsTrigger className="px-2.5 text-xs" value="readme">
-                        README
+                      <TabsTrigger className="px-2.5 text-xs" value="overview">
+                        Overview
                       </TabsTrigger>
                       <TabsTrigger className="px-2.5 text-xs" value="skill">
                         SKILL.md
                       </TabsTrigger>
                     </TabsList>
                   </div>
-                  <TabsContent className="m-0 px-5 py-5" value="readme">
-                    <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                      {readmeContent}
-                    </MessageResponse>
+                  <TabsContent className="m-0 px-5 py-5" value="overview">
+                    {detail ? <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} /> : null}
                   </TabsContent>
                   <TabsContent className="m-0 px-5 py-5" value="skill">
                     {skillContent ? (

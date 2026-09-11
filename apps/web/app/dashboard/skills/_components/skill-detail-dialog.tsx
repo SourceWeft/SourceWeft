@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { RegistryVersionDetail } from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
+import { SkillIntroduction } from "./skill-introduction";
 import {
   AlertTriangle,
   ExternalLink,
@@ -49,10 +50,6 @@ function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
 
 function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
-}
-
-function readmeFallback(item: SkillCatalogItem) {
-  return [`# ${item.displayName}`, "", item.description].join("\n");
 }
 
 function SkillAvatar({ item }: { item: SkillCatalogItem }) {
@@ -102,7 +99,7 @@ export function SkillDetailDialog({
   const [registryDetail, setRegistryDetail] =
     React.useState<RegistryVersionDetail | null>(null);
   const handleVersionView = React.useCallback(
-    (value: RegistryVersionDetail) => setRegistryDetail(value),
+    (value: RegistryVersionDetail | null) => setRegistryDetail(value),
     [],
   );
 
@@ -150,6 +147,8 @@ export function SkillDetailDialog({
           displayName: registryDetail.version.displayName,
           installable: registryDetail.version.status === "published",
           sourceUrl: registryDetail.version.sourceUrl,
+          hasReadme: Boolean(registryDetail.readmeContent?.trim()),
+          flagged: registryDetail.version.flags.length > 0,
         }
       : baseItem;
   const installed =
@@ -157,14 +156,9 @@ export function SkillDetailDialog({
       ? !!activeItem.enabledWorkspaceSkillId
       : activeItem?.enabled;
   const canManageInstall = activeItem?.installable !== false || installed;
-  const readmeContent = activeItem
-    ? registryDetail
-      ? (registryDetail.skillContent ?? readmeFallback(activeItem))
-      : (detail?.readmeContent ?? readmeFallback(activeItem))
-    : "";
-  const skillContent = registryDetail
-    ? registryDetail.skillContent
-    : detail?.skillContent;
+  const documents =
+    item?.sourceType === "registry_github" ? registryDetail : detail;
+  const skillContent = documents?.skillContent;
 
   return (
     <Dialog
@@ -273,43 +267,51 @@ export function SkillDetailDialog({
                   </section>
                 ) : null}
                 <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
-                  <Tabs className="gap-0" defaultValue="readme">
-                    <div className="border-b border-border px-5 py-3">
-                      <TabsList className="h-8" variant="line">
-                        <TabsTrigger className="px-2.5 text-xs" value="readme">
-                          README
-                        </TabsTrigger>
-                        <TabsTrigger className="px-2.5 text-xs" value="skill">
-                          SKILL.md
-                        </TabsTrigger>
-                      </TabsList>
-                    </div>
-                    {/* Immutable version documents must not share streaming block state. */}
-                    <TabsContent className="m-0 px-5 py-5" value="readme">
-                      <MessageResponse
-                        key={`${activeItem.skillVersionId}:readme`}
-                        mode="static"
-                        className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
-                      >
-                        {readmeContent}
-                      </MessageResponse>
-                    </TabsContent>
-                    <TabsContent className="m-0 px-5 py-5" value="skill">
-                      {skillContent ? (
-                        <MessageResponse
-                          key={`${activeItem.skillVersionId}:skill`}
-                          mode="static"
-                          className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
-                        >
-                          {skillContent}
-                        </MessageResponse>
-                      ) : (
-                        <div className="py-10 text-sm text-muted-foreground">
-                          This skill does not include SKILL.md content.
-                        </div>
-                      )}
-                    </TabsContent>
-                  </Tabs>
+                  {documents ? (
+                    <Tabs className="gap-0" defaultValue="overview">
+                      <div className="border-b border-border px-5 py-3">
+                        <TabsList className="h-8" variant="line">
+                          <TabsTrigger
+                            className="px-2.5 text-xs"
+                            value="overview"
+                          >
+                            Overview
+                          </TabsTrigger>
+                          <TabsTrigger className="px-2.5 text-xs" value="skill">
+                            SKILL.md
+                          </TabsTrigger>
+                        </TabsList>
+                      </div>
+                      {/* Immutable version documents must not share streaming block state. */}
+                      <TabsContent className="m-0 px-5 py-5" value="overview">
+                        <SkillIntroduction
+                          key={`${activeItem.skillVersionId}:overview`}
+                          {...documents}
+                          displayName={activeItem.displayName}
+                          description={activeItem.description}
+                        />
+                      </TabsContent>
+                      <TabsContent className="m-0 px-5 py-5" value="skill">
+                        {skillContent ? (
+                          <MessageResponse
+                            key={`${activeItem.skillVersionId}:skill`}
+                            mode="static"
+                            className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                          >
+                            {skillContent}
+                          </MessageResponse>
+                        ) : (
+                          <div className="py-10 text-sm text-muted-foreground">
+                            This skill does not include SKILL.md content.
+                          </div>
+                        )}
+                      </TabsContent>
+                    </Tabs>
+                  ) : (
+                    <p className="px-5 py-10 text-sm text-muted-foreground">
+                      Documentation will appear when the selected version loads.
+                    </p>
+                  )}
                 </article>
               </div>
 
@@ -383,7 +385,7 @@ export function SkillDetailDialog({
                       Under review
                     </Badge>
                   ) : null}
-                  {activeItem.enabled && canManageInstall ? (
+                  {installed && canManageInstall ? (
                     <Badge
                       className="h-5 px-1.5 text-[10px]"
                       variant="secondary"
@@ -391,7 +393,7 @@ export function SkillDetailDialog({
                       Installed
                     </Badge>
                   ) : null}
-                  {!canManageInstall ? (
+                  {!canManageInstall && activeItem.sourceType === "builtin" ? (
                     <Badge
                       className="h-5 px-1.5 text-[10px]"
                       variant="secondary"

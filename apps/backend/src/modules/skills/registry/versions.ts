@@ -14,6 +14,7 @@ import type {
   RegistryVersionsResponse,
 } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
+import { readSkillDocuments } from "../documents";
 import { isMarketAdmin } from "../../market/admin";
 import { teamAuditService } from "../../team-audit";
 
@@ -196,7 +197,7 @@ export async function getRegistryVersionDetail(
   const current = new Map(files.map((f) => [f.path, f.contentHash]));
   return {
     version: mapVersion(version, privileged),
-    skillContent: files.find((f) => f.path === "SKILL.md")?.contentText ?? null,
+    ...readSkillDocuments(files),
     files: files.map(({ path, contentHash, sizeBytes }) => ({
       path,
       contentHash,

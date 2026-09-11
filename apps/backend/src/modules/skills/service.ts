@@ -38,7 +38,8 @@ import {
 import type { SkillCatalogItem, SkillSourceType } from "./types";
 import { builtinSkillSelectionId } from "./selection";
 import { submitRegistrySkillFromGitHub } from "./registry/submit";
-import { registryAccess } from "./registry/versions";
+import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
+import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
@@ -655,14 +656,16 @@ export class ContentSkillsService {
       throw new ContentError(404, "SKILL_NOT_FOUND", "Skill not found");
     }
 
-    const files = await this.getSkillFiles(input, item);
-    const readmeContent =
-      files.find((file) => file.path === "README.md")?.contentText ?? null;
+    // Registry previews use the same viewer/version authorization as version details.
+    // Runtime bundle access remains governed by workspace entitlements.
+    const documents = item.sourceType === "registry_github"
+      ? await getRegistryVersionDetail({ ...input, versionId: item.skillVersionId })
+      : readSkillDocuments(await this.getSkillFiles(input, item));
     return {
-      skill: { ...item, hasReadme: readmeContent !== null },
-      readmeContent,
-      skillContent:
-        files.find((file) => file.path === "SKILL.md")?.contentText ?? null,
+      skill: { ...item, hasReadme: documents.readmeContent !== null },
+      readmeContent: documents.readmeContent,
+      readmePath: documents.readmePath,
+      skillContent: documents.skillContent,
     };
   }
 
