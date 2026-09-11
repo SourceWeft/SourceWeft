@@ -45,6 +45,8 @@ function getAllowedDevOrigins() {
 }
 
 const nextConfig: NextConfig = {
+  // Separate build output lets an isolated E2E server share this checkout.
+  distDir: process.env.SOURCEWEFT_NEXT_DIST_DIR ?? ".next",
   allowedDevOrigins:
     process.env.NODE_ENV === "development" ? getAllowedDevOrigins() : undefined,
   output: "standalone",

@@ -15,7 +15,8 @@
 - Local readonly Sources 尚未实现。静态原生 sandbox 无法撤销旧进程已有的工作目录写权限，因此重叠目录的 Live Sources 方案尚不能交付；等待确定 Snapshot Sources 或独立只读目录的 Live Sources。
 - 2026-09-11：独立 E2E 数据库已迁移至 0038，当前工作目录的测试 API/worker 已启动。真实 HTTP 的 10 项验收通过（包括 >1 MiB 对象存储字节往返、覆盖 CAS、跨对话隔离、匿名拒绝和旧接口拒绝）。
 - 真实默认模型回合已验证 search_files → read_document → 带版本的 File 引用，未调用 Sources/Web。默认模型不支持视觉；首次 view_image 导致整轮 HTTP 500，修复为结构化 VISION_UNAVAILABLE 工具结果后，同模型重跑正常完成文本任务并说明图片未读取。视觉成功路径仍未验收。
-- macOS 仍锁屏；前端标准 next dev 还受到另一开发服务占用 `.next` 的限制。真实桌面 UI E2E 及运行应用的原生二进制升级尚未完成，未停止其他开发服务。
+- 解锁续测：新增 SOURCEWEFT_NEXT_DIST_DIR，E2E 使用 `.next/files-e2e` 与 3400 端口，保留原 3000 开发服务。当前机器的 Watchpack 事件监听发生 EMFILE/目录删除重启循环，测试进程明确采用 WATCHPACK_POLLING=1000；仍使用标准 Next/Turbopack，但默认监听稳定性尚未验收。
+- 测试前端已返回 200，更新后的原生测试应用已实际显示测试账号和对话列表；构建产物与安装二进制的 Mach-O UUID 一致（E18B49CB-9227-37B0-9E2D-75ED219F61C2）。进入本地对话期间 Mac 再次锁屏，宿主状态为离线。本地 FS 传输、目录显示和预览操作仍未验收通过。
 
 已验证：数据库范围与约束 5 项、文件读取/图像/二进制 21 项、前端选择与引用 9 项、Agent runner/assembly/Files 132 项、VFS 26 项、sandbox 契约 12 项、原生二进制/文本搜索 3 项。PDF 测试包含实际页面渲染。此记录不是 Release A 或 Release B 验收通过声明。
 
