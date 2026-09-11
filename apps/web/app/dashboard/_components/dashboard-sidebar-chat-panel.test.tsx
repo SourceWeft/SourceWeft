@@ -81,3 +81,15 @@ test("sidebar text search spans all execution targets", () => {
   assert.ok(!html.includes("Mac research"));
   assert.ok(!html.includes("Clear all private chats"));
 });
+
+test("new chat aligns with navigation and search belongs to the chats header", () => {
+  const html = render("cloud");
+  const newChatIndex = html.indexOf("New chat");
+  const chatsIndex = html.indexOf("Chats");
+  const searchIndex = html.indexOf('aria-label="Search all chats"');
+
+  assert.ok(html.includes("h-9 flex-1 justify-start gap-2 rounded-lg px-3"));
+  assert.ok(newChatIndex >= 0);
+  assert.ok(chatsIndex > newChatIndex);
+  assert.ok(searchIndex > chatsIndex);
+});

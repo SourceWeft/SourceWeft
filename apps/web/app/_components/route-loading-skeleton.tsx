@@ -92,7 +92,7 @@ function DashboardSkeletonContentForPath({
 
 function DashboardSidebarSkeleton() {
   return (
-    <aside className="hidden h-svh w-[248px] shrink-0 flex-col border-r border-border bg-sidebar p-3 md:flex">
+    <aside className="hidden h-svh w-[280px] shrink-0 flex-col border-r border-border bg-sidebar p-3 md:flex">
       <div className="flex h-11 items-center gap-2">
         <SkeletonBlock className="size-6 rounded-md" />
         <SkeletonLine className="w-28" />
@@ -476,7 +476,7 @@ function SourcesHubSkeletonContent({
   return (
     <aside
       className={cx(
-        "h-full shrink-0 flex-col overflow-x-hidden bg-background",
+        "h-full shrink-0 flex-col overflow-x-hidden bg-card",
         className ??
           (variant === "drawer"
             ? "flex w-full min-w-0"

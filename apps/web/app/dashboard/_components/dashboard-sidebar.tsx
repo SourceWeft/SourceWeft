@@ -87,14 +87,14 @@ function NavigationLink({
   return (
     <Link
       className={cn(
-        "flex h-8 min-w-0 items-center gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 min-w-0 items-center gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
       aria-current={active ? "page" : undefined}
       href={href}
       onClick={onNavigate}
     >
-      <Icon className="h-4.5 w-4.5 shrink-0" />
+      <Icon className="size-4 shrink-0" />
       <span className="min-w-0 truncate">{label}</span>
     </Link>
   );
@@ -270,7 +270,7 @@ export function DashboardSidebar() {
       aria-label="Main navigation"
       className="shrink-0 border-b border-sidebar-border/60 px-3 pb-2"
     >
-      <div className="space-y-0.5">
+      <div className="space-y-0">
         {navMain.slice(0, 3).map((item) => (
           <NavigationLink
             key={item.title}
@@ -287,12 +287,12 @@ export function DashboardSidebar() {
           <Button
             variant="ghost"
             className={cn(
-              "h-8 w-full justify-start gap-2 px-3 text-sm font-medium text-sidebar-foreground/75",
+              "h-9 w-full justify-start gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75",
               pathname.startsWith("/dashboard/observability") &&
-                "bg-sidebar-accent",
+                "bg-sidebar-accent text-sidebar-accent-foreground",
             )}
           >
-            <MoreHorizontal className="size-4" />
+            <MoreHorizontal className="size-4 shrink-0" />
             More
           </Button>
         </DropdownMenuTrigger>

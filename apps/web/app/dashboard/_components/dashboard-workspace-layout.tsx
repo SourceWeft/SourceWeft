@@ -13,7 +13,6 @@ import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { useElementSize } from "../../../lib/use-element-size";
 import { resolveWorkspaceLayout } from "./workspace-layout";
 import { useDesktopTitlebar } from "../../../lib/desktop-titlebar";
-import { DesktopTitlebarControls } from "./desktop-titlebar-controls";
 
 const PREFERENCE_KEY = "sourceweft:conversations-expanded";
 type Layout = ReturnType<typeof resolveWorkspaceLayout> & {
@@ -115,7 +114,6 @@ export function DashboardWorkspaceLayout({
         data-short-window={height > 0 && height <= 720 ? "true" : undefined}
         className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground"
       >
-        <DesktopTitlebarControls />
         {children}
       </div>
     </Context.Provider>

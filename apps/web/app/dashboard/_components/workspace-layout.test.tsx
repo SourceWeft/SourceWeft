@@ -139,7 +139,7 @@ test("desktop collapse keeps a 56px rail and only phone sizes hide navigation en
     assert.equal(resolveWorkspaceLayout(width).conversationsDocked, false);
   }
   for (const width of [768, 800, 960, 1120, 1280, 1440]) {
-    assert.equal(resolveWorkspaceLayout(width).contentWidth, width - 248);
+    assert.equal(resolveWorkspaceLayout(width).contentWidth, width - 280);
     assert.equal(resolveWorkspaceLayout(width, false).contentWidth, width - 56);
   }
 });
@@ -152,7 +152,7 @@ test("the macOS overlay returns the full content width when its sidebar is colla
     assert.equal(collapsed.conversationsDocked, false);
     assert.equal(
       resolveWorkspaceLayout(width, true, true).contentWidth,
-      width - 248,
+      width - 280,
     );
   }
 });

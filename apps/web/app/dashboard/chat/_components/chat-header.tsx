@@ -102,24 +102,22 @@ export function ChatHeader({
             : "pl-3 sm:pl-4",
         )}
       >
-        {!desktopTitlebar && (
-          <Button
-            data-conversations-toggle
-            aria-label={conversationLabel}
-            title={conversationLabel}
-            aria-expanded={conversationsOpen}
-            className="size-8 shrink-0"
-            size="icon-sm"
-            variant="ghost"
-            onClick={toggleConversations}
-          >
-            {conversationsOpen ? (
-              <PanelLeftClose className="size-4" />
-            ) : (
-              <PanelLeftOpen className="size-4" />
-            )}
-          </Button>
-        )}
+        <Button
+          data-conversations-toggle
+          aria-label={conversationLabel}
+          title={conversationLabel}
+          aria-expanded={conversationsOpen}
+          className="size-8 shrink-0"
+          size="icon-sm"
+          variant="ghost"
+          onClick={toggleConversations}
+        >
+          {conversationsOpen ? (
+            <PanelLeftClose className="size-4" />
+          ) : (
+            <PanelLeftOpen className="size-4" />
+          )}
+        </Button>
         <div
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2",

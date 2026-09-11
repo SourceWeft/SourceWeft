@@ -450,6 +450,9 @@ function ChatListRow({
 
 function ChatList({
   search,
+  searchOpen,
+  onToggleSearch,
+  onSearchChange,
   headerActions,
   activeId,
   hasMore = false,
@@ -467,6 +470,9 @@ function ChatList({
   onPrefetch,
 }: {
   search: string;
+  searchOpen: boolean;
+  onToggleSearch: () => void;
+  onSearchChange: (value: string) => void;
   headerActions: ReactNode;
   activeId?: string;
   hasMore?: boolean;
@@ -526,7 +532,7 @@ function ChatList({
 
   return (
     <>
-      <div className="group/section-label flex shrink-0 items-center gap-1 px-3.5 py-2">
+      <div className="group/section-label flex shrink-0 items-center gap-1 px-3 py-2">
         <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           Chats
         </span>
@@ -591,6 +597,18 @@ function ChatList({
             <X className="size-3" />
           </Button>
         ) : null}
+        <Button
+          className="text-muted-foreground"
+          variant="ghost"
+          size="icon-xs"
+          type="button"
+          title="Search all chats"
+          aria-label="Search all chats"
+          aria-expanded={searchOpen}
+          onClick={onToggleSearch}
+        >
+          <Search className="size-3.5" />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -645,6 +663,18 @@ function ChatList({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {searchOpen && (
+        <div className="shrink-0 px-3 pb-2">
+          <SidebarInput
+            autoFocus
+            aria-label="Search all chats"
+            className="h-8 text-xs"
+            placeholder="Search all chats…"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </div>
+      )}
       <SidebarContent key={filter} className="min-h-0 overflow-y-auto">
         <SidebarGroup className="px-0 pt-0">
           <SidebarGroupContent>
@@ -665,7 +695,7 @@ function ChatList({
             </SidebarMenu>
             {items.length === 0 ? (
               <p
-                className="px-3.5 py-4 text-xs text-muted-foreground"
+                className="px-3 py-4 text-xs text-muted-foreground"
                 role="status"
               >
                 {isLoadingMore && !isArchived
@@ -678,7 +708,7 @@ function ChatList({
               </p>
             ) : null}
             {canLoadMore && onLoadMore ? (
-              <div className="px-3.5 py-1.5">
+              <div className="px-3 py-1.5">
                 <Button
                   className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
                   disabled={isLoadingMore}
@@ -770,7 +800,7 @@ export function DashboardSidebarChatPanel({
     <div
       className={cn("flex h-full min-h-0 flex-col", desktopTitlebar && "pt-14")}
     >
-      <SidebarHeader className="shrink-0 gap-1 px-3 pb-2 pt-0">
+      <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
         {brand}
         <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
           <div className="min-w-0 flex-1">
@@ -787,7 +817,7 @@ export function DashboardSidebarChatPanel({
         </div>
         <div className="flex items-center gap-1">
           <Button
-            className="h-9 flex-1 justify-start gap-2 rounded-lg px-2 text-sm font-medium"
+            className="h-9 flex-1 justify-start gap-2 rounded-lg px-3 text-sm font-medium"
             variant="ghost"
             onClick={() => {
               setChatListResetKey((value) => value + 1);
@@ -799,35 +829,18 @@ export function DashboardSidebarChatPanel({
             <PenSquare className="size-4 text-muted-foreground" />
             New chat
           </Button>
-          <Button
-            className="size-9 shrink-0"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Search all chats"
-            aria-expanded={searchOpen || Boolean(search)}
-            onClick={() => {
-              setSearchOpen((value) => !value);
-              onSearchChange("");
-            }}
-          >
-            <Search className="size-4" />
-          </Button>
         </div>
-        {(searchOpen || search) && (
-          <SidebarInput
-            autoFocus
-            aria-label="Search all chats"
-            className="h-8 text-xs"
-            placeholder="Search all chats…"
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-          />
-        )}
       </SidebarHeader>
       {navigation}
       <ChatList
         key={`${workspaceId}-${chatListResetKey}`}
         search={search}
+        searchOpen={searchOpen || Boolean(search)}
+        onToggleSearch={() => {
+          setSearchOpen((value) => !value);
+          onSearchChange("");
+        }}
+        onSearchChange={onSearchChange}
         headerActions={
           <Button
             onClick={onOpenMembers}

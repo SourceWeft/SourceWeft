@@ -5,7 +5,8 @@ export function resolveWorkspaceLayout(
   desktopTitlebar = false,
 ) {
   const mode = width >= 1440 ? "wide" : width >= 1120 ? "standard" : "compact";
-  const conversationWidth = 248;
+  // Keep the menu readable while preserving enough room for the chat canvas.
+  const conversationWidth = 280;
   const canDockConversations = width >= 768;
   const conversationsDocked = canDockConversations && conversationPreference;
   const railWidth =
