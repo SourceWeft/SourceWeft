@@ -42,6 +42,7 @@ export function registerMcpRoutes(app: Hono) {
       query: c.req.query("query"),
       category: c.req.query("category"),
       includeDesktopOnly: parseBooleanQuery(c.req.query("includeDesktopOnly")),
+      desktopOnly: parseBooleanQuery(c.req.query("desktopOnly")),
       limit: parseLimitQuery(c.req.query("limit")),
       cursor: c.req.query("cursor"),
     });
@@ -68,6 +69,8 @@ export function registerMcpRoutes(app: Hono) {
     }
 
     const result = await mcpService.countMarketMcpCategories({
+      includeDesktopOnly: parseBooleanQuery(c.req.query("includeDesktopOnly")),
+      desktopOnly: parseBooleanQuery(c.req.query("desktopOnly")),
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       query: c.req.query("query"),

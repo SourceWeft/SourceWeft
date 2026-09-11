@@ -835,6 +835,8 @@ export class ContentClient {
     workspaceId: string,
     params?: {
       query?: string;
+      includeDesktopOnly?: boolean;
+      desktopOnly?: boolean;
       category?: string;
       limit?: number;
       cursor?: string;
@@ -842,6 +844,10 @@ export class ContentClient {
   ) {
     const search = new URLSearchParams();
     if (params?.query) search.set("query", params.query);
+    if (typeof params?.includeDesktopOnly === "boolean")
+      search.set("includeDesktopOnly", String(params.includeDesktopOnly));
+    if (typeof params?.desktopOnly === "boolean")
+      search.set("desktopOnly", String(params.desktopOnly));
     if (params?.category) search.set("category", params.category);
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.cursor) search.set("cursor", params.cursor);
@@ -859,10 +865,18 @@ export class ContentClient {
 
   getWorkspaceMarketMcpCategoryCounts(
     workspaceId: string,
-    params?: { query?: string },
+    params?: {
+      query?: string;
+      includeDesktopOnly?: boolean;
+      desktopOnly?: boolean;
+    },
   ) {
     const search = new URLSearchParams();
     if (params?.query) search.set("query", params.query);
+    if (typeof params?.includeDesktopOnly === "boolean")
+      search.set("includeDesktopOnly", String(params.includeDesktopOnly));
+    if (typeof params?.desktopOnly === "boolean")
+      search.set("desktopOnly", String(params.desktopOnly));
     const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListWorkspaceMarketMcpCategoryCountsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/market/mcp/category-counts${suffix}`,

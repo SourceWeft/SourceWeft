@@ -54,6 +54,7 @@ function fallbackListMcp(input: {
   verified?: boolean;
   runtime?: McpRuntime;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
   limit?: number;
 }) {
   const query = input.query?.trim().toLowerCase();
@@ -61,7 +62,11 @@ function fallbackListMcp(input: {
   const items = records
     .map((record) => record.item)
     .filter((item) => item.status === "published")
-    .filter((item) => input.includeDesktopOnly || !item.desktopOnly)
+    .filter((item) =>
+      typeof input.desktopOnly === "boolean"
+        ? item.desktopOnly === input.desktopOnly
+        : input.includeDesktopOnly || !item.desktopOnly,
+    )
     .filter((item) =>
       input.category ? item.categories.includes(input.category) : true,
     )
@@ -417,6 +422,7 @@ export async function listMcp(input: {
   verified?: boolean;
   runtime?: McpRuntime;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
   limit?: number;
   cursor?: string;
 }) {
@@ -434,7 +440,9 @@ export async function listMcp(input: {
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
-  if (!input.includeDesktopOnly) {
+  if (typeof input.desktopOnly === "boolean") {
+    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+  } else if (!input.includeDesktopOnly) {
     conditions.push(eq(marketItems.desktopOnly, false));
   }
   if (input.transport) {
@@ -521,6 +529,7 @@ export async function listMcp(input: {
 export async function countMcpByCategory(input: {
   query?: string;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
 }): Promise<{ counts: Record<string, number>; total: number }> {
   const query = input.query?.trim().toLowerCase();
   const conditions = [
@@ -531,7 +540,9 @@ export async function countMcpByCategory(input: {
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
-  if (!input.includeDesktopOnly) {
+  if (typeof input.desktopOnly === "boolean") {
+    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+  } else if (!input.includeDesktopOnly) {
     conditions.push(eq(marketItems.desktopOnly, false));
   }
 

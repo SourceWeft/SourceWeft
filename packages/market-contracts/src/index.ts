@@ -143,6 +143,7 @@ export const listMarketMcpRequestSchema = z.object({
   verified: z.boolean().optional(),
   runtime: mcpRuntimeSchema.optional(),
   includeDesktopOnly: z.boolean().optional(),
+  desktopOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
 });

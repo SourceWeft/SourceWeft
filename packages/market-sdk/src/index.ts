@@ -78,6 +78,9 @@ export class MarketClient {
     if (input.runtime) {
       params.set("runtime", input.runtime);
     }
+    if (typeof input.desktopOnly === "boolean") {
+      params.set("desktopOnly", String(input.desktopOnly));
+    }
     if (typeof input.includeDesktopOnly === "boolean") {
       params.set("includeDesktopOnly", String(input.includeDesktopOnly));
     }

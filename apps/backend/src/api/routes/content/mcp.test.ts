@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
   listActionRuns: vi.fn(),
   listMarketMcpCategories: vi.fn(),
+  listMarketMcp: vi.fn(),
+  countMarketMcpCategories: vi.fn(),
   listToolRuns: vi.fn(),
   deleteInstall: vi.fn(),
   installMarketMcp: vi.fn(),
@@ -30,7 +32,8 @@ vi.mock("../../../modules/mcp", () => ({
     listActionRuns: mocks.listActionRuns,
     listInstalls: vi.fn(),
     listMarketMcpCategories: mocks.listMarketMcpCategories,
-    listMarketMcp: vi.fn(),
+    listMarketMcp: mocks.listMarketMcp,
+    countMarketMcpCategories: mocks.countMarketMcpCategories,
     listToolRuns: mocks.listToolRuns,
     testInstall: mocks.testInstall,
     updateInstall: mocks.updateInstall,
@@ -305,3 +308,41 @@ test("POST /mcp-installs/:installId/test maps MCP errors to API errors", async (
     message: "No MCP access",
   });
 });
+
+for (const desktopOnly of [true, false, undefined]) {
+  test(`MCP listing and category counts forward the same device filter: ${desktopOnly}`, async () => {
+    resetRouteMocks();
+    mocks.listMarketMcp.mockResolvedValue({
+      items: [],
+      nextCursor: "next-page",
+    });
+    mocks.countMarketMcpCategories.mockResolvedValue({
+      counts: { files: 250 },
+      total: 250,
+    });
+    const filter = `includeDesktopOnly=true${desktopOnly === undefined ? "" : `&desktopOnly=${desktopOnly}`}`;
+    const app = createTestApp();
+    const listing = await app.request(
+      `/v1/workspaces/workspace_1/market/mcp?${filter}&query=files&category=files&cursor=page-two&limit=100`,
+    );
+    const counts = await app.request(
+      `/v1/workspaces/workspace_1/market/mcp/category-counts?${filter}&query=files`,
+    );
+    assert.equal(listing.status, 200);
+    assert.equal(counts.status, 200);
+    const common = {
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      query: "files",
+      includeDesktopOnly: true,
+      desktopOnly,
+    };
+    assert.deepEqual(mocks.listMarketMcp.mock.calls[0]?.[0], {
+      ...common,
+      category: "files",
+      cursor: "page-two",
+      limit: 100,
+    });
+    assert.deepEqual(mocks.countMarketMcpCategories.mock.calls[0]?.[0], common);
+  });
+}

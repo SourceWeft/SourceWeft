@@ -602,6 +602,7 @@ export class McpService {
     query?: string;
     category?: string;
     includeDesktopOnly?: boolean;
+    desktopOnly?: boolean;
     limit?: number;
     cursor?: string;
   }) {
@@ -615,6 +616,7 @@ export class McpService {
         query: input.query,
         category: input.category,
         includeDesktopOnly: input.includeDesktopOnly,
+        desktopOnly: input.desktopOnly,
         limit: input.limit,
         cursor: input.cursor,
       }),
@@ -659,13 +661,19 @@ export class McpService {
     workspaceId: string;
     userId: string;
     query?: string;
+    includeDesktopOnly?: boolean;
+    desktopOnly?: boolean;
   }) {
     await requireMcpWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
       permission: "mcp.read",
     });
-    return marketService.countMcpByCategory({ query: input.query });
+    return marketService.countMcpByCategory({
+      query: input.query,
+      includeDesktopOnly: input.includeDesktopOnly,
+      desktopOnly: input.desktopOnly,
+    });
   }
 
   async getMarketMcp(input: {
