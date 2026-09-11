@@ -166,7 +166,13 @@ export function SourcePreviewPanel({
       setPreviewMode(isChunkCitation ? "chunks" : "preview");
       setRawChunkIds(new Set());
     }
-  }, [citation?.chunkId, citation?.externalUri, open, source?.id]);
+  }, [
+    citation?.chunkId,
+    citation?.externalUri,
+    citation?.fileReference,
+    open,
+    source?.id,
+  ]);
 
   useEffect(() => {
     if (
@@ -313,7 +319,15 @@ export function SourcePreviewPanel({
     });
   };
 
-  if (citation?.fileReference) return <FileCitationPreview reference={citation.fileReference} excerpt={citation.content ?? citation.excerpt} open={open} onOpenChange={onOpenChange} />;
+  if (citation?.fileReference)
+    return (
+      <FileCitationPreview
+        reference={citation.fileReference}
+        excerpt={citation.content ?? citation.excerpt}
+        open={open}
+        onOpenChange={onOpenChange}
+      />
+    );
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent

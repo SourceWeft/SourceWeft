@@ -1,7 +1,11 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["NODE_ENV", "SOURCEWEFT_COMMERCIAL_ENABLED"],
+  "globalEnv": [
+    "NODE_ENV",
+    "SOURCEWEFT_COMMERCIAL_ENABLED",
+    "SOURCEWEFT_NEXT_DIST_DIR"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

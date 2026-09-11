@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
   push:
@@ -33,6 +34,7 @@ jobs:
             turbo-${{ runner.os }}-node22.23.2-
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=moderate
+      - run: node --test scripts/ci/verify-release-config.test.mjs
       - run: pnpm lint
       - run: pnpm check-types
 

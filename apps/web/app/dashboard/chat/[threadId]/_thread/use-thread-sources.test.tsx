@@ -9,6 +9,9 @@ vi.mock("../../../../../lib/auth-client", () => ({
 }));
 vi.mock("../../../../../lib/sdk", () => ({
   contentClient: {
+    getThreadSourceSelection: async () => ({
+      selection: { selectedSourceIds: [], revision: 0 },
+    }),
     listWorkspaceSkills: async () => ({ items: [] }),
     listSkillsCatalog: async () => ({
       items: [

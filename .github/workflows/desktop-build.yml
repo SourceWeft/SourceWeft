@@ -1,0 +1,57 @@
+name: Desktop package verification
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "third_party/rust/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/desktop-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: app,dmg
+          - os: windows-latest
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'third_party/rust/**') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Build verification installer
+        run: pnpm --filter @sourceweft/desktop exec tauri build --ci --bundles ${{ matrix.bundles }} -- --locked
+      # These are verification artifacts, not signed/public release downloads.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-verification-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

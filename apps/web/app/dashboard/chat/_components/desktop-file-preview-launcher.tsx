@@ -26,6 +26,7 @@ export function DesktopFilePreviewLauncher({
   const callbacks = useRef({ onOpened, onRetry });
   callbacks.current = { onOpened, onRetry };
   const [attempt, setAttempt] = useState(0);
+  const { name, mimeType, blob, text, url } = source ?? {};
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
@@ -41,9 +42,19 @@ export function DesktopFilePreviewLauncher({
           },
         },
       });
+    const previewSource: PreviewSource | undefined =
+      name === undefined
+        ? undefined
+        : blob !== undefined
+          ? { name, mimeType, blob }
+          : text !== undefined
+            ? { name, mimeType, text }
+            : url !== undefined
+              ? { name, mimeType, url }
+              : undefined;
     if (error) fail(error);
-    else if (!loading && source) {
-      void openDesktopPreview(source, description, controller.signal)
+    else if (!loading && previewSource) {
+      void openDesktopPreview(previewSource, description, controller.signal)
         .then(() => {
           if (!controller.signal.aborted) {
             toast.dismiss(notification);
@@ -65,11 +76,11 @@ export function DesktopFilePreviewLauncher({
     loading,
     error,
     description,
-    source?.name,
-    source?.mimeType,
-    source?.blob,
-    source?.text,
-    source?.url,
+    name,
+    mimeType,
+    blob,
+    text,
+    url,
     attempt,
   ]);
   return null;
