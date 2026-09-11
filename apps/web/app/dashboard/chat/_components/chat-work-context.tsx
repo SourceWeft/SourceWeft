@@ -290,7 +290,7 @@ export function ChatWorkContext({
       : "Task folder"
     : "Directory pending";
   const triggerClassName = compact
-    ? "flex h-8 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+    ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
   const icon =
     target?.kind === "cloud" ? (
@@ -303,7 +303,7 @@ export function ChatWorkContext({
       className={cn(
         "flex min-w-0 items-center text-xs text-muted-foreground",
         compact
-          ? "min-w-0 max-w-[220px] shrink"
+          ? "w-full max-w-full shrink"
           : "max-w-[55%] shrink-0 sm:w-full sm:max-w-full sm:shrink",
       )}
       data-testid="chat-work-context"

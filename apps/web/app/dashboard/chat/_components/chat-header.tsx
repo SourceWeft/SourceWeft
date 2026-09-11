@@ -120,16 +120,17 @@ export function ChatHeader({
         </Button>
         <div
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2",
-            !desktopTitlebar &&
-              "sm:flex-col sm:items-start sm:justify-center sm:gap-0",
+            "flex min-w-0 flex-1",
+            desktopTitlebar
+              ? "flex-col items-start justify-center gap-0"
+              : "items-center gap-2 sm:flex-col sm:items-start sm:justify-center sm:gap-0",
           )}
         >
           <h1
             className={cn(
               "min-w-0 truncate text-sm font-semibold leading-5 text-foreground",
               desktopTitlebar
-                ? "max-w-[min(40%,24rem)] flex-none"
+                ? "w-full flex-none"
                 : "flex-1 sm:w-full sm:flex-none",
             )}
             title={threadTitle}
