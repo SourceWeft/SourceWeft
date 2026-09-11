@@ -187,6 +187,7 @@ export type ChatSkillItem = {
   version: string;
   enabled?: boolean;
   hasReadme: boolean;
+  logo?: import("@sourceweft/contracts").SkillLogo;
   capabilities?: { required?: string[]; optional?: string[] };
   models?: { chat?: string; image?: string; vision?: string };
   commands?: SkillCommand[];

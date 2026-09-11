@@ -15,6 +15,7 @@ import type {
 } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
 import { readSkillDocuments } from "../documents";
+import { getSkillLogo } from "../logo";
 import { isMarketAdmin } from "../../market/admin";
 import { teamAuditService } from "../../team-audit";
 
@@ -74,6 +75,7 @@ function mapVersion(
     displayName: version.manifestJson.displayName,
     description: version.manifestJson.description,
     sourceUrl: registry?.sourceUrl ?? null,
+    logo: getSkillLogo(version.manifestJson),
     createdAt: version.createdAt.toISOString(),
     publishedAt: version.publishedAt?.toISOString() ?? null,
     flags: registry?.scan.flags ?? [],

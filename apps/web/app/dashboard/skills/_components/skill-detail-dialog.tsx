@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillAvatar } from "./skill-avatar";
+
 import * as React from "react";
 import type { RegistryVersionDetail } from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
@@ -29,7 +31,6 @@ import {
   TabsList,
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
-import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import { SkillIcon } from "../../_components/dashboard-icons";
 
@@ -50,27 +51,6 @@ function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
 
 function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
-}
-
-function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const palette =
-    item.sourceType === "builtin"
-      ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : item.sourceType === "registry_github"
-        ? "from-amber-500/90 via-orange-500/80 to-rose-500/80"
-        : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
-
-  return (
-    <span
-      className={cn(
-        "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-linear-to-br text-white shadow-sm",
-        palette,
-      )}
-    >
-      <span className="absolute inset-0 bg-black/10" />
-      <SkillIcon className="relative size-4.5 drop-shadow" />
-    </span>
-  );
 }
 
 export function SkillDetailDialog({
@@ -148,6 +128,7 @@ export function SkillDetailDialog({
           installable: registryDetail.version.status === "published",
           sourceUrl: registryDetail.version.sourceUrl,
           hasReadme: Boolean(registryDetail.readmeContent?.trim()),
+          logo: registryDetail.version.logo,
           flagged: registryDetail.version.flags.length > 0,
         }
       : baseItem;

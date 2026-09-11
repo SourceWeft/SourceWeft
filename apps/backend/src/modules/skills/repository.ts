@@ -1,3 +1,4 @@
+import { getSkillLogo } from "./logo";
 import { randomUUID } from "node:crypto";
 import { sha256 } from "./hash";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
@@ -137,6 +138,7 @@ function mapWorkspaceInstalledSkill(row: {
     displayName: row.version.manifestJson.displayName,
     description: row.version.manifestJson.description,
     visibility: row.definition.visibility,
+    logo: getSkillLogo(manifest),
     categories: Array.isArray(manifest.categories) ? manifest.categories : [],
     enabled: workspaceSkill.enabled,
     configJson: workspaceSkill.configJson,

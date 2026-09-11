@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillAvatar } from "./skill-avatar";
+
 import * as React from "react";
 import {
   AlertTriangle,
@@ -72,24 +74,13 @@ function fetchSkillsCatalog(targetWorkspaceId: string) {
 }
 
 type CategoryKey =
-  | "all"
-  | "learn"
-  | "research"
-  | "write"
-  | "review"
-  | "operate";
+  "all" | "learn" | "research" | "write" | "review" | "operate";
 type StatusFilter = "all" | "installed" | "not_installed";
 type PublisherFilter = "all" | "official" | "community" | "not_official";
 type SortKey =
-  | "recommended"
-  | "name_asc"
-  | "installed_first"
-  | "official_first";
+  "recommended" | "name_asc" | "installed_first" | "official_first";
 type CatalogStatus =
-  | "resolving_workspace"
-  | "loading_catalog"
-  | "ready"
-  | "error";
+  "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
 const categories: Array<{ key: CategoryKey; label: string }> = [
   { key: "all", label: "All" },
@@ -340,27 +331,6 @@ function SkillsCatalogSkeletonGrid({
   );
 }
 
-function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const palette =
-    item.sourceType === "builtin"
-      ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : item.sourceType === "registry_github"
-        ? "from-amber-500/90 via-orange-500/80 to-rose-500/80"
-        : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
-
-  return (
-    <span
-      className={cn(
-        "relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-linear-to-br text-white shadow-sm",
-        palette,
-      )}
-    >
-      <span className="absolute inset-0 bg-black/10" />
-      <SkillIcon className="relative h-4.5 w-4.5 drop-shadow" />
-    </span>
-  );
-}
-
 function FilterFacet({
   children,
   defaultOpen = false,
@@ -575,7 +545,10 @@ function SkillCard({
   variant?: "page" | "modal";
 }) {
   const compact = variant === "modal";
-  const installed = item.sourceType === "registry_github" ? !!item.enabledWorkspaceSkillId : item.enabled;
+  const installed =
+    item.sourceType === "registry_github"
+      ? !!item.enabledWorkspaceSkillId
+      : item.enabled;
   const canManageInstall = item.installable !== false || installed;
   const isRegistry = item.sourceType === "registry_github";
   const unverified = isUnverifiedRegistrySkill(item);
@@ -707,7 +680,9 @@ function SkillCard({
             variant="secondary"
           >
             <Check className="h-3.5 w-3.5" />
-            <span className="min-w-0 truncate">{isRegistry ? "Unavailable" : "Built-in"}</span>
+            <span className="min-w-0 truncate">
+              {isRegistry ? "Unavailable" : "Built-in"}
+            </span>
           </Button>
         )}
       </div>

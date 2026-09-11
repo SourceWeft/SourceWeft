@@ -3,6 +3,7 @@ import { SkillParseError } from "../frontmatter";
 import { SCAN_RULE_VERSION } from "./scan";
 import { logger } from "../../../shared/logger";
 import { analyzeRegistrySkill } from "./analyze";
+import { extractRegistryLogo } from "./logo";
 import { RegistrySubmissionError } from "./errors";
 import { triageRegistrySubmission } from "./guard";
 import {
@@ -53,6 +54,8 @@ export async function submitRegistrySkillFromGitHub(input: {
   for (const discovered of read.skills) {
     try {
       const analyzed = analyzeRegistrySkill({ owner, repo, discovered });
+      const branding = await extractRegistryLogo(discovered);
+      analyzed.diagnostics.push(...branding.diagnostics);
       if (seenSlugs.has(analyzed.slug)) {
         throw new RegistrySubmissionError(
           "REGISTRY_DUPLICATE_NAME",
@@ -74,6 +77,7 @@ export async function submitRegistrySkillFromGitHub(input: {
       }`;
 
       const manifestJson: SkillManifestJson = {
+        ...(branding.logo ? { logo: branding.logo } : {}),
         slug: analyzed.slug,
         displayName: analyzed.displayName,
         version,

@@ -4,6 +4,7 @@ import type {
 } from "@sourceweft/sdk";
 
 export type HubSkillItem = {
+  logo?: import("@sourceweft/contracts").SkillLogo;
   id: string;
   workspaceSkillId?: string;
   catalogId: string;

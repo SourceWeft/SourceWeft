@@ -1,3 +1,4 @@
+import { getSkillLogo } from "./logo";
 import { ContentError } from "../content/errors";
 import {
   getBuiltinSkillBySlug,
@@ -171,6 +172,7 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     enabled: row.enabled?.enabled ?? false,
     installable: true,
     defaultEnabled: manifest.defaultEnabled,
+    logo: getSkillLogo(manifest),
     hasReadme: false,
     capabilities: manifest.capabilities,
     models: manifest.models,

@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillAvatar } from "../_components/skill-avatar";
+
 import { SkillIntroduction } from "../_components/skill-introduction";
 
 import * as React from "react";
@@ -16,7 +18,6 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
-import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../_components/dashboard-icons";
@@ -52,24 +53,6 @@ function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
 }
 
-function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const palette =
-    item.sourceType === "builtin"
-      ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
-
-  return (
-    <span
-      className={cn(
-        "relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-linear-to-br text-white shadow-sm",
-        palette,
-      )}
-    >
-      <span className="absolute inset-0 bg-black/10" />
-      <SkillIcon className="relative h-5 w-5 drop-shadow" />
-    </span>
-  );
-}
 
 export default function SkillDetailPage() {
   const params = useParams<{ slug?: string | string[] }>();

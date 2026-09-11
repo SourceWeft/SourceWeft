@@ -80,6 +80,7 @@ export type WorkspaceSkillRecord = {
 };
 
 export type WorkspaceInstalledSkillItem = {
+  logo?: SkillManifestJson["logo"];
   workspaceSkillId: string;
   selectionId: string;
   catalogId: string;
@@ -121,6 +122,7 @@ export type WorkspaceInstalledSkillItem = {
 };
 
 export type SkillCatalogItem = {
+  logo?: SkillManifestJson["logo"];
   catalogId: string;
   selectionId: string | null;
   sourceType: SkillSourceType;

@@ -29,6 +29,8 @@ type SkillVersionStorageType = "repo_builtin" | "db_text";
 export type SkillManifestVisibility =
   "public" | "restricted" | "workspace" | "team";
 export type SkillManifestJson = {
+  /** Display-only thumbnail or declared image; never mounted as skill instructions. */
+  logo?: { url: string; source: "skill" | "publisher"; path?: string };
   slug: string;
   displayName: string;
   version: string;

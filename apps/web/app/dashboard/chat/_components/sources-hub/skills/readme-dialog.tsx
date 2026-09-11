@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
 import { SkillIntroduction } from "../../../../skills/_components/skill-introduction";
 
 import {
@@ -65,7 +66,10 @@ export function SkillReadmeDialog({
         constrainWidth={false}
       >
         <DialogHeader className="border-b px-5 py-4 text-left">
-          <DialogTitle>{detail?.skill.displayName ?? "Skill"}</DialogTitle>
+          <div className="flex items-center gap-3">
+            {detail ? <SkillAvatar item={detail.skill} /> : null}
+            <DialogTitle>{detail?.skill.displayName ?? "Skill"}</DialogTitle>
+          </div>
           <DialogDescription>
             {detail?.skill.description ??
               "Review this skill before selecting it."}

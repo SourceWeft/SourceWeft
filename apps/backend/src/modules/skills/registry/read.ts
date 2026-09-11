@@ -1,4 +1,5 @@
 import { sha256 } from "../hash";
+import { LOGO_FILE_PATTERN, MAX_LOGO_BYTES } from "./logo";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
@@ -93,6 +94,8 @@ export type DiscoveredSkillFile = {
 };
 
 export type DiscoveredSkill = {
+  /** Bounded image candidates for presentation metadata, outside the text runtime bundle. */
+  images?: Array<{ path: string; bytes: Buffer }>;
   /**
    * Skill directory relative to the REPO ROOT. Empty string when the skill sits
    * at the repo root.
@@ -278,6 +281,9 @@ async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
       );
     const prefix = skillDir === "" ? "" : `${skillDir}/`;
     const bundlePath = entryPath.slice(prefix.length);
+    if (LOGO_FILE_PATTERN.test(bundlePath) && bytes.length <= MAX_LOGO_BYTES) {
+      (byDir.get(skillDir)!.images ??= []).push({ path: bundlePath, bytes });
+    }
     const contentText = bytes.toString("utf8");
     if (!isUtf8Text(bytes, contentText)) {
       const skill = byDir.get(skillDir)!;

@@ -24,6 +24,16 @@ const skillSourceTypeSchema = z.enum([
   "registry_github",
 ]);
 
+export const skillLogoSchema = z.object({
+  url: z.string().max(100_000).refine((value) => {
+    if (/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return true;
+    try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password; } catch { return false; }
+  }, "Expected an HTTPS image URL or a PNG thumbnail"),
+  source: z.enum(["skill", "publisher"]),
+  path: z.string().optional(),
+});
+export type SkillLogo = z.infer<typeof skillLogoSchema>;
+
 export const skillCommandSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -78,6 +88,7 @@ export const workspaceSkillSchema = z.object({
 });
 
 export const workspaceInstalledSkillSchema = z.object({
+  logo: skillLogoSchema.optional(),
   workspaceSkillId: z.string(),
   selectionId: z.string(),
   catalogId: z.string(),
@@ -124,6 +135,7 @@ export const workspaceInstalledSkillSchema = z.object({
 });
 
 export const skillCatalogItemSchema = z.object({
+  logo: skillLogoSchema.optional(),
   catalogId: z.string(),
   selectionId: z.string().nullable(),
   sourceType: skillSourceTypeSchema,
@@ -455,6 +467,7 @@ export type DeleteCustomSkillVersionFileResponse = z.infer<
 >;
 
 export const registryVersionSchema = z.object({
+  logo: skillLogoSchema.optional(),
   id: z.string(),
   skillId: z.string(),
   version: z.string(),
