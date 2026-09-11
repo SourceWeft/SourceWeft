@@ -7,13 +7,19 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import type { FileReference } from "@sourceweft/contracts";
 import { FileCitationPreview } from "./file-citation-preview";
 
-const api = vi.hoisted(() => ({ read: vi.fn() }));
+const api = vi.hoisted(() => ({
+  read: vi.fn(),
+  localRequest: vi.fn(),
+  readLocal: vi.fn(),
+}));
 vi.mock("../../../../lib/sdk", () => ({
   contentClient: { readFileBlob: api.read },
 }));
-vi.mock("../../../../lib/local-execution", () => ({ localRequest: vi.fn() }));
+vi.mock("../../../../lib/local-execution", () => ({
+  localRequest: api.localRequest,
+}));
 vi.mock("../../../../lib/local-file-preview", () => ({
-  readLocalPreviewBlob: vi.fn(),
+  readLocalPreviewBlob: api.readLocal,
 }));
 vi.mock("@sourceweft/preview/react", () => ({
   Preview: () =>
@@ -61,11 +67,11 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
 });
-async function render() {
+async function render(fileReference: FileReference = reference) {
   await act(async () =>
     root.render(
       createElement(FileCitationPreview, {
-        reference,
+        reference: fileReference,
         excerpt: "<script>cited</script>",
         open: true,
         onOpenChange: () => {},
@@ -108,4 +114,22 @@ it("does not silently show newer bytes as the cited version", async () => {
   expect(
     document.querySelector('[data-testid="original-file"]'),
   ).not.toBeNull();
+});
+
+it("reads local citation roots with GET semantics and verifies the rooted file", async () => {
+  api.localRequest.mockResolvedValue({ root: "/private/tmp/test-directory" });
+  api.readLocal.mockResolvedValue(new NodeBlob(["cited"]));
+  await render({
+    ...reference,
+    file: { ...reference.file, backendKind: "local_fs" },
+  });
+  expect(api.localRequest).toHaveBeenCalledWith(
+    "/v1/workspaces/workspace/threads/thread/local-files",
+  );
+  expect(api.readLocal).toHaveBeenCalledWith(
+    "/v1/workspaces/workspace/threads/thread/local-files?download=true&path=%2Fprivate%2Ftmp%2Ftest-directory%2Freport.txt",
+    expect.any(AbortSignal),
+  );
+  expect(document.body.textContent).toContain("Cited version verified");
+  expect(api.read).not.toHaveBeenCalled();
 });

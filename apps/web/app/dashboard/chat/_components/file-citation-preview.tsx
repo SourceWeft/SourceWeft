@@ -72,9 +72,8 @@ export function FileCitationPreview({
         );
       } else {
         const base = `/v1/workspaces/${encodeURIComponent(reference.workspaceId)}/threads/${encodeURIComponent(reference.threadId)}/local-files`;
-        const { root } = await localRequest<{ root: string }>(base, {
-          signal: controller.signal,
-        });
+        const { root } = await localRequest<{ root: string }>(base);
+        controller.signal.throwIfAborted();
         blob = await readLocalPreviewBlob(
           `${base}?download=true&path=${encodeURIComponent(`${root}/${file.relativePath}`)}`,
           controller.signal,
