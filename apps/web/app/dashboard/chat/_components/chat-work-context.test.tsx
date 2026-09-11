@@ -293,3 +293,39 @@ test("selected directory remains visible after creation and survives an offline 
     "selected-directory",
   );
 });
+
+test("desktop cloud discovery retains native identity and includes native proof", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  await act(async () => root.render(createElement(Harness)));
+  assert.equal(context.nativeId, "a");
+  mocks.query = new URLSearchParams("computer=cloud");
+  await act(async () => root.render(createElement(Harness)));
+  assert.equal(context.ready, true);
+  await act(async () => {
+    await context.refresh();
+  });
+  assert.equal(context.nativeId, "a");
+  assert.deepEqual(mocks.request.mock.lastCall, [
+    "/v1/local-devices",
+    undefined,
+    { localProof: true },
+  ]);
+  assert.equal(
+    context.devices.some((d) => d.id === "a" && d.connected),
+    true,
+  );
+});
+
+test("native discovery failure in cloud is reported without blocking cloud", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.query = new URLSearchParams("computer=cloud");
+  mocks.native.mockRejectedValue(new Error("KEYCHAIN_DENIED"));
+  await act(async () => root.render(createElement(Harness)));
+  await act(async () => {
+    await context.refresh();
+  });
+  assert.equal(context.ready, true);
+  assert.equal(context.error, null);
+  assert.equal(context.devicesError, "KEYCHAIN_DENIED");
+});

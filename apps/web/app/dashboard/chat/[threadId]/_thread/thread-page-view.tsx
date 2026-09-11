@@ -93,6 +93,7 @@ export function DashboardChatThreadPageView({
   cancelEditing,
   composerInitialCommand,
   composerInitialInput,
+  firstTurn,
   composerResetKey,
   composerOptions,
   disabledToolNames,
@@ -277,6 +278,27 @@ export function DashboardChatThreadPageView({
           />
 
           <LocalConversationNotice status={localStatus} />
+          {firstTurn.recovery && (
+            <div role="alert" className="shrink-0 border-b px-4 py-3 text-sm">
+              <p>{firstTurn.recovery.message}</p>
+              <p className="max-h-32 overflow-auto whitespace-pre-wrap">
+                {firstTurn.recovery.turn.content}
+              </p>
+              {!!firstTurn.recovery.turn.images?.length && (
+                <p>
+                  {firstTurn.recovery.turn.images.length} attached images saved
+                </p>
+              )}
+              <button
+                type="button"
+                className="mt-2 underline"
+                disabled={!localStatus.ready}
+                onClick={() => void firstTurn.retry()}
+              >
+                Retry first message
+              </button>
+            </div>
+          )}
           {localQueuePaused && localStatus.ready && queuedSends.length > 0 && (
             <div className="border-b px-4 py-2 text-sm" role="status">
               Queued messages were paused while the computer was unavailable.

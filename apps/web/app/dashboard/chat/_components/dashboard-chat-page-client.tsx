@@ -1,5 +1,5 @@
 "use client";
-import { clearChatDraft } from "../../../../lib/chat-drafts";
+import { clearChatDraft, readChatDraft } from "../../../../lib/chat-drafts";
 import { localRequest } from "../../../../lib/local-execution";
 import { ChatHeader } from "./chat-header";
 import {
@@ -997,17 +997,6 @@ export function DashboardChatPageClient() {
             composerOptions,
           },
         });
-        if (creationContext.userId && creationContext.draftId) {
-          await clearChatDraft(
-            `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`,
-          ).catch((e) =>
-            toast.error(
-              e instanceof Error
-                ? e.message
-                : "The conversation was created, but the draft could not be cleared.",
-            ),
-          );
-        }
         chatHubContext?.desktop.promoteDraft(result.thread.id);
         adoptChat(result.thread);
         writeStoredByokState(
@@ -1020,6 +1009,13 @@ export function DashboardChatPageClient() {
           result.thread.id,
         );
         const pendingTurn: PendingThreadTurn = {
+          imageDraftKey:
+            images?.length && creationContext.userId && creationContext.draftId
+              ? `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`
+              : undefined,
+          durableRunKey: crypto.randomUUID(),
+          userId: creationContext.userId ?? undefined,
+          workspaceId,
           content: text,
           images,
           mentionedSourceIds,
@@ -1040,8 +1036,33 @@ export function DashboardChatPageClient() {
             byokSelections: selectedByokModels,
           },
         };
+        if (pendingTurn.imageDraftKey) {
+          // Await the composer's queued Blob write before handing over metadata.
+          const savedDraft = await readChatDraft(pendingTurn.imageDraftKey);
+          if (!savedDraft || savedDraft.files.length !== images?.length) {
+            throw new Error(
+              "Could not save the first message's attachments. Keep this page open and try again.",
+            );
+          }
+        }
         setPendingThreadTurn(result.thread.id, pendingTurn);
         writePendingThreadTurnFallback(result.thread.id, pendingTurn);
+        if (
+          !pendingTurn.imageDraftKey &&
+          creationContext.userId &&
+          creationContext.draftId
+        ) {
+          await clearChatDraft(
+            `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`,
+          ).catch((e) =>
+            toast.error(
+              e instanceof Error
+                ? e.message
+                : "The conversation was created, but the draft could not be cleared.",
+            ),
+          );
+        }
+
         // Carry the composed MCP selection to the freshly created thread under
         // its real id, so the thread page restores it instead of resetting to
         // empty (the selection is otherwise lost on this new-chat → thread hop).

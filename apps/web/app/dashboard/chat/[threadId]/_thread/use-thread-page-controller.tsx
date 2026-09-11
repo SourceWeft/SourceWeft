@@ -652,9 +652,12 @@ export function useThreadPageController({
   const targetThreadMessagesKey = workspaceId
     ? `${workspaceId}:${threadId}`
     : null;
+  const currentMessagesTargetRef = useRef(targetThreadMessagesKey);
+  currentMessagesTargetRef.current = targetThreadMessagesKey;
   const loadThreadMessagesWithStatus = useCallback(async () => {
     const targetKey = targetThreadMessagesKey;
     await loadThreadMessages();
+    if (currentMessagesTargetRef.current !== targetKey) return;
     setLoadedThreadMessagesKey((current) => targetKey ?? current);
   }, [loadThreadMessages, targetThreadMessagesKey]);
 
@@ -693,7 +696,8 @@ export function useThreadPageController({
     workspaceId,
   ]);
 
-  useThreadBootstrap({
+  const firstTurn = useThreadBootstrap({
+    userId: currentUserId,
     bootstrappedThreadKeyRef,
     loadThreadMessagesRef,
     persistActiveSourceIds,
@@ -905,7 +909,9 @@ export function useThreadPageController({
       }
 
       if (!sourceSelectionReady) {
-        toast.error("Sources are still loading or saving. Wait for completion before sending.");
+        toast.error(
+          "Sources are still loading or saving. Wait for completion before sending.",
+        );
         return;
       }
       const contextSourceIds = resolveContextSourceIds({
@@ -1287,6 +1293,7 @@ export function useThreadPageController({
     cancelEditing,
     composerInitialCommand,
     composerInitialInput,
+    firstTurn,
     composerResetKey,
     composerOptions,
     disabledToolNames,

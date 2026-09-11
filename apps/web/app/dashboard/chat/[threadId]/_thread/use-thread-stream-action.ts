@@ -70,6 +70,8 @@ import { useLocalConversationStatus } from "../../_components/local-conversation
 import { reportLocalAvailabilityError } from "../../../../../lib/local-availability-events";
 
 export type ThreadStreamActionInput = {
+  onAccepted?: () => void;
+  onBlocked?: (message: string) => void;
   mode: "send" | "refresh" | "edit" | "resume";
   content?: string;
   mentionedSourceIds?: string[];
@@ -203,9 +205,13 @@ export function useThreadStreamAction({
   const streamThreadAction = useCallback(
     async (input: ThreadStreamActionInput) => {
       if (!workspaceId) {
+        input.onBlocked?.("The workspace is not ready.");
         return;
       }
       if (!input.attachOnly && !localStatus.ready) {
+        input.onBlocked?.(
+          localStatus.message ?? "The computer is unavailable.",
+        );
         toast.error(localStatus.message ?? "The computer is unavailable.");
         return;
       }
@@ -285,7 +291,9 @@ export function useThreadStreamAction({
               ? { effectiveMentionedSourceIds: input.mentionedSourceIds }
               : {}),
             ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
-    ...(input.sourceSelectionRevision !== undefined ? { sourceSelectionRevision: input.sourceSelectionRevision } : {}),
+            ...(input.sourceSelectionRevision !== undefined
+              ? { sourceSelectionRevision: input.sourceSelectionRevision }
+              : {}),
             ...(localEffectiveSourceIds.length > 0
               ? { effectiveSourceIds: localEffectiveSourceIds }
               : {}),
@@ -742,6 +750,7 @@ export function useThreadStreamAction({
             }));
           },
           onPersistedUserMessageId: (messageId) => {
+            input.onAccepted?.();
             persistedUserMessageId = messageId;
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
@@ -752,6 +761,7 @@ export function useThreadStreamAction({
             preparedEffectiveSourceIds = sourceIds;
           },
           onPreparedThreadRun: (threadRun) => {
+            input.onAccepted?.();
             preparedThreadRunId = toNullableString(threadRun.id);
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,

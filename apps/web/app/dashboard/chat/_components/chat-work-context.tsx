@@ -124,12 +124,13 @@ export function useChatCreationContext() {
       let cloud = requested === "cloud";
       try {
         const native =
-          requested === "cloud" || !desktopBridge.isAvailable()
+          !desktopBridge.isAvailable() || (requested === "cloud" && !discover)
             ? null
             : await ensureLocalHostSession(session.data?.user.id);
         if (version !== refreshVersion.current) return;
         cloud = requested === "cloud" || (!requested && !native);
-        setNativeId(native?.deviceId ?? null);
+        if (native) setNativeId(native.deviceId);
+        else if (!desktopBridge.isAvailable()) setNativeId(null);
         setError(null);
         // Cloud readiness is independent of computer discovery, including a
         // request that never settles. Native bootstrap errors remain blocking.

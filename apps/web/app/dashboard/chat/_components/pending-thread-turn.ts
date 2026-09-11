@@ -1,5 +1,7 @@
 "use client";
 
+import { readChatDraft, clearChatDraft } from "../../../../lib/chat-drafts";
+
 import type { ByokModelSelection } from "./byok-state";
 import type {
   ChatSendInput,
@@ -14,6 +16,11 @@ import type {
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 
 export type PendingThreadTurn = {
+  imageDraftKey?: string;
+  durableRunKey?: string;
+  requiresRetry?: boolean;
+  userId?: string;
+  workspaceId?: string;
   content: string;
   images?: ChatSendInput["images"];
   mentionedSourceIds?: string[];
@@ -70,6 +77,12 @@ export function readPendingThreadTurn(threadId: string) {
 }
 
 export function clearPendingThreadTurn(threadId: string) {
+  const turn = readPendingThreadTurn(threadId);
+  if (turn?.imageDraftKey)
+    void clearChatDraft(turn.imageDraftKey).catch(() => {
+      // Retaining the source draft is safe if cleanup fails; never discard an unsent payload.
+      console.error("Could not clear the accepted first-message image draft.");
+    });
   pendingThreadTurns.delete(threadId);
   if (typeof window === "undefined") {
     return;
@@ -89,16 +102,57 @@ export function writePendingThreadTurnFallback(
   threadId: string,
   pendingTurn: PendingThreadTurn,
 ) {
-  if (typeof window === "undefined" || (pendingTurn.images?.length ?? 0) > 0) {
+  if (typeof window === "undefined") {
     return;
   }
 
   try {
     window.sessionStorage.setItem(
       getPendingThreadTurnStorageKey(threadId),
-      JSON.stringify(pendingTurn),
+      JSON.stringify(
+        pendingTurn.imageDraftKey
+          ? { ...pendingTurn, images: undefined }
+          : pendingTurn,
+      ),
     );
   } catch {
-    // The in-memory pending turn is enough for same-session navigation.
+    throw new Error(
+      "Could not save the first message. Keep this page open and try again.",
+    );
   }
+}
+
+export async function hydratePendingThreadTurn(
+  turn: PendingThreadTurn,
+): Promise<PendingThreadTurn> {
+  if (!turn.imageDraftKey || turn.images?.length) return turn;
+  const draft = await readChatDraft(turn.imageDraftKey);
+  if (!draft || !draft.files.length)
+    throw new Error(
+      "The first message's saved attachments are unavailable. Keep this page open and restore the attachments before sending.",
+    );
+  const images = await Promise.all(
+    draft.files.map(async (file) => {
+      if (
+        !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
+          file.mediaType,
+        )
+      )
+        throw new Error("Unsupported saved image type.");
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file.blob);
+      });
+      return {
+        dataUrl,
+        fileName: file.filename,
+        mimeType: file.mediaType as
+          "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+        sizeBytes: file.blob.size,
+      };
+    }),
+  );
+  return { ...turn, images };
 }
