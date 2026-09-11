@@ -1,6 +1,7 @@
 "use client";
 import { isHubFileWindow, requestHubFile } from "./hub-file-relay";
 import { apiBaseUrl } from "./api-base-url";
+import { reportLocalAvailabilityError } from "./local-availability-events";
 import {
   cachedLocalHostHeaders,
   clearLocalHostSession,
@@ -15,12 +16,19 @@ export async function downloadLocalFile(path: string, filename: string) {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     credentials: "include",
     cache: "no-store",
-    headers: await cachedLocalHostHeaders(),
+    headers: await cachedLocalHostHeaders(path),
+  }).catch((error) => {
+    reportLocalAvailabilityError(path, error);
+    throw error;
   });
   if (!response.ok) {
     const error = await response.json();
     if (error.code === "NATIVE_PROOF_EXPIRED") clearLocalHostSession();
-    throw new Error(error.message ?? `Download failed (${response.status})`);
+    reportLocalAvailabilityError(path, error);
+    throw Object.assign(
+      new Error(error.message ?? `Download failed (${response.status})`),
+      { code: error.code },
+    );
   }
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");

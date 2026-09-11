@@ -27,11 +27,17 @@ export function LocalHostPanel() {
         const native = await ensureLocalHostSession(userId);
         const [state, list] = await Promise.all([
           desktopBridge.localHostStatus(),
-          localRequest<{ devices: LocalDevice[] }>("/v1/local-devices"),
+          localRequest<{ devices: LocalDevice[] }>(
+            "/v1/local-devices",
+            undefined,
+            { localProof: true },
+          ),
         ]);
         const listFolders = native?.deviceId
           ? await localRequest<{ folders: { id: string; name: string }[] }>(
               `/v1/local-devices/${native.deviceId}/folders`,
+              undefined,
+              { localProof: true },
             )
           : { folders: [] };
         if (active) {
@@ -97,6 +103,7 @@ export function LocalHostPanel() {
               const value = await localRequest<{ remoteEnabled: boolean }>(
                 `/v1/local-devices/${device.id}/policy`,
                 { remoteEnabled: !device.remoteEnabled },
+                { localProof: true },
               );
               setDevice({ ...device, remoteEnabled: value.remoteEnabled });
             } catch (e) {
@@ -135,6 +142,7 @@ export function LocalHostPanel() {
                   await localRequest(
                     `/v1/local-devices/${device.id}/folders/${folder.id}/revoke`,
                     {},
+                    { localProof: true },
                   );
                   setFolders((items) =>
                     items.filter((item) => item.id !== folder.id),

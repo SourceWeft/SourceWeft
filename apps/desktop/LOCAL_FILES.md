@@ -28,8 +28,37 @@ Hub Workfiles shows “Cloud · saved with this conversation” for database-bac
 cloud files. For PC conversations it shows “This computer” and the device name,
 then lists the bound physical directory. The local view supports directory
 navigation, text preview, download and filtering. It refreshes every three seconds
-while open and clears unavailable content on errors. External edits appear on the
+while open. When the PC is unavailable it marks the last listing as stale and
+closes its file preview. External edits appear on the
 next read. The separate Files view uses the same endpoint and disk files.
+
+## Offline conversations
+
+The Web chat, composer, and file panels share an account/session-scoped availability
+check every three seconds while visible. The backend verifies access and requests
+`workspace.check` from the PC; this probe reads the directory binding and identity
+without allocating or repairing directories. A never-used automatic directory is
+still allocated lazily by the first real operation. Native hosts must include the
+`workspace.check` implementation before this backend/Web update is deployed.
+
+An unavailable PC leaves history readable and drafts editable. Sending, rerunning,
+approving tools, and file access are blocked; Stop, Reject, and reconnect remain
+available. Disabled remote access, missing browser authorization, directory errors,
+and an offline PC retain distinct reasons. A detached Hub obtains status through
+the main window's proof; losing that window does not declare the PC offline.
+
+Existing file listings are marked stale while inaccessible. Reconnection validates
+the directory again and refreshes it. Failed commands are never replayed automatically;
+queued chat messages require an explicit resume after an availability interruption.
+Backend startup/resume and approval checks enforce the same boundary. Durable runs
+also monitor PC availability and abort ongoing agent work if it is lost.
+
+Connection replacement and close settle pending operations as cancelled, and
+dispatched operations without a result as outcome unknown. Dispatch claims are
+persisted before delivery and cannot be replayed by a replacement connection.
+Unknown results require checking the PC before retrying; a cancellation request
+alone is not proof that a physical command stopped. Detection time includes the
+existing connection lease, not just the three-second Web polling interval.
 
 Click a file to open the shared in-app preview dialog; clicking a directory only
 navigates into it. Text and code use line numbers and copying, and Markdown offers

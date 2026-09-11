@@ -984,6 +984,7 @@ export function DashboardChatPageClient() {
             : await localRequest<{ id: string }>(
                 "/v1/local-devices/creation-context",
                 { target: creationContext.target },
+                { localProof: creationContext.target.kind === "local" },
               );
         creationAttempt.current = { fingerprint, id: context.id };
         const result = await contentClient.createThread(workspaceId, {

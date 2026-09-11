@@ -597,6 +597,11 @@ class ContentThreadService {
     });
 
     const mode: ChatThreadRunMode = "send";
+    if (thread.executionTarget?.kind === "local") {
+      const { requireLocalConversationReady } =
+        await import("../devices/availability");
+      await requireLocalConversationReady({ ...input, threadId: thread.id });
+    }
     const request: StreamThreadEventInput = {
       localCaller: input.localCaller,
       workspaceId: input.workspaceId,

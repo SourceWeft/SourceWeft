@@ -695,6 +695,17 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
+    if (!existingDurableRun) {
+      const { requireLocalConversationReady } =
+        await import("../../../modules/devices/availability");
+      await requireLocalConversationReady({
+        workspaceId,
+        threadId,
+        userId,
+        localCaller,
+      });
+    }
+
     if (durableKey?.kind === "run") {
       if (existingDurableRun) {
         if (parsed.data.stream === false) {

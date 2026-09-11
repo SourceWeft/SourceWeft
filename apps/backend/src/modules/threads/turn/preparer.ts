@@ -1247,6 +1247,12 @@ export async function prepareThreadTurn(
     throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
   }
 
+  if (thread.executionTarget?.kind === "local") {
+    const { requireLocalConversationReady } =
+      await import("../../devices/availability");
+    await requireLocalConversationReady(input);
+  }
+
   const originalThreadSettings = normalizeThreadModelSettings(
     thread.modelSettings,
   );

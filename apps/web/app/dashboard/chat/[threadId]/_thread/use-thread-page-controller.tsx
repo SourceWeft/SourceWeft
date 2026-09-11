@@ -97,6 +97,8 @@ type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+import { useLocalConversationStatus } from "../../_components/local-conversation-status";
+
 export function useThreadPageController({
   dashboardState,
   router,
@@ -573,6 +575,15 @@ export function useThreadPageController({
   // closures); `queuedSends` mirrors it for rendering the pending list.
   const pendingSendsRef = useRef<QueuedSend[]>([]);
   const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([]);
+  const localConversationStatus = useLocalConversationStatus(
+    workspaceId,
+    threadId,
+  );
+  const [localQueuePaused, setLocalQueuePaused] = useState(false);
+  useEffect(() => {
+    if (!localConversationStatus.ready && pendingSendsRef.current.length)
+      setLocalQueuePaused(true);
+  }, [localConversationStatus.ready]);
   const queuedSendIdRef = useRef(0);
   // Until this timestamp the auto-send effect must not fire — the load-bearing
   // guard that turns a 409 re-queue into a paced retry rather than a hot loop.
@@ -831,6 +842,12 @@ export function useThreadPageController({
         attempts?: number;
       },
     ) => {
+      if (!localConversationStatus.ready) {
+        toast.error(
+          localConversationStatus.message ?? "The computer is unavailable.",
+        );
+        return;
+      }
       try {
         await synchronizeHubBeforeSend();
       } catch (e) {
@@ -1020,6 +1037,8 @@ export function useThreadPageController({
       selectedModels.llm,
       pendingLatestVersionSelectionRef,
       requeueSendAfterRunActive,
+      localConversationStatus.ready,
+      localConversationStatus.message,
       setActiveVersionByGroup,
       streamThreadAction,
     ],
@@ -1036,6 +1055,8 @@ export function useThreadPageController({
     const next = pendingSendsRef.current[0];
     if (
       chatExecutionState === "idle" &&
+      localConversationStatus.ready &&
+      !localQueuePaused &&
       !hasActivelyRunningToolWorkState &&
       next &&
       Date.now() >= retryBackoffUntilRef.current
@@ -1050,7 +1071,13 @@ export function useThreadPageController({
         attempts: next.attempts,
       });
     }
-  }, [chatExecutionState, hasActivelyRunningToolWorkState, retryTick]);
+  }, [
+    chatExecutionState,
+    hasActivelyRunningToolWorkState,
+    retryTick,
+    localConversationStatus.ready,
+    localQueuePaused,
+  ]);
 
   const cancelQueuedSend = useCallback((id: string) => {
     pendingSendsRef.current = pendingSendsRef.current.filter(
@@ -1229,6 +1256,10 @@ export function useThreadPageController({
     presentViewers,
     typingViewers,
     onComposerType: notifyTyping,
+    localQueuePaused,
+    resumeLocalQueue: () => {
+      if (localConversationStatus.ready) setLocalQueuePaused(false);
+    },
     queuedSends: queuedSends.map((queued) => ({
       id: queued.id,
       preview: queuedSendPreview(queued.input),

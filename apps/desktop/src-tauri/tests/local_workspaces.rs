@@ -23,6 +23,36 @@ fn allocation_is_lazy_persistent_and_idempotent() {
 }
 
 #[test]
+fn availability_probe_never_allocates_or_repairs_a_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    host.check_workspace("owner", "thread", None, None).unwrap();
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    host.check_workspace("owner", "thread", Some(&workspace.id), None).unwrap();
+    fs::rename(&workspace.path, workspace.path.with_extension("moved")).unwrap();
+    assert!(host.check_workspace("owner", "thread", Some(&workspace.id), None).is_err());
+    assert!(!workspace.path.exists());
+}
+
+#[test]
+fn availability_probe_checks_selected_grant_ownership_and_root_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(&temp.path().join("app")).unwrap();
+    let selected = temp.path().join("selected");
+    fs::create_dir(&selected).unwrap();
+    let (grant, _) = host.grant_directory("owner", &selected).unwrap();
+    host.check_workspace("owner", "thread", None, Some(&grant)).unwrap();
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+    assert!(host.check_workspace("other", "thread", None, Some(&grant)).is_err());
+    let workspace = host.ensure_workspace_with_grant("owner", "thread", Some(&grant)).unwrap();
+    host.check_workspace("owner", "thread", Some(&workspace.id), Some(&grant)).unwrap();
+    fs::rename(&selected, temp.path().join("moved")).unwrap();
+    fs::create_dir(&selected).unwrap();
+    assert!(host.check_workspace("owner", "thread", Some(&workspace.id), Some(&grant)).is_err());
+}
+
+#[test]
 fn accounts_and_threads_cannot_share_implicit_roots() {
     let temp = tempfile::tempdir().unwrap();
     let host = LocalHost::open(temp.path()).unwrap();

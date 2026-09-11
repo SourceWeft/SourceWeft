@@ -1,4 +1,5 @@
 import { contentThreadService } from "../../modules/threads/service";
+import { requireLocalConversationReady } from "../../modules/devices/availability";
 import { randomUUID } from "node:crypto";
 import { threadExecutionTargetSchema } from "@sourceweft/contracts";
 import {
@@ -163,7 +164,12 @@ export function registerLocalDeviceRoutes(app: Hono) {
     if (!credential) throw ApiError.unauthorized();
     return ApiResponse.success(
       c,
-      await createNativeAccess(data.ticket, credential, data.workspaceBase, data.name),
+      await createNativeAccess(
+        data.ticket,
+        credential,
+        data.workspaceBase,
+        data.name,
+      ),
     );
   });
   app.post("/v1/local-devices/:deviceId/connect", async (c) => {
@@ -374,7 +380,34 @@ export function registerLocalDeviceRoutes(app: Hono) {
             where: eq(localDevices.id, binding.deviceId),
           })
         : null;
+      let availability: {
+        ready: boolean;
+        code: string | null;
+        message: string | null;
+      };
+      try {
+        const localCaller = await resolveLocalCaller(
+          session.user.id,
+          session.session.id,
+          c.req.header("X-Local-Proof"),
+        );
+        await requireLocalConversationReady({
+          userId: session.user.id,
+          workspaceId: thread.workspaceId,
+          threadId: thread.id,
+          localCaller,
+        });
+        availability = { ready: true, code: null, message: null };
+      } catch (error) {
+        if (!(error instanceof Error) || !("code" in error)) throw error;
+        availability = {
+          ready: false,
+          code: String(error.code),
+          message: error.message,
+        };
+      }
       return ApiResponse.success(c, {
+        availability,
         userId: session.user.id,
         workingDirectory: binding?.workspacePath ?? null,
         executionTarget: thread.executionTargetJson,

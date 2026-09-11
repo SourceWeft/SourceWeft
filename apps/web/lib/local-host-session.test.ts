@@ -83,6 +83,13 @@ test("normal API calls never bootstrap the host or forward proof outside thread 
     await cachedLocalHostHeaders("/v1/workspaces/w/artifacts/file"),
     {},
   );
+  assert.deepEqual(await cachedLocalHostHeaders("/v1/local-devices"), {});
+  assert.deepEqual(
+    await cachedLocalHostHeaders(
+      "/v1/workspaces/w/threads/t/local-files?path=note.txt&content=true",
+    ),
+    { "X-Local-Proof": "test-proof" },
+  );
 });
 test("a late authentication reply cannot restore a signed-out session", async () => {
   let complete!: (value: unknown) => void;

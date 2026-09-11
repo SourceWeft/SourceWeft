@@ -8,6 +8,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocalOperationStatus } from "../local-conversation-status";
 import type { ToolConfirmationDecision as ToolConfirmationWireDecision } from "@sourceweft/sdk";
 import {
   Confirmation,
@@ -157,6 +158,7 @@ function ToolConfirmationPanel({
   workspaceId?: string | null;
 }) {
   const { confirmation } = item;
+  const localStatus = useLocalOperationStatus();
   const initialStatus = confirmation.status ?? confirmation.action.status;
   const [state, setState] = useState<ConfirmationState>(
     confirmationStatusToState(initialStatus),
@@ -200,6 +202,7 @@ function ToolConfirmationPanel({
   );
 
   async function respond(decision: ToolConfirmationWireDecision) {
+    if (localStatus.blocked && decision !== "reject") return;
     if (submittedConfirmationIdRef.current === confirmation.id) {
       return;
     }
@@ -394,7 +397,10 @@ function ToolConfirmationPanel({
         ) : null}
         {decisionOptions.map((option) => (
           <ConfirmationAction
-            disabled={!respondable}
+            disabled={
+              !respondable ||
+              (localStatus.blocked && option.decision !== "reject")
+            }
             key={option.decision}
             onClick={() => void respond(option.decision)}
             {...(option.description ? { title: option.description } : {})}

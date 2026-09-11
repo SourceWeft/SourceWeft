@@ -128,6 +128,15 @@ impl LocalHost {
         action: &str,
         payload: &Value,
     ) -> Result<Value> {
+        if action == "workspace.check" {
+            self.check_workspace(
+                owner,
+                thread,
+                payload.get("workspaceId").and_then(Value::as_str),
+                payload.get("directoryGrantId").and_then(Value::as_str),
+            )?;
+            return Ok(json!({"ready":true}));
+        }
         if action == "workspace.ensure" {
             if payload.get("folderId").is_some() && payload.get("directoryGrantId").is_some() {
                 return Err(HostError::new(

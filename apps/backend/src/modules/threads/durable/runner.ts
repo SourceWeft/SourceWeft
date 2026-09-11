@@ -1637,6 +1637,7 @@ export async function processThreadChatRunJob(
   // Stop that raced our subscribe, or a dropped message). The poll runs on its
   // own timer so it still fires while a long tool blocks the event loop.
   const abortController = new AbortController();
+  let stopLocalMonitor: () => void = () => {};
   const abortTurn = (reason: ContentError) => {
     if (abortController.signal.aborted) {
       return;
@@ -1645,6 +1646,7 @@ export async function processThreadChatRunJob(
       runId: run.id,
       reason: reason.code,
     });
+    stopLocalMonitor();
     abortController.abort(reason);
   };
   const checkRunOwnership = async () => {
@@ -1689,6 +1691,18 @@ export async function processThreadChatRunJob(
         abortSignal: abortController.signal,
         onPrepared: async (prepared) => {
           await checkRunOwnership();
+          if (prepared.thread.executionTarget?.kind === "local") {
+            const { watchLocalConversationAvailability } =
+              await import("../../devices/availability-monitor");
+            const { requireLocalConversationReady } =
+              await import("../../devices/availability");
+            abortController.signal.throwIfAborted();
+            stopLocalMonitor();
+            stopLocalMonitor = watchLocalConversationAvailability(
+              () => requireLocalConversationReady(request),
+              (error) => abortTurn(toDurableRunContentError(error)),
+            );
+          }
           prepared.threadRunId = run.id;
           await applyRunProgress(
             await updateChatThreadRunProgress({
@@ -2072,6 +2086,7 @@ export async function processThreadChatRunJob(
     };
   } finally {
     clearInterval(cancelPoll);
+    stopLocalMonitor();
     await unsubscribeCancel().catch(() => {});
   }
 }

@@ -387,7 +387,7 @@ async fn connection(
                             let owner=credential.user_id.clone();let host=host.clone();let calls=executions.clone();let events=events.clone();let serial=serial.clone();let stop=stop.clone();let generation=generation.clone();
                             sender.send(Message::Text(json!({"type":"accepted","id":id}).to_string().into())).await.map_err(|e|e.to_string())?;
                             tokio::spawn(async move{
-                                let _permit=serial.acquire_owned().await;
+                                let _permit=if action == "workspace.check" { None } else { Some(serial.acquire_owned().await) };
                                 let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d|d.as_millis() as u64).unwrap_or(u64::MAX);
                                 if now>=deadline||stop.load(Ordering::SeqCst)||generation.load(Ordering::SeqCst)!=current||calls.is_cancelled(&id){let _=events.send(json!({"type":"result","id":id,"ok":false,"error":"CALL_EXPIRED"})).await;return;}
                                 let result_id=id.clone();

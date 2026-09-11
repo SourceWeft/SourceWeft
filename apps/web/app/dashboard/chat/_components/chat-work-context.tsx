@@ -35,6 +35,7 @@ import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 
 import { LocalFilesPanel } from "./local-files-panel";
+import { useLocalConversationStatus } from "./local-conversation-status";
 
 export function useChatCreationContext() {
   const { setWorkTarget, workspaceId } = useDashboardChatState();
@@ -50,6 +51,8 @@ export function useChatCreationContext() {
   );
   const refreshVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [devicesLoading, setDevicesLoading] = useState(false);
   const requested = query.get("computer");
   const ready = readyFor === requested;
   const queryDraft = query.get("draft");
@@ -115,31 +118,65 @@ export function useChatCreationContext() {
               : { kind: "cloud" },
     [ready, requested, nativeId, folderId],
   );
-  const refresh = useCallback(async () => {
-    const version = ++refreshVersion.current;
-    try {
-      const native =
-        requested === "cloud"
-          ? null
-          : await ensureLocalHostSession(session.data?.user.id);
-      const response = await localRequest<{ devices: LocalDevice[] }>(
-        "/v1/local-devices",
-      );
-      if (version !== refreshVersion.current) return;
-      setDevices(response.devices);
-      if (native) setNativeId(native.deviceId);
-      setReadyFor(requested);
-      setError(null);
-    } catch (e) {
-      if (version === refreshVersion.current)
-        setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [requested, session.data?.user.id]);
+  const refresh = useCallback(
+    async (discover = true) => {
+      const version = ++refreshVersion.current;
+      let cloud = requested === "cloud";
+      try {
+        const native =
+          requested === "cloud" || !desktopBridge.isAvailable()
+            ? null
+            : await ensureLocalHostSession(session.data?.user.id);
+        if (version !== refreshVersion.current) return;
+        cloud = requested === "cloud" || (!requested && !native);
+        setNativeId(native?.deviceId ?? null);
+        setError(null);
+        // Cloud readiness is independent of computer discovery, including a
+        // request that never settles. Native bootstrap errors remain blocking.
+        if (cloud) {
+          setReadyFor(requested);
+          if (!discover) return;
+        }
+        setDevicesLoading(true);
+        const response = await localRequest<{ devices: LocalDevice[] }>(
+          "/v1/local-devices",
+          undefined,
+          { localProof: Boolean(native) },
+        );
+        if (version !== refreshVersion.current) return;
+        setDevices(response.devices);
+        setDevicesError(null);
+        setReadyFor(requested);
+      } catch (e) {
+        if (version !== refreshVersion.current) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setDevicesError(message);
+        if (!cloud) {
+          setReadyFor(undefined);
+          setError(message);
+        }
+      } finally {
+        if (version === refreshVersion.current) setDevicesLoading(false);
+      }
+    },
+    [requested, session.data?.user.id],
+  );
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 10000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    const requests = refreshVersion;
+    setDevices([]);
+    setDevicesError(null);
+    setDevicesLoading(false);
+    setReadyFor(undefined);
+    void refresh(false);
+    const timer =
+      requested !== "cloud" && (requested || desktopBridge.isAvailable())
+        ? setInterval(() => void refresh(false), 10000)
+        : undefined;
+    return () => {
+      requests.current++;
+      clearInterval(timer);
+    };
+  }, [refresh, requested]);
   const select = (id: string) => {
     const next = new URLSearchParams(query.toString());
     if (target?.kind === "local")
@@ -177,6 +214,8 @@ export function useChatCreationContext() {
     userId: session.data?.user.id ?? null,
     target,
     devices,
+    devicesError,
+    devicesLoading,
     nativeId,
     error: invalid
       ? "This computer is unavailable. Choose another computer."
@@ -201,11 +240,6 @@ export function useChatCreationContext() {
 }
 export type ChatCreationContext = ReturnType<typeof useChatCreationContext>;
 
-type ExecutionInfo = {
-  workingDirectory: string | null;
-  executionTarget: ThreadExecutionTarget;
-  target: { deviceId: string; name: string; online: boolean } | null;
-};
 export function ChatWorkContext({
   workspaceId,
   threadId,
@@ -220,7 +254,8 @@ export function ChatWorkContext({
   compact?: boolean;
 }) {
   const { setWorkTarget } = useDashboardChatState();
-  const [info, setInfo] = useState<ExecutionInfo | null>(null);
+  const localStatus = useLocalConversationStatus(workspaceId, threadId);
+  const info = localStatus.info;
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -228,35 +263,16 @@ export function ChatWorkContext({
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     if (!threadId || !workspaceId) return;
-    let active = true;
-    setInfo(null);
     setFilesOpen(false);
     setError(null);
-    const refresh = () =>
-      localRequest<ExecutionInfo>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-execution`,
-      ).then(
-        (value) => {
-          if (active) {
-            setInfo(value);
-            setWorkTarget(value.executionTarget);
-            setError(null);
-          }
-        },
-        (e) => {
-          if (active) setError(e instanceof Error ? e.message : String(e));
-        },
-      );
-    void refresh();
-    const timer = setInterval(() => void refresh(), 10000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
   }, [workspaceId, threadId, setWorkTarget]);
+  useEffect(() => {
+    if (info) setWorkTarget(info.executionTarget);
+  }, [info, setWorkTarget]);
   const target = threadId ? info?.executionTarget : creation?.target;
   const device = threadId ? info?.target : creation?.selectedDevice;
-  const contextError = error || creation?.error;
+  const contextError =
+    error || (threadId && localStatus.message) || creation?.error;
   const label =
     target?.kind === "cloud"
       ? "Cloud"
@@ -365,7 +381,13 @@ export function ChatWorkContext({
           </PopoverContent>
         </Popover>
       ) : (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next) void creation?.refresh();
+          }}
+        >
           <PopoverTrigger asChild>
             <button
               type="button"
@@ -406,6 +428,17 @@ export function ChatWorkContext({
             <p className="px-2 py-2 text-xs text-muted-foreground">
               My computers
             </p>
+            {creation?.devicesLoading && (
+              <p role="status" className="px-2 py-1 text-xs">
+                Loading computers…
+              </p>
+            )}
+            {creation?.devicesError &&
+              creation.devicesError !== contextError && (
+                <p role="alert" className="px-2 py-1 text-xs text-destructive">
+                  Could not load computers: {creation.devicesError}
+                </p>
+              )}
             <div className="max-h-64 overflow-y-auto">
               {creation?.devices
                 .filter((d) => d.connected)
@@ -444,6 +477,7 @@ export function ChatWorkContext({
               onClick={() => {
                 setOpen(false);
                 setConnectOpen(true);
+                void creation?.refresh();
               }}
             >
               <Plus className="mr-2 size-4" />
@@ -521,11 +555,26 @@ export function ChatWorkContext({
                 </Button>
               </div>
             ))}
-          {!creation?.devices.length && (
-            <p className="text-sm text-muted-foreground">
-              No computers are available yet.
-            </p>
+          {creation?.devicesLoading && <p role="status">Loading computers…</p>}
+          {creation?.devicesError && (
+            <div role="alert" className="space-y-2 text-sm text-destructive">
+              <p>Could not load computers: {creation.devicesError}</p>
+              <Button
+                variant="outline"
+                disabled={creation.devicesLoading}
+                onClick={() => void creation.refresh()}
+              >
+                Try again
+              </Button>
+            </div>
           )}
+          {!creation?.devices.length &&
+            !creation?.devicesLoading &&
+            !creation?.devicesError && (
+              <p className="text-sm text-muted-foreground">
+                No computers are available yet.
+              </p>
+            )}
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -556,6 +605,8 @@ export function WorkingFolderPicker({
     if (id && creation.selectedDevice?.connected)
       void localRequest<{ folders: { id: string; name: string }[] }>(
         `/v1/local-devices/${id}/folders`,
+        undefined,
+        { localProof: true },
       ).then(
         (v) => {
           if (live) setFolders(v.folders);

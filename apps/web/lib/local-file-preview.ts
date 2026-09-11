@@ -1,6 +1,7 @@
 "use client";
 import { readPreviewBlob } from "@sourceweft/preview";
 import { apiBaseUrl } from "./api-base-url";
+import { reportLocalAvailabilityError } from "./local-availability-events";
 import {
   cachedLocalHostHeaders,
   clearLocalHostSession,
@@ -26,13 +27,18 @@ export async function readLocalPreviewBlob(
     credentials: "include",
     cache: "no-store",
     signal,
-    headers: await cachedLocalHostHeaders(),
+    headers: await cachedLocalHostHeaders(path),
+  }).catch((error) => {
+    reportLocalAvailabilityError(path, error);
+    throw error;
   });
   if (!response.ok) {
     const error = await response.json();
     if (error.code === "NATIVE_PROOF_EXPIRED") clearLocalHostSession();
-    throw new Error(
-      error.message ?? `Could not read file (${response.status}).`,
+    reportLocalAvailabilityError(path, error);
+    throw Object.assign(
+      new Error(error.message ?? `Could not read file (${response.status}).`),
+      { code: error.code },
     );
   }
   return readPreviewBlob(response, signal);

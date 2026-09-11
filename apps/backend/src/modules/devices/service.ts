@@ -245,20 +245,35 @@ export async function localCall(input: {
   const id = input.id ?? randomUUID();
   const timeout = Math.min(input.timeoutMs ?? 30_000, 180_000);
   const deadline = new Date(Date.now() + timeout);
-  await db
-    .insert(localToolInvocations)
-    .values({
-      id,
-      deviceId: input.deviceId,
-      userId: input.userId,
-      threadId: input.threadId,
-      runId: input.runId,
-      accessId: access.id,
-      action: input.action,
-      payload,
-      deadline,
-    })
-    .onConflictDoNothing();
+  await db.transaction(async (tx) => {
+    // Serialize insertion against connection replacement/close so a request
+    // checked on the old connection cannot appear after its cleanup finishes.
+    const [live] = await tx
+      .select()
+      .from(localDevices)
+      .where(eq(localDevices.id, input.deviceId))
+      .for("update");
+    if (!live || !isOnline(live) || live.connectionId !== device.connectionId)
+      throw new ContentError(
+        409,
+        "DEVICE_OFFLINE",
+        "The computer connection changed before dispatch. Send the request again after reconnecting.",
+      );
+    await tx
+      .insert(localToolInvocations)
+      .values({
+        id,
+        deviceId: input.deviceId,
+        userId: input.userId,
+        threadId: input.threadId,
+        runId: input.runId,
+        accessId: access.id,
+        action: input.action,
+        payload,
+        deadline,
+      })
+      .onConflictDoNothing();
+  });
   const record = await db.query.localToolInvocations.findFirst({
     where: eq(localToolInvocations.id, id),
   });

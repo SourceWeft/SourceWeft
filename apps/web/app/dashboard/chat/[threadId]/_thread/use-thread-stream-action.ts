@@ -66,6 +66,8 @@ import {
 } from "./thread-utils";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import { mergeCommittedArtifactOutputsIntoMessage } from "./artifact-output-reconcile";
+import { useLocalConversationStatus } from "../../_components/local-conversation-status";
+import { reportLocalAvailabilityError } from "../../../../../lib/local-availability-events";
 
 export type ThreadStreamActionInput = {
   mode: "send" | "refresh" | "edit" | "resume";
@@ -197,9 +199,14 @@ export function useThreadStreamAction({
   updateChatTitle,
   workspaceId,
 }: UseThreadStreamActionInput) {
+  const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const streamThreadAction = useCallback(
     async (input: ThreadStreamActionInput) => {
       if (!workspaceId) {
+        return;
+      }
+      if (!input.attachOnly && !localStatus.ready) {
+        toast.error(localStatus.message ?? "The computer is unavailable.");
         return;
       }
 
@@ -898,6 +905,10 @@ export function useThreadStreamAction({
         clearAttachedRunKeyIfCurrent(durableRunKey);
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
+        reportLocalAvailabilityError(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/stream`,
+          error,
+        );
         // The server's one-run-per-thread backstop: this queued send lost the
         // race for the free window. Don't restore the composer or toast — the
         // controller re-queues it (see onRunAlreadyActive) so it isn't lost.
@@ -996,6 +1007,8 @@ export function useThreadStreamAction({
       updateChatTitle,
       updateActiveRunIfCurrent,
       workspaceId,
+      localStatus.ready,
+      localStatus.message,
     ],
   );
 

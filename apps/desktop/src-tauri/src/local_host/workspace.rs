@@ -377,6 +377,59 @@ impl LocalHost {
         Ok(())
     }
 
+    pub fn check_workspace(
+        &self,
+        owner: &str,
+        thread: &str,
+        requested_id: Option<&str>,
+        grant: Option<&str>,
+    ) -> Result<()> {
+        validate_identity(owner)?;
+        validate_identity(thread)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Workspace database lock failed."))?;
+        let bound: Option<(String, Option<String>)> = db.query_row(
+            "SELECT id,directory_grant_id FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
+            params![owner, thread], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        if let Some((id, previous_grant)) = bound {
+            if requested_id.is_some_and(|value| value != id) || previous_grant.as_deref() != grant {
+                return Err(HostError::new(
+                    "WORKSPACE_BINDING_IMMUTABLE",
+                    "The working directory binding changed.",
+                ));
+            }
+            drop(db);
+            let workspace = self.get_workspace(owner, thread, &id)?;
+            fs::read_dir(&workspace.path)?;
+            return Ok(());
+        }
+        if let Some(grant) = grant {
+            let selected: Option<(String, u64, u64)> = db.query_row(
+                "SELECT path,root_device,root_inode FROM directory_grants WHERE id=?1 AND owner_id=?2",
+                params![grant, owner], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+            let (path, device, inode) = selected.ok_or_else(|| {
+                HostError::new("DIRECTORY_GRANT_DENIED", "The directory grant is unavailable.")
+            })?;
+            let path = PathBuf::from(path);
+            self.check_selected_directory(&path)?;
+            if root_identity(&path)? != (device, inode) {
+                return Err(HostError::new(
+                    "WORKSPACE_REPLACED",
+                    "The selected directory was replaced.",
+                ));
+            }
+            fs::read_dir(&path)?;
+        } else {
+            // A never-initialized automatic workspace may be allocated by the first
+            // real operation. Checking availability must not create it.
+            require_real_directory(&self.workspace_base())?;
+            fs::read_dir(self.workspace_base())?;
+        }
+        Ok(())
+    }
+
     pub fn get_workspace(&self, owner: &str, thread: &str, id: &str) -> Result<Workspace> {
         let db = self
             .db

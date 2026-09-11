@@ -15,10 +15,18 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   native: vi.fn(),
+  isDesktop: vi.fn(),
   request: vi.fn(),
 }));
+vi.mock("../../../../lib/desktop-bridge", () => ({
+  desktopBridge: { isAvailable: mocks.isDesktop },
+}));
 vi.mock("../../../../lib/auth-client", () => ({
-  authClient: { useSession: () => ({ data: { user: { id: "draft-owner" } } }) },
+  authClient: {
+    useSession: () => ({
+      data: { user: { id: "draft-owner" }, session: { id: "session" } },
+    }),
+  },
 }));
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.query,
@@ -52,6 +60,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mocks.query = new URLSearchParams();
   mocks.native.mockReset().mockResolvedValue(null);
+  mocks.isDesktop.mockReset().mockReturnValue(false);
   mocks.request.mockReset().mockResolvedValue({
     devices: [
       { id: "a", name: "Mac A", online: true, connected: true },
@@ -67,6 +76,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 test("Web defaults to cloud; a native bootstrap selects this computer", async () => {
@@ -75,10 +85,12 @@ test("Web defaults to cloud; a native bootstrap selects this computer", async ()
   await act(async () => root.unmount());
   root = createRoot(container);
   mocks.native.mockResolvedValue({ deviceId: "b" });
+  mocks.isDesktop.mockReturnValue(true);
   await act(async () => root.render(createElement(Harness)));
   assert.deepEqual(context.target, { kind: "local", deviceId: "b" });
 });
 test("native initialization failure never creates an implicit cloud context", async () => {
+  mocks.isDesktop.mockReturnValue(true);
   mocks.native.mockRejectedValue(new Error("KEYCHAIN_DENIED"));
   await act(async () => root.render(createElement(Harness)));
   assert.equal(context.target, null);
@@ -149,6 +161,51 @@ test("explicit cloud remains available when this PC cannot initialize", async ()
   assert.equal(mocks.native.mock.calls.length, 0);
 });
 
+test("web defaults to cloud when computer discovery is unavailable", async () => {
+  mocks.request.mockRejectedValue(new Error("Internal server error"));
+  await act(async () => root.render(createElement(Harness)));
+  assert.deepEqual(context.target, { kind: "cloud" });
+  assert.equal(context.ready, true);
+  assert.equal(context.error, null);
+  assert.equal(mocks.request.mock.calls.length, 0);
+  assert.equal(mocks.native.mock.calls.length, 0);
+  await act(async () => {
+    await context.refresh();
+  });
+  assert.equal(context.ready, true);
+  assert.equal(context.error, null);
+  assert.equal(context.devicesError, "Internal server error");
+});
+
+test("explicit cloud is ready while computer discovery remains pending", async () => {
+  mocks.query = new URLSearchParams("computer=cloud");
+  mocks.request.mockImplementation(() => new Promise(() => {}));
+  await act(async () => root.render(createElement(Harness)));
+  assert.equal(context.ready, true);
+  assert.equal(mocks.request.mock.calls.length, 0);
+  await act(async () => {
+    void context.refresh();
+  });
+  assert.equal(context.ready, true);
+  assert.equal(context.devicesLoading, true);
+  assert.deepEqual(context.target, { kind: "cloud" });
+});
+
+test("computer discovery failure blocks a selected local target without switching to cloud", async () => {
+  mocks.query = new URLSearchParams("computer=a");
+  mocks.request.mockRejectedValue(new Error("Internal server error"));
+  await act(async () => root.render(createElement(Harness)));
+  assert.equal(context.ready, false);
+  assert.equal(context.target, null);
+  assert.equal(context.error, "Internal server error");
+  mocks.request.mockResolvedValue({ devices: [{ id: "a", connected: true }] });
+  await act(async () => {
+    await context.refresh();
+  });
+  assert.equal(context.error, null);
+  assert.deepEqual(context.target, { kind: "local", deviceId: "a" });
+});
+
 test("an offline bound computer retains its identity without offering another execution target", async () => {
   mocks.request.mockResolvedValue({
     executionTarget: { kind: "local", deviceId: "b" },
@@ -162,7 +219,7 @@ test("an offline bound computer retains its identity without offering another ex
       }),
     ),
   );
-  assert.match(container.textContent ?? "", /Mac B · Offline/);
+  assert.match(container.textContent ?? "", /Mac B · Status unavailable/);
   assert.equal(
     document.querySelector('[aria-label="Choose cloud or computer"]'),
     null,
@@ -229,7 +286,7 @@ test("selected directory remains visible after creation and survives an offline 
     target: { ...info.target, online: false },
   });
   await act(async () => render());
-  assert.match(container.textContent ?? "", /Offline/);
+  assert.match(container.textContent ?? "", /Status unavailable/);
   assert.equal(
     container.querySelector('[data-testid="thread-working-directory"]')
       ?.textContent,

@@ -16,6 +16,7 @@ import { FilePreviewDialog } from "./file-preview-dialog";
 import { basename } from "./workfile-content-preview";
 import { readLocalPreviewBlob } from "../../../../lib/local-file-preview";
 import type { PreviewSource } from "@sourceweft/preview";
+import { useLocalConversationStatus } from "./local-conversation-status";
 
 type Directory = {
   root: string;
@@ -38,10 +39,15 @@ type LocalFilesPanelProps = {
 
 /** Changing conversations must discard the previous directory and open preview. */
 export function LocalFilesPanel(props: LocalFilesPanelProps) {
+  const availability = useLocalConversationStatus(
+    props.workspaceId,
+    props.threadId,
+  );
   return (
     <LocalFilesBrowser
-      key={`${props.workspaceId}:${props.threadId}`}
+      key={`${availability.scopeKey}:${props.workspaceId}:${props.threadId}`}
       {...props}
+      availability={availability}
     />
   );
 }
@@ -52,8 +58,12 @@ function LocalFilesBrowser({
   variant = "panel",
   computerName,
   searchQuery = "",
-}: LocalFilesPanelProps) {
+  availability,
+}: LocalFilesPanelProps & {
+  availability: ReturnType<typeof useLocalConversationStatus>;
+}) {
   const openerRef = useRef<HTMLButtonElement | null>(null);
+  const localStatus = availability;
   const [directory, setDirectory] = useState<Directory | null>(null);
   const [path, setPath] = useState<string>();
   const [previewPath, setPreviewPath] = useState<string>();
@@ -70,8 +80,13 @@ function LocalFilesBrowser({
   useEffect(() => {
     let live = true;
     let busy = false;
-    setDirectory(null);
     setError(undefined);
+    if (!localStatus.ready) {
+      setLoading(false);
+      setPreviewPath(undefined);
+      setPreview(null);
+      return;
+    }
     setLoading(true);
     const refresh = async () => {
       if (busy) return;
@@ -86,7 +101,6 @@ function LocalFilesBrowser({
         }
       } catch (cause) {
         if (live) {
-          setDirectory(null);
           setError(cause instanceof Error ? cause.message : String(cause));
           setPreviewPath(undefined);
           setPreview(null);
@@ -102,10 +116,10 @@ function LocalFilesBrowser({
       live = false;
       clearInterval(timer);
     };
-  }, [base, path, revision]);
+  }, [base, path, revision, localStatus.ready]);
 
   useEffect(() => {
-    if (!previewPath) return;
+    if (!previewPath || !localStatus.ready) return;
     const requestedPath = previewPath;
     const controller = new AbortController();
     let live = true;
@@ -141,7 +155,7 @@ function LocalFilesBrowser({
       live = false;
       controller.abort();
     };
-  }, [base, previewPath, previewRevision]);
+  }, [base, previewPath, previewRevision, localStatus.ready]);
 
   const visiblePreview = preview?.path === previewPath ? preview : null;
   const visibleFiles =
@@ -151,6 +165,7 @@ function LocalFilesBrowser({
         file.path.toLowerCase().includes(searchQuery.trim().toLowerCase()),
     ) ?? [];
   const download = (filePath: string, fromPreview = false) => {
+    if (!localStatus.ready) return;
     void downloadLocalFile(
       `${base}?path=${encodeURIComponent(filePath)}&download=true`,
       basename(filePath),
@@ -184,12 +199,20 @@ function LocalFilesBrowser({
           <RefreshCw size={15} />
         </button>
       </header>
+      {!localStatus.ready && (
+        <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+          {localStatus.message}
+          {directory
+            ? " Showing the last loaded listing; files are currently inaccessible."
+            : ""}
+        </p>
+      )}
       {directory && (
         <div className="flex items-center gap-2 border-y px-4 py-1 text-xs">
           <button
             type="button"
             aria-label="Parent folder"
-            disabled={directory.path === directory.root}
+            disabled={!localStatus.ready || directory.path === directory.root}
             onClick={() =>
               setPath(directory.path.slice(0, directory.path.lastIndexOf("/")))
             }
@@ -237,6 +260,7 @@ function LocalFilesBrowser({
                 <button
                   type="button"
                   aria-label={`${file.is_dir ? "Open folder" : "Preview"} ${basename(file.path)}`}
+                  disabled={!localStatus.ready}
                   title={file.is_dir ? "Open folder" : "Preview in app"}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 py-2 text-left text-sm"
                   onClick={(event) => {
@@ -274,6 +298,7 @@ function LocalFilesBrowser({
                   <button
                     type="button"
                     aria-label={`Download ${basename(file.path)}`}
+                    disabled={!localStatus.ready}
                     className="p-2 text-muted-foreground"
                     onClick={() => download(file.path)}
                   >
@@ -299,9 +324,7 @@ function LocalFilesBrowser({
           }
         }}
         path={previewPath ?? ""}
-        description={
-          [sourceLabel, previewPath].filter(Boolean).join(" · ")
-        }
+        description={[sourceLabel, previewPath].filter(Boolean).join(" · ")}
         loading={!visiblePreview || visiblePreview.status === "loading"}
         source={
           visiblePreview?.status === "ready" ? visiblePreview.source : undefined

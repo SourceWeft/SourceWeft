@@ -8,6 +8,8 @@ import {
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
+import { requireLocalConversationReady } from "../../../modules/devices/availability";
+import { resolveLocalCaller } from "../../../modules/devices/access";
 
 export function registerAgentConfirmationRoutes(app: Hono) {
   app.post("/agent-confirmations/:confirmationId/respond", async (c) => {
@@ -32,6 +34,19 @@ export function registerAgentConfirmationRoutes(app: Hono) {
       assistantMessageId: parsed.data.assistantMessageId,
     });
 
+    if (parsed.data.decision !== "reject") {
+      await requireLocalConversationReady({
+        workspaceId: run.workspaceId,
+        threadId: run.threadId,
+        userId: session.user.id,
+        resolveCaller: () =>
+          resolveLocalCaller(
+            session.user.id,
+            session.session.id,
+            c.req.header("X-Local-Proof"),
+          ),
+      });
+    }
     const result = await toolConfirmationRunner.respond({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),

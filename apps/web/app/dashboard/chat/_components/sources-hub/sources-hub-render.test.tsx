@@ -44,6 +44,13 @@ const listWorkingFilesMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ items: [] }),
 );
 const localRequestMock = vi.hoisted(() => vi.fn());
+vi.mock("../../../../../lib/auth-client", () => ({
+  authClient: {
+    useSession: () => ({
+      data: { user: { id: "owner" }, session: { id: "session" } },
+    }),
+  },
+}));
 vi.mock("../../../../../lib/local-execution", () => ({
   localRequest: localRequestMock,
 }));
@@ -133,7 +140,7 @@ test("mounts in new mode and renders the hub tab strip", async () => {
   const el = await renderHub({ mode: "new" });
   // The hub renders one <button> per tab; assert a couple of stable labels.
   expect(el.textContent).toContain("Sources");
-  expect(el.textContent).not.toContain("Files");
+  expect(el.textContent).toContain("Files");
   expect(el.querySelectorAll("button").length).toBeGreaterThan(3);
 });
 
@@ -173,9 +180,9 @@ test("a detached local conversation never loads cloud Files from a saved tab", a
     initialView: { tab: "Files" },
     onViewChange: viewChanged,
   });
-  expect(el.textContent).not.toContain("Files");
+  expect(el.textContent).toContain("Files");
   expect(listWorkingFilesMock).not.toHaveBeenCalled();
-  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Sources");
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Files");
 });
 
 test("mounts in thread mode with a threadId", async () => {

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { WebSocket } from "ws";
 import { eq } from "drizzle-orm";
 import { beforeAll, afterAll, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
@@ -41,6 +44,169 @@ async function host() {
   );
   return { ...device, userId, sessionId, caller, proof };
 }
+
+test("disconnect settles pending calls and never replays uncertain commands on replacement", async () => {
+  const { openLocalConnection, closeLocalConnection } =
+    await import("./connection-lifecycle");
+  const h = await host(),
+    workspaceId = randomUUID(),
+    threadId = randomUUID(),
+    teamId = randomUUID();
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Offline",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    workspaceId,
+    teamId,
+    createdBy: h.userId,
+    title: "Offline",
+    executionTargetJson: { kind: "local", deviceId: h.id },
+  });
+  await openLocalConnection(h.id, "old");
+  const pending = randomUUID(),
+    running = randomUUID(),
+    completed = randomUUID();
+  for (const [id, status] of [
+    [pending, "pending"],
+    [running, "running"],
+    [completed, "succeeded"],
+  ] as const) {
+    await schema.db.insert(schema.localToolInvocations).values({
+      id,
+      status,
+      deviceId: h.id,
+      threadId,
+      userId: h.userId,
+      action: "command.execute",
+      payload: {},
+      deadline: new Date(Date.now() + 60000),
+    });
+  }
+  await closeLocalConnection(h.id, "old");
+  const status = async (id: string) =>
+    (
+      await schema.db.query.localToolInvocations.findFirst({
+        where: eq(schema.localToolInvocations.id, id),
+      })
+    )?.status;
+  assert.equal(await status(pending), "cancelled");
+  assert.equal(await status(running), "outcome_unknown");
+  assert.equal(await status(completed), "succeeded");
+  await openLocalConnection(h.id, "new");
+  await closeLocalConnection(h.id, "old");
+  assert.equal(
+    (
+      await schema.db.query.localDevices.findFirst({
+        where: eq(schema.localDevices.id, h.id),
+      })
+    )?.connectionId,
+    "new",
+  );
+  assert.equal(await status(running), "outcome_unknown");
+});
+test("gateway persists dispatch and does not replay a command after the socket disconnects", async () => {
+  const { attachLocalDeviceGateway } = await import("./gateway");
+  const h = await host(),
+    workspaceId = randomUUID(),
+    threadId = randomUUID(),
+    teamId = randomUUID();
+  await schema.db
+    .insert(schema.workspaces)
+    .values({
+      id: workspaceId,
+      organizationId: teamId,
+      name: "Socket",
+      slug: workspaceId,
+    });
+  await schema.db
+    .insert(schema.threads)
+    .values({
+      id: threadId,
+      workspaceId,
+      teamId,
+      createdBy: h.userId,
+      title: "Socket",
+      executionTargetJson: { kind: "local", deviceId: h.id },
+    });
+  const server = createServer();
+  const dispose = attachLocalDeviceGateway(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as { port: number };
+  let socket: WebSocket | undefined;
+  const connect = async () => {
+    socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/v1/local-devices/socket`,
+      { headers: { Authorization: `Bearer ${h.token}` } },
+    );
+    const [message] = await once(socket, "message");
+    assert.equal(JSON.parse(String(message)).type, "connected");
+    return socket;
+  };
+  try {
+    const first = await connect();
+    const callReceived = once(first, "message");
+    const completion = service
+      .localCall({
+        deviceId: h.id,
+        threadId,
+        userId: h.userId,
+        caller: h.caller,
+        action: "command.execute",
+        payload: { command: "test command" },
+        timeoutMs: 5000,
+      })
+      .then(
+        () => null,
+        (error) => error,
+      );
+    const [bytes] = await callReceived;
+    const call = JSON.parse(String(bytes));
+    assert.equal(call.type, "call");
+    assert.equal(
+      (
+        await schema.db.query.localToolInvocations.findFirst({
+          where: eq(schema.localToolInvocations.id, call.id),
+        })
+      )?.status,
+      "accepted",
+    );
+    first.send(JSON.stringify({ type: "accepted", id: call.id }));
+    first.terminate();
+    const error = await completion;
+    assert.equal(error?.code, "LOCAL_EXECUTION_OUTCOME_UNKNOWN");
+    const second = await connect();
+    const replayed: unknown[] = [];
+    second.on("message", (message) => {
+      if (JSON.parse(String(message)).type === "call") replayed.push(message);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    assert.deepEqual(replayed, []);
+  } finally {
+    socket?.terminate();
+    dispose();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    // Wait for the gateway's asynchronous close transaction before the test DB closes.
+    for (let i = 0; i < 50; i++) {
+      if (
+        !(
+          await schema.db.query.localDevices.findFirst({
+            where: eq(schema.localDevices.id, h.id),
+          })
+        )?.connectionId
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+});
+
 test("native use does not enable remote; pairing cannot expand PC policy", async () => {
   const h = await host();
   assert.equal(
@@ -393,38 +559,32 @@ test("legacy directory selection remains immutable and cannot bypass registered 
     teamId = randomUUID(),
     threadId = randomUUID(),
     folderId = randomUUID();
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Legacy directory",
-      slug: workspaceId,
-    });
-  await schema.db
-    .insert(schema.localFolderGrants)
-    .values({
-      id: folderId,
-      deviceId: h.id,
-      userId: h.userId,
-      name: "Selected folder",
-      path: "/Users/test/selected",
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Legacy directory",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.localFolderGrants).values({
+    id: folderId,
+    deviceId: h.id,
+    userId: h.userId,
+    name: "Selected folder",
+    path: "/Users/test/selected",
+  });
   const target = {
     kind: "local" as const,
     deviceId: h.id,
     directoryGrantId: folderId,
   };
-  await schema.db
-    .insert(schema.threads)
-    .values({
-      id: threadId,
-      teamId,
-      workspaceId,
-      createdBy: h.userId,
-      title: "Legacy directory",
-      executionTargetJson: target,
-    });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    teamId,
+    workspaceId,
+    createdBy: h.userId,
+    title: "Legacy directory",
+    executionTargetJson: target,
+  });
   const binding = await schema.db.query.localThreadBindings.findFirst({
     where: eq(schema.localThreadBindings.threadId, threadId),
   });
@@ -435,15 +595,13 @@ test("legacy directory selection remains immutable and cannot bypass registered 
   );
   assert.equal(binding?.localWorkspaceId, null);
   const contextId = randomUUID();
-  await schema.db
-    .insert(schema.localCreationContexts)
-    .values({
-      id: contextId,
-      userId: h.userId,
-      sessionId: h.sessionId,
-      target,
-      expiresAt: new Date(Date.now() + 60000),
-    });
+  await schema.db.insert(schema.localCreationContexts).values({
+    id: contextId,
+    userId: h.userId,
+    sessionId: h.sessionId,
+    target,
+    expiresAt: new Date(Date.now() + 60000),
+  });
   await assert.rejects(
     access.resolveCreationContext(h.userId, h.caller, contextId, {
       ...target,
@@ -460,16 +618,14 @@ test("legacy directory selection remains immutable and cannot bypass registered 
     { code: "CREATION_CONTEXT_MISMATCH" },
   );
   await assert.rejects(
-    schema.db
-      .insert(schema.threads)
-      .values({
-        id: randomUUID(),
-        teamId,
-        workspaceId,
-        createdBy: h.userId,
-        title: "Invalid",
-        executionTargetJson: { ...target, folderId },
-      }),
+    schema.db.insert(schema.threads).values({
+      id: randomUUID(),
+      teamId,
+      workspaceId,
+      createdBy: h.userId,
+      title: "Invalid",
+      executionTargetJson: { ...target, folderId },
+    }),
   );
   await access.revokeFolderAccess(h.userId, h.id, folderId, h.caller);
   await assert.rejects(

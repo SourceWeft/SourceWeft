@@ -7,6 +7,15 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   download: vi.fn(),
   preview: vi.fn(),
+  ready: true,
+  scopeKey: "account-one",
+}));
+vi.mock("./local-conversation-status", () => ({
+  useLocalConversationStatus: () => ({
+    scopeKey: mocks.scopeKey,
+    ready: mocks.ready,
+    message: mocks.ready ? null : "Computer offline",
+  }),
 }));
 vi.mock("../../../../lib/local-execution", () => ({
   localRequest: mocks.request,
@@ -24,6 +33,8 @@ vi.mock("@sourceweft/preview/react", () => ({
 import { LocalFilesPanel } from "./local-files-panel";
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
+  mocks.ready = true;
+  mocks.scopeKey = "account-one";
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   container = document.createElement("div");
@@ -62,7 +73,10 @@ test("Hub Files reads the PC directory and clears its preview when offline", asy
   );
   assert.match(container.textContent ?? "", /Files/);
   assert.match(container.textContent ?? "", /Mac A/);
-  assert.doesNotMatch(container.textContent ?? "", /This computer|Stored on this computer/);
+  assert.doesNotMatch(
+    container.textContent ?? "",
+    /This computer|Stored on this computer/,
+  );
   assert.match(container.textContent ?? "", /report.txt/);
   assert.equal(container.querySelector('[aria-label="Close files"]'), null);
   const file = [...container.querySelectorAll("button")].find(
@@ -98,6 +112,57 @@ test("Hub Files reads the PC directory and clears its preview when offline", asy
         !String(path).includes("/files"),
     ),
   );
+});
+test("offline retains a stale listing, disables access and refreshes on recovery", async () => {
+  const render = () =>
+    root.render(
+      createElement(LocalFilesPanel, {
+        workspaceId: "w",
+        threadId: "offline-test",
+        computerName: "Mac A",
+      }),
+    );
+  await act(async () => render());
+  assert.match(container.textContent ?? "", /report.txt/);
+  mocks.ready = false;
+  await act(async () => render());
+  const requestCount = mocks.request.mock.calls.length;
+  await act(async () => vi.advanceTimersByTimeAsync(9000));
+  assert.equal(mocks.request.mock.calls.length, requestCount);
+  assert.match(container.textContent ?? "", /last loaded listing/);
+  assert.equal(
+    container.querySelector<HTMLButtonElement>(
+      '[aria-label="Preview report.txt"]',
+    )?.disabled,
+    true,
+  );
+  assert.equal(
+    container.querySelector<HTMLButtonElement>(
+      '[aria-label="Download report.txt"]',
+    )?.disabled,
+    true,
+  );
+  mocks.ready = true;
+  mocks.request.mockResolvedValue({
+    root: "/local/task",
+    path: "/local/task",
+    files: [{ path: "/local/task/recovered.txt" }],
+  });
+  await act(async () => render());
+  assert.match(container.textContent ?? "", /recovered.txt/);
+  assert.doesNotMatch(container.textContent ?? "", /report.txt/);
+});
+test("account/session changes discard stale listings even for the same conversation id", async () => {
+  const render = () =>
+    root.render(
+      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+    );
+  await act(async () => render());
+  assert.match(container.textContent ?? "", /report.txt/);
+  mocks.scopeKey = "another-session";
+  mocks.ready = false;
+  await act(async () => render());
+  assert.doesNotMatch(container.textContent ?? "", /report.txt/);
 });
 test("Hub search filters physical filenames without changing the file store", async () => {
   await act(async () =>

@@ -1344,6 +1344,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                       <MessageAction
                         className="text-muted-foreground hover:text-foreground"
                         label="Edit prompt"
+                        disabled={!onRestartFromMessage}
                         onClick={() => {
                           onRestartFromMessage?.({
                             groupId: group.groupId,
@@ -1370,6 +1371,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                       <MessageAction
                         className="text-muted-foreground hover:text-foreground"
                         label="Refresh"
+                        disabled={!onRefreshLatest}
                         onClick={() => {
                           onRefreshLatest?.({
                             groupId: group.groupId,

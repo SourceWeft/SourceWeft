@@ -25,6 +25,7 @@ import {
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
+import { useLocalOperationStatus } from "../local-conversation-status";
 import { UserQuestionInterventionBar } from "./user-question-panel";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import type {
@@ -438,7 +439,9 @@ export function ChatCanvas({
   // when the thread frees (see the controller). Only a pending tool approval or
   // background tool/artifact work still blocks composing. The Stop control is
   // still shown for one's own run via `composerStopStreaming` below.
+  const localStatus = useLocalOperationStatus();
   const isSubmitDisabledForRun =
+    localStatus.blocked ||
     shouldLockComposerForApproval({
       isWaitingForApproval,
       pendingConfirmationCount: pendingConfirmationItems.length,
@@ -720,8 +723,10 @@ export function ChatCanvas({
         onArtifactPreview={onArtifactPreview}
         onCitationClick={onCitationClick}
         onLoadOlderMessages={onLoadOlderMessages}
-        onRefreshLatest={onRefreshLatest}
-        onRestartFromMessage={onRestartFromMessage}
+        onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
+        onRestartFromMessage={
+          localStatus.blocked ? undefined : onRestartFromMessage
+        }
         onSourcePreview={onSourcePreview}
         onWorkfileClick={onWorkfileClick}
         resolvedConfirmations={confirmationResolutions}
@@ -756,7 +761,8 @@ export function ChatCanvas({
             return;
           }
 
-          onResumeToolConfirmation(settled.resumeEffect);
+          if (!localStatus.blocked)
+            onResumeToolConfirmation(settled.resumeEffect);
         }}
         onInterventionExpired={({ item }) => {
           updateToolConfirmationState((current) =>
@@ -824,6 +830,10 @@ export function ChatCanvas({
       <UserQuestionInterventionBar
         items={pendingQuestionItems}
         onSettled={({ answer, item }) => {
+          if (localStatus.blocked) {
+            if (answer.status === "cancelled") onStopStreaming?.();
+            return;
+          }
           setResolvedQuestionIds((previous) =>
             new Set(previous).add(item.question.id),
           );
@@ -915,6 +925,11 @@ export function ChatCanvas({
           {typingIndicator}
           <Composer
             draftKey={composerDraftKey}
+            placeholder={
+              localStatus.blocked
+                ? `${localStatus.message ?? "Computer unavailable."} You can keep writing a draft.`
+                : undefined
+            }
             workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}

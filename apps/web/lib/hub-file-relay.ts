@@ -71,11 +71,19 @@ export function validateHubFileRequest(
     !threadId ||
     !request.path.startsWith("/") ||
     url.origin !== "http://hub.invalid" ||
-    url.pathname !== base ||
+    (url.pathname !== base &&
+      url.pathname !== base.replace(/local-files$/, "local-execution")) ||
     url.hash
   )
     throw new Error("Hub file request is outside the current conversation.");
   const allowed = new Set(["path", "content", "download"]);
+  if (
+    url.pathname.endsWith("/local-execution") &&
+    (url.search ||
+      request.downloadName !== undefined ||
+      request.preview !== undefined)
+  )
+    throw new Error("Invalid Hub status request.");
   for (const key of url.searchParams.keys()) {
     if (!allowed.has(key) || url.searchParams.getAll(key).length !== 1)
       throw new Error("Invalid Hub file request.");

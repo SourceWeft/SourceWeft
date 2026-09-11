@@ -83,7 +83,12 @@ export async function ensureLocalHostSession(
 export async function cachedLocalHostHeaders(
   path?: string,
 ): Promise<Record<string, string>> {
-  if (path && !/^\/v1\/workspaces\/[^/]+\/threads(?:\/start-turn)?$/.test(path))
+  if (
+    path &&
+    !/^\/v1\/workspaces\/[^/]+\/(?:threads(?:\/start-turn|\/[^/]+\/(?:local-files|local-execution))?|agent-confirmations\/[^/]+\/respond)(?:\?.*)?$/.test(
+      path,
+    )
+  )
     return {};
   return typeof window !== "undefined" &&
     window.location.pathname.startsWith("/dashboard") &&
@@ -146,7 +151,9 @@ export async function synchronizeLocalHostScope(
   // enrollment, proof rotation, or disconnection. These belong to main.
   if (
     typeof window !== "undefined" &&
-    ["/dashboard/hub-window", "/dashboard/preview-window"].includes(window.location.pathname)
+    ["/dashboard/hub-window", "/dashboard/preview-window"].includes(
+      window.location.pathname,
+    )
   )
     return;
   const next = userId && sessionId ? `${userId}:${sessionId}` : null;

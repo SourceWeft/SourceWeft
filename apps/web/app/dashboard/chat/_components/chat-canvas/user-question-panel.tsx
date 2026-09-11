@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useLocalOperationStatus } from "../local-conversation-status";
 import {
   CircleStopIcon,
   MessageCircleQuestionIcon,
@@ -91,6 +92,7 @@ function UserQuestionPanel({
     item: UserQuestionItem;
   }) => void;
 }) {
+  const localStatus = useLocalOperationStatus();
   const questions = item.question.questions;
   const [drafts, setDrafts] = useState<QuestionDraft[]>(() =>
     questions.map(() => createDraft()),
@@ -117,6 +119,7 @@ function UserQuestionPanel({
   }
 
   function handleSubmit() {
+    if (localStatus.blocked) return;
     const firstMissing = questions.findIndex(
       (question, index) =>
         isRequired(question) &&
@@ -313,7 +316,7 @@ function UserQuestionPanel({
         </Button>
         <Button
           className="h-8 gap-1.5 px-3 text-sm"
-          disabled={submitted}
+          disabled={submitted || localStatus.blocked}
           onClick={handleSubmit}
           type="button"
         >

@@ -19,6 +19,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { ToolInterventionBar } from "./tool-confirmation";
+import { LocalOperationContext } from "../local-conversation-status";
 import type { ToolConfirmationItem } from "./tool-confirmation-state";
 
 type Item = ToolConfirmationItem;
@@ -72,17 +73,21 @@ function createItem(input: {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
-async function render(item: Item) {
+async function render(item: Item, blocked = false) {
   container = document.createElement("div");
   document.body.append(container);
   const createdRoot = createRoot(container);
   root = createdRoot;
   await act(async () => {
     createdRoot.render(
-      createElement(ToolInterventionBar, {
-        items: [item],
-        workspaceId: "workspace-1",
-      }),
+      createElement(
+        LocalOperationContext.Provider,
+        { value: { blocked, message: blocked ? "Computer offline" : null } },
+        createElement(ToolInterventionBar, {
+          items: [item],
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
   });
   return container;
@@ -104,6 +109,22 @@ function clickButton(element: HTMLElement, label: string) {
 
 beforeEach(() => {
   respondToConfirmation.mockReset();
+});
+
+test("offline blocks approval but leaves rejection available", async () => {
+  const element = await render(
+    createItem({
+      decisionOptions: [
+        { decision: "reject", label: "Reject" },
+        { decision: "approve", label: "Approve" },
+      ],
+    }),
+    true,
+  );
+  assert.equal(clickButton(element, "Approve").disabled, true);
+  assert.equal(clickButton(element, "Reject").disabled, false);
+  await act(async () => clickButton(element, "Approve").click());
+  assert.equal(respondToConfirmation.mock.calls.length, 0);
 });
 
 afterEach(async () => {

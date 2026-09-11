@@ -42,10 +42,6 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import {
-  localRequest,
-  type ExecutionInfo,
-} from "../../../../../lib/local-execution";
 import { contentClient } from "../../../../../lib/sdk";
 import { McpIcon, SkillIcon } from "../../../_components/dashboard-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
@@ -98,6 +94,7 @@ import {
   WorkfilePreviewDialog,
 } from "./workfiles/dialogs";
 import { LocalFilesPanel } from "../local-files-panel";
+import { useLocalConversationStatus } from "../local-conversation-status";
 import { WorkfilesTab } from "./workfiles/tab";
 import { UploadFilesButton } from "./workfiles/upload-button";
 import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
@@ -253,45 +250,25 @@ export function SourcesHub({
         ? initialView.tab
         : getLastHubActiveTab()) as HubTab,
   );
-  const [executionError, setExecutionError] = useState<string | null>(null);
-  const [execution, setExecution] = useState<{
-    threadId: string;
-    kind: "local" | "cloud";
-    computerName?: string;
-  } | null>(null);
+  const localStatus = useLocalConversationStatus(
+    workspaceId,
+    mode === "thread" ? threadId : null,
+  );
+  const executionError =
+    mode === "thread" && localStatus.info?.executionTarget.kind !== "cloud"
+      ? localStatus.message
+      : null;
+  const execution = localStatus.info
+    ? {
+        threadId,
+        kind: localStatus.info.executionTarget.kind,
+        computerName: localStatus.info.target?.name,
+      }
+    : null;
   const cloudWorkfiles =
     mode === "thread" &&
     execution?.threadId === threadId &&
     execution.kind === "cloud";
-  useEffect(() => {
-    let live = true;
-    setExecution(null);
-    setExecutionError(null);
-    if (workspaceId && threadId && mode === "thread") {
-      void localRequest<ExecutionInfo>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-execution`,
-      )
-        .then((value) => {
-          if (live)
-            setExecution({
-              threadId,
-              kind: value.executionTarget.kind,
-              computerName: value.target?.name,
-            });
-        })
-        .catch((error) => {
-          if (live) {
-            setExecution(null);
-            setExecutionError(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        });
-    }
-    return () => {
-      live = false;
-    };
-  }, [workspaceId, threadId, mode]);
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
     Files: "",
@@ -820,7 +797,7 @@ export function SourcesHub({
           }
         }}
         className={cn(
-          "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
+          "flex h-full shrink-0 flex-col overflow-x-hidden bg-card",
           variant !== "panel" ? "w-full min-w-0" : "w-[360px] border-l",
         )}
       >

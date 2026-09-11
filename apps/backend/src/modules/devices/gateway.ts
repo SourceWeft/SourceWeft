@@ -4,7 +4,11 @@ import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  openLocalConnection,
+  closeLocalConnection,
+} from "./connection-lifecycle";
 import { db, localDevices, localToolInvocations } from "@sourceweft/db";
 import { tokenHash } from "./service";
 import { logger } from "../../shared/logger";
@@ -66,10 +70,11 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
     eq(localDevices.connectionId, connectionId),
     isNull(localDevices.revokedAt),
   );
-  await db
-    .update(localDevices)
-    .set({ connectionId, heartbeatAt: new Date() })
-    .where(eq(localDevices.id, deviceId));
+  await openLocalConnection(deviceId, connectionId);
+  if (ws.readyState !== WebSocket.OPEN) {
+    await closeLocalConnection(deviceId, connectionId);
+    return;
+  }
   const delivered = new Set<string>();
   ws.send(
     JSON.stringify({ type: "connected", deviceId, userId, connectionId }),
@@ -174,6 +179,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             eq(localToolInvocations.deviceId, deviceId),
             inArray(localToolInvocations.status, [
               "pending",
+              "accepted",
               "running",
               "cancel_requested",
             ]),
@@ -199,7 +205,19 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             .where(eq(localToolInvocations.id, call.id));
           continue;
         }
-        if (delivered.has(call.id)) continue;
+        if (delivered.has(call.id) || call.status !== "pending") continue;
+        const claimed = await db
+          .update(localToolInvocations)
+          .set({ status: "accepted" })
+          .where(
+            and(
+              eq(localToolInvocations.id, call.id),
+              eq(localToolInvocations.status, "pending"),
+              sql`exists (select 1 from ${localDevices} where ${localDevices.id} = ${deviceId} and ${localDevices.connectionId} = ${connectionId})`,
+            ),
+          )
+          .returning({ id: localToolInvocations.id });
+        if (!claimed.length || ws.readyState !== WebSocket.OPEN) continue;
         delivered.add(call.id);
         ws.send(
           JSON.stringify({
@@ -226,10 +244,11 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
   }, 250);
   ws.on("close", () => {
     clearInterval(timer);
-    void db
-      .update(localDevices)
-      .set({ connectionId: null, heartbeatAt: null })
-      .where(activeConnection)
-      .catch(() => {});
+    void closeLocalConnection(deviceId, connectionId).catch((error) => {
+      logger.warn("Local connection cleanup failed", {
+        deviceId,
+        error: String(error),
+      });
+    });
   });
 }
