@@ -190,6 +190,8 @@ export type SandboxProvider = {
     signal?: AbortSignal;
     timeoutMs?: number;
   }): Promise<Buffer>;
+  /** Native I/O enforces bound-root/no-follow access itself; downloads return
+   * bounded immutable snapshots and must reject unsafe links and file races. */
   nativeFileOperations?: boolean;
   listFiles?(input: {
     recursive?: boolean;

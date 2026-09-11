@@ -17,6 +17,8 @@
 - 真实默认模型回合已验证 search_files → read_document → 带版本的 File 引用，未调用 Sources/Web。默认模型不支持视觉；首次 view_image 导致整轮 HTTP 500，修复为结构化 VISION_UNAVAILABLE 工具结果后，同模型重跑正常完成文本任务并说明图片未读取。视觉成功路径仍未验收。
 - 解锁续测：新增 SOURCEWEFT_NEXT_DIST_DIR，E2E 使用 `.next/files-e2e` 与 3400 端口，保留原 3000 开发服务。当前机器的 Watchpack 事件监听发生 EMFILE/目录删除重启循环，测试进程明确采用 WATCHPACK_POLLING=1000；仍使用标准 Next/Turbopack，但默认监听稳定性尚未验收。
 - 测试前端已返回 200，更新后的原生测试应用已实际显示测试账号和对话列表；构建产物与安装二进制的 Mach-O UUID 一致（E18B49CB-9227-37B0-9E2D-75ED219F61C2）。进入本地对话期间 Mac 再次锁屏，宿主状态为离线。本地 FS 传输、目录显示和预览操作仍未验收通过。
+- 后续解锁续测：宿主已在线；本地 Files 列表显示完整绑定目录及新建 fixture，文本预览实际显示精确 token，图片预览实际显示红色方块和蓝色圆形；关闭预览后原列表保留。文内搜索的按钮自动化未产生命中，因同类 submit 按钮也出现 AX 点击未触发表单、键盘提交正常的现象，需用真实点击/回车进一步复核，尚未据此修改搜索实现。
+- 桌面真实发送本地检索任务后，审计证明 file.list/file.grep 命中正确文件；随后通用下载路径调用 GNU realpath -m，在 macOS 返回 illegal option，整轮失败。修复为 nativeFileOperations 使用宿主受根目录限制的不可变读取快照，不经过 GNU shell 探测，仍检查字节上限、取消与会话版本。回归测试 18 项通过、1 项 Linux 专属测试跳过，backend 类型检查通过；修复已加载到测试服务，但 Mac 再次锁屏，真实回合重跑待完成。
 
 已验证：数据库范围与约束 5 项、文件读取/图像/二进制 21 项、前端选择与引用 9 项、Agent runner/assembly/Files 132 项、VFS 26 项、sandbox 契约 12 项、原生二进制/文本搜索 3 项。PDF 测试包含实际页面渲染。此记录不是 Release A 或 Release B 验收通过声明。
 

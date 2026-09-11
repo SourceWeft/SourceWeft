@@ -579,6 +579,24 @@ export function createTrustedSandboxHostAdapter(input: {
         signal: controller.signal,
         timeoutMs,
       };
+      if (current.provider.nativeFileOperations) {
+        // The native provider validates every path against its bound root and
+        // returns a bounded, immutable descriptor-read snapshot. GNU realpath
+        // and stat are neither portable to macOS nor this provider's authority.
+        const path = assertSandboxReadPath(downloadInput.sandboxPath, policy);
+        const bytes = await current.provider.downloadFile({
+          providerSandboxId: current.sandbox.providerSandboxId,
+          executionId,
+          sandboxPath: path,
+          signal: controller.signal,
+          timeoutMs,
+        });
+        if (bytes.byteLength > maxDownloadBytes)
+          throw new Error(
+            `SANDBOX_HOST_DOWNLOAD_TOO_LARGE: ${path} exceeds the ${maxDownloadBytes} byte limit.`,
+          );
+        return new Uint8Array(bytes);
+      }
       const before = await statFile(downloadInput.sandboxPath, systemOptions);
       if (before.size > maxDownloadBytes) {
         throw new Error(
