@@ -1,4 +1,9 @@
 import { approvalFinishPayload } from "./approval-finish";
+import {
+  beginReasoningRun,
+  projectReasoning,
+  projectSnapshotReasoning,
+} from "../turn/reasoning-state";
 import type {
   ThreadChatRunJobPayload,
   ThreadChatRunJobResult,
@@ -784,6 +789,7 @@ function updateSnapshotFromPayload(
   }
   if (payload.type === "reasoning" && typeof payload.reasoning === "string") {
     next.reasoning = `${next.reasoning ?? ""}${payload.reasoning}`;
+    next.reasoningRevision = (snapshot.reasoningRevision ?? 0) + 1;
     if (payload.segment) {
       next.reasoningSegments = mergeReasoningSegment(
         next.reasoningSegments ?? [],
@@ -1088,7 +1094,7 @@ function buildSnapshotMetadata(input: {
     sourceUserMessageId: input.run.userMessageId,
     toolCalls: input.snapshot.toolCalls ?? [],
     thinkingSteps: input.snapshot.thinkingSteps ?? [],
-    reasoning: input.snapshot.reasoning,
+    ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
     reasoningSegments: input.snapshot.reasoningSegments ?? [],
     traceEvents: input.snapshot.traceEvents ?? [],
     traceParts: input.snapshot.traceParts ?? [],
@@ -1183,6 +1189,14 @@ async function createAssistantPlaceholder(input: {
       metadata: {
         ...existingAssistantMessage.metadata,
         ...buildThreadRunMetadata(input.run),
+        ...(existingAssistantMessage.metadata.reasoningWrite &&
+        (existingAssistantMessage.metadata.reasoningWrite as { runId: string })
+          .runId === input.run.id
+          ? {}
+          : projectReasoning({
+              run: input.prepared.reasoningRun,
+              text: undefined,
+            })),
       },
     });
 
@@ -1219,6 +1233,14 @@ async function createAssistantPlaceholder(input: {
         nextMetadata: {
           ...existingOverrideMessage.metadata,
           ...buildThreadRunMetadata(input.run),
+          ...(existingOverrideMessage.metadata.reasoningWrite &&
+          (existingOverrideMessage.metadata.reasoningWrite as { runId: string })
+            .runId === input.run.id
+            ? {}
+            : projectReasoning({
+                run: input.prepared.reasoningRun,
+                text: undefined,
+              })),
         },
       }),
     });
@@ -1248,6 +1270,10 @@ async function createAssistantPlaceholder(input: {
       thinkingSteps: input.prepared.preflightThinkingSteps,
       traceParts: [],
       renderBlocks: [],
+      ...projectReasoning({
+        run: input.prepared.reasoningRun,
+        text: undefined,
+      }),
       ...buildThreadRunMetadata(input.run),
     },
   });
@@ -1333,7 +1359,13 @@ async function createDurableErrorMessage(input: {
       agentMode: input.createErrorInput.prepared.agentMode,
       versionOf: input.createErrorInput.prepared.assistantMessageParentId,
       ...errorBilling.metadata,
-      reasoning: input.snapshot.reasoning,
+      ...projectReasoning({
+        run: input.snapshot.reasoningRun,
+        text:
+          input.createErrorInput.partialState?.reasoning ??
+          input.snapshot.reasoning,
+        terminal: true,
+      }),
       reasoningSegments: input.snapshot.reasoningSegments ?? [],
       traceParts: input.snapshot.traceParts ?? [],
       toolCalls: input.snapshot.toolCalls ?? [],
@@ -1455,6 +1487,7 @@ export async function persistTerminalFailure(input: {
           ...(currentMessage?.metadata ??
             snapshot.assistantMessage?.metadata ??
             {}),
+          ...projectSnapshotReasoning(snapshot, true),
           isError: input.status === "failed",
           isCancelled: input.status === "cancelled",
           error: input.contentError.message,
@@ -1528,7 +1561,11 @@ export async function processThreadChatRunJob(
     undefined,
     billingService,
   );
-  let snapshot: ChatRunSnapshot = {};
+  let snapshot: ChatRunSnapshot = {
+    reasoningRun: (run.snapshotJson as ChatRunSnapshot).reasoningRun,
+    reasoningRevision:
+      (run.snapshotJson as ChatRunSnapshot).reasoningRevision ?? 0,
+  };
   let assistantMessageId: string | null = run.assistantMessageId;
   let finalRun = run;
   let runBilling: MeterConsumeResponse | null = null;
@@ -1704,12 +1741,40 @@ export async function processThreadChatRunJob(
             );
           }
           prepared.threadRunId = run.id;
+          if (!prepared.reasoningRun) {
+            throw new ContentError(
+              409,
+              "REASONING_RUN_CONFLICT",
+              "Prepared turn is missing its reasoning base",
+            );
+          }
+          if (
+            !snapshot.reasoningRun &&
+            prepared.reasoningRun.parentRunId === run.id
+          ) {
+            throw new ContentError(
+              409,
+              "REASONING_RUN_CONFLICT",
+              "Retry is missing its persisted reasoning base",
+            );
+          }
+          prepared.reasoningRun = beginReasoningRun({
+            runId: run.id,
+            continuation: Boolean(prepared.assistantMessageId),
+            // A retry uses its persisted base, never the partially written message.
+            restored: snapshot.reasoningRun ?? {
+              ...prepared.reasoningRun,
+              runId: run.id,
+            },
+          });
+          snapshot = { ...snapshot, reasoningRun: prepared.reasoningRun };
           await applyRunProgress(
             await updateChatThreadRunProgress({
               runId: run.id,
               teamId: run.teamId,
               workspaceId: run.workspaceId,
               userMessageId: prepared.userMessage.id,
+              snapshotJson: snapshot,
             }),
           );
           const placeholder = await createAssistantPlaceholder({

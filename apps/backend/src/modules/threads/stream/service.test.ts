@@ -494,6 +494,7 @@ test("buildGatewayRequestMetadata keeps BYOK profileAlias out of observed metada
 });
 
 const prepared: PreparedThreadTurn = {
+  reasoningRun: { runId: "stream-test", parentRunId: null, base: "" },
   sourceSelectionRevision: 0,
   userId: "user-1",
   workspace: {

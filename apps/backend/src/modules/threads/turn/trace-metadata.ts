@@ -161,22 +161,6 @@ function appendReasoningSegments(existing: unknown, next: unknown) {
   return appendTraceItemsByStateId(existingItems, nextItems);
 }
 
-function appendReasoningText(existing: unknown, next: unknown) {
-  if (typeof existing !== "string" || existing.length === 0) {
-    return next;
-  }
-  if (typeof next !== "string" || next.length === 0) {
-    return existing;
-  }
-  if (existing === next || existing.endsWith(next)) {
-    return existing;
-  }
-  if (next.startsWith(existing)) {
-    return next;
-  }
-  return `${existing}\n${next}`;
-}
-
 function appendTraceParts(existing: unknown, next: unknown) {
   return normalizeTraceParts(next).reduce<TracePart[]>(
     (parts, part) => upsertTracePart(parts, part),
@@ -246,10 +230,9 @@ export function preserveTraceMetadata(input: {
   return {
     ...existingMetadata,
     ...input.nextMetadata,
-    reasoning: appendReasoningText(
-      existingMetadata.reasoning,
-      input.nextMetadata.reasoning,
-    ),
+    // Reasoning is a complete projection of a run's fixed base plus its latest
+    // cumulative text. Continuations must be composed before this merge.
+    reasoning: input.nextMetadata.reasoning ?? existingMetadata.reasoning,
     traceEvents: appendTraceItemsByEventId(
       existingMetadata.traceEvents,
       input.nextMetadata.traceEvents,

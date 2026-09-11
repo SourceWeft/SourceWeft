@@ -4,6 +4,12 @@ import { ContentError } from "../../content/errors";
 import { SANDBOX_EXECUTE_TOOL_CALL_ID_REQUIRED } from "../turn/sandbox-execute-error";
 import type { ChatThreadRunRecord } from "./types";
 import { persistTerminalFailure, testExports } from "./runner";
+import { beginReasoningRun, projectReasoning } from "../turn/reasoning-state";
+import type { ChatRunSnapshot } from "./types";
+import {
+  buildAssistantMessageConfirmationMetadata,
+  buildAssistantMessageSnapshotMetadata,
+} from "./assistant-message-metadata";
 
 function createRun(
   input: Partial<ChatThreadRunRecord> = {},
@@ -43,6 +49,61 @@ function parseSseData(value: string) {
     unknown
   >;
 }
+
+test("all durable snapshot writers preserve one copy across approval, resume, and failure", () => {
+  let metadata: Record<string, unknown> = projectReasoning({
+    run: beginReasoningRun({ runId: "prior", continuation: false }),
+    text: "prior reasoning",
+    terminal: true,
+  });
+  const run = createRun({ mode: "resume" });
+  let snapshot: ChatRunSnapshot = {
+    reasoningRun: beginReasoningRun({
+      runId: run.id,
+      continuation: true,
+      metadata,
+    }),
+    assistantContent: "",
+  };
+  let current = "";
+  for (let i = 0; i < 738; i++) {
+    const delta = i === 0 ? "completed segment ".repeat(1000) : "next ";
+    current += delta;
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "reasoning",
+      reasoning: delta,
+    });
+    metadata = testExports.buildSnapshotMetadata({
+      currentMetadata: metadata,
+      run,
+      snapshot,
+    });
+    assert.equal(metadata.reasoning, `prior reasoning\n${current}`);
+  }
+  for (const status of [
+    "waiting_for_approval",
+    "completed",
+    "failed",
+    "cancelled",
+  ] as const) {
+    const terminalRun = { ...run, status };
+    const approval = buildAssistantMessageConfirmationMetadata({
+      currentMetadata: metadata,
+      run: terminalRun,
+      snapshot,
+    });
+    const terminal = buildAssistantMessageSnapshotMetadata({
+      currentMetadata: approval,
+      run: terminalRun,
+      snapshot,
+    });
+    assert.equal(terminal.reasoning, `prior reasoning\n${current}`);
+    assert.equal(
+      (terminal.reasoningWrite as { terminal: boolean }).terminal,
+      true,
+    );
+  }
+});
 
 test("progress snapshots preserve committed accounting even when the snapshot is absent or stale", () => {
   const settled = { id: "settled", consumedCredits: 23 };
@@ -337,6 +398,7 @@ test("waiting approval metadata keeps confirmation and resume checkpoint", () =>
         final: null,
       },
       reasoning: "Need to ask for approval.",
+      reasoningRun: { runId: "run-1", parentRunId: null, base: "" },
       reasoningSegments: [
         {
           id: "reasoning-before-approval",

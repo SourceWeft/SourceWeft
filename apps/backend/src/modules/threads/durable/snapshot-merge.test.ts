@@ -18,6 +18,26 @@ const committedBlock = {
   type: "artifact_output",
 };
 
+test("reasoning base survives restart snapshots and rejects re-capture from partial output", () => {
+  const reasoningRun = { runId: "run", parentRunId: "prior", base: "before" };
+  const current = { reasoningRun, reasoning: "after", reasoningRevision: 5 };
+  const merged = mergeChatRunSnapshot({
+    current,
+    incoming: { reasoning: "a", reasoningRevision: 1 },
+  });
+  assert.deepEqual(merged.reasoningRun, reasoningRun);
+  assert.equal(merged.reasoning, "after");
+  assert.equal(merged.reasoningRevision, 5);
+  assert.throws(
+    () =>
+      mergeChatRunSnapshot({
+        current,
+        incoming: { reasoningRun: { ...reasoningRun, base: "before\nafter" } },
+      }),
+    /cannot change its reasoning base/,
+  );
+});
+
 test("stale runner render blocks cannot remove a committed artifact output", () => {
   const merged = mergeChatRunSnapshot({
     current: {

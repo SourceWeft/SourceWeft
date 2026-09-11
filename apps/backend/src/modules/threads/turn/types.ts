@@ -247,6 +247,7 @@ export type PreparedThreadTurn = {
   timezone: string;
   userMessage: MessageRecord;
   runTraceId: string;
+  reasoningRun: import("./reasoning-state").ReasoningRun;
   /** Durable chat-run identity. Set before capability tools are bound. */
   threadRunId?: string;
   createdUserMessage: boolean;

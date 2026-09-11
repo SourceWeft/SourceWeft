@@ -14,6 +14,7 @@ import {
 import { computeProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
 import { preserveTraceMetadata } from "./trace-metadata";
+import { projectReasoning } from "./reasoning-state";
 import type { FinalizeThreadTurnInput } from "./types";
 
 export function preserveAssistantMetadataForContinuation(input: {
@@ -211,7 +212,11 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
     finishReason: input.finishReason,
     usage: input.usage,
-    reasoning: input.reasoning,
+    ...projectReasoning({
+      run: prepared.reasoningRun,
+      text: input.reasoning,
+      terminal: true,
+    }),
     reasoningSegments: input.reasoningSegments,
     traceParts: input.traceParts,
     traceEvents: Array.isArray(input.assistantMetadata?.traceEvents)

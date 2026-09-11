@@ -467,6 +467,23 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
   ]);
 });
 
+test("client metadata excludes reasoning persistence state without hiding reasoning", () => {
+  const input = {
+    reasoning: "before\nafter",
+    reasoningWrite: {
+      runId: "run",
+      parentRunId: "prior",
+      base: "before",
+      revision: 2,
+      terminal: false,
+    },
+  };
+  const result = sanitizeThreadMessageMetadataForClient(input);
+  assert.equal(result.reasoning, input.reasoning);
+  assert.equal("reasoningWrite" in result, false);
+  assert.equal(input.reasoningWrite.base, "before");
+});
+
 test("physical PC paths are files, distinct from Sources and DB Files", () => {
   const input = { file_path: "/Users/example/Local task/report.txt" };
   assert.equal(getFilesystemToolStartTitle("read_file", input), "Reading file");

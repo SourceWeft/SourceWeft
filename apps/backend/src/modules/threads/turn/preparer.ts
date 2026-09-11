@@ -2,6 +2,7 @@ import { loadThreadSourceSelection } from "../source-selection-service";
 import { resolveTurnSourceSelection, selectedSourceAnchors } from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
 import { randomUUID } from "node:crypto";
+import { beginReasoningRun } from "./reasoning-state";
 import type {
   ChatCompleteResult,
   RouteDecision,
@@ -1788,15 +1789,28 @@ export async function prepareThreadTurn(
 
   const agentRunThreadId = input.agentRunThreadId ?? thread.id;
   const toolApprovalResume = input.toolApprovalResume ?? null;
+  const continuedAssistantMessage = input.assistantMessageId
+    ? (messageRecords.find(
+        (message) =>
+          message.id === input.assistantMessageId &&
+          message.role === "assistant",
+      ) ?? null)
+    : null;
   const traceContinuation = resolveTraceContinuationMetadata(
-    input.assistantMessageId
-      ? (messageRecords.find(
-          (message) =>
-            message.id === input.assistantMessageId &&
-            message.role === "assistant",
-        ) ?? null)
-      : null,
+    continuedAssistantMessage,
   );
+  if (input.assistantMessageId && !continuedAssistantMessage) {
+    throw new ContentError(
+      404,
+      "ASSISTANT_MESSAGE_NOT_FOUND",
+      "Assistant message not found for continuation",
+    );
+  }
+  const reasoningRun = beginReasoningRun({
+    runId: input.idempotencyKey ?? randomUUID(),
+    continuation: Boolean(input.assistantMessageId),
+    metadata: continuedAssistantMessage?.metadata,
+  });
   const userMessageWithTraceId = existingUserMessage
     ? userMessage
     : ((await updateMessageMetadataRecord({
@@ -1851,6 +1865,7 @@ export async function prepareThreadTurn(
     userMessage: userMessageWithTraceId,
     runTraceId,
     createdUserMessage,
+    reasoningRun,
     assistantMessageParentId,
     assistantMessageId: input.assistantMessageId ?? null,
     assistantMessageIdOverride: input.assistantMessageIdOverride ?? null,

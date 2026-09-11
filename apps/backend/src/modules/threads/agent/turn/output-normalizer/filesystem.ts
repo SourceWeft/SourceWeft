@@ -339,8 +339,9 @@ function sanitizeThinkingStepForClient(value: unknown) {
 export function sanitizeThreadMessageMetadataForClient(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
+  const { reasoningWrite: _reasoningWrite, ...clientMetadata } = metadata;
   return {
-    ...metadata,
+    ...clientMetadata,
     ...(Array.isArray(metadata.toolCalls)
       ? {
           toolCalls: metadata.toolCalls.map(

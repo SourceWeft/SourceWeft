@@ -482,6 +482,7 @@ for (const finishReason of ["stop", "tool_confirmation_requested"]) {
         userMessage,
         userId: "test-user",
         runTraceId: run.id,
+        reasoningRun: { runId: run.id, parentRunId: null, base: "" },
         modelAlias: "synthetic-chat",
         profileAlias: "synthetic-chat",
         preflightThinkingSteps: [],

@@ -70,6 +70,9 @@ export type DurableRunResultSnapshot = {
 };
 
 export type ChatRunSnapshot = DurableRunResultSnapshot & {
+  /** Captured before the first message write; reused when this run is retried. */
+  reasoningRun?: import("../turn/reasoning-state").ReasoningRun;
+  reasoningRevision?: number;
   /** Host-only capability receipts/idempotency state; never projected to messages. */
   protectedAgentTools?: Record<string, unknown>;
   assistantContent?: string;

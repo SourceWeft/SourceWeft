@@ -12,6 +12,7 @@ import { buildTerminalAssistantTraceState } from "../turn/assistant-run-terminal
 import type { ChatRunSnapshot, ChatThreadRunStatus } from "./types";
 import type { EmbeddingVectorStrategy } from "../../content/types";
 import { CLIENT_CANCELLED_CODE } from "./run-constants";
+import { ContentError } from "../../content/errors";
 import {
   mergeCommittedArtifactRenderBlocks,
   mergeCommittedArtifactToolCalls,
@@ -65,6 +66,28 @@ export function mergeChatRunSnapshot(input: {
 }): ChatRunSnapshot {
   const { protectedAgentTools: _untrustedProtectedState, ...incoming } =
     input.incoming ?? {};
+  const base = input.current.reasoningRun;
+  if (
+    base &&
+    incoming.reasoningRun &&
+    (base.runId !== incoming.reasoningRun.runId ||
+      base.parentRunId !== incoming.reasoningRun.parentRunId ||
+      base.base !== incoming.reasoningRun.base)
+  ) {
+    throw new ContentError(
+      409,
+      "REASONING_RUN_CONFLICT",
+      "A running invocation cannot change its reasoning base",
+    );
+  }
+  if (base) incoming.reasoningRun = base;
+  if (
+    (input.current.reasoningRevision ?? 0) > (incoming.reasoningRevision ?? 0)
+  ) {
+    incoming.reasoning = input.current.reasoning;
+    incoming.reasoningRevision = input.current.reasoningRevision;
+    incoming.reasoningSegments = input.current.reasoningSegments;
+  }
   const messageBlocks = getRenderBlocks(input.assistantMessageMetadata);
   const currentAssistant = input.current.assistantMessage;
   const incomingAssistant = incoming.assistantMessage;
