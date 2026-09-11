@@ -74,8 +74,17 @@ it("does not read files or silently choose another model without vision support"
     images: new FileImageContext(),
     supportsImageInput: false,
   });
-  await expect(tool.invoke({ path: "image.png" })).rejects.toMatchObject({
+  const result = await tool.invoke({
+    type: "tool_call",
+    name: "view_image",
+    id: "unavailable-image",
+    args: { path: "image.png" },
+  });
+  if (!ToolMessage.isInstance(result)) throw new Error("Expected a tool result");
+  expect(JSON.parse(result.content as string)).toMatchObject({
+    ok: false,
     code: "VISION_UNAVAILABLE",
+    imageInput: false,
   });
   expect(read).not.toHaveBeenCalled();
 });

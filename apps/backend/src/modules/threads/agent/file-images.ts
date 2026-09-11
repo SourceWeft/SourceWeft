@@ -99,11 +99,16 @@ export function createViewImageTool(input: {
   return tool(
     async ({ path, page }) => {
       if (!input.supportsImageInput)
-        throw new ContentError(
-          409,
-          "VISION_UNAVAILABLE",
-          "The selected chat model cannot read images. Select a model with image input support.",
-        );
+        return [
+          JSON.stringify({
+            ok: false,
+            code: "VISION_UNAVAILABLE",
+            message:
+              "The selected chat model cannot read images. No image was read. Explain this limitation and continue any supported text work; image inspection requires a model with image input support.",
+            imageInput: false,
+          }),
+          { kind: "file_image_unavailable" },
+        ] as [string, unknown];
       const { file, bytes } = await input.read(path, input.signal);
       const pdf = file.mimeType === "application/pdf";
       if (pdf && page === undefined)

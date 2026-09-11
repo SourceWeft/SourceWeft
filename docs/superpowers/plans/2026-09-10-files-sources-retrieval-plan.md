@@ -13,7 +13,9 @@
 - File 引用独立于 Source chunk，包含 scope、内容 hash 与定位；预览校验当前内容版本。列表搜索框明确表示名称/路径过滤，内容检索使用 `search_files`。
 - 当前解析缓存仅为单轮内存缓存；计划中的宿主持久派生缓存、Cloud scope cache、独立解析策略/计费和 Office 视觉 renderer 尚未实现。Cloud sandbox 的 `collect_sandbox_outputs` 仍只收集文本，二进制采集尚待接入。
 - Local readonly Sources 尚未实现。静态原生 sandbox 无法撤销旧进程已有的工作目录写权限，因此重叠目录的 Live Sources 方案尚不能交付；等待确定 Snapshot Sources 或独立只读目录的 Live Sources。
-- macOS 当前锁屏，真实桌面 E2E 暂停；尚未迁移既有测试服务的数据库，也未将构建部署到运行中的桌面测试应用。
+- 2026-09-11：独立 E2E 数据库已迁移至 0038，当前工作目录的测试 API/worker 已启动。真实 HTTP 的 10 项验收通过（包括 >1 MiB 对象存储字节往返、覆盖 CAS、跨对话隔离、匿名拒绝和旧接口拒绝）。
+- 真实默认模型回合已验证 search_files → read_document → 带版本的 File 引用，未调用 Sources/Web。默认模型不支持视觉；首次 view_image 导致整轮 HTTP 500，修复为结构化 VISION_UNAVAILABLE 工具结果后，同模型重跑正常完成文本任务并说明图片未读取。视觉成功路径仍未验收。
+- macOS 仍锁屏；前端标准 next dev 还受到另一开发服务占用 `.next` 的限制。真实桌面 UI E2E 及运行应用的原生二进制升级尚未完成，未停止其他开发服务。
 
 已验证：数据库范围与约束 5 项、文件读取/图像/二进制 21 项、前端选择与引用 9 项、Agent runner/assembly/Files 132 项、VFS 26 项、sandbox 契约 12 项、原生二进制/文本搜索 3 项。PDF 测试包含实际页面渲染。此记录不是 Release A 或 Release B 验收通过声明。
 
