@@ -19,10 +19,6 @@ Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease)
 
 ## Desktop installers
 
-The current macOS candidate is `0.2.0-rc.1`. Preparation status and local
-verification artifacts are tracked in
-[`releases/v0.2.0-rc.1-macos.md`](../../releases/v0.2.0-rc.1-macos.md).
-
 `.github/workflows/desktop-build.yml` is reusable, manually dispatchable, and runs
 for desktop changes in pull requests. It builds a macOS app/DMG and Windows NSIS
 installer with the committed lockfile, then retains them as workflow artifacts.
@@ -31,6 +27,13 @@ CI explicitly uses `--no-sign` and verifies the macOS disk image with
 `hdiutil verify`. Its macOS runner does not depend on the developer's local
 screen being unlocked. Run it with `gh workflow run desktop-build.yml --ref main`
 after committing the candidate version; this does not create a release tag.
+
+To exercise automatic packaging from a tag without publishing, push a
+`ci-package-vMAJOR.MINOR.PATCH` tag (including a prerelease suffix when needed),
+for example `ci-package-v0.2.0-rc.1`. CI checks that this tag matches the desktop
+package, Tauri configuration, Cargo manifest and lockfile, then uploads installers
+as Actions artifacts. This namespace does not match the publishing workflow's
+`v*` trigger. A plain `v0.2.0-rc.1` tag still triggers the real Web/Docker release.
 
 Local macOS packaging:
 
