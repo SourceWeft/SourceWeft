@@ -4,9 +4,11 @@
 
 # SourceWeft
 
-**Open-source NotebookLM alternative: connect your sources, ask grounded questions, generate cited outputs, and extend deep knowledge work with Virtual FS and extensible Skills.**
+**Your knowledge. Agents working together.**
 
-Self-hosted and multi-model, with files, web pages, notes, YouTube, and SaaS connectors so teams stay in control of their data, models, and knowledge work.
+An open-source AI workspace where agents work together with your knowledge and tools.
+
+Self-hostable · Multi-model · Custom skills
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -16,9 +18,11 @@ Self-hosted and multi-model, with files, web pages, notes, YouTube, and SaaS con
 
 ---
 
-**SourceWeft** is an open-source NotebookLM alternative for deep knowledge work. Connect PDFs, web pages, notes, YouTube, Notion, Google Drive, Gmail, Slack, and more into one organized source space, then ask questions with answers grounded in verifiable citations.
+**SourceWeft** brings documents, web pages, notes, and working files into one AI workspace. Connect sources such as PDFs, YouTube, Notion, Google Drive, Gmail, and Slack, then ask questions grounded in your sources and check the citations.
 
-Beyond Q&A, SourceWeft helps you create study guides, FAQs, timelines, research briefings, drafts, audio overviews, image artifacts, and other knowledge outputs. Virtual FS, built-in Skills, custom Skills, web tools, and working files give agents the context and tools to read, search, create, organize, and refine work across your sources.
+Agents can delegate exploration, planning, and execution, using your sources, tools, and Skills to work through a task. Turn research into reports and presentations, review the outputs, and return to saved conversations and files to keep refining the results.
+
+Choose from supported model providers, add custom Skills to reuse your working methods, and self-host your workspace.
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
@@ -38,15 +42,13 @@ Beyond Q&A, SourceWeft helps you create study guides, FAQs, timelines, research 
 
 ## Why SourceWeft
 
-**Connect all your sources.** Work across files, URLs, notes, YouTube, source trees, and SaaS connectors.
+**Ground work in your knowledge.** Bring files, URLs, notes, YouTube, and connected sources together. Ask across selected materials and follow citations back to the source.
 
-**Ground every answer.** Ask across selected sources and get cited, verifiable responses.
+**Let agents divide the work.** Agents can delegate exploration, planning, and execution to specialized subagents, then use their findings to continue the task.
 
-**Give agents a real workspace.** Virtual FS organizes sources, working files, Artifacts, and Skill instructions into navigable context.
+**Pick up where you left off.** Return to saved conversations and working files to review, revise, and continue your work.
 
-**Extend agents with Skills.** Built-in and custom Skills add reusable domain methods, slash commands, tool defaults, and task-specific guidance.
-
-Self-host SourceWeft, use your own models for chat, embeddings, rerank, image, and audio, and share workspaces with your team.
+**Make the workspace yours.** Choose supported models, self-host your workspace, and add built-in or custom Skills for reusable methods and task guidance.
 
 ---
 
@@ -58,7 +60,7 @@ Self-host SourceWeft, use your own models for chat, embeddings, rerank, image, a
 
 3. **Let SourceWeft index them.** Sources are parsed, chunked, embedded, and made searchable with hybrid retrieval.
 
-4. **Ask, create, and refine.** Chat with selected sources, generate cited outputs, use Skills, search the web, create Artifacts, and keep working from the same context.
+4. **Ask, create, and refine.** Chat with selected sources, check citations, and let agents use tools and Skills to research, create, and refine your work.
 
 5. **Use it everywhere.** Continue from the web app, desktop app, or browser extension with your sources and team workspace in sync.
 

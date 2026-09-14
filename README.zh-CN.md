@@ -4,9 +4,11 @@
 
 # SourceWeft
 
-**开源 NotebookLM 替代品：连接你的资料源，进行可信问答，生成带引用的多种内容，并通过 Virtual FS 和可扩展 Skills 增强深度知识工作。**
+**让 Agent 协作，把你的知识用起来。**
 
-支持自托管与多模型，可汇聚文件、网页、笔记、YouTube 和 SaaS 连接器，让团队掌控数据、模型和知识工作方式。
+连接知识与 Agent 协作的开源 AI 工作空间。
+
+支持自托管 · 多模型 · 自定义 Skills
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/SourceWeft/SourceWeft?style=social)](https://github.com/SourceWeft/SourceWeft/stargazers)
@@ -17,9 +19,11 @@
 
 ---
 
-**SourceWeft** 是面向深度知识工作的开源 NotebookLM 替代品。你可以把 PDF、网页、笔记、YouTube、Notion、Google Drive、Gmail、Slack 等资料汇聚到一个结构化资料空间中，并基于选定资料获得带引用、可验证的回答。
+**SourceWeft** 将文档、网页、笔记和工作文件组织在同一个 AI 工作空间。你可以接入 PDF、YouTube、Notion、Google Drive、Gmail、Slack 等资料源，基于选定资料提问，并通过引用核对出处。
 
-不止于问答，SourceWeft 还可以帮助你生成学习指南、FAQ、时间线、研究简报、草稿、音频概览、图像 Artifacts 等知识产物。Virtual FS、内置 Skills、自定义 Skills、Web 工具和工作文件，让 Agent 能够围绕你的资料读取、搜索、创作、整理和持续迭代。
+Agent 可以分工探索、规划和执行，结合你的资料、工具与 Skills 处理任务。从研究到报告和演示，检查成果后，再回到保存的对话与文件中继续修改完善。
+
+支持多模型选择，通过内置和自定义 Skills 复用工作方法，也可以自行部署整个工作空间。
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
@@ -39,15 +43,13 @@
 
 ## 为什么选择 SourceWeft
 
-**连接多种资料源。** 汇聚文件、URL、笔记、YouTube、结构化资料树和 SaaS 连接器。
+**基于你的知识工作。** 汇聚文件、URL、笔记、YouTube 和连接资料源。围绕选定材料提问，通过引用回到来源核对。
 
-**每个回答都可追溯。** 在选定资料中提问，获得带引用、可验证、基于来源的回答。
+**让 Agent 分工处理。** Agent 可以将探索、规划和执行委派给专门的子 Agent，再结合返回的结果继续处理任务。
 
-**给 Agent 一个真正的工作空间。** Virtual FS 将资料、工作文件、Artifacts 和 Skill 指令组织成可导航的上下文。
+**接着上次的工作继续。** 回到保存的对话和工作文件，检查结果、修改内容并继续推进。
 
-**用 Skills 扩展 Agent 能力。** 内置和自定义 Skills 可以提供可复用的领域方法、斜杠命令、工具默认配置和任务指导。
-
-SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Embedding、重排序、图片和音频任务，并在团队中共享工作空间、角色、资料源和计费。
+**按你的方式工作。** 选择受支持的模型、自托管工作空间，通过内置或自定义 Skills 复用工作方法与任务指导。
 
 ---
 
@@ -59,7 +61,7 @@ SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Emb
 
 3. **让 SourceWeft 完成索引。** 资料会被解析、切分、向量化，并通过混合检索变成可搜索的知识库。
 
-4. **提问、创作、持续迭代。** 基于选定资料对话，生成带引用的内容，调用 Skills，搜索网页，创建 Artifacts，并在同一上下文里继续工作。
+4. **提问、创作、持续迭代。** 基于选定资料对话、核对引用，让 Agent 借助工具和 Skills 开展研究、创作内容并完善成果。
 
 5. **随处继续。** 在网页端、桌面端或浏览器扩展中继续使用，同步你的资料、上下文和团队工作空间。
 
