@@ -1,4 +1,6 @@
-# Deploy the published image / 使用发布镜像部署
+# Deploy the published image
+
+[English](README.md) | [Simplified Chinese](README.zh-CN.md)
 
 This is a Docker-only installation: no host Node.js, Rust, image rebuild or external
 file-storage service is required. Use Docker Engine/Desktop with Compose v2.24+
@@ -6,19 +8,15 @@ and a POSIX shell (Linux/macOS or WSL). The single gateway exposes the Web and A
 at one origin. PostgreSQL, Redis and the default SeaweedFS S3 service are private
 Compose services with project-scoped persistent volumes.
 
-只需要 Docker、Compose v2.24+ 和终端，不需要本机安装 Node/Rust、重新构建镜像或单独搭建文件存储。
-
-## Fresh installation / 首次安装
+## Fresh installation
 
 Download the `sourceweft-selfhost-vX.Y.Z.tar.gz` asset from the chosen GitHub
 Release and extract it. It contains this `docker/` directory. Alternatively,
 checkout the same release tag in Git; do not mix main's Compose with an older image.
 Run from the directory containing `docker/`:
 
-从所选 Release 下载并解压自托管压缩包，或 checkout 相同 Git tag。在包含 `docker/` 的目录执行：
-
 ```sh
-VERSION=v0.2.0-rc.1 # replace with the release you downloaded / 改成所选发布版本
+VERSION=v0.2.0-rc.1 # replace with the release you downloaded
 IMAGE=ghcr.io/sourceweft/sourceweft:$VERSION
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint node \
   -e SOURCEWEFT_IMAGE="$IMAGE" -v "$PWD/docker:/config" "$IMAGE" \
@@ -30,18 +28,15 @@ The initializer writes `.env` with independent random database, storage, auth an
 encryption secrets. It refuses to overwrite an existing `.env`. Do not run it on
 an existing installation and do not rotate the model encryption secret casually.
 
-初始化会生成随机密码和密钥，已有 `.env` 时拒绝覆盖。不要仅复制带占位值的模板启动。
-
 Open **http://localhost:3000**, register and sign in. The migration and bucket
 initialization must finish before the API/worker start. This starts the application
 without mail/OAuth/payment/model accounts. To use chat and embedding-dependent
 indexing, configure a model provider (for example OPENROUTER_ENABLED plus its key)
 or an authorized BYOK model. Missing models are not silently substituted.
+The private upload bucket is separate from the optional PUBLIC_S3_* bucket used
+for public blog assets.
 
-打开页面即可注册登录。使用聊天和依赖嵌入的索引前，在 `.env` 或 BYOK 中配置模型；模型不是启动服务的前提。
-默认私有桶用于上传文件，PUBLIC_S3_* 是可选的公开博客资源桶，二者不是同一个配置。
-
-## Change address or port / 修改地址或端口
+## Change address or port
 
 Edit `docker/.env`, then repeat the same `up` command. No image rebuild is needed.
 
@@ -58,9 +53,7 @@ keep the public URL consistent with the browser's origin. SSE buffering is disab
 and WebSocket Upgrade is forwarded by the bundled gateway. `INTERNAL_API_BASE_URL`
 is `http://api:3001` inside the Web container, independently of public addresses.
 
-只发布网关端口；公开地址是运行时配置。普通 API、鉴权、聊天流和实时连接共用入口；SSR 通过容器内网访问 API。
-
-## Optional services / 可选服务
+## Optional services
 
 - External S3: set `COMPOSE_PROFILES=` to disable bundled storage, set `S3_ENDPOINT`,
   `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and path-style
@@ -79,9 +72,8 @@ is `http://api:3001` inside the Web container, independently of public addresses
   use `PUBLIC_GOOGLE_ONE_TAP_*` and are injected at runtime.
 - Web search/fetch uses `ANYCRAWL_API_KEY`. Without it, ordinary model chat remains
   available; explicit web-tool invocations report an unconfigured provider.
-  网页搜索/抓取是可选服务，未配置时不阻塞普通聊天，也不会自动改用其他数据源。
 
-## Inspect, stop and restart / 检查与重启
+## Inspect, stop and restart
 
 ```sh
 docker compose --env-file docker/.env -f docker/docker-compose.yml ps -a
@@ -95,7 +87,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 explicit disposable reset. Health HTTP 200 is not a replacement for testing a
 login, file upload and model response.
 
-## Upgrade / 升级
+## Upgrade
 
 1. Stop writes and back up PostgreSQL plus the S3 volume using your normal snapshot
    tooling; preserve `.env` and the encryption secret with the backup.
@@ -108,7 +100,7 @@ login, file upload and model response.
    restore the compatible database/storage backup along with the previous image.
    Merely downgrading the image is not a database rollback.
 
-## Existing fixed volumes / 旧版本固定卷
+## Existing fixed volumes
 
 Older Compose used `sourceweft-postgres` and `sourceweft-redis`. To retain those
 volumes explicitly during upgrade, add the supplied override to **every** command:
@@ -123,7 +115,7 @@ Do not use it for a fresh installation or a second instance. New instances can
 use `-p another-instance`, a separate config directory and another WEB_PORT; their
 volumes will remain independent.
 
-## Automated contract / 自动验收
+## Automated contract
 
 CI builds the universal image, initializes the shipped template, starts the real
 Compose stack with fresh project volumes, and tests registration/login, private

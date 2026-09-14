@@ -10,7 +10,7 @@ Self-hosted and multi-model, with files, web pages, notes, YouTube, and SaaS con
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [Simplified Chinese](README.zh-CN.md)
 
 </div>
 

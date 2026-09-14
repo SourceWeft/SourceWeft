@@ -957,7 +957,7 @@ export function DashboardChatPageClient() {
 
       if (!creationContext.target || creationContext.error) {
         preserveDraft();
-        toast.error(creationContext.error || "请等待电脑初始化。");
+        toast.error(creationContext.error || "Please wait for the computer to finish initializing.");
         return;
       }
       if (
@@ -965,7 +965,7 @@ export function DashboardChatPageClient() {
         !creationContext.selectedDevice?.connected
       ) {
         preserveDraft();
-        toast.error("请先连接所选电脑。");
+        toast.error("Connect to the selected computer first.");
         return;
       }
       isStartingChatRef.current = true;

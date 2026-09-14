@@ -2679,7 +2679,7 @@ function DraftMirror({
           toast.error(
             error instanceof Error
               ? error.message
-              : "草稿保存失败，请暂勿刷新。",
+              : "Failed to save your draft. Please do not refresh yet.",
           );
         }
       },
@@ -2714,7 +2714,7 @@ function PersistentComposer(
         }
       },
       (e) => {
-        if (active) setError(e instanceof Error ? e.message : "无法恢复草稿。");
+        if (active) setError(e instanceof Error ? e.message : "Unable to restore your draft.");
       },
     );
     return () => {
@@ -2747,14 +2747,14 @@ function PersistentComposer(
           className="ml-2 underline"
           onClick={() => setRetry((value) => value + 1)}
         >
-          重试
+          Retry
         </button>
       </div>
     );
   if (loaded?.key !== loadKey)
     return (
       <div className="min-h-24 text-sm text-muted-foreground">
-        正在恢复草稿…
+        Restoring your draft…
       </div>
     );
   return (
@@ -2771,7 +2771,7 @@ function PersistentComposer(
           args[4] ?? args[0].text,
           args[0].files,
         ).catch((e) =>
-          toast.error(e instanceof Error ? e.message : "草稿保存失败。"),
+          toast.error(e instanceof Error ? e.message : "Failed to save your draft."),
         );
         props.onSubmit?.(...args);
       }}

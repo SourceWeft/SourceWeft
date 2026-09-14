@@ -28,7 +28,7 @@ function openDatabase() {
     };
     request.onerror = () => {
       database = undefined;
-      reject(request.error ?? new Error("无法打开草稿存储。"));
+      reject(request.error ?? new Error("Unable to open draft storage."));
     };
   }));
 }
@@ -53,8 +53,8 @@ async function transact<T>(
     const tx = db.transaction("drafts", mode);
     const request = action(tx.objectStore("drafts"));
     tx.oncomplete = () => resolve(request.result);
-    tx.onerror = () => reject(tx.error ?? new Error("无法保存草稿。"));
-    tx.onabort = () => reject(tx.error ?? new Error("草稿操作已中止。"));
+    tx.onerror = () => reject(tx.error ?? new Error("Unable to save your draft."));
+    tx.onabort = () => reject(tx.error ?? new Error("The draft operation was aborted."));
   });
 }
 export function readChatDraft(key: string): Promise<ChatDraft | null> {
@@ -72,7 +72,7 @@ export function readChatDraft(key: string): Promise<ChatDraft | null> {
           !(file.blob instanceof Blob),
       )
     )
-      throw new Error("草稿数据不可用，请保留当前页面后重试。");
+      throw new Error("Draft data is unavailable. Keep this page open and try again.");
     return value as ChatDraft;
   });
 }
@@ -86,11 +86,11 @@ export function writeChatDraft(
   const captured = Promise.all(
     files.map(async (file, index) => {
       if (!file.url.startsWith("blob:") && !file.url.startsWith("data:"))
-        throw new Error("此附件无法保存为本地草稿。");
+        throw new Error("This attachment cannot be saved in a local draft.");
       let content = fileContents.get(file);
       if (!content) {
         content = fetch(file.url).then((response) => {
-          if (!response.ok) throw new Error("无法读取草稿附件。");
+          if (!response.ok) throw new Error("Unable to read the draft attachment.");
           return response.blob();
         });
         fileContents.set(file, content);

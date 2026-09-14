@@ -223,7 +223,7 @@ async function recordTrustRuleForDecision(input: {
     throw new ConnectorError(
       403,
       "LOCAL_RULES_SETTINGS_ONLY",
-      "本机长期权限只能通过目标 PC 的设置修改。",
+      "Persistent local permissions can only be changed in the target computer settings.",
     );
   if (!input.scope) {
     logger.warn(

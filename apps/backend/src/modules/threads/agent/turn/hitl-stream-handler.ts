@@ -317,7 +317,7 @@ export async function* handleHitlStreamChunk(input: {
           throw new ContentError(
             409,
             "LOCAL_BINDING_INVALID",
-            "无法确认本机审批的工作目录。",
+            "Unable to verify the working directory for local approval.",
           );
         confirmation.subject = { ...confirmation.subject, label: device.name };
         confirmation.preview = {

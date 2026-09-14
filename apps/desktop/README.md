@@ -1,5 +1,7 @@
 # Desktop (Tauri)
 
+[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+
 This directory hosts the desktop application.
 
 - `src/`: frontend entry and desktop web UI wiring
@@ -10,4 +12,4 @@ Desktop frontend should reuse `packages/ui` (`@sourceweft/ui-web`) and `packages
 
 Environment template: `apps/desktop/.env.example`.
 
-PC 工作目录、文件面板、目录选择和升级说明：[LOCAL_FILES.md](./LOCAL_FILES.md)。
+For PC working directories, file panels, directory selection, and upgrade instructions, see [LOCAL_FILES.md](./LOCAL_FILES.md).

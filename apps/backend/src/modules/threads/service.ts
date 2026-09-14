@@ -510,7 +510,7 @@ class ContentThreadService {
           throw new ContentError(
             409,
             "CREATION_CONTEXT_REUSED",
-            "新建上下文已用于其他对话。",
+            "This creation context has already been used for another conversation.",
           );
         return { thread: existing };
       }

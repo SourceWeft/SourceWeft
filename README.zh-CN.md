@@ -69,7 +69,7 @@ SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Emb
 
 使用发布镜像即可启动 Web、API、后台任务、数据库及默认文件存储，不需要本机 Node/Rust 或自行构建。
 
-下载所选 Release 的 `sourceweft-selfhost-vX.Y.Z.tar.gz` 并解压，按 [Docker 安装说明](docker/README.md) 运行配置初始化和 Compose 启动命令。
+下载所选 Release 的 `sourceweft-selfhost-vX.Y.Z.tar.gz` 并解压，按 [Docker 安装说明](docker/README.zh-CN.md) 运行配置初始化和 Compose 启动命令。
 初始化自动生成密码/密钥；随后打开 `http://localhost:3000` 注册登录。聊天与模型索引需要显式配置模型 Provider 或 BYOK。
 
 地址和端口可以在运行时修改，不需要重新构建镜像。升级时保留 `.env` 和数据卷，使用与镜像同版本的 Compose；详见安装说明中的升级与旧卷迁移步骤。

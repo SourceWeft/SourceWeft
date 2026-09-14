@@ -110,7 +110,7 @@ jobs:
       - name: Package self-hosting instructions
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: tar -czf "sourceweft-selfhost-${RELEASE_TAG}.tar.gz" docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/compose.legacy-volumes.yml
+        run: tar -czf "sourceweft-selfhost-${RELEASE_TAG}.tar.gz" docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/README.zh-CN.md docker/compose.legacy-volumes.yml
 
       - name: Download desktop installers
         uses: actions/download-artifact@v4
@@ -129,9 +129,9 @@ jobs:
             release-installers/**/*.exe
           fail_on_unmatched_files: true
           body: |
-            Web/Docker 自托管包与 macOS、Windows 候选安装包。
+            Self-hosting files for Web/Docker, plus macOS and Windows candidate installers.
 
-            桌面安装包用于测试，尚未完成分发签名及 macOS 公证。Windows 本地设备执行暂不支持。
-            自托管安装与升级说明见附件中的 docker/README.md。
+            Desktop installers are provided for testing without distribution signing or macOS notarization. Local device execution is not yet supported on Windows.
+            See docker/README.md in the self-hosting archive for installation and upgrade instructions. Translations are provided in separate README files.
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}

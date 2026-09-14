@@ -884,7 +884,7 @@ export function SourcesHub({
 
           {executionError && (
             <p role="alert" className="mt-2 text-xs text-destructive">
-              无法读取文件位置：{executionError}
+              Unable to read the file location: {executionError}
             </p>
           )}
           <div className="relative mt-2 border-t pt-2">
