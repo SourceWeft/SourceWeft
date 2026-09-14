@@ -34,10 +34,10 @@ after committing the candidate version; this does not create a release tag.
 
 To exercise automatic packaging from a tag without publishing, push a
 `ci-package-vMAJOR.MINOR.PATCH` tag (including a prerelease suffix when needed),
-for example `ci-package-v0.2.0-rc.1`. CI checks that this tag matches the desktop
+for example `ci-package-v0.2.0-rc.2`. CI checks that this tag matches the desktop
 package, Tauri configuration, Cargo manifest and lockfile, then uploads installers
 as Actions artifacts. This namespace does not match the publishing workflow's
-`v*` trigger. A plain `v0.2.0-rc.1` tag still triggers the real Web/Docker release.
+`v*` trigger. A plain `v0.2.0-rc.2` tag still triggers the real Web/Docker release.
 
 Local macOS packaging:
 
