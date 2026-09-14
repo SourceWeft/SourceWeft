@@ -3,6 +3,10 @@ name: Desktop package verification
 on:
   workflow_call:
   workflow_dispatch:
+  push:
+    tags:
+      # Verification-only namespace: deliberately does not match Release's v*.
+      - "ci-package-v*"
   pull_request:
     paths:
       - "apps/desktop/**"
@@ -35,6 +39,9 @@ jobs:
         with:
           node-version: 24.18.0
           cache: pnpm
+      - name: Verify tag matches desktop version
+        if: github.ref_type == 'tag'
+        run: node scripts/ci/verify-desktop-tag.mjs
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: actions/cache@v4
         with:
@@ -55,7 +62,7 @@ jobs:
       # These are verification artifacts, not signed/public release downloads.
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-verification-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          name: desktop-verification-${{ runner.os }}-${{ runner.arch }}-${{ github.ref_type == 'tag' && github.ref_name || github.event_name }}-${{ github.sha }}
           path: |
             apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
             apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
