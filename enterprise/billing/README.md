@@ -111,7 +111,3 @@ identical. Applicable previous Apache-2.0 permissions remain in effect; see
 [Apache-2.0](LICENSES/Apache-2.0.txt). `private` prevents accidental publication;
 it is not a runtime licensing system. Production rights are governed by the
 commercial agreement, independently of customer payment subscriptions.
-
-The implementation's selected verification and remaining external-service
-coverage limits are recorded in `docs/verification/billing-extraction/completion.md`.
-This change does not execute production deployment or live payment transactions.
