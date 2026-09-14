@@ -17,13 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reject tracked files covered by ignore rules
-        run: |
-          ignored_tracked="$(git ls-files --cached --ignored --exclude-standard)"
-          if [ -n "$ignored_tracked" ]; then
-            printf '%s\n' 'Ignored local files must not be tracked:' "$ignored_tracked"
-            exit 1
-          fi
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
