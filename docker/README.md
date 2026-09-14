@@ -18,7 +18,7 @@ Run from the directory containing `docker/`:
 从所选 Release 下载并解压自托管压缩包，或 checkout 相同 Git tag。在包含 `docker/` 的目录执行：
 
 ```sh
-VERSION=v0.1.0 # replace with the release you downloaded / 改成所选发布版本
+VERSION=v0.2.0-rc.1 # replace with the release you downloaded / 改成所选发布版本
 IMAGE=ghcr.io/sourceweft/sourceweft:$VERSION
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint node \
   -e SOURCEWEFT_IMAGE="$IMAGE" -v "$PWD/docker:/config" "$IMAGE" \

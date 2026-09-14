@@ -6,7 +6,7 @@ import {
 } from "./verify-release-config.mjs";
 test("only stable versions can update latest", () => {
   assert.equal(releaseVersion("v0.1.0").latest, true);
-  for (const tag of ["v0.1.0-rc.1", "v1.0.0-beta", "v2.1.0-0"]) {
+  for (const tag of ["v0.1.0-rc.1", "v0.2.0-rc.1", "v1.0.0-beta", "v2.1.0-0"]) {
     assert.deepEqual(releaseVersion(tag), {
       version: tag.slice(1),
       latest: false,

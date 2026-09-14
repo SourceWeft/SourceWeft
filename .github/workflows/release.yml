@@ -31,6 +31,8 @@ jobs:
       - name: Validate release tag
         id: config
         run: node scripts/ci/verify-release-config.mjs
+      - name: Require versioned release notes
+        run: test -s "releases/${GITHUB_REF_NAME}.md"
 
   quality:
     needs: preflight
@@ -111,5 +113,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: sourceweft-selfhost-*.tar.gz
+          body_path: releases/${{ github.ref_name }}.md
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}

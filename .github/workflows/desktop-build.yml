@@ -45,7 +45,13 @@ jobs:
           key: desktop-${{ runner.os }}-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'third_party/rust/**') }}
       - run: pnpm install --frozen-lockfile
       - name: Build verification installer
-        run: pnpm --filter @sourceweft/desktop exec tauri build --ci --bundles ${{ matrix.bundles }} -- --locked
+        run: pnpm --filter @sourceweft/desktop exec tauri build --ci --no-sign --bundles ${{ matrix.bundles }} -- --locked
+      - name: Verify macOS disk image
+        if: runner.os == 'macOS'
+        run: |
+          for image in apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg; do
+            hdiutil verify "$image"
+          done
       # These are verification artifacts, not signed/public release downloads.
       - uses: actions/upload-artifact@v4
         with:
