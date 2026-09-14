@@ -190,7 +190,12 @@ test("v3 continuation persists the new head and resumes a question beyond a pinn
     finalCheckpoint: current,
     payload: interruptsToLegacyUpdatesPayload(second.interrupts),
     runConfig: pinned,
-    runtime: createTurnRuntime({ prepared: {} as never }),
+    runtime: createTurnRuntime({
+      prepared: {
+        workspace: { id: "w" },
+        thread: { id: config.configurable.thread_id },
+      } as never,
+    }),
     threadId: config.configurable.thread_id,
     workspaceId: "w",
     userId: "u",
@@ -341,7 +346,11 @@ test("interrupt survives the observability + retry middleware stack (fix #2)", a
 
 test("handleAskUserStreamChunk emits the question request + parks with finishReason", async () => {
   const runtime = createTurnRuntime({
-    prepared: { traceContinuation: undefined } as never,
+    prepared: {
+      workspace: { id: "w1" },
+      thread: { id: "t1" },
+      traceContinuation: undefined,
+    } as never,
   });
   const agent = {
     getState: async () => ({

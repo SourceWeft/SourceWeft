@@ -18,7 +18,7 @@ test("base chat system prompt treats kb as source evidence and work as user-visi
   assert.match(CHAT_SYSTEM_PROMPT, /read_file reads UTF-8 text only/);
   assert.match(
     CHAT_SYSTEM_PROMPT,
-    /Database-persisted, thread-scoped Files/,
+    /Thread-scoped Cloud VFS for uploaded task files, scripts, notes, drafts, calculations, and outputs/,
   );
   assert.match(CHAT_SYSTEM_PROMPT, /Read \/files to continue prior work/);
   assert.match(CHAT_SYSTEM_PROMPT, /Create Files when a task is complex/);
