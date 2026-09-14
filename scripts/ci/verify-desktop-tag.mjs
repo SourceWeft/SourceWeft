@@ -7,7 +7,11 @@ assert.ok(
   tag.startsWith("ci-package-v"),
   "Expected a ci-package-v* verification tag",
 );
-const { version } = releaseVersion(tag.slice("ci-package-".length));
+// Repeat verification without moving an existing tag or changing the app version.
+const versionTag = tag
+  .slice("ci-package-".length)
+  .replace(/--attempt\.[1-9]\d*$/, "");
+const { version } = releaseVersion(versionTag);
 const desktop = new URL("../../apps/desktop/", import.meta.url);
 for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
   const value = JSON.parse(readFileSync(new URL(file, desktop), "utf8"));

@@ -1,15 +1,21 @@
 use super::{HostError, LocalHost, Result};
 use rusqlite::{params, OptionalExtension};
-use serde_json::{json, Value};
+#[cfg(target_os = "macos")]
+use serde_json::json;
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
-    io::Read,
-    path::Path,
-    process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+};
+
+#[cfg(target_os = "macos")]
+use std::{
+    io::Read,
+    path::Path,
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
@@ -119,6 +125,23 @@ impl LocalHost {
         outcome
     }
 
+    #[cfg(not(target_os = "macos"))]
+    fn perform(
+        &self,
+        _calls: &Executions,
+        _id: &str,
+        _owner: &str,
+        _thread: &str,
+        _action: &str,
+        _payload: &Value,
+    ) -> Result<Value> {
+        Err(HostError::new(
+            "UNSUPPORTED_PLATFORM",
+            "Local execution currently requires macOS.",
+        ))
+    }
+
+    #[cfg(target_os = "macos")]
     fn perform(
         &self,
         calls: &Executions,
@@ -344,6 +367,7 @@ impl LocalHost {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
         .get(key)
@@ -351,6 +375,7 @@ fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| HostError::new("INVALID_CALL", format!("Missing {key}")))
 }
 
+#[cfg(target_os = "macos")]
 fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::path::PathBuf> {
     use std::path::Component;
     let mut result = root.to_owned();
@@ -382,6 +407,7 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
     Ok(result)
 }
 
+#[cfg(target_os = "macos")]
 fn bounded_read(mut stream: impl Read, max: usize) -> (Vec<u8>, bool) {
     let mut stored = Vec::new();
     let mut buffer = [0u8; 8192];
@@ -399,6 +425,7 @@ fn bounded_read(mut stream: impl Read, max: usize) -> (Vec<u8>, bool) {
     (stored, truncated)
 }
 
+#[cfg(target_os = "macos")]
 fn execute_command(
     root: &Path,
     cwd: &Path,

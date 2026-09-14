@@ -51,6 +51,8 @@ jobs:
             apps/desktop/src-tauri/target
           key: desktop-${{ runner.os }}-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'third_party/rust/**') }}
       - run: pnpm install --frozen-lockfile
+      - name: Verify platform boundary
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test unsupported_local_host
       - name: Build verification installer
         run: pnpm --filter @sourceweft/desktop exec tauri build --ci --no-sign --bundles ${{ matrix.bundles }} -- --locked
       - name: Verify macOS disk image
