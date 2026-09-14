@@ -148,14 +148,14 @@ test("work_file source adapter reads binary bytes from VFS download", async () =
   ]);
   const adapter = adapterForSource({
     kind: "work_file",
-    path: "workfiles/deck.pptx",
+    path: "/files/deck.pptx",
   });
   assert.ok(adapter);
 
   const output = await adapter.read({
     publishInput: validInput({
       kind: "work_file",
-      path: "workfiles/deck.pptx",
+      path: "/files/deck.pptx",
     }),
     services: {
       filesystem: {
