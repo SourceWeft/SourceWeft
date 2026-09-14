@@ -1564,6 +1564,7 @@ test("required runtime asset staging exposes its resolved executable path", asyn
 
 test("native file tools share disk state without invoking Linux shell helpers", async () => {
   const { files, provider } = createProvider();
+  const nativeSearches: Array<{ paths: string[]; pattern: string }> = [];
   provider.nativeFileOperations = true;
   provider.listFiles = async (input) =>
     [...files.entries()]
@@ -1573,6 +1574,22 @@ test("native file tools share disk state without invoking Linux shell helpers", 
           path === input.sandboxPath,
       )
       .map(([path, bytes]) => ({ path, size: bytes.length, is_dir: false }));
+  provider.nativeGrep = async ({ paths, pattern }) => {
+    nativeSearches.push({ paths, pattern });
+    return {
+      matches: paths.flatMap((path) =>
+        new TextDecoder()
+          .decode(files.get(path))
+          .split("\n")
+          .flatMap((text, index) =>
+            text.includes(pattern) ? [{ path, line: index + 1, text }] : [],
+          ),
+      ),
+      visitedPaths: paths,
+      skipped: [],
+      truncated: false,
+    };
+  };
   provider.readTextFile = async (input) =>
     new TextDecoder("utf-8", { fatal: true }).decode(
       files.get(input.sandboxPath),
@@ -1599,6 +1616,9 @@ test("native file tools share disk state without invoking Linux shell helpers", 
     (await backend.grep("before", "/workspace")).matches?.[0]?.line,
     1,
   );
+  assert.deepEqual(nativeSearches, [
+    { paths: ["/workspace/note.txt"], pattern: "before" },
+  ]);
   assert.equal(
     (await backend.edit("/workspace/note.txt", "before", "after")).occurrences,
     1,
@@ -1609,6 +1629,21 @@ test("native file tools share disk state without invoking Linux shell helpers", 
     "external change",
   );
   assert.ok((await backend.write("/files/wrong.txt", "wrong")).error);
+  assert.deepEqual(provider.systemExecuted, []);
+  assert.deepEqual(provider.executed, []);
+});
+
+test("native grep fails explicitly when the provider has no native search capability", async () => {
+  const { provider } = createProvider();
+  provider.nativeFileOperations = true;
+  provider.listFiles = async () => [
+    { path: "/workspace/note.txt", size: 6, is_dir: false },
+  ];
+  const { backend } = createBackendWithProvider(provider);
+  await assert.rejects(
+    backend.grep("before", "/workspace"),
+    /NATIVE_SEARCH_UNAVAILABLE/,
+  );
   assert.deepEqual(provider.systemExecuted, []);
   assert.deepEqual(provider.executed, []);
 });
