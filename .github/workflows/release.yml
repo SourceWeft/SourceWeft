@@ -39,8 +39,14 @@ jobs:
       contents: read
       packages: read
 
+  desktop:
+    needs: preflight
+    uses: ./.github/workflows/desktop-build.yml
+    permissions:
+      contents: read
+
   release:
-    needs: [preflight, quality]
+    needs: [preflight, quality, desktop]
     name: Build and publish release
     runs-on: ubuntu-latest
 
@@ -106,10 +112,26 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: tar -czf "sourceweft-selfhost-${RELEASE_TAG}.tar.gz" docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/compose.legacy-volumes.yml
 
+      - name: Download desktop installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-verification-*
+          path: release-installers
+          merge-multiple: true
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: sourceweft-selfhost-*.tar.gz
+          files: |
+            sourceweft-selfhost-*.tar.gz
+            release-installers/**/*.dmg
+            release-installers/**/*.exe
+          fail_on_unmatched_files: true
+          body: |
+            Web/Docker 自托管包与 macOS、Windows 候选安装包。
+
+            桌面安装包用于测试，尚未完成分发签名及 macOS 公证。Windows 本地设备执行暂不支持。
+            自托管安装与升级说明见附件中的 docker/README.md。
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}

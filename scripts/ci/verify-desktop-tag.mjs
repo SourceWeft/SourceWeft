@@ -4,13 +4,13 @@ import { releaseVersion } from "./verify-release-config.mjs";
 
 const tag = process.env.GITHUB_REF_NAME ?? "";
 assert.ok(
-  tag.startsWith("ci-package-v"),
-  "Expected a ci-package-v* verification tag",
+  tag.startsWith("ci-package-v") || tag.startsWith("v"),
+  "Expected a v* release tag or ci-package-v* verification tag",
 );
 // Repeat verification without moving an existing tag or changing the app version.
-const versionTag = tag
-  .slice("ci-package-".length)
-  .replace(/--attempt\.[1-9]\d*$/, "");
+const versionTag = tag.startsWith("ci-package-")
+  ? tag.slice("ci-package-".length).replace(/--attempt\.[1-9]\d*$/, "")
+  : tag;
 const { version } = releaseVersion(versionTag);
 const desktop = new URL("../../apps/desktop/", import.meta.url);
 for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
@@ -30,6 +30,4 @@ assert.equal(
   version,
   "Cargo lockfile version must match the tag",
 );
-console.log(
-  `Desktop verification tag ${tag} matches ${version}; no release is published.`,
-);
+console.log(`Desktop tag ${tag} matches ${version}.`);

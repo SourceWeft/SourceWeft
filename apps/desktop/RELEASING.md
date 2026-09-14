@@ -2,7 +2,8 @@
 
 The tag release workflow validates the version tag and runs the reusable CI
 including real self-hosting Compose acceptance before publishing the universal
-container image. Web releases do not depend on desktop version numbers or builds. Reusable workflows run from the same commit as
+container image and desktop installers. Desktop package versions must match the
+release tag. Reusable workflows run from the same commit as
 the tagged workflow; see [GitHub's reusable workflow documentation](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows).
 
 Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease):
@@ -22,7 +23,10 @@ Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease)
 `.github/workflows/desktop-build.yml` is reusable, manually dispatchable, and runs
 for desktop changes in pull requests. It builds a macOS app/DMG and Windows NSIS
 installer with the committed lockfile, then retains them as workflow artifacts.
-It does not install the app or publish these artifacts as customer downloads.
+Standalone verification runs do not install the app or publish customer downloads.
+The tag Release workflow calls this same builder, waits for both platforms and CI,
+then attaches the DMG and NSIS EXE to GitHub Release alongside the self-hosting archive.
+These candidate installers still skip distribution signing, as stated on the release page.
 CI explicitly uses `--no-sign` and verifies the macOS disk image with
 `hdiutil verify`. Its macOS runner does not depend on the developer's local
 screen being unlocked. Run it with `gh workflow run desktop-build.yml --ref main`
