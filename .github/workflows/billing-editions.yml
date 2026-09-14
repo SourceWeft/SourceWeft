@@ -14,10 +14,7 @@ jobs:
         edition: [core, commercial]
     services:
       postgres:
-        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.github_token }}
+        image: ghcr.io/sourceweft/sourceweft-postgres:17
         env:
           POSTGRES_USER: sourceweft
           POSTGRES_PASSWORD: sourceweft

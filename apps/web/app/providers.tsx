@@ -24,18 +24,7 @@ import { userSettingsClient } from "../lib/sdk";
 
 registerBuiltinAgentTools();
 
-function resolveWebBaseUrl() {
-  const configuredBaseUrl = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
-  if (configuredBaseUrl) {
-    return configuredBaseUrl.replace(/\/$/, "");
-  }
-
-  if (typeof window !== "undefined" && window.location.origin) {
-    return window.location.origin;
-  }
-
-  return "http://localhost:3000";
-}
+import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
 
 function shouldIgnoreCancelledPasskey(message?: string) {
   if (!message) {

@@ -150,8 +150,8 @@ export async function createCapabilityAgentToolsForTurn(
     webProvider: await createDefaultWebProvider(),
   });
   const baseContext = createCapabilityAgentToolTurnContext(input);
-  const unavailableSandboxTools = new Set<string>();
-  if (!input.sandboxRuntime) {
+  const unavailableTools = new Set<string>();
+  if (!input.sandboxRuntime || !services.webProvider) {
     const invokedSkillIds = new Set(input.prepared.invokedSkillIds);
     const invokedSkillNames = new Set(
       input.prepared.enabledSkills
@@ -174,8 +174,15 @@ export async function createCapabilityAgentToolsForTurn(
       ),
     ]);
     for (const toolName of toolOwners.keys()) {
+      const requirements = getAgentToolDefinition(toolName)?.requirements;
+      const unavailableReason =
+        requirements?.sandbox === true && !input.sandboxRuntime
+          ? "SANDBOX_RUNTIME_UNAVAILABLE"
+          : requirements?.provider === "web" && !services.webProvider
+            ? "WEB_PROVIDER_UNAVAILABLE"
+            : null;
       if (
-        getAgentToolDefinition(toolName)?.requirements?.sandbox !== true ||
+        !unavailableReason ||
         !baseContext.shouldBindAgentTool(toolName) ||
         baseContext.isToolDenied(toolName)
       ) {
@@ -184,20 +191,20 @@ export async function createCapabilityAgentToolsForTurn(
       if (explicitTools.has(toolName)) {
         throw new ContentError(
           503,
-          "SANDBOX_RUNTIME_UNAVAILABLE",
-          `Tool '${toolName}' requires sandbox execution, which is unavailable for this turn.`,
+          unavailableReason,
+          `Tool '${toolName}' requires ${unavailableReason === "WEB_PROVIDER_UNAVAILABLE" ? "a configured web provider" : "sandbox execution"}, which is unavailable for this turn.`,
           { recoverable: false, details: { toolName } },
         );
       }
-      unavailableSandboxTools.add(toolName);
+      unavailableTools.add(toolName);
       logger.info("Optional tool unavailable for this turn", {
         toolName,
-        reason: "SANDBOX_RUNTIME_UNAVAILABLE",
+        reason: unavailableReason,
       });
     }
   }
   const runtimeTools = { ...input.prepared.runtimeTools };
-  for (const toolName of unavailableSandboxTools) {
+  for (const toolName of unavailableTools) {
     const runtimeTool = runtimeTools[toolName];
     if (runtimeTool) {
       runtimeTools[toolName] = {
@@ -213,10 +220,9 @@ export async function createCapabilityAgentToolsForTurn(
     ...baseContext,
     runtimeTools,
     isToolDenied: (toolName: string) =>
-      unavailableSandboxTools.has(toolName) ||
-      baseContext.isToolDenied(toolName),
+      unavailableTools.has(toolName) || baseContext.isToolDenied(toolName),
     shouldBindAgentTool: (toolName: string) =>
-      !unavailableSandboxTools.has(toolName) &&
+      !unavailableTools.has(toolName) &&
       baseContext.shouldBindAgentTool(toolName),
   };
   const tools: AgentTurnTool[] = [];
@@ -232,6 +238,15 @@ export async function createCapabilityAgentToolsForTurn(
       context.shouldBindAgentTool,
     );
     if (toolIds.length === 0) {
+      continue;
+    }
+    // The selected sandbox runtime owns these bindings. Its capability entry
+    // has no generic factory and must not be dynamically loaded as TS here.
+    if (
+      toolIds.every(
+        (toolId) => getAgentToolDefinition(toolId)?.domain === "sandbox",
+      )
+    ) {
       continue;
     }
     const module = await loadCapabilityAgentToolModule(record);

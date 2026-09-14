@@ -1038,6 +1038,7 @@ export function SourcesHub({
                     <span className="sr-only">Delete selected sources</span>
                   </Button>
                   <Button
+                    disabled={!workspaceId}
                     onClick={() => handleOpenCreateDirectory(null)}
                     size="icon-xs"
                     title="Create folder"
@@ -1048,6 +1049,7 @@ export function SourcesHub({
                     <span className="sr-only">Create folder</span>
                   </Button>
                   <Button
+                    disabled={!workspaceId}
                     onClick={() => addSourceDialog.open(null)}
                     size="xs"
                     type="button"
@@ -1107,9 +1109,7 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">
-                    Files
-                  </h3>
+                  <h3 className="text-xs font-medium text-foreground">Files</h3>
                   <span className="text-[10px] text-muted-foreground">
                     {workfiles.length} files
                   </span>
@@ -1119,7 +1119,13 @@ export function SourcesHub({
                     </span>
                   ) : null}
                 </div>
-                {workspaceId && threadId && <UploadFilesButton workspaceId={workspaceId} threadId={threadId} onUploaded={() => void refreshWorkfiles()} />}
+                {workspaceId && threadId && (
+                  <UploadFilesButton
+                    workspaceId={workspaceId}
+                    threadId={threadId}
+                    onUploaded={() => void refreshWorkfiles()}
+                  />
+                )}
                 <Button
                   onClick={() => void refreshWorkfiles()}
                   size="icon-xs"
@@ -1417,6 +1423,7 @@ export function SourcesHub({
       />
 
       <AddSourceDialog
+        workspaceReady={Boolean(workspaceId)}
         addParentSourceId={addSourceDialog.parentSourceId}
         addTab={addSourceDialog.tab}
         fileInputRef={addSourceDialog.fileInputRef}

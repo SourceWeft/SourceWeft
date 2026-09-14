@@ -1,7 +1,9 @@
 "use client";
+import { publicRuntimeConfig } from "./public-runtime-config";
 
 const DESKTOP_AUTH_STATE_STORAGE_KEY = "sourceweft.desktop.auth.state.v1";
-const DESKTOP_AUTH_LOGIN_URL_STORAGE_KEY = "sourceweft.desktop.auth.login-url.v1";
+const DESKTOP_AUTH_LOGIN_URL_STORAGE_KEY =
+  "sourceweft.desktop.auth.login-url.v1";
 const DESKTOP_AUTH_EXPIRES_AT_STORAGE_KEY =
   "sourceweft.desktop.auth.expires-at.v1";
 
@@ -31,7 +33,7 @@ function stripTrailingSlash(value: string) {
 }
 
 function resolveWebBaseUrl() {
-  const configured = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
+  const configured = publicRuntimeConfig().webBaseUrl;
   if (configured) {
     return stripTrailingSlash(configured);
   }
@@ -62,7 +64,9 @@ function toSearchParams(search?: string | URLSearchParams | null) {
   }
 
   if (typeof search === "string") {
-    return new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    return new URLSearchParams(
+      search.startsWith("?") ? search.slice(1) : search,
+    );
   }
 
   return new URLSearchParams(search);
@@ -92,7 +96,9 @@ export function buildDesktopWebAuthUrl(input: {
 }) {
   const url = new URL(
     normalizePath(input.path),
-    input.webBaseUrl ? stripTrailingSlash(input.webBaseUrl) : resolveWebBaseUrl(),
+    input.webBaseUrl
+      ? stripTrailingSlash(input.webBaseUrl)
+      : resolveWebBaseUrl(),
   );
   const searchParams = toSearchParams(input.search);
 
@@ -132,7 +138,10 @@ export function setPendingDesktopAuth(input: {
   }
 
   window.sessionStorage.setItem(DESKTOP_AUTH_STATE_STORAGE_KEY, input.state);
-  window.sessionStorage.setItem(DESKTOP_AUTH_LOGIN_URL_STORAGE_KEY, input.loginUrl);
+  window.sessionStorage.setItem(
+    DESKTOP_AUTH_LOGIN_URL_STORAGE_KEY,
+    input.loginUrl,
+  );
   window.sessionStorage.setItem(
     DESKTOP_AUTH_EXPIRES_AT_STORAGE_KEY,
     String(Date.now() + DESKTOP_AUTH_STATE_TTL_MS),

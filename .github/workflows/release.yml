@@ -28,12 +28,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
-      - name: Validate release version and production URLs
+      - name: Validate release tag
         id: config
         run: node scripts/ci/verify-release-config.mjs
-        env:
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-          NEXT_PUBLIC_WEB_BASE_URL: ${{ vars.NEXT_PUBLIC_WEB_BASE_URL }}
 
   quality:
     needs: preflight
@@ -42,14 +39,8 @@ jobs:
       contents: read
       packages: read
 
-  desktop:
-    needs: preflight
-    uses: ./.github/workflows/desktop-build.yml
-    permissions:
-      contents: read
-
   release:
-    needs: [preflight, quality, desktop]
+    needs: [preflight, quality]
     name: Build and publish release
     runs-on: ubuntu-latest
 
@@ -99,17 +90,26 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
-          build-args: |
-            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-            NEXT_PUBLIC_WEB_BASE_URL=${{ vars.NEXT_PUBLIC_WEB_BASE_URL }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED || 'false' }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID || '' }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED || 'false' }}
-            NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID || '' }}
+
+      - name: Verify published images support anonymous installation
+        env:
+          RELEASE_IMAGE: ${{ steps.image.outputs.name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          registry_config=$(mktemp -d)
+          trap 'rm -rf "$registry_config"' EXIT
+          DOCKER_CONFIG="$registry_config" docker manifest inspect "$RELEASE_IMAGE:$RELEASE_TAG" > /dev/null
+          DOCKER_CONFIG="$registry_config" docker manifest inspect ghcr.io/sourceweft/sourceweft-postgres:17 > /dev/null
+
+      - name: Package self-hosting instructions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: tar -czf "sourceweft-selfhost-${RELEASE_TAG}.tar.gz" docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/compose.legacy-volumes.yml
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          files: sourceweft-selfhost-*.tar.gz
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}

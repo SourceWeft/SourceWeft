@@ -361,7 +361,20 @@ export function registerSourceRoutes(app: Hono) {
       userId: getSessionUserId(session),
     });
 
-    return c.redirect(result.url, 302);
+    if ("body" in result && result.body) {
+      c.header("Content-Type", result.contentType);
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("Content-Security-Policy", "sandbox");
+      const disposition =
+        c.req.query("inline") === "true" ? "inline" : "attachment";
+      c.header(
+        "Content-Disposition",
+        `${disposition}; filename*=UTF-8''${encodeURIComponent(result.fileName).replace(/'/g, "%27")}`,
+      );
+      return c.body(new Uint8Array(result.body));
+    }
+    return c.redirect(result.url!, 302);
   });
 
   app.patch("/sources/:id", async (c) => {

@@ -1,20 +1,20 @@
 # Release verification
 
-The tag release workflow validates production URLs and version numbers, runs the
-reusable CI workflow, and waits for macOS/Windows package verification before
-publishing the container image. Reusable workflows run from the same commit as
+The tag release workflow validates the version tag and runs the reusable CI
+including real self-hosting Compose acceptance before publishing the universal
+container image. Web releases do not depend on desktop version numbers or builds. Reusable workflows run from the same commit as
 the tagged workflow; see [GitHub's reusable workflow documentation](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows).
 
 Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease):
 
-- Set repository variables `NEXT_PUBLIC_API_BASE_URL` and
-  `NEXT_PUBLIC_WEB_BASE_URL` to the actual production HTTPS base URLs. Missing or
-  local URLs fail preflight. These values are compiled into the Web bundle.
-- Match the tag version in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
+- Configure public Web/API URLs at runtime in the installation's `.env`, not in
+  repository build variables. The same image supports different installations.
+- Before a separate desktop distribution, match the version in
+  `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
 - Keep prereleases on their full version tags. Only stable tags update the image's
   minor alias and `latest`; prereleases are marked as such in GitHub Releases.
 - Use the default PostgreSQL image
-  `ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17`, or explicitly pin
+  `ghcr.io/sourceweft/sourceweft-postgres:17`, or explicitly pin
   `SOURCEWEFT_POSTGRES_IMAGE` to the intended published version/digest.
 
 ## Desktop installers

@@ -1,4 +1,9 @@
 import "./globals.css";
+import Script from "next/script";
+import {
+  serverPublicRuntimeConfig,
+  serializePublicConfig,
+} from "../lib/public-runtime-config";
 import { GoogleTagManager } from "@next/third-parties/google";
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
@@ -19,8 +24,6 @@ import {
   SITE_NAME,
   SITE_URL,
 } from "./seo";
-
-const gtmId = process.env.NEXT_PUBLIC_GTM_ID?.trim();
 
 export const metadata: Metadata = {
   alternates: {
@@ -62,6 +65,8 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const runtimeConfig = serverPublicRuntimeConfig();
+  const gtmId = runtimeConfig.gtmId;
   const cookieStore = await cookies();
   const requestHeaders = await headers();
 
@@ -75,6 +80,13 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={direction} suppressHydrationWarning>
       <head>
+        <Script
+          id="sourceweft-runtime-config"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `window.__SOURCEWEFT_CONFIG__=${serializePublicConfig(runtimeConfig)};`,
+          }}
+        />
         <SeoJsonLd />
       </head>
       <body className="flex min-h-svh flex-col antialiased">

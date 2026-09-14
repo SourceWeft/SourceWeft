@@ -82,30 +82,17 @@ The sandbox provider is an operator detail; users should think in terms of an is
 
 ## Self-host with Docker
 
-Use Docker Compose when you want to run SourceWeft from the published container image.
+The published image runs Web, API, background jobs, PostgreSQL, Redis and a default
+private S3 store. No host Node/Rust installation or image rebuild is required.
 
-Source development and image builds default to Node 22.23.2, with Node 24 also
-supported. See the [runtime policy](apps/backend/docs/node-runtime.md).
+Download the chosen Release's `sourceweft-selfhost-vX.Y.Z.tar.gz` asset and follow
+[the Docker installation guide](docker/README.md). The initializer generates
+passwords/secrets, then Compose starts the system at `http://localhost:3000`.
+Register and sign in; configure a model Provider or BYOK for chat and model indexing.
 
-```bash
-git clone https://github.com/SourceWeft/SourceWeft.git
-cd SourceWeft
-cp docker/.env.example docker/.env
-# Edit docker/.env — set the two required secrets before using beyond localhost.
-# OSS defaults start with quota enforcement on and payment/mail SaaS providers off.
-# Model provider keys are optional for boot; configure one before using model features.
-docker compose -f docker/docker-compose.yml up -d
-```
-
-Open **http://localhost:3000**, sign up, and start.
-
-Sandbox execution is disabled in the base compose file. To enable sandbox
-execution, point the `DAYTONA_*` values in `docker/.env` at an external Daytona
-deployment and review the sandbox TTL, timeout, and file/output byte limits.
-
-SaaS billing and payment checkout are opt-in. See the SaaS billing block in
-`docker/.env.example` for the required `SOURCEWEFT_SAAS_ENABLED`,
-`BACKEND_BILLING_PROVIDER`, Creem, and public checkout UI settings.
+Addresses and ports are runtime configuration. Keep `.env` and data volumes when
+upgrading, and use Compose from the same release as the image. The guide includes
+upgrade commands and an explicit override for older fixed-name volumes.
 
 ---
 

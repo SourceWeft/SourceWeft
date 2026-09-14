@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { afterEach, test, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 
 afterEach(() => {
   vi.restoreAllMocks();

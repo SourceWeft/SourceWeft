@@ -1,5 +1,7 @@
+import { publicWebBaseUrl } from "../lib/public-runtime-config";
+
 export const SITE_NAME = "SourceWeft";
-export const SITE_URL = "https://sourceweft.com";
+export const SITE_URL = publicWebBaseUrl();
 export const DEFAULT_TITLE = "SourceWeft - AI Notebook Workspace";
 export const DEFAULT_DESCRIPTION =
   "SourceWeft is an AI notebook workspace for connected knowledge sources. Upload documents, connect your tools, and generate source-grounded answers, citations, study guides, FAQs, and audio overviews.";

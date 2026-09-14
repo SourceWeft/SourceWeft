@@ -3,12 +3,25 @@ name: sourceweft
 x-sourceweft-env: &sourceweft-env
   NODE_ENV: production
   SOURCEWEFT_COMMERCIAL_ENABLED: ${SOURCEWEFT_COMMERCIAL_ENABLED:-false}
-  DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
+  DATABASE_URL: ${DATABASE_URL:-}
+  DB_HOST: ${DB_HOST:-postgres}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_USER: ${DB_USER:-sourceweft}
+  DB_PASSWORD: ${DB_PASSWORD:?Run the configuration initialization command in docker/README.md}
+  DB_NAME: ${DB_NAME:-sourceweft}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-  NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
-  NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:3000}
-  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-replace_with_32_plus_char_auth_secret}
-  MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:-replace_with_32_plus_char_model_secret}
+  PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:-http://localhost:${WEB_PORT:-3000}}
+  PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-${PUBLIC_WEB_BASE_URL:-http://localhost:${WEB_PORT:-3000}}}
+  INTERNAL_API_BASE_URL: http://api:3001
+  S3_BUCKET: ${S3_BUCKET:-sourceweft-uploads}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://storage:8333}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-sourceweft}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Initialize docker/.env first}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+  S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-true}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Initialize docker/.env first}
+  MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:?Initialize docker/.env first}
   MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
   OPENROUTER_ENABLED: ${OPENROUTER_ENABLED:-true}
   ORCAROUTER_ENABLED: ${ORCAROUTER_ENABLED:-false}
@@ -24,7 +37,7 @@ x-sourceweft-env: &sourceweft-env
   PUBLIC_S3_SECRET_ACCESS_KEY: ${PUBLIC_S3_SECRET_ACCESS_KEY:-}
   PUBLIC_S3_FORCE_PATH_STYLE: ${PUBLIC_S3_FORCE_PATH_STYLE:-true}
   PUBLIC_S3_BASE_URL: ${PUBLIC_S3_BASE_URL:-}
-  # proxy (default) sends uploads through the API and needs no bucket setup.
+  # proxy uploads through the API; both modes require the private S3 bucket.
   # direct hands the browser a presigned PUT — faster and keeps files out of the
   # API process, but the bucket must carry a CORS policy allowing PUT from the
   # web origin, so it stays opt-in.
@@ -53,15 +66,51 @@ x-sourceweft-env: &sourceweft-env
   DAYTONA_SANDBOX_IMAGE: ${DAYTONA_SANDBOX_IMAGE:-}
 
 services:
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "${WEB_PORT:-3000}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  storage:
+    image: ${SOURCEWEFT_STORAGE_IMAGE:-chrislusf/seaweedfs:4.46}
+    profiles: [local-storage]
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-sourceweft}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Initialize docker/.env first}
+    volumes:
+      - storage_data:/data
+    restart: unless-stopped
+
+  storage-init:
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    command: ["node", "apps/backend/scripts/storage-init.mjs"]
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      <<: *sourceweft-env
+    depends_on:
+      storage:
+        condition: service_started
+        required: false
+    restart: "no"
+
   postgres:
-    image: ${SOURCEWEFT_POSTGRES_IMAGE:-ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17}
+    image: ${SOURCEWEFT_POSTGRES_IMAGE:-ghcr.io/sourceweft/sourceweft-postgres:17}
     command: ["postgres", "-c", "shared_preload_libraries=pg_textsearch"]
     environment:
       POSTGRES_USER: ${DB_USER:-sourceweft}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-sourceweft}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Initialize docker/.env first}
       POSTGRES_DB: ${DB_NAME:-sourceweft}
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -69,18 +118,18 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${DB_USER:-sourceweft} -d ${DB_NAME:-sourceweft}",
+          "pg_isready -h 127.0.0.1 -U ${DB_USER:-sourceweft} -d ${DB_NAME:-sourceweft}",
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 12
+      # Require the final TCP server, not initdb's temporary Unix-only server.
+      # Fresh volumes can take over a minute to initialize on Docker Desktop.
+      start_period: 120s
 
   redis:
     image: redis:8-alpine
     command: redis-server --appendonly yes
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -103,6 +152,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -121,8 +172,6 @@ services:
       BACKEND_API_HOST: 0.0.0.0
       PORT: 3001
       BACKEND_API_PORT: 3001
-    ports:
-      - "${BACKEND_API_PORT:-3001}:3001"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -130,6 +179,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -162,6 +213,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -184,6 +237,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -197,19 +252,13 @@ services:
       - path: .env
         required: false
     environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
+      <<: *sourceweft-env
       NEXT_TELEMETRY_DISABLED: 1
       HOSTNAME: 0.0.0.0
       PORT: 3000
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
-      NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:3000}
-      NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED: ${NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED:-false}
-      NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID:-}
-      NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED: ${NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED:-false}
-      NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID:-}
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+      PUBLIC_GOOGLE_ONE_TAP_ENABLED: ${PUBLIC_GOOGLE_ONE_TAP_ENABLED:-false}
+      PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID: ${PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID:-}
+      PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED: ${PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED:-false}
     depends_on:
       api:
         condition: service_healthy
@@ -231,6 +280,7 @@ services:
 
 volumes:
   postgres_data:
-    name: sourceweft-postgres
+    # Existing installations: see the explicit legacy-volume override.
   redis_data:
-    name: sourceweft-redis
+    # Project-scoped by default.
+  storage_data: {}

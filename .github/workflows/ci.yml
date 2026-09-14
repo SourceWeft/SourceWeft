@@ -34,7 +34,7 @@ jobs:
             turbo-${{ runner.os }}-node22.23.2-
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=moderate
-      - run: node --test scripts/ci/verify-release-config.test.mjs
+      - run: node --test scripts/ci/verify-release-config.test.mjs docker/selfhost-config.test.mjs
       - run: pnpm lint
       - run: pnpm check-types
 
@@ -50,10 +50,7 @@ jobs:
       postgres:
         # Hardcoded lowercase: github.repository is SourceWeft/SourceWeft and
         # Docker rejects uppercase repository names; expressions have no lower().
-        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.github_token }}
+        image: ghcr.io/sourceweft/sourceweft-postgres:17
         env:
           POSTGRES_USER: sourceweft
           POSTGRES_PASSWORD: sourceweft
@@ -129,10 +126,7 @@ jobs:
     timeout-minutes: 45
     services:
       postgres:
-        image: ghcr.io/sourceweft/sourceweft/sourceweft-postgres:17
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.github_token }}
+        image: ghcr.io/sourceweft/sourceweft-postgres:17
         env:
           POSTGRES_USER: sourceweft
           POSTGRES_PASSWORD: sourceweft
@@ -170,6 +164,22 @@ jobs:
           tags: sourceweft:pr-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: Verify documented Compose installation and restart
+        run: node scripts/ci/verify-selfhost-compose.mjs sourceweft:pr-test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selfhost-compose-${{ github.sha }}
+          path: |
+            output/ci/selfhost/
+            output/selfhost-playwright/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Check production image entrypoints
         run: node scripts/ci/verify-docker-startup.mjs sourceweft:pr-test
         env:

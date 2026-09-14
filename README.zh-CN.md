@@ -67,25 +67,12 @@ SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Emb
 
 ## Docker 自托管
 
-如果你想直接使用已发布的容器镜像运行 SourceWeft，使用 Docker Compose。
+使用发布镜像即可启动 Web、API、后台任务、数据库及默认文件存储，不需要本机 Node/Rust 或自行构建。
 
-源码开发与镜像构建默认使用 Node 22.23.2，同时支持 Node 24；详见[运行版本说明](apps/backend/docs/node-runtime.md)。
+下载所选 Release 的 `sourceweft-selfhost-vX.Y.Z.tar.gz` 并解压，按 [Docker 安装说明](docker/README.md) 运行配置初始化和 Compose 启动命令。
+初始化自动生成密码/密钥；随后打开 `http://localhost:3000` 注册登录。聊天与模型索引需要显式配置模型 Provider 或 BYOK。
 
-```bash
-git clone https://github.com/SourceWeft/SourceWeft.git
-cd SourceWeft
-cp docker/.env.example docker/.env
-# 编辑 docker/.env——至少设置两个必填 secret；本地以外部署请使用强随机值。
-# OSS 默认开启额度拦截，关闭支付/邮件 SaaS provider。
-# 模型 provider key 不影响启动；使用模型功能前再配置即可。
-docker compose -f docker/docker-compose.yml up -d
-```
-
-打开 **http://localhost:3000**，注册，开始使用。
-
-SaaS 计费和支付 checkout 需要显式启用。请参考 `docker/.env.example`
-里的 SaaS billing 区块，配置 `SOURCEWEFT_SAAS_ENABLED`、
-`BACKEND_BILLING_PROVIDER`、Creem 和前端 checkout UI 开关。
+地址和端口可以在运行时修改，不需要重新构建镜像。升级时保留 `.env` 和数据卷，使用与镜像同版本的 Compose；详见安装说明中的升级与旧卷迁移步骤。
 
 ---
 

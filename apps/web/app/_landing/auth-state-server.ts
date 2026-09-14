@@ -1,4 +1,5 @@
 import "server-only";
+import { internalApiBaseUrl } from "../../lib/internal-api-base-url";
 
 import { headers } from "next/headers";
 
@@ -8,7 +9,7 @@ import type {
 } from "./components/use-landing-auth-state";
 
 function resolveAuthSessionUrl() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+  const base = internalApiBaseUrl();
   return `${base.replace(/\/$/, "")}/api/auth/get-session`;
 }
 

@@ -281,7 +281,9 @@ function resolveExtensionRedirectUri() {
 }
 
 function resolveApiBaseUrl() {
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  const configured = (
+    process.env.PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL
+  )?.trim();
   if (configured) {
     return stripTrailingSlash(configured);
   }
@@ -290,7 +292,9 @@ function resolveApiBaseUrl() {
 }
 
 function resolveWebBaseUrl() {
-  const configured = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
+  const configured = (
+    process.env.PUBLIC_WEB_BASE_URL || process.env.NEXT_PUBLIC_WEB_BASE_URL
+  )?.trim();
   if (configured) {
     return stripTrailingSlash(configured);
   }
@@ -712,7 +716,8 @@ export const config = {
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET || "",
     passkey: {
-      rpId: process.env.AUTH_PASSKEY_RP_ID || "localhost",
+      rpId:
+        process.env.AUTH_PASSKEY_RP_ID || new URL(resolveWebBaseUrl()).hostname,
       rpName: process.env.AUTH_PASSKEY_RP_NAME || "SourceWeft",
       origin: resolvePasskeyOrigin(),
     },

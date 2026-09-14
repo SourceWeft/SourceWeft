@@ -5,23 +5,14 @@ import { SharedArtifactViewer } from "./shared-artifact-viewer";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Server-side API base. On the server `apiBaseUrl` resolves from the configured
- * public URL (or localhost in dev), which is what SSR needs to reach the API.
- */
-function serverApiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-    "http://localhost:3001"
-  );
-}
+import { internalApiBaseUrl } from "../../../lib/internal-api-base-url";
 
 async function fetchShare(
   token: string,
 ): Promise<PublicSharedArtifactResponse["artifact"] | null> {
   try {
     const res = await fetch(
-      `${serverApiBaseUrl()}/v1/public/shares/${encodeURIComponent(token)}`,
+      `${internalApiBaseUrl()}/v1/public/shares/${encodeURIComponent(token)}`,
       { cache: "no-store" },
     );
     if (!res.ok) return null;

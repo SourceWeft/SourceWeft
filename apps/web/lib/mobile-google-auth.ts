@@ -1,5 +1,7 @@
 "use client";
 
+import { publicRuntimeConfig } from "./public-runtime-config";
+
 import { authClient } from "./auth-client";
 
 type GoogleAuthModule = {
@@ -16,7 +18,7 @@ type GoogleAuthModule = {
 };
 
 function resolveMobileGoogleClientId() {
-  return process.env.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID?.trim() || "";
+  return publicRuntimeConfig().googleMobileClientId || "";
 }
 
 function isCancelledGoogleSignIn(error: unknown) {
@@ -31,17 +33,13 @@ function isCancelledGoogleSignIn(error: unknown) {
 }
 
 async function loadGoogleAuthModule() {
-  return import(
-    "@choochmeque/tauri-plugin-google-auth-api"
-  ) as Promise<GoogleAuthModule>;
+  return import("@choochmeque/tauri-plugin-google-auth-api") as Promise<GoogleAuthModule>;
 }
 
 export async function signInWithMobileGoogle() {
   const clientId = resolveMobileGoogleClientId();
   if (!clientId) {
-    throw new Error(
-      "Google sign-in is not configured for this mobile build.",
-    );
+    throw new Error("Google sign-in is not configured for this mobile build.");
   }
 
   let googleAuth: GoogleAuthModule;

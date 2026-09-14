@@ -46,8 +46,7 @@ import {
 } from "./streaming-render-buffer";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "../../../../lib/api-base-url";
 
 const STREAM_DELTA_MAX_BATCH_CHARS = 800;
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";

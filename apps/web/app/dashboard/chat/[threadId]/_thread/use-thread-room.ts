@@ -6,8 +6,7 @@ import { contentClient } from "../../../../../lib/sdk";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import type { ArtifactOutputReconcileTarget } from "./artifact-output-reconcile";
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "../../../../../lib/api-base-url";
 
 const MESSAGE_REFETCH_DEBOUNCE_MS = 250;
 const RECONNECT_BASE_MS = 1_000;

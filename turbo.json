@@ -65,6 +65,10 @@
     }
   },
   "globalPassThroughEnv": [
+    "PUBLIC_*",
+    "INTERNAL_API_BASE_URL",
+    "SELFHOST_*",
+    "LANDING_VERSION",
     "SOURCEWEFT_SAAS_ENABLED",
     "BACKEND_BILLING_*",
     "BACKEND_CREDITS_ENABLED",
