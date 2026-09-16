@@ -13,6 +13,7 @@ on:
       - "third_party/rust/**"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-build.yml"
+      - "scripts/ci/desktop-release-artifacts.mjs"
 
 permissions:
   contents: read

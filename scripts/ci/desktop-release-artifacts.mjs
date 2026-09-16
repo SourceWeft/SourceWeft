@@ -66,7 +66,10 @@ if (
   // The workflow builds the host target, without --target. Capture the actual
   // runner architecture instead of assuming what macos-latest resolves to.
   const entry = await describeInstaller(
-    "apps/desktop/src-tauri/target/release/bundle",
+    join(
+      "apps/desktop/src-tauri/target/release/bundle",
+      process.platform === "darwin" ? "dmg" : "nsis",
+    ),
     process.platform,
     process.arch,
     version,
