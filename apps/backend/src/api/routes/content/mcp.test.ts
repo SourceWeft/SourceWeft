@@ -346,3 +346,17 @@ for (const desktopOnly of [true, false, undefined]) {
     assert.deepEqual(mocks.countMarketMcpCategories.mock.calls[0]?.[0], common);
   });
 }
+
+test("MCP listing forwards multiple categories together with the page cursor", async () => {
+  resetRouteMocks();
+  mocks.listMarketMcp.mockResolvedValue({ items: [], nextCursor: null });
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace_1/market/mcp?category=files-storage%2Cdatabases&cursor=page-two",
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    mocks.listMarketMcp.mock.calls[0]?.[0].category,
+    "files-storage,databases",
+  );
+  assert.equal(mocks.listMarketMcp.mock.calls[0]?.[0].cursor, "page-two");
+});

@@ -1,12 +1,14 @@
 import type { ExecutionInfo } from "./local-execution";
 
 export type ConversationSnapshot = {
+  status: "checking" | "ready" | "unavailable" | "error";
   info: ExecutionInfo | null;
   ready: boolean;
   message: string | null;
   code: string | null;
 };
 export const checkingConversation: ConversationSnapshot = {
+  status: "checking",
   info: null,
   ready: false,
   message: "Checking the computer connection…",
@@ -43,6 +45,7 @@ export function createLocalConversationStore(
           info.executionTarget.kind === "cloud" ||
           info.availability?.ready === true;
         publish({
+          status: ready ? "ready" : "unavailable",
           info,
           ready,
           code: info.availability?.code ?? null,
@@ -54,6 +57,7 @@ export function createLocalConversationStore(
       } catch (error) {
         if (current !== generation) return;
         publish({
+          status: "error",
           info: snapshot.info,
           ready: false,
           code: (error as { code?: string })?.code ?? null,
@@ -82,6 +86,7 @@ export function createLocalConversationStore(
     busy = undefined;
     publish({
       ...snapshot,
+      status: "checking",
       ready: false,
       message: "Checking the computer connection…",
     });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { config } from "../config";
 import {
@@ -109,6 +110,8 @@ export function resolveGlobalModelGatewayConfigPath() {
 
 export function mergeGlobalProfileConfigJson(input: {
   existingConfigJson: Record<string, unknown>;
+  pricingGatewayConfigId?: string;
+  pricingProviderName?: string;
   entry: {
     pricing?: GlobalProfilePricingEntry | null;
     /** The primary target's model — the representative value for catalog and UI. */
@@ -133,14 +136,42 @@ export function mergeGlobalProfileConfigJson(input: {
   };
   existing: boolean;
   now: Date;
-}) {
+}): Record<string, unknown> {
   const protectedFields: ProtectedProfileConfigField[] = [];
-  const pricingConfigJson =
+  const configuredPricing =
     input.entry.pricing !== undefined || !input.existing
       ? buildProfilePricingConfigJson(input.entry.pricing, input.now)
       : {};
+  // Keep the declaration separate from prices populated by the catalog. API and
+  // worker startup syncs do not refresh prices, so reapplying an unchanged
+  // declaration must not erase the scheduler's resolved prices.
+  const { price_updated_at: _updatedAt, ...pricingDeclaration } =
+    configuredPricing;
+  const globalPricingDefinition = {
+    gatewayConfigId: input.pricingGatewayConfigId ?? null,
+    providerName: input.pricingProviderName ?? null,
+    targetModel: input.entry.targetModel,
+    targets: input.entry.targets ?? [],
+    providerRouting: input.entry.providerRouting ?? null,
+    pricing: pricingDeclaration,
+  };
+  const preserveCatalogPricing =
+    input.existing &&
+    input.entry.pricing != null &&
+    Object.entries(input.entry.pricing).every(
+      ([key, value]) => value === undefined || key === "litellmKey",
+    ) &&
+    input.existingConfigJson.price_source === "registry" &&
+    isDeepStrictEqual(
+      input.existingConfigJson.globalPricingDefinition,
+      JSON.parse(JSON.stringify(globalPricingDefinition)),
+    );
+  const pricingConfigJson = preserveCatalogPricing ? {} : configuredPricing;
   const globalConfigJson = {
     ...pricingConfigJson,
+    ...(input.entry.pricing !== undefined || !input.existing
+      ? { globalPricingDefinition }
+      : {}),
     targetModel: input.entry.targetModel,
     ...(input.entry.targets ? { targets: input.entry.targets } : {}),
     ...(input.entry.displayName
@@ -270,6 +301,8 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   const { targets, ...entryWithoutTargets } = entry;
   const mergedConfigJson = mergeGlobalProfileConfigJson({
     existingConfigJson,
+    pricingGatewayConfigId: gatewayConfigId,
+    pricingProviderName: primaryTarget.providerName,
     entry: {
       ...entryWithoutTargets,
       targetModel: primaryTarget.targetModel,

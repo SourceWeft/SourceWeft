@@ -837,6 +837,7 @@ export class ContentClient {
       query?: string;
       includeDesktopOnly?: boolean;
       desktopOnly?: boolean;
+      /** Comma-separated category slugs, matching any selected category. */
       category?: string;
       limit?: number;
       cursor?: string;

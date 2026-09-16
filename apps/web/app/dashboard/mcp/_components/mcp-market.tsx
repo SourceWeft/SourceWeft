@@ -342,6 +342,7 @@ function FacetChoice({
 }) {
   return (
     <button
+      aria-pressed={active}
       className={cn(
         "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/60",
         active && "bg-accent/60 text-foreground",
@@ -468,7 +469,7 @@ function SortMenu({
 }
 
 function McpFilterPanel({
-  category,
+  selectedCategories,
   categoryCounts,
   deviceFilter,
   installedCount,
@@ -486,7 +487,7 @@ function McpFilterPanel({
   unverifiedCount,
   categories,
 }: {
-  category: CategoryKey;
+  selectedCategories: CategoryKey[];
   categoryCounts: Record<CategoryKey, number>;
   categories: Array<{ key: CategoryKey; label: string }>;
   deviceFilter: DeviceFilter;
@@ -542,12 +543,23 @@ function McpFilterPanel({
         <FilterFacet
           defaultOpen
           label="Category"
-          summary={categories.find((item) => item.key === category)?.label}
+          summary={
+            selectedCategories.length === 0
+              ? "All"
+              : categories
+                  .filter((item) => selectedCategories.includes(item.key))
+                  .map((item) => item.label)
+                  .join(", ")
+          }
         >
           <div className="space-y-1">
             {categories.map((item) => (
               <FacetChoice
-                active={category === item.key}
+                active={
+                  item.key === "all"
+                    ? selectedCategories.length === 0
+                    : selectedCategories.includes(item.key)
+                }
                 count={categoryCounts[item.key] ?? 0}
                 key={item.key}
                 label={item.label}
@@ -975,7 +987,19 @@ export function McpMarket() {
     });
   }, []);
   const [query, setQuery] = React.useState("");
-  const [category, setCategory] = React.useState<CategoryKey>("all");
+  const [selectedCategories, setSelectedCategories] = React.useState<
+    CategoryKey[]
+  >([]);
+  const category = selectedCategories.slice().sort().join(",") || undefined;
+  const toggleCategory = (value: CategoryKey) => {
+    setSelectedCategories((current) =>
+      value === "all"
+        ? []
+        : current.includes(value)
+          ? current.filter((entry) => entry !== value)
+          : [...current, value],
+    );
+  };
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
   const [trustFilter, setTrustFilter] = React.useState<TrustFilter>("all");
   const [deviceFilter, setDeviceFilter] = React.useState<DeviceFilter>("all");
@@ -1077,7 +1101,7 @@ export function McpMarket() {
       const [result, categoryResult] = await Promise.all([
         fetchMcpCatalog(resolved.id, {
           query: serverQuery || undefined,
-          category: category === "all" ? undefined : category,
+          category,
           desktopOnly:
             deviceFilter === "all" ? undefined : deviceFilter === "desktop",
         }),
@@ -1145,7 +1169,7 @@ export function McpMarket() {
     try {
       const result = await fetchMcpCatalog(targetWorkspaceId, {
         query: serverQuery || undefined,
-        category: category === "all" ? undefined : category,
+        category,
         cursor: nextCursor,
         desktopOnly:
           deviceFilter === "all" ? undefined : deviceFilter === "desktop",
@@ -1446,7 +1470,7 @@ export function McpMarket() {
 
   const clearFilters = React.useCallback(() => {
     setQuery("");
-    setCategory("all");
+    setSelectedCategories([]);
     setStatusFilter("all");
     setTrustFilter("all");
     setDeviceFilter("all");
@@ -1454,12 +1478,12 @@ export function McpMarket() {
 
   const filtersPanel = (
     <McpFilterPanel
-      category={category}
+      selectedCategories={selectedCategories}
       categoryCounts={categoryCounts}
       categories={categories}
       deviceFilter={deviceFilter}
       installedCount={installedCount}
-      onCategoryChange={setCategory}
+      onCategoryChange={toggleCategory}
       onClear={clearFilters}
       onDeviceFilterChange={setDeviceFilter}
       onQueryChange={setQuery}
@@ -1474,12 +1498,12 @@ export function McpMarket() {
   );
   const drawerFiltersPanel = (
     <McpFilterPanel
-      category={category}
+      selectedCategories={selectedCategories}
       categoryCounts={categoryCounts}
       categories={categories}
       deviceFilter={deviceFilter}
       installedCount={installedCount}
-      onCategoryChange={setCategory}
+      onCategoryChange={toggleCategory}
       onClear={clearFilters}
       onDeviceFilterChange={setDeviceFilter}
       onQueryChange={setQuery}

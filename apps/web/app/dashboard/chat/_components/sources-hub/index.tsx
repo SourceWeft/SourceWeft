@@ -255,7 +255,9 @@ export function SourcesHub({
     mode === "thread" ? threadId : null,
   );
   const executionError =
-    mode === "thread" && localStatus.info?.executionTarget.kind !== "cloud"
+    mode === "thread" &&
+    (localStatus.status === "unavailable" || localStatus.status === "error") &&
+    localStatus.info?.executionTarget.kind !== "cloud"
       ? localStatus.message
       : null;
   const execution = localStatus.info

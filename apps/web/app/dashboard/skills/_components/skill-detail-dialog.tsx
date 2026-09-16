@@ -136,7 +136,9 @@ export function SkillDetailDialog({
     activeItem?.sourceType === "registry_github"
       ? !!activeItem.enabledWorkspaceSkillId
       : activeItem?.enabled;
-  const canManageInstall = activeItem?.installable !== false || installed;
+  const canManageInstall =
+    activeItem?.installable !== false ||
+    (activeItem?.sourceType === "registry_github" && installed);
   const documents =
     item?.sourceType === "registry_github" ? registryDetail : detail;
   const skillContent = documents?.skillContent;

@@ -145,6 +145,7 @@ export default function SkillDetailPage() {
 
   async function installSkill() {
     if (!workspace || !detail || detail.skill.enabled) return;
+    if (detail.skill.installable === false) return;
 
     setIsInstalling(true);
     try {
@@ -175,6 +176,7 @@ export default function SkillDetailPage() {
 
   async function uninstallSkill() {
     if (!workspace || !detail || !detail.skill.enabled) return;
+    if (detail.skill.sourceType === "builtin" && detail.skill.installable === false) return;
     if (!detail.skill.enabledWorkspaceSkillId) {
       toast.error("Skill install record is missing. Refresh and try again.");
       return;

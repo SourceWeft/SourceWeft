@@ -160,12 +160,67 @@ test("restores the detached cloud Files tab after execution metadata loads", asy
     onViewChange: viewChanged,
   });
   expect(listWorkingFilesMock).not.toHaveBeenCalled();
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  expect(el.textContent).toContain("Loading Files location…");
   await act(async () =>
     resolveExecution({ executionTarget: { kind: "cloud" } }),
   );
   expect(el.textContent).toContain("Files");
   expect(listWorkingFilesMock).toHaveBeenCalledWith("ws1", "cloud-restore");
   expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Files");
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+});
+
+test("Hub shows a real initial execution request failure", async () => {
+  localRequestMock.mockRejectedValueOnce(new Error("Network unavailable"));
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "execution-failure",
+    initialView: { tab: "Sources" },
+  });
+  expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+    "Unable to read the file location: Network unavailable",
+  );
+});
+
+test("Hub does not warn during a local connection recheck and reports confirmed unavailability", async () => {
+  const online = {
+    executionTarget: { kind: "local", deviceId: "pc" },
+    availability: { ready: true },
+  };
+  let resolveExecution!: (value: unknown) => void;
+  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
+    resolveExecution = resolve;
+  }));
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "local-recheck",
+    initialView: { tab: "Sources" },
+  });
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => resolveExecution(online));
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+
+  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
+    resolveExecution = resolve;
+  }));
+  const { reportLocalAvailabilityError } = await import(
+    "../../../../../lib/local-availability-events"
+  );
+  await act(async () => {
+    reportLocalAvailabilityError(
+      "/v1/workspaces/ws1/threads/local-recheck/files",
+      { code: "DEVICE_OFFLINE" },
+    );
+  });
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => resolveExecution({
+    ...online,
+    availability: { ready: false, code: "DEVICE_OFFLINE", message: "Computer offline" },
+  }));
+  expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+    "Unable to read the file location: Computer offline",
+  );
 });
 
 test("a detached local conversation never loads cloud Files from a saved tab", async () => {

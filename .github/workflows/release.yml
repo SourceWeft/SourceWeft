@@ -11,6 +11,14 @@ permissions:
   id-token: write
   attestations: write
 
+env:
+  DOWNLOADS_S3_ENDPOINT: ${{ vars.DOWNLOADS_S3_ENDPOINT }}
+  DOWNLOADS_S3_BUCKET: ${{ vars.DOWNLOADS_S3_BUCKET }}
+  DOWNLOADS_S3_REGION: ${{ vars.DOWNLOADS_S3_REGION }}
+  DOWNLOADS_S3_FORCE_PATH_STYLE: ${{ vars.DOWNLOADS_S3_FORCE_PATH_STYLE }}
+  DOWNLOADS_S3_PREFIX: ${{ vars.DOWNLOADS_S3_PREFIX }}
+  DOWNLOADS_PUBLIC_BASE_URL: ${{ vars.DOWNLOADS_PUBLIC_BASE_URL }}
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -31,6 +39,11 @@ jobs:
       - name: Validate release tag
         id: config
         run: node scripts/ci/verify-release-config.mjs
+      - name: Validate download storage configuration
+        run: node scripts/ci/publish-downloads.mjs validate
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
 
   quality:
     needs: preflight
@@ -53,6 +66,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
       - name: Resolve image name
         id: image
@@ -139,6 +161,12 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
 
+      - name: Upload and verify public downloads
+        run: node scripts/ci/publish-downloads.mjs upload
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+
       - name: Publish completed release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -147,3 +175,9 @@ jobs:
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -f tag_name="$GITHUB_REF_NAME" -f name="$GITHUB_REF_NAME" \
             --jq .html_url
+
+      - name: Promote verified download channel
+        run: node scripts/ci/publish-downloads.mjs promote
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}

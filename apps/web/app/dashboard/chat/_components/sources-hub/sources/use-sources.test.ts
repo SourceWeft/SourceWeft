@@ -157,11 +157,72 @@ afterEach(async () => {
   container?.remove();
   root = null;
   container = null;
+  vi.useRealTimers();
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+test("processing completion updates only that source without loading the list", async () => {
+  vi.useFakeTimers();
+  sdk.listSources.mockResolvedValue({
+    items: [apiSource("ready"), apiSource("upload", { status: "processing" })],
+  });
+  sdk.listSourceStatuses.mockResolvedValue({
+    items: [{ id: "upload", status: { status: "indexed" } }],
+  });
+  let finish!: (value: unknown) => void;
+  sdk.getSource.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  const props = makeProps({ selectedIds: ["ready"] });
+  const captured = await renderHook(props);
+  const unchanged = captured.api!.sources.find((source) => source.id === "ready");
+  vi.mocked(props.onSelectionChange).mockClear();
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(sdk.getSource).toHaveBeenCalledWith("ws1", "upload");
+  expect(captured.api!.isLoading).toBe(false);
+  // A slow detail request must not start overlapping polls.
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(sdk.listSourceStatuses).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish({ source: apiSource("upload", { contentText: "Parsed text" }) });
+  });
+  expect(captured.api!.sources.map((source) => source.id)).toEqual(["ready", "upload"]);
+  expect(captured.api!.sources[0]).toBe(unchanged);
+  expect(captured.api!.sources[1]).toMatchObject({ status: "Indexed", contentText: "Parsed text" });
+  expect(captured.api!.isLoading).toBe(false);
+  expect(sdk.listSources).toHaveBeenCalledTimes(1);
+  expect(props.onSourceMerge).toHaveBeenLastCalledWith([captured.api!.sources[1]]);
+  expect(props.onSelectionChange).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(sdk.listSourceStatuses).toHaveBeenCalledTimes(1);
+});
+
+test("failed detail requests retry individually while other completed sources update", async () => {
+  vi.useFakeTimers();
+  sdk.listSources.mockResolvedValue({
+    items: [apiSource("s1", { status: "processing" }), apiSource("s2", { status: "queued" })],
+  });
+  sdk.listSourceStatuses.mockResolvedValueOnce({
+    items: [
+      { id: "s1", status: { status: "indexed" } },
+      { id: "s2", status: { status: "failed" } },
+    ],
+  }).mockResolvedValue({ items: [{ id: "s1", status: { status: "indexed" } }] });
+  sdk.getSource.mockRejectedValueOnce(new Error("Temporary failure"))
+    .mockResolvedValueOnce({ source: apiSource("s2", { status: "failed" }) })
+    .mockResolvedValueOnce({ source: apiSource("s1") });
+  const captured = await renderHook(makeProps());
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(captured.api!.sources.map((source) => source.status)).toEqual(["Syncing", "Failed"]);
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(sdk.listSourceStatuses).toHaveBeenLastCalledWith("ws1", { ids: ["s1"] });
+  expect(captured.api!.sources.map((source) => source.status)).toEqual(["Indexed", "Failed"]);
+  expect(sdk.listSources).toHaveBeenCalledTimes(1);
+  expect(captured.api!.loadingError).toBeNull();
+});
 
 test("initial mount loads sources and reports them via onSourceLoad", async () => {
   sdk.listSources.mockResolvedValue({

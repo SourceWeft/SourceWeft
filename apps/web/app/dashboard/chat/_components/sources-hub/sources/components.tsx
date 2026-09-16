@@ -45,7 +45,7 @@ import {
 import { TypeBadge } from "../type-badge";
 import type { SourceItem } from "../../source-types";
 
-const SOURCE_TREE_INDENT_PX = 10;
+const SOURCE_TREE_INDENT_PX = 16;
 
 function StatusDot({ status }: { status: SourceItem["status"] }) {
   return (
@@ -57,7 +57,7 @@ function StatusDot({ status }: { status: SourceItem["status"] }) {
           : status === "Syncing"
             ? "bg-amber-500"
             : status === "Failed"
-              ? "bg-destructive"
+              ? "bg-red-600 dark:bg-red-400"
               : "bg-red-400",
       )}
     />
@@ -263,18 +263,22 @@ const SourceRow = memoComponent(function SourceRow({
       className={cn(
         "group flex min-h-8 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
         canSelect && "cursor-pointer hover:bg-accent/60",
-        isFailed && "bg-muted/20 opacity-60",
+        isFailed && "bg-muted/20",
       )}
       onClick={handleRowClick}
       style={{ paddingLeft: `${4 + depth * SOURCE_TREE_INDENT_PX}px` }}
     >
-      {leading ?? <span className="size-5 shrink-0" />}
       <Checkbox
+        aria-label={`Select ${source.title}`}
         checked={selectionState}
-        className={cn(!isDirectory && !isEditing && "mt-0.5")}
+        className={cn(
+          "border-muted-foreground/70 disabled:border-muted-foreground/40 disabled:bg-muted disabled:opacity-100",
+          !isDirectory && !isEditing && "mt-0.5",
+        )}
         disabled={!canSelect}
         onCheckedChange={() => onToggle()}
       />
+      {leading}
 
       <div className="min-w-0 flex-1">
         {isEditing ? (
@@ -331,7 +335,7 @@ const SourceRow = memoComponent(function SourceRow({
                 source={source}
               />
               <button
-                className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
                 disabled={isBusy || !isSelectable}
                 onClick={isDirectory ? onToggle : onPreview}
                 title={
@@ -357,7 +361,14 @@ const SourceRow = memoComponent(function SourceRow({
             {!isDirectory ? (
               <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
                 <StatusDot status={source.status} />
-                <span className="min-w-0 max-w-full truncate text-[10px] text-muted-foreground">
+                <span
+                  className={cn(
+                    "min-w-0 max-w-full truncate text-[10px]",
+                    isFailed
+                      ? "text-red-600 dark:text-red-400"
+                      : "text-muted-foreground",
+                  )}
+                >
                   {metaLabel}
                 </span>
                 <SourceProviderBadge
@@ -375,7 +386,7 @@ const SourceRow = memoComponent(function SourceRow({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              className="opacity-100 md:opacity-0 md:group-hover:opacity-100"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 data-[state=open]:opacity-100"
               disabled={isBusy}
               onClick={(event) => event.stopPropagation()}
               size="icon-xs"
@@ -654,7 +665,7 @@ export const SourceTreeRow = memoComponent(function SourceTreeRow({
           className="relative space-y-0.5 before:absolute before:bottom-1 before:top-0 before:left-[var(--source-tree-branch-left)] before:w-px before:bg-border/70"
           style={
             {
-              "--source-tree-branch-left": `${9 + depth * SOURCE_TREE_INDENT_PX}px`,
+              "--source-tree-branch-left": `${12 + depth * SOURCE_TREE_INDENT_PX}px`,
             } as CSSProperties
           }
         >

@@ -137,6 +137,7 @@ export const marketItemVersionSchema = z.object({
 
 export const listMarketMcpRequestSchema = z.object({
   query: z.string().optional(),
+  /** Comma-separated category slugs, matching any selected category. */
   category: z.string().optional(),
   transport: mcpTransportSchema.optional(),
   official: z.boolean().optional(),

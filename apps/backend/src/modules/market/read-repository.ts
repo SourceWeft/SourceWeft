@@ -46,6 +46,18 @@ function marketSearchCondition(query: string) {
   return or(...conditions)!;
 }
 
+// Category slugs cannot contain commas; multiple slugs select their union.
+export function parseMcpCategoryFilter(category?: string): string[] {
+  return [
+    ...new Set(
+      category
+        ?.split(",")
+        .map((slug) => slug.trim())
+        .filter(Boolean) ?? [],
+    ),
+  ];
+}
+
 function fallbackListMcp(input: {
   query?: string;
   category?: string;
@@ -58,6 +70,7 @@ function fallbackListMcp(input: {
   limit?: number;
 }) {
   const query = input.query?.trim().toLowerCase();
+  const categories = parseMcpCategoryFilter(input.category);
   const limit = input.limit ?? 50;
   const items = records
     .map((record) => record.item)
@@ -68,7 +81,9 @@ function fallbackListMcp(input: {
         : input.includeDesktopOnly || !item.desktopOnly,
     )
     .filter((item) =>
-      input.category ? item.categories.includes(input.category) : true,
+      categories.length > 0
+        ? item.categories.some((category) => categories.includes(category))
+        : true,
     )
     .filter((item) =>
       input.transport ? item.transport === input.transport : true,
@@ -427,6 +442,7 @@ export async function listMcp(input: {
   cursor?: string;
 }) {
   const query = input.query?.trim().toLowerCase();
+  const categories = parseMcpCategoryFilter(input.category);
   const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
 
   // Everything is pushed into SQL — facets are real columns and categories join
@@ -457,7 +473,7 @@ export async function listMcp(input: {
   if (input.runtime) {
     conditions.push(eq(marketItems.runtime, input.runtime));
   }
-  if (input.category) {
+  if (categories.length > 0) {
     conditions.push(
       exists(
         db
@@ -470,7 +486,7 @@ export async function listMcp(input: {
           .where(
             and(
               eq(marketItemCategories.itemId, marketItems.id),
-              eq(marketCategories.slug, input.category),
+              inArray(marketCategories.slug, categories),
             ),
           ),
       ),

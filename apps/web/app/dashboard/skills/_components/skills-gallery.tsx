@@ -549,7 +549,9 @@ function SkillCard({
     item.sourceType === "registry_github"
       ? !!item.enabledWorkspaceSkillId
       : item.enabled;
-  const canManageInstall = item.installable !== false || installed;
+  const canManageInstall =
+    item.installable !== false ||
+    (item.sourceType === "registry_github" && installed);
   const isRegistry = item.sourceType === "registry_github";
   const unverified = isUnverifiedRegistrySkill(item);
 
@@ -1024,7 +1026,7 @@ export function SkillsGallery({
   );
 
   async function installSkill(item: SkillCatalogItem) {
-    if (!workspace || item.enabled) return;
+    if (!workspace || item.enabled || item.installable === false) return;
 
     const activeWorkspaceId = workspace.id;
     setPendingCatalogId(item.catalogId);
@@ -1064,6 +1066,7 @@ export function SkillsGallery({
 
   async function uninstallSkill(item: SkillCatalogItem) {
     if (!workspace || !item.enabled) return;
+    if (item.sourceType === "builtin" && item.installable === false) return;
     if (!item.enabledWorkspaceSkillId) {
       toast.error("Skill install record is missing. Refresh and try again.");
       return;
