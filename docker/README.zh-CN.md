@@ -9,7 +9,7 @@
 从所选 GitHub Release 下载 `sourceweft-selfhost-vX.Y.Z.tar.gz` 并解压，也可以在 Git 中切换到同一个发布标签。不要把 main 分支的 Compose 文件与旧镜像混用。在包含 `docker/` 的目录中执行：
 
 ```sh
-VERSION=v0.2.0-rc.2 # 改成所下载的发布版本
+VERSION=v0.2.0-rc.3 # 改成所下载的发布版本
 IMAGE=ghcr.io/sourceweft/sourceweft:$VERSION
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint node \
   -e SOURCEWEFT_IMAGE="$IMAGE" -v "$PWD/docker:/config" "$IMAGE" \

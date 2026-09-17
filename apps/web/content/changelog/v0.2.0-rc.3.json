@@ -1,0 +1,15 @@
+{
+  "tag": "v0.2.0-rc.3",
+  "releasedAt": "2026-09-17",
+  "title": "Show the running version and keep changelog notes with the release",
+  "commit": "f8130a5",
+  "category": "Release",
+  "summary": "This release candidate adds an About panel that reports the version you are actually running, and moves changelog notes into the repository so a release cannot ship without them.",
+  "items": [
+    "Added an About panel in Settings on web, desktop, and mobile. The desktop client reports its native app version; the web client reports the commit it was built from.",
+    "Injected the build commit into the container image and exposed the same value on the backend health endpoint, so a deployment can be traced back to its source.",
+    "Moved changelog entries out of page code into per-release files in the repository, and made a release tag without notes fail the release pipeline.",
+    "Backfilled the changelog entries for 0.2.0-test.3, 0.2.0-rc.1, and 0.2.0-rc.2, which had never been published to the changelog page.",
+    "Opened the changelog from the desktop client in the system browser, and added the application copyright and publisher to the desktop bundle metadata."
+  ]
+}
