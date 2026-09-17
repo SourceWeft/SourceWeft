@@ -1,9 +1,9 @@
 SourceWeft Commercial License
 
 This license applies to material expressly identified as commercially licensed
-under enterprise/, subject to the pre-existing and third-party rights below.
-The licensor is the applicable copyright holder or an entity authorized to
-license that material. No ownership assignment is implied by this document.
+under enterprise/. The licensor is the applicable copyright holder or an
+entity authorized to license that material. No ownership assignment is
+implied by this document.
 
 Development and evaluation
 
@@ -20,13 +20,6 @@ written commercial agreement with a licensor authorized to grant the required
 rights. That agreement specifies the permitted scope and takes precedence over
 this document for the uses it covers. A tenant's payment subscription, API key
 or deployment environment variable is not such an agreement.
-
-Existing and third-party rights
-
-This document does not revoke rights previously granted under Apache-2.0 or
-other applicable licenses. Portions derived from earlier SourceWeft versions
-remain subject to those pre-existing grants and required notices. Third-party
-components retain their own licenses.
 
 Modifications and contributions
 

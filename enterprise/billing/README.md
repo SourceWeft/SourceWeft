@@ -107,7 +107,6 @@ commercial build and preserve already-confirmed payments and ledger rows.
 ## License and verification
 
 See [LICENSE](LICENSE) and [enterprise LICENSE](../LICENSE). They must remain
-identical. Applicable previous Apache-2.0 permissions remain in effect.
-`private` prevents accidental publication; it is not a runtime licensing
-system. Production rights are governed by the commercial agreement,
+identical. `private` prevents accidental publication; it is not a runtime
+licensing system. Production rights are governed by the commercial agreement,
 independently of customer payment subscriptions.
