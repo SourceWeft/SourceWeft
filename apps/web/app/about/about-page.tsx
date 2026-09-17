@@ -10,6 +10,7 @@ import {
   Quote,
 } from "lucide-react";
 
+import { SHORT_BUILD_SHA } from "../../lib/app-version";
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { useLandingAuthState } from "../_landing/components/use-landing-auth-state";
@@ -223,6 +224,15 @@ export function AboutPage() {
             </div>
           </div>
         </section>
+
+        <div className="mx-auto max-w-6xl px-6 pb-16">
+          <Link
+            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1 font-mono text-xs text-zinc-500 transition-colors hover:border-zinc-300 hover:text-zinc-700 dark:border-white/[0.08] dark:text-zinc-500 dark:hover:border-white/20 dark:hover:text-zinc-300"
+            href="/changelog"
+          >
+            build {SHORT_BUILD_SHA}
+          </Link>
+        </div>
       </main>
       <SourceWeftFooter authState={authState} />
     </div>

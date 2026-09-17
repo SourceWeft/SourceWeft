@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  Info,
   LayoutGrid,
   Receipt,
   ShieldCheck,
@@ -23,6 +24,7 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { AboutPanel } from "./about-panel";
 import { AccountPanel } from "./account-panel";
 import { BillingPanel } from "./billing-panel";
 import { TeamPanel } from "./team-panel";
@@ -89,12 +91,13 @@ export function DashboardSettingsCenterModal({
       active = false;
     };
   }, []);
-  const visibleMenuItems = isLocalPc
-    ? [
-        ...menuItems,
-        { key: "local" as const, label: "This computer", icon: Monitor },
-      ]
-    : menuItems;
+  const visibleMenuItems = [
+    ...menuItems,
+    ...(isLocalPc
+      ? [{ key: "local" as const, label: "This computer", icon: Monitor }]
+      : []),
+    { key: "about" as const, label: "About", icon: Info },
+  ];
 
   React.useEffect(() => {
     if (open && !wasOpenRef.current) {
@@ -200,6 +203,7 @@ export function DashboardSettingsCenterModal({
               {activeTab === "billing" && <BillingPanel />}
               {activeTab === "approvals" && <TrustRulesPanel />}
               {activeTab === "local" && isLocalPc && <LocalHostPanel />}
+              {activeTab === "about" && <AboutPanel />}
             </div>
           </div>
         </div>

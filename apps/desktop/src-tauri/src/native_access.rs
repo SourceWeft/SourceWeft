@@ -55,6 +55,13 @@ pub fn is_allowed_auth_url(url: &Url, base: &Url) -> bool {
     same_trusted_origin(url, base) && (url.path() == "/auth" || url.path().starts_with("/auth/"))
 }
 
+/// Pages the app may hand to the system browser. Origin-scoped rather than
+/// path-scoped: the desktop window refuses to navigate outside /dashboard and
+/// /auth, so public pages such as the changelog can only be opened externally.
+pub fn is_allowed_external_url(url: &Url, base: &Url) -> bool {
+    same_trusted_origin(url, base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +223,26 @@ mod tests {
             "javascript:alert(1)",
         ] {
             assert!(!is_allowed_auth_url(&url(value), &base));
+        }
+    }
+
+    #[test]
+    fn external_open_allows_other_paths_on_the_configured_origin_only() {
+        let base = url("https://sourceweft.com/dashboard");
+        for value in [
+            "https://sourceweft.com/changelog",
+            "https://sourceweft.com/about",
+            "https://sourceweft.com/auth/sign-in",
+        ] {
+            assert!(is_allowed_external_url(&url(value), &base), "{value}");
+        }
+        for value in [
+            "https://evil.example/changelog",
+            "https://sourceweft.com.evil.example/changelog",
+            "http://sourceweft.com/changelog",
+            "https://user:pass@sourceweft.com/changelog",
+        ] {
+            assert!(!is_allowed_external_url(&url(value), &base), "{value}");
         }
     }
 }

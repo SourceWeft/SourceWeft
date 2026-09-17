@@ -39,6 +39,8 @@ jobs:
       - name: Validate release tag
         id: config
         run: node scripts/ci/verify-release-config.mjs
+      - name: Require changelog notes for the tag
+        run: node scripts/ci/verify-changelog-entry.mjs
       - name: Validate download storage configuration
         run: node scripts/ci/publish-downloads.mjs validate
         env:
@@ -106,6 +108,10 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},enable=${{ needs.preflight.outputs.latest == 'true' }}
             type=raw,value=latest,enable=${{ needs.preflight.outputs.latest == 'true' }}
 
+      - name: Resolve build metadata
+        id: buildmeta
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -114,6 +120,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max

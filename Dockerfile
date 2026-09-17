@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_VERSION=22.23.2
+# Commit this image was built from. The Web build inlines it into the client
+# bundle; the backend reads it at runtime from its health endpoint.
+ARG BUILD_SHA=""
+ARG BUILD_TIME=""
 
 FROM node:${NODE_VERSION}-alpine AS base
 ENV PNPM_HOME=/pnpm
@@ -32,12 +36,18 @@ RUN pnpm install --frozen-lockfile
 
 # ── Builder ──────────────────────────────────────────────────────────
 # Public deployment settings are injected by the Web server at runtime.
-# This image deliberately has no publisher-specific NEXT_PUBLIC_* build args.
+# This image deliberately has no publisher-specific NEXT_PUBLIC_* build args;
+# the build-provenance args below describe the image itself, not its publisher.
 FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
+# Declared after the package builds so a new commit does not invalidate their cache.
+ARG BUILD_SHA
+ARG BUILD_TIME
+ENV NEXT_PUBLIC_BUILD_SHA=${BUILD_SHA} \
+  NEXT_PUBLIC_BUILD_TIME=${BUILD_TIME}
 RUN --mount=type=cache,id=sourceweft-next-cache,target=/app/apps/web/.next/cache,sharing=locked \
   pnpm --filter web build
 # The backend build runs tsc over the whole workspace graph; the default heap
@@ -48,6 +58,8 @@ RUN find . -name ".turbo" -type d -prune -exec rm -rf '{}' + \
 
 # ── Runner ───────────────────────────────────────────────────────────
 FROM base AS runner
+ARG BUILD_SHA
+ENV BUILD_SHA=${BUILD_SHA}
 ENV NODE_ENV=production
 ENV SOURCEWEFT_COMMERCIAL_ENABLED=false
 ENV NEXT_TELEMETRY_DISABLED=1

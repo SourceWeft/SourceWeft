@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { loadChangelogEntries } from "../../lib/changelog";
 import { ChangelogPage } from "./changelog-page";
 
 export const metadata: Metadata = {
@@ -12,5 +13,5 @@ export const metadata: Metadata = {
 };
 
 export default function ChangelogRoute() {
-  return <ChangelogPage />;
+  return <ChangelogPage entries={loadChangelogEntries()} />;
 }

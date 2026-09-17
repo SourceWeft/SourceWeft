@@ -432,8 +432,8 @@ fn open_external_url(
     }
 
     let base = resolve_app_url(&app, "/dashboard")?;
-    if !native_access::is_allowed_auth_url(&parsed, &base) {
-        return Err("Only SourceWeft authentication URLs can be opened externally.".to_string());
+    if !native_access::is_allowed_external_url(&parsed, &base) {
+        return Err("Only SourceWeft URLs can be opened externally.".to_string());
     }
 
     tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>).map_err(|error| error.to_string())

@@ -1,0 +1,18 @@
+{
+  "tag": "v0.2.0-rc.1",
+  "releasedAt": "2026-09-15",
+  "commit": "6b6df08",
+  "category": "Release",
+  "title": "First release candidate: desktop client, skills registry, and model gateway",
+  "summary": "This release candidate covers four months of work. It adds the macOS desktop client, reworks the skills registry around provenance and approvals, and unifies the model gateway behind a normalized catalog.",
+  "items": [
+    "Added the macOS desktop client: a local workspace foundation, local execution bound to authorized hosts, a detachable Hub window, native centered file previews, and unified desktop chrome.",
+    "Reworked the skills registry: preserved registry versions, surfaced publisher attribution and license terms, stored skill bundles instead of pointers, and made enabling a registry skill an explicit approval rather than an automatic one.",
+    "Unified the model gateway behind a normalized model catalog with per-image pricing, provider-scoped price resolution, separated provider activation from credentials, and added OrcaRouter as a standalone provider.",
+    "Made commercial billing an optional module and added the shared subscription lifecycle across Stripe and Waffo.",
+    "Added tenant envelope encryption for team-owned secrets.",
+    "Integrated AnyDoc with explicit OCR routing and added direct-to-store upload from the browser.",
+    "Added versioned HTML artifact delivery, persisted committed artifact outputs, and grouped each sub-agent's tool calls under an Agent card in chat.",
+    "Unified the sandbox provider base images and made skill staging unconditional."
+  ]
+}

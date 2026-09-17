@@ -6,55 +6,17 @@ import { ArrowRight, Check, GitCommit, Sparkles, Tag } from "lucide-react";
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { useLandingAuthState } from "../_landing/components/use-landing-auth-state";
-
-type ChangelogEntry = {
-  date: string;
-  title: string;
-  tag: string;
-  commit: string;
-  category: "Release";
-  summary: string;
-  items: string[];
-};
-
-const changelogEntries: ChangelogEntry[] = [
-  {
-    date: "May 18, 2026",
-    title: "Expand model catalog discovery and dashboard performance",
-    tag: "v0.2.0-test.1",
-    commit: "da3bcd8",
-    category: "Release",
-    summary:
-      "This test release expands model catalog discovery for global gateways and BYOK credentials, then improves dashboard and chat rendering paths.",
-    items: [
-      "Added dynamic model catalog discovery for global gateways and BYOK credentials, including LiteLLM capability matching and BYOK model candidate APIs.",
-      "Moved model catalog sync configuration into `model-gateway.global.json` and documented the gateway-level behavior.",
-      "Split chat thread streaming logic into focused parser, request body, render buffer, runner control, and event handler modules.",
-      "Improved dashboard rendering performance with richer route skeletons, memoized and virtualized chat/source UI paths, observability layout updates, and cached skills catalog loading.",
-    ],
-  },
-  {
-    date: "May 17, 2026",
-    title: "Skip startup pricing sync",
-    tag: "v0.1.0-test.1",
-    commit: "4f21442",
-    category: "Release",
-    summary:
-      "This test release changes startup behavior so pricing synchronization is skipped during normal API and worker boot.",
-    items: [
-      "Updated backend API startup to avoid running pricing sync as part of service initialization.",
-      "Updated worker startup with the same pricing sync skip behavior.",
-      "Adjusted model gateway config sync handling for the new startup path.",
-    ],
-  },
-];
+import {
+  formatReleaseDate,
+  type ChangelogEntry,
+} from "../../lib/changelog-entry";
 
 const categoryClassName = {
   Release:
     "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300",
 } satisfies Record<ChangelogEntry["category"], string>;
 
-export function ChangelogPage() {
+export function ChangelogPage({ entries }: { entries: ChangelogEntry[] }) {
   const authState = useLandingAuthState();
 
   return (
@@ -120,9 +82,9 @@ export function ChangelogPage() {
                 className="absolute top-3 bottom-3 left-3 hidden w-px bg-zinc-200 sm:block dark:bg-white/[0.08]"
               />
               <div className="space-y-8">
-                {changelogEntries.map((entry) => (
+                {entries.map((entry) => (
                   <article
-                    key={`${entry.date}-${entry.title}`}
+                    key={entry.tag}
                     className="relative sm:pl-12"
                   >
                     <span className="absolute top-2 left-0 hidden h-6 w-6 items-center justify-center rounded-full border border-zinc-200 bg-background sm:flex dark:border-white/10">
@@ -139,7 +101,7 @@ export function ChangelogPage() {
                           {entry.commit}
                         </span>
                         <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                          {entry.date}
+                          {formatReleaseDate(entry.releasedAt)}
                         </span>
                         <span
                           className={`rounded-full border px-2.5 py-1 text-xs font-medium ${categoryClassName[entry.category]}`}

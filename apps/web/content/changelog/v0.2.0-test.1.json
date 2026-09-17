@@ -1,0 +1,14 @@
+{
+  "tag": "v0.2.0-test.1",
+  "releasedAt": "2026-05-18",
+  "commit": "da3bcd8",
+  "category": "Release",
+  "title": "Expand model catalog discovery and dashboard performance",
+  "summary": "This test release expands model catalog discovery for global gateways and BYOK credentials, then improves dashboard and chat rendering paths.",
+  "items": [
+    "Added dynamic model catalog discovery for global gateways and BYOK credentials, including LiteLLM capability matching and BYOK model candidate APIs.",
+    "Moved model catalog sync configuration into `model-gateway.global.json` and documented the gateway-level behavior.",
+    "Split chat thread streaming logic into focused parser, request body, render buffer, runner control, and event handler modules.",
+    "Improved dashboard rendering performance with richer route skeletons, memoized and virtualized chat/source UI paths, observability layout updates, and cached skills catalog loading."
+  ]
+}

@@ -50,6 +50,11 @@ const nextConfig: NextConfig = {
   allowedDevOrigins:
     process.env.NODE_ENV === "development" ? getAllowedDevOrigins() : undefined,
   output: "standalone",
+  // The standalone runner only receives traced files; the changelog reads this
+  // directory, and a dynamic path is not traceable.
+  outputFileTracingIncludes: {
+    "/changelog": ["./content/changelog/**"],
+  },
   async redirects() {
     return [
       // Public shares moved from `/s/:token` to the canonical `/artifact/:token`

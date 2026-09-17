@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ChevronRight,
   CreditCard,
+  Info,
   LayoutGrid,
   LogOut,
   PanelsTopLeft,
@@ -20,6 +21,7 @@ import {
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { authClient } from "../../../lib/auth-client";
 import {
+  AboutPanel,
   AccountPanel,
   BillingPanel,
   TeamPanel,
@@ -79,6 +81,12 @@ const panelItems: Array<{
     description: "Actions you chose to always allow",
     icon: ShieldCheck,
   },
+  {
+    key: "about",
+    label: "About",
+    description: "Version and build details",
+    icon: Info,
+  },
 ];
 
 const panelTitleByKey: Record<MobileMePanel, string> = {
@@ -88,6 +96,7 @@ const panelTitleByKey: Record<MobileMePanel, string> = {
   usage: "Usage",
   billing: "Billing",
   approvals: "Approvals",
+  about: "About",
 };
 
 function getInitials(name?: string, email?: string) {
@@ -296,6 +305,7 @@ export function DashboardMobileMe() {
             {activePanel === "usage" ? <UsagePanel /> : null}
             {activePanel === "billing" ? <BillingPanel /> : null}
             {activePanel === "approvals" ? <TrustRulesPanel /> : null}
+            {activePanel === "about" ? <AboutPanel /> : null}
           </div>
         ) : null}
       </div>

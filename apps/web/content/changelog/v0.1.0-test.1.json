@@ -1,0 +1,13 @@
+{
+  "tag": "v0.1.0-test.1",
+  "releasedAt": "2026-05-17",
+  "commit": "4f21442",
+  "category": "Release",
+  "title": "Skip startup pricing sync",
+  "summary": "This test release changes startup behavior so pricing synchronization is skipped during normal API and worker boot.",
+  "items": [
+    "Updated backend API startup to avoid running pricing sync as part of service initialization.",
+    "Updated worker startup with the same pricing sync skip behavior.",
+    "Adjusted model gateway config sync handling for the new startup path."
+  ]
+}
