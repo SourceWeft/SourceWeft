@@ -58,7 +58,7 @@ const navMain: NavItem[] = [
     match: (p) => p.startsWith("/dashboard/skills"),
   },
   {
-    title: "Connectors",
+    title: "MCP",
     href: "/dashboard/mcp",
     icon: McpIcon,
     match: (p) => p.startsWith("/dashboard/mcp"),
