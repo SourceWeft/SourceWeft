@@ -15,7 +15,8 @@ import {
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
-import { SITE_NAME, SITE_URL } from "../../seo";
+import { JsonLd } from "../../_components/seo/json-ld";
+import { OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
 import {
   getPublicMcpManifest,
   isMarketNotFound,
@@ -33,14 +34,16 @@ import {
   McpTransportBadge,
   McpVerificationBadge,
   mcpDetailSeoDescription,
-  mcpFaqItems,
   publicMcpDescription,
   runtimeLabel,
   transportLabel,
   verificationLabel,
 } from "../_components/mcp-display";
 
-export const revalidate = 3600;
+// Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
+// is injected at container start, so a build-time render would bake in the
+// wrong origin. Freshness now comes from the cached market reads instead.
+export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ identifier: string }>;
@@ -50,10 +53,11 @@ async function loadMcp(identifier: string) {
   try {
     return await getPublicMcpManifest(identifier);
   } catch (error) {
+    // A market outage must surface as 5xx: 404 would deindex every server page.
     if (isMarketNotFound(error)) {
       notFound();
     }
-    notFound();
+    throw error;
   }
 }
 
@@ -98,12 +102,19 @@ export async function generateMetadata({
       description,
       openGraph: {
         description,
+        images: [OG_IMAGE],
         siteName: SITE_NAME,
         title,
         type: "article",
         url,
       },
       title,
+      twitter: {
+        card: "summary_large_image",
+        description,
+        images: [OG_IMAGE.url],
+        title,
+      },
     };
   } catch {
     return {
@@ -146,8 +157,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     description,
     isAccessibleForFree: true,
     name: `${item.name} MCP Server`,
-    operatingSystem:
-      item.runtime === "desktop" ? "Desktop MCP client" : "Web MCP client",
+    offers: {
+      "@type": "Offer",
+      price: 0,
+      priceCurrency: "USD",
+    },
+    operatingSystem: item.runtime === "desktop" ? "Windows, macOS, Linux" : "Web",
     provider: {
       "@type": "Organization",
       name: item.providerName ?? manifest.providerName ?? "SourceWeft MCP Market",
@@ -180,33 +195,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       },
     ],
   };
-  const faqJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: mcpFaqItems.slice(0, 3).map((faqItem) => ({
-      "@type": "Question",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: faqItem.answer,
-      },
-      name: faqItem.question,
-    })),
-  };
-
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareJsonLd) }}
-        type="application/ld+json"
-      />
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
-        type="application/ld+json"
-      />
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
-        type="application/ld+json"
-      />
+      <JsonLd data={softwareJsonLd} />
+      <JsonLd data={breadcrumbJsonLd} />
       <SourceWeftHeader
         authState={authState}
         containerClassName={mcpContainerClassName}
@@ -442,9 +434,4 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       />
     </main>
   );
-}
-
-export async function generateStaticParams() {
-  const market = await listPublicMcp({ limit: 100 });
-  return market.items.map((item) => ({ identifier: item.identifier }));
 }
