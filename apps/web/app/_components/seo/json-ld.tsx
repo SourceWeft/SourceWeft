@@ -8,11 +8,17 @@ type JsonLdProps = {
   data: Record<string, unknown>;
 };
 
-function JsonLd({ data }: JsonLdProps) {
+/** Third-party strings reach this markup, so `</script>` must never survive serialization. */
+export function JsonLd({ data }: JsonLdProps) {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(data)
+          .replaceAll("<", "\\u003c")
+          .replaceAll("\u2028", "\\u2028")
+          .replaceAll("\u2029", "\\u2029"),
+      }}
     />
   );
 }

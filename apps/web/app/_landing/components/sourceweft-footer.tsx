@@ -55,6 +55,8 @@ export function SourceWeftFooter({
     ["/#features", "Features"],
     ["/#how-it-works", "How it works"],
     ["/#pricing", "Pricing"],
+    ["/mcp", "MCP Servers"],
+    ["/blog", "Blog"],
     [
       authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",
       authState?.isSignedIn ? "Dashboard" : "Get started",
@@ -85,7 +87,7 @@ export function SourceWeftFooter({
 
         <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-100 pt-8 text-xs text-zinc-400 dark:border-white/[0.06] dark:text-zinc-700">
           <p>© {new Date().getFullYear()} SourceWeft. All rights reserved.</p>
-          <span>Build By SourceWeft</span>
+          <span>Built by SourceWeft</span>
         </div>
       </div>
     </footer>

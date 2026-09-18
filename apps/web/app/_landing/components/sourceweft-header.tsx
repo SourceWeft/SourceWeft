@@ -36,6 +36,7 @@ export function SourceWeftHeader({
               ["/#features", "Features"],
               ["/#how-it-works", "How it works"],
               ["/#pricing", "Pricing"],
+              ["/mcp", "MCP Servers"],
               ["/blog", "Blog"],
             ] as const
           )

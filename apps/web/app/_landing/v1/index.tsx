@@ -17,7 +17,7 @@ import { PricingToggle } from "./pricing-toggle";
 
 function IconBrain() {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
       <path
         d="M9.5 2a4.5 4.5 0 0 1 4.5 4.5v.086A4.5 4.5 0 0 1 17.5 11c0 .17-.01.339-.028.504A4 4 0 0 1 20 15.5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4 4 4 0 0 1 2.528-3.696A4.5 4.5 0 0 1 6 10.5a4.5 4.5 0 0 1 3.5-4.414V2Z"
         stroke="currentColor"
@@ -31,7 +31,7 @@ function IconBrain() {
 
 function IconDatabase() {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
       <ellipse
         cx="12"
         cy="5"
@@ -56,7 +56,7 @@ function IconDatabase() {
 
 function IconLayers() {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
       <path
         d="M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5"
         stroke="currentColor"
@@ -70,7 +70,7 @@ function IconLayers() {
 
 function IconArrow() {
   return (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 16 16">
+    <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 16 16">
       <path
         d="M3 8h10M9 4l4 4-4 4"
         stroke="currentColor"
@@ -84,7 +84,7 @@ function IconArrow() {
 
 function IconCheck() {
   return (
-    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 16 16">
+    <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 16 16">
       <path
         d="M3 8l3.5 3.5L13 4.5"
         stroke="currentColor"
@@ -200,8 +200,10 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
             </div>
           </div>
 
-          {/* Right — mock UI */}
-          <div className="relative">
+          {/* Right — mock UI. Decorative sample copy (including invented
+              metrics), so it is kept out of the accessibility tree and out of
+              search snippets. */}
+          <div className="relative" aria-hidden="true">
             <div
               className="relative rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900/80"
               style={{ backdropFilter: "blur(8px)" }}
@@ -710,11 +712,13 @@ export default function LandingV1({
     <div className="min-h-screen bg-background text-foreground">
       <GlobalStyles />
       <SourceWeftHeader authState={authState} />
-      <HeroSection authState={authState} />
-      <SocialProof />
-      <FeaturesSection />
-      <HowItWorks />
-      <PricingSection authState={authState} />
+      <main>
+        <HeroSection authState={authState} />
+        <SocialProof />
+        <FeaturesSection />
+        <HowItWorks />
+        <PricingSection authState={authState} />
+      </main>
       <SourceWeftFooter authState={authState} />
     </div>
   );
