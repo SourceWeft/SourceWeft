@@ -7,6 +7,7 @@ import {
 import { isMarketAdmin } from "../../modules/market/admin";
 import { listMcpCategories } from "../../modules/market/read-categories";
 import {
+  countMcpByCategory,
   findMcp,
   findMcpVersion,
   listMcp,
@@ -91,6 +92,19 @@ export function registerMarketRoutes(app: Hono) {
 
   app.get("/v1/mcp/categories", async (c) =>
     cachedJson(c, await listMcpCategories(), { maxAge: 300 }),
+  );
+
+  // Registered before `/v1/mcp/:identifier` so the literal segment wins.
+  app.get("/v1/mcp/category-counts", async (c) =>
+    cachedJson(
+      c,
+      await countMcpByCategory({
+        query: c.req.query("query"),
+        includeDesktopOnly: booleanQuery(c.req.query("includeDesktopOnly")),
+        desktopOnly: booleanQuery(c.req.query("desktopOnly")),
+      }),
+      { maxAge: 60 },
+    ),
   );
 
   app.get("/v1/mcp/:identifier", async (c) => {

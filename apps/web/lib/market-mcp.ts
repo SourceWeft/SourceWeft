@@ -6,6 +6,8 @@ import {
   MarketClient,
   MarketClientError,
   type GetMarketMcpManifestResponse,
+  type GetMarketMcpResponse,
+  type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
   type ListMarketMcpResponse,
@@ -73,6 +75,39 @@ export async function listPublicMcpCategories(): Promise<ListMarketCategoriesRes
  */
 export function requirePublicMcpCategories(): Promise<ListMarketCategoriesResponse> {
   return cachedListMcpCategories();
+}
+
+const cachedMcpCategoryCounts = unstable_cache(
+  async (input: Parameters<MarketClient["countMcpByCategory"]>[0]) =>
+    marketClient().countMcpByCategory(input),
+  ["public-mcp-category-counts"],
+  { revalidate: MCP_LIST_REVALIDATE_SECONDS },
+);
+
+export async function countPublicMcpByCategory(
+  input: Parameters<MarketClient["countMcpByCategory"]>[0] = {},
+): Promise<MarketCategoryCountsResponse> {
+  try {
+    return await cachedMcpCategoryCounts(input);
+  } catch {
+    return { counts: {}, total: 0 };
+  }
+}
+
+const cachedMcpVersions = unstable_cache(
+  async (identifier: string) => (await marketClient().getMcp(identifier)).versions,
+  ["public-mcp-versions"],
+  { revalidate: MCP_MANIFEST_REVALIDATE_SECONDS },
+);
+
+export async function getPublicMcpVersions(
+  identifier: string,
+): Promise<GetMarketMcpResponse["versions"]> {
+  try {
+    return await cachedMcpVersions(identifier);
+  } catch {
+    return [];
+  }
 }
 
 const cachedMcpManifest = unstable_cache(

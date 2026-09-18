@@ -15,13 +15,21 @@ import {
   SITE_URL,
 } from "../../../seo";
 import {
+  countPublicMcpByCategory,
   listPublicMcp,
   requirePublicMcpCategories,
 } from "../../../../lib/market-mcp";
 import {
+  mcpCountRequest,
+  mcpListRequest,
+  parseMcpBrowseState,
+  type McpSearchParams,
+} from "../../_components/mcp-browse";
+import { McpListingView, McpSearchForm } from "../../_components/mcp-listing";
+import {
   mcpCategoryPath,
   mcpContainerClassName,
-  McpMarketCard,
+  mcpPath,
 } from "../../_components/mcp-display";
 
 // Canonical and JSON-LD embed the public site URL, which is injected at
@@ -30,6 +38,7 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<McpSearchParams>;
 };
 
 async function loadCategory(slug: string) {
@@ -45,6 +54,7 @@ function categoryTitle(name: string) {
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const decodedSlug = decodeURIComponent(slug);
@@ -54,6 +64,9 @@ export async function generateMetadata({
     return { ...NO_INDEX_METADATA, title: "MCP Category" };
   }
 
+  const state = parseMcpBrowseState(await searchParams, {
+    category: category.slug,
+  });
   const title = categoryTitle(category.name);
   const description =
     category.description ??
@@ -63,6 +76,13 @@ export async function generateMetadata({
     category: category.slug,
     includeDesktopOnly: true,
   });
+  // A search or facet inside the category is one of infinitely many views of
+  // the same page, so only the bare category URL is offered for indexing.
+  const narrowed =
+    Boolean(state.query) ||
+    Boolean(state.cursor) ||
+    state.trust !== "all" ||
+    state.runtime !== "all";
 
   return {
     alternates: { canonical: url },
@@ -75,7 +95,9 @@ export async function generateMetadata({
       type: "website",
       url,
     },
-    ...(isIndexableListing(market.items.length) ? {} : NO_INDEX_METADATA),
+    ...(!narrowed && isIndexableListing(market.items.length)
+      ? {}
+      : NO_INDEX_METADATA),
     title,
     twitter: {
       card: "summary_large_image",
@@ -86,22 +108,29 @@ export async function generateMetadata({
   };
 }
 
-export default async function PublicMcpCategoryPage({ params }: PageProps) {
-  const { slug } = await params;
+export default async function PublicMcpCategoryPage({
+  params,
+  searchParams,
+}: PageProps) {
+  const [{ slug }, rawSearchParams] = await Promise.all([params, searchParams]);
   const decodedSlug = decodeURIComponent(slug);
-  const [authState, category] = await Promise.all([
+  const [authState, category, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
     loadCategory(decodedSlug),
+    requirePublicMcpCategories(),
   ]);
 
   if (!category) {
     notFound();
   }
 
-  const market = await listPublicMcp({
+  const state = parseMcpBrowseState(rawSearchParams, {
     category: category.slug,
-    includeDesktopOnly: true,
   });
+  const [facets, market] = await Promise.all([
+    countPublicMcpByCategory(mcpCountRequest(state)),
+    listPublicMcp(mcpListRequest(state)),
+  ]);
   const description =
     category.description ??
     `Public ${category.name} MCP servers available to SourceWeft and other MCP clients.`;
@@ -124,10 +153,21 @@ export default async function PublicMcpCategoryPage({ params }: PageProps) {
       },
     ],
   };
+  const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: market.items.map((item, index) => ({
+      "@type": "ListItem",
+      name: item.name,
+      position: index + 1,
+      url: `${SITE_URL}${mcpPath(item.identifier)}`,
+    })),
+  };
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={breadcrumbJsonLd} />
+      <JsonLd data={itemListJsonLd} />
       <SourceWeftHeader
         authState={authState}
         containerClassName={mcpContainerClassName}
@@ -138,9 +178,7 @@ export default async function PublicMcpCategoryPage({ params }: PageProps) {
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
-        <div
-          className={`relative mx-auto pb-12 pt-24 lg:pb-16 lg:pt-28 ${mcpContainerClassName}`}
-        >
+        <div className={`relative mx-auto pb-8 pt-24 ${mcpContainerClassName}`}>
           <Link
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
             href="/mcp"
@@ -149,37 +187,38 @@ export default async function PublicMcpCategoryPage({ params }: PageProps) {
             Back to MCP market
           </Link>
           <div className="max-w-4xl">
-            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
+            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
               <Server className="size-3.5" />
               {category.name}
             </span>
-            <h1 className="text-5xl font-semibold leading-[0.95] tracking-tight text-zinc-950 sm:text-6xl dark:text-white">
+            <p className="text-3xl font-semibold tracking-tight sm:text-4xl">
               {categoryTitle(category.name)}
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
+            </p>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
               {description}
             </p>
           </div>
+
+          <McpSearchForm
+            action={mcpCategoryPath(category.slug)}
+            className="mt-6"
+            state={state}
+          />
         </div>
       </section>
 
-      <section className={`mx-auto py-12 ${mcpContainerClassName}`}>
-        {market.items.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            No MCP servers are listed in this category yet.{" "}
-            <Link className="underline underline-offset-4" href="/mcp">
-              Browse all MCP servers
-            </Link>
-            .
-          </p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {market.items.map((item) => (
-              <McpMarketCard item={item} key={item.identifier} />
-            ))}
-          </div>
-        )}
-      </section>
+      <McpListingView
+        categories={categoriesResponse.items}
+        counts={facets.counts}
+        market={market}
+        state={state}
+        title={
+          state.query
+            ? `Results for “${state.query}” in ${category.name}`
+            : categoryTitle(category.name)
+        }
+        total={facets.total}
+      />
 
       <SourceWeftFooter
         authState={authState}
