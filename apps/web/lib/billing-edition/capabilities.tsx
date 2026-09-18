@@ -20,13 +20,23 @@ const Context = createContext<State>(initial);
 
 export function DeploymentCapabilitiesProvider({
   children,
+  initialCapabilities = null,
 }: {
   children: ReactNode;
+  initialCapabilities?: DeploymentCapabilities | null;
 }) {
-  const [state, setState] = useState<State>(initial);
+  const [state, setState] = useState<State>(
+    initialCapabilities
+      ? { status: "ready", capabilities: initialCapabilities, error: null }
+      : initial,
+  );
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
+    // Seeded from the server render; refetching would only re-run the same call.
+    if (initialCapabilities && attempt === 0) {
+      return;
+    }
     let active = true;
     setState(initial);
     void deploymentClient.getCapabilities().then(
@@ -48,7 +58,7 @@ export function DeploymentCapabilitiesProvider({
     return () => {
       active = false;
     };
-  }, [attempt]);
+  }, [attempt, initialCapabilities]);
   return (
     <Context.Provider value={state}>
       {state.status === "error" ? (

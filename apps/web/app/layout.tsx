@@ -6,14 +6,9 @@ import {
 } from "../lib/public-runtime-config";
 import { GoogleTagManager } from "@next/third-parties/google";
 import type { Metadata } from "next";
-import { cookies, headers } from "next/headers";
+import { connection } from "next/server";
 
-import {
-  getLocaleDirection,
-  LOCALE_COOKIE_NAME,
-  resolveRequestLocale,
-} from "../lib/locale";
-
+import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { Providers } from "./providers";
 import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
@@ -65,20 +60,14 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Runtime config (base URL, GTM) is injected at container start, so never prerender with build-time values.
+  await connection();
   const runtimeConfig = serverPublicRuntimeConfig();
   const gtmId = runtimeConfig.gtmId;
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-
-  const locale = resolveRequestLocale({
-    acceptLanguage: requestHeaders.get("accept-language"),
-    cookieLocale: cookieStore.get(LOCALE_COOKIE_NAME)?.value,
-    headerLocale: requestHeaders.get("x-sourceweft-locale"),
-  });
-  const direction = getLocaleDirection(locale);
+  const capabilities = await resolveDeploymentCapabilities();
 
   return (
-    <html lang={locale} dir={direction} suppressHydrationWarning>
+    <html lang="en" dir="ltr" suppressHydrationWarning>
       <head>
         <Script
           id="sourceweft-runtime-config"
@@ -89,13 +78,13 @@ export default async function RootLayout({
         />
         <SeoJsonLd />
       </head>
+      {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
       <body className="flex min-h-svh flex-col antialiased">
-        <Providers>
+        <Providers initialCapabilities={capabilities}>
           <DesktopWindowChrome />
           {children}
         </Providers>
       </body>
-      {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
     </html>
   );
 }

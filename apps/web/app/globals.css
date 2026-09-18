@@ -4,14 +4,8 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/sora";
-@import "@fontsource-variable/noto-sans-arabic";
-@import "@fontsource-variable/noto-sans-devanagari";
-@import "@fontsource-variable/noto-sans-hebrew";
-@import "@fontsource-variable/noto-sans-jp";
-@import "@fontsource-variable/noto-sans-kr";
-@import "@fontsource-variable/noto-sans-sc";
-@import "@fontsource-variable/noto-sans-tc";
-@import "@fontsource-variable/noto-sans-thai";
+/* Script-specific UI fonts load with the signed-in app (app/dashboard/layout.tsx);
+   marketing pages are Latin-only and must not ship ~480 extra @font-face rules. */
 @import "@sourceweft/tailwind-config";
 @import "@daveyplate/better-auth-ui/css";
 

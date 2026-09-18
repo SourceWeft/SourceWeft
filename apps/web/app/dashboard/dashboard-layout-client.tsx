@@ -1,6 +1,7 @@
 "use client";
 
 import { synchronizeLocalHostScope } from "../../lib/local-host-session";
+import { registerBuiltinAgentTools } from "../../lib/register-builtin-agent-tools";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { desktopHubBridge } from "../../lib/desktop-hub-bridge";
@@ -18,6 +19,10 @@ import { DashboardPageNavigation } from "./_components/dashboard-page-navigation
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
+
+// Only chat surfaces read the registry, so marketing pages no longer pay for
+// the connector tool definitions at boot.
+registerBuiltinAgentTools();
 import { DashboardShellRouteSkeleton } from "../_components/route-loading-skeleton";
 
 const SESSION_CONFIRM_ATTEMPTS = 3;
