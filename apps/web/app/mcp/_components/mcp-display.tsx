@@ -25,6 +25,7 @@ import type {
 } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { slugify } from "../../../lib/slug";
 
 export const mcpContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
@@ -64,7 +65,7 @@ export function mcpFilterTabs(categories: MarketCategory[]) {
   return [
     { href: "/mcp", label: "All", value: "all" },
     ...categories.map((category) => ({
-      href: `/mcp?filter=${encodeURIComponent(category.slug)}`,
+      href: mcpCategoryPath(category.slug),
       label: category.name,
       value: category.slug,
     })),
@@ -101,19 +102,8 @@ export const mcpDirectorySections: Array<{
   },
 ];
 
-export function selectedMcpFilter(
-  value: string | string[] | undefined,
-  categories: MarketCategory[],
-) {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (!raw || raw === "all") {
-    return "all";
-  }
-  return categories.some((category) => category.slug === raw) ? raw : "all";
-}
-
-export function queryForFilter(filter: McpFilterValue) {
-  return filter === "all" ? {} : ({ category: filter } as const);
+export function mcpCategoryPath(slug: string) {
+  return `/mcp/category/${encodeURIComponent(slug)}`;
 }
 
 export function mcpPath(identifier: string) {
@@ -121,11 +111,7 @@ export function mcpPath(identifier: string) {
 }
 
 export function slugifyAnchor(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  return slugify(value);
 }
 
 export function verificationLabel(item: {
@@ -343,9 +329,9 @@ export function McpMarketCard({ item }: { item: MarketItemSummary }) {
       <div className="flex items-start gap-3">
         <McpLogoMark trusted={trusted} />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-lg font-semibold leading-6 text-zinc-950 dark:text-white">
+          <h3 className="truncate text-lg font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}
-          </h2>
+          </h3>
           <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-500">
             {item.providerName ?? item.identifier}
           </p>

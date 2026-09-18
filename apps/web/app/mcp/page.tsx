@@ -6,7 +6,8 @@ import type { MarketItemSummary } from "@sourceweft/market-sdk";
 import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
-import { SITE_NAME, SITE_URL } from "../seo";
+import { JsonLd } from "../_components/seo/json-ld";
+import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
 import { listPublicMcp, listPublicMcpCategories } from "../../lib/market-mcp";
 import {
   mcpContainerClassName,
@@ -16,28 +17,49 @@ import {
   McpFaqSection,
   mcpFilterTabs,
   McpMarketCard,
-  queryForFilter,
-  selectedMcpFilter,
 } from "./_components/mcp-display";
 
 export const revalidate = 300;
 
-export const metadata: Metadata = {
-  alternates: {
-    canonical: `${SITE_URL}/mcp`,
-  },
-  description:
-    "Browse public MCP servers for SourceWeft and other MCP clients. Discover HTTP, SSE, and desktop MCP servers with tools, runtime, and verification details.",
-  openGraph: {
-    description:
-      "A public directory of MCP servers with tools, transport, runtime, and verification details.",
-    siteName: SITE_NAME,
-    title: "MCP Servers",
-    type: "website",
-    url: `${SITE_URL}/mcp`,
-  },
-  title: "MCP Servers",
-};
+const MCP_TITLE = "MCP Servers";
+const MCP_DESCRIPTION =
+  "Browse public MCP servers for SourceWeft and other MCP clients. Discover HTTP, SSE, and desktop MCP servers with tools, runtime, and verification details.";
+const MCP_SOCIAL_DESCRIPTION =
+  "A public directory of MCP servers with tools, transport, runtime, and verification details.";
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string | string[] }>;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  // Search-result permutations are infinite and add nothing over the directory
+  // itself, so they stay crawlable but out of the index.
+  const isSearch = Boolean(searchParamsValue(params.q)?.trim());
+
+  return {
+    alternates: {
+      canonical: `${SITE_URL}/mcp`,
+    },
+    description: MCP_DESCRIPTION,
+    openGraph: {
+      description: MCP_SOCIAL_DESCRIPTION,
+      images: [OG_IMAGE],
+      siteName: SITE_NAME,
+      title: MCP_TITLE,
+      type: "website",
+      url: `${SITE_URL}/mcp`,
+    },
+    ...(isSearch ? NO_INDEX_METADATA : {}),
+    title: MCP_TITLE,
+    twitter: {
+      card: "summary_large_image",
+      description: MCP_SOCIAL_DESCRIPTION,
+      images: [OG_IMAGE.url],
+      title: MCP_TITLE,
+    },
+  };
+}
 
 function searchParamsValue(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
@@ -74,7 +96,7 @@ function sectionItems(input: {
 export default async function PublicMcpMarketPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string | string[]; q?: string | string[] }>;
+  searchParams: Promise<{ q?: string | string[] }>;
 }) {
   const params = await searchParams;
   const [authState, categoriesResponse] = await Promise.all([
@@ -83,10 +105,8 @@ export default async function PublicMcpMarketPage({
   ]);
   const categories = categoriesResponse.items;
   const filterTabs = mcpFilterTabs(categories);
-  const selectedFilter = selectedMcpFilter(params.filter, categories);
   const query = searchParamsValue(params.q)?.trim() ?? "";
   const market = await listPublicMcp({
-    ...queryForFilter(selectedFilter),
     query: query || undefined,
   });
   const allMarket = query
@@ -108,10 +128,7 @@ export default async function PublicMcpMarketPage({
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
-        type="application/ld+json"
-      />
+      <JsonLd data={faqJsonLd} />
       <SourceWeftHeader
         authState={authState}
         containerClassName={mcpContainerClassName}
@@ -138,7 +155,6 @@ export default async function PublicMcpMarketPage({
           </div>
 
           <form action="/mcp" className="mt-9">
-            <input name="filter" type="hidden" value={selectedFilter} />
             <div className="relative max-w-3xl">
               <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
               <input
@@ -156,12 +172,8 @@ export default async function PublicMcpMarketPage({
         <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {filterTabs.map((tab) => (
             <Link
-              className={`shrink-0 rounded-full border px-4 py-2 text-sm transition-colors ${
-                selectedFilter === tab.value
-                  ? "border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950"
-                  : "border-zinc-300 bg-white/50 text-zinc-600 hover:border-zinc-950 hover:text-zinc-950 dark:border-white/12 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:border-white/35 dark:hover:text-white"
-              }`}
-              href={query ? `${tab.href}${tab.href.includes("?") ? "&" : "?"}q=${encodeURIComponent(query)}` : tab.href}
+              className="shrink-0 rounded-full border border-zinc-300 bg-white/50 px-4 py-2 text-sm text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/12 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:border-white/35 dark:hover:text-white"
+              href={tab.href}
               key={tab.value}
             >
               {tab.label}
