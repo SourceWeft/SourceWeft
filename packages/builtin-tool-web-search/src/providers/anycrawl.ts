@@ -162,13 +162,15 @@ function isTimeoutError(error: unknown) {
   return error instanceof Error && error.name === "TimeoutError";
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+// `budgetMs` is the overall fetch budget reported to the user; `timeoutMs` is
+// only the slice of it left for this attempt.
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, budgetMs: number) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timeout = setTimeout(() => reject(createTimeoutError(timeoutMs)), timeoutMs);
+        timeout = setTimeout(() => reject(createTimeoutError(budgetMs)), timeoutMs);
       }),
     ]);
   } finally {
@@ -289,6 +291,7 @@ export class AnyCrawlWebProvider implements WebProvider {
         ...(fresh ? { max_age: 0 } : {}),
       }),
       timeoutMs,
+      this.fetchTimeoutMs,
     );
   }
 
