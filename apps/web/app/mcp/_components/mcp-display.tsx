@@ -8,9 +8,7 @@ import {
   Globe2,
   KeyRound,
   Laptop,
-  Layers3,
   Plug,
-  Server,
   ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
@@ -25,6 +23,8 @@ import type {
 } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+
+import { McpIcon } from "./mcp-client";
 
 export const mcpContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
@@ -56,64 +56,21 @@ export const mcpFaqItems = [
   },
 ] as const;
 
-export type McpFilterValue =
-  | "all"
-  | (string & {});
-
-export function mcpFilterTabs(categories: MarketCategory[]) {
-  return [
-    { href: "/mcp", label: "All", value: "all" },
-    ...categories.map((category) => ({
-      href: `/mcp?filter=${encodeURIComponent(category.slug)}`,
-      label: category.name,
-      value: category.slug,
-    })),
-  ] satisfies Array<{ href: string; label: string; value: McpFilterValue }>;
+export function mcpCategoryNames(categories: MarketCategory[]) {
+  return new Map(categories.map((category) => [category.slug, category.name]));
 }
 
-export const mcpDirectorySections: Array<{
-  description: string;
-  filter?: McpFilterValue;
-  title: string;
-}> = [
-  {
-    description: "Curated MCP servers with official or verified listing signals.",
-    title: "Featured MCP Servers",
-  },
-  {
-    description: "Freshly indexed servers and recently updated MCP listings.",
-    title: "Recently Updated",
-  },
-  {
-    description: "Browser, crawling, web search, and URL-based MCP workflows.",
-    filter: "web-search-scraping",
-    title: "Web & Browser",
-  },
-  {
-    description: "MCP servers for repositories, code, issues, and developer operations.",
-    filter: "developer-tools",
-    title: "Developer Tools",
-  },
-  {
-    description: "Data, research, source discovery, and knowledge workflows.",
-    filter: "data-analytics",
-    title: "Data & Research",
-  },
-];
-
-export function selectedMcpFilter(
-  value: string | string[] | undefined,
-  categories: MarketCategory[],
+export function mcpCategoryLabel(
+  slug: string,
+  names?: ReadonlyMap<string, string>,
 ) {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (!raw || raw === "all") {
-    return "all";
-  }
-  return categories.some((category) => category.slug === raw) ? raw : "all";
-}
-
-export function queryForFilter(filter: McpFilterValue) {
-  return filter === "all" ? {} : ({ category: filter } as const);
+  return (
+    names?.get(slug) ??
+    slug
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
 }
 
 export function mcpPath(identifier: string) {
@@ -266,36 +223,6 @@ export function McpTransportBadge({
   );
 }
 
-export function McpLogoMark({
-  trusted,
-  size = "md",
-}: {
-  trusted: boolean;
-  size?: "sm" | "md" | "lg";
-}) {
-  return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-lg text-white shadow-sm",
-        size === "sm" && "size-9",
-        size === "md" && "size-11",
-        size === "lg" && "size-14",
-        trusted
-          ? "bg-zinc-950 dark:bg-white dark:text-zinc-950"
-          : "bg-amber-600",
-      )}
-    >
-      <Server
-        className={cn(
-          size === "sm" && "size-4",
-          size === "md" && "size-5",
-          size === "lg" && "size-6",
-        )}
-      />
-    </span>
-  );
-}
-
 export function formatDate(value?: string | null) {
   if (!value) return "Unscheduled";
   return new Intl.DateTimeFormat("en", {
@@ -319,7 +246,10 @@ export function mcpDetailSeoDescription(input: {
 }) {
   const categoryText =
     input.item.categories.length > 0
-      ? input.item.categories.slice(0, 3).join(", ")
+      ? input.item.categories
+          .slice(0, 3)
+          .map((slug) => mcpCategoryLabel(slug))
+          .join(", ")
       : "AI tool";
   const tools = input.manifest.tools
     .map((tool) => tool.title || tool.name)
@@ -333,93 +263,142 @@ export function mcpDetailSeoDescription(input: {
   );
 }
 
-export function McpMarketCard({ item }: { item: MarketItemSummary }) {
+export function McpMarketCard({
+  categoryNames,
+  highlightCategory,
+  item,
+}: {
+  categoryNames?: ReadonlyMap<string, string>;
+  /** Category to show when the item has several, e.g. the one being browsed. */
+  highlightCategory?: string;
+  item: MarketItemSummary;
+}) {
   const trusted = Boolean(item.official || item.verified);
+  const primaryCategory =
+    highlightCategory && item.categories.includes(highlightCategory)
+      ? highlightCategory
+      : item.categories[0];
   return (
     <Link
-      className="group flex h-full min-h-[260px] flex-col rounded-lg border border-zinc-300 bg-white/62 p-4 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
+      className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
       href={mcpPath(item.identifier)}
     >
       <div className="flex items-start gap-3">
-        <McpLogoMark trusted={trusted} />
+        <McpIcon iconUrl={item.iconUrl} trusted={trusted} />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-lg font-semibold leading-6 text-zinc-950 dark:text-white">
+          <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}
-          </h2>
-          <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-500">
+          </h3>
+          <p className="mt-0.5 truncate text-xs text-zinc-500">
             {item.providerName ?? item.identifier}
           </p>
         </div>
+        <McpVerificationBadge item={item} />
       </div>
 
       <p className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {item.summary}
       </p>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <McpVerificationBadge item={item} />
-        <McpRuntimeBadge item={item} />
+      <div className="mb-4 mt-4 flex flex-wrap gap-2">
         <McpTransportBadge transport={item.transport} />
+        <McpRuntimeBadge item={item} />
+        {item.requiresAuth ? (
+          <Badge>
+            <KeyRound className="size-3.5" />
+            Auth
+          </Badge>
+        ) : null}
       </div>
 
-      <div className="mt-auto border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-500">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="inline-flex items-center gap-1.5">
-            <Code2 className="size-3.5" />
-            {item.toolsCount} tools
+      <div className="mt-auto flex items-center gap-x-4 gap-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10">
+        {primaryCategory ? (
+          <span className="min-w-0 truncate">
+            {mcpCategoryLabel(primaryCategory, categoryNames)}
           </span>
-          {item.requiresAuth ? (
-            <span className="inline-flex items-center gap-1.5">
-              <KeyRound className="size-3.5" />
-              Auth required
-            </span>
-          ) : null}
-          <span className="inline-flex items-center gap-1.5">
-            <Layers3 className="size-3.5" />
-            {item.latestVersion ?? "No version"}
-          </span>
-        </div>
-        <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-zinc-950 dark:text-white">
-          View details
-          <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+        ) : null}
+        <span className="inline-flex shrink-0 items-center gap-1.5">
+          <Code2 className="size-3.5" />
+          {item.toolsCount} tool{item.toolsCount === 1 ? "" : "s"}
         </span>
+        <span className="ml-auto shrink-0">{formatDate(item.updatedAt)}</span>
       </div>
     </Link>
   );
 }
 
+export function McpCardGrid({
+  categoryNames,
+  className,
+  highlightCategory,
+  items,
+}: {
+  categoryNames?: ReadonlyMap<string, string>;
+  className?: string;
+  highlightCategory?: string;
+  items: MarketItemSummary[];
+}) {
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
+        className,
+      )}
+    >
+      {items.map((item) => (
+        <McpMarketCard
+          categoryNames={categoryNames}
+          highlightCategory={highlightCategory}
+          item={item}
+          key={item.identifier}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function McpDirectorySection({
+  categoryNames,
   description,
+  highlightCategory,
   items,
   title,
+  viewAllHref,
 }: {
+  categoryNames?: ReadonlyMap<string, string>;
   description: string;
+  highlightCategory?: string;
   items: MarketItemSummary[];
   title: string;
+  viewAllHref: string;
 }) {
   if (items.length === 0) {
     return null;
   }
   return (
-    <section className="border-t border-zinc-300 pt-8 dark:border-white/10">
-      <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-        <div>
+    <section>
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div className="min-w-0">
           <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
             {title}
           </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+          <p className="mt-1.5 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             {description}
           </p>
         </div>
-        <span className="text-sm text-zinc-500 dark:text-zinc-500">
-          {items.length} server{items.length === 1 ? "" : "s"}
-        </span>
+        <Link
+          className="group inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
+          href={viewAllHref}
+        >
+          View all
+          <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+        </Link>
       </div>
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((item) => (
-          <McpMarketCard item={item} key={item.identifier} />
-        ))}
-      </div>
+      <McpCardGrid
+        categoryNames={categoryNames}
+        highlightCategory={highlightCategory}
+        items={items}
+      />
     </section>
   );
 }

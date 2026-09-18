@@ -4,6 +4,8 @@ import {
   MarketClient,
   MarketClientError,
   type GetMarketMcpManifestResponse,
+  type GetMarketMcpResponse,
+  type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
   type ListMarketMcpResponse,
@@ -47,8 +49,28 @@ export async function listPublicMcpCategories(): Promise<ListMarketCategoriesRes
   }
 }
 
+export async function countPublicMcpByCategory(
+  input: Parameters<MarketClient["countMcpByCategory"]>[0] = {},
+): Promise<MarketCategoryCountsResponse> {
+  try {
+    return await marketClient().countMcpByCategory(input);
+  } catch {
+    return { counts: {}, total: 0 };
+  }
+}
+
 export async function getPublicMcpManifest(
   identifier: string,
 ): Promise<GetMarketMcpManifestResponse> {
   return marketClient().getMcpManifest(identifier);
+}
+
+export async function getPublicMcpVersions(
+  identifier: string,
+): Promise<GetMarketMcpResponse["versions"]> {
+  try {
+    return (await marketClient().getMcp(identifier)).versions;
+  } catch {
+    return [];
+  }
 }

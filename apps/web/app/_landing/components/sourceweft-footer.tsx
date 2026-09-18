@@ -55,6 +55,7 @@ export function SourceWeftFooter({
     ["/#features", "Features"],
     ["/#how-it-works", "How it works"],
     ["/#pricing", "Pricing"],
+    ["/mcp", "MCP Market"],
     [
       authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",
       authState?.isSignedIn ? "Dashboard" : "Get started",

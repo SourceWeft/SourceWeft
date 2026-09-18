@@ -1,16 +1,37 @@
 import type { MetadataRoute } from "next";
+import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
 import { listPublishedBlogSitemapEntries } from "../lib/blog-db";
-import { listPublicMcp } from "../lib/market-mcp";
+import { listPublicMcp, listPublicMcpCategories } from "../lib/market-mcp";
 import { SITE_URL } from "./seo";
 
 export const dynamic = "force-dynamic";
 
+// Caps the walk at 5,000 servers so a bad cursor cannot stall the sitemap.
+const MCP_SITEMAP_MAX_PAGES = 50;
+
+async function listAllPublicMcp() {
+  const items: MarketItemSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MCP_SITEMAP_MAX_PAGES; page += 1) {
+    const result = await listPublicMcp({
+      cursor,
+      includeDesktopOnly: true,
+      limit: 100,
+    });
+    items.push(...result.items);
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+  return items;
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const lastModified = new Date();
-  const [blogPosts, mcpMarket] = await Promise.all([
+  const [blogPosts, mcpItems, mcpCategories] = await Promise.all([
     listPublishedBlogSitemapEntries(),
-    listPublicMcp({ includeDesktopOnly: true, limit: 100 }),
+    listAllPublicMcp(),
+    listPublicMcpCategories(),
   ]);
 
   return [
@@ -50,7 +71,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.5,
       url: `${SITE_URL}${post.urlPath}`,
     })),
-    ...mcpMarket.items.map((item) => ({
+    ...mcpCategories.items.map((category) => ({
+      changeFrequency: "daily" as const,
+      lastModified,
+      priority: 0.6,
+      url: `${SITE_URL}/mcp?category=${encodeURIComponent(category.slug)}`,
+    })),
+    ...mcpItems.map((item) => ({
       changeFrequency: "weekly" as const,
       lastModified: item.updatedAt ? new Date(item.updatedAt) : lastModified,
       priority: 0.55,
