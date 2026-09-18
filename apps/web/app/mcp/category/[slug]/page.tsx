@@ -191,9 +191,9 @@ export default async function PublicMcpCategoryPage({
               <Server className="size-3.5" />
               {category.name}
             </span>
-            <p className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
               {categoryTitle(category.name)}
-            </p>
+            </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
               {description}
             </p>
@@ -215,7 +215,7 @@ export default async function PublicMcpCategoryPage({
         title={
           state.query
             ? `Results for “${state.query}” in ${category.name}`
-            : categoryTitle(category.name)
+            : undefined
         }
         total={facets.total}
       />

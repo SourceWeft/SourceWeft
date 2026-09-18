@@ -1,7 +1,4 @@
-import type {
-  ListMarketMcpRequest,
-  MarketCategory,
-} from "@sourceweft/market-sdk";
+import type { ListMarketMcpRequest } from "@sourceweft/market-sdk";
 
 import { mcpCategoryPath } from "./mcp-display";
 
@@ -48,7 +45,7 @@ function oneOf<T extends string>(
 
 export function parseMcpBrowseState(
   params: McpSearchParams,
-  input: { categories?: MarketCategory[]; category?: string } = {},
+  input: { category?: string } = {},
 ): McpBrowseState {
   return {
     category: input.category ?? "all",

@@ -147,8 +147,6 @@ function CategorySidebar({
  * /mcp/category/[slug] page, so both browse the catalog the same way.
  */
 export function McpListingView({
-  backHref = "/mcp",
-  backLabel = "Market home",
   categories,
   counts,
   market,
@@ -156,13 +154,12 @@ export function McpListingView({
   title,
   total,
 }: {
-  backHref?: string;
-  backLabel?: string;
   categories: MarketCategory[];
   counts: Record<string, number>;
   market: ListMarketMcpResponse;
   state: McpBrowseState;
-  title: string;
+  /** Omitted when the page header already names the listing. */
+  title?: string;
   total: number;
 }) {
   const categoryNames = mcpCategoryNames(categories);
@@ -194,19 +191,21 @@ export function McpListingView({
       <div className="min-w-0">
         <div className="flex flex-col gap-4 border-b border-zinc-300 pb-5 dark:border-white/10">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0">
-              <Link
-                className="mb-2 inline-flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-950 dark:hover:text-white"
-                href={backHref}
-              >
-                <ArrowLeft className="size-3.5" />
-                {backLabel}
-              </Link>
-              <h1 className="truncate text-2xl font-semibold tracking-tight">
-                {title}
-              </h1>
-            </div>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {title ? (
+              <div className="min-w-0">
+                <Link
+                  className="mb-2 inline-flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-950 dark:hover:text-white"
+                  href="/mcp"
+                >
+                  <ArrowLeft className="size-3.5" />
+                  Market home
+                </Link>
+                <h1 className="truncate text-2xl font-semibold tracking-tight">
+                  {title}
+                </h1>
+              </div>
+            ) : null}
+            <p className="ml-auto text-sm text-zinc-500 dark:text-zinc-400">
               {exactCount !== null
                 ? `${exactCount.toLocaleString("en")} server${exactCount === 1 ? "" : "s"}`
                 : `${market.items.length} server${market.items.length === 1 ? "" : "s"} on this page`}
