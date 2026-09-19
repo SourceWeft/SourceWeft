@@ -18,6 +18,51 @@ export const GITHUB_ARCHIVE_LIMITS = Object.freeze({
   maxEntries: 20_000,
 });
 
+/**
+ * Failure modes a caller has to distinguish. Kept as a code rather than
+ * per-caller error classes so this module stays free of any one consumer's
+ * error taxonomy — the skills registry and the MCP market each map these onto
+ * their own submission errors.
+ *
+ * Defined here rather than in `github-zip.ts` (which re-exports it) because
+ * `githubFetch` raises the timeout, and `github-zip.ts` already imports this
+ * module.
+ */
+export type GitHubArchiveErrorCode =
+  | "ARCHIVE_UNAVAILABLE"
+  | "ARCHIVE_TOO_LARGE"
+  | "ARCHIVE_UNPINNED"
+  | "ARCHIVE_TIMEOUT";
+
+export class GitHubArchiveError extends Error {
+  constructor(
+    readonly code: GitHubArchiveErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GitHubArchiveError";
+  }
+}
+
+/**
+ * Per-request deadlines. `fetch` has none of its own, so a GitHub response that
+ * stalls mid-flight would otherwise pin the submitting HTTP request for minutes.
+ * The deadline covers the response BODY too (the signal stays attached to the
+ * stream), which is why the archive download gets a longer one than the small
+ * JSON metadata calls.
+ */
+export const GITHUB_REQUEST_TIMEOUTS = Object.freeze({
+  metadataMs: 30_000,
+  archiveMs: 120_000,
+});
+
+export type GitHubRequestOptions = {
+  /** Deadline for each attempt, body included. Defaults to `metadataMs`. */
+  timeoutMs?: number;
+  /** Caller cancellation, combined with the deadline. */
+  signal?: AbortSignal;
+};
+
 function stripGitSuffix(value: string) {
   return value.endsWith(".git") ? value.slice(0, -4) : value;
 }
@@ -177,17 +222,56 @@ function githubRetryDelayMs(response: Response, attempt: number) {
 }
 
 /**
+ * True when `error` is what an aborted `AbortSignal.timeout` rejects with —
+ * whether it surfaced from `fetch` itself or from reading the response body.
+ */
+export function isGitHubTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
+}
+
+export function githubTimeoutError(url: string, timeoutMs: number) {
+  return new GitHubArchiveError(
+    "ARCHIVE_TIMEOUT",
+    `GitHub did not respond within ${Math.round(timeoutMs / 1000)}s: ${url}`,
+  );
+}
+
+/**
  * Retry/backoff-aware GitHub fetch. Exported alongside `githubDownloadHeaders`
  * so `github-zip.ts` reuses the same rate-limit handling and token plumbing
  * instead of re-implementing them.
+ *
+ * Every attempt runs under its own deadline. The deadline signal is handed to
+ * `fetch`, so it also bounds a caller streaming the returned body; a caller
+ * that reads the body maps that late abort with `isGitHubTimeoutError`.
  */
 export async function githubFetch(
   url: string,
   headers: Record<string, string>,
+  options: GitHubRequestOptions = {},
 ): Promise<Response> {
+  const timeoutMs = options.timeoutMs ?? GITHUB_REQUEST_TIMEOUTS.metadataMs;
   let totalWaited = 0;
   for (let attempt = 0; ; attempt += 1) {
-    const response = await fetch(url, { headers });
+    options.signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        signal: options.signal
+          ? AbortSignal.any([deadline, options.signal])
+          : deadline,
+      });
+    } catch (error) {
+      // A caller's own cancellation is theirs to interpret; only our deadline
+      // becomes the module's error type. A timeout is not retried: the request
+      // already spent its whole budget.
+      if (isGitHubTimeoutError(error) && !options.signal?.aborted) {
+        throw githubTimeoutError(url, timeoutMs);
+      }
+      throw error;
+    }
     if (
       response.ok ||
       attempt >= githubMaxRetries ||
@@ -207,36 +291,91 @@ export async function githubFetch(
   }
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await githubFetch(url, githubHeaders());
+async function fetchJson<T>(
+  url: string,
+  options?: GitHubRequestOptions,
+): Promise<T> {
+  const response = await githubFetch(url, githubHeaders(), options);
   if (!response.ok) {
     throw new Error(`GitHub request failed ${response.status}: ${url}`);
   }
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    if (isGitHubTimeoutError(error) && !options?.signal?.aborted) {
+      throw githubTimeoutError(
+        url,
+        options?.timeoutMs ?? GITHUB_REQUEST_TIMEOUTS.metadataMs,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
  * The URL/API half of GitHub source resolution — no archive bytes are touched
  * here, only a repo URL string and JSON metadata.
  */
-export async function resolveDefaultBranch(source: NormalizedGitHubSource) {
+export async function resolveDefaultBranch(
+  source: NormalizedGitHubSource,
+  options?: GitHubRequestOptions,
+) {
   const data = await fetchJson<{ default_branch?: string }>(
     `https://api.github.com/repos/${source.owner}/${source.repo}`,
+    options,
   );
   return data.default_branch || "main";
 }
 
-/** See `resolveDefaultBranch` for why this is exported. */
-export async function resolveCommitSha(
+export type ResolvedGitHubCommit = {
+  sha: string;
+  /**
+   * Committer date, ISO 8601. Unknown when the ref was already a full sha and
+   * GitHub's commit metadata could not be read.
+   */
+  committedAt?: string;
+};
+
+/**
+ * Resolve a ref to its commit, with the committer date the same response
+ * already carries — so ordering two commits of one repo costs no extra call.
+ * See `resolveDefaultBranch` for why this is exported.
+ */
+export async function resolveCommit(
   source: NormalizedGitHubSource,
   ref: string,
-) {
+  options?: GitHubRequestOptions,
+): Promise<ResolvedGitHubCommit | undefined> {
   try {
-    const data = await fetchJson<{ sha?: string }>(
+    const data = await fetchJson<{
+      sha?: string;
+      commit?: { committer?: { date?: string } | null };
+    }>(
       `https://api.github.com/repos/${source.owner}/${source.repo}/commits/${encodeURIComponent(ref)}`,
+      options,
     );
-    return data.sha;
-  } catch {
-    return shaRefPattern.test(ref) ? ref : undefined;
+    if (!data.sha) {
+      return undefined;
+    }
+    const date = data.commit?.committer?.date;
+    // Normalised so stored values compare consistently; a malformed date is
+    // dropped rather than stored, and the version then ranks as undated.
+    const parsed = typeof date === "string" ? Date.parse(date) : Number.NaN;
+    return {
+      sha: data.sha,
+      ...(Number.isNaN(parsed)
+        ? {}
+        : { committedAt: new Date(parsed).toISOString() }),
+    };
+  } catch (error) {
+    if (shaRefPattern.test(ref)) {
+      return { sha: ref };
+    }
+    // Without a sha to fall back on, a stalled GitHub must read as a timeout,
+    // not as "this ref cannot be pinned".
+    if (error instanceof GitHubArchiveError) {
+      throw error;
+    }
+    return undefined;
   }
 }

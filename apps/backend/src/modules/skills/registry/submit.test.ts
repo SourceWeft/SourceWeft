@@ -106,6 +106,27 @@ test("a clean, new skill indexes and stores a pointer + published version", asyn
   );
 });
 
+test("the commit date rides into the stored manifest; an unknown one is omitted", async () => {
+  mocks.analyze.mockReturnValue(analyzed());
+
+  mocks.read.mockResolvedValue({
+    ...readResult(1),
+    committedAt: "2026-02-01T10:00:00.000Z",
+  });
+  await submitRegistrySkillFromGitHub({ repoUrl: "acme/skills", userId: "me" });
+  assert.equal(
+    mocks.upsert.mock.calls[0]?.[0].manifestJson.registry.committedAt,
+    "2026-02-01T10:00:00.000Z",
+  );
+
+  mocks.read.mockResolvedValue(readResult(1));
+  await submitRegistrySkillFromGitHub({ repoUrl: "acme/skills", userId: "me" });
+  assert.equal(
+    "committedAt" in mocks.upsert.mock.calls[1]?.[0].manifestJson.registry,
+    false,
+  );
+});
+
 test("a flagged skill queues for review (draft version)", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(

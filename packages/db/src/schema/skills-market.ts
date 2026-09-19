@@ -109,6 +109,13 @@ export type SkillManifestJson = {
     sourceUrl: string;
     repoUrl: string;
     submittedBy: string;
+    /**
+     * Committer date (ISO 8601) of the pinned commit. Decides which published
+     * version is current — by commit age, not by which write landed last.
+     * Absent on versions indexed before this was captured, and when GitHub's
+     * commit metadata could not be read; such a version ranks as oldest.
+     */
+    committedAt?: string;
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };

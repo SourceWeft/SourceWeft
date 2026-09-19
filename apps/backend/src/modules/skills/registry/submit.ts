@@ -41,7 +41,7 @@ export async function submitRegistrySkillFromGitHub(input: {
 }): Promise<SubmitRegistryResult> {
   const read = await readRegistrySkillsFromGitHub(input.repoUrl);
 
-  const { source, commitSha } = read;
+  const { source, commitSha, committedAt } = read;
   const { owner, repo, repoUrl } = source;
   const version = commitSha.slice(0, VERSION_SHA_PREFIX_LENGTH);
 
@@ -94,6 +94,9 @@ export async function submitRegistrySkillFromGitHub(input: {
           sourceUrl: skillSourceUrl(repoUrl, commitSha, analyzed.repoSubpath),
           repoUrl,
           submittedBy: input.userId,
+          // Orders this commit against the skill's other versions when the
+          // index decides which one is current.
+          ...(committedAt ? { committedAt } : {}),
           capability: analyzed.capability,
           scan: analyzed.scan,
           ingestion: {
