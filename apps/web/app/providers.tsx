@@ -14,7 +14,10 @@ import { AuthProvider } from "./_components/auth/auth-provider";
 import { GoogleOneTap } from "./google-one-tap";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
-import { additionalFields } from "../lib/auth-ui-config";
+import {
+  additionalFields,
+  organizationPluginOptions,
+} from "../lib/auth-ui-config";
 import { apiKeyPlugin } from "../lib/auth/api-key-plugin";
 import { emailOtpPlugin } from "../lib/auth/email-otp-plugin";
 import { magicLinkPlugin } from "../lib/auth/magic-link-plugin";
@@ -171,7 +174,7 @@ export function Providers({
             twoFactorPlugin({ enrollmentMethods: ["otp", "totp"] }),
             multiSessionPlugin(),
             apiKeyPlugin({ organization: true }),
-            organizationPlugin(),
+            organizationPlugin(organizationPluginOptions),
           ]}
           redirectTo="/dashboard"
           socialProviders={["google", "github"]}

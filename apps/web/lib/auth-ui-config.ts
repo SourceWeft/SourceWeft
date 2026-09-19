@@ -1,26 +1,48 @@
 import { viewPaths, type AdditionalFields } from "@better-auth-ui/core";
 import { emailOtpPlugin } from "@better-auth-ui/core/plugins/email-otp";
 import { magicLinkPlugin } from "@better-auth-ui/core/plugins/magic-link";
-import { organizationPlugin } from "@better-auth-ui/core/plugins/organization";
+import {
+  organizationPlugin,
+  type OrganizationPluginOptions,
+} from "@better-auth-ui/core/plugins/organization";
 import { twoFactorPlugin } from "@better-auth-ui/core/plugins/two-factor";
+
+/**
+ * `app/providers.tsx` registers the organization plugin with exactly these
+ * options, and the static paths below are derived from them. Keeping one
+ * source for both matters: the plugin advertises a view path for `teams` and
+ * `roles` whether or not they are switched on, so deriving paths separately
+ * produces routes that throw (`roles`) or render an empty tab shell (`teams`).
+ *
+ * `teams` also needs better-auth's organization teams enabled on the server,
+ * which `apps/backend` currently does not do.
+ */
+export const organizationPluginOptions: OrganizationPluginOptions = {};
+
+const organizationViewIsEnabled: Record<string, boolean> = {
+  roles: organizationPluginOptions.dynamicAccessControl?.enabled === true,
+  teams: Boolean(organizationPluginOptions.teams),
+};
 
 // View paths are contributed by the core package plus whichever plugins are
 // registered in `app/providers.tsx`. Keep this list in step with that array:
 // a path missing here becomes a 404 because the routes set `dynamicParams`
 // to false.
 const authPlugins = [
-  magicLinkPlugin,
-  emailOtpPlugin,
-  twoFactorPlugin,
-  organizationPlugin,
+  () => magicLinkPlugin({}),
+  () => emailOtpPlugin({}),
+  () => twoFactorPlugin({}),
+  () => organizationPlugin(organizationPluginOptions),
 ];
 
 function pluginViewPaths(scope: "auth" | "settings" | "organization") {
   return authPlugins.flatMap((plugin) => {
-    const paths = plugin({}).viewPaths as
+    const paths = plugin().viewPaths as
       | Partial<Record<typeof scope, Record<string, string>>>
       | undefined;
-    return Object.values(paths?.[scope] ?? {});
+    return Object.entries(paths?.[scope] ?? {})
+      .filter(([view]) => organizationViewIsEnabled[view] ?? true)
+      .map(([, segment]) => segment);
   });
 }
 
