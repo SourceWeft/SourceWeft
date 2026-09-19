@@ -7,6 +7,7 @@ import {
   validateBuiltinSkills,
 } from "./builtin";
 import {
+  BuiltinSkillSlugConflictError,
   createNextCustomSkillVersionDraft,
   createWorkspaceCustomSkillDraft,
   deleteCustomSkillVersionFileRecord,
@@ -48,6 +49,7 @@ import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
 import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
 // curated index, not a document corpus (skill-registry-index.md §4).
@@ -195,6 +197,19 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
   return base;
 }
 
+const REGISTRY_SLUG_PREFIX = "gh-";
+
+/** drizzle wraps the driver error, so the pg fields may sit on `cause`. */
+function isSkillSlugUniqueViolation(error: unknown): boolean {
+  for (const candidate of [error, (error as { cause?: unknown })?.cause]) {
+    const pg = candidate as { code?: string; constraint?: string } | undefined;
+    if (pg?.code === "23505" && pg.constraint === "skill_definitions_slug_uq") {
+      return true;
+    }
+  }
+  return false;
+}
+
 const SKILL_SEARCH_MAX_TERMS = 8;
 
 /** The whole query plus its individual words, lowercased, shortest dropped. */
@@ -330,21 +345,37 @@ export class ContentSkillsService {
   async syncBuiltinCatalog() {
     await validateBuiltinSkills();
     const synced = [];
+    const skipped: string[] = [];
     for (const skill of await listBuiltinSkills()) {
-      synced.push(
-        await syncBuiltinSkillMetadata({
-          slug: skill.slug,
-          displayName: skill.displayName,
-          description: skill.description,
-          visibility: skill.visibility,
-          version: skill.version,
-          storagePointer: skill.storagePointer,
-          contentHash: skill.contentHash,
-          manifestJson: skill.manifestJson,
-        }),
-      );
+      try {
+        synced.push(
+          await syncBuiltinSkillMetadata({
+            slug: skill.slug,
+            displayName: skill.displayName,
+            description: skill.description,
+            visibility: skill.visibility,
+            version: skill.version,
+            storagePointer: skill.storagePointer,
+            contentHash: skill.contentHash,
+            manifestJson: skill.manifestJson,
+          }),
+        );
+      } catch (error) {
+        // This runs at API boot. A slug collision costs that ONE builtin its
+        // catalog row (a `managed` one is not installable until it is
+        // resolved); anything else — the database being down — still fails
+        // the boot.
+        if (!(error instanceof BuiltinSkillSlugConflictError)) {
+          throw error;
+        }
+        skipped.push(skill.slug);
+        logger.error("Builtin skill not synced: its slug is taken", {
+          slug: error.slug,
+          conflictingSourceType: error.conflictingSourceType,
+        });
+      }
     }
-    return { items: synced };
+    return { items: synced, skipped };
   }
 
   async validateBuiltinCatalog() {
@@ -917,17 +948,42 @@ export class ContentSkillsService {
     description: string;
     version?: string;
   }) {
-    return {
-      customSkill: await createWorkspaceCustomSkillDraft({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        name: input.name,
-        displayName: input.displayName ?? displayNameFromName(input.name),
-        description: input.description,
-        version: input.version,
-      }),
-    };
+    // Slugs are global. `gh-…` is the registry's namespace — a custom skill
+    // there blocks that repository's skill from ever being indexed — and a
+    // builtin's name would shadow it (see `syncBuiltinCatalog`).
+    if (
+      input.name.startsWith(REGISTRY_SLUG_PREFIX) ||
+      (await getBuiltinSkillBySlug(input.name))
+    ) {
+      throw new ContentError(
+        409,
+        "SKILL_NAME_RESERVED",
+        `'${input.name}' is reserved. Choose another name.`,
+      );
+    }
+    try {
+      return {
+        customSkill: await createWorkspaceCustomSkillDraft({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          name: input.name,
+          displayName: input.displayName ?? displayNameFromName(input.name),
+          description: input.description,
+          version: input.version,
+        }),
+      };
+    } catch (error) {
+      if (isSkillSlugUniqueViolation(error)) {
+        // Was an unhandled 23505 → HTTP 500.
+        throw new ContentError(
+          409,
+          "SKILL_NAME_TAKEN",
+          `A skill named '${input.name}' already exists. Choose another name.`,
+        );
+      }
+      throw error;
+    }
   }
 
   async createWorkspaceCustomSkillVersion(input: {
@@ -1133,4 +1189,5 @@ export const testExports = {
   parseSkillInstallSource,
   pickInstallableByName,
   skillSearchTerms,
+  isSkillSlugUniqueViolation,
 };

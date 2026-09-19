@@ -702,6 +702,25 @@ export async function loadSkillVersionBundle(input: {
   };
 }
 
+/**
+ * A builtin's slug is already held by a non-builtin skill. Typed so startup
+ * can skip that one builtin instead of refusing to boot: slugs are global and
+ * workspace-authored skills pick their own, so without this a single custom
+ * skill named like a builtin we ship later would take the whole API down.
+ */
+export class BuiltinSkillSlugConflictError extends Error {
+  readonly slug: string;
+  readonly conflictingSourceType: string;
+  constructor(slug: string, conflictingSourceType: string) {
+    super(
+      `Builtin skill slug '${slug}' conflicts with ${conflictingSourceType} skill`,
+    );
+    this.name = "BuiltinSkillSlugConflictError";
+    this.slug = slug;
+    this.conflictingSourceType = conflictingSourceType;
+  }
+}
+
 export async function syncBuiltinSkillMetadata(input: {
   slug: string;
   displayName: string;
@@ -715,6 +734,12 @@ export async function syncBuiltinSkillMetadata(input: {
   assertRegistryStorageInvariant("builtin", "repo_builtin");
   const now = new Date();
   return db.transaction(async (tx) => {
+    // Every API instance runs this at boot. Without the lock, two instances
+    // starting together on a release that adds a builtin both see "no row" and
+    // both insert; the loser dies on the slug unique constraint.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${"builtin:" + input.slug}))`,
+    );
     const [conflict] = await tx
       .select({
         id: skillDefinitions.id,
@@ -729,9 +754,7 @@ export async function syncBuiltinSkillMetadata(input: {
       )
       .limit(1);
     if (conflict) {
-      throw new Error(
-        `Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`,
-      );
+      throw new BuiltinSkillSlugConflictError(input.slug, conflict.sourceType);
     }
 
     const [existing] = await tx
