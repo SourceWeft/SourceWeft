@@ -29,7 +29,7 @@ const chats: ComponentProps<typeof DashboardSidebarChatPanel>["privateChats"] =
     sourceCount: 0,
     visibility: "private" as const,
   }));
-function render(activeChatId: string, search = "") {
+function render(activeChatId: string, search = "", desktopTitlebar = false) {
   const noop = () => {};
   const asyncNoop = async () => {};
   return renderToStaticMarkup(
@@ -37,6 +37,7 @@ function render(activeChatId: string, search = "") {
       SidebarProvider,
       null,
       createElement(DashboardSidebarChatPanel, {
+        desktopTitlebar,
         heading: null,
         navigation: null,
         footer: null,
@@ -80,6 +81,19 @@ test("sidebar text search spans all execution targets", () => {
   assert.ok(html.includes("Cloud research"));
   assert.ok(!html.includes("Mac research"));
   assert.ok(!html.includes("Clear all private chats"));
+});
+
+test("the PC client clears only the traffic lights above the workspace switcher", () => {
+  const desktop = render("cloud", "", true);
+  // A draggable 40px strip, not the 56px spacer that read as a blank band.
+  assert.ok(!desktop.includes("pt-14"));
+  assert.ok(desktop.includes('data-desktop-drag-region=""'));
+  assert.ok(desktop.includes("h-10 shrink-0 select-none"));
+  assert.ok(desktop.includes("h-12 sm:h-14"));
+
+  const web = render("cloud");
+  assert.ok(!web.includes("data-desktop-drag-region"));
+  assert.ok(web.includes("h-12 sm:h-14"));
 });
 
 test("new chat aligns with navigation and search belongs to the chats header", () => {

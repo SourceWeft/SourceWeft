@@ -797,11 +797,19 @@ export function DashboardSidebarChatPanel({
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
-    <div
-      className={cn("flex h-full min-h-0 flex-col", desktopTitlebar && "pt-14")}
-    >
+    <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
         {brand}
+        {/* The PC client hides the brand, so the strip above the workspace
+            switcher reserves only what the traffic lights occupy, and drags
+            the window instead of sitting there empty. */}
+        {desktopTitlebar ? (
+          <div
+            aria-hidden="true"
+            data-desktop-drag-region=""
+            className="h-10 shrink-0 select-none"
+          />
+        ) : null}
         <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
           <div className="min-w-0 flex-1">
             <WorkspaceSwitcher
