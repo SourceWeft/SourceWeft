@@ -18,6 +18,10 @@ import type {
 } from "./types";
 import type { ValidatedCustomSkillFile } from "./custom-validation";
 
+// Enough to show a person every collision on a short name without letting a
+// common suffix pull an unbounded set.
+const INSTALLABLE_NAME_MATCH_LIMIT = 20;
+
 type WorkspaceSkillRow = typeof workspaceSkills.$inferSelect;
 type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
 type SkillVersionRow = typeof skillVersions.$inferSelect;
@@ -335,6 +339,91 @@ export async function listCatalogSkillVersionsForWorkspace(input: {
     );
 }
 
+/**
+ * What a workspace is allowed to install — the ONE predicate every install
+ * path goes through, whether it names the skill by id (the catalog UI) or by
+ * slug (the agent's `install_skill`).
+ *
+ * The chat path used to resolve slugs with its own registry-only lookup that
+ * skipped this check, and `upsertWorkspaceSkill` grants an entitlement as part
+ * of installing — so naming someone else's `restricted` skill by its
+ * (guessable) slug both installed it and granted access to it.
+ */
+function installableSkillCondition(input: {
+  teamId: string;
+  workspaceId: string;
+  userId?: string;
+}) {
+  return and(
+    // Builtins are installable only when explicitly `managed` (e.g. feynman);
+    // always-on builtins (generators) stay non-installable.
+    sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
+    eq(skillDefinitions.status, "active"),
+    eq(skillVersions.status, "published"),
+    or(
+      visibleSkillCondition(input),
+      input.userId
+        ? and(
+            eq(skillDefinitions.sourceType, "registry_github"),
+            eq(skillDefinitions.ownerUserId, input.userId),
+          )
+        : undefined,
+    ),
+  );
+}
+
+/**
+ * Installable skills a person could mean by `name`: the exact slug, or — for
+ * registry skills, whose slug is `gh-<owner>-<repo>-<name>` — the author's own
+ * short name. An exact slug wins outright; short names can collide across
+ * repositories, and the caller must surface that rather than pick one.
+ */
+export async function findInstallableSkillsByName(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+}) {
+  const name = input.name.trim().toLowerCase();
+  if (!name) {
+    return [];
+  }
+  const suffix = `%-${name.replace(/[\\%_]/g, (char) => `\\${char}`)}`;
+  const rows = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+      enabled: workspaceSkills,
+    })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+    .leftJoin(
+      workspaceSkills,
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        eq(workspaceSkills.skillId, skillDefinitions.id),
+      ),
+    )
+    .where(
+      and(
+        eq(skillVersions.isCurrent, true),
+        installableSkillCondition(input),
+        or(
+          eq(skillDefinitions.slug, name),
+          and(
+            eq(skillDefinitions.sourceType, "registry_github"),
+            sql`${skillDefinitions.slug} like ${suffix}`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(skillDefinitions.slug)
+    .limit(INSTALLABLE_NAME_MATCH_LIMIT);
+  const exact = rows.filter((row) => row.definition.slug === name);
+  return exact.length > 0 ? exact : rows;
+}
+
 export async function findCatalogSkillVersionForWorkspace(input: {
   teamId: string;
   workspaceId: string;
@@ -363,12 +452,7 @@ export async function findCatalogSkillVersionForWorkspace(input: {
         eq(skillDefinitions.id, input.skillId),
         eq(skillVersions.id, input.skillVersionId),
         eq(skillVersions.skillId, input.skillId),
-        // Builtins are installable only when explicitly `managed` (e.g. feynman);
-        // always-on builtins (generators) stay non-installable.
-        sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
-        eq(skillDefinitions.status, "active"),
-        eq(skillVersions.status, "published"),
-        or(visibleSkillCondition(input), input.userId ? and(eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.ownerUserId, input.userId)) : undefined),
+        installableSkillCondition(input),
       ),
     )
     .limit(1);
@@ -538,17 +622,34 @@ export async function deleteWorkspaceSkillRecord(input: {
   workspaceId: string;
   workspaceSkillId: string;
 }) {
-  const rows = await db
-    .delete(workspaceSkills)
-    .where(
-      and(
-        eq(workspaceSkills.id, input.workspaceSkillId),
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning({ id: workspaceSkills.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const [removed] = await tx
+      .delete(workspaceSkills)
+      .where(
+        and(
+          eq(workspaceSkills.id, input.workspaceSkillId),
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+        ),
+      )
+      .returning({ skillId: workspaceSkills.skillId });
+    if (!removed) {
+      return false;
+    }
+    // Installing is what granted this workspace access (`grantSkillEntitlement`),
+    // so uninstalling takes it back. Left behind, the grant kept a `restricted`
+    // skill visible — and re-installable — to a workspace that had removed it.
+    await tx
+      .delete(skillEntitlements)
+      .where(
+        and(
+          eq(skillEntitlements.skillId, removed.skillId),
+          eq(skillEntitlements.teamId, input.teamId),
+          eq(skillEntitlements.workspaceId, input.workspaceId),
+        ),
+      );
+    return true;
+  });
 }
 
 export async function loadSkillVersionBundle(input: {

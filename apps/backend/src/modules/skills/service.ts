@@ -12,6 +12,7 @@ import {
   deleteCustomSkillVersionFileRecord,
   deleteWorkspaceSkillRecord,
   findCatalogSkillVersionForWorkspace,
+  findInstallableSkillsByName,
   findWorkspaceCustomDraftVersion,
   listCatalogSkillVersionsForWorkspace,
   listCustomSkillVersionFileRecords,
@@ -36,12 +37,17 @@ import {
   skillVersions,
   workspaceSkills,
 } from "@sourceweft/db";
-import type { SkillCatalogItem, SkillSourceType } from "./types";
+import type {
+  SkillCatalogItem,
+  SkillSourceType,
+  WorkspaceSkillRecord,
+} from "./types";
 import { builtinSkillSelectionId } from "./selection";
 import { submitRegistrySkillFromGitHub } from "./registry/submit";
 import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
 import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
+import { config } from "../../shared/config";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
 // curated index, not a document corpus (skill-registry-index.md §4).
@@ -187,6 +193,123 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     return { ...base, displayName: manifest.displayName, description: manifest.description, installable: row.version.status === "published", ...registryCatalogFields(manifest) };
   }
   return base;
+}
+
+export type InstalledSkillResult = {
+  slug: string;
+  displayName: string;
+  description: string;
+  sourceType: SkillSourceType;
+  capability: "prompt-only" | "executable";
+  license: string | null;
+  flagged: boolean;
+  sourceUrl: string | null;
+  /** `queued`: indexed but held for review, so not installed. */
+  status: "installed" | "queued";
+  workspaceSkill: WorkspaceSkillRecord | null;
+};
+
+function describeInstallableRow(
+  row: CatalogRow,
+): Omit<InstalledSkillResult, "status" | "workspaceSkill"> {
+  const registry = row.version.manifestJson.registry;
+  return {
+    slug: row.definition.slug,
+    displayName: row.definition.displayName,
+    description: row.definition.description,
+    sourceType: row.definition.sourceType as SkillSourceType,
+    capability: registry?.capability ?? "prompt-only",
+    license: registry?.license ?? null,
+    flagged: registry?.scan?.reviewRequired ?? false,
+    sourceUrl: registry?.sourceUrl ?? null,
+  };
+}
+
+const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const OWN_SKILL_PAGE_PATTERN = /^\/dashboard\/skills\/([^/]+)\/?$/;
+
+/**
+ * What an `install_skill` source string refers to. A bare name is looked up in
+ * the catalog; anything path- or URL-shaped is a GitHub reference, except a
+ * link to this deployment's own skill page, which is just another way to name a
+ * catalog entry. Other hosts are refused outright rather than handed to the
+ * GitHub reader: a third-party directory page is not a source we can pin, scan
+ * or attribute, and what such pages tell an agent to do is not ours to follow.
+ */
+function parseSkillInstallSource(
+  raw: string,
+): { kind: "name"; name: string } | { kind: "github"; reference: string } {
+  const source = raw.trim();
+  if (!source) {
+    throw new ContentError(
+      400,
+      "SKILL_SOURCE_REQUIRED",
+      "A skill source is required",
+    );
+  }
+  if (SKILL_NAME_PATTERN.test(source.toLowerCase())) {
+    return { kind: "name", name: source.toLowerCase() };
+  }
+  let url: URL | null = null;
+  try {
+    url = new URL(source);
+  } catch {
+    // Not a URL — `owner/repo`, left to the GitHub reader to validate.
+  }
+  if (url) {
+    const ownPage =
+      url.origin === new URL(config.auth.webBaseUrl).origin
+        ? url.pathname.match(OWN_SKILL_PAGE_PATTERN)
+        : null;
+    if (ownPage?.[1]) {
+      return {
+        kind: "name",
+        name: decodeURIComponent(ownPage[1]).toLowerCase(),
+      };
+    }
+    if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
+      throw new ContentError(
+        400,
+        "SKILL_SOURCE_UNSUPPORTED",
+        "Only a catalog slug, a SourceWeft skill link, or a github.com repository can be installed",
+      );
+    }
+  }
+  return { kind: "github", reference: source };
+}
+
+function ambiguousSkillName(
+  name: string,
+  candidates: Array<{ slug: string; description: string }>,
+) {
+  return new ContentError(
+    409,
+    "SKILL_NAME_AMBIGUOUS",
+    `'${name}' matches ${candidates.length} skills. Use the full slug of the one you mean:\n${candidates
+      .map((candidate) => `- ${candidate.slug} — ${candidate.description}`)
+      .join("\n")}`,
+  );
+}
+
+function pickInstallableByName(rows: CatalogRow[], name: string): CatalogRow {
+  if (rows.length > 1) {
+    throw ambiguousSkillName(
+      name,
+      rows.map((row) => ({
+        slug: row.definition.slug,
+        description: row.definition.description,
+      })),
+    );
+  }
+  const [row] = rows;
+  if (!row) {
+    throw new ContentError(
+      404,
+      "SKILL_NOT_FOUND",
+      `No skill named '${name}' is available to this workspace. Use search_skills to see what is, or give a GitHub repository to add a new one.`,
+    );
+  }
+  return row;
 }
 
 export class ContentSkillsService {
@@ -410,161 +533,195 @@ export class ContentSkillsService {
   }
 
   /**
-   * Install a skill by source, indexing it first if we have never seen it.
+   * Search everything this workspace can install — the agent's `search_skills`.
    *
-   * `source` accepts the three forms a person would naturally give: a GitHub
-   * URL (optionally deep-linked to one skill's directory), the `owner/repo`
-   * shorthand, or the slug of something already in the catalog. That is the
-   * same surface `lh skill install <source>` exposes, and it is what lets the
-   * agent act on "install a skill that can do X" without the user leaving chat.
+   * `searchRegistry` alone made the workspace's own skills, its team's, and the
+   * opt-in builtins invisible to the agent: it could be asked for "our
+   * meeting-notes skill" and truthfully report that nothing matched. Registry
+   * rows keep their SQL filter (that index is the large one); the rest of the
+   * catalog is a handful of rows and is matched in process.
+   */
+  async searchCatalog(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    query: string;
+  }) {
+    const { items: registryItems, query } = await this.searchRegistry(input);
+    if (query.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
+      return { items: registryItems, query };
+    }
+    const needle = query.toLowerCase();
+    const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
+      .filter(
+        (row) =>
+          row.definition.sourceType !== "registry_github" &&
+          (row.definition.sourceType !== "builtin" ||
+            row.version.manifestJson.managed === true) &&
+          row.version.manifestJson.listing !== "hidden",
+      )
+      .map(mapCatalogRow)
+      .filter((item) =>
+        [item.slug, item.displayName, item.description].some((text) =>
+          text.toLowerCase().includes(needle),
+        ),
+      );
+    const items = [...ownItems, ...registryItems]
+      .sort(compareSkillSearchRelevance(query))
+      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
+    return { items, query };
+  }
+
+  /**
+   * Install a skill into a workspace — the ONE install path. The catalog UI
+   * names the skill by id (`ref.kind === "version"`); the agent's
+   * `install_skill` names it by `source`, which accepts what a person would
+   * naturally give: a catalog slug, the author's short name ("pdf"), a link to
+   * this deployment's own skill page, a GitHub URL (optionally deep-linked to
+   * one skill's directory), or the `owner/repo` shorthand.
    *
-   * `skill` narrows a multi-skill repository to the one that was asked for,
-   * mirroring `lh skill install <repo> --skill <name>`. Without it, "install the
-   * pdf skill from anthropics/skills" could only install all nineteen, because
-   * naming one otherwise means knowing its directory path — which the model has
-   * no way to learn before the repo is indexed. The whole repo is still INDEXED
-   * (that is what makes the rest searchable); only the install narrows.
+   * Every form resolves to a catalog row through `installableSkillCondition`,
+   * so a workspace can only install what its catalog shows it: builtins marked
+   * `managed`, its own and its team's skills, public skills, and registry
+   * skills the caller submitted. The slug path used to skip that check and
+   * could install — and thereby entitle — another submitter's `restricted`
+   * skill by guessing its slug.
    *
-   * Nothing installed here is enabled. Every skill this method handles is
-   * `registry_github` — third-party, `visibility: restricted`, publisher
-   * "Community", `verified: false` — and enabling one puts its author's text
-   * into the agent's available-skills list on every subsequent turn. That is
-   * not hypothetical: a community skill observed in the wild uses its own
-   * DESCRIPTION to demand "skill invocation before ANY response including
-   * clarifying questions". Instruction injection needs no scripts.
+   * A GitHub reference that is not indexed yet goes through the submit pipeline
+   * first (scan + triage included); `skill` narrows a multi-skill repository to
+   * the one that was asked for, mirroring `lh skill install <repo> --skill`. The
+   * whole repo is still INDEXED — that is what makes the rest searchable — only
+   * the install narrows. A submission the scan held for review is reported as
+   * `queued` and not installed: a draft version is not selectable, so
+   * installing it would be a dead reference.
    *
-   * So installing and enabling separate by SOURCE, not by capability: builtin
-   * and workspace-authored skills enable on install (we ship the first, the
-   * user wrote the second), while a registry skill waits for someone to approve
-   * that specific skill through `enable_skill`. `capability` still matters — it
-   * decides what the approval prompt warns about — it just no longer decides
-   * whether third-party text goes live on its own.
+   * Installing enables (product decision, 2026-09): whatever the catalog offers
+   * a workspace can be put to work in one step, by a person or by the agent.
+   * The gates are upstream of this method — the scan and review queue at
+   * ingest, and visibility here — not a second approval at install time.
    */
   async installSkill(input: {
     teamId: string;
     workspaceId: string;
     userId: string;
-    source: string;
-    skill?: string;
-  }) {
-    const source = input.source.trim();
-    const wanted = input.skill?.trim().toLowerCase();
-    if (!source) {
-      throw new ContentError(
-        400,
-        "SKILL_SOURCE_REQUIRED",
-        "A skill source is required",
-      );
-    }
-
-    const installed: Array<{
-      slug: string;
-      displayName: string;
-      description: string;
-      capability: "prompt-only" | "executable";
-      enabled: boolean;
-      status: "indexed" | "queued";
-      license: string | null;
-      flagged: boolean;
-      sourceUrl: string | null;
-    }> = [];
-
-    // An already-indexed slug installs directly; anything else is a repo
-    // reference and goes through the submit pipeline first.
-    const known = await getRegistrySkillBySlug(source);
-    const submitted = known
-      ? null
-      : await submitRegistrySkillFromGitHub({
-          repoUrl: source,
-          userId: input.userId,
-        });
-
-    const indexed = known
-      ? [{ slug: source, name: known.version.manifestJson.slug }]
-      : (submitted?.skills ?? []).flatMap((s) => s.status !== "failed" && s.slug && s.name ? [{ slug: s.slug, name: s.name }] : []);
-    // Match the author's frontmatter name — what a person actually says ("the
-    // pdf skill") rather than `gh-<owner>-<repo>-<name>`. A full slug works too.
-    const selected = wanted
-      ? indexed.filter(
-          (entry) =>
-            entry.name.toLowerCase() === wanted ||
-            entry.slug.toLowerCase() === wanted,
-        )
-      : indexed;
-    if (wanted && selected.length === 0) {
-      throw new ContentError(
-        404,
-        "SKILL_NOT_FOUND",
-        `'${source}' has no skill named '${input.skill}'. It ships: ${indexed
-          .map((entry) => entry.name)
-          .slice(0, 30)
-          .join(", ")}`,
-      );
-    }
-    const slugs = selected.map((entry) => entry.slug);
-    for (const slug of slugs) {
-      const row = await getRegistrySkillBySlug(slug);
-      if (!row) {
-        continue;
-      }
-      const registry = row.version.manifestJson.registry;
-      const capability = registry?.capability ?? "prompt-only";
-      const provenance = {
-        license: registry?.license ?? null,
-        flagged: registry?.scan?.reviewRequired ?? false,
-        sourceUrl: registry?.sourceUrl ?? null,
-      };
-      // A queued (draft) version is not selectable, so installing it would be a
-      // dead reference — record it in the result and move on.
-      if (row.version.status !== "published") {
-        installed.push({
-          slug,
-          displayName: row.definition.displayName,
-          description: row.definition.description,
-          capability,
-          enabled: false,
-          status: "queued",
-          ...provenance,
-        });
-        continue;
-      }
-      await upsertWorkspaceSkill({
+    ref:
+      | { kind: "version"; skillId: string; skillVersionId: string }
+      | { kind: "source"; source: string; skill?: string };
+    configJson?: Record<string, unknown>;
+  }): Promise<{ skills: InstalledSkillResult[] }> {
+    const scope = {
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    };
+    const install = async (row: CatalogRow): Promise<InstalledSkillResult> => {
+      const workspaceSkill = await upsertWorkspaceSkill({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         skillId: row.definition.id,
         skillVersionId: row.version.id,
         enabledBy: input.userId,
-        enabled: false,
+        // Re-installing must not wipe the config of a skill already in place.
+        configJson: input.configJson ?? row.enabled?.configJson,
       });
-      installed.push({
-        slug,
-        displayName: row.definition.displayName,
-        description: row.definition.description,
-        capability,
-        enabled: false,
-        status: "indexed",
-        ...provenance,
+      return {
+        ...describeInstallableRow(row),
+        status: "installed",
+        workspaceSkill,
+      };
+    };
+
+    if (input.ref.kind === "version") {
+      const row = await findCatalogSkillVersionForWorkspace({
+        ...scope,
+        skillId: input.ref.skillId,
+        skillVersionId: input.ref.skillVersionId,
       });
+      if (!row) {
+        throw new ContentError(
+          404,
+          "SKILL_NOT_FOUND",
+          "Skill not found or not available to this workspace",
+        );
+      }
+      return { skills: [await install(row)] };
     }
 
-    if (installed.length === 0) {
+    const source = parseSkillInstallSource(input.ref.source);
+    if (source.kind === "name") {
+      const row = pickInstallableByName(
+        await findInstallableSkillsByName({ ...scope, name: source.name }),
+        source.name,
+      );
+      return { skills: [await install(row)] };
+    }
+
+    const submitted = await submitRegistrySkillFromGitHub({
+      repoUrl: source.reference,
+      userId: input.userId,
+    });
+    const accepted = submitted.skills.flatMap((item) =>
+      item.status !== "failed" && item.slug && item.name
+        ? [{ slug: item.slug, name: item.name, status: item.status }]
+        : [],
+    );
+    // Match the author's frontmatter name — what a person actually says ("the
+    // pdf skill") rather than `gh-<owner>-<repo>-<name>`. A full slug works too.
+    const wanted = input.ref.skill?.trim().toLowerCase();
+    const selected = wanted
+      ? accepted.filter(
+          (entry) =>
+            entry.name.toLowerCase() === wanted ||
+            entry.slug.toLowerCase() === wanted,
+        )
+      : accepted;
+    if (wanted && selected.length === 0) {
       throw new ContentError(
         404,
         "SKILL_NOT_FOUND",
-        `No installable skill was found at '${source}'`,
+        `'${source.reference}' has no skill named '${input.ref.skill}'. It ships: ${accepted
+          .map((entry) => entry.name)
+          .slice(0, 30)
+          .join(", ")}`,
       );
     }
-    return { skills: installed };
+
+    const skills: InstalledSkillResult[] = [];
+    for (const entry of selected) {
+      const [row] =
+        entry.status === "indexed"
+          ? await findInstallableSkillsByName({ ...scope, name: entry.slug })
+          : [];
+      if (row) {
+        skills.push(await install(row));
+        continue;
+      }
+      const held = await getRegistrySkillBySlug(entry.slug);
+      if (held && held.definition.ownerUserId === input.userId) {
+        skills.push({
+          ...describeInstallableRow({ ...held, enabled: null }),
+          status: "queued",
+          workspaceSkill: null,
+        });
+      }
+    }
+    if (skills.length === 0) {
+      throw new ContentError(
+        404,
+        "SKILL_NOT_FOUND",
+        `No installable skill was found at '${source.reference}'`,
+      );
+    }
+    return { skills };
   }
 
   /**
-   * Switch on an already-installed skill, by slug.
+   * Switch an installed skill back on, by slug.
    *
-   * The counterpart to `installSkill` leaving everything off. Its tool goes
-   * through human approval, which is the point: this is where a person accepts
-   * a specific third party's instructions — and, for an `executable` skill,
-   * their code — into the agent. A model completing a task is exactly the actor
-   * that would otherwise flip it on as a means to an end.
+   * Installing already enables, so this only matters for a skill somebody
+   * deliberately switched off — which is why its tool still asks a person
+   * first: the model overriding that choice on its own is a different act from
+   * installing something new.
    */
   async enableWorkspaceSkillBySlug(input: {
     teamId: string;
@@ -572,18 +729,32 @@ export class ContentSkillsService {
     userId: string;
     slug: string;
   }) {
-    const slug = input.slug.trim();
+    const slug = input.slug.trim().toLowerCase();
     const installed = await listWorkspaceInstalledSkills({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
     });
-    const match =
-      installed.find((item) => item.slug === slug) ??
-      // Accept the author's own name too — it is what a person says out loud,
-      // and the same handle `install_skill` takes.
-      installed.find(
-        (item) => item.slug.endsWith(`-${slug}`) || item.name === slug,
+    const exact = installed.filter((item) => item.slug === slug);
+    // Accept the author's own name too — it is what a person says out loud,
+    // and the same handle `install_skill` takes.
+    const matches =
+      exact.length > 0
+        ? exact
+        : installed.filter(
+            (item) =>
+              item.sourceType === "registry_github" &&
+              item.slug.endsWith(`-${slug}`),
+          );
+    if (matches.length > 1) {
+      throw ambiguousSkillName(
+        input.slug,
+        matches.map((item) => ({
+          slug: item.slug,
+          description: item.description,
+        })),
       );
+    }
+    const match = matches[0];
     if (!match) {
       throw new ContentError(
         404,
@@ -600,6 +771,7 @@ export class ContentSkillsService {
       skillId: match.skillId,
       skillVersionId: match.skillVersionId,
       enabledBy: input.userId,
+      configJson: match.configJson,
       enabled: true,
     });
     return { skill: match, alreadyEnabled: false };
@@ -697,34 +869,6 @@ export class ContentSkillsService {
       );
     }
     return bundle.files;
-  }
-
-  async enableSkill(input: {
-    teamId: string;
-    workspaceId: string;
-    userId: string;
-    skillId: string;
-    skillVersionId: string;
-    configJson?: Record<string, unknown>;
-  }) {
-    const skill = await findCatalogSkillVersionForWorkspace(input);
-    if (!skill) {
-      throw new ContentError(
-        404,
-        "SKILL_NOT_FOUND",
-        "Skill not found or not available to this workspace",
-      );
-    }
-    return {
-      workspaceSkill: await upsertWorkspaceSkill({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        skillId: input.skillId,
-        skillVersionId: input.skillVersionId,
-        enabledBy: input.userId,
-        configJson: input.configJson,
-      }),
-    };
   }
 
   async createWorkspaceCustomSkill(input: {
@@ -949,4 +1093,6 @@ export const testExports = {
   skillSearchRelevanceRank,
   compareSkillSearchRelevance,
   mapCatalogRow,
+  parseSkillInstallSource,
+  pickInstallableByName,
 };

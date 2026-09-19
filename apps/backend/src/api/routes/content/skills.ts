@@ -180,15 +180,22 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentSkillsService.enableSkill({
+    const { skills } = await contentSkillsService.installSkill({
       teamId,
       workspaceId,
       userId: getSessionUserId(session),
-      skillId: parsed.data.skillId,
-      skillVersionId: parsed.data.skillVersionId,
+      ref: {
+        kind: "version",
+        skillId: parsed.data.skillId,
+        skillVersionId: parsed.data.skillVersionId,
+      },
       configJson: parsed.data.configJson,
     });
-    return ApiResponse.success(c, result, 201);
+    return ApiResponse.success(
+      c,
+      { workspaceSkill: skills[0]!.workspaceSkill },
+      201,
+    );
   });
 
   app.post("/skills/custom", async (c) => {

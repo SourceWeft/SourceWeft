@@ -56,9 +56,8 @@ function registrySkill(
   };
 }
 
-// A skill that ships scripts is installed switched OFF on purpose. Without a
-// reason on the row, the user sees a skill they just asked for sitting inert
-// and reads it as a failed install.
+// A switched-off skill that ships scripts says so on its row, so whoever turns
+// it back on knows that doing so makes code runnable, not just instructions.
 test("an off executable registry skill says why it is off", () => {
   const text = render(
     registrySkill({ registryCapability: "executable" }),

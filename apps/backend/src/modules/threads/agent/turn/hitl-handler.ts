@@ -297,7 +297,7 @@ const PLAIN_CONFIRMABLE_TOOLS: ReadonlyMap<
       domain: "skills",
       label: "Enable skill",
       subject: "Workspace skills",
-      title: "Enable a third-party skill",
+      title: "Switch a skill back on",
     },
   ],
 ]);
