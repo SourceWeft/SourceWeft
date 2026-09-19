@@ -217,14 +217,14 @@ export function DashboardLayoutClient({
 
   if (isAuxiliaryWindow) {
     return (
-      <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
+      <main className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
         {children}
       </main>
     );
   }
 
   return (
-    <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
+    <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
           <DashboardWorkspaceLayout>

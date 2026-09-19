@@ -100,7 +100,7 @@ export function MobileLoginView({ path }: { path: string }) {
           return;
         }
 
-        router.replace("/dashboard");
+        router.replace("/dashboard/chat");
         router.refresh();
       } catch {
         // Stay on the mobile auth form when the session probe is unavailable.
@@ -143,7 +143,7 @@ export function MobileLoginView({ path }: { path: string }) {
     const session = await authClient.getSession();
 
     if (hasActiveSession(session)) {
-      router.replace("/dashboard");
+      router.replace("/dashboard/chat");
       router.refresh();
       return;
     }
