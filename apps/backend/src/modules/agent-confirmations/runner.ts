@@ -219,6 +219,12 @@ async function recordTrustRuleForDecision(input: {
   if (input.decision !== "approve_always") {
     return undefined;
   }
+  if (input.confirmation?.execution.sourceweft?.localDeviceId)
+    throw new ConnectorError(
+      403,
+      "LOCAL_RULES_SETTINGS_ONLY",
+      "Persistent local permissions can only be changed in the target computer settings.",
+    );
   if (!input.scope) {
     logger.warn(
       "approve_always decision could not be turned into a trust rule; approving once only",

@@ -1,4 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod hub_window;
+mod preview_window;
+mod local_bridge;
+mod native_access;
+mod remote_host;
+mod window_chrome;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -93,13 +99,24 @@ fn main() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        .append_invoke_initialization_script(desktop_bridge_script())
         .invoke_handler(tauri::generate_handler![
+            hub_window::hub_window_action,
+            hub_window::hub_window_send,
+            preview_window::open_file_preview,
+            preview_window::read_file_preview,
+            preview_window::close_file_preview,
             desktop_info,
+            window_chrome::desktop_titlebar_action,
             show_main_window,
             get_autostart,
             set_autostart,
             open_external_url,
+            local_bridge::local_host_status,
+            local_bridge::authenticate_local_host,
+            local_bridge::choose_local_folder,
+            local_bridge::enable_local_host,
+            local_bridge::disconnect_local_host,
+            local_bridge::choose_working_directory,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {
@@ -108,6 +125,17 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
+                    &app.path().app_data_dir()?,
+                )?);
+                app.manage(
+                    remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
+                        .map_err(std::io::Error::other)?,
+                );
+                app.manage(host);
+            }
             let settings_path = resolve_settings_path(app.handle())?;
             let settings = read_settings(&settings_path);
             app.manage(DesktopState {
@@ -115,8 +143,15 @@ fn main() {
                 settings_path,
             });
 
+            app.manage(preview_window::PreviewState::default());
             setup_deep_links(app.handle());
             register_deep_links(app.handle());
+            let base =
+                resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?;
+            app.add_capability(native_access::web_capability(&base))?;
+            app.add_capability(native_access::hub_capability(&base))?;
+            app.add_capability(preview_window::opener_capability(&base))?;
+            app.add_capability(preview_window::reader_capability(&base))?;
             create_main_window(app)?;
             setup_tray(app)?;
             emit_startup_deep_links(app.handle());
@@ -125,9 +160,21 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == preview_window::LABEL {
+                    api.prevent_close();
+                    preview_window::clear(window.app_handle(), true);
+                    return;
+                }
                 if !IS_QUITTING.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == hub_window::LABEL {
+                        let _ = window.emit(
+                            hub_window::EVENT,
+                            serde_json::json!({"kind":"close-requested"}),
+                        );
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         })
@@ -136,7 +183,7 @@ fn main() {
 }
 
 fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
-    let window_config = app
+    let mut window_config = app
         .config()
         .app
         .windows
@@ -145,8 +192,19 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .cloned()
         .unwrap_or_else(|| app.config().app.windows[0].clone());
 
+    window_config.url = tauri::WebviewUrl::External(
+        resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?,
+    );
     let handle = app.handle().clone();
-    WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+    let builder = WebviewWindowBuilder::from_config(app.handle(), &window_config)?;
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0))
+        .initialization_script(window_chrome::INITIALIZATION_SCRIPT);
+    builder
+        .initialization_script(desktop_bridge_script())
         .on_navigation(move |url| handle_navigation(&handle, url))
         .on_new_window(move |url, _features| {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -164,11 +222,14 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
     }
 
     if is_desktop_web_url(app, url) {
+        if url.path() == "/auth" || url.path().starts_with("/auth/") {
+            preview_window::clear(app, false);
+        }
         if is_allowed_desktop_path(url.path()) {
             return true;
         }
 
-        let _ = navigate_main_window(app, "/dashboard");
+        let _ = navigate_main_window(app, "/dashboard/chat");
         return false;
     }
 
@@ -180,23 +241,7 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
 }
 
 fn is_desktop_web_url(app: &AppHandle, url: &Url) -> bool {
-    if url.scheme() == "tauri"
-        || url.scheme() == "http" && url.host_str() == Some("tauri.localhost")
-        || url.scheme() == "https" && url.host_str() == Some("tauri.localhost")
-    {
-        return true;
-    }
-
-    app.config()
-        .build
-        .dev_url
-        .as_ref()
-        .map(|dev_url| {
-            url.scheme() == dev_url.scheme()
-                && url.host_str() == dev_url.host_str()
-                && url.port_or_known_default() == dev_url.port_or_known_default()
-        })
-        .unwrap_or(false)
+    resolve_app_url(app, "/dashboard").is_ok_and(|base| same_origin(url, &base))
 }
 
 fn is_allowed_desktop_path(path: &str) -> bool {
@@ -215,19 +260,28 @@ fn navigate_main_window(app: &AppHandle, path: &str) -> Result<(), String> {
 }
 
 fn resolve_app_url(app: &AppHandle, path: &str) -> Result<Url, String> {
-    if let Some(dev_url) = app.config().build.dev_url.as_ref() {
-        return dev_url.join(path).map_err(|error| error.to_string());
+    let configured = std::env::var("NEXT_PUBLIC_WEB_BASE_URL").ok();
+    let base = if let Some(value) = configured {
+        Url::parse(value.trim()).map_err(|e| e.to_string())?
+    } else if cfg!(debug_assertions) {
+        app.config()
+            .build
+            .dev_url
+            .clone()
+            .ok_or("Missing development Web URL")?
+    } else {
+        Url::parse("https://sourceweft.com").map_err(|e| e.to_string())?
+    };
+    if !base.username().is_empty()
+        || base.password().is_some()
+        || (base.scheme() != "https"
+            && !(cfg!(debug_assertions)
+                && base.scheme() == "http"
+                && base.host_str() == Some("localhost")))
+    {
+        return Err("Web URL requires HTTPS; localhost HTTP is development-only".into());
     }
-
-    Url::parse(&format!(
-        "tauri://localhost{}",
-        if path.starts_with('/') {
-            path.to_string()
-        } else {
-            format!("/{path}")
-        }
-    ))
-    .map_err(|error| error.to_string())
+    base.join(path).map_err(|e| e.to_string())
 }
 
 fn desktop_bridge_script() -> &'static str {
@@ -283,8 +337,15 @@ fn desktop_bridge_script() -> &'static str {
 }
 
 #[tauri::command]
-fn desktop_info(app: AppHandle) -> DesktopInfo {
-    DesktopInfo {
+fn desktop_info(app: AppHandle, window: tauri::WebviewWindow) -> Result<DesktopInfo, String> {
+    if window.label() == preview_window::LABEL {
+        preview_window::authorize(&app, &window)?;
+    } else if window.label() == hub_window::LABEL {
+        hub_window::authorize(&app, &window)?;
+    } else {
+        authorize_desktop_window(&app, &window, false)?;
+    }
+    Ok(DesktopInfo {
         kind: "desktop",
         is_native: true,
         is_desktop: true,
@@ -293,16 +354,22 @@ fn desktop_info(app: AppHandle) -> DesktopInfo {
         app_name: app.package_info().name.clone(),
         app_version: app.package_info().version.to_string(),
         tauri_version: tauri::VERSION,
-    }
+    })
 }
 
 #[tauri::command]
-fn show_main_window(app: AppHandle) -> Result<(), String> {
+fn show_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    authorize_desktop_window(&app, &window, false)?;
     focus_main_window(&app)
 }
 
 #[tauri::command]
-fn get_autostart(state: State<'_, DesktopState>) -> Result<AutostartState, String> {
+fn get_autostart(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, DesktopState>,
+) -> Result<AutostartState, String> {
+    authorize_desktop_window(&app, &window, true)?;
     let settings = state
         .settings
         .lock()
@@ -321,9 +388,12 @@ fn get_autostart(state: State<'_, DesktopState>) -> Result<AutostartState, Strin
 
 #[tauri::command]
 fn set_autostart(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
     input: SetAutostartInput,
     state: State<'_, DesktopState>,
 ) -> Result<AutostartState, String> {
+    authorize_desktop_window(&app, &window, true)?;
     let snapshot = {
         let mut settings = state
             .settings
@@ -346,35 +416,44 @@ fn set_autostart(
 }
 
 #[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
+fn open_external_url(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    url: String,
+) -> Result<(), String> {
+    if window.label() == hub_window::LABEL {
+        hub_window::authorize(&app, &window)?;
+    } else {
+        authorize_desktop_window(&app, &window, false)?;
+    }
     let parsed = Url::parse(url.trim()).map_err(|error| error.to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Only http and https URLs can be opened externally.".to_string());
     }
 
-    if !is_allowed_external_url(&parsed) {
-        return Err("Only SourceWeft authentication URLs can be opened externally.".to_string());
+    let base = resolve_app_url(&app, "/dashboard")?;
+    if !native_access::is_allowed_external_url(&parsed, &base) {
+        return Err("Only SourceWeft URLs can be opened externally.".to_string());
     }
 
     tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>).map_err(|error| error.to_string())
 }
 
-fn is_allowed_external_url(url: &Url) -> bool {
-    if !url.path().starts_with("/auth/") && url.path() != "/auth" {
-        return false;
+fn authorize_desktop_window(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    dashboard_only: bool,
+) -> Result<(), String> {
+    let url = window.url().map_err(|error| error.to_string())?;
+    let base = resolve_app_url(app, "/dashboard")?;
+    if native_access::is_allowed_caller(window.label(), &url, &base, dashboard_only) {
+        Ok(())
+    } else {
+        Err(
+            "DESKTOP_ACCESS_DENIED: Use the configured SourceWeft page in the main PC window."
+                .into(),
+        )
     }
-
-    if let Ok(web_base_url) = std::env::var("NEXT_PUBLIC_WEB_BASE_URL") {
-        if let Ok(web_base_url) = Url::parse(web_base_url.trim()) {
-            return same_origin(url, &web_base_url);
-        }
-    }
-
-    if url.scheme() == "http" && url.host_str() == Some("localhost") {
-        return matches!(url.port_or_known_default(), Some(3000));
-    }
-
-    url.scheme() == "https" && matches!(url.host_str(), Some("sourceweft.com" | "www.sourceweft.com"))
 }
 
 fn same_origin(left: &Url, right: &Url) -> bool {
@@ -411,7 +490,7 @@ fn focus_main_window(app: &AppHandle) -> Result<(), String> {
         .as_ref()
         .is_some_and(|url| is_desktop_web_url(app, url) && !is_allowed_desktop_path(url.path()))
     {
-        let _ = navigate_main_window(app, "/dashboard");
+        let _ = navigate_main_window(app, "/dashboard/chat");
     }
 
     window.show().map_err(|error| error.to_string())?;
@@ -497,6 +576,9 @@ fn handle_tray_action(app: &AppHandle, menu_id: &str) {
             let _ = focus_main_window(app);
         }
         "quit" => {
+            if let Some(host) = app.try_state::<remote_host::RemoteHost>() {
+                host.disconnect();
+            }
             IS_QUITTING.store(true, Ordering::SeqCst);
             app.exit(0);
         }

@@ -1,4 +1,4 @@
-import { billingService } from "../billing";
+import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { SourceIndexingService } from "./indexing-service";
 import { SourceParsingService } from "./parsing-service";
 
@@ -29,8 +29,5 @@ export {
 export { createSourceRevisionRecord } from "./revision-repository";
 
 // Parsers (used by content facade and others)
-export {
-  getSourceParser,
-  listSupportedSourceMimeTypes,
-} from "./parsers";
+export { getSourceParser, listSupportedSourceMimeTypes } from "./parsers";
 export type { SourceParser } from "./parsers/types";

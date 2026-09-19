@@ -1,13 +1,32 @@
 import type { Metadata } from "next";
 
 import { LegalPage } from "../_landing/legal/legal-page";
+import { OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
+
+const title = "Terms of Service | SourceWeft";
+const description =
+  "The terms that govern SourceWeft accounts, organizations, workspace content, subscriptions, credits, AI outputs, and third-party services.";
+const canonicalUrl = `${SITE_URL}/terms`;
 
 export const metadata: Metadata = {
-  title: "Terms of Service | SourceWeft",
-  description:
-    "The terms that govern SourceWeft accounts, organizations, workspace content, subscriptions, credits, AI outputs, and third-party services.",
+  title,
+  description,
   alternates: {
-    canonical: "https://sourceweft.com/terms",
+    canonical: canonicalUrl,
+  },
+  openGraph: {
+    description,
+    images: [OG_IMAGE],
+    siteName: SITE_NAME,
+    title,
+    type: "website",
+    url: canonicalUrl,
+  },
+  twitter: {
+    card: "summary_large_image",
+    description,
+    images: [OG_IMAGE.url],
+    title,
   },
 };
 

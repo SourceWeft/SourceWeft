@@ -79,7 +79,7 @@ export const citations = pgTable(
     ),
     check(
       "citations_target_check",
-      sql`${table.chunkId} is not null or ${table.externalUri} is not null`,
+      sql`(((${table.chunkId} is not null or ${table.externalUri} is not null) and ${table.metadataJson}->'fileReference' is null) or (${table.metadataJson}->>'origin' = 'file' and jsonb_typeof(${table.metadataJson}->'fileReference') = 'object' and ${table.chunkId} is null and ${table.externalUri} is null and ${table.sourceId} is null and ${table.documentId} is null)) is true`,
     ),
     index("citations_message_rank_idx").on(table.messageId, table.rank),
     index("citations_chunk_idx").on(table.chunkId),

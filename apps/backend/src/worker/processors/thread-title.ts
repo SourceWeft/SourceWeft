@@ -11,7 +11,7 @@ import {
 } from "../../modules/threads";
 import { findThreadRecord } from "../../modules/threads";
 import { contentByokService } from "../../modules/byok";
-import { billingService } from "../../modules/billing";
+import { billingRuntime as billingService } from "../../billing-host/bindings";
 import type { LlmExecutionConfig } from "../../modules/content/model-gateway-audit";
 
 async function resolveThreadTitleExecution(

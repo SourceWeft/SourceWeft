@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { db, messages, threads } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
 import { publishThreadEvent } from "../../shared/notify-hub";
+import { canApplyReasoningWrite } from "./turn/reasoning-state";
 import type { MessageRecord, MessageRole } from "../content/types";
 import {
   mergeCommittedArtifactRenderBlocks,
@@ -292,6 +293,9 @@ export async function updateMessageMetadataRecord(input: {
     if (!current) {
       return null;
     }
+    if (!canApplyReasoningWrite(current.metadata ?? {}, input.metadata)) {
+      return current;
+    }
     const renderBlocks = mergeCommittedArtifactRenderBlocks({
       incoming: Array.isArray(input.metadata.renderBlocks)
         ? input.metadata.renderBlocks
@@ -322,6 +326,13 @@ export async function updateMessageMetadataRecord(input: {
       .set({
         metadata: {
           ...input.metadata,
+          ...(input.metadata.reasoningWrite === undefined &&
+          current.metadata?.reasoningWrite
+            ? {
+                reasoning: current.metadata.reasoning,
+                reasoningWrite: current.metadata.reasoningWrite,
+              }
+            : {}),
           ...(renderBlocks ? { renderBlocks } : {}),
           ...(toolCalls ? { toolCalls } : {}),
         },
@@ -403,6 +414,11 @@ export async function updateMessageRecord(input: {
           if (!current) {
             return null;
           }
+          if (
+            !canApplyReasoningWrite(current.metadata ?? {}, input.metadata!)
+          ) {
+            return current;
+          }
           const renderBlocks = mergeCommittedArtifactRenderBlocks({
             incoming: Array.isArray(input.metadata?.renderBlocks)
               ? input.metadata.renderBlocks
@@ -434,6 +450,13 @@ export async function updateMessageRecord(input: {
               ...set,
               metadata: {
                 ...input.metadata,
+                ...(input.metadata?.reasoningWrite === undefined &&
+                current.metadata?.reasoningWrite
+                  ? {
+                      reasoning: current.metadata.reasoning,
+                      reasoningWrite: current.metadata.reasoningWrite,
+                    }
+                  : {}),
                 ...(renderBlocks ? { renderBlocks } : {}),
                 ...(toolCalls ? { toolCalls } : {}),
               },

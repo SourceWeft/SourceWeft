@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { contentClient } from "../../../../../../lib/sdk";
@@ -24,7 +24,7 @@ export function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
   if (purpose === "draft") return "Draft";
   if (purpose === "note") return "Note";
   if (purpose === "output_candidate") return "Candidate";
-  return "Workfile";
+  return "File";
 }
 
 export function workfileMatchesQuery(file: WorkfileListItem, q: string) {
@@ -38,6 +38,7 @@ export function workfileMatchesQuery(file: WorkfileListItem, q: string) {
 
 export function useWorkfiles(input: {
   mode: "thread" | "new";
+  enabled?: boolean;
   workspaceId: string | null | undefined;
   threadId: string | null;
   workfilesRefreshKey: number;
@@ -45,12 +46,15 @@ export function useWorkfiles(input: {
 }) {
   const {
     mode,
+    enabled = true,
     workspaceId,
     threadId,
     workfilesRefreshKey,
     currentWorkspaceIdRef,
   } = input;
 
+  const liveScope = useRef("");
+  liveScope.current = `${enabled}:${workspaceId}:${threadId}:${mode}`;
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
   const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
   const [workfilesLoadingError, setWorkfilesLoadingError] = useState<
@@ -76,12 +80,14 @@ export function useWorkfiles(input: {
   }, []);
 
   const refreshWorkfiles = useCallback(async () => {
-    if (!workspaceId || !threadId || mode !== "thread") {
+    if (!enabled || !workspaceId || !threadId || mode !== "thread") {
       setWorkfiles([]);
+      setIsLoadingWorkfiles(false);
       setWorkfilesLoadingError(null);
       return;
     }
 
+    const requestScope = liveScope.current;
     const activeWorkspaceId = workspaceId;
     const activeThreadId = threadId;
     setIsLoadingWorkfiles(true);
@@ -94,7 +100,10 @@ export function useWorkfiles(input: {
       // Guard against a workspace switch in flight, matching refreshArtifacts /
       // refreshMcpInstalls; without this, a stale workspace's workfiles could be
       // written into the current view.
-      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+      if (
+        liveScope.current !== requestScope ||
+        currentWorkspaceIdRef.current !== activeWorkspaceId
+      ) {
         return;
       }
       setWorkfiles(result.items);
@@ -103,19 +112,24 @@ export function useWorkfiles(input: {
         cloneWorkfileItems(result.items),
       );
     } catch (error) {
+      if (liveScope.current !== requestScope) return;
       setWorkfilesLoadingError(
-        getErrorMessage(error, "Failed to load workfiles."),
+        getErrorMessage(error, "Failed to load files."),
       );
     } finally {
-      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+      if (
+        liveScope.current === requestScope &&
+        currentWorkspaceIdRef.current === activeWorkspaceId
+      ) {
         setIsLoadingWorkfiles(false);
       }
     }
-  }, [currentWorkspaceIdRef, mode, threadId, workspaceId]);
+  }, [currentWorkspaceIdRef, enabled, mode, threadId, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !threadId || mode !== "thread") {
+    if (!enabled || !workspaceId || !threadId || mode !== "thread") {
       setWorkfiles([]);
+      setIsLoadingWorkfiles(false);
       setWorkfilesLoadingError(null);
       return;
     }
@@ -131,7 +145,7 @@ export function useWorkfiles(input: {
     }
 
     void refreshWorkfiles();
-  }, [mode, refreshWorkfiles, threadId, workspaceId]);
+  }, [enabled, mode, refreshWorkfiles, threadId, workspaceId]);
 
   useEffect(() => {
     if (workfilesRefreshKey > 0) {
@@ -152,7 +166,7 @@ export function useWorkfiles(input: {
         );
         setPreviewWorkfile(result.file);
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to load workfile."));
+        toast.error(getErrorMessage(error, "Could not read file."));
       } finally {
         setWorkfileBusy(file.path, false);
       }
@@ -170,14 +184,14 @@ export function useWorkfiles(input: {
         threadId,
         deleteWorkfile.path,
       );
-      toast.success("Workfile deleted.");
+      toast.success("File deleted.");
       setDeleteWorkfile(null);
       if (previewWorkfile?.path === deleteWorkfile.path) {
         setPreviewWorkfile(null);
       }
       await refreshWorkfiles();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to delete workfile."));
+      toast.error(getErrorMessage(error, "Could not delete file."));
     } finally {
       setWorkfileBusy(deleteWorkfile.path, false);
     }

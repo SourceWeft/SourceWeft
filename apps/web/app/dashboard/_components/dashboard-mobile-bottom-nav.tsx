@@ -9,21 +9,21 @@ import {
   User,
 } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { McpIcon, SkillIcon } from "./dashboard-icons";
+import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 
 const items = [
-  {
-    label: "Overview",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    match: (pathname: string) => pathname === "/dashboard",
-  },
   {
     label: "Chat",
     href: "/dashboard/chat",
     icon: MessageSquareText,
     match: (pathname: string) => pathname.startsWith("/dashboard/chat"),
+  },
+  {
+    label: "Overview",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+    match: (pathname: string) => pathname === "/dashboard",
   },
   {
     label: "Skills",
@@ -45,7 +45,10 @@ export function DashboardMobileBottomNav() {
   const isMeActive = view === "me" || view === "observability";
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 backdrop-blur md:hidden">
+    // Anchored to the shell rather than the layout viewport: the shell is sized in
+    // `dvh`, which shrinks when the keyboard opens, while a `fixed` element stays put —
+    // the two disagree and leave the composer floating above the bar.
+    <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 backdrop-blur md:hidden">
       <div className="grid grid-cols-5 gap-1">
         {items.map((item) => {
           const Icon = item.icon;

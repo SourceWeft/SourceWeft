@@ -564,7 +564,7 @@ export async function* handleToolEndStreamChunk(input: {
         const metadata = {
           ...getFilesystemToolClientMetadata(
             toolName,
-            normalizedInput,
+            nextToolCall.input,
             skillDisplayOptions,
           ),
           ...getFilesystemToolMetadata(toolName, output),
@@ -723,7 +723,7 @@ export async function* handleToolErrorStreamChunk(input: {
         metadata: {
           ...getFilesystemToolClientMetadata(
             toolName,
-            normalizedInput,
+            nextToolCall.input,
             skillDisplayOptions,
           ),
           latencyMs,

@@ -24,6 +24,16 @@ const skillSourceTypeSchema = z.enum([
   "registry_github",
 ]);
 
+export const skillLogoSchema = z.object({
+  url: z.string().max(100_000).refine((value) => {
+    if (/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return true;
+    try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password; } catch { return false; }
+  }, "Expected an HTTPS image URL or a PNG thumbnail"),
+  source: z.enum(["skill", "publisher"]),
+  path: z.string().optional(),
+});
+export type SkillLogo = z.infer<typeof skillLogoSchema>;
+
 export const skillCommandSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -78,6 +88,7 @@ export const workspaceSkillSchema = z.object({
 });
 
 export const workspaceInstalledSkillSchema = z.object({
+  logo: skillLogoSchema.optional(),
   workspaceSkillId: z.string(),
   selectionId: z.string(),
   catalogId: z.string(),
@@ -124,6 +135,7 @@ export const workspaceInstalledSkillSchema = z.object({
 });
 
 export const skillCatalogItemSchema = z.object({
+  logo: skillLogoSchema.optional(),
   catalogId: z.string(),
   selectionId: z.string().nullable(),
   sourceType: skillSourceTypeSchema,
@@ -225,9 +237,31 @@ export const submitRegistrySkillRequestSchema = z
 
 // `indexed` = clean scan → auto-published catalog entry; `queued` = flagged or
 // sticky (§4 triage) → held for review. `slug` is the derived collision-safe key.
+export const skillDiagnosticSchema = z.object({
+  code: z.string(),
+  severity: z.enum(["error", "warning"]),
+  message: z.string(),
+  file: z.string().optional(),
+  field: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
+});
+export type SkillDiagnostic = z.infer<typeof skillDiagnosticSchema>;
+export const registrySkillResultSchema = z.object({
+  sourcePath: z.string(),
+  name: z.string().optional(),
+  slug: z.string().optional(),
+  skillVersionId: z.string().optional(),
+  version: z.string().optional(),
+  status: z.enum(["indexed", "queued", "failed"]),
+  flags: z.array(z.string()),
+  diagnostics: z.array(skillDiagnosticSchema),
+});
+export type RegistrySkillResult = z.infer<typeof registrySkillResultSchema>;
 export const submitRegistrySkillResponseSchema = z.object({
   status: z.enum(["indexed", "queued"]),
   slug: z.string().optional(),
+  skills: z.array(registrySkillResultSchema),
 });
 
 export const listWorkspaceSkillsResponseSchema = z.object({
@@ -237,6 +271,7 @@ export const listWorkspaceSkillsResponseSchema = z.object({
 export const getSkillCatalogDetailResponseSchema = z.object({
   skill: skillCatalogItemSchema,
   readmeContent: z.string().nullable(),
+  readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
 });
 
@@ -430,3 +465,72 @@ export type PutCustomSkillVersionFileResponse = z.infer<
 export type DeleteCustomSkillVersionFileResponse = z.infer<
   typeof deleteCustomSkillVersionFileResponseSchema
 >;
+
+export const registryVersionSchema = z.object({
+  logo: skillLogoSchema.optional(),
+  id: z.string(),
+  skillId: z.string(),
+  version: z.string(),
+  status: z.enum(["draft", "published", "deprecated", "disabled"]),
+  isCurrent: z.boolean(),
+  displayName: z.string(),
+  description: z.string(),
+  sourceUrl: z.string().nullable(),
+  createdAt: z.string(),
+  publishedAt: z.string().nullable(),
+  flags: z.array(z.string()),
+  diagnostics: z.array(skillDiagnosticSchema),
+  findings: z.array(
+    z.object({
+      ruleId: z.string(),
+      file: z.string().optional(),
+      line: z.number().optional(),
+    }),
+  ),
+  hasIngestion: z.boolean(),
+  moderation: z
+    .object({
+      action: z.enum(["publish", "reject", "revoke"]),
+      actorUserId: z.string(),
+      at: z.string(),
+      reason: z.string().optional(),
+    })
+    .nullable(),
+});
+export type RegistryVersion = z.infer<typeof registryVersionSchema>;
+export const registryVersionsResponseSchema = z.object({
+  items: z.array(registryVersionSchema),
+  nextCursor: z.string().nullable(),
+  installed: z
+    .object({
+      id: z.string(),
+      skillVersionId: z.string(),
+      enabled: z.boolean(),
+    })
+    .nullable(),
+});
+export type RegistryVersionsResponse = z.infer<
+  typeof registryVersionsResponseSchema
+>;
+export const registryVersionDetailSchema = z.object({
+  version: registryVersionSchema,
+  readmeContent: z.string().nullable(),
+  readmePath: z.string().nullable(),
+  skillContent: z.string().nullable(),
+  files: z.array(
+    z.object({
+      path: z.string(),
+      contentHash: z.string(),
+      sizeBytes: z.number(),
+    }),
+  ),
+  changes: z.object({
+    added: z.array(z.string()),
+    removed: z.array(z.string()),
+    changed: z.array(z.string()),
+  }),
+});
+export type RegistryVersionDetail = z.infer<typeof registryVersionDetailSchema>;
+export const switchSkillVersionSchema = z
+  .object({ skillVersionId: z.string().min(1) })
+  .strict();

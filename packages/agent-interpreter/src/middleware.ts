@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = `
 An eval tool is available for bounded JavaScript/TypeScript data processing in
 an isolated QuickJS WASM runtime. It has no network, shell, module loading, host
 filesystem, or subagent access. Only the listed read-only tools are bridged via
-the tools namespace. They can access /kb and /workfiles only. Never attempt to
+the tools namespace. They can access /kb and /files only. Never attempt to
 write files or bypass these boundaries. Keep code and returned values concise.
 `;
 
@@ -93,7 +93,10 @@ export function createSourceWeftInterpreterMiddleware(
     executionTimeoutMs: options.limits.executionTimeoutMs,
     maxPtcCalls: options.limits.maxPtcCallsPerEval,
     maxResultChars: options.limits.maxResultChars,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: SYSTEM_PROMPT.replace(
+      "/kb and /files",
+      (options.readRoots ?? ["/kb", "/files"]).join(" and "),
+    ),
     subagents: false,
     toolName: "eval",
   });

@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { authClient } from "../../../../lib/auth-client";
 import { connectorsClient } from "../../../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../../../lib/dashboard-workspace-bootstrap";
-import { resolveBillingTeamId } from "./billing-utils";
+import { resolveBillingTeamId } from "./organization-selection";
 import { toTrustRuleRow, visibleTrustRules } from "./trust-rules-utils";
 import type { BillingOrg } from "./types";
 

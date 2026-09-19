@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hub",
+  "description": "Auxiliary Hub view: scoped relay and window actions only.",
+  "windows": ["hub"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-desktop-info",
+    "allow-hub-window-action",
+    "allow-hub-window-send",
+    "allow-open-external-url"
+  ]
+}

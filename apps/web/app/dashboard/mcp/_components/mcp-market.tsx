@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  Github,
   Laptop,
   ListFilter,
   Loader2,
@@ -51,7 +50,8 @@ import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { McpIcon } from "../../_components/dashboard-icons";
+import { GitHubIcon } from "../../../_components/brand-icons";
+import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "./mcp-credentials-dialog";
 import { McpDetailDialog } from "./mcp-detail-dialog";
@@ -120,12 +120,10 @@ const trustOptions: Array<{ key: TrustFilter; label: string }> = [
   { key: "unverified", label: "Unverified" },
 ];
 
-// The web catalog only ever lists web-executable servers (the backend excludes
-// desktop-only entries); the desktop-only facet returns when the desktop host
-// ships its own market view.
 const deviceOptions: Array<{ key: DeviceFilter; label: string }> = [
   { key: "all", label: "All devices" },
   { key: "web", label: "Web executable" },
+  { key: "desktop", label: "Desktop host" },
 ];
 
 const sortOptions: Array<{ key: SortKey; label: string }> = [
@@ -139,10 +137,15 @@ const CATALOG_PAGE_SIZE = 100;
 
 function fetchMcpCatalog(
   targetWorkspaceId: string,
-  params?: { query?: string; category?: string; cursor?: string },
+  params?: {
+    query?: string;
+    category?: string;
+    cursor?: string;
+    desktopOnly?: boolean;
+  },
 ) {
   // Dedupe concurrent identical requests (workspace + filters + page).
-  const requestKey = `${targetWorkspaceId}|${params?.query ?? ""}|${params?.category ?? ""}|${params?.cursor ?? ""}`;
+  const requestKey = `${targetWorkspaceId}|${params?.query ?? ""}|${params?.category ?? ""}|${params?.cursor ?? ""}|${params?.desktopOnly ?? "all"}`;
   const pending = catalogRequestsByWorkspace.get(requestKey);
   if (pending) {
     return pending;
@@ -151,6 +154,7 @@ function fetchMcpCatalog(
     .listWorkspaceMarketMcp(targetWorkspaceId, {
       ...params,
       limit: CATALOG_PAGE_SIZE,
+      includeDesktopOnly: true,
     })
     .finally(() => {
       if (catalogRequestsByWorkspace.get(requestKey) === promise) {
@@ -338,6 +342,7 @@ function FacetChoice({
 }) {
   return (
     <button
+      aria-pressed={active}
       className={cn(
         "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/60",
         active && "bg-accent/60 text-foreground",
@@ -464,9 +469,8 @@ function SortMenu({
 }
 
 function McpFilterPanel({
-  category,
+  selectedCategories,
   categoryCounts,
-  desktopCount,
   deviceFilter,
   installedCount,
   onCategoryChange,
@@ -481,13 +485,11 @@ function McpFilterPanel({
   totalCount,
   trustFilter,
   unverifiedCount,
-  webCount,
   categories,
 }: {
-  category: CategoryKey;
+  selectedCategories: CategoryKey[];
   categoryCounts: Record<CategoryKey, number>;
   categories: Array<{ key: CategoryKey; label: string }>;
-  desktopCount: number;
   deviceFilter: DeviceFilter;
   installedCount: number;
   onCategoryChange: (value: CategoryKey) => void;
@@ -502,7 +504,6 @@ function McpFilterPanel({
   totalCount: number;
   trustFilter: TrustFilter;
   unverifiedCount: number;
-  webCount: number;
 }) {
   const notInstalledCount = Math.max(totalCount - installedCount, 0);
   return (
@@ -542,12 +543,23 @@ function McpFilterPanel({
         <FilterFacet
           defaultOpen
           label="Category"
-          summary={categories.find((item) => item.key === category)?.label}
+          summary={
+            selectedCategories.length === 0
+              ? "All"
+              : categories
+                  .filter((item) => selectedCategories.includes(item.key))
+                  .map((item) => item.label)
+                  .join(", ")
+          }
         >
           <div className="space-y-1">
             {categories.map((item) => (
               <FacetChoice
-                active={category === item.key}
+                active={
+                  item.key === "all"
+                    ? selectedCategories.length === 0
+                    : selectedCategories.includes(item.key)
+                }
                 count={categoryCounts[item.key] ?? 0}
                 key={item.key}
                 label={item.label}
@@ -584,13 +596,6 @@ function McpFilterPanel({
             {deviceOptions.map((item) => (
               <FacetChoice
                 active={deviceFilter === item.key}
-                count={
-                  item.key === "web"
-                    ? webCount
-                    : item.key === "desktop"
-                      ? desktopCount
-                      : totalCount
-                }
                 key={item.key}
                 label={item.label}
                 onClick={() => onDeviceFilterChange(item.key)}
@@ -784,7 +789,7 @@ function McpCard({
                   target="_blank"
                 >
                   {sourceIsGithub ? (
-                    <Github className="size-4" />
+                    <GitHubIcon className="size-4" />
                   ) : (
                     <ExternalLink className="size-4" />
                   )}
@@ -982,13 +987,25 @@ export function McpMarket() {
     });
   }, []);
   const [query, setQuery] = React.useState("");
-  const [category, setCategory] = React.useState<CategoryKey>("all");
+  const [selectedCategories, setSelectedCategories] = React.useState<
+    CategoryKey[]
+  >([]);
+  const category = selectedCategories.slice().sort().join(",") || undefined;
+  const toggleCategory = (value: CategoryKey) => {
+    setSelectedCategories((current) =>
+      value === "all"
+        ? []
+        : current.includes(value)
+          ? current.filter((entry) => entry !== value)
+          : [...current, value],
+    );
+  };
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
   const [trustFilter, setTrustFilter] = React.useState<TrustFilter>("all");
   const [deviceFilter, setDeviceFilter] = React.useState<DeviceFilter>("all");
   const [sort, setSort] = React.useState<SortKey>("recommended");
   // Server-side catalog paging: the catalog is far larger than one page, so
-  // query/category are pushed to the backend (debounced) and further pages are
+  // query/category/device are pushed to the backend and further pages are
   // appended via the keyset cursor.
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
@@ -1077,14 +1094,17 @@ export function McpMarket() {
         setCatalogStatus("ready");
         return;
       }
-      if (loadedCatalogWorkspaceIdRef.current === resolved.id) {
-        setCatalogStatus("ready");
-        return;
-      }
       setItems([]);
+      setNextCursor(null);
+      setIsLoadingMore(false);
       setCatalogStatus("loading_catalog");
       const [result, categoryResult] = await Promise.all([
-        fetchMcpCatalog(resolved.id),
+        fetchMcpCatalog(resolved.id, {
+          query: serverQuery || undefined,
+          category,
+          desktopOnly:
+            deviceFilter === "all" ? undefined : deviceFilter === "desktop",
+        }),
         fetchMcpCategories(resolved.id),
       ]);
       if (catalogGenerationRef.current !== generation) return;
@@ -1104,51 +1124,27 @@ export function McpMarket() {
           : "Failed to load MCP market.",
       );
     }
-  }, [resolveWorkspace]);
+  }, [resolveWorkspace, serverQuery, category, deviceFilter]);
 
   React.useEffect(() => {
     void loadCatalog();
+    return () => {
+      catalogGenerationRef.current += 1;
+    };
   }, [loadCatalog]);
 
-  // Refetch the first page from the server whenever the debounced query or the
-  // category changes; the initial default-filter load per workspace is done by
-  // loadCatalog and skipped here.
-  const filterKeyRef = React.useRef("");
-  React.useEffect(() => {
-    const targetWorkspaceId = workspace?.id;
-    if (!targetWorkspaceId) return;
-    const key = `${targetWorkspaceId}|${serverQuery}|${category}`;
-    if (filterKeyRef.current === key) return;
-    const isFirstForWorkspace = !filterKeyRef.current.startsWith(
-      `${targetWorkspaceId}|`,
-    );
-    filterKeyRef.current = key;
-    if (isFirstForWorkspace && !serverQuery && category === "all") return;
-    let cancelled = false;
-    void fetchMcpCatalog(targetWorkspaceId, {
-      query: serverQuery || undefined,
-      category: category === "all" ? undefined : category,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        setItems(result.items);
-        setNextCursor(result.nextCursor ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) toast.error("Failed to search the MCP catalog.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspace?.id, serverQuery, category]);
-
   React.useEffect(() => {
     const targetWorkspaceId = workspace?.id;
     if (!targetWorkspaceId) return;
     let cancelled = false;
+    setServerCategoryCounts(null);
+    setServerTotalCount(null);
     void contentClient
       .getWorkspaceMarketMcpCategoryCounts(targetWorkspaceId, {
         query: serverQuery || undefined,
+        includeDesktopOnly: true,
+        desktopOnly:
+          deviceFilter === "all" ? undefined : deviceFilter === "desktop",
       })
       .then((result) => {
         if (cancelled) return;
@@ -1163,18 +1159,22 @@ export function McpMarket() {
     return () => {
       cancelled = true;
     };
-  }, [workspace?.id, serverQuery]);
+  }, [workspace?.id, serverQuery, deviceFilter]);
 
   const loadMoreMcp = React.useCallback(async () => {
     const targetWorkspaceId = workspace?.id;
     if (!targetWorkspaceId || !nextCursor || isLoadingMore) return;
+    const generation = catalogGenerationRef.current;
     setIsLoadingMore(true);
     try {
       const result = await fetchMcpCatalog(targetWorkspaceId, {
         query: serverQuery || undefined,
-        category: category === "all" ? undefined : category,
+        category,
         cursor: nextCursor,
+        desktopOnly:
+          deviceFilter === "all" ? undefined : deviceFilter === "desktop",
       });
+      if (catalogGenerationRef.current !== generation) return;
       setItems((current) => {
         const seen = new Set(current.map((item) => item.market.identifier));
         return [
@@ -1184,11 +1184,19 @@ export function McpMarket() {
       });
       setNextCursor(result.nextCursor ?? null);
     } catch {
-      toast.error("Failed to load more MCP servers.");
+      if (catalogGenerationRef.current === generation)
+        toast.error("Failed to load more MCP servers.");
     } finally {
-      setIsLoadingMore(false);
+      if (catalogGenerationRef.current === generation) setIsLoadingMore(false);
     }
-  }, [workspace?.id, nextCursor, isLoadingMore, serverQuery, category]);
+  }, [
+    workspace?.id,
+    nextCursor,
+    isLoadingMore,
+    serverQuery,
+    category,
+    deviceFilter,
+  ]);
 
   // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
   // once the catalog is loaded, scroll the matching card into view and give it
@@ -1400,21 +1408,6 @@ export function McpMarket() {
     () => items.filter((item) => !isTrustedMcp(item.market)).length,
     [items],
   );
-  const webCount = React.useMemo(
-    () =>
-      items.filter(
-        (item) => item.market.webExecutable && !item.market.desktopOnly,
-      ).length,
-    [items],
-  );
-  const desktopCount = React.useMemo(
-    () =>
-      items.filter(
-        (item) => item.market.desktopOnly || !item.market.webExecutable,
-      ).length,
-    [items],
-  );
-
   const categoryCounts = React.useMemo(() => {
     const counts = categories.reduce(
       (record, item) => ({ ...record, [item.key]: 0 }),
@@ -1445,7 +1438,6 @@ export function McpMarket() {
     const filtered = items.filter((item) => {
       const market = item.market;
       const trusted = isTrustedMcp(market);
-      const desktopOnly = market.desktopOnly || !market.webExecutable;
       // Category is filtered SERVER-side (DB join over all of an item's
       // categories). Re-checking here with categoryForMcp — which collapses an
       // item to a single category — hid server-matched items whose first
@@ -1454,8 +1446,6 @@ export function McpMarket() {
       if (statusFilter === "not_installed" && item.install) return false;
       if (trustFilter === "trusted" && !trusted) return false;
       if (trustFilter === "unverified" && trusted) return false;
-      if (deviceFilter === "web" && desktopOnly) return false;
-      if (deviceFilter === "desktop" && !desktopOnly) return false;
       if (!q) return true;
       const searchableIdentifier = identifierForSearch(market.identifier);
       return (
@@ -1476,11 +1466,11 @@ export function McpMarket() {
         return Number(isTrustedMcp(b.market)) - Number(isTrustedMcp(a.market));
       return 0;
     });
-  }, [deviceFilter, items, query, sort, statusFilter, trustFilter]);
+  }, [items, query, sort, statusFilter, trustFilter]);
 
   const clearFilters = React.useCallback(() => {
     setQuery("");
-    setCategory("all");
+    setSelectedCategories([]);
     setStatusFilter("all");
     setTrustFilter("all");
     setDeviceFilter("all");
@@ -1488,13 +1478,12 @@ export function McpMarket() {
 
   const filtersPanel = (
     <McpFilterPanel
-      category={category}
+      selectedCategories={selectedCategories}
       categoryCounts={categoryCounts}
       categories={categories}
-      desktopCount={desktopCount}
       deviceFilter={deviceFilter}
       installedCount={installedCount}
-      onCategoryChange={setCategory}
+      onCategoryChange={toggleCategory}
       onClear={clearFilters}
       onDeviceFilterChange={setDeviceFilter}
       onQueryChange={setQuery}
@@ -1505,18 +1494,16 @@ export function McpMarket() {
       totalCount={items.length}
       trustFilter={trustFilter}
       unverifiedCount={unverifiedCount}
-      webCount={webCount}
     />
   );
   const drawerFiltersPanel = (
     <McpFilterPanel
-      category={category}
+      selectedCategories={selectedCategories}
       categoryCounts={categoryCounts}
       categories={categories}
-      desktopCount={desktopCount}
       deviceFilter={deviceFilter}
       installedCount={installedCount}
-      onCategoryChange={setCategory}
+      onCategoryChange={toggleCategory}
       onClear={clearFilters}
       onDeviceFilterChange={setDeviceFilter}
       onQueryChange={setQuery}
@@ -1528,7 +1515,6 @@ export function McpMarket() {
       totalCount={items.length}
       trustFilter={trustFilter}
       unverifiedCount={unverifiedCount}
-      webCount={webCount}
     />
   );
   const pageLoading =
@@ -1584,23 +1570,37 @@ export function McpMarket() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  {isDesktopHost ? (
-                    <Badge
-                      className="h-7 gap-1.5 px-2 text-[11px]"
-                      variant="outline"
-                    >
-                      <Laptop className="h-3.5 w-3.5" />
-                      Desktop host
-                    </Badge>
-                  ) : (
-                    <Badge
-                      className="h-7 gap-1.5 px-2 text-[11px]"
-                      variant="outline"
-                    >
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Web runtime
-                    </Badge>
-                  )}
+                  <div
+                    aria-label="MCP device filter"
+                    className="flex items-center gap-1"
+                    role="group"
+                  >
+                    {deviceOptions.map((option) => (
+                      <Button
+                        aria-pressed={deviceFilter === option.key}
+                        className="h-7 gap-1.5 px-2 text-[11px]"
+                        key={option.key}
+                        onClick={() => setDeviceFilter(option.key)}
+                        size="sm"
+                        type="button"
+                        variant={
+                          deviceFilter === option.key ? "secondary" : "ghost"
+                        }
+                      >
+                        {option.key === "desktop" ? (
+                          <Laptop className="h-3.5 w-3.5" />
+                        ) : null}
+                        {option.key === "web" ? (
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        ) : null}
+                        {option.key === "all"
+                          ? "All"
+                          : option.key === "web"
+                            ? "Web"
+                            : option.label}
+                      </Button>
+                    ))}
+                  </div>
                   <SubmitMcpDialog />
                   <SortMenu onChange={setSort} value={sort} />
                 </div>

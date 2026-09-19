@@ -22,8 +22,8 @@ const policy: SandboxProviderPathPolicy = {
 
 test("sandbox path validation accepts only explicit SourceWeft and sandbox paths", () => {
   assert.equal(
-    assertSourceWorkPath("/workfiles/novel/chapter-01.md"),
-    "/workfiles/novel/chapter-01.md",
+    assertSourceWorkPath("/files/novel/chapter-01.md"),
+    "/files/novel/chapter-01.md",
   );
   assert.equal(
     assertPrepareSandboxPath("/workspace/input/chapter-01.md", policy),
@@ -38,8 +38,8 @@ test("sandbox path validation accepts only explicit SourceWeft and sandbox paths
     "/workspace/output/report.md",
   );
   assert.equal(
-    assertSourceWorkPath("/workfiles/reports/report.md"),
-    "/workfiles/reports/report.md",
+    assertSourceWorkPath("/files/reports/report.md"),
+    "/files/reports/report.md",
   );
   assert.equal(assertExecuteCwd(undefined, policy), "/workspace");
   assert.equal(
@@ -62,7 +62,7 @@ test("sandbox bridge path validation rejects kb, skills, traversal, and host pat
     /SANDBOX_PREPARE_PATH_DENIED/,
   );
   assert.throws(
-    () => assertSourceWorkPath("/workfiles/../secret"),
+    () => assertSourceWorkPath("/files/../secret"),
     /SANDBOX_PREPARE_PATH_DENIED/,
   );
   assert.throws(
@@ -82,7 +82,7 @@ test("sandbox bridge path validation rejects kb, skills, traversal, and host pat
     /SANDBOX_EXECUTE_CWD_DENIED/,
   );
   assert.throws(
-    () => assertSandboxReadPath("/workfiles/file.md", policy),
+    () => assertSandboxReadPath("/files/file.md", policy),
     /SANDBOX_READ_PATH_DENIED/,
   );
   assert.throws(
@@ -142,7 +142,7 @@ describe("assertExecuteCommandPathPolicy", () => {
       "python /work/foo.py",
     );
     assert.throws(
-      () => assertExecuteCommandPathPolicy("mkdir -p /workfiles/ppt-deck"),
+      () => assertExecuteCommandPathPolicy("mkdir -p /files/ppt-deck"),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
     assert.throws(
@@ -152,7 +152,7 @@ describe("assertExecuteCommandPathPolicy", () => {
     assert.throws(
       () =>
         assertExecuteCommandPathPolicy(
-          "set -e\ncat /workfiles/ppt-deck/deck.js\npwd",
+          "set -e\ncat /files/ppt-deck/deck.js\npwd",
         ),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
@@ -161,7 +161,7 @@ describe("assertExecuteCommandPathPolicy", () => {
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
     assert.throws(
-      () => assertExecuteCommandPathPolicy("printf '/workfiles literal only'"),
+      () => assertExecuteCommandPathPolicy("printf '/files literal only'"),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
   });
@@ -179,7 +179,7 @@ describe("assertExecuteCommandPathPolicy", () => {
     // The always-denied roots stay denied regardless of staging.
     assert.throws(
       () =>
-        assertExecuteCommandPathPolicy("cat /workfiles/notes.md", {
+        assertExecuteCommandPathPolicy("cat /files/notes.md", {
           skillScriptsStaged: true,
         }),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,

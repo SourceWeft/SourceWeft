@@ -26,4 +26,4 @@ Resolve “change page 3” by the order of sections in the version you loaded, 
 
 All styling, animations, effects and controls live in the file. Reveal is the sole player. The included adapter implements `presentation/v1` for optional host controls; a plain iframe and the downloaded file must work without a host handshake. Preview/share read the finished artifact and never load this skill at viewing time.
 
-Source HTML, QA screenshots and process notes may stay in the sandbox or Workfiles for follow-up. Publish the real file; never claim the workspace path itself is a delivered artifact. Do not claim visual checks that were not run.
+Source HTML, QA screenshots and process notes may stay in the sandbox or Files for follow-up. Publish the real file; never claim the workspace path itself is a delivered artifact. Do not claim visual checks that were not run.

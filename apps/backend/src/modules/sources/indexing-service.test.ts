@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../test/billing-runtime";
 import { beforeEach, expect, test, vi } from "vitest";
 
 const TEAM_ID = "team_1";
@@ -154,10 +155,10 @@ beforeEach(() => {
     },
   );
 
-  billing = {
+  billing = adaptBillingTestPort({
     meterIngestion: vi.fn().mockResolvedValue({ ok: true }),
     getSummary: vi.fn(),
-  };
+  });
 });
 
 function makeService() {

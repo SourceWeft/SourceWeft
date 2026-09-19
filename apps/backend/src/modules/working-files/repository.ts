@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db, workingFiles } from "@sourceweft/db";
 import { ContentError } from "../content/errors";
@@ -14,6 +14,11 @@ function mapWorkingFile(row: WorkingFileRow): WorkingFileRecord {
     threadId: row.threadId,
     path: row.path,
     contentText: row.contentText,
+    payloadKind: row.payloadKind,
+    storageBucket: row.storageBucket,
+    storageKey: row.storageKey,
+    contentHash: row.contentHash,
+    origin: row.origin,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     purpose: row.purpose ?? null,
@@ -105,6 +110,10 @@ export async function findWorkingFileRecord(input: {
 }
 
 export async function upsertWorkingFileRecord(input: {
+  signal?: AbortSignal;
+  object?: { bucket: string; key: string; contentHash: string };
+  origin?: WorkingFileRecord["origin"];
+  expectedRevision?: string;
   teamId: string;
   workspaceId: string;
   threadId: string;
@@ -117,44 +126,92 @@ export async function upsertWorkingFileRecord(input: {
 }) {
   const id = randomUUID();
   const now = new Date();
-  const [row] = await db
-    .insert(workingFiles)
-    .values({
-      id,
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      threadId: input.threadId,
-      path: input.path,
-      contentText: input.contentText,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      purpose: input.purpose ?? null,
-      createdBy: input.createdBy ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        workingFiles.teamId,
-        workingFiles.workspaceId,
-        workingFiles.threadId,
-        workingFiles.path,
-      ],
-      set: {
+  const payload = {
+    payloadKind: input.object ? ("object" as const) : ("inline_text" as const),
+    storageBucket: input.object?.bucket ?? null,
+    storageKey: input.object?.key ?? null,
+    contentHash:
+      input.object?.contentHash ??
+      createHash("sha256").update(input.contentText).digest("hex"),
+    origin: input.origin ?? ("unknown" as const),
+  };
+  input.signal?.throwIfAborted();
+  const row = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([input.teamId, input.workspaceId, input.threadId])}, 0))`,
+    );
+    const scope = and(
+      eq(workingFiles.teamId, input.teamId),
+      eq(workingFiles.workspaceId, input.workspaceId),
+      eq(workingFiles.threadId, input.threadId),
+    );
+    const [existing] = await tx
+      .select({ id: workingFiles.id })
+      .from(workingFiles)
+      .where(and(scope, eq(workingFiles.path, input.path)))
+      .limit(1);
+    if (!existing) {
+      const [count] = await tx
+        .select({ value: sql<number>`count(*)::int` })
+        .from(workingFiles)
+        .where(scope);
+      if (Number(count?.value ?? 0) >= 200)
+        throw new ContentError(
+          409,
+          "WORKING_FILE_LIMIT_EXCEEDED",
+          "This conversation has reached its file limit.",
+        );
+    }
+    input.signal?.throwIfAborted();
+    const [saved] = await tx
+      .insert(workingFiles)
+      .values({
+        ...payload,
+        id,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        threadId: input.threadId,
+        path: input.path,
         contentText: input.contentText,
         mimeType: input.mimeType,
         sizeBytes: input.sizeBytes,
         purpose: input.purpose ?? null,
+        createdBy: input.createdBy ?? null,
+        createdAt: now,
         updatedAt: now,
-      },
-    })
-    .returning();
+      })
+      .onConflictDoUpdate({
+        target: [
+          workingFiles.teamId,
+          workingFiles.workspaceId,
+          workingFiles.threadId,
+          workingFiles.path,
+        ],
+        set: {
+          ...payload,
+          contentText: input.contentText,
+          mimeType: input.mimeType,
+          sizeBytes: input.sizeBytes,
+          purpose: input.purpose ?? null,
+          updatedAt: now,
+        },
+        setWhere: input.expectedRevision
+          ? eq(
+              workingFiles.contentHash,
+              input.expectedRevision.replace(/^sha256:/, ""),
+            )
+          : sql`false`,
+      })
+      .returning();
+    input.signal?.throwIfAborted();
+    return saved;
+  });
 
   if (!row) {
     throw new ContentError(
-      500,
-      "WORKING_FILE_UPSERT_FAILED",
-      "Failed to upsert working file",
+      409,
+      "FILE_CHANGED",
+      "Read the current file before replacing it.",
       {
         details: {
           teamId: input.teamId,
@@ -235,4 +292,3 @@ export async function deleteWorkingFileRecord(input: {
 
   return row?.path ?? null;
 }
-

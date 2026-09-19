@@ -1,7 +1,8 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 import type { ObserveSink, UsageInfo } from "@sourceweft/model-gateway";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import type { ModelUsageContext } from "./context";
 import type { MeterUsageFn } from "./settle";
 import { openBillingScope } from "./scope";
@@ -41,7 +42,7 @@ function context(teamId: string): ModelUsageContext {
 }
 
 function billingPort(): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(async (teamId: string) => ({
       teamId,
       billingMode: "enforced",
@@ -49,7 +50,7 @@ function billingPort(): ContentBillingPort {
     })),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function meterStub() {

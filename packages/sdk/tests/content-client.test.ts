@@ -35,3 +35,29 @@ test("listThreadModelSelectorCatalog requests the selector projection", async ()
     "/v1/workspaces/workspace%20%2F%20one/model-gateway/models?view=selector",
   ]);
 });
+
+for (const desktopOnly of [true, false, undefined]) {
+  test(`MCP list pagination and category counts preserve device filter ${desktopOnly}`, async () => {
+    const { client, paths } = recordingClient();
+    const filter = { includeDesktopOnly: true, desktopOnly, query: "files" };
+    await client.listWorkspaceMarketMcp("workspace", {
+      ...filter,
+      cursor: "page + two",
+      limit: 100,
+    });
+    await client.getWorkspaceMarketMcpCategoryCounts("workspace", filter);
+    for (const path of paths) {
+      const url = new URL(path, "https://example.test");
+      assert.equal(url.searchParams.get("includeDesktopOnly"), "true");
+      assert.equal(
+        url.searchParams.get("desktopOnly"),
+        desktopOnly === undefined ? null : String(desktopOnly),
+      );
+      assert.equal(url.searchParams.get("query"), "files");
+    }
+    assert.equal(
+      new URL(paths[0]!, "https://example.test").searchParams.get("cursor"),
+      "page + two",
+    );
+  });
+}

@@ -1,7 +1,8 @@
+import { adaptBillingTestPort } from "../../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../../content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../../test/billing-runtime";
 import type { PreparedThreadTurn } from "../..";
 import { createTurnRuntime } from "./turn-runtime";
 import { workspaceService } from "../../../workspace";
@@ -15,7 +16,7 @@ vi.mock("../../../../shared/model-gateway/index", () => gatewayMocks);
 const { openTurnBillingScope } = await import("./turn-billing-scope");
 
 function createBilling(): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(
       async (teamId: string) =>
         ({
@@ -26,7 +27,7 @@ function createBilling(): ContentBillingPort {
     ),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function createPrepared(): PreparedThreadTurn {

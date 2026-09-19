@@ -1,5 +1,6 @@
 import {
   BillingClient,
+  DeploymentClient,
   ConnectorsClient,
   ContentClient,
   DashboardClient,
@@ -10,16 +11,19 @@ import {
   WorkspaceClient,
 } from "@sourceweft/sdk";
 import { apiBaseUrl } from "./api-base-url";
+import { cachedLocalHostHeaders } from "./local-host-session";
 
 export { apiBaseUrl };
 
 const httpClient = new HttpClient({
   baseUrl: apiBaseUrl,
   credentials: "include",
+  getHeaders: cachedLocalHostHeaders,
 });
 
 export const jobsClient = new JobsClient(httpClient);
 export const billingClient = new BillingClient(httpClient);
+export const deploymentClient = new DeploymentClient(httpClient);
 export const connectorsClient = new ConnectorsClient(httpClient);
 export const contentClient = new ContentClient(httpClient);
 export const dashboardClient = new DashboardClient(httpClient);

@@ -1,12 +1,16 @@
 "use client";
+import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
+import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
+import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   Activity,
   ArrowLeft,
   ChevronRight,
   CreditCard,
+  Info,
   LayoutGrid,
   LogOut,
   PanelsTopLeft,
@@ -17,6 +21,7 @@ import {
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { authClient } from "../../../lib/auth-client";
 import {
+  AboutPanel,
   AccountPanel,
   BillingPanel,
   TeamPanel,
@@ -32,7 +37,7 @@ import {
 } from "./dashboard-team-selector-shared";
 import { RawImage } from "../../_components/raw-image";
 
-type MobileMePanel = SettingsCenterTab;
+type MobileMePanel = Exclude<SettingsCenterTab, "local">;
 
 const panelItems: Array<{
   description: string;
@@ -76,6 +81,12 @@ const panelItems: Array<{
     description: "Actions you chose to always allow",
     icon: ShieldCheck,
   },
+  {
+    key: "about",
+    label: "About",
+    description: "Version and build details",
+    icon: Info,
+  },
 ];
 
 const panelTitleByKey: Record<MobileMePanel, string> = {
@@ -85,6 +96,7 @@ const panelTitleByKey: Record<MobileMePanel, string> = {
   usage: "Usage",
   billing: "Billing",
   approvals: "Approvals",
+  about: "About",
 };
 
 function getInitials(name?: string, email?: string) {
@@ -98,6 +110,7 @@ function getInitials(name?: string, email?: string) {
 }
 
 export function DashboardMobileMe() {
+  const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
   const sessionState = authState.data as
     | {
@@ -132,6 +145,7 @@ export function DashboardMobileMe() {
   async function handleSignOut() {
     setIsSigningOut(true);
     try {
+      await disconnectLocalHostSession();
       await authClient.signOut();
     } finally {
       setIsSigningOut(false);
@@ -196,32 +210,36 @@ export function DashboardMobileMe() {
               </div>
             </div>
 
-            {panelItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
-                  key={item.key}
-                  onClick={() => setActivePanel(item.key)}
-                  type="button"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-foreground">
-                        {item.label}
+            {panelItems
+              .filter((item) =>
+                isSettingsTabAvailable(item.key, billingAvailable),
+              )
+              .map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
+                    key={item.key}
+                    onClick={() => setActivePanel(item.key)}
+                    type="button"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Icon className="h-4 w-4" />
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {item.description}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {item.label}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {item.description}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              );
-            })}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                );
+              })}
             <button
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
               onClick={openObservability}
@@ -287,6 +305,7 @@ export function DashboardMobileMe() {
             {activePanel === "usage" ? <UsagePanel /> : null}
             {activePanel === "billing" ? <BillingPanel /> : null}
             {activePanel === "approvals" ? <TrustRulesPanel /> : null}
+            {activePanel === "about" ? <AboutPanel /> : null}
           </div>
         ) : null}
       </div>

@@ -1,3 +1,4 @@
+import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import type { ChatItem } from "./dashboard-chat-types";
 
 /** The thread shape the sidebar needs; every API thread response satisfies it. */
@@ -9,6 +10,7 @@ export type ChatThreadLike = {
   createdAt?: string | null;
   lastMessageAt?: string | null;
   visibility?: ChatItem["visibility"] | null;
+  executionTarget?: ThreadExecutionTarget;
   parentThreadId?: string | null;
   personaId?: string | null;
   children?: ChatThreadLike[] | null;
@@ -25,6 +27,7 @@ export function normalizeUpdatedAt(value?: string | null) {
 export function mapThreadToChatItem(item: ChatThreadLike): ChatItem {
   return {
     id: item.id,
+    executionTarget: item.executionTarget,
     title: item.title,
     // Sort/display timestamp is conversation activity — last message, falling
     // back to creation. NOT updatedAt, which metadata writes (title/model/

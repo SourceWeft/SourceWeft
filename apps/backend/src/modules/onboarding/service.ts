@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createSourceweftOrganizationMetadata } from "../auth/organization-metadata";
-import { billingService } from "../billing";
+import { billingOrganizationHooks as billingService } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
 
 export class OnboardingService {
@@ -9,10 +9,7 @@ export class OnboardingService {
     userId: string;
   }) {
     await workspaceService.ensureMembershipWorkspace(input);
-    await billingService.ensureBillingAccount(
-      input.organizationId,
-      input.userId,
-    );
+    await billingService.provisionAccount(input.organizationId, input.userId);
   }
 
   async ensurePersonalTeamForUser(input: { userId: string }) {

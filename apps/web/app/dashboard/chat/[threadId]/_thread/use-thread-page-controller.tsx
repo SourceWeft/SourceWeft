@@ -1,4 +1,5 @@
 "use client";
+import { synchronizeHubBeforeSend } from "../../../../../lib/hub-send-barrier";
 
 import {
   useCallback,
@@ -90,7 +91,6 @@ import {
 } from "./message-groups";
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
-import { BREAKPOINTS, useMediaQuery } from "../../../../../lib/use-media-query";
 import { findChatItem } from "../../../_components/dashboard-chat-items";
 import {
   isEmbedMode,
@@ -99,11 +99,14 @@ import {
   withAgentParam,
 } from "../../../../../lib/thread-embed-params";
 import type { ChatHubSubagentPanel } from "../../_components/chat-hub-context";
+import { useWorkspaceLayout } from "../../../_components/dashboard-workspace-layout";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+import { useLocalConversationStatus } from "../../_components/local-conversation-status";
 
 export function useThreadPageController({
   dashboardState,
@@ -235,8 +238,12 @@ export function useThreadPageController({
     subagentChildren,
   ]);
 
-  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
-  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
+  const {
+    canDockHub: isPersistentLayout,
+    canDockPreview: isDesktopPanel,
+    ready: layoutReady,
+    setHubDrawerOpen,
+  } = useWorkspaceLayout();
   const handledConnectorOAuthHubRef = useRef(false);
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
@@ -266,18 +273,26 @@ export function useThreadPageController({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledConnectorOAuthHubRef.current) return;
+    if (!layoutReady || handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
-      if (window.matchMedia(BREAKPOINTS.md).matches) {
+      if (isPersistentLayout) {
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
+      } else {
+        setHubDrawerOpen(true);
       }
     }
-  }, [sourcesVisible, toggleSourcesVisible]);
+  }, [
+    layoutReady,
+    isPersistentLayout,
+    setHubDrawerOpen,
+    sourcesVisible,
+    toggleSourcesVisible,
+  ]);
 
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
 
@@ -295,6 +310,8 @@ export function useThreadPageController({
     activeMcpToolIds,
     activeSkillIds,
     activeSourceIds,
+    sourceSelectionReady,
+    sourceSelectionRevision,
     availableSkills,
     hubSkills,
     capabilityCatalog,
@@ -664,6 +681,15 @@ export function useThreadPageController({
   // closures); `queuedSends` mirrors it for rendering the pending list.
   const pendingSendsRef = useRef<QueuedSend[]>([]);
   const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([]);
+  const localConversationStatus = useLocalConversationStatus(
+    workspaceId,
+    threadId,
+  );
+  const [localQueuePaused, setLocalQueuePaused] = useState(false);
+  useEffect(() => {
+    if (!localConversationStatus.ready && pendingSendsRef.current.length)
+      setLocalQueuePaused(true);
+  }, [localConversationStatus.ready]);
   const queuedSendIdRef = useRef(0);
   // Until this timestamp the auto-send effect must not fire — the load-bearing
   // guard that turns a 409 re-queue into a paced retry rather than a hot loop.
@@ -732,9 +758,12 @@ export function useThreadPageController({
   const targetThreadMessagesKey = workspaceId
     ? `${workspaceId}:${threadId}`
     : null;
+  const currentMessagesTargetRef = useRef(targetThreadMessagesKey);
+  currentMessagesTargetRef.current = targetThreadMessagesKey;
   const loadThreadMessagesWithStatus = useCallback(async () => {
     const targetKey = targetThreadMessagesKey;
     await loadThreadMessages();
+    if (currentMessagesTargetRef.current !== targetKey) return;
     setLoadedThreadMessagesKey((current) => targetKey ?? current);
   }, [loadThreadMessages, targetThreadMessagesKey]);
 
@@ -773,7 +802,8 @@ export function useThreadPageController({
     workspaceId,
   ]);
 
-  useThreadBootstrap({
+  const firstTurn = useThreadBootstrap({
+    userId: currentUserId,
     bootstrappedThreadKeyRef,
     loadThreadMessagesRef,
     persistActiveSourceIds,
@@ -922,6 +952,18 @@ export function useThreadPageController({
         attempts?: number;
       },
     ) => {
+      if (!localConversationStatus.ready) {
+        toast.error(
+          localConversationStatus.message ?? "The computer is unavailable.",
+        );
+        return;
+      }
+      try {
+        await synchronizeHubBeforeSend();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        return;
+      }
       // Set only when replaying a queued send: on a 409 re-queue the same item.
       const onRunAlreadyActive =
         options?.durableRunKey && options.queuedSendId
@@ -972,6 +1014,12 @@ export function useThreadPageController({
         return;
       }
 
+      if (!sourceSelectionReady) {
+        toast.error(
+          "Sources are still loading or saving. Wait for completion before sending.",
+        );
+        return;
+      }
       const contextSourceIds = resolveContextSourceIds({
         messages,
         activeSourceIds,
@@ -1051,6 +1099,7 @@ export function useThreadPageController({
           images,
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
+          sourceSelectionRevision,
           skillIds: selectedSkillIds,
           tools,
           command: input.command,
@@ -1070,6 +1119,7 @@ export function useThreadPageController({
         images,
         mentionedSourceIds,
         sourceIds: sendSourceIds,
+        sourceSelectionRevision,
         skillIds: selectedSkillIds,
         tools,
         command: input.command,
@@ -1090,6 +1140,8 @@ export function useThreadPageController({
       messageGroups,
       messages,
       activeSourceIds,
+      sourceSelectionReady,
+      sourceSelectionRevision,
       activeMcpInstallIds,
       activeMcpToolIds,
       effectiveActiveSkillIds,
@@ -1097,6 +1149,8 @@ export function useThreadPageController({
       selectedModels.llm,
       pendingLatestVersionSelectionRef,
       requeueSendAfterRunActive,
+      localConversationStatus.ready,
+      localConversationStatus.message,
       setActiveVersionByGroup,
       streamThreadAction,
     ],
@@ -1113,6 +1167,8 @@ export function useThreadPageController({
     const next = pendingSendsRef.current[0];
     if (
       chatExecutionState === "idle" &&
+      localConversationStatus.ready &&
+      !localQueuePaused &&
       !hasActivelyRunningToolWorkState &&
       next &&
       Date.now() >= retryBackoffUntilRef.current
@@ -1127,7 +1183,13 @@ export function useThreadPageController({
         attempts: next.attempts,
       });
     }
-  }, [chatExecutionState, hasActivelyRunningToolWorkState, retryTick]);
+  }, [
+    chatExecutionState,
+    hasActivelyRunningToolWorkState,
+    retryTick,
+    localConversationStatus.ready,
+    localQueuePaused,
+  ]);
 
   const cancelQueuedSend = useCallback((id: string) => {
     pendingSendsRef.current = pendingSendsRef.current.filter(
@@ -1165,6 +1227,10 @@ export function useThreadPageController({
         turnId: assistantGroup?.turnId,
       };
 
+      if (!sourceSelectionReady) {
+        toast.error("Sources are still loading or saving.");
+        return;
+      }
       const refreshSourceIds = resolveRefreshSourceIds({
         activeSourceIds,
         assistantMessageId: input.assistantMessageId,
@@ -1179,6 +1245,7 @@ export function useThreadPageController({
       await streamThreadAction({
         mode: "refresh",
         sourceIds: refreshSourceIds,
+        sourceSelectionRevision,
         skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
@@ -1190,6 +1257,8 @@ export function useThreadPageController({
     },
     [
       activeSourceIds,
+      sourceSelectionReady,
+      sourceSelectionRevision,
       effectiveActiveSkillIds,
       isStreaming,
       messageGroups,
@@ -1299,6 +1368,10 @@ export function useThreadPageController({
     presentViewers,
     typingViewers,
     onComposerType: notifyTyping,
+    localQueuePaused,
+    resumeLocalQueue: () => {
+      if (localConversationStatus.ready) setLocalQueuePaused(false);
+    },
     queuedSends: queuedSends.map((queued) => ({
       id: queued.id,
       preview: queuedSendPreview(queued.input),
@@ -1326,6 +1399,7 @@ export function useThreadPageController({
     cancelEditing,
     composerInitialCommand,
     composerInitialInput,
+    firstTurn,
     composerResetKey,
     composerOptions,
     disabledToolNames,

@@ -2,11 +2,8 @@ import { parseBooleanEnv as parseBoolean } from "../shared/env";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
-import { createCreemClient } from "@creem_io/better-auth/server";
-import {
-  getPricingConfig,
-  type PlanConfig,
-} from "@sourceweft/contracts/pricing";
+import { createCreemClient } from "@sourceweft/billing/provider-sdk";
+import { getPricingConfig, type PlanConfig } from "@sourceweft/billing/catalog";
 
 type BillingInterval = "monthly" | "yearly";
 type PaidPlanId = Extract<PlanConfig["id"], "pro" | "team">;

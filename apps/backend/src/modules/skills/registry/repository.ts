@@ -8,7 +8,8 @@ import {
   skillVersions,
 } from "@sourceweft/db";
 import { assertRegistryStorageInvariant } from "../repository";
-import type { RegistryExistingEntry } from "./guard";
+import { triageRegistrySubmission, type RegistryExistingEntry } from "./guard";
+import { RegistrySubmissionError } from "./errors";
 
 /**
  * Stage 5 — Index (persist the definition, version and bundle).
@@ -30,7 +31,7 @@ import type { RegistryExistingEntry } from "./guard";
  */
 
 // The `version` label is derived from the pinned commit so each distinct commit
-// is its own version, while a re-submit of the SAME commit updates in place.
+// is its own version. A repeated source returns the immutable existing version.
 const VERSION_SHA_PREFIX_LENGTH = 12;
 
 export type UpsertRegistrySkillInput = {
@@ -63,6 +64,10 @@ export type UpsertRegistrySkillResult = {
   skillVersionId: string;
   version: string;
   status: "indexed" | "queued";
+  flags: string[];
+  diagnostics: NonNullable<
+    NonNullable<SkillManifestJson["registry"]>["ingestion"]
+  >["diagnostics"];
 };
 
 /**
@@ -184,73 +189,30 @@ export async function upsertRegistrySkillIndex(
   input: UpsertRegistrySkillInput,
 ): Promise<UpsertRegistrySkillResult> {
   const version = input.commitSha.slice(0, VERSION_SHA_PREFIX_LENGTH);
-  const values = buildRegistryUpsertValues({
-    displayName: input.displayName,
-    description: input.description,
-    storagePointer: input.storagePointer,
-    contentHash: input.contentHash,
-    manifestJson: input.manifestJson,
-    version,
-    versionStatus: input.versionStatus,
-  });
-
   const now = new Date();
   return db.transaction(async (tx) => {
+    // Also serializes first insertion, where no definition row exists to lock.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${"registry:" + input.slug}))`,
+    );
     const [existing] = await tx
-      .select({
-        id: skillDefinitions.id,
-        ownerUserId: skillDefinitions.ownerUserId,
-      })
+      .select()
       .from(skillDefinitions)
-      .where(
-        and(
-          eq(skillDefinitions.slug, input.slug),
-          eq(skillDefinitions.sourceType, "registry_github"),
-        ),
-      )
+      .where(eq(skillDefinitions.slug, input.slug))
       .limit(1);
-
+    if (
+      existing &&
+      (existing.sourceType !== "registry_github" ||
+        (existing.ownerUserId && existing.ownerUserId !== input.submitterId))
+    ) {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SUBMISSION_CONFLICT",
+        "This skill belongs to another submitter or source",
+      );
+    }
     const skillId = existing?.id ?? randomUUID();
-    if (existing) {
-      await tx
-        .update(skillDefinitions)
-        .set({
-          displayName: values.definition.displayName,
-          description: values.definition.description,
-          status: values.definition.status,
-          updatedAt: now,
-        })
-        .where(eq(skillDefinitions.id, skillId));
-    } else {
-      await tx.insert(skillDefinitions).values({
-        id: skillId,
-        teamId: values.definition.teamId,
-        workspaceId: values.definition.workspaceId,
-        sourceType: values.definition.sourceType,
-        slug: input.slug,
-        displayName: values.definition.displayName,
-        description: values.definition.description,
-        visibility: values.definition.visibility,
-        status: values.definition.status,
-        ownerUserId: input.submitterId,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-
-    // A newly-current version demotes any prior current version (partial-unique
-    // `skill_versions_skill_current_uq`).
-    if (values.version.isCurrent) {
-      await tx
-        .update(skillVersions)
-        .set({ isCurrent: false, updatedAt: now })
-        .where(eq(skillVersions.skillId, skillId));
-    }
-
-    // Re-submitting the same commit updates that version in place; a new commit
-    // is a new version row.
     const [existingVersion] = await tx
-      .select({ id: skillVersions.id })
+      .select()
       .from(skillVersions)
       .where(
         and(
@@ -259,65 +221,135 @@ export async function upsertRegistrySkillIndex(
         ),
       )
       .limit(1);
-
-    const skillVersionId = existingVersion?.id ?? randomUUID();
     if (existingVersion) {
+      if (existingVersion.storagePointer !== input.storagePointer) {
+        throw new RegistrySubmissionError(
+          "REGISTRY_VERSION_CONFLICT",
+          "Version label refers to a different full source commit or path",
+        );
+      }
+      const stored = await tx
+        .select()
+        .from(skillVersionFiles)
+        .where(eq(skillVersionFiles.skillVersionId, existingVersion.id));
+      const hashes = (files: Array<{ path: string; contentHash: string }>) =>
+        JSON.stringify(
+          files
+            .map((f) => [f.path, f.contentHash])
+            .sort((a, b) => a[0]!.localeCompare(b[0]!)),
+        );
+      if (hashes(stored) !== hashes(input.files)) {
+        throw new RegistrySubmissionError(
+          "REGISTRY_VERSION_CONFLICT",
+          "This source has different files from the stored immutable version",
+        );
+      }
+      if (
+        existing?.status !== "active" ||
+        (existingVersion.status !== "published" &&
+          existingVersion.status !== "draft")
+      ) {
+        throw new RegistrySubmissionError(
+          "REGISTRY_VERSION_UNAVAILABLE",
+          "This version was revoked or disabled; resubmitting cannot restore it",
+        );
+      }
+      return {
+        slug: input.slug,
+        skillId,
+        skillVersionId: existingVersion.id,
+        version,
+        status: existingVersion.status === "published" ? "indexed" : "queued",
+        flags: existingVersion.manifestJson.registry?.scan.flags ?? [],
+        diagnostics:
+          existingVersion.manifestJson.registry?.ingestion?.diagnostics ?? [],
+      };
+    }
+    if (existing?.status === "archived")
+      throw new RegistrySubmissionError(
+        "REGISTRY_VERSION_UNAVAILABLE",
+        "This skill is archived",
+      );
+    const [latest] = await tx
+      .select()
+      .from(skillVersions)
+      .where(eq(skillVersions.skillId, skillId))
+      .orderBy(desc(skillVersions.createdAt), desc(skillVersions.id))
+      .limit(1);
+    const decision = triageRegistrySubmission({
+      existing: existing
+        ? {
+            ownerUserId: existing.ownerUserId,
+            definitionStatus: existing.status,
+            currentVersionStatus: latest?.status ?? null,
+          }
+        : null,
+      submitterId: input.submitterId,
+      scan: input.manifestJson.registry!.scan,
+    });
+    const values = buildRegistryUpsertValues({
+      ...input,
+      version,
+      versionStatus: decision.versionStatus,
+    });
+    if (!existing) {
       await tx
-        .update(skillVersions)
+        .insert(skillDefinitions)
+        .values({
+          id: skillId,
+          ...values.definition,
+          slug: input.slug,
+          ownerUserId: input.submitterId,
+          createdAt: now,
+          updatedAt: now,
+        });
+    } else if (values.version.isCurrent) {
+      await tx
+        .update(skillDefinitions)
         .set({
-          status: values.version.status,
-          storageType: values.version.storageType,
-          storagePointer: values.version.storagePointer,
-          isCurrent: values.version.isCurrent,
-          contentHash: values.version.contentHash,
-          manifestJson: values.version.manifestJson,
-          publishedAt: values.version.status === "published" ? now : null,
+          displayName: input.displayName,
+          description: input.description,
           updatedAt: now,
         })
-        .where(eq(skillVersions.id, skillVersionId));
-    } else {
-      await tx.insert(skillVersions).values({
+        .where(eq(skillDefinitions.id, skillId));
+    }
+    if (values.version.isCurrent) {
+      await tx
+        .update(skillVersions)
+        .set({ isCurrent: false, updatedAt: now })
+        .where(eq(skillVersions.skillId, skillId));
+    }
+    const skillVersionId = randomUUID();
+    await tx
+      .insert(skillVersions)
+      .values({
         id: skillVersionId,
         skillId,
-        version,
-        status: values.version.status,
-        storageType: values.version.storageType,
-        storagePointer: values.version.storagePointer,
-        isCurrent: values.version.isCurrent,
-        contentHash: values.version.contentHash,
-        manifestJson: values.version.manifestJson,
+        ...values.version,
         createdBy: input.submitterId,
-        publishedAt: values.version.status === "published" ? now : null,
+        publishedAt: values.version.isCurrent ? now : null,
         createdAt: now,
         updatedAt: now,
       });
-    }
-
-    // Replace the whole bundle rather than merging: a re-submit of the same
-    // commit must not leave behind files the upstream skill has since dropped.
-    await tx
-      .delete(skillVersionFiles)
-      .where(eq(skillVersionFiles.skillVersionId, skillVersionId));
-    if (input.files.length > 0) {
-      await tx.insert(skillVersionFiles).values(
-        input.files.map((file) => ({
-          id: randomUUID(),
-          skillVersionId,
-          path: file.path,
-          contentText: file.contentText,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-          contentHash: file.contentHash,
-        })),
-      );
-    }
-
+    if (input.files.length)
+      await tx
+        .insert(skillVersionFiles)
+        .values(
+          input.files.map((file) => ({
+            ...file,
+            id: randomUUID(),
+            skillVersionId,
+            createdAt: now,
+          })),
+        );
     return {
       slug: input.slug,
       skillId,
       skillVersionId,
       version,
-      status: input.outcome,
+      status: decision.outcome,
+      flags: input.manifestJson.registry?.scan.flags ?? [],
+      diagnostics: input.manifestJson.registry?.ingestion?.diagnostics ?? [],
     };
   });
 }

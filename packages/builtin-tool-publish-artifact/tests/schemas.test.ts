@@ -128,7 +128,7 @@ test("PublishArtifactInputSchema accepts file artifact types for handler dispatc
     title: "Reference",
     source: {
       kind: "work_file",
-      path: "/workfiles/reference.pdf",
+      path: "/files/reference.pdf",
     },
   });
 
@@ -144,7 +144,7 @@ test("PublishArtifactInputSchema rejects unsupported public artifact types", () 
         title: "Reference",
         source: {
           kind: "work_file",
-          path: "/workfiles/reference.pdf",
+          path: "/files/reference.pdf",
         },
       }),
     /Invalid option/u,

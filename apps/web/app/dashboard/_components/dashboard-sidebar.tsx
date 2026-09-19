@@ -1,22 +1,41 @@
 "use client";
 
+import { contentClient } from "../../../lib/sdk";
+import { toast } from "sonner";
 import * as React from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, LayoutDashboard, MessageSquareText } from "lucide-react";
-import { Logo } from "@sourceweft/ui-web/logo";
+import {
+  Activity,
+  LayoutDashboard,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PenSquare,
+  Search,
+} from "lucide-react";
 import {
   Sheet,
   SheetContent,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
-import { McpIcon, SkillIcon } from "./dashboard-icons";
+import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
+import { useWorkspaceLayout } from "./dashboard-workspace-layout";
+import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
 
 type NavItem = {
   title: string;
@@ -31,12 +50,6 @@ const navMain: NavItem[] = [
     href: "/dashboard",
     icon: LayoutDashboard,
     match: (p) => p === "/dashboard",
-  },
-  {
-    title: "Chat",
-    href: "/dashboard/chat",
-    icon: MessageSquareText,
-    match: (p) => p.startsWith("/dashboard/chat"),
   },
   {
     title: "Skills",
@@ -58,47 +71,7 @@ const navMain: NavItem[] = [
   },
 ];
 
-function RailButton({
-  active,
-  href,
-  icon: Icon,
-  label,
-  onNavigate,
-}: {
-  active?: boolean;
-  href?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  onNavigate?: () => void;
-}) {
-  const className = cn(
-    "flex h-10 w-10 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-    active && "bg-accent text-foreground",
-  );
-
-  const content = (
-    <>
-      <Icon className="h-4.5 w-4.5" />
-      <span className="sr-only">{label}</span>
-    </>
-  );
-
-  if (!href) {
-    return (
-      <button className={className} title={label} type="button">
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <a className={className} href={href} onClick={onNavigate} title={label}>
-      {content}
-    </a>
-  );
-}
-
-function MobileNavLink({
+function NavigationLink({
   active,
   href,
   icon: Icon,
@@ -112,17 +85,18 @@ function MobileNavLink({
   onNavigate?: () => void;
 }) {
   return (
-    <a
+    <Link
       className={cn(
-        "flex h-10 min-w-0 items-center gap-3 rounded-xl px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 min-w-0 items-center gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
+      aria-current={active ? "page" : undefined}
       href={href}
       onClick={onNavigate}
     >
-      <Icon className="h-4.5 w-4.5 shrink-0" />
+      <Icon className="size-4 shrink-0" />
       <span className="min-w-0 truncate">{label}</span>
-    </a>
+    </Link>
   );
 }
 
@@ -130,11 +104,15 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
-  const hasChatPanel = pathname.startsWith("/dashboard/chat");
-  const [settingsRequest, setSettingsRequest] = React.useState<{
-    id: number;
-    tab: "account" | "team" | "usage" | "billing";
-  } | null>(null);
+  const {
+    conversationsDocked,
+    desktopTitlebar,
+    conversationWidth,
+    canDockConversations,
+    railWidth,
+    toggleConversations,
+  } = useWorkspaceLayout();
+  const [search, setSearch] = React.useState("");
   // Member management is per-workspace, not an account setting — it opens as
   // its own dialog rather than a settings-center tab.
   const [membersOpen, setMembersOpen] = React.useState(false);
@@ -161,7 +139,6 @@ export function DashboardSidebar() {
     isLoadingPrivateChats,
     loadMorePrivateChats,
     mode,
-    organizationName,
     renameWorkspace,
     switchWorkspace,
     sharedChats,
@@ -216,7 +193,30 @@ export function DashboardSidebar() {
     router.push("/dashboard/chat");
   };
 
-  const handleStartNewChat = () => {
+  const handleStartNewChat = async () => {
+    let query = new URLSearchParams(window.location.search);
+    if (workspaceId && activeThreadId) {
+      try {
+        const { thread } = await contentClient.getThread(
+          workspaceId,
+          activeThreadId,
+        );
+        const target = thread.executionTarget ?? { kind: "cloud" };
+        query = new URLSearchParams({
+          computer: target.kind === "local" ? target.deviceId : "cloud",
+        });
+        if (target.kind === "local" && target.folderId)
+          query.set("folder", target.folderId);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not load the conversation details",
+        );
+        return;
+      }
+    }
+
     if (workspaceId && activeThreadId) {
       copyStoredByokState({
         workspaceId,
@@ -225,8 +225,10 @@ export function DashboardSidebar() {
       });
     }
 
+    query.set("draft", crypto.randomUUID());
     startNewChat();
-    router.push("/dashboard/chat");
+    setOpenMobile(false);
+    router.push(`/dashboard/chat${query.size ? `?${query.toString()}` : ""}`);
   };
 
   // A persona-owned thread lands in the list like any created chat, nested
@@ -294,163 +296,209 @@ export function DashboardSidebar() {
     });
   };
 
-  const renderRail = () => (
-    <div className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-sidebar-border px-2 py-4">
-      <div className="flex flex-col items-center gap-2">
-        <a
-          className="flex h-10 w-10 items-center justify-center text-primary"
-          href="/dashboard"
-          onClick={() => setOpenMobile(false)}
-          title="SourceWeft"
-        >
-          <Logo className="h-9 w-9 bg-sidebar-accent text-sidebar-accent-foreground" />
-          <span className="sr-only">SourceWeft</span>
-        </a>
-
-        <div className="mt-2 flex flex-col items-center gap-1">
-          {navMain.map((item) => (
-            <RailButton
-              active={item.match(pathname)}
-              href={item.href}
-              icon={item.icon}
-              key={item.title}
-              label={item.title}
-              onNavigate={() => setOpenMobile(false)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <DashboardAccountMenu settingsRequest={settingsRequest} />
-    </div>
-  );
-
-  const renderMobileMenuPanel = () => (
-    <div className="flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-sidebar-border px-4">
-        <Logo className="h-9 w-9 shrink-0 bg-sidebar-accent text-sidebar-accent-foreground" />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-sidebar-foreground">
-            SourceWeft
-          </div>
-          <div className="truncate text-xs text-sidebar-foreground/60">
-            Dashboard
-          </div>
-        </div>
-      </div>
-
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3">
-        {navMain.map((item) => (
-          <MobileNavLink
+  const renderNavigation = () => (
+    <nav
+      aria-label="Main navigation"
+      className="shrink-0 border-b border-sidebar-border/60 px-3 pb-2"
+    >
+      <div className="space-y-0">
+        {navMain.slice(0, 3).map((item) => (
+          <NavigationLink
+            key={item.title}
             active={item.match(pathname)}
             href={item.href}
             icon={item.icon}
-            key={item.title}
             label={item.title}
             onNavigate={() => setOpenMobile(false)}
           />
         ))}
-      </nav>
-
-      <div className="border-t border-sidebar-border px-3 py-3">
-        <DashboardAccountMenu settingsRequest={settingsRequest} />
       </div>
-    </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            className={cn(
+              "h-9 w-full justify-start gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75",
+              pathname.startsWith("/dashboard/observability") &&
+                "bg-sidebar-accent text-sidebar-accent-foreground",
+            )}
+          >
+            <MoreHorizontal className="size-4 shrink-0" />
+            More
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-52">
+          {navMain.map((item, index) => (
+            <DropdownMenuItem
+              key={item.title}
+              asChild
+              className={index < 3 ? "hidden" : undefined}
+            >
+              <Link
+                href={item.href}
+                onClick={() => setOpenMobile(false)}
+                aria-current={item.match(pathname) ? "page" : undefined}
+              >
+                <item.icon className="size-4" />
+                {item.title}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </nav>
   );
 
-  const renderChatPanel = ({
-    onOpenChat,
-    onWorkspaceChange,
-  }: {
-    onOpenChat: (id: string) => void;
-    onWorkspaceChange: (nextId: string) => void;
-  }) =>
-    hasChatPanel ? (
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
-        <DashboardSidebarChatPanel
-          archivedChats={archivedChats}
-          activeChatId={activeThreadId}
-          onArchiveChat={archiveChat}
-          onClearArchivedChats={handleClearArchivedChats}
-          onClearPrivateChats={handleClearPrivateChats}
-          onCreateAgentChat={handleCreateAgentChat}
-          onCreateChat={handleStartNewChat}
-          onCreateWorkspace={handleCreateWorkspace}
-          onDeleteChat={handleDeleteChat}
-          onSetChatVisibility={setChatVisibility}
-          onLoadMoreChats={() => void loadMorePrivateChats()}
-          onOpenMembers={() => setMembersOpen(true)}
-          onOpenUsage={() =>
-            setSettingsRequest({ id: Date.now(), tab: "usage" })
-          }
-          onOpenChat={onOpenChat}
-          onOpenChatInNewWindow={handleOpenChatInNewWindow}
-          onOpenChatInPanel={handleOpenChatInPanel}
-          onPrefetchChat={handlePrefetchChat}
-          onRenameWorkspace={handleRenameWorkspace}
-          hasMorePrivateChats={hasMorePrivateChats}
-          isLoadingPrivateChats={isLoadingPrivateChats}
-          privateChats={privateChats}
-          sharedChats={sharedChats}
-          onWorkspaceChange={onWorkspaceChange}
-          organizationName={organizationName}
-          workspaceId={workspaceId}
-          workspaceName={workspaceName}
-          workspaces={workspaces}
-        />
+  const renderPanel = (desktopTitlebar = false) => (
+    <DashboardSidebarChatPanel
+      brand={<DashboardSidebarBrand />}
+      desktopTitlebar={desktopTitlebar}
+      heading={
+        desktopTitlebar ||
+        (canDockConversations &&
+          pathname.startsWith("/dashboard/chat")) ? null : (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="size-8 shrink-0 text-muted-foreground"
+            data-sidebar-collapse
+            aria-label={
+              canDockConversations ? "Collapse sidebar" : "Hide sidebar"
+            }
+            onClick={toggleConversations}
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        )
+      }
+      navigation={renderNavigation()}
+      footer={
+        <div className="shrink-0 border-t border-sidebar-border/60 p-3">
+          <DashboardAccountMenu expanded />
+        </div>
+      }
+      search={search}
+      onSearchChange={setSearch}
+      archivedChats={archivedChats}
+      activeChatId={activeThreadId}
+      onArchiveChat={archiveChat}
+      onClearArchivedChats={handleClearArchivedChats}
+      onClearPrivateChats={handleClearPrivateChats}
+      onCreateAgentChat={handleCreateAgentChat}
+      onCreateChat={handleStartNewChat}
+      onCreateWorkspace={handleCreateWorkspace}
+      onDeleteChat={handleDeleteChat}
+      onSetChatVisibility={setChatVisibility}
+      onLoadMoreChats={() => void loadMorePrivateChats()}
+      onOpenMembers={() => setMembersOpen(true)}
+      onOpenChat={handleOpenChat}
+      onOpenChatInNewWindow={handleOpenChatInNewWindow}
+      onOpenChatInPanel={handleOpenChatInPanel}
+      onPrefetchChat={handlePrefetchChat}
+      onRenameWorkspace={handleRenameWorkspace}
+      hasMorePrivateChats={hasMorePrivateChats}
+      isLoadingPrivateChats={isLoadingPrivateChats}
+      privateChats={privateChats}
+      sharedChats={sharedChats}
+      onWorkspaceChange={handleMobileWorkspaceChange}
+      workspaceId={workspaceId}
+      workspaceName={workspaceName}
+      workspaces={workspaces}
+    />
+  );
+
+  const renderRail = () => (
+    <aside
+      data-testid="navigation-rail"
+      style={{ width: railWidth }}
+      className="flex h-svh shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar px-2 py-3"
+    >
+      <DashboardSidebarBrand collapsed />
+      {!pathname.startsWith("/dashboard/chat") && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="mb-3 size-9"
+          aria-label="Expand sidebar"
+          onClick={toggleConversations}
+        >
+          <PanelLeftOpen className="size-4" />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="size-9"
+        aria-label="New chat"
+        title="New chat"
+        onClick={handleStartNewChat}
+      >
+        <PenSquare className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="mb-3 size-9"
+        aria-label="Show conversations"
+        title="Show conversations"
+        onClick={toggleConversations}
+      >
+        <Search className="size-4" />
+      </Button>
+      <nav aria-label="Main navigation" className="flex flex-col gap-1">
+        {navMain.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-label={item.title}
+            title={item.title}
+            aria-current={item.match(pathname) ? "page" : undefined}
+            className={cn(
+              "flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+              item.match(pathname) && "bg-sidebar-accent text-foreground",
+            )}
+          >
+            <item.icon className="size-4" />
+          </Link>
+        ))}
+      </nav>
+      <div className="mt-auto">
+        <DashboardAccountMenu />
       </div>
-    ) : null;
-
-  const desktopChatPanel = renderChatPanel({
-    onOpenChat: (id) => {
-      router.prefetch(`/dashboard/chat/${id}`);
-      router.push(`/dashboard/chat/${id}`);
-    },
-    onWorkspaceChange: (nextId) => {
-      void switchWorkspace(nextId).then((switched) => {
-        if (switched) {
-          router.push("/dashboard/chat");
-        }
-      });
-    },
-  });
-
-  const mobileChatPanel = renderChatPanel({
-    onOpenChat: handleOpenChat,
-    onWorkspaceChange: handleMobileWorkspaceChange,
-  });
+    </aside>
+  );
 
   return (
     <>
-      <aside
-        className={cn(
-          "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
-          hasChatPanel ? "w-[360px] border-r border-border" : "w-14",
-        )}
-      >
-        {renderRail()}
-        {desktopChatPanel}
-      </aside>
+      {railWidth > 0 && renderRail()}
+      {conversationsDocked && (
+        <aside
+          data-testid="conversation-sidebar"
+          style={{ width: conversationWidth }}
+          className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+        >
+          {renderPanel(desktopTitlebar)}
+        </aside>
+      )}
 
       <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
-          className={cn(
-            "gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground md:hidden [&>button]:hidden",
-            hasChatPanel
-              ? "w-[min(100vw,360px)] max-w-none"
-              : "w-[min(100vw,280px)] max-w-none",
-          )}
+          onCloseAutoFocus={(event) => {
+            const trigger = document.querySelector<HTMLButtonElement>(
+              "[data-conversations-toggle]",
+            );
+            if (trigger) {
+              event.preventDefault();
+              trigger.focus();
+            }
+          }}
+          className="gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground w-[min(320px,calc(100vw-2rem))] max-w-none [&>button]:hidden"
           side="left"
         >
-          <SheetTitle className="sr-only">Dashboard menu</SheetTitle>
-          <div
-            className={cn(
-              "flex h-full min-h-0 bg-sidebar text-sidebar-foreground",
-              hasChatPanel ? "w-[min(100vw,360px)]" : "w-[min(100vw,280px)]",
-            )}
-          >
-            {hasChatPanel ? mobileChatPanel : renderMobileMenuPanel()}
-          </div>
+          <SheetTitle className="sr-only">
+            Navigation and conversations
+          </SheetTitle>
+          {renderPanel()}
         </SheetContent>
       </Sheet>
 

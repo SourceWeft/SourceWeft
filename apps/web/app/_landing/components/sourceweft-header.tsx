@@ -5,6 +5,7 @@ import { LayoutDashboard } from "lucide-react";
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import { ThemeToggle } from "./theme-toggle";
+import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 import {
   getLandingUserLabel,
   type LandingAuthState,
@@ -18,6 +19,7 @@ export function SourceWeftHeader({
   containerClassName?: string;
 }) {
   const dashboardHref = "/dashboard";
+  const checkoutAvailable = useCheckoutAvailable();
   const signInHref = "/auth/sign-in";
   const userLabel = getLandingUserLabel(authState.user);
 
@@ -34,17 +36,21 @@ export function SourceWeftHeader({
               ["/#features", "Features"],
               ["/#how-it-works", "How it works"],
               ["/#pricing", "Pricing"],
+              ["/mcp", "MCP Servers"],
+              ["/download", "Download"],
               ["/blog", "Blog"],
             ] as const
-          ).map(([href, label]) => (
-            <a
-              key={href}
-              href={href}
-              className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-            >
-              {label}
-            </a>
-          ))}
+          )
+            .filter(([href]) => href !== "/#pricing" || checkoutAvailable)
+            .map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+              >
+                {label}
+              </a>
+            ))}
         </div>
 
         <div className="flex items-center gap-3">

@@ -1,7 +1,11 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["NODE_ENV"],
+  "globalEnv": [
+    "NODE_ENV",
+    "SOURCEWEFT_COMMERCIAL_ENABLED",
+    "SOURCEWEFT_NEXT_DIST_DIR"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -40,6 +44,38 @@
     "dev:fast": {
       "cache": false,
       "persistent": true
+    },
+    "test:e2e:skills": {
+      "cache": false,
+      "env": [
+        "SKILL_E2E_API_URL",
+        "SKILL_E2E_WEB_URL",
+        "SKILL_E2E_FIXTURES_FILE",
+        "SKILL_E2E_REQUIRE_ALL"
+      ]
+    },
+    "test:e2e:skills:full": {
+      "cache": false,
+      "env": [
+        "SKILL_E2E_API_URL",
+        "SKILL_E2E_WEB_URL",
+        "SKILL_E2E_FIXTURES_FILE",
+        "SKILL_E2E_REQUIRE_ALL"
+      ]
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "PUBLIC_*",
+    "INTERNAL_API_BASE_URL",
+    "SELFHOST_*",
+    "LANDING_VERSION",
+    "SOURCEWEFT_SAAS_ENABLED",
+    "BACKEND_BILLING_*",
+    "BACKEND_CREDITS_ENABLED",
+    "BACKEND_PAGES_ENABLED",
+    "BACKEND_TEAM_BILLING_ENABLED",
+    "CREEM_*",
+    "WAFFO_*",
+    "STRIPE_*"
+  ]
 }

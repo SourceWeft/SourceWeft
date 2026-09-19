@@ -21,6 +21,7 @@ import type {
 } from "../turn/types";
 import type { TracePart } from "../turn/trace-parts";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import { projectReasoning } from "../turn/reasoning-state";
 
 export type ThreadStreamPartialErrorState = {
   reasoning?: string;
@@ -136,7 +137,11 @@ export async function createThreadStreamErrorMessage(input: {
       agentMode: input.prepared.agentMode,
       versionOf: input.prepared.assistantMessageParentId,
       ...errorBilling.metadata,
-      reasoning: input.partialState?.reasoning,
+      ...projectReasoning({
+        run: input.prepared.reasoningRun,
+        text: input.partialState?.reasoning,
+        terminal: true,
+      }),
       reasoningSegments: input.partialState?.reasoningSegments,
       toolCalls: input.partialState?.toolCalls,
       traceParts: input.partialState?.traceParts,

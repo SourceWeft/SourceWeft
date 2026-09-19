@@ -14,6 +14,7 @@ import { registerSourceRoutes } from "./content/sources";
 import { registerSkillRoutes } from "./content/skills";
 import { registerThreadRoutes } from "./content/threads";
 import { registerWorkingFileRoutes } from "./content/working-files";
+import { registerSourceSelectionRoutes } from "./content/source-selection";
 
 export function registerContentRoutes(app: Hono) {
   const workspaceRoutes = new Hono();
@@ -26,6 +27,7 @@ export function registerContentRoutes(app: Hono) {
   registerSkillRoutes(workspaceRoutes);
   registerThreadRoutes(workspaceRoutes);
   registerWorkingFileRoutes(workspaceRoutes);
+  registerSourceSelectionRoutes(workspaceRoutes);
   registerByokRoutes(workspaceRoutes);
   registerMcpRoutes(workspaceRoutes);
   registerModelGatewayRoutes(workspaceRoutes);

@@ -177,7 +177,7 @@ function formatPrepareMappingList(files: Record<string, unknown>[]) {
   }
   const visible = files.slice(0, 3).map((file) => {
     const sourcePath = prepareSourcePath(file) ?? "unknown source";
-    const sandboxPath = prepareSandboxPath(file) ?? "unknown sandbox path";
+    const sandboxPath = prepareSandboxPath(file) ?? "unknown workspace path";
     return `${sourcePath} -> ${sandboxPath}`;
   });
   const remaining = files.length - visible.length;
@@ -478,10 +478,10 @@ function formatOperationLabel(value: string | null) {
     case "collect_sandbox_outputs":
       return "Collected outputs";
     case "create":
-      return "Created sandbox";
+      return "Prepared workspace";
     case "cleanup":
     case "delete":
-      return "Cleaned up sandbox";
+      return "Released workspace";
     default:
       return value
         ? value
@@ -642,7 +642,7 @@ export function getSandboxToolResultDetails(input: {
   if (input.toolName === "prepare_sandbox_workspace") {
     const requestedFiles = arrayRecord(record(input.input)?.files);
     const inputCount = Math.max(result.filePaths.length, requestedFiles.length);
-    details.push({ label: "Operation", value: "Prepared sandbox workspace" });
+    details.push({ label: "Operation", value: "Prepared workspace" });
     appendSandboxFailureDetails(details, result);
     details.push({
       label: "Inputs",
@@ -660,7 +660,7 @@ export function getSandboxToolResultDetails(input: {
       details.push({ label: "Requested transfer", value: requestedMappings });
     }
   } else if (input.toolName === "collect_sandbox_outputs") {
-    details.push({ label: "Operation", value: "Collected sandbox outputs" });
+    details.push({ label: "Operation", value: "Collected output files" });
     appendSandboxFailureDetails(details, result);
     details.push({
       label: "Outputs",
@@ -674,7 +674,7 @@ export function getSandboxToolResultDetails(input: {
       details.push({ label: "Output paths", value: paths });
     }
   } else {
-    details.push({ label: "Operation", value: "Executed sandbox command" });
+    details.push({ label: "Operation", value: "Executed command" });
     appendSandboxFailureDetails(details, result);
     if (result.exitCode !== null) {
       details.push({ label: "Exit code", value: String(result.exitCode) });
@@ -705,7 +705,7 @@ export function getSandboxCollectedWorkfilePaths(input: {
 
   return Array.from(
     new Set(
-      result.outputPaths.filter((path) => path.startsWith("/workfiles/")),
+      result.outputPaths.filter((path) => path.startsWith("/files/")),
     ),
   );
 }
@@ -732,7 +732,7 @@ export function getSandboxToolOperationTimeline(input: {
   // (execute/prepare/collect) are claimed at start, so their `createdAt` is the
   // start. The `create` (sandbox cold start) row is written at *completion*
   // (recordOperation), and because an execute triggers that cold start its row
-  // is claimed first — so a naive createdAt sort wrongly lists "Created sandbox"
+  // is claimed first — so a naive createdAt sort wrongly lists "Prepared workspace"
   // after the commands. Recover its real start as createdAt − duration (minus an
   // epsilon so it precedes the command that waited on it at an equal start).
   return fallbackOperations
@@ -770,39 +770,38 @@ function extractSandboxErrorCode(error: string) {
 
 const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
   SANDBOX_BINARY_OUTPUT_UNSUPPORTED:
-    "This sandbox output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
+    "This output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
   SANDBOX_COLLECT_CONFLICT:
-    "A target /workfiles file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+    "A target /files file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
   SANDBOX_COLLECT_PATH_DENIED:
-    "The requested sandbox output path is outside the provider-allowed collection area. Use one of the sandbox collect source roots shown in the runtime instructions.",
+    "The requested output path is outside the provider-allowed collection area. Use an authorized output directory.",
   SANDBOX_COMMAND_TIMEOUT:
-    "The sandbox command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
+    "The command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
   SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT:
-    "The sandbox returned an unsupported download result. Try collecting a plain text output file instead.",
+    "The operation returned an unsupported download result. Try collecting a plain text output file instead.",
   SANDBOX_EXECUTE_CWD_DENIED:
-    "The command working directory must stay inside the provider sandbox workspace root.",
+    "The command working directory must stay inside the authorized workspace.",
   SANDBOX_EXECUTE_COMMAND_DENIED:
     "The command was rejected before execution because it was empty or contained unsafe control characters. Revise the command and try again.",
   SANDBOX_EXECUTE_VFS_PATH_DENIED:
-    "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+    "The command referenced a file that is not available in the working directory. Prepare the required files before running the command.",
   SANDBOX_FILE_NOT_FOUND:
-    "The requested sandbox file was not found. Re-run the command or check the output path before collecting.",
+    "The requested file was not found. Re-run the command or check the output path before collecting.",
   SANDBOX_SKILL_STAGING_UNAVAILABLE:
-    "Skill files could not be staged into this sandbox, so /skills paths cannot be executed here. Read the skill file with file tools, save the needed content as a Workfile, prepare it into /workspace, then run that copy.",
+    "The required skill files could not be prepared in the working directory. Check the skill files and try again.",
   SANDBOX_FILE_TOO_LARGE:
-    "The selected file exceeds the sandbox transfer limit. Reduce the file size or collect a smaller output.",
+    "The selected file exceeds the file transfer limit. Reduce the file size or collect a smaller output.",
   SANDBOX_NOT_CONFIGURED:
-    "Sandbox execution is not fully configured. Ask an operator to check the backend sandbox settings.",
+    "Command execution is not configured. Contact your administrator.",
   SANDBOX_NOT_FOUND_OR_EXPIRED:
-    "The sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+    "The execution session was not found or has expired. Retry to start a new session.",
   SANDBOX_PREPARE_PATH_DENIED:
-    "Prepare requires sourcePath under SourceWeft DB-backed /workfiles and sandboxPath under a provider-allowed prepare target root.",
+    "Choose an existing workfile and an authorized destination directory.",
   SANDBOX_PROVIDER_AUTH_FAILED:
-    "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
-  SANDBOX_PROVIDER_ERROR:
-    "The sandbox operation failed. Try again, or ask an operator to check backend sandbox logs.",
+    "The execution service could not authenticate. Contact your administrator.",
+  SANDBOX_PROVIDER_ERROR: "The operation failed. Try again or contact support.",
   SANDBOX_TOTAL_SIZE_EXCEEDED:
-    "The selected files exceed the total sandbox transfer limit. Reduce the number or size of files and try again.",
+    "The selected files exceed the total file transfer limit. Reduce the number or size of files and try again.",
 };
 
 export function getSandboxToolSafeErrorMessage(input: {
@@ -821,11 +820,11 @@ export function getSandboxToolSafeErrorMessage(input: {
     if (exitCodeMatch) {
       return input.error;
     }
-    return "Sandbox operation failed. Review the operation details and try again.";
+    return "Operation failed. Review the details and try again.";
   }
 
   return (
     SANDBOX_SAFE_ERROR_MESSAGES[code] ??
-    "Sandbox operation failed. Review the operation details and try again."
+    "Operation failed. Review the details and try again."
   );
 }

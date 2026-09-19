@@ -48,12 +48,6 @@ function compactBillingError(error: unknown) {
  * Absent or unreadable billing state is treated as enforced, so a failure to
  * determine the mode fails closed rather than silently granting free usage.
  */
-function resolveBillingMode(
-  summary: Awaited<ReturnType<ContentBillingPort["getSummary"]>> | null,
-): BillingMode {
-  return summary?.billingMode ?? "enforced";
-}
-
 export type SettleModelCallInput = {
   context: ModelUsageContext;
   billing: ContentBillingPort;
@@ -163,11 +157,11 @@ export async function settleModelCall(
   let billingMode: BillingMode = "enforced";
 
   try {
-    const summary = await input.billing.getSummary(
+    const state = await input.billing.getExecutionState(
       context.teamId,
       context.actorUserId,
     );
-    billingMode = resolveBillingMode(summary);
+    billingMode = state.kind === "unmetered" ? "disabled" : state.mode;
 
     const meterUsage = input.meterUsage ?? meterBillableModelUsage;
     const providerAdapter = input.observation
@@ -200,19 +194,21 @@ export async function settleModelCall(
     return {
       ...baseTrace,
       billingStatus: metered.billedBy === "skipped" ? "skipped" : "metered",
-      consumedCredits: metered.billing.consumedCredits,
+      consumedCredits: metered.billing?.consumedCredits ?? 0,
       billedBy: metered.billedBy,
       skipReason: metered.skipReason,
       providerCostUsd: metered.cost.providerCostUsd,
       costSource: metered.cost.costSource,
       missingPriceComponents: metered.cost.missingPriceComponents,
       pricingSnapshot: metered.cost.pricingSnapshot,
-      billing: {
-        teamId: metered.billing.teamId,
-        availableCredits: metered.billing.availableCredits,
-        consumedThisCycle: metered.billing.consumedThisCycle,
-        idempotencyReplayed: metered.billing.idempotencyReplayed,
-      },
+      billing: metered.billing
+        ? {
+            teamId: metered.billing.teamId,
+            availableCredits: metered.billing.availableCredits,
+            consumedThisCycle: metered.billing.consumedThisCycle,
+            idempotencyReplayed: metered.billing.idempotencyReplayed,
+          }
+        : undefined,
       metadata: {
         ...metadata,
         billedBy: metered.billedBy,

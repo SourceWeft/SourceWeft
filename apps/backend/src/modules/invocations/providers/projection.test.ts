@@ -19,19 +19,6 @@ test("obsolete builtin tool compatibility provider is deleted", async () => {
   );
 });
 
-test("legacy builtin_tool selectable ids are documented as removed", async () => {
-  const repositoryRoot = join(process.cwd(), "../..");
-  const capabilityBindingDoc = await readFile(
-    join(repositoryRoot, "docs/architecture/capability-binding.md"),
-    "utf8",
-  );
-
-  assert.match(
-    capabilityBindingDoc,
-    /Legacy `builtin_tool\.\*` selectable IDs and `legacyIds` aliases were removed/u,
-  );
-});
-
 test("legacy builtin_tool selectable ids do not resolve", () => {
   const registry = createSelectableInvocationRegistry({
     providers: [

@@ -19,7 +19,7 @@ export const WorkFileSourceSchema = z.object({
   path: z
     .string()
     .min(1)
-    .describe("SourceWeft /workfiles path for an already-existing file."),
+    .describe("SourceWeft /files path for an already-existing file."),
 });
 
 export const ArtifactSourceSchema = z.discriminatedUnion("kind", [
@@ -169,7 +169,7 @@ export const PublishArtifactToolInputSchema = z.object({
   title: z.string().optional().describe("Artifact title for metadata."),
   description: z.string().optional(),
   source: ToolSourceSchema.optional().describe(
-    "Structured source object, for example { kind: 'sandbox_path', path: '/workspace/Presentation.pptx' } or { kind: 'work_file', path: '/workfiles/deck.pptx' }.",
+    "Structured source object, for example { kind: 'sandbox_path', path: '/workspace/Presentation.pptx' } or { kind: 'work_file', path: '/files/deck.pptx' }.",
   ),
   sourceKind: z
     .unknown()

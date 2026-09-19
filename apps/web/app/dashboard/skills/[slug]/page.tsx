@@ -1,5 +1,9 @@
 "use client";
 
+import { SkillAvatar } from "../_components/skill-avatar";
+
+import { SkillIntroduction } from "../_components/skill-introduction";
+
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -14,10 +18,9 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
-import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -50,32 +53,6 @@ function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
 }
 
-function readmeFallback(item: SkillCatalogItem) {
-  return [
-    `# ${item.displayName}`,
-    "",
-    item.description,
-  ].join("\n");
-}
-
-function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const palette =
-    item.sourceType === "builtin"
-      ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
-
-  return (
-    <span
-      className={cn(
-        "relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-linear-to-br text-white shadow-sm",
-        palette,
-      )}
-    >
-      <span className="absolute inset-0 bg-black/10" />
-      <SkillIcon className="relative h-5 w-5 drop-shadow" />
-    </span>
-  );
-}
 
 export default function SkillDetailPage() {
   const params = useParams<{ slug?: string | string[] }>();
@@ -168,6 +145,7 @@ export default function SkillDetailPage() {
 
   async function installSkill() {
     if (!workspace || !detail || detail.skill.enabled) return;
+    if (detail.skill.installable === false) return;
 
     setIsInstalling(true);
     try {
@@ -198,6 +176,7 @@ export default function SkillDetailPage() {
 
   async function uninstallSkill() {
     if (!workspace || !detail || !detail.skill.enabled) return;
+    if (detail.skill.sourceType === "builtin" && detail.skill.installable === false) return;
     if (!detail.skill.enabledWorkspaceSkillId) {
       toast.error("Skill install record is missing. Refresh and try again.");
       return;
@@ -226,9 +205,6 @@ export default function SkillDetailPage() {
   }
 
   const pageLoading = isResolvingWorkspace || isLoading;
-  const readmeContent = detail
-    ? detail.readmeContent ?? readmeFallback(detail.skill)
-    : "";
   const skillContent = detail?.skillContent ?? "";
   const canManageInstall = detail?.skill.installable !== false;
 
@@ -306,25 +282,24 @@ export default function SkillDetailPage() {
                   Loading skill...
                 </div>
               ) : error ? (
-                <div className="px-5 py-10 text-sm text-destructive">
-                  {error}
+                <div role="alert" className="space-y-3 px-5 py-10 text-sm">
+                  <p className="text-destructive">{error}</p>
+                  <Button variant="outline" size="sm" onClick={() => void loadDetail()}>Retry</Button>
                 </div>
               ) : (
-                <Tabs className="gap-0" defaultValue="readme">
+                <Tabs className="gap-0" defaultValue="overview">
                   <div className="border-b border-border px-5 py-3">
                     <TabsList className="h-8" variant="line">
-                      <TabsTrigger className="px-2.5 text-xs" value="readme">
-                        README
+                      <TabsTrigger className="px-2.5 text-xs" value="overview">
+                        Overview
                       </TabsTrigger>
                       <TabsTrigger className="px-2.5 text-xs" value="skill">
                         SKILL.md
                       </TabsTrigger>
                     </TabsList>
                   </div>
-                  <TabsContent className="m-0 px-5 py-5" value="readme">
-                    <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                      {readmeContent}
-                    </MessageResponse>
+                  <TabsContent className="m-0 px-5 py-5" value="overview">
+                    {detail ? <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} /> : null}
                   </TabsContent>
                   <TabsContent className="m-0 px-5 py-5" value="skill">
                     {skillContent ? (

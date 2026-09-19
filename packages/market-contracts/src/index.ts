@@ -137,12 +137,14 @@ export const marketItemVersionSchema = z.object({
 
 export const listMarketMcpRequestSchema = z.object({
   query: z.string().optional(),
+  /** Comma-separated category slugs, matching any selected category. */
   category: z.string().optional(),
   transport: mcpTransportSchema.optional(),
   official: z.boolean().optional(),
   verified: z.boolean().optional(),
   runtime: mcpRuntimeSchema.optional(),
   includeDesktopOnly: z.boolean().optional(),
+  desktopOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
 });

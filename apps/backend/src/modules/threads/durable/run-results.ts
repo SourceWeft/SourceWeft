@@ -1,4 +1,5 @@
 import { ContentError } from "../../content/errors";
+import { clientReasoningMetadata } from "../turn/reasoning-state";
 import { requireContentWorkspace } from "../../workspace/guards";
 import { canViewThread } from "../../workspace/content-visibility";
 import { findMessageRecord } from "../message-repository";
@@ -97,7 +98,10 @@ export async function getRunResult(run: ChatThreadRunRecord) {
   return {
     thread: thread as ThreadRecord,
     userMessage: userMessage as MessageRecord,
-    assistantMessage: assistantMessage as MessageRecord,
+    assistantMessage: {
+      ...assistantMessage,
+      metadata: clientReasoningMetadata(assistantMessage.metadata),
+    } as MessageRecord,
     billing: snapshot.billing ?? buildEmptyBilling(run.teamId),
     retrieval: normalizeRetrievalSnapshot(snapshot.retrieval) ?? {
       embeddingProfileId: null,

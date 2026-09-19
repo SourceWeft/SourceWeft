@@ -1,4 +1,4 @@
-import { billingService } from "../billing";
+import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { ConnectorActionRunner } from "./action-runner";
 import { ConnectorOAuthService } from "./oauth-service";
 import {

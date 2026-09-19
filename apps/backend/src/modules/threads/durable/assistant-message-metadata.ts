@@ -1,5 +1,6 @@
 import { findMessageRecord, updateMessageRecord } from "../message-repository";
 import { preserveTraceMetadata } from "../turn/trace-metadata";
+import { projectSnapshotReasoning } from "../turn/reasoning-state";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
 import { toObjectRecord } from "../../../shared/records";
 
@@ -195,9 +196,7 @@ export function buildAssistantMessageSnapshotMetadata(input: {
   snapshot: ChatRunSnapshot;
 }) {
   const nextMetadata = {
-    ...(input.snapshot.reasoning !== undefined
-      ? { reasoning: input.snapshot.reasoning }
-      : {}),
+    ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
     ...(input.snapshot.reasoningSegments !== undefined
       ? { reasoningSegments: input.snapshot.reasoningSegments }
       : {}),
@@ -247,9 +246,7 @@ export function buildAssistantMessageConfirmationMetadata(input: {
   const approvalExpiresAt =
     input.snapshot.approvalExpiresAt ?? currentThreadRun?.approvalExpiresAt;
   const nextMetadata = {
-    ...(input.snapshot.reasoning !== undefined
-      ? { reasoning: input.snapshot.reasoning }
-      : {}),
+    ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
     ...(input.snapshot.reasoningSegments !== undefined
       ? { reasoningSegments: input.snapshot.reasoningSegments }
       : {}),

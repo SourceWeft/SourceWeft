@@ -463,11 +463,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
       teamId: string;
       workspaceId: string;
       sourceIds: string[];
+      validateScope?: () => Promise<void>;
       citationRegistry: AgentCitationRegistry;
     },
   ) {}
 
   private async sources() {
+    await this.input.validateScope?.();
     return listVirtualFsSources({
       teamId: this.input.teamId,
       workspaceId: this.input.workspaceId,

@@ -1,6 +1,12 @@
 import type { Hono } from "hono";
 import {
+  listRegistryVersions,
+  getRegistryVersionDetail,
+  switchRegistryVersion,
+} from "../../../modules/skills/registry/versions";
+import {
   createCustomSkillRequestSchema,
+  switchSkillVersionSchema,
   createCustomSkillVersionRequestSchema,
   putCustomSkillVersionFileRequestSchema,
   enableWorkspaceSkillRequestSchema,
@@ -13,7 +19,10 @@ import { RegistrySubmissionError } from "../../../modules/skills/registry/errors
 import { requireSkillWorkspace } from "../../../modules/skills/registry/permissions";
 import { submitRegistrySkillFromGitHub } from "../../../modules/skills/registry/submit";
 import { requireContentWorkspace } from "../../../modules/workspace";
-import { getSessionUserId, requireSession } from "../../middleware/auth-session";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
@@ -26,10 +35,63 @@ async function resolveSkillContext(c: import("hono").Context) {
     workspaceId: requireRouteParam(c, "workspaceId"),
     userId: getSessionUserId(session),
   });
-  return { session, teamId: workspace.organizationId, workspaceId: workspace.id };
+  return {
+    session,
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+  };
 }
 
 export function registerSkillRoutes(app: Hono) {
+  app.get("/skills/catalog/:catalogId/versions", async (c) => {
+    const context = await resolveSkillContext(c);
+    const rawLimit = c.req.query("limit") ?? "20";
+    const limit = Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw ApiError.validation({ limit: "Expected integer from 1 to 100" });
+    return ApiResponse.success(
+      c,
+      await listRegistryVersions({
+        ...context,
+        userId: getSessionUserId(context.session),
+        catalogId: requireRouteParam(c, "catalogId"),
+        limit,
+        cursor: c.req.query("cursor"),
+      }),
+    );
+  });
+  app.get("/skills/catalog/:catalogId/versions/:versionId", async (c) => {
+    const context = await resolveSkillContext(c);
+    return ApiResponse.success(
+      c,
+      await getRegistryVersionDetail({
+        ...context,
+        userId: getSessionUserId(context.session),
+        catalogId: requireRouteParam(c, "catalogId"),
+        versionId: requireRouteParam(c, "versionId"),
+      }),
+    );
+  });
+  app.put("/skills/:workspaceSkillId/version", async (c) => {
+    const context = await resolveSkillContext(c);
+    const userId = getSessionUserId(context.session);
+    await requireSkillWorkspace({
+      workspaceId: context.workspaceId,
+      userId,
+      permission: "skills.manage",
+    });
+    const body = switchSkillVersionSchema.safeParse(await c.req.json());
+    if (!body.success) throw ApiError.validation();
+    return ApiResponse.success(
+      c,
+      await switchRegistryVersion({
+        ...context,
+        userId,
+        workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
+        skillVersionId: body.data.skillVersionId,
+      }),
+    );
+  });
   app.get("/skills/catalog", async (c) => {
     const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const result = await contentSkillsService.listCatalog({
@@ -79,14 +141,10 @@ export function registerSkillRoutes(app: Hono) {
         repoUrl: parsed.data.repoUrl,
         userId,
       });
-      return ApiResponse.success(
-        c,
-        { status: result.status, slug: result.slug },
-        201,
-      );
+      return ApiResponse.success(c, result, 201);
     } catch (error) {
       if (error instanceof RegistrySubmissionError) {
-        throw new ApiError(422, error.code, error.message);
+        throw new ApiError(422, error.code, error.message, error.details);
       }
       throw error;
     }
@@ -94,7 +152,10 @@ export function registerSkillRoutes(app: Hono) {
 
   app.get("/skills", async (c) => {
     const { teamId, workspaceId } = await resolveSkillContext(c);
-    const result = await contentSkillsService.listWorkspaceSkills({ teamId, workspaceId });
+    const result = await contentSkillsService.listWorkspaceSkills({
+      teamId,
+      workspaceId,
+    });
     return ApiResponse.success(c, result);
   });
 
@@ -162,13 +223,15 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentSkillsService.createWorkspaceCustomSkillVersion({
-      teamId,
-      workspaceId,
-      userId: getSessionUserId(session),
-      skillId: requireRouteParam(c, "skillId"),
-      version: parsed.data.version,
-    });
+    const result = await contentSkillsService.createWorkspaceCustomSkillVersion(
+      {
+        teamId,
+        workspaceId,
+        userId: getSessionUserId(session),
+        skillId: requireRouteParam(c, "skillId"),
+        version: parsed.data.version,
+      },
+    );
     return ApiResponse.success(c, result, 201);
   });
 
@@ -182,59 +245,70 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentSkillsService.updateWorkspaceCustomSkillVersion({
-      teamId,
-      workspaceId,
-      skillId: requireRouteParam(c, "skillId"),
-      skillVersionId: requireRouteParam(c, "versionId"),
-      displayName: parsed.data.displayName,
-      description: parsed.data.description,
-    });
+    const result = await contentSkillsService.updateWorkspaceCustomSkillVersion(
+      {
+        teamId,
+        workspaceId,
+        skillId: requireRouteParam(c, "skillId"),
+        skillVersionId: requireRouteParam(c, "versionId"),
+        displayName: parsed.data.displayName,
+        description: parsed.data.description,
+      },
+    );
     return ApiResponse.success(c, result);
   });
 
-  app.put("/skills/custom/:skillId/versions/:versionId/files/:path{.+}", async (c) => {
-    const { teamId, workspaceId } = await resolveSkillContext(c);
-    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
-    const parsed = putCustomSkillVersionFileRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
+  app.put(
+    "/skills/custom/:skillId/versions/:versionId/files/:path{.+}",
+    async (c) => {
+      const { teamId, workspaceId } = await resolveSkillContext(c);
+      const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+      const parsed = putCustomSkillVersionFileRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw ApiError.validation(
+          parsed.error.flatten() as Record<string, unknown>,
+        );
+      }
 
-    const result = await contentSkillsService.putWorkspaceCustomSkillVersionFile({
-      teamId,
-      workspaceId,
-      skillId: requireRouteParam(c, "skillId"),
-      skillVersionId: requireRouteParam(c, "versionId"),
-      path: requireRouteParam(c, "path"),
-      contentText: parsed.data.contentText,
-      mimeType: parsed.data.mimeType,
-    });
-    return ApiResponse.success(c, result);
-  });
+      const result =
+        await contentSkillsService.putWorkspaceCustomSkillVersionFile({
+          teamId,
+          workspaceId,
+          skillId: requireRouteParam(c, "skillId"),
+          skillVersionId: requireRouteParam(c, "versionId"),
+          path: requireRouteParam(c, "path"),
+          contentText: parsed.data.contentText,
+          mimeType: parsed.data.mimeType,
+        });
+      return ApiResponse.success(c, result);
+    },
+  );
 
-  app.delete("/skills/custom/:skillId/versions/:versionId/files/:path{.+}", async (c) => {
-    const { teamId, workspaceId } = await resolveSkillContext(c);
-    const result = await contentSkillsService.deleteWorkspaceCustomSkillVersionFile({
-      teamId,
-      workspaceId,
-      skillId: requireRouteParam(c, "skillId"),
-      skillVersionId: requireRouteParam(c, "versionId"),
-      path: requireRouteParam(c, "path"),
-    });
-    return ApiResponse.success(c, result);
-  });
+  app.delete(
+    "/skills/custom/:skillId/versions/:versionId/files/:path{.+}",
+    async (c) => {
+      const { teamId, workspaceId } = await resolveSkillContext(c);
+      const result =
+        await contentSkillsService.deleteWorkspaceCustomSkillVersionFile({
+          teamId,
+          workspaceId,
+          skillId: requireRouteParam(c, "skillId"),
+          skillVersionId: requireRouteParam(c, "versionId"),
+          path: requireRouteParam(c, "path"),
+        });
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.post("/skills/custom/:skillId/versions/:versionId/publish", async (c) => {
     const { teamId, workspaceId } = await resolveSkillContext(c);
-    const result = await contentSkillsService.publishWorkspaceCustomSkillVersion({
-      teamId,
-      workspaceId,
-      skillId: requireRouteParam(c, "skillId"),
-      skillVersionId: requireRouteParam(c, "versionId"),
-    });
+    const result =
+      await contentSkillsService.publishWorkspaceCustomSkillVersion({
+        teamId,
+        workspaceId,
+        skillId: requireRouteParam(c, "skillId"),
+        skillVersionId: requireRouteParam(c, "versionId"),
+      });
     return ApiResponse.success(c, result);
   });
 

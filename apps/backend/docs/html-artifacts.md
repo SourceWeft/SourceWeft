@@ -16,7 +16,7 @@ Rebuild the existing Daytona/Cloudflare sandbox images with `docker/sourceweft-s
 - `SOURCEWEFT_HTML_FONTS=/opt/sourceweft-html-fonts`
 - `NODE_PATH=/usr/local/lib/node_modules`
 
-The shared installer pins parse5 7.3.0, PostCSS 8.5.26, postcss-value-parser 4.2.0, Playwright 1.59.1, fontTools 4.54.1 and Brotli 1.1.0. Fonts are pinned to the official Google Fonts commit and individual hashes in `fonts.json`, including licenses. Render jobs never install or download missing dependencies. Missing or mismatched runtime assets fail explicitly.
+The shared installer pins parse5 7.3.0, PostCSS 8.5.26, postcss-value-parser 4.2.0, Playwright 1.59.1, fontTools 4.60.2 and Brotli 1.2.0. Fonts are pinned to the official Google Fonts commit and individual hashes in `fonts.json`, including licenses. Render jobs never install or download missing dependencies. Missing or mismatched runtime assets fail explicitly.
 
 The generating skills contain bounded text/runtime bundles under the existing 200-file / 2 MiB skill limits; font binaries stay outside those bundles. Reveal and the visual library are pinned in the skill catalog. Chart.js 4.4.3 and highlight.js 11.10.0 preserve the upstream chart/code layouts offline. All notices accompany the generated file.
 

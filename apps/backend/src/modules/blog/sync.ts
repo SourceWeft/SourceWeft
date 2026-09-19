@@ -131,6 +131,7 @@ export async function syncNotionBlog(options: SyncNotionBlogOptions = {}) {
       articleId: parsedPage.articleId,
       locale: parsedPage.locale,
       postId,
+      postTitle: parsedPage.title,
       dryRun,
     });
     assetIds.push(...rendered.assetIds);

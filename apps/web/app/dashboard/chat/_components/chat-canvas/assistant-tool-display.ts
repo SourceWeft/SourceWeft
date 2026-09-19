@@ -116,6 +116,7 @@ function getStepDisplayTitle(toolStep?: ThinkingStepRecord) {
     (visibility === "internal_instruction" ||
       filesystemScope === "skills" ||
       filesystemScope === "work" ||
+      filesystemScope === "files" ||
       filesystemScope === "sources")
   ) {
     return toolStep.title.trim();

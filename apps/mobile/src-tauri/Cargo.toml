@@ -23,3 +23,7 @@ url = "2"
 
 [features]
 default = []
+
+[patch.crates-io]
+# GTK 0.18 compatibility backport of RUSTSEC-2024-0429; provenance in third_party/rust.
+glib = { path = "../../../third_party/rust/glib-0.18.5" }

@@ -46,6 +46,18 @@ function marketSearchCondition(query: string) {
   return or(...conditions)!;
 }
 
+// Category slugs cannot contain commas; multiple slugs select their union.
+export function parseMcpCategoryFilter(category?: string): string[] {
+  return [
+    ...new Set(
+      category
+        ?.split(",")
+        .map((slug) => slug.trim())
+        .filter(Boolean) ?? [],
+    ),
+  ];
+}
+
 function fallbackListMcp(input: {
   query?: string;
   category?: string;
@@ -54,16 +66,24 @@ function fallbackListMcp(input: {
   verified?: boolean;
   runtime?: McpRuntime;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
   limit?: number;
 }) {
   const query = input.query?.trim().toLowerCase();
+  const categories = parseMcpCategoryFilter(input.category);
   const limit = input.limit ?? 50;
   const items = records
     .map((record) => record.item)
     .filter((item) => item.status === "published")
-    .filter((item) => input.includeDesktopOnly || !item.desktopOnly)
     .filter((item) =>
-      input.category ? item.categories.includes(input.category) : true,
+      typeof input.desktopOnly === "boolean"
+        ? item.desktopOnly === input.desktopOnly
+        : input.includeDesktopOnly || !item.desktopOnly,
+    )
+    .filter((item) =>
+      categories.length > 0
+        ? item.categories.some((category) => categories.includes(category))
+        : true,
     )
     .filter((item) =>
       input.transport ? item.transport === input.transport : true,
@@ -417,10 +437,12 @@ export async function listMcp(input: {
   verified?: boolean;
   runtime?: McpRuntime;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
   limit?: number;
   cursor?: string;
 }) {
   const query = input.query?.trim().toLowerCase();
+  const categories = parseMcpCategoryFilter(input.category);
   const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
 
   // Everything is pushed into SQL — facets are real columns and categories join
@@ -434,7 +456,9 @@ export async function listMcp(input: {
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
-  if (!input.includeDesktopOnly) {
+  if (typeof input.desktopOnly === "boolean") {
+    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+  } else if (!input.includeDesktopOnly) {
     conditions.push(eq(marketItems.desktopOnly, false));
   }
   if (input.transport) {
@@ -449,7 +473,7 @@ export async function listMcp(input: {
   if (input.runtime) {
     conditions.push(eq(marketItems.runtime, input.runtime));
   }
-  if (input.category) {
+  if (categories.length > 0) {
     conditions.push(
       exists(
         db
@@ -462,7 +486,7 @@ export async function listMcp(input: {
           .where(
             and(
               eq(marketItemCategories.itemId, marketItems.id),
-              eq(marketCategories.slug, input.category),
+              inArray(marketCategories.slug, categories),
             ),
           ),
       ),
@@ -521,6 +545,7 @@ export async function listMcp(input: {
 export async function countMcpByCategory(input: {
   query?: string;
   includeDesktopOnly?: boolean;
+  desktopOnly?: boolean;
 }): Promise<{ counts: Record<string, number>; total: number }> {
   const query = input.query?.trim().toLowerCase();
   const conditions = [
@@ -531,7 +556,9 @@ export async function countMcpByCategory(input: {
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
-  if (!input.includeDesktopOnly) {
+  if (typeof input.desktopOnly === "boolean") {
+    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+  } else if (!input.includeDesktopOnly) {
     conditions.push(eq(marketItems.desktopOnly, false));
   }
 

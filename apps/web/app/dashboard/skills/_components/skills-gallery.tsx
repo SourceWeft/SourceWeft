@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillAvatar } from "./skill-avatar";
+
 import * as React from "react";
 import {
   AlertTriangle,
@@ -34,7 +36,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 
@@ -72,24 +74,13 @@ function fetchSkillsCatalog(targetWorkspaceId: string) {
 }
 
 type CategoryKey =
-  | "all"
-  | "learn"
-  | "research"
-  | "write"
-  | "review"
-  | "operate";
+  "all" | "learn" | "research" | "write" | "review" | "operate";
 type StatusFilter = "all" | "installed" | "not_installed";
 type PublisherFilter = "all" | "official" | "community" | "not_official";
 type SortKey =
-  | "recommended"
-  | "name_asc"
-  | "installed_first"
-  | "official_first";
+  "recommended" | "name_asc" | "installed_first" | "official_first";
 type CatalogStatus =
-  | "resolving_workspace"
-  | "loading_catalog"
-  | "ready"
-  | "error";
+  "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
 const categories: Array<{ key: CategoryKey; label: string }> = [
   { key: "all", label: "All" },
@@ -340,27 +331,6 @@ function SkillsCatalogSkeletonGrid({
   );
 }
 
-function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const palette =
-    item.sourceType === "builtin"
-      ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
-      : item.sourceType === "registry_github"
-        ? "from-amber-500/90 via-orange-500/80 to-rose-500/80"
-        : "from-violet-500/90 via-fuchsia-500/80 to-rose-500/80";
-
-  return (
-    <span
-      className={cn(
-        "relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-linear-to-br text-white shadow-sm",
-        palette,
-      )}
-    >
-      <span className="absolute inset-0 bg-black/10" />
-      <SkillIcon className="relative h-4.5 w-4.5 drop-shadow" />
-    </span>
-  );
-}
-
 function FilterFacet({
   children,
   defaultOpen = false,
@@ -575,7 +545,13 @@ function SkillCard({
   variant?: "page" | "modal";
 }) {
   const compact = variant === "modal";
-  const canManageInstall = item.installable !== false;
+  const installed =
+    item.sourceType === "registry_github"
+      ? !!item.enabledWorkspaceSkillId
+      : item.enabled;
+  const canManageInstall =
+    item.installable !== false ||
+    (item.sourceType === "registry_github" && installed);
   const isRegistry = item.sourceType === "registry_github";
   const unverified = isUnverifiedRegistrySkill(item);
 
@@ -597,7 +573,7 @@ function SkillCard({
             {item.displayName}
           </h3>
           {canManageInstall ? (
-            item.enabled ? (
+            installed ? (
               <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
                 <Check className="h-3 w-3" />
                 Installed
@@ -605,7 +581,7 @@ function SkillCard({
             ) : null
           ) : (
             <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
-              Built-in
+              {isRegistry ? "Unavailable" : "Built-in"}
             </span>
           )}
         </div>
@@ -681,20 +657,20 @@ function SkillCard({
           <Button
             className="min-w-0 rounded-full px-2"
             disabled={pending}
-            onClick={() => (item.enabled ? onUninstall(item) : onInstall(item))}
+            onClick={() => (installed ? onUninstall(item) : onInstall(item))}
             size="xs"
             type="button"
-            variant={item.enabled ? "secondary" : "default"}
+            variant={installed ? "secondary" : "default"}
           >
             {pending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : item.enabled ? (
+            ) : installed ? (
               <Trash2 className="h-3.5 w-3.5" />
             ) : (
               <SkillIcon className="h-3.5 w-3.5" />
             )}
             <span className="min-w-0 truncate">
-              {item.enabled ? "Uninstall" : "Install"}
+              {installed ? "Uninstall" : "Install"}
             </span>
           </Button>
         ) : (
@@ -706,7 +682,9 @@ function SkillCard({
             variant="secondary"
           >
             <Check className="h-3.5 w-3.5" />
-            <span className="min-w-0 truncate">Built-in</span>
+            <span className="min-w-0 truncate">
+              {isRegistry ? "Unavailable" : "Built-in"}
+            </span>
           </Button>
         )}
       </div>
@@ -1048,7 +1026,7 @@ export function SkillsGallery({
   );
 
   async function installSkill(item: SkillCatalogItem) {
-    if (!workspace || item.enabled) return;
+    if (!workspace || item.enabled || item.installable === false) return;
 
     const activeWorkspaceId = workspace.id;
     setPendingCatalogId(item.catalogId);
@@ -1088,6 +1066,7 @@ export function SkillsGallery({
 
   async function uninstallSkill(item: SkillCatalogItem) {
     if (!workspace || !item.enabled) return;
+    if (item.sourceType === "builtin" && item.installable === false) return;
     if (!item.enabledWorkspaceSkillId) {
       toast.error("Skill install record is missing. Refresh and try again.");
       return;
@@ -1302,6 +1281,7 @@ export function SkillsGallery({
       </Sheet>
       <SkillDetailDialog
         item={selectedItem}
+        onVersionChanged={() => void refreshCatalog()}
         onInstall={(next) => void installSkill(next)}
         onOpenChange={(open) => {
           if (!open) setSelectedCatalogId(null);

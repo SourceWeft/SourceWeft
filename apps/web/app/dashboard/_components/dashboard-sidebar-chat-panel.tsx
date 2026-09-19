@@ -1,14 +1,25 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+"use client";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Archive,
   Bot,
-  ChevronDown,
-  Clock3,
   ExternalLink,
-  Gauge,
+  Link2,
+  PanelRightOpen,
+  ListFilter,
+  MessagesSquare,
+  X,
+  ChevronDown,
+  Search,
   Lock,
   MoreHorizontal,
-  PanelRightOpen,
   PanelsTopLeft,
   PenSquare,
   Share2,
@@ -18,7 +29,6 @@ import {
 import { toast } from "sonner";
 import type { Persona } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import {
   Dialog,
   DialogClose,
@@ -34,216 +44,41 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import {
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
   SidebarMenuItem,
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@sourceweft/ui-web/components/ui/tooltip";
+import {
+  getSidebarChatItems,
+  type SidebarChatFilter,
+} from "./dashboard-sidebar-chat-list";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { authClient } from "../../../lib/auth-client";
-import { billingClient, contentClient } from "../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
-import { subscribeDashboardBillingSummaryRefresh } from "./dashboard-billing-summary-refresh";
-import { getPersonalOrganization } from "./dashboard-team-selector-shared";
 import {
   DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
   formatDashboardShortcut,
   getDashboardWorkspaceShortcutKeys,
   useDashboardShortcutPlatform,
 } from "./dashboard-shortcuts";
-import { flattenChatItems } from "./dashboard-chat-items";
+import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
-
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
-type BillingOrg = {
-  id: string;
-  metadata?: unknown;
-  name: string;
-  slug?: string;
-};
-
-function resolveSidebarBillingTeamId(input: {
-  activeOrg?: BillingOrg | null;
-  orgs?: BillingOrg[] | null;
-}) {
-  if (input.activeOrg?.id) {
-    return input.activeOrg.id;
-  }
-
-  return getPersonalOrganization(input.orgs ?? [])?.id ?? null;
-}
-
-function formatUsageNumber(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(value);
-}
-
-function formatUsageDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "--";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-  }).format(date);
-}
-
-function SidebarUsageSummary({ onOpenUsage }: { onOpenUsage?: () => void }) {
-  const { data: orgs } = authClient.useListOrganizations();
-  const { data: activeOrg } = authClient.useActiveOrganization();
-  const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
-  const orgList = (orgs ?? []) as BillingOrg[];
-  const teamId = resolveSidebarBillingTeamId({
-    activeOrg: activeOrgRecord,
-    orgs: orgList,
-  });
-  const resolvingTeamId = !activeOrgRecord && orgs === undefined;
-  const [summary, setSummary] = useState<BillingSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [hasError, setHasError] = useState(false);
-  const mountedRef = useRef(false);
-  const requestIdRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const loadSummary = useCallback(
-    async (options?: { silent?: boolean }) => {
-      const requestId = requestIdRef.current + 1;
-      requestIdRef.current = requestId;
-      const silent = options?.silent === true;
-
-      if (!teamId) {
-        setSummary(null);
-        setLoading(resolvingTeamId);
-        setHasError(false);
-        return;
-      }
-
-      if (!silent) {
-        setLoading(true);
-      }
-      setHasError(false);
-
-      try {
-        const nextSummary = await billingClient.getSummary(teamId);
-
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          setSummary(nextSummary);
-        }
-      } catch {
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          if (!silent) {
-            setSummary(null);
-          }
-          setHasError(true);
-        }
-      } finally {
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          setLoading(false);
-        }
-      }
-    },
-    [resolvingTeamId, teamId],
-  );
-
-  useEffect(() => {
-    void loadSummary();
-  }, [loadSummary]);
-
-  useEffect(
-    () =>
-      subscribeDashboardBillingSummaryRefresh(() => {
-        void loadSummary({ silent: true });
-      }),
-    [loadSummary],
-  );
-
-  const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
-  const creditsLimit = summary?.credits.monthlyGrant ?? 0;
-  const creditsPercent =
-    creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
-  const creditsLabel = summary
-    ? `${formatUsageNumber(creditsUsed)} / ${formatUsageNumber(creditsLimit)}`
-    : loading
-      ? "Loading"
-      : "-- / --";
-  const pagesAvailable = summary?.pages.available ?? 0;
-  const cycleEndsAt = summary ? formatUsageDate(summary.cycleEndAt) : "--";
-
-  return (
-    <button
-      aria-label="Open usage"
-      className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-2.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onOpenUsage}
-      type="button"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Gauge className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate text-[10px] font-medium text-sidebar-foreground">
-            Usage
-          </span>
-        </div>
-        <span className="shrink-0 text-[10px] font-medium text-sidebar-foreground">
-          {summary ? `${Math.round(creditsPercent)}%` : loading ? "..." : "--"}
-        </span>
-      </div>
-
-      <div className="mt-2">
-        <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-          <span className="text-muted-foreground">Credits</span>
-          <span className="truncate text-right font-medium text-sidebar-foreground">
-            {creditsLabel}
-          </span>
-        </div>
-        <Progress className="h-1 bg-sidebar-border/70" value={creditsPercent} />
-      </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
-        <div className="min-w-0">
-          <p className="truncate text-muted-foreground">Pages left</p>
-          <p className="truncate font-medium text-sidebar-foreground">
-            {summary
-              ? formatUsageNumber(pagesAvailable)
-              : loading
-                ? "..."
-                : "--"}
-          </p>
-        </div>
-        <div className="min-w-0 text-right">
-          <p className="truncate text-muted-foreground">Cycle ends</p>
-          <p className="truncate font-medium text-sidebar-foreground">
-            {hasError ? "Unavailable" : cycleEndsAt}
-          </p>
-        </div>
-      </div>
-    </button>
-  );
-}
 
 function WorkspaceSwitcher({
   workspaceId,
@@ -306,7 +141,7 @@ function WorkspaceSwitcher({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            className="flex w-full min-w-36 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
+            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
             type="button"
           >
             <PanelsTopLeft className="size-3.5 shrink-0 text-muted-foreground" />
@@ -669,13 +504,15 @@ function ChatListRow({
           nested && "py-1.5",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
-            : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+            : "text-sidebar-foreground group-hover/menu-item:bg-sidebar-accent/60 group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent/60",
+          menuOpen && !active && "bg-sidebar-accent/60",
         )}
         onClick={() => onOpen(item.id, item.title)}
         onFocus={() => onPrefetch?.(item.id)}
         onMouseEnter={() => onPrefetch?.(item.id)}
         type="button"
       >
+        <StatusDot status={item.status} />
         {nested ? (
           <span
             aria-hidden="true"
@@ -684,30 +521,43 @@ function ChatListRow({
             ↳
           </span>
         ) : null}
-        <StatusDot status={item.status} />
         <div className="min-w-0 flex-1">
           <div className="flex w-full items-start gap-2">
             <div className="min-w-0 flex-1">
-              <div className="relative min-w-0 pr-8">
+              <div className="relative flex min-w-0 items-center gap-2 pr-8">
                 <span
                   className={cn(
-                    "line-clamp-1 flex-1 font-medium leading-4.5",
+                    "line-clamp-1 min-w-0 flex-1 font-medium leading-4.5",
                     nested ? "text-[12px]" : "text-[13px]",
                   )}
                 >
                   {item.title}
                 </span>
+                {shared ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 text-muted-foreground">
+                        {item.visibility === "public_link" ? (
+                          <Link2 className="size-3.5" aria-hidden="true" />
+                        ) : (
+                          <Users className="size-3.5" aria-hidden="true" />
+                        )}
+                        <span className="sr-only">
+                          {item.visibility === "public_link"
+                            ? "Anyone with the link"
+                            : "Visible to workspace"}
+                        </span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {item.visibility === "public_link"
+                        ? "Anyone with the link"
+                        : "Visible to workspace"}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
-                {shared ? (
-                  <>
-                    <Users
-                      className="size-2.5"
-                      aria-label="Visible to workspace"
-                    />
-                    <span aria-hidden="true">|</span>
-                  </>
-                ) : null}
                 <span>{item.sourceCount} sources</span>
                 <span aria-hidden="true">|</span>
                 <span>{status}</span>
@@ -719,14 +569,6 @@ function ChatListRow({
         </div>
       </button>
 
-      <div
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute inset-y-1.5 right-2.5 w-12 rounded-r-md bg-gradient-to-l from-sidebar via-sidebar/70 to-transparent invisible opacity-0 transition-opacity",
-          "group-hover/menu-item:visible group-hover/menu-item:opacity-100 group-focus-within/menu-item:visible group-focus-within/menu-item:opacity-100",
-          menuOpen && "visible opacity-100",
-        )}
-      />
       <div
         className={cn(
           "absolute right-3 top-2 z-10 shrink-0 invisible opacity-0 pointer-events-none transition-opacity",
@@ -806,46 +648,83 @@ function ChatListRow({
   );
 }
 
-function ChatSection({
+function ChatList({
+  search,
+  searchOpen,
+  onToggleSearch,
+  onSearchChange,
+  headerActions,
   activeId,
-  canArchive = true,
   hasMore = false,
   isLoadingMore = false,
-  items,
+  privateChats,
+  sharedChats,
+  archivedChats,
   onLoadMore,
   onAddSubagent,
   onArchive,
-  onClear,
+  onClearPrivate,
+  onClearArchived,
   onDelete,
   onOpenInNewWindow,
   onOpenInPanel,
   onSetVisibility,
   onOpen,
   onPrefetch,
-  title,
 }: {
+  search: string;
+  searchOpen: boolean;
+  onToggleSearch: () => void;
+  onSearchChange: (value: string) => void;
+  headerActions: ReactNode;
   activeId?: string;
-  canArchive?: boolean;
   hasMore?: boolean;
   isLoadingMore?: boolean;
-  items: ChatItem[];
+  privateChats: ChatItem[];
+  sharedChats: ChatItem[];
+  archivedChats: ChatItem[];
   onLoadMore?: () => void;
   onAddSubagent?: (id: string, title: string) => void;
   onArchive: (id: string) => void;
-  onClear?: () => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
   onOpenInPanel?: (parentId: string, childId: string) => void;
+  onClearPrivate: () => Promise<void>;
+  onClearArchived: () => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   onSetVisibility?: (
     id: string,
     visibility: "private" | "workspace",
   ) => Promise<void>;
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
-  title: string;
 }) {
   const [isClearing, setIsClearing] = useState(false);
+  const [filter, setFilter] = useState<SidebarChatFilter>("all");
+  const isArchived = filter === "archived";
+  const items = useMemo(
+    () =>
+      getSidebarChatItems({
+        privateChats,
+        sharedChats,
+        archivedChats,
+        filter,
+      }).filter((item) =>
+        item.title.toLowerCase().includes(search.trim().toLowerCase()),
+      ),
+    [privateChats, sharedChats, archivedChats, filter, search],
+  );
+  const canLoadMore = !isArchived && hasMore;
+  // Clear actions keep their original scope, regardless of the visible subset.
+  const onClear = search.trim()
+    ? undefined
+    : isArchived
+      ? onClearArchived
+      : filter === "private"
+        ? onClearPrivate
+        : undefined;
+  const clearItems = isArchived ? archivedChats : privateChats;
+  const clearTitle = isArchived ? "archived chats" : "private chats";
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -859,30 +738,33 @@ function ChatSection({
   };
 
   return (
-    <SidebarGroup className="px-0">
-      <SidebarGroupLabel className="group/section-label flex h-6 items-center justify-between px-3.5 text-[10px] uppercase tracking-[0.16em]">
-        <span>{title}</span>
-        {onClear && items.length > 0 ? (
+    <>
+      <div className="group/section-label flex shrink-0 items-center gap-1 px-3 py-2">
+        <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          Chats
+        </span>
+        {headerActions}
+        {onClear && clearItems.length > 0 ? (
           <Dialog>
             <DialogTrigger asChild>
               <Button
                 className="invisible size-5 pointer-events-none text-destructive opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:visible focus-visible:pointer-events-auto focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/section-label:visible group-hover/section-label:pointer-events-auto group-hover/section-label:opacity-100 group-focus-within/section-label:visible group-focus-within/section-label:pointer-events-auto group-focus-within/section-label:opacity-100"
                 size="icon-xs"
-                title={`Clear all ${title.toLowerCase()}`}
+                title={`Clear all ${clearTitle}`}
                 type="button"
                 variant="destructive"
               >
                 <Trash2 className="size-3" />
-                <span className="sr-only">Clear all {title.toLowerCase()}</span>
+                <span className="sr-only">Clear all {clearTitle}</span>
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Clear all {title.toLowerCase()}?</DialogTitle>
+                <DialogTitle>Clear all {clearTitle}?</DialogTitle>
                 <DialogDescription>
-                  This will remove {items.length}{" "}
-                  {items.length === 1 ? "chat" : "chats"}
-                  from this section. This action cannot be undone.
+                  This will remove {clearItems.length} {clearTitle}, including
+                  chats hidden by the current filter. This action cannot be
+                  undone.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -905,62 +787,182 @@ function ChatSection({
             </DialogContent>
           </Dialog>
         ) : null}
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu className="gap-1 py-0.5">
-          {items.map((item) => (
-            <Fragment key={item.id}>
-              <ChatListRow
-                active={item.id === activeId}
-                canArchive={canArchive}
-                item={item}
-                onAddSubagent={onAddSubagent}
-                onArchive={onArchive}
-                onDelete={onDelete}
-                onSetVisibility={onSetVisibility}
-                onOpen={onOpen}
-                onPrefetch={onPrefetch}
-              />
-              {/* One visible level: a chat's sub-agent conversations follow it. */}
-              {item.children?.map((child) => (
-                <ChatListRow
-                  key={child.id}
-                  active={child.id === activeId}
-                  canArchive={canArchive}
-                  item={child}
-                  nested
-                  onArchive={onArchive}
-                  onDelete={onDelete}
-                  onOpenInNewWindow={onOpenInNewWindow}
-                  onOpenInPanel={onOpenInPanel}
-                  onSetVisibility={onSetVisibility}
-                  onOpen={onOpen}
-                  onPrefetch={onPrefetch}
-                />
-              ))}
-            </Fragment>
-          ))}
-        </SidebarMenu>
-        {hasMore && onLoadMore ? (
-          <div className="px-3.5 py-1.5">
+        {filter !== "all" ? (
+          <Button
+            className="h-6 gap-1 rounded px-1.5 text-[11px]"
+            onClick={() => setFilter("all")}
+            size="xs"
+            type="button"
+            variant="secondary"
+            aria-label={`Clear ${filter} filter`}
+          >
+            {filter === "shared"
+              ? "Shared"
+              : filter === "archived"
+                ? "Archived"
+                : "Private"}
+            <X className="size-3" />
+          </Button>
+        ) : null}
+        <Button
+          className="text-muted-foreground"
+          variant="ghost"
+          size="icon-xs"
+          type="button"
+          title="Search all chats"
+          aria-label="Search all chats"
+          aria-expanded={searchOpen}
+          onClick={onToggleSearch}
+        >
+          <Search className="size-3.5" />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-              disabled={isLoadingMore}
-              onClick={onLoadMore}
-              size="xs"
+              className={cn(
+                "text-muted-foreground",
+                filter !== "all" &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground",
+              )}
+              size="icon-xs"
               type="button"
               variant="ghost"
+              title="Filter chats"
+              aria-label="Filter chats"
             >
-              {isLoadingMore ? "Loading..." : "Load more"}
+              <ListFilter className="size-3.5" />
             </Button>
-          </div>
-        ) : null}
-      </SidebarGroupContent>
-    </SidebarGroup>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Filter chats
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={filter}
+              onValueChange={(value) => {
+                if (
+                  value === "all" ||
+                  value === "shared" ||
+                  value === "private" ||
+                  value === "archived"
+                ) {
+                  setFilter(value);
+                }
+              }}
+            >
+              <DropdownMenuRadioItem value="all">
+                <MessagesSquare className="size-4" />
+                All chats
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="shared">
+                <Users className="size-4" />
+                Shared
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="private">
+                <Lock className="size-4" />
+                Private
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="archived">
+                <Archive className="size-4" />
+                Archived
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {searchOpen && (
+        <div className="shrink-0 px-3 pb-2">
+          <SidebarInput
+            autoFocus
+            aria-label="Search all chats"
+            className="h-8 text-xs"
+            placeholder="Search all chats…"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </div>
+      )}
+      <SidebarContent key={filter} className="min-h-0 overflow-y-auto">
+        <SidebarGroup className="px-0 pt-0">
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-1 py-0.5">
+              {items.map((item) => (
+                <Fragment key={item.id}>
+                  <ChatListRow
+                    active={item.id === activeId}
+                    canArchive={!isArchived}
+                    item={item}
+                    onAddSubagent={isArchived ? undefined : onAddSubagent}
+                    onArchive={onArchive}
+                    onDelete={onDelete}
+                    onOpenInNewWindow={onOpenInNewWindow}
+                    onSetVisibility={isArchived ? undefined : onSetVisibility}
+                    onOpen={onOpen}
+                    onPrefetch={onPrefetch}
+                  />
+                  {/* One visible level: a chat's sub-agent conversations follow it. */}
+                  {item.children?.map((child) => (
+                    <ChatListRow
+                      key={child.id}
+                      active={child.id === activeId}
+                      canArchive={!isArchived}
+                      item={child}
+                      nested
+                      onArchive={onArchive}
+                      onDelete={onDelete}
+                      onOpenInNewWindow={onOpenInNewWindow}
+                      onOpenInPanel={onOpenInPanel}
+                      onSetVisibility={isArchived ? undefined : onSetVisibility}
+                      onOpen={onOpen}
+                      onPrefetch={onPrefetch}
+                    />
+                  ))}
+                </Fragment>
+              ))}
+            </SidebarMenu>
+            {items.length === 0 ? (
+              <p
+                className="px-3 py-4 text-xs text-muted-foreground"
+                role="status"
+              >
+                {isLoadingMore && !isArchived
+                  ? "Loading chats..."
+                  : canLoadMore
+                    ? "No matching chats loaded. Load more to see older chats."
+                    : filter !== "all"
+                      ? `No ${filter} chats.`
+                      : "No chats yet."}
+              </p>
+            ) : null}
+            {canLoadMore && onLoadMore ? (
+              <div className="px-3 py-1.5">
+                <Button
+                  className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  disabled={isLoadingMore}
+                  onClick={onLoadMore}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  {isLoadingMore ? "Loading..." : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </>
   );
 }
 
 export function DashboardSidebarChatPanel({
+  brand,
+  desktopTitlebar = false,
+  heading,
+  navigation,
+  footer,
+  search,
+  onSearchChange,
   archivedChats,
   activeChatId,
   onArchiveChat,
@@ -972,7 +974,6 @@ export function DashboardSidebarChatPanel({
   onSetChatVisibility,
   onLoadMoreChats,
   onOpenMembers,
-  onOpenUsage,
   onOpenChat,
   onOpenChatInNewWindow,
   onOpenChatInPanel,
@@ -983,12 +984,18 @@ export function DashboardSidebarChatPanel({
   isLoadingPrivateChats,
   privateChats,
   sharedChats,
-  organizationName,
   workspaceId,
   workspaces,
   onWorkspaceChange,
   workspaceName,
 }: {
+  brand?: ReactNode;
+  heading: ReactNode;
+  desktopTitlebar?: boolean;
+  navigation: ReactNode;
+  footer: ReactNode;
+  search: string;
+  onSearchChange: (value: string) => void;
   archivedChats: ChatItem[];
   activeChatId: string;
   onArchiveChat: (id: string) => void;
@@ -1007,7 +1014,6 @@ export function DashboardSidebarChatPanel({
   ) => Promise<void>;
   onLoadMoreChats: () => void;
   onOpenMembers?: () => void;
-  onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
   onOpenChatInNewWindow: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
@@ -1019,12 +1025,14 @@ export function DashboardSidebarChatPanel({
   isLoadingPrivateChats: boolean;
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
-  organizationName: string;
   workspaceId: string | null;
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const [chatListResetKey, setChatListResetKey] = useState(0);
+
+  const [searchOpen, setSearchOpen] = useState(false);
   const [personaPicker, setPersonaPicker] = useState<{
     parentThreadId: string | null;
     parentTitle: string | null;
@@ -1036,123 +1044,103 @@ export function DashboardSidebarChatPanel({
   const [personaManagerOpen, setPersonaManagerOpen] = useState(false);
   const [personaRefreshToken, setPersonaRefreshToken] = useState(0);
 
-  const weekAgo = Date.now() - ONE_WEEK_MS;
-  const seenIds = new Set<string>();
-  const threadsThisWeek = flattenChatItems([
-    ...sharedChats,
-    ...privateChats,
-    ...archivedChats,
-  ]).reduce((count, item) => {
-    if (seenIds.has(item.id)) {
-      return count;
-    }
-
-    seenIds.add(item.id);
-    const updatedAt = new Date(item.updatedAt);
-    if (Number.isNaN(updatedAt.getTime())) {
-      return count;
-    }
-
-    return updatedAt.getTime() >= weekAgo ? count + 1 : count;
-  }, 0);
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <SidebarHeader className="gap-2.5 border-b px-3.5 py-2.5">
-        <div className="flex w-full items-center justify-between gap-2">
-          <span className="text-[10px] text-muted-foreground">
-            {organizationName}
-          </span>
+      <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
+        {brand}
+        {/* The PC client hides the brand, so the strip above the workspace
+            switcher reserves only what the traffic lights occupy, and drags
+            the window instead of sitting there empty. */}
+        {desktopTitlebar ? (
+          <div
+            aria-hidden="true"
+            data-desktop-drag-region=""
+            className="h-10 shrink-0 select-none"
+          />
+        ) : null}
+        <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
+          <div className="min-w-0 flex-1">
+            <WorkspaceSwitcher
+              activeWorkspace={workspaceName}
+              workspaceId={workspaceId}
+              workspaces={workspaces}
+              onCreateWorkspace={onCreateWorkspace}
+              onRenameWorkspace={onRenameWorkspace}
+              onWorkspaceChange={onWorkspaceChange}
+            />
+          </div>
+          {heading}
         </div>
-        <WorkspaceSwitcher
-          activeWorkspace={workspaceName}
-          workspaceId={workspaceId}
-          workspaces={workspaces}
-          onCreateWorkspace={onCreateWorkspace}
-          onRenameWorkspace={onRenameWorkspace}
-          onWorkspaceChange={onWorkspaceChange}
-        />
-        <SidebarInput className="h-7 text-xs" placeholder="Search threads..." />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Button
-            className="flex-1"
-            onClick={onCreateChat}
+            className="h-9 flex-1 justify-start gap-2 rounded-lg px-3 text-sm font-medium"
+            variant="ghost"
+            onClick={() => {
+              setChatListResetKey((value) => value + 1);
+              onCreateChat();
+            }}
             size="xs"
             type="button"
           >
-            <PenSquare className="size-3" />
+            <PenSquare className="size-4 text-muted-foreground" />
             New chat
-          </Button>
-          <Button
-            onClick={() =>
-              setPersonaPicker({ parentThreadId: null, parentTitle: null })
-            }
-            size="icon-xs"
-            title="New agent chat"
-            type="button"
-            variant="outline"
-          >
-            <Bot className="size-3" />
-            <span className="sr-only">New agent chat</span>
-          </Button>
-          {/* "Share the workspace" = bring people in: opens member & guest management. */}
-          <Button
-            onClick={onOpenMembers}
-            size="icon-xs"
-            title="Invite & manage members"
-            type="button"
-            variant="outline"
-          >
-            <Share2 className="size-3" />
-            <span className="sr-only">Invite & manage members</span>
           </Button>
         </div>
       </SidebarHeader>
-
-      <SidebarContent className="min-h-0 overflow-y-auto">
-        <ChatSection
-          activeId={activeChatId}
-          items={sharedChats}
-          onAddSubagent={openSubagentPicker}
-          onArchive={onArchiveChat}
-          onDelete={onDeleteChat}
-          onOpenInNewWindow={onOpenChatInNewWindow}
-          onOpenInPanel={onOpenChatInPanel}
-          onSetVisibility={onSetChatVisibility}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Shared chats"
-        />
-        <ChatSection
-          activeId={activeChatId}
-          hasMore={hasMorePrivateChats}
-          isLoadingMore={isLoadingPrivateChats}
-          items={privateChats}
-          onLoadMore={onLoadMoreChats}
-          onAddSubagent={openSubagentPicker}
-          onArchive={onArchiveChat}
-          onClear={onClearPrivateChats}
-          onDelete={onDeleteChat}
-          onOpenInNewWindow={onOpenChatInNewWindow}
-          onOpenInPanel={onOpenChatInPanel}
-          onSetVisibility={onSetChatVisibility}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Private chats"
-        />
-        <ChatSection
-          activeId={activeChatId}
-          canArchive={false}
-          items={archivedChats}
-          onArchive={onArchiveChat}
-          onClear={onClearArchivedChats}
-          onDelete={onDeleteChat}
-          onOpenInNewWindow={onOpenChatInNewWindow}
-          onOpen={onOpenChat}
-          onPrefetch={onPrefetchChat}
-          title="Archived"
-        />
-      </SidebarContent>
+      {navigation}
+      <ChatList
+        key={`${workspaceId}-${chatListResetKey}`}
+        search={search}
+        searchOpen={searchOpen || Boolean(search)}
+        onToggleSearch={() => {
+          setSearchOpen((value) => !value);
+          onSearchChange("");
+        }}
+        onSearchChange={onSearchChange}
+        headerActions={
+          <>
+            <Button
+              onClick={() =>
+                setPersonaPicker({ parentThreadId: null, parentTitle: null })
+              }
+              size="icon-xs"
+              title="New agent chat"
+              type="button"
+              variant="ghost"
+            >
+              <Bot className="size-3" />
+              <span className="sr-only">New agent chat</span>
+            </Button>
+            <Button
+              onClick={onOpenMembers}
+              size="icon-xs"
+              title="Invite & manage members"
+              type="button"
+              variant="ghost"
+            >
+              <Share2 className="size-3" />
+              <span className="sr-only">Invite & manage members</span>
+            </Button>
+          </>
+        }
+        activeId={activeChatId}
+        hasMore={hasMorePrivateChats}
+        isLoadingMore={isLoadingPrivateChats}
+        privateChats={privateChats}
+        sharedChats={sharedChats}
+        archivedChats={archivedChats}
+        onLoadMore={onLoadMoreChats}
+        onAddSubagent={openSubagentPicker}
+        onArchive={onArchiveChat}
+        onOpenInNewWindow={onOpenChatInNewWindow}
+        onOpenInPanel={onOpenChatInPanel}
+        onClearPrivate={onClearPrivateChats}
+        onClearArchived={onClearArchivedChats}
+        onDelete={onDeleteChat}
+        onSetVisibility={onSetChatVisibility}
+        onOpen={onOpenChat}
+        onPrefetch={onPrefetchChat}
+      />
 
       <PersonaPickerDialog
         onManage={() => setPersonaManagerOpen(true)}
@@ -1177,19 +1165,7 @@ export function DashboardSidebarChatPanel({
         workspaceId={workspaceId}
       />
 
-      <SidebarFooter className="border-t px-3.5 py-2.5">
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Clock3 className="size-3.5" />
-          <span>
-            {threadsThisWeek} {threadsThisWeek === 1 ? "thread" : "threads"}{" "}
-            this week
-          </span>
-        </div>
-      </SidebarFooter>
-
-      <div className="border-t border-sidebar-border px-3.5 py-2.5">
-        <SidebarUsageSummary onOpenUsage={onOpenUsage} />
-      </div>
+      {footer}
     </div>
   );
 }

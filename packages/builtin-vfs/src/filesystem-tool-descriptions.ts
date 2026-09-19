@@ -57,8 +57,8 @@ export function buildLsToolDescription(
     getMount(mounts, "/kb")
       ? `Use ${LS_TOOL_NAME}('/kb') when source identity, directory contents, file enumeration, or source-wide coverage matters. Do not call ${LS_TOOL_NAME}('/') just to discover /kb.`
       : "",
-    getMount(mounts, "/workfiles")
-      ? `Use ${LS_TOOL_NAME}('/workfiles') to find persisted Workfiles when continuing or managing generated work.`
+    getMount(mounts, "/files")
+      ? `Use ${LS_TOOL_NAME}('/files') to find persisted Files when continuing or managing generated work.`
       : "",
     getMount(mounts, "/skills")
       ? `Use ${LS_TOOL_NAME}('/skills') only to locate selected skill instruction files or templates.`
@@ -81,8 +81,8 @@ export function buildReadFileToolDescription(
     getMount(mounts, "/kb")
       ? `/kb files are internal markdown virtual files backed by the source's canonical markdown. In /kb, ${READ_FILE_TOOL_NAME} offset and limit are source-line based, not chunk based; default limit is ${KB_READ_FILE_DEFAULT_LINE_LIMIT} source lines and explicit limits are capped at ${KB_READ_FILE_MAX_LINE_LIMIT}. Use it for source-wide coverage, full-document analysis, extraction, or surrounding context. Only /kb ${READ_FILE_TOOL_NAME} output may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
       : "",
-    getMount(mounts, "/workfiles")
-      ? "/workfiles are database-persisted, thread-scoped Workfiles. Read /workfiles to continue prior work, reuse drafts, inspect intermediate records, or supplement the current task with persisted working context. /workfiles is non-citable and must not be treated as source evidence."
+    getMount(mounts, "/files")
+      ? "/files are database-persisted, thread-scoped Files. Read /files to continue prior work, reuse drafts, inspect intermediate records, or supplement the current task with persisted working context. /files is non-citable and must not be treated as source evidence."
       : "",
     getMount(mounts, "/skills")
       ? "/skills files are selected skill instructions and workflow resources. Read /skills only for procedure, templates, or output-shape guidance; /skills is non-citable."
@@ -100,8 +100,8 @@ export function buildGlobToolDescription(
     getMount(mounts, "/kb")
       ? `Use ${GLOB_TOOL_NAME} under /kb to narrow selected sources by filename, directory, or path pattern, then gather citable evidence with ${SEARCH_SOURCES_TOOL_NAME}, ${READ_FILE_TOOL_NAME}, or ${GREP_TOOL_NAME}.`
       : "",
-    getMount(mounts, "/workfiles")
-      ? `Use ${GLOB_TOOL_NAME} under /workfiles to find persisted Workfiles, drafts, notes, extracted records, outlines, calculations, or candidate outputs.`
+    getMount(mounts, "/files")
+      ? `Use ${GLOB_TOOL_NAME} under /files to find persisted Files, drafts, notes, extracted records, outlines, calculations, or candidate outputs.`
       : "",
     getMount(mounts, "/skills")
       ? `Use ${GLOB_TOOL_NAME} under /skills only to locate skill instruction or template files.`
@@ -119,8 +119,8 @@ export function buildGrepToolDescription(
     getMount(mounts, "/kb")
       ? `Use ${GREP_TOOL_NAME} on /kb when the user asks for literal text matching, occurrence counts, line/location search, a quoted/known string, or exact textual verification after ${SEARCH_SOURCES_TOOL_NAME}. Only /kb ${GREP_TOOL_NAME} matches may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
       : "",
-    getMount(mounts, "/workfiles")
-      ? `Use ${GREP_TOOL_NAME} on /workfiles to inspect persisted Workfiles. /workfiles matches are non-citable and must not be used as source evidence without /kb or other citable verification.`
+    getMount(mounts, "/files")
+      ? `Use ${GREP_TOOL_NAME} on /files to inspect persisted Files. For versioned File citations, read matching files with read_document or search_files. This does not add them to Sources.`
       : "",
     getMount(mounts, "/skills")
       ? `Use ${GREP_TOOL_NAME} on /skills only to locate workflow instructions. /skills matches are non-citable.`
@@ -135,8 +135,8 @@ export function buildWriteFileToolDescription(
   const mounts = input.mounts ?? createDefaultFilesystemMounts();
   return sentenceList([
     `Writes content to a file. Writable mounts: ${writableMountRoots(mounts)}.`,
-    getMount(mounts, "/workfiles")
-      ? "Use /workfiles for database-persisted, thread-scoped Workfiles such as process notes, scratchpads, plans, drafts, extracted intermediate data, calculations, or candidate final outputs. Create a Workfile when the task is complex, multi-step, resumable, or the intermediate material will likely be reused; avoid creating one for simple one-shot answers. Do not intentionally write runtime [citation:cN] markers to /workfiles; when such markers are present in Workfile content, the backend rewrites them to Markdown footnote references that preserve source association without creating citable evidence."
+    getMount(mounts, "/files")
+      ? "Use /files for database-persisted, thread-scoped Files such as process notes, scratchpads, plans, drafts, extracted intermediate data, calculations, or candidate final outputs. Create a Workfile when the task is complex, multi-step, resumable, or the intermediate material will likely be reused; avoid creating one for simple one-shot answers. Do not intentionally write runtime [citation:cN] markers to /files; when such markers are present in Workfile content, the backend rewrites them to Markdown footnote references that preserve source association without creating citable evidence."
       : "",
     "Writing a Workfile does not publish an Artifact and does not create citable evidence.",
     "Do not write to read-only mounts.",
@@ -149,10 +149,10 @@ export function buildEditFileToolDescription(
   const mounts = input.mounts ?? createDefaultFilesystemMounts();
   return sentenceList([
     `Edits an existing file by replacing exact text. Writable mounts: ${writableMountRoots(mounts)}.`,
-    getMount(mounts, "/workfiles")
-      ? `Use ${EDIT_FILE_TOOL_NAME} on /workfiles to update database-persisted, thread-scoped Workfiles.`
+    getMount(mounts, "/files")
+      ? `Use ${EDIT_FILE_TOOL_NAME} on /files to update database-persisted, thread-scoped Files.`
       : "",
-    "Read-only mounts cannot be edited. Workfiles are not source evidence and are not citable.",
+    "Read-only mounts cannot be edited. Files are not source evidence and are not citable.",
   ]);
 }
 

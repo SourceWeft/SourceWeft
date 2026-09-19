@@ -22,12 +22,12 @@ const CRITICAL_FLAG = /pipe-to-shell|sudo|base64-exec|internal-address/;
 
 function flagLabel(flag: string) {
   const map: Record<string, string> = {
-    "command:pipe-to-shell": "安装命令 curl | sh",
+    "command:pipe-to-shell": "Installer command: curl | sh",
     "command:sudo": "sudo",
     "command:eval": "eval(",
     "command:base64-exec": "base64 | sh",
     "command:chmod-exec": "chmod +x",
-    "endpoint:internal-address": "内网 / 元数据地址",
+    "endpoint:internal-address": "Internal / metadata address",
   };
   return map[flag] ?? flag;
 }
@@ -35,11 +35,11 @@ function flagLabel(flag: string) {
 function relativeTime(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "刚刚";
-  if (mins < 60) return `${mins} 分钟前`;
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.round(hours / 24)} 天前`;
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} d ago`;
 }
 
 export default function MarketReviewPage() {
@@ -56,8 +56,8 @@ export default function MarketReviewPage() {
       const status = (caught as { status?: number } | null)?.status;
       setError(
         status === 403
-          ? "你没有市场审核权限(需要在 MARKET_ADMIN_USER_IDS 名单内)。"
-          : "加载待审队列失败,请重试。",
+          ? "You do not have permission to review market submissions."
+          : "Failed to load the review queue. Please try again.",
       );
       setItems([]);
     }
@@ -82,7 +82,7 @@ export default function MarketReviewPage() {
         prev ? prev.filter((item) => item.identifier !== identifier) : prev,
       );
     } catch {
-      setError(`操作失败:${identifier}`);
+      setError(`Action failed: ${identifier}`);
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
@@ -99,10 +99,10 @@ export default function MarketReviewPage() {
         Market · Admin
       </div>
       <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-        MCP 提交审核
+        Review MCP submissions
       </h1>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        干净的提交已自动上架,不出现在这里。这个队列只有自动扫描标了红旗、需要你人工判断的那几条。
+        Submissions that pass automated checks are published automatically. This queue contains flagged submissions that need manual review.
       </p>
 
       {error ? (
@@ -115,12 +115,12 @@ export default function MarketReviewPage() {
       {items === null ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          加载待审队列…
+          Loading review queue…
         </div>
       ) : items.length === 0 && !error ? (
         <div className="mt-10 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center text-muted-foreground">
           <CheckCircle2 className="size-6 text-emerald-500" />
-          <p className="text-sm">当前没有需要审核的提交。</p>
+          <p className="text-sm">No submissions need review.</p>
         </div>
       ) : (
         <div className="mt-6 divide-y overflow-hidden rounded-xl border">
@@ -154,7 +154,7 @@ export default function MarketReviewPage() {
                       </a>
                     ) : null}
                     {item.transport ? <span>{item.transport}</span> : null}
-                    {item.submittedBy ? <span>提交者 {item.submittedBy}</span> : null}
+                    {item.submittedBy ? <span>Submitted by {item.submittedBy}</span> : null}
                     <span>{relativeTime(item.createdAt)}</span>
                   </div>
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -179,7 +179,7 @@ export default function MarketReviewPage() {
                     ) : (
                       <CheckCircle2 className="size-4" />
                     )}
-                    通过并上架
+                    Approve and publish
                   </Button>
                   <Button
                     disabled={isBusy}
@@ -188,7 +188,7 @@ export default function MarketReviewPage() {
                     variant="outline"
                   >
                     <XCircle className="size-4" />
-                    拒绝
+                    Reject
                   </Button>
                 </div>
               </div>
@@ -198,8 +198,8 @@ export default function MarketReviewPage() {
       )}
 
       <p className="mt-6 text-xs text-muted-foreground">
-        只有 <code className="rounded bg-muted px-1 py-0.5">MARKET_ADMIN_USER_IDS</code>{" "}
-        里的用户能打开此页;通过 / 拒绝接口同样按此白名单门控。
+        Only users listed in <code className="rounded bg-muted px-1 py-0.5">MARKET_ADMIN_USER_IDS</code>{" "}
+        can access this page. Approval and rejection actions use the same allowlist.
       </p>
     </div>
   );

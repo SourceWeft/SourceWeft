@@ -1,5 +1,5 @@
+export { getPricingConfig } from "../../lib/billing-edition/catalog";
 export {
-  getPricingConfig,
   planFamilyToPricingPlanId,
   type PlanConfig,
 } from "@sourceweft/contracts/pricing";

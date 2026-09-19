@@ -54,7 +54,7 @@ test("executable permissions satisfy Deep Agents route scoping", () => {
     "/conversation_history/": new StateBackend(),
     "/large_tool_results/": new StateBackend(),
     "/kb/": new StateBackend(),
-    "/workfiles/": new StateBackend(),
+    "/files/": new StateBackend(),
     "/skills/": new StateBackend(),
     "/workspace/": sandbox,
     "/": sandbox,
@@ -88,7 +88,7 @@ test("a root-scoped sandbox remains valid under Deep Agents permissions", () => 
     "/conversation_history/": new StateBackend(),
     "/large_tool_results/": new StateBackend(),
     "/kb/": new StateBackend(),
-    "/workfiles/": new StateBackend(),
+    "/files/": new StateBackend(),
     "/": sandbox,
   });
   const permissions = filesystemPermissionsForMounts([

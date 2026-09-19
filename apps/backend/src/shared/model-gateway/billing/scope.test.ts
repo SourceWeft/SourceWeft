@@ -1,13 +1,14 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import type { ModelUsageContext } from "./context";
 import { deriveIdempotencyKey, openBillingScope } from "./scope";
 import type { ScheduleProviderCostReconciliationFn } from "./settle";
 
 function createBilling(billingMode = "enforced"): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(
       async (teamId: string) =>
         ({
@@ -24,7 +25,7 @@ function createBilling(billingMode = "enforced"): ContentBillingPort {
       idempotencyReplayed: false,
     })),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function billedContext(
@@ -284,13 +285,13 @@ test("non-enforced mode swallows a metering failure and returns the trace", asyn
 // Fail closed: if billing state cannot be read at all, assume enforced rather
 // than handing out free usage.
 test("an unreadable billing summary is treated as enforced", async () => {
-  const billing = {
+  const billing = adaptBillingTestPort({
     getSummary: vi.fn(async () => {
       throw new Error("billing down");
     }),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 
   const scope = openBillingScope({
     context: billedContext(),

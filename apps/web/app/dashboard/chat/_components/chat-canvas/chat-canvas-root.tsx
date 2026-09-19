@@ -25,6 +25,7 @@ import {
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
+import { useLocalOperationStatus } from "../local-conversation-status";
 import { UserQuestionInterventionBar } from "./user-question-panel";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import type {
@@ -134,6 +135,8 @@ function countSelectedTools(tools: ChatSendInput["tools"]) {
 }
 
 export function ChatCanvas({
+  composerDraftKey,
+  workingFolderSlot,
   activeVersionByGroup = {},
   artifactStatuses,
   composerInitialCommand = null,
@@ -198,6 +201,8 @@ export function ChatCanvas({
   composerOptions,
   onComposerOptionsChange,
 }: {
+  composerDraftKey?: string;
+  workingFolderSlot?: import("react").ReactNode;
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activeThreadRun?: ActiveThreadRun | null;
@@ -434,7 +439,9 @@ export function ChatCanvas({
   // when the thread frees (see the controller). Only a pending tool approval or
   // background tool/artifact work still blocks composing. The Stop control is
   // still shown for one's own run via `composerStopStreaming` below.
+  const localStatus = useLocalOperationStatus();
   const isSubmitDisabledForRun =
+    localStatus.blocked ||
     shouldLockComposerForApproval({
       isWaitingForApproval,
       pendingConfirmationCount: pendingConfirmationItems.length,
@@ -661,6 +668,8 @@ export function ChatCanvas({
   if (mode === "new") {
     return (
       <EmptyState
+        workingFolderSlot={workingFolderSlot}
+        composerDraftKey={composerDraftKey}
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         allSources={allSources}
@@ -696,7 +705,10 @@ export function ChatCanvas({
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]">
+    <section
+      data-approval-pending={hasPendingConfirmationItems ? "true" : undefined}
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]"
+    >
       <MessageList
         activeThreadRun={activeThreadRun}
         activeVersionByGroup={activeVersionByGroup}
@@ -711,8 +723,10 @@ export function ChatCanvas({
         onArtifactPreview={onArtifactPreview}
         onCitationClick={onCitationClick}
         onLoadOlderMessages={onLoadOlderMessages}
-        onRefreshLatest={onRefreshLatest}
-        onRestartFromMessage={onRestartFromMessage}
+        onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
+        onRestartFromMessage={
+          localStatus.blocked ? undefined : onRestartFromMessage
+        }
         onSourcePreview={onSourcePreview}
         onWorkfileClick={onWorkfileClick}
         resolvedConfirmations={confirmationResolutions}
@@ -747,7 +761,8 @@ export function ChatCanvas({
             return;
           }
 
-          onResumeToolConfirmation(settled.resumeEffect);
+          if (!localStatus.blocked)
+            onResumeToolConfirmation(settled.resumeEffect);
         }}
         onInterventionExpired={({ item }) => {
           updateToolConfirmationState((current) =>
@@ -815,6 +830,10 @@ export function ChatCanvas({
       <UserQuestionInterventionBar
         items={pendingQuestionItems}
         onSettled={({ answer, item }) => {
+          if (localStatus.blocked) {
+            if (answer.status === "cancelled") onStopStreaming?.();
+            return;
+          }
           setResolvedQuestionIds((previous) =>
             new Set(previous).add(item.question.id),
           );
@@ -874,7 +893,7 @@ export function ChatCanvas({
         }}
       />
 
-      <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
+      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           {queuedSends.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -905,6 +924,13 @@ export function ChatCanvas({
           ) : null}
           {typingIndicator}
           <Composer
+            draftKey={composerDraftKey}
+            placeholder={
+              localStatus.blocked
+                ? `${localStatus.message ?? "Computer unavailable."} You can keep writing a draft.`
+                : undefined
+            }
+            workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}

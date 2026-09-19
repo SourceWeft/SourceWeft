@@ -498,7 +498,7 @@ export function validateCustomSkillBundle(input: {
     throw new Error("Custom skill bundle exceeds total size limit");
   }
 
-  const frontmatter = parseSkillFrontmatter(skillMd.contentText);
+  const frontmatter = parseSkillFrontmatter(skillMd.contentText) ?? {};
   const sourceweft = getSourceWeftFrontmatter(frontmatter);
   if (Object.keys(sourceweft).length > 0) {
     throw new Error(
@@ -506,12 +506,14 @@ export function validateCustomSkillBundle(input: {
     );
   }
   const skillJson = firstJsonObject(files);
-  const slug = String(frontmatter.name ?? skillJson?.slug ?? "").trim();
+  const rawSlug = frontmatter.name ?? skillJson?.slug ?? "";
+  if (typeof rawSlug !== "string") throw new Error("Custom skill name must be a string");
+  const slug = rawSlug.trim();
   const displayName = String(skillJson?.displayName ?? slug).trim();
   const version = String(skillJson?.version ?? "0.1.0").trim();
-  const description = String(
-    frontmatter.description ?? skillJson?.description ?? "",
-  ).trim();
+  const rawDescription = frontmatter.description ?? skillJson?.description ?? "";
+  if (typeof rawDescription !== "string") throw new Error("Custom skill description must be a string");
+  const description = rawDescription.trim();
   const visibility = String(skillJson?.visibility ?? "workspace").trim();
   const categoriesValue = skillJson?.categories;
   const categories = Array.isArray(categoriesValue)

@@ -1,7 +1,11 @@
+import { z } from "zod";
+import { logger } from "../../shared/logger";
+import { getRegistryVersionDetail } from "../../modules/skills/registry/versions";
 import type { Hono } from "hono";
 import { isMarketAdmin } from "../../modules/market/admin";
 import {
   listRegistryReviewQueue,
+  setRegistryVisibility,
   setRegistrySkillVersionStatus,
 } from "../../modules/skills/registry/review";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
@@ -37,14 +41,24 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.post(
     "/v1/skills/registry/admin/submissions/:versionId/publish",
     async (c) => {
-      await requireSkillRegistryAdmin(c);
+      const session = await requireSkillRegistryAdmin(c);
+      const parsed = z
+        .object({
+          reason: z.string().trim().max(1000).optional(),
+          visibility: z.enum(["public", "restricted"]).optional(),
+        })
+        .strict()
+        .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
+      if (!parsed.success) throw ApiError.validation();
       const result = await setRegistrySkillVersionStatus(
         decodeURIComponent(c.req.param("versionId")),
         "published",
+        { ...parsed.data, actorUserId: getSessionUserId(session) },
       );
       if (!result) {
         throw ApiError.notFound("No draft registry version awaiting review");
       }
+      logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
       return ApiResponse.success(c, result);
     },
   );
@@ -52,15 +66,58 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.post(
     "/v1/skills/registry/admin/submissions/:versionId/reject",
     async (c) => {
-      await requireSkillRegistryAdmin(c);
+      const session = await requireSkillRegistryAdmin(c);
+      const parsed = z
+        .object({
+          reason: z.string().trim().max(1000).optional(),
+          visibility: z.enum(["public", "restricted"]).optional(),
+        })
+        .strict()
+        .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
+      if (!parsed.success) throw ApiError.validation();
       const result = await setRegistrySkillVersionStatus(
         decodeURIComponent(c.req.param("versionId")),
         "deprecated",
+        { reason: parsed.data.reason, actorUserId: getSessionUserId(session) },
       );
       if (!result) {
         throw ApiError.notFound("No registry version to deprecate");
       }
+      logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
       return ApiResponse.success(c, result);
     },
   );
+  app.get(
+    "/v1/skills/registry/admin/skills/:skillId/versions/:versionId",
+    async (c) => {
+      const session = await requireSkillRegistryAdmin(c);
+      return ApiResponse.success(
+        c,
+        await getRegistryVersionDetail({
+          userId: getSessionUserId(session),
+          teamId: "",
+          workspaceId: "",
+          catalogId: c.req.param("skillId"),
+          versionId: c.req.param("versionId"),
+        }),
+      );
+    },
+  );
+  app.put("/v1/skills/registry/admin/skills/:skillId/visibility", async (c) => {
+    const session = await requireSkillRegistryAdmin(c);
+    const parsed = z
+      .object({ visibility: z.enum(["public", "restricted"]) })
+      .strict()
+      .safeParse(await c.req.json());
+    if (!parsed.success) throw ApiError.validation();
+    const input = {
+      skillId: c.req.param("skillId"),
+      actorUserId: getSessionUserId(session),
+      visibility: parsed.data.visibility,
+    };
+    const result = await setRegistryVisibility(input);
+    if (!result) throw ApiError.notFound();
+    logger.info("Registry skill visibility changed", input);
+    return ApiResponse.success(c, result);
+  });
 }

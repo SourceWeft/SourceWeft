@@ -1,0 +1,57 @@
+name: Sandbox Security Regression
+
+on:
+  pull_request:
+    paths:
+      - 'docker/sourceweft-sandbox/**'
+      - 'packages/sandbox-provider-cloudflare/bridge/Dockerfile'
+      - 'packages/builtin-skill-html/**'
+      - 'packages/builtin-skill-html-slides/**'
+      - 'scripts/ci/verify-sandbox-security.sh'
+      - '.github/workflows/sandbox-security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docker/sourceweft-sandbox/**'
+      - 'packages/sandbox-provider-cloudflare/bridge/Dockerfile'
+      - 'scripts/ci/verify-sandbox-security.sh'
+      - '.github/workflows/sandbox-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Sandbox security (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: daytona
+            dockerfile: docker/sourceweft-sandbox/Dockerfile
+          - provider: cloudflare
+            dockerfile: packages/sandbox-provider-cloudflare/bridge/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - run: test "$(uname -m)" = x86_64
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker/sourceweft-sandbox
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: sourceweft-sandbox-security:${{ matrix.provider }}
+          cache-from: type=gha,scope=sandbox-security-${{ matrix.provider }}
+          cache-to: type=gha,mode=max,scope=sandbox-security-${{ matrix.provider }}
+      - name: Verify fixed libraries and offline HTML as the image user
+        run: |
+          docker run --rm --network none --ipc=host --entrypoint bash \
+            --mount type=bind,source="$PWD/packages/builtin-skill-html",target=/skills/html,readonly \
+            --mount type=bind,source="$PWD/packages/builtin-skill-html-slides",target=/skills/html-slides,readonly \
+            --mount type=bind,source="$PWD/scripts/ci/verify-sandbox-security.sh",target=/tmp/verify-security.sh,readonly \
+            sourceweft-sandbox-security:${{ matrix.provider }} /tmp/verify-security.sh

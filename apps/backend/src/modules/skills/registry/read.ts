@@ -1,4 +1,5 @@
 import { sha256 } from "../hash";
+import { LOGO_FILE_PATTERN, MAX_LOGO_BYTES } from "./logo";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
@@ -73,7 +74,7 @@ const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
  * actually carry.
  */
 function isUtf8Text(bytes: Buffer, decoded: string): boolean {
-  return Buffer.byteLength(decoded, "utf8") === bytes.byteLength;
+  return !decoded.includes("\0") && Buffer.from(decoded, "utf8").equals(bytes);
 }
 
 function mimeTypeFor(bundlePath: string): string {
@@ -93,6 +94,8 @@ export type DiscoveredSkillFile = {
 };
 
 export type DiscoveredSkill = {
+  /** Bounded image candidates for presentation metadata, outside the text runtime bundle. */
+  images?: Array<{ path: string; bytes: Buffer }>;
   /**
    * Skill directory relative to the REPO ROOT. Empty string when the skill sits
    * at the repo root.
@@ -101,6 +104,7 @@ export type DiscoveredSkill = {
   /** Last path segment of the skill dir. */
   dirName: string;
   files: DiscoveredSkillFile[];
+  excludedFiles?: Array<{ path: string; reason: string }>;
 };
 
 export type ReadRegistryResult = {
@@ -270,15 +274,25 @@ async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
 
   for (const [entryPath, skillDir] of wanted) {
     const bytes = files.get(entryPath);
-    if (!bytes) {
-      continue;
+    if (!bytes)
+      throw new RegistrySubmissionError(
+        "REGISTRY_READ_FAILED",
+        "A requested archive file could not be read",
+      );
+    const prefix = skillDir === "" ? "" : `${skillDir}/`;
+    const bundlePath = entryPath.slice(prefix.length);
+    if (LOGO_FILE_PATTERN.test(bundlePath) && bytes.length <= MAX_LOGO_BYTES) {
+      (byDir.get(skillDir)!.images ??= []).push({ path: bundlePath, bytes });
     }
     const contentText = bytes.toString("utf8");
     if (!isUtf8Text(bytes, contentText)) {
+      const skill = byDir.get(skillDir)!;
+      (skill.excludedFiles ??= []).push({
+        path: bundlePath,
+        reason: "File is not supported UTF-8 text and was not included.",
+      });
       continue;
     }
-    const prefix = skillDir === "" ? "" : `${skillDir}/`;
-    const bundlePath = entryPath.slice(prefix.length);
     byDir.get(skillDir)?.files.push({
       bundlePath,
       // sha256 is over the raw bytes, so integrity stays byte-exact.

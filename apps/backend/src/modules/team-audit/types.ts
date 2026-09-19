@@ -3,6 +3,7 @@
  * audit trail whose vocabulary drifts per call site cannot be queried.
  */
 export type TeamAuditAction =
+  | "skill.version_changed"
   | "workspace.created"
   | "workspace.renamed"
   | "workspace.member_added"
@@ -21,6 +22,7 @@ export type TeamAuditAction =
   | "workspace.guest_removed";
 
 export type TeamAuditTargetType =
+  | "skill"
   | "workspace"
   | "workspace_member"
   | "member"

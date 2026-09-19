@@ -2,7 +2,7 @@
 
 import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceItem } from "../source-types";
 
@@ -40,6 +40,24 @@ const emptyResult = {
 const listArtifactSummariesMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
 );
+const listWorkingFilesMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ items: [] }),
+);
+const localRequestMock = vi.hoisted(() => vi.fn());
+vi.mock("../../../../../lib/auth-client", () => ({
+  authClient: {
+    useSession: () => ({
+      data: { user: { id: "owner" }, session: { id: "session" } },
+    }),
+  },
+}));
+vi.mock("../../../../../lib/local-execution", () => ({
+  localRequest: localRequestMock,
+}));
+
+beforeEach(() => {
+  localRequestMock.mockResolvedValue({ executionTarget: { kind: "cloud" } });
+});
 
 function makeStubClient(overrides: Record<string, unknown> = {}) {
   return new Proxy(overrides, {
@@ -55,6 +73,7 @@ vi.mock("../../../../../lib/sdk", () => ({
   connectorsClient: makeStubClient(),
   contentClient: makeStubClient({
     listArtifactSummaries: listArtifactSummariesMock,
+    listWorkingFiles: listWorkingFilesMock,
   }),
 }));
 
@@ -121,8 +140,104 @@ test("mounts in new mode and renders the hub tab strip", async () => {
   const el = await renderHub({ mode: "new" });
   // The hub renders one <button> per tab; assert a couple of stable labels.
   expect(el.textContent).toContain("Sources");
-  expect(el.textContent).toContain("Workfiles");
+  expect(el.textContent).toContain("Files");
   expect(el.querySelectorAll("button").length).toBeGreaterThan(3);
+});
+
+test("restores the detached cloud Files tab after execution metadata loads", async () => {
+  let resolveExecution!: (value: unknown) => void;
+  localRequestMock.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveExecution = resolve;
+    }),
+  );
+  const viewChanged = vi.fn();
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "cloud-restore",
+    variant: "window",
+    initialView: { tab: "Files" },
+    onViewChange: viewChanged,
+  });
+  expect(listWorkingFilesMock).not.toHaveBeenCalled();
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  expect(el.textContent).toContain("Loading Files location…");
+  await act(async () =>
+    resolveExecution({ executionTarget: { kind: "cloud" } }),
+  );
+  expect(el.textContent).toContain("Files");
+  expect(listWorkingFilesMock).toHaveBeenCalledWith("ws1", "cloud-restore");
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Files");
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+});
+
+test("Hub shows a real initial execution request failure", async () => {
+  localRequestMock.mockRejectedValueOnce(new Error("Network unavailable"));
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "execution-failure",
+    initialView: { tab: "Sources" },
+  });
+  expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+    "Unable to read the file location: Network unavailable",
+  );
+});
+
+test("Hub does not warn during a local connection recheck and reports confirmed unavailability", async () => {
+  const online = {
+    executionTarget: { kind: "local", deviceId: "pc" },
+    availability: { ready: true },
+  };
+  let resolveExecution!: (value: unknown) => void;
+  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
+    resolveExecution = resolve;
+  }));
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "local-recheck",
+    initialView: { tab: "Sources" },
+  });
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => resolveExecution(online));
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+
+  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
+    resolveExecution = resolve;
+  }));
+  const { reportLocalAvailabilityError } = await import(
+    "../../../../../lib/local-availability-events"
+  );
+  await act(async () => {
+    reportLocalAvailabilityError(
+      "/v1/workspaces/ws1/threads/local-recheck/files",
+      { code: "DEVICE_OFFLINE" },
+    );
+  });
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => resolveExecution({
+    ...online,
+    availability: { ready: false, code: "DEVICE_OFFLINE", message: "Computer offline" },
+  }));
+  expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+    "Unable to read the file location: Computer offline",
+  );
+});
+
+test("a detached local conversation never loads cloud Files from a saved tab", async () => {
+  localRequestMock.mockResolvedValueOnce({
+    executionTarget: { kind: "local" },
+  });
+  const viewChanged = vi.fn();
+  const el = await renderHub({
+    mode: "thread",
+    threadId: "local-restore",
+    variant: "window",
+    initialView: { tab: "Files" },
+    onViewChange: viewChanged,
+  });
+  expect(el.textContent).toContain("Files");
+  expect(listWorkingFilesMock).not.toHaveBeenCalled();
+  expect(viewChanged.mock.calls.at(-1)?.[0].tab).toBe("Files");
 });
 
 test("mounts in thread mode with a threadId", async () => {

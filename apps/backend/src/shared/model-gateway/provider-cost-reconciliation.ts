@@ -5,7 +5,14 @@ import {
 } from "@sourceweft/model-gateway";
 import { db, llmGenerations, modelGatewayConfigs } from "@sourceweft/db";
 import { and, eq } from "drizzle-orm";
-import { billingService, isBillingError } from "../../modules/billing";
+import {
+  billingRuntime,
+  getBillingDeploymentCapabilities,
+} from "../../billing-host/bindings";
+import {
+  BillingError,
+  isBillingError,
+} from "@sourceweft/contracts/billing-runtime";
 import { opsAlertService } from "../../modules/ops";
 import { config } from "../config";
 import { logger } from "../logger";
@@ -152,6 +159,16 @@ async function loadReconciliationTarget(
 async function reconcileProviderCost(
   payload: ProviderCostReconciliationPayload,
 ) {
+  if (
+    payload.originalBillingIdempotencyKey &&
+    !getBillingDeploymentCapabilities().billing.available
+  ) {
+    throw new BillingError(
+      "BILLING_UNAVAILABLE",
+      501,
+      "A commercial settlement job cannot run in the core edition",
+    );
+  }
   const target = await loadReconciliationTarget(payload);
   if (target.alreadySettled) {
     return { status: "settled" as const, replayed: true };
@@ -174,7 +191,7 @@ async function reconcileProviderCost(
   });
 
   if (payload.actorUserId && payload.originalBillingIdempotencyKey) {
-    await billingService.reconcileModelProviderCost({
+    await billingRuntime.reconcileProviderCost({
       teamId: payload.teamId,
       actorUserId: payload.actorUserId,
       workspaceId: payload.workspaceId,

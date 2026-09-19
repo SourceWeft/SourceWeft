@@ -1,27 +1,19 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
 import { SharedArtifactViewer } from "./shared-artifact-viewer";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Server-side API base. On the server `apiBaseUrl` resolves from the configured
- * public URL (or localhost in dev), which is what SSR needs to reach the API.
- */
-function serverApiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-    "http://localhost:3001"
-  );
-}
+import { internalApiBaseUrl } from "../../../lib/internal-api-base-url";
+import { OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
 
 async function fetchShare(
   token: string,
 ): Promise<PublicSharedArtifactResponse["artifact"] | null> {
   try {
     const res = await fetch(
-      `${serverApiBaseUrl()}/v1/public/shares/${encodeURIComponent(token)}`,
+      `${internalApiBaseUrl()}/v1/public/shares/${encodeURIComponent(token)}`,
       { cache: "no-store" },
     );
     if (!res.ok) return null;
@@ -80,26 +72,34 @@ export async function generateMetadata({
   const description = artifactDescription(artifact);
   const images = artifact.previewImageUrl
     ? [{ url: artifact.previewImageUrl }]
-    : undefined;
+    : [OG_IMAGE];
+  const canonicalPath = `/artifact/${token}`;
 
   return {
     title,
     description,
     // Canonical for this content (the old `/s/:token` permanently redirects
     // here), so the two paths never split SEO signals.
-    alternates: { canonical: `/artifact/${token}` },
+    alternates: { canonical: canonicalPath },
     // The share token is in this page's URL; keep it out of the Referer header
     // on any outbound navigation/subresource so it can't leak to third parties.
     referrer: "no-referrer",
     // A public link is a deliberate publish → indexable for reach, unless the
     // owner opted this share out.
     robots: artifact.noindex ? { index: false, follow: false } : undefined,
-    openGraph: { title, description, images, type: "article" },
-    twitter: {
-      card: images ? "summary_large_image" : "summary",
+    openGraph: {
       title,
       description,
-      images: images?.map((i) => i.url),
+      images,
+      siteName: SITE_NAME,
+      type: "article",
+      url: `${SITE_URL}${canonicalPath}`,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: images.map((image) => image.url),
     },
   };
 }
@@ -113,20 +113,9 @@ export default async function SharedArtifactPage({
   const artifact = await fetchShare(token);
 
   if (!artifact) {
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-        <h1 className="text-lg font-medium">This share is not available</h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          The link may have been revoked or has expired.
-        </p>
-        <Link
-          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-          href="/"
-        >
-          Go to SourceWeft
-        </Link>
-      </main>
-    );
+    // A revoked or expired link must 404 rather than serve a 200 "unavailable"
+    // page, which search engines treat as a soft 404.
+    notFound();
   }
 
   return <SharedArtifactViewer artifact={artifact} />;

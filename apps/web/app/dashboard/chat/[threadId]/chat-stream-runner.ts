@@ -1,3 +1,7 @@
+import {
+  localHostHeaders,
+  clearLocalHostSession,
+} from "../../../../lib/local-host-session";
 import type { ByokModelSelection } from "../_components/byok-state";
 import type {
   ChatSendInput,
@@ -42,8 +46,7 @@ import {
 } from "./streaming-render-buffer";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "../../../../lib/api-base-url";
 
 const STREAM_DELTA_MAX_BATCH_CHARS = 800;
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
@@ -187,6 +190,7 @@ type RunChatStreamInput = {
   ) => boolean;
   skillIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   streamRenderBuffer?: StreamingRenderBuffer;
   streamThinkingStepsById: Map<string, ThinkingStepRecord>;
   streamToolCallsById: Map<string, ToolCallRecord>;
@@ -263,6 +267,7 @@ export async function runChatStream(
     mode: input.mode,
     mentionedSourceIds: input.mentionedSourceIds,
     sourceIds: input.sourceIds,
+    sourceSelectionRevision: input.sourceSelectionRevision,
     timezone: input.timezone,
     durableRunKey: input.durableRunKey,
     command: input.command,
@@ -285,16 +290,34 @@ export async function runChatStream(
     toolApprovalResume: input.toolApprovalResume,
   });
 
+  const nativeHeaders = await localHostHeaders({
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+  });
   const response = await fetch(
     `${apiBaseUrl}/v1/workspaces/${input.workspaceId}/threads/${input.threadId}/stream`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...nativeHeaders,
+      },
       credentials: "include",
       body: JSON.stringify(requestBody),
     },
   );
 
+  if (
+    !response.ok &&
+    response.status === 403 &&
+    nativeHeaders["X-Local-Proof"]
+  ) {
+    const failure = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    if (failure?.code === "NATIVE_PROOF_EXPIRED") clearLocalHostSession();
+  }
   if (!response.ok) {
     await input.throwStreamRequestError(response);
   }

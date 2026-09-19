@@ -652,6 +652,8 @@ export class SandboxManager {
       : provider.execute.bind(provider);
     return {
       rootDir: provider.pathPolicy.workspaceRoot,
+      skillsRoot: provider.pathPolicy.skillsRoot,
+      checksumCommand: provider.id === "local" ? "shasum -a 256" : undefined,
       execute: async (command) => {
         const result = await execute({
           providerSandboxId,

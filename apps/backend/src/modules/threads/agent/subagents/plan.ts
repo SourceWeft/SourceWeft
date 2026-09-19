@@ -82,6 +82,7 @@ export const PLAN_SYSTEM_PROMPT = [
 export function createPlanSubagent(input: {
   availableTools: readonly { readonly name: string }[];
   backend: AnyBackendProtocol;
+  workingDirectory?: string;
   middleware: readonly AgentMiddleware[];
 }): SubAgent {
   return {
@@ -93,6 +94,7 @@ export function createPlanSubagent(input: {
     ) as unknown as SubAgent["tools"],
     middleware: readOnlyChildMiddleware({
       backend: input.backend,
+      workingDirectory: input.workingDirectory,
       middleware: input.middleware,
     }),
     interruptOn: {},

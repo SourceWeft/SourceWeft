@@ -187,6 +187,7 @@ export type SourceDetailRecord = {
 };
 
 export type ThreadRecord = {
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   id: string;
   teamId: string;
   workspaceId: string;
@@ -236,6 +237,11 @@ export type WorkingFilePurpose =
   "scratch" | "draft" | "note" | "output_candidate";
 
 export type WorkingFileRecord = {
+  payloadKind: "inline_text" | "object";
+  storageBucket: string | null;
+  storageKey: string | null;
+  contentHash: string;
+  origin: import("@sourceweft/contracts").FileRef["origin"];
   id: string;
   teamId: string;
   workspaceId: string;

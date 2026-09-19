@@ -10,6 +10,11 @@ export default defineConfig({
     worker: "src/worker/main.ts",
   },
   format: ["esm"],
+  // Bundled CommonJS dependencies (for example PostCSS in artifact tools)
+  // still require Node builtins. ESM has no ambient require.
+  banner: {
+    js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+  },
   minify: false,
   // Workspace packages export TypeScript source. Bundle their static imports
   // (including the builtin capability map) for the plain Node dist entrypoints.

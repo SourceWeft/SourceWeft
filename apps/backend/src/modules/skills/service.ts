@@ -1,3 +1,4 @@
+import { getSkillLogo } from "./logo";
 import { ContentError } from "../content/errors";
 import {
   getBuiltinSkillBySlug,
@@ -27,7 +28,7 @@ import {
   validateCustomSkillBundle,
   validateCustomSkillFileInput,
 } from "./custom-validation";
-import { and, eq, ilike, or } from "drizzle-orm";
+import { and, eq, ilike, or, sql } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
@@ -38,6 +39,8 @@ import {
 import type { SkillCatalogItem, SkillSourceType } from "./types";
 import { builtinSkillSelectionId } from "./selection";
 import { submitRegistrySkillFromGitHub } from "./registry/submit";
+import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
+import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
@@ -169,6 +172,7 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     enabled: row.enabled?.enabled ?? false,
     installable: true,
     defaultEnabled: manifest.defaultEnabled,
+    logo: getSkillLogo(manifest),
     hasReadme: false,
     capabilities: manifest.capabilities,
     models: manifest.models,
@@ -180,7 +184,7 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     defaultConfig: manifest.defaultConfig,
   };
   if (row.definition.sourceType === "registry_github") {
-    return { ...base, ...registryCatalogFields(manifest) };
+    return { ...base, displayName: manifest.displayName, description: manifest.description, installable: row.version.status === "published", ...registryCatalogFields(manifest) };
   }
   return base;
 }
@@ -316,8 +320,12 @@ export class ContentSkillsService {
     const conditions = [
       eq(skillDefinitions.sourceType, "registry_github"),
       eq(skillDefinitions.status, "active"),
-      eq(skillVersions.status, "published"),
-      eq(skillVersions.isCurrent, true),
+      or(
+        and(eq(skillVersions.status, "published"), eq(skillVersions.isCurrent, true)),
+        and(eq(skillDefinitions.ownerUserId, input.userId),
+          sql`not exists (select 1 from skill_versions current_version where current_version.skill_id = ${skillDefinitions.id} and current_version.is_current = true)`,
+          sql`${skillVersions.id} = (select latest_version.id from skill_versions latest_version where latest_version.skill_id = ${skillDefinitions.id} order by latest_version.created_at desc, latest_version.id desc limit 1)`),
+      ),
       or(
         eq(skillDefinitions.visibility, "public"),
         and(
@@ -473,7 +481,7 @@ export class ContentSkillsService {
 
     const indexed = known
       ? [{ slug: source, name: known.version.manifestJson.slug }]
-      : (submitted?.skills ?? []).map((s) => ({ slug: s.slug, name: s.name }));
+      : (submitted?.skills ?? []).flatMap((s) => s.status !== "failed" && s.slug && s.name ? [{ slug: s.slug, name: s.name }] : []);
     // Match the author's frontmatter name — what a person actually says ("the
     // pdf skill") rather than `gh-<owner>-<repo>-<name>`. A full slug works too.
     const selected = wanted
@@ -636,21 +644,30 @@ export class ContentSkillsService {
     catalogId: string;
   }) {
     const catalog = await this.listCatalog(input);
-    const item = catalog.items.find(
-      (candidate) => candidate.catalogId === input.catalogId,
-    );
+    let item = catalog.items.find(candidate => candidate.catalogId === input.catalogId);
+    if (!item && input.catalogId.includes(":")) {
+      const [skillId, versionId] = input.catalogId.split(":");
+      const [row] = await db.select({ definition: skillDefinitions, version: skillVersions, enabled: workspaceSkills })
+        .from(skillDefinitions).innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+        .leftJoin(workspaceSkills, and(eq(workspaceSkills.skillId, skillDefinitions.id), eq(workspaceSkills.workspaceId, input.workspaceId), eq(workspaceSkills.teamId, input.teamId)))
+        .where(and(eq(skillDefinitions.id, skillId!), eq(skillVersions.id, versionId!), eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.status, "active"), registryAccess(input),
+          or(eq(skillVersions.status, "published"), eq(skillDefinitions.ownerUserId, input.userId)))) .limit(1);
+      if (row) item = { ...mapCatalogRow(row), displayName: row.version.manifestJson.displayName, description: row.version.manifestJson.description, installable: row.version.status === "published" };
+    }
     if (!item) {
       throw new ContentError(404, "SKILL_NOT_FOUND", "Skill not found");
     }
 
-    const files = await this.getSkillFiles(input, item);
-    const readmeContent =
-      files.find((file) => file.path === "README.md")?.contentText ?? null;
+    // Registry previews use the same viewer/version authorization as version details.
+    // Runtime bundle access remains governed by workspace entitlements.
+    const documents = item.sourceType === "registry_github"
+      ? await getRegistryVersionDetail({ ...input, versionId: item.skillVersionId })
+      : readSkillDocuments(await this.getSkillFiles(input, item));
     return {
-      skill: { ...item, hasReadme: readmeContent !== null },
-      readmeContent,
-      skillContent:
-        files.find((file) => file.path === "SKILL.md")?.contentText ?? null,
+      skill: { ...item, hasReadme: documents.readmeContent !== null },
+      readmeContent: documents.readmeContent,
+      readmePath: documents.readmePath,
+      skillContent: documents.skillContent,
     };
   }
 

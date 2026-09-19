@@ -253,7 +253,10 @@ export async function resolveSourceTreeScope(input: {
   });
   const expandedDescendantSourceIds = descendants.map((source) => source.id);
   const effectiveSourceIds = Array.from(
-    new Set([...requestedSourceIds, ...expandedDescendantSourceIds]),
+    new Set([
+      ...requestedSourceIds.filter((id) => selectedById.has(id)),
+      ...expandedDescendantSourceIds,
+    ]),
   );
 
   return {
@@ -348,6 +351,11 @@ export class ContentSourceService {
   private async attachSourceUrls(source: SourceRecord) {
     if (!source.storageKey) {
       return source;
+    }
+
+    if (config.sourceUpload.mode === "proxy") {
+      const url = `${config.auth.webBaseUrl}/api/source-file?workspaceId=${encodeURIComponent(source.workspaceId)}&sourceId=${encodeURIComponent(source.id)}`;
+      return { ...source, previewUrl: `${url}&inline=true`, downloadUrl: url };
     }
 
     const fileName = String(
@@ -1298,6 +1306,17 @@ export class ContentSourceService {
         "SOURCE_ORIGINAL_FILE_MISSING",
         "Source has no original uploaded file to download",
       );
+    }
+
+    if (config.sourceUpload.mode === "proxy") {
+      return {
+        body: await downloadSourceObject({
+          bucket: source.storageBucket ?? config.s3.bucket,
+          key: source.storageKey,
+        }),
+        contentType: source.mimeType || "application/octet-stream",
+        fileName: String(source.metadata.fileName || source.title || "source"),
+      };
     }
 
     const url = await getSourceObjectDownloadUrl({

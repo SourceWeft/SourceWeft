@@ -1,0 +1,38 @@
+{
+  "name": "@sourceweft/preview",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/preview.tsx"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "assets": "node scripts/copy-assets.mjs"
+  },
+  "dependencies": {
+    "@file-viewer/assets-ppt": "3.0.3",
+    "@file-viewer/assets-standard": "3.0.3",
+    "@file-viewer/core": "3.0.3",
+    "@file-viewer/react": "3.0.3",
+    "@file-viewer/preset-lite": "3.0.3",
+    "@file-viewer/renderer-pdf": "3.0.3",
+    "@file-viewer/renderer-word": "3.0.3",
+    "@file-viewer/renderer-spreadsheet": "3.0.3",
+    "@file-viewer/renderer-pptx": "3.0.3",
+    "@file-viewer/renderer-ppt": "3.0.3",
+    "@file-viewer/renderer-epub": "3.0.3"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "typescript": "5.9.2",
+    "vitest": "4.1.11"
+  }
+}

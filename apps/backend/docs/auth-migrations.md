@@ -21,6 +21,15 @@ stay schema-focused: include schema-bearing plugins, but keep runtime email
 handlers, webhook callbacks, onboarding hooks, and workspace side effects out of
 migration mode.
 
+## Optional commercial module
+
+Both module states use the same migration command and shared schema. The current
+commercial Auth factory returns no provider plugin: signed payment webhooks are
+handled by the host. Migration never needs checkout credentials to register a
+provider plugin. Retain historical billing/Auth tables and fields; disabling the
+module is not a request to delete commercial data. Run migrations before enabling
+features on an older database, and restart API, worker and scheduler together.
+
 ## Commands
 
 Run auth migrations before Drizzle migrations:

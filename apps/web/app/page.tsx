@@ -15,7 +15,7 @@ const VERSIONS: Record<string, ComponentType<LandingPageProps>> = {
 };
 
 export default function RootPage() {
-  const version = process.env.NEXT_PUBLIC_LANDING_VERSION ?? "1";
+  const version = process.env.LANDING_VERSION ?? "1";
   const LandingPage = VERSIONS[version] ?? LandingV1;
 
   return (

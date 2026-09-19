@@ -1,3 +1,4 @@
+import { DeploymentClient } from "./deployment-client";
 import { BillingClient } from "./billing-client";
 import { ConnectorsClient } from "./connectors-client";
 import { ContentClient } from "./content-client";
@@ -11,6 +12,7 @@ import { WorkspaceClient } from "./workspace-client";
 export type SourceweftClient = {
   readonly http: HttpClient;
   readonly billing: BillingClient;
+  readonly deployment: DeploymentClient;
   readonly connectors: ConnectorsClient;
   readonly content: ContentClient;
   readonly dashboard: DashboardClient;
@@ -36,6 +38,7 @@ export function createSourceweftClient(baseUrl: string): SourceweftClient {
   return {
     http,
     billing: new BillingClient(http),
+    deployment: new DeploymentClient(http),
     connectors: new ConnectorsClient(http),
     content: new ContentClient(http),
     dashboard: new DashboardClient(http),

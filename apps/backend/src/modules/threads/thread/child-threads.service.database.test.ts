@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
+import { READ_ONLY_BUSINESS_TOOL_NAMES } from "../agent/subagents/read-only";
 
 let schema: typeof import("@sourceweft/db");
 let service: typeof import("../service").contentThreadService;
@@ -164,7 +165,7 @@ test("the persona roster lists the built-in delegates for any workspace member",
     items.map((persona) => persona.slug),
     ["general-purpose", "explore", "plan"],
   );
-  assert.deepEqual(items[1]?.toolAllowlist, ["search_sources"]);
+  assert.deepEqual(items[1]?.toolAllowlist, [...READ_ONLY_BUSINESS_TOOL_NAMES]);
   assert.equal(items[0]?.toolAllowlist, null);
   assert.equal(items[0]?.trust, "system");
 });

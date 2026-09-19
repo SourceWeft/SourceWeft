@@ -1,3 +1,7 @@
+import { fileReferenceSchema } from "@sourceweft/contracts";
+import { targetKey } from "../devices/access";
+import { validateThreadExecutionTarget } from "../devices/service";
+import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import { findCitationByMessageRank } from "../citations";
 import { sharingService } from "../sharing";
 import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
@@ -149,6 +153,8 @@ function sanitizeClientMessagePage(input: {
 }
 
 export type StartThreadTurnInput = {
+  localCaller?: import("../devices/access").LocalExecutionCaller;
+  executionTarget?: ThreadExecutionTarget;
   workspaceId: string;
   userId: string;
   title?: string;
@@ -162,6 +168,7 @@ export type StartThreadTurnInput = {
   images?: StreamThreadEventInput["images"];
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   tools?: StreamThreadEventInput["tools"];
   command?: StreamThreadEventInput["command"];
   invocation?: StreamThreadEventInput["invocation"];
@@ -633,6 +640,8 @@ class ContentThreadService {
   }
 
   async createThread(input: {
+    creationId?: string;
+    executionTarget?: ThreadExecutionTarget;
     workspaceId: string;
     userId: string;
     title?: string;
@@ -652,6 +661,27 @@ class ContentThreadService {
       userId: input.userId,
     });
 
+    if (input.creationId) {
+      const existing = await findThreadRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: input.creationId,
+      });
+      if (existing) {
+        if (
+          existing.createdBy !== input.userId ||
+          targetKey(existing.executionTarget ?? { kind: "cloud" }) !==
+            targetKey(input.executionTarget ?? { kind: "cloud" })
+        )
+          throw new ContentError(
+            409,
+            "CREATION_CONTEXT_REUSED",
+            "This creation context has already been used for another conversation.",
+          );
+        return { thread: existing };
+      }
+    }
+    await validateThreadExecutionTarget(input.userId, input.executionTarget);
     const persona = input.personaId
       ? await resolvePersona({
           teamId: workspace.organizationId,
@@ -698,6 +728,7 @@ class ContentThreadService {
       await resolveThreadModelSettingsSnapshots(modelSettings);
 
     const thread = await createThreadRecord({
+      id: input.creationId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       title: normalizeContentTitle(input.title, persona?.name ?? "New Thread"),
@@ -715,6 +746,7 @@ class ContentThreadService {
       parentThreadId: parent?.id ?? null,
       personaId: persona?.slug ?? null,
       origin: "user",
+      executionTarget: input.executionTarget,
     });
 
     return { thread };
@@ -743,9 +775,25 @@ class ContentThreadService {
       if (!existingThread || !canViewThread(input.userId, existingThread)) {
         throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
       }
+      const previous = existingThread.executionTarget ?? { kind: "cloud" };
+      const requested = input.executionTarget ?? { kind: "cloud" };
+      if (
+        previous.kind !== requested.kind ||
+        (previous.kind === "local" &&
+          requested.kind === "local" &&
+          (previous.deviceId !== requested.deviceId ||
+            previous.directoryGrantId !== requested.directoryGrantId))
+      ) {
+        throw new ContentError(
+          409,
+          "EXECUTION_TARGET_IMMUTABLE",
+          "A conversation execution environment cannot be changed. Create a new conversation.",
+        );
+      }
       return { thread: existingThread, run: existingRun };
     }
 
+    await validateThreadExecutionTarget(input.userId, input.executionTarget);
     const modelSettings = await pruneUnavailableThreadModelAliases(
       normalizeThreadModelSettings(input.modelSettings),
     );
@@ -760,10 +808,17 @@ class ContentThreadService {
       createdBy: input.userId,
       modelSettings: resolvedModelSettings,
       chatPreferences: input.chatPreferences,
+      executionTarget: input.executionTarget,
     });
 
     const mode: ChatThreadRunMode = "send";
+    if (thread.executionTarget?.kind === "local") {
+      const { requireLocalConversationReady } =
+        await import("../devices/availability");
+      await requireLocalConversationReady({ ...input, threadId: thread.id });
+    }
     const request: StreamThreadEventInput = {
+      localCaller: input.localCaller,
       workspaceId: input.workspaceId,
       threadId: thread.id,
       userId: input.userId,
@@ -771,6 +826,7 @@ class ContentThreadService {
       images: input.images,
       mentionedSourceIds: input.mentionedSourceIds,
       sourceIds: input.sourceIds,
+      sourceSelectionRevision: input.sourceSelectionRevision,
       tools: input.tools,
       command: input.command,
       invocation: input.invocation,
@@ -807,6 +863,7 @@ class ContentThreadService {
     });
 
     const citation = await findCitationByMessageRank({
+      userId: input.userId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       messageId: input.messageId,
@@ -817,7 +874,11 @@ class ContentThreadService {
       throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     }
 
+    const thread = await findThreadRecord({ teamId: workspace.organizationId, workspaceId: workspace.id, threadId: citation.threadId });
+    if (!thread || !canViewThread(input.userId, thread)) throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     const snapshot = toObjectRecord(citation.metadataJson);
+    if (!snapshot) throw new ContentError(500, "CITATION_INVALID", "Citation metadata is invalid.");
+    const fileReference = snapshot.fileReference === undefined ? undefined : fileReferenceSchema.parse(snapshot.fileReference);
     const sourceTitleSnapshot = getMetadataString(snapshot, "sourceTitle");
     const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
     const excerptSnapshot = getMetadataString(snapshot, "excerpt");
@@ -826,12 +887,14 @@ class ContentThreadService {
     return {
       citation: {
         citation: citation.citationKey,
+        fileReference,
         score: citation.score,
         sourceId: citation.sourceId,
         sourceTitle: citation.sourceTitle ?? sourceTitleSnapshot,
         documentId: citation.documentId,
         chunkId:
           citation.chunkId ??
+          getMetadataString(snapshot, "referenceKey") ??
           citation.externalUri ??
           `external:${citation.citationKey}`,
         chunkNo: chunkNoSnapshot,

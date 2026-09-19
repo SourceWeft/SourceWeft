@@ -38,7 +38,11 @@ import {
   ASSISTANT_ACTIVITY_LABEL_CLASS,
   ASSISTANT_ACTIVITY_ROW_CLASS,
 } from "./assistant-activity-layout";
-import { getResolvedToolConfirmationMessage } from "./reasoning-trace-state";
+import {
+  getResolvedToolConfirmationMessage,
+  getToolApprovalDisplayLabel,
+  isToolConfirmationResolved,
+} from "./reasoning-trace-state";
 import {
   formatSandboxByteCount,
   getSandboxExecuteView,
@@ -96,6 +100,11 @@ function getConfirmationDisplay(input: {
       )
     : null;
   return {
+    resolved: isToolConfirmationResolved({
+      confirmation,
+      confirmationResolution: resolution,
+    }),
+    label: getToolApprovalDisplayLabel(input.toolCall, resolution),
     message: getResolvedToolConfirmationMessage({
       confirmation,
       confirmationResolution: resolution,
@@ -119,7 +128,7 @@ function outputPlaceholder(input: {
     case "input-available":
       return "Command is running. Output will appear when execution completes.";
     case "output-error":
-      return "The sandbox command could not be executed.";
+      return "The command could not be executed.";
     default:
       return "Command completed without output.";
   }
@@ -161,18 +170,13 @@ function SandboxOperationActivity({
     // the timeline items sit under TaskContent's left rule. No nested card box.
     // Collapsed by default — it's secondary detail, expand to inspect.
     <Task defaultOpen={false}>
-      <TaskTrigger title="Recorded sandbox operations">
+      <TaskTrigger title="Command details">
         <button
           className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-muted-foreground text-sm transition-colors hover:text-foreground"
           type="button"
         >
           <ListTree className="size-3.5 text-muted-foreground/75" />
-          <span className="font-medium text-foreground/80">
-            Recorded operations
-          </span>
-          <span className="text-muted-foreground/60 text-xs">
-            {items.length}
-          </span>
+          <span className="font-medium text-foreground/80">Details</span>
           <ChevronRight className="ml-auto size-3.5 text-muted-foreground/50 transition-transform group-data-[state=open]:rotate-90" />
         </button>
       </TaskTrigger>
@@ -314,7 +318,7 @@ function SandboxExecuteCard({
       ? (getSandboxToolSafeErrorMessage({
           error: view.code ?? view.message,
           toolName: toolCall.tool,
-        }) ?? "The sandbox command could not be executed.")
+        }) ?? "The command could not be executed.")
       : null);
   const hasDetails =
     Boolean(view.command) ||
@@ -335,20 +339,26 @@ function SandboxExecuteCard({
         type="button"
       >
         <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
-          <ExecuteStatusIcon statusKey={statusKey} />
+          <ExecuteStatusIcon
+            statusKey={confirmation.resolved ? "done" : statusKey}
+          />
         </span>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span className="truncate text-[13px] text-foreground/80">
-            Execute sandbox command
+            Run command
           </span>
           {duration ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
+              <span aria-hidden="true">· </span>
               {duration}
             </span>
           ) : null}
           {statusKey !== "done" ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
-              {SANDBOX_STATUS_LABELS[statusKey]}
+              <span aria-hidden="true">· </span>
+              {confirmation.resolved
+                ? confirmation.label
+                : SANDBOX_STATUS_LABELS[statusKey]}
             </span>
           ) : null}
         </span>
@@ -369,7 +379,7 @@ function SandboxExecuteCard({
             view.command.includes("\n") ? (
               // Multi-line command (rare, e.g. a heredoc): keep a code block, but
               // drop the redundant "command" header — the card title already
-              // says "Execute sandbox command".
+              // says "Run command".
               <CodeBlock
                 className="[&_pre]:max-h-72 [&_pre]:overflow-auto"
                 code={view.command}
@@ -377,7 +387,7 @@ function SandboxExecuteCard({
               >
                 <CodeBlockHeader className="justify-end">
                   <CodeBlockActions>
-                    <CodeBlockCopyButton aria-label="Copy sandbox command" />
+                    <CodeBlockCopyButton aria-label="Copy command" />
                   </CodeBlockActions>
                 </CodeBlockHeader>
               </CodeBlock>
@@ -386,11 +396,8 @@ function SandboxExecuteCard({
               // copy — the real code authoring now lives in write_file previews,
               // so the command here is just an identifiable, copyable invocation.
               <Snippet className="w-full" code={view.command}>
-                <SnippetInput
-                  aria-label="Sandbox command"
-                  className="text-xs"
-                />
-                <SnippetCopyButton aria-label="Copy sandbox command" />
+                <SnippetInput aria-label="Command" className="text-xs" />
+                <SnippetCopyButton aria-label="Copy command" />
               </Snippet>
             )
           ) : (
@@ -435,7 +442,9 @@ function SandboxExecuteCard({
                 {view.output}
               </pre>
             </div>
-          ) : failureMessage || statusKey === "done" ? null : (
+          ) : failureMessage ||
+            statusKey === "done" ||
+            confirmation.resolved ? null : (
             // Only surface a placeholder for states that are actually waiting on
             // something (running / approval / denied). A finished command that
             // simply produced no output needs no "completed without output" box.
@@ -538,16 +547,14 @@ function SandboxTransferCard({
 
   const duration = formatDuration(toolCall.latencyMs);
   const title =
-    view.direction === "prepare"
-      ? "Prepare sandbox workspace"
-      : "Collect sandbox outputs";
+    view.direction === "prepare" ? "Prepare workspace" : "Collect output files";
   const resultMessage =
     toolError ??
     (view.resultFailed
       ? (getSandboxToolSafeErrorMessage({
           error: view.code ?? view.message,
           toolName: toolCall.tool,
-        }) ?? "The sandbox file transfer could not be completed.")
+        }) ?? "The file transfer could not be completed.")
       : null);
   const hasDetails =
     view.mappings.length > 0 ||
@@ -570,7 +577,7 @@ function SandboxTransferCard({
         <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
           <TransferStatusIcon
             direction={view.direction}
-            statusKey={statusKey}
+            statusKey={confirmation.resolved ? "done" : statusKey}
           />
         </span>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
@@ -579,12 +586,16 @@ function SandboxTransferCard({
           </span>
           {duration ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
+              <span aria-hidden="true">· </span>
               {duration}
             </span>
           ) : null}
           {statusKey !== "done" ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
-              {SANDBOX_STATUS_LABELS[statusKey]}
+              <span aria-hidden="true">· </span>
+              {confirmation.resolved
+                ? confirmation.label
+                : SANDBOX_STATUS_LABELS[statusKey]}
             </span>
           ) : null}
         </span>
@@ -619,7 +630,7 @@ function SandboxTransferCard({
                 const canOpenTarget =
                   view.direction === "collect" &&
                   view.resultSucceeded &&
-                  mapping.target.startsWith("/workfiles/") &&
+                  mapping.target.startsWith("/files/") &&
                   Boolean(onWorkfileClick);
                 return (
                   <div

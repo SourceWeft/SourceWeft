@@ -20,7 +20,7 @@ export function DesktopAuthListener() {
       void handleDesktopAuthDeepLink({
         url: payload.url,
         onSuccess: () => {
-          router.replace("/dashboard");
+          router.replace("/dashboard/chat");
           router.refresh();
         },
         onError: (message) => toast.error(message),
@@ -28,9 +28,7 @@ export function DesktopAuthListener() {
     });
 
     return () => {
-      cleanupTask
-        .then((cleanup) => void cleanup())
-        .catch(() => {});
+      cleanupTask.then((cleanup) => void cleanup()).catch(() => {});
     };
   }, [router]);
 

@@ -1,5 +1,10 @@
 "use client";
 
+import { useSourceSelection } from "./use-source-selection";
+
+import { authClient } from "../../../../../lib/auth-client";
+import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatSkillItem,
@@ -11,11 +16,6 @@ import {
   hasCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../../_components/sources-hub/workspace-hub-cache";
-import {
-  getSourceSelectionStorageKey,
-  readStoredSourceSelection,
-  writeStoredSourceSelection,
-} from "../../_components/source-selection-storage";
 import {
   readStoredMcpSelection,
   writeStoredMcpSelection,
@@ -84,6 +84,7 @@ function catalogBuiltinSkillToChatSkill(
     catalogId: skill.catalogId,
     slug: skill.slug,
     name: skill.name,
+    logo: skill.logo,
     displayName: skill.displayName,
     description: skill.description,
     sourceType: skill.sourceType,
@@ -110,6 +111,7 @@ function workspaceInstalledSkillToChatSkill(
     catalogId: skill.catalogId,
     slug: skill.slug,
     name: skill.name,
+    logo: skill.logo,
     displayName: skill.displayName,
     description: skill.description,
     sourceType: skill.sourceType,
@@ -135,13 +137,42 @@ export function useThreadSources({
   workspaceId,
 }: UseThreadSourcesInput) {
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
-  const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
+  const { activeSourceIds, persistActiveSourceIds, sourceSelectionReady, sourceSelectionRevision } = useSourceSelection(workspaceId, threadId);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
   const [capabilityCatalog, setCapabilityCatalog] =
     useState<ListCapabilityCatalogResponse | null>(null);
+  const { data: hubSession } = authClient.useSession();
+  const accountId = hubSession?.user.id;
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const skillScope = useRef("");
+  const preserveSkillChoice = useRef(false);
+  const skillChoiceReady = useRef(false);
+  useEffect(() => {
+    if (!accountId || !workspaceId) return;
+    skillScope.current = "";
+    preserveSkillChoice.current = hubSkillMemory.has(
+      accountId,
+      workspaceId,
+      threadId,
+    );
+    skillChoiceReady.current = preserveSkillChoice.current;
+    setActiveSkillIds(hubSkillMemory.read(accountId, workspaceId, threadId));
+  }, [accountId, workspaceId, threadId]);
+  useEffect(() => {
+    if (
+      accountId &&
+      workspaceId &&
+      skillChoiceReady.current &&
+      skillScope.current === JSON.stringify([accountId, workspaceId, threadId])
+    ) {
+      hubSkillMemory.write(accountId, workspaceId, threadId, activeSkillIds);
+    }
+    skillScope.current = JSON.stringify([accountId, workspaceId, threadId]);
+  }, [accountId, workspaceId, threadId, activeSkillIds]);
   const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
+    preserveSkillChoice.current = true;
+    skillChoiceReady.current = true;
     const { skillIds: nextSkillIds, wasLimited } =
       coerceSkillIdsSelection(skillIds);
     if (wasLimited) {
@@ -165,7 +196,7 @@ export function useThreadSources({
 
   const selectionStorageKey = useMemo(
     () =>
-      workspaceId ? getSourceSelectionStorageKey(workspaceId, threadId) : null,
+      workspaceId ? `${workspaceId}:${threadId}` : null,
     [workspaceId, threadId],
   );
 
@@ -176,13 +207,11 @@ export function useThreadSources({
   useEffect(() => {
     setSelectionLoaded(false);
     if (!workspaceId) {
-      setActiveSourceIds([]);
       setActiveMcpInstallIds([]);
       setActiveMcpToolIds([]);
       setSelectionLoaded(true);
       return;
     }
-    setActiveSourceIds(readStoredSourceSelection(workspaceId, threadId));
     // MCP selection is per-thread too: restore THIS thread's selection (empty
     // for a thread never configured), so switching threads never leaks one
     // thread's MCP servers onto another's messages.
@@ -191,18 +220,6 @@ export function useThreadSources({
     setActiveMcpToolIds(storedMcp.toolIds);
     setSelectionLoaded(true);
   }, [selectionStorageKey, threadId, workspaceId]);
-
-  useEffect(() => {
-    if (!selectionLoaded || !workspaceId) return;
-    writeStoredSourceSelection(workspaceId, threadId, activeSourceIds);
-    writeStoredSourceSelection(workspaceId, "current", activeSourceIds);
-  }, [
-    activeSourceIds,
-    selectionLoaded,
-    selectionStorageKey,
-    threadId,
-    workspaceId,
-  ]);
 
   useEffect(() => {
     if (!selectionLoaded || !workspaceId) return;
@@ -218,17 +235,6 @@ export function useThreadSources({
     threadId,
     workspaceId,
   ]);
-
-  const persistActiveSourceIds = useCallback(
-    (sourceIds: string[]) => {
-      setActiveSourceIds(sourceIds);
-      if (workspaceId) {
-        writeStoredSourceSelection(workspaceId, threadId, sourceIds);
-        writeStoredSourceSelection(workspaceId, "current", sourceIds);
-      }
-    },
-    [threadId, workspaceId],
-  );
 
   const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
     async ({ cursor, limit, query }) => {
@@ -279,6 +285,11 @@ export function useThreadSources({
 
   const loadAvailableSkills = useCallback(async () => {
     const loadGeneration = ++skillsLoadGenerationRef.current;
+    const expectedSkillScope = JSON.stringify([
+      accountId,
+      workspaceId,
+      threadId,
+    ]);
     if (!workspaceId) {
       setAvailableSkills([]);
       setHubSkills([]);
@@ -294,6 +305,7 @@ export function useThreadSources({
       ]);
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
+        skillScope.current !== expectedSkillScope ||
         activeWorkspaceId !== workspaceId
       ) {
         return;
@@ -311,24 +323,31 @@ export function useThreadSources({
       setAvailableSkills(enabledSkills);
       setHubSkills([...builtinOptionSkills, ...workspaceInstalledSkills]);
 
-      const optionControlledIds = new Set(
-        builtinOptionSkills.map((skill) => skill.id),
-      );
+      const availableIds = new Set(enabledSkills.map((skill) => skill.id));
+      skillChoiceReady.current = true;
       setActiveSkillIds((current) =>
-        resolveDefaultActiveSkillIds({
-          availableSkills: builtinOptionSkills,
-          currentSkillIds: current.filter((id) => optionControlledIds.has(id)),
-        }),
+        preserveSkillChoice.current
+          ? coerceSkillIdsSelection(
+              current.filter((id) => availableIds.has(id)),
+            ).skillIds
+          : resolveDefaultActiveSkillIds({
+              availableSkills: builtinOptionSkills,
+              currentSkillIds: current.filter((id) => availableIds.has(id)),
+            }),
       );
     } catch {
-      if (skillsLoadGenerationRef.current !== loadGeneration) {
+      if (
+        skillsLoadGenerationRef.current !== loadGeneration ||
+        skillScope.current !== expectedSkillScope
+      ) {
         return;
       }
       setAvailableSkills([]);
       setHubSkills([]);
+      skillChoiceReady.current = false;
       setActiveSkillIds([]);
     }
-  }, [workspaceId]);
+  }, [workspaceId, threadId, accountId]);
 
   useEffect(() => {
     void loadAvailableSkills();
@@ -381,6 +400,8 @@ export function useThreadSources({
     activeMcpToolIds,
     activeSkillIds,
     activeSourceIds,
+    sourceSelectionReady,
+    sourceSelectionRevision,
     availableSkills,
     hubSkills,
     capabilityCatalog,

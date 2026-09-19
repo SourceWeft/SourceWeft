@@ -18,8 +18,8 @@ function createBackend(): BackendProtocolV2 & {
       calls.push(["ls", [path]]);
       return {
         files: [
-          { path: "/workfiles/report.md", is_dir: false },
-          { path: "/workfiles/slides/", is_dir: true },
+          { path: "/files/report.md", is_dir: false },
+          { path: "/files/slides/", is_dir: true },
         ] satisfies FileInfo[],
       };
     },
@@ -42,14 +42,14 @@ function createBackend(): BackendProtocolV2 & {
       calls.push(["grep", [pattern, path, glob]]);
       return {
         matches: [
-          { path: "/workfiles/report.md", line: 1, text: "hit" },
+          { path: "/files/report.md", line: 1, text: "hit" },
         ] satisfies GrepMatch[],
       };
     },
     async glob(pattern: string, path?: string) {
       calls.push(["glob", [pattern, path]]);
       return {
-        files: [{ path: "/workfiles/report.md", is_dir: false }],
+        files: [{ path: "/files/report.md", is_dir: false }],
       };
     },
     async write(filePath: string, content: string) {
@@ -82,7 +82,7 @@ function createBackend(): BackendProtocolV2 & {
 
 test("PrefixedBackendAdapter re-adds stripped CompositeBackend path prefixes", async () => {
   const backend = createBackend();
-  const adapter = new PrefixedBackendAdapter("/workfiles", backend);
+  const adapter = new PrefixedBackendAdapter("/files", backend);
 
   assert.deepEqual((await adapter.ls("/")).files, [
     { path: "/report.md", is_dir: false },
@@ -90,7 +90,7 @@ test("PrefixedBackendAdapter re-adds stripped CompositeBackend path prefixes", a
   ]);
   assert.equal(
     (await adapter.read("/report.md")).content,
-    "read:/workfiles/report.md",
+    "read:/files/report.md",
   );
   assert.deepEqual((await adapter.grep("hit", "/", "*.md")).matches, [
     { path: "/report.md", line: 1, text: "hit" },
@@ -106,14 +106,14 @@ test("PrefixedBackendAdapter re-adds stripped CompositeBackend path prefixes", a
   await adapter.uploadFiles([["/new.md", uploadContent]]);
 
   assert.deepEqual(backend.calls, [
-    ["ls", ["/workfiles"]],
-    ["read", ["/workfiles/report.md", undefined, undefined]],
-    ["grep", ["hit", "/workfiles", "*.md"]],
-    ["glob", ["*.md", "/workfiles"]],
-    ["write", ["/workfiles/draft.md", "x"]],
-    ["edit", ["/workfiles/draft.md", "x", "y", undefined]],
-    ["downloadFiles", [["/workfiles/report.md"]]],
-    ["uploadFiles", [[["/workfiles/new.md", uploadContent]]]],
+    ["ls", ["/files"]],
+    ["read", ["/files/report.md", undefined, undefined]],
+    ["grep", ["hit", "/files", "*.md"]],
+    ["glob", ["*.md", "/files"]],
+    ["write", ["/files/draft.md", "x"]],
+    ["edit", ["/files/draft.md", "x", "y", undefined]],
+    ["downloadFiles", [["/files/report.md"]]],
+    ["uploadFiles", [[["/files/new.md", uploadContent]]]],
   ]);
 });
 
@@ -127,7 +127,7 @@ test("CompositeBackend delegates execute to sandbox default and routes SourceWef
     },
   };
   const composite = new CompositeBackend(sandboxBackend, {
-    "/workfiles/": new PrefixedBackendAdapter("/workfiles", workBackend),
+    "/files/": new PrefixedBackendAdapter("/files", workBackend),
   });
 
   assert.equal(
@@ -135,8 +135,8 @@ test("CompositeBackend delegates execute to sandbox default and routes SourceWef
     "read:/workspace/ppt-deck/deck.md",
   );
   assert.equal(
-    (await composite.read("/workfiles/report.md")).content,
-    "read:/workfiles/report.md",
+    (await composite.read("/files/report.md")).content,
+    "read:/files/report.md",
   );
   assert.equal((await composite.execute("pwd")).output, "executed:pwd");
 });

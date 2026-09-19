@@ -25,14 +25,14 @@ test("resolveWorkfileMutationPreview builds write_file code preview", () => {
     toolCall({
       input: {
         content: "console.log('deck');\n",
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       tool: "write_file",
     }),
   );
 
   assert.equal(preview?.kind, "write");
-  assert.equal(preview?.path, "/workfiles/ppt/deck.js");
+  assert.equal(preview?.path, "/files/ppt/deck.js");
   assert.equal(
     preview?.kind === "write" ? preview.language : null,
     "javascript",
@@ -51,7 +51,7 @@ test("resolveWorkfileMutationPreview truncates long write_file content", () => {
     toolCall({
       input: {
         content,
-        path: "/workfiles/ppt/deck.ts",
+        path: "/files/ppt/deck.ts",
       },
       tool: "write_file",
     }),
@@ -74,7 +74,7 @@ test("resolveWorkfileMutationPreview handles empty write_file content", () => {
     toolCall({
       input: {
         content: "",
-        path: "/workfiles/ppt/empty.txt",
+        path: "/files/ppt/empty.txt",
       },
       tool: "write_file",
     }),
@@ -92,7 +92,7 @@ test("resolveWorkfileMutationPreview keeps markdown write_file language", () => 
     toolCall({
       input: {
         content: "# Deck",
-        path: "/workfiles/ppt/README.md",
+        path: "/files/ppt/README.md",
       },
       tool: "write_file",
     }),
@@ -108,19 +108,19 @@ test("resolveWorkfileMutationPreview builds edit_file diff preview", () => {
       input: {
         newString: "const title = 'New';",
         oldString: "const title = 'Old';",
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
         replace_all: true,
       },
       output: {
         occurrences: 2,
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       tool: "edit_file",
     }),
   );
 
   assert.equal(preview?.kind, "edit");
-  assert.equal(preview?.path, "/workfiles/ppt/deck.js");
+  assert.equal(preview?.path, "/files/ppt/deck.js");
   assert.equal(preview?.kind === "edit" ? preview.occurrences : null, 2);
   assert.equal(preview?.kind === "edit" ? preview.replaceAll : null, true);
   assert.equal(
@@ -140,11 +140,11 @@ test("resolveWorkfileMutationPreview handles edit_file replacements to empty str
       input: {
         newString: "",
         oldString: "const title = 'Old';",
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       output: {
         occurrences: 1,
-        path: "/workfiles/ppt/deck.js",
+        path: "/files/ppt/deck.js",
       },
       tool: "edit_file",
     }),
@@ -186,7 +186,7 @@ test("getWorkfileMutationToolTitle labels sandbox writes distinctly", () => {
   assert.equal(
     getWorkfileMutationToolTitle(
       toolCall({
-        input: { content: "x", path: "/workfiles/a.py" },
+        input: { content: "x", path: "/files/a.py" },
         tool: "write_file",
       }),
     ),

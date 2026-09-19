@@ -1,9 +1,12 @@
 "use client";
+import { disconnectLocalHostSession } from "../../../lib/local-host-session";
+import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 
 import * as React from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   CreditCard,
+  ChevronsUpDown,
   Keyboard,
   LayoutGrid,
   LogOut,
@@ -35,7 +38,6 @@ import {
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import type { SettingsCenterTab } from "./dashboard-settings-center-modal";
-import { DashboardRailTeamSwitcher } from "./dashboard-team-switcher";
 import {
   DashboardTeamDisplay,
   type DashboardTeamItem,
@@ -45,12 +47,10 @@ import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
 import { DashboardSettingsCenterModalSkeleton } from "./dashboard-settings-center-modal-skeleton";
 import { RawImage } from "../../_components/raw-image";
 
-const DashboardSettingsCenterModal = React.lazy(
-  async () => {
-    const settingsModal = await import("./dashboard-settings-center-modal");
-    return { default: settingsModal.DashboardSettingsCenterModal };
-  },
-);
+const DashboardSettingsCenterModal = React.lazy(async () => {
+  const settingsModal = await import("./dashboard-settings-center-modal");
+  return { default: settingsModal.DashboardSettingsCenterModal };
+});
 
 function getInitials(name?: string, email?: string) {
   const value = name || email || "SW";
@@ -64,10 +64,13 @@ function getInitials(name?: string, email?: string) {
 
 export function DashboardAccountMenu({
   settingsRequest,
+  expanded = false,
 }: {
+  expanded?: boolean;
   settingsRequest?: { id: number; tab: SettingsCenterTab } | null;
 }) {
   const { isMobile } = useSidebar();
+  const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
   const sessionState = authState.data as
     | {
@@ -113,20 +116,23 @@ export function DashboardAccountMenu({
   }
 
   async function handleSignOut() {
+    await disconnectLocalHostSession();
     await authClient.signOut();
   }
 
   return (
     <>
-      <SidebarMenu className="items-center gap-2">
-        <SidebarMenuItem>
-          <DashboardRailTeamSwitcher onAddTeam={() => openSettings("team")} />
-        </SidebarMenuItem>
+      <SidebarMenu className={expanded ? "gap-2" : "items-center gap-2"}>
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground shadow-xs"
+                aria-label="Account and settings"
+                className={
+                  expanded
+                    ? "flex h-10 w-full items-center gap-2 rounded-lg px-1 text-left text-sm hover:bg-sidebar-accent"
+                    : "flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground shadow-xs"
+                }
                 type="button"
               >
                 {userImage ? (
@@ -136,13 +142,23 @@ export function DashboardAccountMenu({
                     src={userImage}
                   />
                 ) : (
-                  <span>{initials || "SW"}</span>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted font-semibold">
+                    {initials || "SW"}
+                  </span>
+                )}
+                {expanded && (
+                  <>
+                    <span className="min-w-0 flex-1 truncate">
+                      {userName || userEmail || "Account"}
+                    </span>
+                    <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                  </>
                 )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-              side={isMobile ? "bottom" : "right"}
+              side={expanded ? "top" : isMobile ? "bottom" : "right"}
               align="end"
               sideOffset={4}
             >
@@ -222,14 +238,18 @@ export function DashboardAccountMenu({
                   <User />
                   Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openSettings("usage")}>
-                  <LayoutGrid />
-                  Usage
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openSettings("billing")}>
-                  <CreditCard />
-                  Billing
-                </DropdownMenuItem>
+                {billingAvailable ? (
+                  <>
+                    <DropdownMenuItem onClick={() => openSettings("usage")}>
+                      <LayoutGrid />
+                      Usage
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openSettings("billing")}>
+                      <CreditCard />
+                      Billing
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void handleSignOut()}>
@@ -247,7 +267,9 @@ export function DashboardAccountMenu({
 
       {settingsOpen ? (
         <React.Suspense
-          fallback={<DashboardSettingsCenterModalSkeleton activeTab={initialTab} />}
+          fallback={
+            <DashboardSettingsCenterModalSkeleton activeTab={initialTab} />
+          }
         >
           <DashboardSettingsCenterModal
             hasTeam={orgList.length > 0}

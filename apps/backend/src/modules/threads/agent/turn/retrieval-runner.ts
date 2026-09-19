@@ -1,3 +1,5 @@
+import { ContentError } from "../../../content/errors";
+import { assertThreadSourceSelection } from "../../source-selection-service";
 import type { TraceContext } from "../../../llm-observability";
 import { endSpan, startSpan } from "../../../llm-observability";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
@@ -197,6 +199,15 @@ export async function runToolRetrieval(input: {
   traceContext?: TraceContext;
   billing: ContentBillingPort;
 }) {
+  if (input.prepared.sourceIds.length === 0) {
+    throw new ContentError(400, "NO_SOURCES_SELECTED", "Select sources before searching reference material.");
+  }
+  await assertThreadSourceSelection({
+    workspaceId: input.prepared.workspace.id,
+    threadId: input.prepared.thread.id,
+    userId: input.prepared.userId,
+    revision: input.prepared.sourceSelectionRevision,
+  });
   const spanId = input.traceContext?.parentSpanId
     ? `retrieval:${input.traceContext.parentSpanId}`
     : "retrieval";

@@ -6,7 +6,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -22,6 +22,8 @@ import type {
 } from "./chat-canvas";
 import type { ArtifactListItem, ThreadCitationRecord } from "./sources-hub";
 import type { SourceItem } from "./source-types";
+
+import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
 
 export type ChatHubMode = "new" | "thread";
 
@@ -44,9 +46,13 @@ export type ChatHubSubagentPanel = {
 
 export type ChatHubRegistration = {
   mode: ChatHubMode;
+  draftWorkContext?: import("./draft-files-panel").DraftWorkContext;
+  onWorkFolderChange?: (folderId: string) => void;
+  onChooseWorkFolder?: () => Promise<void>;
   workspaceId: string | null;
   workspaceName: string | null;
   threadId: string | null;
+  threadTitle?: string;
   activeCitationIndex: number | null;
   activeCitationMessageId: string | null;
   displayedCitations: CitationRecord[];
@@ -85,7 +91,11 @@ export type ChatHubRegistration = {
   subagentPanel?: ChatHubSubagentPanel | null;
 };
 
+import { useDesktopHubHost } from "./use-desktop-hub-host";
+
 type ChatHubContextValue = {
+  desktop: ReturnType<typeof useDesktopHubHost>;
+  clearRegistration: (registration: ChatHubRegistration) => void;
   registration: ChatHubRegistration;
   mobileHubOpen: boolean;
   setMobileHubOpen: (open: boolean) => void;
@@ -158,19 +168,40 @@ export function ChatHubProvider({
       ...initialValue,
     }),
   );
-  const [mobileHubOpen, setMobileHubOpen] = useState(false);
+  const {
+    hubDrawerOpen: mobileHubOpen,
+    setHubDrawerOpen: setMobileHubOpen,
+    canDockHub,
+  } = useWorkspaceLayout();
+  const [registered, setRegistered] = useState(false);
+  const activeRegistration = useRef<ChatHubRegistration | null>(null);
+  const desktop = useDesktopHubHost(registration, registered, () => {
+    setMobileHubOpen(!canDockHub);
+  });
+  useEffect(() => {
+    if (desktop.mode === "detached") setMobileHubOpen(false);
+  }, [desktop.mode, setMobileHubOpen]);
 
   const setRegistration = useCallback(
     (partial: Partial<ChatHubRegistration>) => {
-      setRegistrationState((prev) => ({ ...prev, ...partial }));
+      activeRegistration.current = partial as ChatHubRegistration;
+      setRegistered(true);
+      setRegistrationState({ ...buildDefaultRegistration(), ...partial });
     },
     [],
   );
 
-  const value = useMemo(
-    () => ({ mobileHubOpen, registration, setMobileHubOpen, setRegistration }),
-    [mobileHubOpen, registration, setRegistration],
-  );
+  const clearRegistration = useCallback((value: ChatHubRegistration) => {
+    if (activeRegistration.current === value) setRegistered(false);
+  }, []);
+  const value = {
+    mobileHubOpen,
+    registration,
+    setMobileHubOpen,
+    setRegistration,
+    clearRegistration,
+    desktop,
+  };
 
   return (
     <ChatHubContext.Provider value={value}>{children}</ChatHubContext.Provider>
@@ -188,5 +219,6 @@ export function useRegisterChatHub(registration: ChatHubRegistration) {
   useBrowserLayoutEffect(() => {
     if (!setRegistration) return;
     setRegistration(registration);
-  }, [registration, setRegistration]);
+    return () => context?.clearRegistration(registration);
+  }, [registration, setRegistration, context?.clearRegistration]);
 }

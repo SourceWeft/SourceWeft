@@ -4,9 +4,11 @@
 
 # SourceWeft
 
-**Open-source NotebookLM alternative: connect your sources, ask grounded questions, generate cited outputs, and extend deep knowledge work with Virtual FS and extensible Skills.**
+**Your knowledge. Agents working together.**
 
-Self-hosted and multi-model, with files, web pages, notes, YouTube, and SaaS connectors so teams stay in control of their data, models, and knowledge work.
+An open-source AI workspace where agents work together with your knowledge and tools.
+
+Self-hostable · Multi-model · Custom skills
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -16,103 +18,56 @@ Self-hosted and multi-model, with files, web pages, notes, YouTube, and SaaS con
 
 ---
 
-**SourceWeft** is an open-source NotebookLM alternative for deep knowledge work. Connect PDFs, web pages, notes, YouTube, Notion, Google Drive, Gmail, Slack, and more into one organized source space, then ask questions with answers grounded in verifiable citations.
-
-Beyond Q&A, SourceWeft helps you create study guides, FAQs, timelines, research briefings, drafts, audio overviews, image artifacts, and other knowledge outputs. Virtual FS, built-in Skills, custom Skills, web tools, and working files give agents the context and tools to read, search, create, organize, and refine work across your sources.
+**SourceWeft** connects your sources, files, and tools in one AI workspace. Let agents divide up research, planning, and execution, check the results against your sources, and return to saved conversations and files to keep work moving.
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
 ---
 
+## Features
+
+- **Knowledge & citations.** Connect PDFs, web pages, notes, YouTube, Notion, Google Drive, Gmail, Slack, and more. Ask across selected sources and follow citations back to the evidence.
+- **Agent collaboration.** Delegate exploration, planning, and execution to specialized subagents, then use their findings to continue the task.
+- **Tools & Skills.** Extend agents with web tools, MCP integrations, and reusable built-in or custom Skills.
+- **Creation & working files.** Create reports, presentations, learning guides, audio overviews, and image artifacts. Review outputs and return to saved conversations and files to keep refining them.
+- **Models & self-hosting.** Choose supported model providers and deploy your own workspace.
+- **Shared workspaces.** Organize sources and conversations with your team, with roles and access control.
+
+Optional sandbox command execution is **Alpha** and requires a configured runtime and approval. See [execution details](docker/sandbox-execution.md).
+
 ## Use Cases
 
-**Research briefing.** Papers, web pages, and notes -> cited research briefings with key claims, evidence, and open questions.
+| Start with                        | Work toward                                                       |
+| --------------------------------- | ----------------------------------------------------------------- |
+| Papers, web pages, and notes      | Research briefings with key claims, citations, and open questions |
+| Course material, videos, and PDFs | Study guides, FAQs, and quiz drafts                               |
+| Product docs and team notes       | Reports, presentations, blog drafts, and launch materials         |
+| Connected team sources            | Traceable answers about decisions, projects, and shared context   |
 
-**Learning guide.** Course material, videos, and PDFs -> study guides, FAQs, and quiz drafts.
+## Get Started
 
-**Content workspace.** Product docs, web pages, and team notes -> blog drafts, launch outlines, and image Artifacts.
+### Self-host with Docker
 
-**Team knowledge.** Drive, Gmail, Slack, Notion, and other connected sources -> traceable answers about decisions, projects, and shared context.
+Download `sourceweft-selfhost-vX.Y.Z.tar.gz` from the [Releases page](https://github.com/SourceWeft/SourceWeft/releases) and follow the [Docker installation guide](docker/README.md).
 
----
+The release bundle runs the web app, API, background jobs, database, and file storage without a host Node/Rust installation or image rebuild. Initialize the configuration, start Compose, then open `http://localhost:3000` and configure a model Provider or BYOK for chat and indexing.
 
-## Why SourceWeft
+### Start your first task
 
-**Connect all your sources.** Work across files, URLs, notes, YouTube, source trees, and SaaS connectors.
+1. **Create a workspace** for yourself or your team.
+2. **Add sources** by uploading files, pasting URLs, writing notes, or connecting your existing tools.
+3. **Ask and create.** Check citations, let agents use tools and Skills, and refine the results in your saved conversations and files.
 
-**Ground every answer.** Ask across selected sources and get cited, verifiable responses.
+Use the web app, or find desktop installers in [Releases](https://github.com/SourceWeft/SourceWeft/releases). Desktop connection details are in the [desktop guide](apps/desktop/README.md).
 
-**Give agents a real workspace.** Virtual FS organizes sources, working files, Artifacts, and Skill instructions into navigable context.
-
-**Extend agents with Skills.** Built-in and custom Skills add reusable domain methods, slash commands, tool defaults, and task-specific guidance.
-
-Self-host SourceWeft, use your own models for chat, embeddings, rerank, image, and audio, and share workspaces with your team.
-
----
-
-## How to Use
-
-1. **Create a workspace.** Start with a personal workspace, or invite teammates into a shared workspace with roles and shared billing.
-
-2. **Add your sources.** Upload files, paste URLs, write notes, add YouTube links, or connect tools like Notion, Google Drive, Gmail, and Slack.
-
-3. **Let SourceWeft index them.** Sources are parsed, chunked, embedded, and made searchable with hybrid retrieval.
-
-4. **Ask, create, and refine.** Chat with selected sources, generate cited outputs, use Skills, search the web, create Artifacts, and keep working from the same context.
-
-5. **Use it everywhere.** Continue from the web app, desktop app, or browser extension with your sources and team workspace in sync.
-
-## Sandbox Execution (Alpha)
-
-SourceWeft can optionally run approved commands in an isolated, temporary sandbox runtime. The sandbox is a scratch execution environment; SourceWeft `/work` remains the durable working-file area.
-
-Mental model:
-
-- `/work` is durable SourceWeft workspace storage.
-- Sandbox `/workspace` is temporary and disposable.
-- Selected `/work` files may be copied into sandbox `/workspace/input` or `/workspace/work` only after explicit approval.
-- `/kb` source evidence is not mounted or copied directly into the sandbox.
-- Commands run in the sandbox only after human approval.
-- Outputs are not durable until collected back into `/work` or published through a supported artifact pipeline.
-- Sandbox-generated outputs are not citable evidence unless verified against citable sources.
-
-The sandbox provider is an operator detail; users should think in terms of an isolated temporary execution environment rather than a specific provider.
-
----
-
-## Self-host with Docker
-
-Use Docker Compose when you want to run SourceWeft from the published container image.
-
-Source development and image builds default to Node 22.23.2, with Node 24 also
-supported. See the [runtime policy](apps/backend/docs/node-runtime.md).
-
-```bash
-git clone https://github.com/SourceWeft/SourceWeft.git
-cd SourceWeft
-cp docker/.env.example docker/.env
-# Edit docker/.env — set the two required secrets before using beyond localhost.
-# OSS defaults start with quota enforcement on and payment/mail SaaS providers off.
-# Model provider keys are optional for boot; configure one before using model features.
-docker compose -f docker/docker-compose.yml up -d
-```
-
-Open **http://localhost:3000**, sign up, and start.
-
-Sandbox execution is disabled in the base compose file. To enable sandbox
-execution, point the `DAYTONA_*` values in `docker/.env` at an external Daytona
-deployment and review the sandbox TTL, timeout, and file/output byte limits.
-
-SaaS billing and payment checkout are opt-in. See the SaaS billing block in
-`docker/.env.example` for the required `SOURCEWEFT_SAAS_ENABLED`,
-`BACKEND_BILLING_PROVIDER`, Creem, and public checkout UI settings.
+Deployment configuration and upgrades are covered in the [Docker guide](docker/README.md).
 
 ---
 
 ## Contributing
 
 Bug reports, feature ideas, code, and design — all welcome.  
-See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+Open an [issue](https://github.com/SourceWeft/SourceWeft/issues) to report a bug or discuss an improvement.
 
 <a href="https://github.com/SourceWeft/SourceWeft/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft&1=1" alt="SourceWeft contributors" />
@@ -128,3 +83,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 [Apache License 2.0](LICENSE)
 
 Content under `enterprise/`, if present, is excluded and governed by its separate license. See [LICENSE](LICENSE) for the scope.
+
+Billing is optional. The default core build runs without credits/pages billing.
+Commercial subscription, payment and billing UI are provided by `enterprise/billing`;
+see [billing build and migration instructions](enterprise/billing/README.md).

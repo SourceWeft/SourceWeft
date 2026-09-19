@@ -29,6 +29,7 @@ type RenderContext = {
   articleId: string;
   locale: BlogLocale;
   postId: string;
+  postTitle: string;
   dryRun: boolean;
   assetIds: string[];
 };
@@ -46,6 +47,7 @@ export async function renderNotionPageContent(input: {
   articleId: string;
   locale: BlogLocale;
   postId: string;
+  postTitle: string;
   dryRun: boolean;
 }) {
   const blocks = await listBlockChildren(input.pageId);
@@ -53,6 +55,7 @@ export async function renderNotionPageContent(input: {
     articleId: input.articleId,
     locale: input.locale,
     postId: input.postId,
+    postTitle: input.postTitle,
     dryRun: input.dryRun,
     assetIds: [],
   };
@@ -251,12 +254,14 @@ async function renderFileBlock(
 
   const caption = richTextToPlainText(payload.caption).trim();
   const fallbackName = assetKind === "content_image" ? "image" : "file";
+  // An uncaptioned image would otherwise ship alt="", which reads as decorative.
+  const imageAltText = caption || context.postTitle;
 
   if (context.dryRun) {
     return {
       html:
         assetKind === "content_image"
-          ? `<figure><img src="${escapeAttribute(sourceUrl)}" alt="${escapeAttribute(caption)}"></figure>`
+          ? `<figure><img src="${escapeAttribute(sourceUrl)}" alt="${escapeAttribute(imageAltText)}"></figure>`
           : `<p><a href="${escapeAttribute(sourceUrl)}">${escapeHtml(caption || fallbackName)}</a></p>`,
       text: caption,
     };
@@ -280,13 +285,13 @@ async function renderFileBlock(
     postId: context.postId,
     assetKind,
     asset: uploaded,
-    altText: caption || null,
+    altText: caption || context.postTitle,
   });
   context.assetIds.push(assetId);
 
   if (assetKind === "content_image") {
     return {
-      html: `<figure><img src="${escapeAttribute(uploaded.publicUrl)}" alt="${escapeAttribute(caption)}">${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}</figure>`,
+      html: `<figure><img src="${escapeAttribute(uploaded.publicUrl)}" alt="${escapeAttribute(imageAltText)}">${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}</figure>`,
       text: caption,
     };
   }

@@ -14,6 +14,7 @@ import {
 import { computeProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
 import { preserveTraceMetadata } from "./trace-metadata";
+import { projectReasoning } from "./reasoning-state";
 import type { FinalizeThreadTurnInput } from "./types";
 
 export function preserveAssistantMetadataForContinuation(input: {
@@ -129,19 +130,22 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     userId: prepared.userId,
     workspaceOrganizationId: prepared.workspace.organizationId,
   });
-  const billingSummary = await input.billing.getSummary(
+  const billingState = await input.billing.getExecutionState(
     billingTeamId,
     prepared.userId,
   );
-  const billing = {
-    teamId: billingTeamId,
-    consumedCredits: meteredLlmCreditsConsumed,
-    availableCredits: billingSummary.credits.available,
-    consumedThisCycle: billingSummary.credits.consumedThisCycle,
-    idempotencyReplayed: meteredLlmCalls.some(
-      (call) => call.billing?.idempotencyReplayed === true,
-    ),
-  };
+  const billing =
+    billingState.kind === "metered"
+      ? {
+          teamId: billingTeamId,
+          consumedCredits: meteredLlmCreditsConsumed,
+          availableCredits: billingState.availableCredits,
+          consumedThisCycle: billingState.consumedThisCycle,
+          idempotencyReplayed: meteredLlmCalls.some(
+            (call) => call.billing?.idempotencyReplayed === true,
+          ),
+        }
+      : undefined;
 
   const existingAssistantMessage = input.assistantMessageId
     ? await findMessageRecord({
@@ -208,7 +212,11 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
     finishReason: input.finishReason,
     usage: input.usage,
-    reasoning: input.reasoning,
+    ...projectReasoning({
+      run: prepared.reasoningRun,
+      text: input.reasoning,
+      terminal: true,
+    }),
     reasoningSegments: input.reasoningSegments,
     traceParts: input.traceParts,
     traceEvents: Array.isArray(input.assistantMetadata?.traceEvents)
@@ -296,10 +304,12 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     messageId: assistantMessage.id,
     citations: input.citations.map((citation, index) => ({
       citationKey: citation.citation,
+      referenceKey: citation.chunkId,
       sourceId: citation.sourceId,
       sourceTitle: citation.sourceTitle,
       documentId: citation.documentId,
-      chunkId: citation.externalUri ? null : citation.chunkId,
+      chunkId: citation.externalUri || citation.fileReference ? null : citation.chunkId,
+      fileReference: citation.fileReference,
       chunkNo: citation.chunkNo,
       excerpt: citation.excerpt,
       quoteText: citation.quoteText,

@@ -1,4 +1,10 @@
+import type { Metadata } from "next";
+
+import { NO_INDEX_METADATA } from "../seo";
 import { ArtifactPreviewPageClient } from "./artifact-preview-page-client";
+
+// Authenticated in-app surface, not a landing page.
+export const metadata: Metadata = NO_INDEX_METADATA;
 
 type ArtifactPreviewSearchParams = {
   artifactId?: string | string[];

@@ -14,7 +14,7 @@ import {
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
-import { creemClient } from "@creem_io/better-auth/client";
+import { billingAuthClientPlugins } from "./billing-edition/auth-client";
 import { apiBaseUrl } from "./api-base-url";
 import { resolveGoogleOneTapConfig } from "./google-one-tap-config";
 
@@ -40,7 +40,7 @@ export const authClient = createAuthClient({
     oneTimeTokenClient(),
     passkeyClient(),
     oauthProviderClient(),
-    creemClient(),
+    ...billingAuthClientPlugins,
     ...(googleOneTapConfig.active
       ? [
           oneTapClient({

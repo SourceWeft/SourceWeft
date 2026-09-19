@@ -10,7 +10,7 @@ import {
   type ArtifactVersionMediaResource,
 } from "@sourceweft/contracts/artifact-urls";
 import { NextResponse, type NextRequest } from "next/server";
-import { apiBaseUrl } from "../../../lib/api-base-url";
+import { internalApiBaseUrl } from "../../../lib/internal-api-base-url";
 
 const GENERIC_HTML_ARTIFACT_CSP = [
   "sandbox",
@@ -94,7 +94,7 @@ export async function proxyArtifactFile(request: NextRequest) {
   if (!upstreamPath) {
     return badRequest("assetFileName must be a flat artifact asset file name.");
   }
-  const upstreamUrl = new URL(upstreamPath, apiBaseUrl);
+  const upstreamUrl = new URL(upstreamPath, internalApiBaseUrl());
   const response = await fetch(upstreamUrl, {
     cache: "no-store",
     headers: {

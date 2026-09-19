@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_VERSION=22.23.2
+# Commit this image was built from. The Web build inlines it into the client
+# bundle; the backend reads it at runtime from its health endpoint.
+ARG BUILD_SHA=""
+ARG BUILD_TIME=""
 
 FROM node:${NODE_VERSION}-alpine AS base
 ENV PNPM_HOME=/pnpm
@@ -20,7 +24,8 @@ RUN apk add --no-cache libc6-compat libstdc++ \
 # their workspace dependencies). No manual package list required.
 FROM base AS pruner
 COPY . .
-RUN pnpm dlx turbo prune @sourceweft/backend web --docker
+RUN pnpm dlx turbo@2.10.9 prune @sourceweft/backend web --docker \
+  && node scripts/editions/copy-licenses.mjs /app/out/full
 
 # ── Deps ─────────────────────────────────────────────────────────────
 FROM base AS deps
@@ -30,30 +35,19 @@ COPY --from=pruner /app/out/pnpm-lock.yaml .
 RUN pnpm install --frozen-lockfile
 
 # ── Builder ──────────────────────────────────────────────────────────
-# NOTE: NEXT_PUBLIC_* ARGs are inlined into the JS bundle at build time.
-# Changing them at container runtime has no effect; rebuild the image instead.
-# See https://nextjs.org/docs/app/building-your-application/configuring/environment-variables
+# Public deployment settings are injected by the Web server at runtime.
+# This image deliberately has no publisher-specific NEXT_PUBLIC_* build args;
+# the build-provenance args below describe the image itself, not its publisher.
 FROM deps AS builder
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
-ARG NEXT_PUBLIC_WEB_BASE_URL=http://localhost:3000
-ARG NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED=false
-ARG NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID=
-ARG NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=false
-ARG NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=
-ARG NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=false
-ARG NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=false
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-ENV NEXT_PUBLIC_WEB_BASE_URL=${NEXT_PUBLIC_WEB_BASE_URL}
-ENV NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED=${NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED}
-ENV NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID}
-ENV NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=${NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED}
-ENV NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID}
-ENV NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=${NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED}
-ENV NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=${NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED}
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
+# Declared after the package builds so a new commit does not invalidate their cache.
+ARG BUILD_SHA
+ARG BUILD_TIME
+ENV NEXT_PUBLIC_BUILD_SHA=${BUILD_SHA} \
+  NEXT_PUBLIC_BUILD_TIME=${BUILD_TIME}
 RUN --mount=type=cache,id=sourceweft-next-cache,target=/app/apps/web/.next/cache,sharing=locked \
   pnpm --filter web build
 # The backend build runs tsc over the whole workspace graph; the default heap
@@ -64,7 +58,10 @@ RUN find . -name ".turbo" -type d -prune -exec rm -rf '{}' + \
 
 # ── Runner ───────────────────────────────────────────────────────────
 FROM base AS runner
+ARG BUILD_SHA
+ENV BUILD_SHA=${BUILD_SHA}
 ENV NODE_ENV=production
+ENV SOURCEWEFT_COMMERCIAL_ENABLED=false
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
@@ -87,6 +84,9 @@ COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/.next/static web
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/public web-standalone/apps/web/public
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/dist apps/backend/dist
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/market-contracts/dist packages/market-contracts/dist
+
+COPY docker/runtime-entrypoint.mjs docker/init-config.mjs /app/docker/
+ENTRYPOINT ["node", "/app/docker/runtime-entrypoint.mjs"]
 
 USER sourceweft
 EXPOSE 3000 3001

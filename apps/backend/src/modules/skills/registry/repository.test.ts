@@ -6,9 +6,7 @@ import type { SkillManifestJson } from "@sourceweft/db";
  * Stage 5 index write (docs/architecture/skill-registry-index.md §3 Stage 5).
  * Pins two invariants:
  *   1. the write reuses the storage-invariant guard at the pointer write site;
- *   2. it NEVER writes `skill_version_files` (the redistribution tripwire) — the
- *      fake db below records every table touched, and only definitions/versions
- *      may appear.
+ *   2. new versions store files, while existing immutable versions are untouched.
  */
 
 // Records of the invariant guards being reused by the registry write path.
@@ -57,6 +55,7 @@ vi.mock("@sourceweft/db", async () => {
 
   function makeTx() {
     return {
+      execute: async () => {},
       select() {
         let table = "";
         const builder: Record<string, unknown> = {
@@ -65,6 +64,9 @@ vi.mock("@sourceweft/db", async () => {
             return builder;
           },
           where: () => builder,
+          orderBy: () => builder,
+          then: (resolve: (rows: unknown[]) => unknown) =>
+            Promise.resolve(resolve(dbState.fileRows)),
           leftJoin: () => builder,
           innerJoin: () => builder,
           limit: () => {
@@ -223,41 +225,56 @@ test("a new clean submission writes the definition, version and bundle", async (
   assert.deepEqual(guardCalls.invariant.at(-1), ["registry_github", "db_text"]);
 });
 
-test("re-indexing replaces the bundle rather than merging into it", async () => {
+test("new versions never delete another version bundle", async () => {
   await upsertRegistrySkillIndex(upsertInput());
   // A file the upstream skill has since dropped must not survive a re-submit.
   const deletes = dbState.ops.filter(
     (op) => op.op === "delete" && op.table === "skill_version_files",
   );
-  assert.equal(deletes.length, 1);
+  assert.equal(deletes.length, 0);
 });
 
 test("a queued (draft) submission stores its bundle too", async () => {
   const result = await upsertRegistrySkillIndex(
-    upsertInput({ versionStatus: "draft", outcome: "queued" }),
+    upsertInput({
+      versionStatus: "draft",
+      outcome: "queued",
+      manifestJson: {
+        ...MANIFEST,
+        registry: {
+          ...MANIFEST.registry!,
+          scan: { reviewRequired: true, flags: ["test-risk"] },
+        },
+      },
+    }),
   );
   assert.equal(result.status, "queued");
   // Held back from the catalog by `status`, not by withholding its content.
   assert.equal(dbState.fileRows.length, 1);
 });
 
-test("re-submitting an existing slug updates in place (no duplicate definition)", async () => {
-  dbState.definitionRows = [{ id: "def-1", ownerUserId: "me" }];
-  dbState.versionRows = [{ id: "ver-1" }];
-  await upsertRegistrySkillIndex(upsertInput());
-
-  const inserts = dbState.ops
-    .filter((op) => op.op === "insert")
-    .map((op) => op.table);
-  // Existing definition + version → updates, not inserts.
-  assert.equal(inserts.includes("skill_definitions"), false);
-  assert.equal(inserts.includes("skill_versions"), false);
-  // The bundle is the exception: it is deleted and rewritten wholesale, so a
-  // file the upstream skill has since dropped does not survive the re-submit.
-  assert.ok(inserts.includes("skill_version_files"));
-  assert.ok(
-    dbState.ops.some(
-      (op) => op.op === "delete" && op.table === "skill_version_files",
-    ),
+test("re-submitting an existing source leaves content and status untouched", async () => {
+  dbState.definitionRows = [
+    {
+      id: "def-1",
+      ownerUserId: "me",
+      sourceType: "registry_github",
+      status: "active",
+    },
+  ];
+  dbState.versionRows = [
+    {
+      id: "ver-1",
+      storagePointer: upsertInput().storagePointer,
+      status: "published",
+      manifestJson: MANIFEST,
+    },
+  ];
+  dbState.fileRows = upsertInput().files;
+  const result = await upsertRegistrySkillIndex(upsertInput());
+  assert.equal(result.skillVersionId, "ver-1");
+  assert.deepEqual(
+    dbState.ops.filter((op) => op.op !== "select"),
+    [],
   );
 });

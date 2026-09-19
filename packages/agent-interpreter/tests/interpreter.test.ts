@@ -43,7 +43,7 @@ function backendWithCalls(calls: string[]): BackendProtocolV2 {
     ls: async (path) => ({
       files: [
         { path: "/kb/", is_dir: true },
-        { path: "/workfiles/", is_dir: true },
+        { path: "/files/", is_dir: true },
         { path: "/skills/", is_dir: true },
         { path: `${path}/visible.txt`, is_dir: false },
       ],
@@ -108,10 +108,10 @@ test("interpreter read tools allow tenant-scoped knowledge and work files", asyn
     "content:/kb/source.md",
   );
   assert.equal(
-    await readFile.invoke({ file_path: "/workfiles/note.md" }),
-    "content:/workfiles/note.md",
+    await readFile.invoke({ file_path: "/files/note.md" }),
+    "content:/files/note.md",
   );
-  assert.deepEqual(calls, ["/kb/source.md", "/workfiles/note.md"]);
+  assert.deepEqual(calls, ["/kb/source.md", "/files/note.md"]);
 });
 
 test("root ls never exposes the skills mount", async () => {
@@ -119,7 +119,7 @@ test("root ls never exposes the skills mount", async () => {
   const value = String(await ls.invoke({ path: "/" }));
 
   assert.match(value, /\/kb\//);
-  assert.match(value, /\/workfiles\//);
+  assert.match(value, /\/files\//);
   assert.doesNotMatch(value, /\/skills\//);
 });
 
@@ -395,4 +395,20 @@ test("QuickJS interrupts non-terminating code", async () => {
   } finally {
     session.dispose();
   }
+});
+
+test("PC interpreter reads the physical working directory and denies DB Files", async () => {
+  const calls: string[] = [];
+  const configuredLimits = limits();
+  const tools = createInterpreterReadTools({
+    backend: backendWithCalls(calls), readRoots: ["/kb", "/Users/test/task"],
+    allowedTools: ["read_file"], limits: configuredLimits,
+    gate: createInterpreterExecutionGate(configuredLimits), context: { turnId: "pc" },
+  });
+  const read = tools[0]!;
+  await read.invoke({ file_path: "/Users/test/task/note.txt" });
+  await assert.rejects(read.invoke({ file_path: "/files/note.txt" }));
+  await assert.rejects(read.invoke({ file_path: "/Users/test/task-other/note.txt" }));
+  await assert.rejects(read.invoke({ file_path: "/Users/test/task/../private.txt" }));
+  assert.deepEqual(calls, ["/Users/test/task/note.txt"]);
 });

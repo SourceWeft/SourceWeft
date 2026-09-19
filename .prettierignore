@@ -1,0 +1,2 @@
+# Preserve byte-for-byte upstream sources; the reviewed patch has its own checks.
+third_party/rust/glib-0.18.5/

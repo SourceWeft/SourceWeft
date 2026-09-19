@@ -53,7 +53,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
     return (
       <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
         <Loader2 className="mr-2 size-3.5 animate-spin" />
-        Loading workfiles...
+        Loading files...
       </div>
     );
   }
@@ -82,13 +82,13 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
         description={
           searchQuery
             ? "Try a different path, purpose, or file type."
-            : "Assistant-created plans, notes, extraction tables, calculations, drafts, and candidate outputs from complex work will appear here."
+            : "Files you upload and files created during this conversation appear here."
         }
         icon={FileText}
         title={
           searchQuery
-            ? `No workfiles match "${searchQuery}"`
-            : "Workfiles will appear here."
+            ? `No files match "${searchQuery}"`
+            : "Files will appear here."
         }
       />
     );

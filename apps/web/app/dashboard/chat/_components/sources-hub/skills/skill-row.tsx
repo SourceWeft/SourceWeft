@@ -1,9 +1,8 @@
 import type { MouseEvent } from "react";
 
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
-import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
+import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { SkillIcon } from "../../../../_components/dashboard-icons";
 import { TypeBadge } from "../type-badge";
 import {
   skillSourceLabel,
@@ -59,7 +58,11 @@ export function SkillRow({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <SkillRowIcon icon={icon} selected={selected} />
+          <SkillAvatar
+            item={skill}
+            icon={icon}
+            className="size-4 rounded-sm text-xs"
+          />
           <button
             className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => onOpenSkill(skill.catalogId)}
@@ -91,29 +94,4 @@ export function SkillRow({
       </div>
     </article>
   );
-}
-
-function SkillRowIcon({
-  icon,
-  selected,
-}: {
-  icon?: SkillIconSpec;
-  selected: boolean;
-}) {
-  const className = cn(
-    "size-3 shrink-0",
-    selected ? "text-primary" : "text-muted-foreground",
-  );
-  if (icon?.iconName) {
-    return (
-      <GlobalIcon
-        className={className}
-        fallbackIconName="skill"
-        iconName={icon.iconName}
-        iconTone={icon.iconTone ?? "mono"}
-      />
-    );
-  }
-
-  return <SkillIcon className={className} />;
 }

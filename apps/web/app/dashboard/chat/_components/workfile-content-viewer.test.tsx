@@ -39,7 +39,7 @@ afterEach(async () => {
 test("WorkfileContentViewer renders code workfiles with CodeBlock", async () => {
   const element = await renderViewer({
     contentText: "console.log('deck');\n",
-    path: "/workfiles/ppt/deck.js",
+    path: "/files/ppt/deck.js",
   });
 
   const codeBlock = element.querySelector('[data-language="javascript"]');
@@ -57,7 +57,7 @@ test("WorkfileContentViewer renders markdown preview by default with source tab"
   const element = await renderViewer({
     contentText: "# Deck\n\n```js\nconsole.log('deck');\n```",
     mimeType: "text/markdown",
-    path: "/workfiles/ppt/README.md",
+    path: "/files/ppt/README.md",
   });
 
   assert.ok(element.querySelector('[role="tab"][data-state="active"]'));
@@ -71,7 +71,7 @@ test("WorkfileContentViewer renders markdown source mode with CodeBlock", async 
     contentText: "# Deck\n\n```js\nconsole.log('deck');\n```",
     defaultMode: "source",
     mimeType: "text/markdown",
-    path: "/workfiles/ppt/README.md",
+    path: "/files/ppt/README.md",
   });
 
   assert.ok(element.querySelector('[data-language="markdown"]'));

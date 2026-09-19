@@ -21,7 +21,9 @@ import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
 import { RawImage } from "../_components/raw-image";
-import { OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
+import { JsonLd } from "../_components/seo/json-ld";
+import { blogTagPath } from "./_components/blog-list";
+import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
 
 const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
@@ -32,6 +34,7 @@ export async function generateBlogArticleMetadata(input: {
 
   if (!post) {
     return {
+      ...NO_INDEX_METADATA,
       title: "Post Not Found",
     };
   }
@@ -61,6 +64,12 @@ export async function generateBlogArticleMetadata(input: {
       url: canonicalUrl,
     },
     title,
+    twitter: {
+      card: "summary_large_image",
+      description,
+      images: [imageUrl],
+      title,
+    },
   };
 }
 
@@ -140,10 +149,10 @@ function HeroMedia({ post }: { post: BlogPostDetail }) {
   }
 
   return (
-    <figure className="mx-auto mb-10 w-fit max-w-full overflow-hidden rounded-lg border border-zinc-300 bg-zinc-100 shadow-[0_18px_60px_rgba(39,39,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+    <figure className="mb-10 aspect-[1.91/1] w-full overflow-hidden rounded-lg border border-zinc-300 bg-zinc-100 shadow-[0_18px_60px_rgba(39,39,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
       <RawImage
         alt={post.coverAltText || post.title}
-        className="block max-h-[18rem] max-w-full object-contain sm:max-h-[22rem]"
+        className="block h-full w-full object-contain"
         src={post.coverPublicUrl}
       />
     </figure>
@@ -158,12 +167,13 @@ function BlogTagList({ post }: { post: BlogPostSummary }) {
   return (
     <>
       {post.tags.map((tag) => (
-        <span
+        <Link
           key={tag}
-          className="rounded-full border border-zinc-300 bg-white/40 px-3 py-1 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500"
+          href={blogTagPath(tag)}
+          className="rounded-full border border-zinc-300 bg-white/40 px-3 py-1 text-xs text-zinc-500 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500 dark:hover:border-white/35 dark:hover:text-white"
         >
           #{tag}
-        </span>
+        </Link>
       ))}
     </>
   );
@@ -246,7 +256,7 @@ function ArticleFooter({
   );
 }
 
-function JsonLd({ post }: { post: BlogPostDetail }) {
+function BlogPostingJsonLd({ post }: { post: BlogPostDetail }) {
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -257,7 +267,10 @@ function JsonLd({ post }: { post: BlogPostDetail }) {
     datePublished: post.publishedAt?.toISOString(),
     description: post.seoDescription || post.excerpt,
     headline: post.seoTitle || post.title,
-    image: post.ogImagePublicUrl || post.coverPublicUrl || `${SITE_URL}${OG_IMAGE.url}`,
+    image: new URL(
+      post.ogImagePublicUrl || post.coverPublicUrl || OG_IMAGE.url,
+      SITE_URL,
+    ).toString(),
     inLanguage: post.locale,
     mainEntityOfPage: absoluteBlogPostUrl(post.slug),
     publisher: {
@@ -266,12 +279,7 @@ function JsonLd({ post }: { post: BlogPostDetail }) {
     },
   };
 
-  return (
-    <script
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      type="application/ld+json"
-    />
-  );
+  return <JsonLd data={jsonLd} />;
 }
 
 export async function BlogArticlePageContent(input: {
@@ -297,7 +305,7 @@ export async function BlogArticlePageContent(input: {
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <JsonLd post={post} />
+      <BlogPostingJsonLd post={post} />
       <SourceWeftHeader
         authState={initialAuthState}
         containerClassName={blogContainerClassName}

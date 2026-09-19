@@ -4,9 +4,11 @@
 
 # SourceWeft
 
-**开源 NotebookLM 替代品：连接你的资料源，进行可信问答，生成带引用的多种内容，并通过 Virtual FS 和可扩展 Skills 增强深度知识工作。**
+**让 Agent 协作，把你的知识用起来。**
 
-支持自托管与多模型，可汇聚文件、网页、笔记、YouTube 和 SaaS 连接器，让团队掌控数据、模型和知识工作方式。
+连接知识与 Agent 协作的开源 AI 工作空间。
+
+支持自托管 · 多模型 · 自定义 Skills
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/SourceWeft/SourceWeft?style=social)](https://github.com/SourceWeft/SourceWeft/stargazers)
@@ -17,82 +19,56 @@
 
 ---
 
-**SourceWeft** 是面向深度知识工作的开源 NotebookLM 替代品。你可以把 PDF、网页、笔记、YouTube、Notion、Google Drive、Gmail、Slack 等资料汇聚到一个结构化资料空间中，并基于选定资料获得带引用、可验证的回答。
-
-不止于问答，SourceWeft 还可以帮助你生成学习指南、FAQ、时间线、研究简报、草稿、音频概览、图像 Artifacts 等知识产物。Virtual FS、内置 Skills、自定义 Skills、Web 工具和工作文件，让 Agent 能够围绕你的资料读取、搜索、创作、整理和持续迭代。
+**SourceWeft** 将资料、文件与工具连接到同一个 AI 工作空间。让 Agent 分工研究、规划和执行，结合来源核对结果，再回到保存的对话与文件中继续推进工作。
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
 ---
 
+## 核心功能
+
+- **资料与引用。** 接入 PDF、网页、笔记、YouTube、Notion、Google Drive、Gmail、Slack 等资料源。围绕选定资料提问，通过引用回到来源核对。
+- **Agent 协作。** 将探索、规划和执行委派给专门的子 Agent，再结合返回的结果继续处理任务。
+- **工具与 Skills。** 通过 Web 工具、MCP 集成、内置和自定义 Skills 扩展 Agent，复用工作方法。
+- **创作与工作文件。** 生成报告、演示、学习指南、音频概览和图像成果。检查输出，再回到保存的对话与文件中继续完善。
+- **多模型与自托管。** 选择受支持的模型 Provider，自行部署工作空间。
+- **共享工作空间。** 与团队组织资料和对话，通过角色与访问控制开展协作。
+
+可选的沙箱命令执行目前处于 **Alpha** 阶段，需要配置执行环境并获得批准。参见[执行说明](docker/sandbox-execution.zh-CN.md)。
+
 ## 使用场景
 
-**研究简报。** 论文、网页和笔记 -> 带引用的研究简报，包含关键结论、证据和开放问题。
+| 带入材料             | 完成工作                                   |
+| -------------------- | ------------------------------------------ |
+| 论文、网页和笔记     | 整理研究简报，包含关键结论、引用和待解问题 |
+| 课程资料、视频和 PDF | 制作学习指南、FAQ 和测验草稿               |
+| 产品文档和团队笔记   | 撰写报告、制作演示、整理博客草稿和发布材料 |
+| 已连接的团队资料源   | 获取关于决策、项目和共享上下文的可追溯回答 |
 
-**学习指南。** 课程资料、视频和 PDF -> 学习指南、FAQ 和测验草稿。
+## 开始使用
 
-**内容工作区。** 产品文档、网页和团队资料 -> 博客草稿、发布大纲和图像 Artifacts。
+### Docker 自托管
 
-**团队知识。** Drive、Gmail、Slack、Notion 等连接资料源 -> 关于历史决策、项目上下文和共享知识的可追溯回答。
+从 [Releases 页面](https://github.com/SourceWeft/SourceWeft/releases) 下载 `sourceweft-selfhost-vX.Y.Z.tar.gz`，按 [Docker 安装说明](docker/README.zh-CN.md) 部署。
 
----
+发布包包含 Web、API、后台任务、数据库及文件存储，不需要本机 Node/Rust 或自行构建镜像。初始化配置并启动 Compose 后，打开 `http://localhost:3000`，配置用于聊天与索引的模型 Provider 或 BYOK。
 
-## 为什么选择 SourceWeft
+### 开始第一个任务
 
-**连接多种资料源。** 汇聚文件、URL、笔记、YouTube、结构化资料树和 SaaS 连接器。
+1. **创建工作空间**，用于个人工作或团队协作。
+2. **添加资料**，上传文件、粘贴 URL、编写笔记，或连接已有工具。
+3. **提问与创作**，核对引用，让 Agent 使用工具和 Skills，并在保存的对话与文件中完善结果。
 
-**每个回答都可追溯。** 在选定资料中提问，获得带引用、可验证、基于来源的回答。
+可使用网页端，也可从 [Releases](https://github.com/SourceWeft/SourceWeft/releases) 获取桌面安装包。桌面端连接方式参见[桌面端说明](apps/desktop/README.zh-CN.md)。
 
-**给 Agent 一个真正的工作空间。** Virtual FS 将资料、工作文件、Artifacts 和 Skill 指令组织成可导航的上下文。
-
-**用 Skills 扩展 Agent 能力。** 内置和自定义 Skills 可以提供可复用的领域方法、斜杠命令、工具默认配置和任务指导。
-
-SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Embedding、重排序、图片和音频任务，并在团队中共享工作空间、角色、资料源和计费。
-
----
-
-## 如何使用
-
-1. **创建工作空间。** 从个人工作空间开始，也可以邀请团队成员进入共享工作空间，配置角色和共享计费。
-
-2. **添加你的资料。** 上传文件、粘贴 URL、编写笔记、添加 YouTube 链接，或连接 Notion、Google Drive、Gmail、Slack 等工具。
-
-3. **让 SourceWeft 完成索引。** 资料会被解析、切分、向量化，并通过混合检索变成可搜索的知识库。
-
-4. **提问、创作、持续迭代。** 基于选定资料对话，生成带引用的内容，调用 Skills，搜索网页，创建 Artifacts，并在同一上下文里继续工作。
-
-5. **随处继续。** 在网页端、桌面端或浏览器扩展中继续使用，同步你的资料、上下文和团队工作空间。
-
----
-
-## Docker 自托管
-
-如果你想直接使用已发布的容器镜像运行 SourceWeft，使用 Docker Compose。
-
-源码开发与镜像构建默认使用 Node 22.23.2，同时支持 Node 24；详见[运行版本说明](apps/backend/docs/node-runtime.md)。
-
-```bash
-git clone https://github.com/SourceWeft/SourceWeft.git
-cd SourceWeft
-cp docker/.env.example docker/.env
-# 编辑 docker/.env——至少设置两个必填 secret；本地以外部署请使用强随机值。
-# OSS 默认开启额度拦截，关闭支付/邮件 SaaS provider。
-# 模型 provider key 不影响启动；使用模型功能前再配置即可。
-docker compose -f docker/docker-compose.yml up -d
-```
-
-打开 **http://localhost:3000**，注册，开始使用。
-
-SaaS 计费和支付 checkout 需要显式启用。请参考 `docker/.env.example`
-里的 SaaS billing 区块，配置 `SOURCEWEFT_SAAS_ENABLED`、
-`BACKEND_BILLING_PROVIDER`、Creem 和前端 checkout UI 开关。
+部署配置和升级参见 [Docker 说明](docker/README.zh-CN.md)。
 
 ---
 
 ## 贡献
 
 Bug 报告、功能建议、代码和设计——都欢迎。  
-参见 [CONTRIBUTING.md](CONTRIBUTING.md) 开始。
+欢迎通过 [Issues](https://github.com/SourceWeft/SourceWeft/issues) 报告问题或讨论改进建议。
 
 <a href="https://github.com/SourceWeft/SourceWeft/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft&1=1" alt="SourceWeft contributors" />
@@ -108,3 +84,5 @@ Bug 报告、功能建议、代码和设计——都欢迎。
 [Apache License 2.0](LICENSE)
 
 `enterprise/` 目录（如存在）不适用上述许可，按其独立许可证授权。具体范围见 [LICENSE](LICENSE)。
+
+计费为可选模块：默认核心构建不运行 credits/pages 商业账本。订阅、支付和计费界面由 `enterprise/billing` 提供，见[构建与迁移说明](enterprise/billing/README.md)。

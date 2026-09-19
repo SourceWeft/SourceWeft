@@ -139,6 +139,7 @@ export function DirectoryPicker({
 }
 
 export function AddSourceDialog({
+  workspaceReady,
   addParentSourceId,
   addTab,
   files,
@@ -168,6 +169,7 @@ export function AddSourceDialog({
   urlTitle,
   urlValue,
 }: {
+  workspaceReady: boolean;
   addParentSourceId: string | null;
   addTab: AddTab;
   files: File[];
@@ -374,6 +376,7 @@ export function AddSourceDialog({
           </Button>
           <Button
             disabled={
+              !workspaceReady ||
               isSubmitting ||
               (addTab === "Text" && !textContent.trim()) ||
               (addTab === "URL" && !urlValue.trim()) ||

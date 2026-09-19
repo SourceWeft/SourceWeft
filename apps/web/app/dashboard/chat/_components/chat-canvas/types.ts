@@ -187,6 +187,7 @@ export type ChatSkillItem = {
   version: string;
   enabled?: boolean;
   hasReadme: boolean;
+  logo?: import("@sourceweft/contracts").SkillLogo;
   capabilities?: { required?: string[]; optional?: string[] };
   models?: { chat?: string; image?: string; vision?: string };
   commands?: SkillCommand[];
@@ -205,6 +206,7 @@ export type ChatSkillItem = {
 };
 
 export type CitationRecord = {
+  fileReference?: import("@sourceweft/contracts").FileReference;
   citation: string;
   sourceId: string | null;
   sourceTitle?: string;

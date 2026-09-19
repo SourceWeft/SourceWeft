@@ -39,7 +39,9 @@ target
 .env.*
 **/.env
 **/.env.*
-!**/.env.example
+!docker/.env.example
+!apps/backend/.env.example
+!apps/web/.env.example
 
 npm-debug.log*
 yarn-debug.log*
@@ -54,6 +56,7 @@ reference-*
 
 # Apps not shipped in the SourceWeft web/backend runtime image.
 apps/desktop
+apps/mobile
 apps/docs
 apps/extension
 
@@ -62,3 +65,11 @@ SurfSense
 WeKnora
 langfuse
 opencode
+
+# Local agent/session state is not part of the runtime source tree.
+.docs
+.omo
+.octto
+.working_plan
+.superpowers
+.playwright-mcp

@@ -3,10 +3,7 @@ import {
   ConversationContent,
   ConversationEmptyState,
 } from "@sourceweft/ui-web/components/ai-elements/conversation";
-import {
-  Suggestion,
-  Suggestions,
-} from "@sourceweft/ui-web/components/ai-elements/suggestion";
+import { Suggestion } from "@sourceweft/ui-web/components/ai-elements/suggestion";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import type { FileUIPart } from "ai";
 import type { SourceItem } from "../source-types";
@@ -46,6 +43,8 @@ function promptFilesToImages(files: FileUIPart[] | undefined) {
 }
 
 export function EmptyState({
+  composerDraftKey,
+  workingFolderSlot,
   onSendMessage,
   composerInitialInput,
   composerResetKey,
@@ -77,6 +76,8 @@ export function EmptyState({
   composerOptions,
   onComposerOptionsChange,
 }: {
+  composerDraftKey?: string;
+  workingFolderSlot?: import("react").ReactNode;
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
   composerResetKey?: number;
@@ -111,42 +112,41 @@ export function EmptyState({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <Conversation className="h-full min-h-0 flex-1 overflow-hidden">
-        <ConversationContent className="flex min-h-full items-center justify-center px-6 py-10">
+        <ConversationContent className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
           <div className="mx-auto flex w-full max-w-4xl flex-col items-start justify-center gap-8">
             <ConversationEmptyState className="w-full items-start gap-4 p-0 text-left">
               <div className="space-y-2">
-                <p className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-                  New chat
-                </p>
                 <div className="space-y-3">
-                  <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                    Work with your agent across your selected sources.
+                  <h1 className="chat-empty-title max-w-2xl text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                    What would you like to work on?
                   </h1>
-                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+                  <p className="chat-empty-description max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                     Start with a prompt, compare evidence, or have the agent
                     synthesize what matters most before you open a thread.
                   </p>
                 </div>
               </div>
-              <Suggestions className="justify-start gap-2 pt-2">
+              <div className="flex w-full flex-wrap items-start gap-2 pt-2">
                 {starterSuggestions.map((suggestion) => (
                   <Suggestion
-                    className="h-auto rounded-full border-border/70 bg-background px-4 py-2 text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
+                    className="h-auto max-w-full rounded-full border-border/70 bg-background px-4 py-2 text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
                     key={suggestion}
                     onClick={(content) => onSendMessage({ content })}
                     suggestion={suggestion}
                     variant="outline"
                   />
                 ))}
-              </Suggestions>
+              </div>
             </ConversationEmptyState>
           </div>
         </ConversationContent>
       </Conversation>
 
-      <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
+      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
+            draftKey={composerDraftKey}
+            workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}

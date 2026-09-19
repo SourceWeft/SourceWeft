@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { AgentCitationRegistry } from "./citation-registry";
@@ -16,6 +17,8 @@ function record(input: {
   updatedAt?: string;
 }): WorkingFileRecord {
   return {
+    payloadKind: "inline_text", storageBucket: null, storageKey: null, origin: "unknown",
+    contentHash: createHash("sha256").update(input.contentText).digest("hex"),
     id: `wf-${input.path}`,
     teamId: "team-1",
     workspaceId: "workspace-1",
@@ -34,8 +37,8 @@ function record(input: {
 test("WorkingFilesBackend lists virtual directories from file paths", async () => {
   const originalList = workingFilesService.listForBackend;
   workingFilesService.listForBackend = async () => [
-    record({ path: "/workfiles/notes/todo.md", contentText: "todo" }),
-    record({ path: "/workfiles/final.md", contentText: "final" }),
+    record({ path: "/files/notes/todo.md", contentText: "todo" }),
+    record({ path: "/files/final.md", contentText: "final" }),
   ];
   try {
     const backend = new WorkingFilesBackend({
@@ -46,18 +49,18 @@ test("WorkingFilesBackend lists virtual directories from file paths", async () =
     });
 
     assert.deepEqual(
-      (await backend.ls("/workfiles")).files?.map((item) => [
+      (await backend.ls("/files")).files?.map((item) => [
         item.path,
         item.is_dir,
       ]),
       [
-        ["/workfiles/final.md", false],
-        ["/workfiles/notes/", true],
+        ["/files/final.md", false],
+        ["/files/notes/", true],
       ],
     );
     assert.deepEqual(
-      (await backend.ls("/workfiles/notes")).files?.map((item) => item.path),
-      ["/workfiles/notes/todo.md"],
+      (await backend.ls("/files/notes")).files?.map((item) => item.path),
+      ["/files/notes/todo.md"],
     );
   } finally {
     workingFilesService.listForBackend = originalList;
@@ -68,7 +71,7 @@ test("WorkingFilesBackend read and grep do not create citations", async () => {
   const originalList = workingFilesService.listForBackend;
   const originalGet = workingFilesService.getWorkingFile;
   const file = record({
-    path: "/workfiles/notes/todo.md",
+    path: "/files/notes/todo.md",
     contentText: "alpha\nbeta evidence",
   });
   workingFilesService.listForBackend = async () => [file];
@@ -81,14 +84,14 @@ test("WorkingFilesBackend read and grep do not create citations", async () => {
       userId: "user-1",
     });
 
-    const read = await backend.read("/workfiles/notes/todo.md");
+    const read = await backend.read("/files/notes/todo.md");
     assert.equal(read.mimeType, "text/markdown");
     assert.match(String(read.content), /thread working memory/i);
     assert.match(String(read.content), /not source evidence/);
     assert.doesNotMatch(String(read.content), /\[citation:/);
 
-    const grep = await backend.grep("evidence", "/workfiles");
-    assert.equal(grep.matches?.[0]?.path, "/workfiles/notes/todo.md");
+    const grep = await backend.grep("evidence", "/files");
+    assert.equal(grep.matches?.[0]?.path, "/files/notes/todo.md");
     assert.doesNotMatch(grep.matches?.[0]?.text ?? "", /\[citation:/);
   } finally {
     workingFilesService.listForBackend = originalList;
@@ -111,7 +114,7 @@ test("WorkingFilesBackend missing reads direct source mentions back to /kb", asy
     });
 
     const read = await backend.read(
-      "/workfiles/043e27f7-c8e0-438e-a47f-adcf8b06088e.pdf",
+      "/files/043e27f7-c8e0-438e-a47f-adcf8b06088e.pdf",
     );
 
     assert.match(read.error ?? "", /no such thread working file/);
@@ -137,7 +140,7 @@ test("WorkingFilesBackend preserves non-not-found getWorkingFile errors", async 
       userId: "user-1",
     });
 
-    const read = await backend.readRaw("/workfiles/notes/todo.md");
+    const read = await backend.readRaw("/files/notes/todo.md");
 
     assert.match(read.error ?? "", /scope denied/);
     assert.doesNotMatch(read.error ?? "", /no such thread working file/);
@@ -149,7 +152,7 @@ test("WorkingFilesBackend preserves non-not-found getWorkingFile errors", async 
 test("WorkingFilesBackend neutralizes citation-like markers in agent-facing reads", async () => {
   const originalGet = workingFilesService.getWorkingFile;
   const file = record({
-    path: "/workfiles/notes/todo.md",
+    path: "/files/notes/todo.md",
     contentText:
       "alpha [citation:c1]\nbeta citation:c2\ngamma 【citation: c3, c4】",
   });
@@ -162,7 +165,7 @@ test("WorkingFilesBackend neutralizes citation-like markers in agent-facing read
       userId: "user-1",
     });
 
-    const read = await backend.read("/workfiles/notes/todo.md");
+    const read = await backend.read("/files/notes/todo.md");
     assert.doesNotMatch(String(read.content), /\[citation:c1\]/i);
     assert.match(
       String(read.content),
@@ -170,16 +173,16 @@ test("WorkingFilesBackend neutralizes citation-like markers in agent-facing read
     );
 
     const [download] = await backend.downloadFiles([
-      "/workfiles/notes/todo.md",
+      "/files/notes/todo.md",
     ]);
     assert.equal(download?.error, null);
     const downloaded = download?.content
       ? new TextDecoder().decode(download.content)
       : "";
-    assert.doesNotMatch(downloaded, /\[citation:c1\]/i);
-    assert.match(downloaded, /non-citable citation marker c2 removed/i);
-    assert.doesNotMatch(downloaded, /【citation:/i);
-    assert.match(downloaded, /non-citable citation marker c3, c4 removed/i);
+    // Byte transport is lossless. Text readers, not downloads, neutralize untrusted citation syntax.
+    assert.match(downloaded, /\[citation:c1\]/i);
+    assert.match(downloaded, /citation:c2/i);
+    assert.match(downloaded, /【citation: c3, c4】/i);
   } finally {
     workingFilesService.getWorkingFile = originalGet;
   }
@@ -199,7 +202,7 @@ test("WorkingFilesBackend write and edit persist through service", async () => {
   };
   const originalGet = workingFilesService.getWorkingFile;
   workingFilesService.getWorkingFile = async () => ({
-    file: record({ path: "/workfiles/a.md", contentText: "hello world" }),
+    file: record({ path: "/files/a.md", contentText: "hello world" }),
   });
   try {
     const backend = new WorkingFilesBackend({
@@ -210,10 +213,10 @@ test("WorkingFilesBackend write and edit persist through service", async () => {
     });
 
     assert.equal(
-      (await backend.write("/workfiles/a.md", "hello")).path,
-      "/workfiles/a.md",
+      (await backend.write("/files/a.md", "hello")).path,
+      "/files/a.md",
     );
-    const edit = await backend.edit("/workfiles/a.md", "world", "there");
+    const edit = await backend.edit("/files/a.md", "world", "there");
     assert.equal(edit.occurrences, 1);
     assert.deepEqual(
       writes.map((item) => item.contentText),
@@ -264,7 +267,7 @@ test("WorkingFilesBackend rewrites runtime citations to markdown footnotes on wr
     });
 
     await backend.write(
-      "/workfiles/notes.md",
+      "/files/notes.md",
       "Web claim [citation:c1]\nSource claim [citation:c2]\nAgain [citation:c1]",
     );
 
@@ -316,7 +319,7 @@ test("WorkingFilesBackend reuses existing footnote definitions and removes unkno
     });
 
     await backend.write(
-      "/workfiles/notes.md",
+      "/files/notes.md",
       [
         "Existing [^custom-ref]",
         "",
@@ -347,16 +350,16 @@ test("WorkingFilesBackend reuses existing footnote definitions and removes unkno
 
 test("toWorkingFileListItem omits file content", () => {
   const file = record({
-    path: "/workfiles/notes/todo.md",
+    path: "/files/notes/todo.md",
     contentText: "private draft",
   });
   const item = toWorkingFileListItem(file);
 
-  assert.equal(item.path, "/workfiles/notes/todo.md");
+  assert.equal(item.path, "/files/notes/todo.md");
   assert.equal("contentText" in item, false);
 });
 
-test("MountedAgentFilesystemBackend exposes /kb and /workfiles roots, defaults search to /kb, and restricts writes", async () => {
+test("MountedAgentFilesystemBackend exposes /kb and /files roots, defaults file search to /files, and restricts writes", async () => {
   const knowledge = {
     ls: async () => ({ files: [{ path: "/kb/source.md", is_dir: false }] }),
     read: async () => ({ content: "kb" }),
@@ -376,7 +379,7 @@ test("MountedAgentFilesystemBackend exposes /kb and /workfiles roots, defaults s
     edit: async () => ({ error: "readonly" }),
   };
   const working = {
-    ls: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    ls: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     read: async () => ({ content: "work" }),
     readRaw: async () => ({
       data: {
@@ -387,9 +390,9 @@ test("MountedAgentFilesystemBackend exposes /kb and /workfiles roots, defaults s
       },
     }),
     grep: async () => ({
-      matches: [{ path: "/workfiles/a.md", line: 1, text: "work" }],
+      matches: [{ path: "/files/a.md", line: 1, text: "work" }],
     }),
-    glob: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    glob: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     write: async (path: string) => ({ path }),
     edit: async (path: string) => ({ path, occurrences: 1 }),
   };
@@ -397,27 +400,27 @@ test("MountedAgentFilesystemBackend exposes /kb and /workfiles roots, defaults s
   const backend = new MountedAgentFilesystemBackend({ knowledge, working });
   assert.deepEqual(
     (await backend.ls("/")).files?.map((item) => item.path),
-    ["/kb/", "/workfiles/"],
+    ["/files/", "/kb/"],
   );
   assert.equal(
     (await backend.write("/kb/a.md", "x")).error?.startsWith("EROFS"),
     true,
   );
   assert.equal(
-    (await backend.write("/workfiles/a.md", "x")).path,
-    "/workfiles/a.md",
+    (await backend.write("/files/a.md", "x")).path,
+    "/files/a.md",
   );
   assert.deepEqual((await backend.grep("anything", "/")).matches, [
-    { path: "/kb/source.md", line: 1, text: "kb" },
+    { path: "/files/a.md", line: 1, text: "work" },
   ]);
   assert.deepEqual((await backend.glob("**/*.md", "/")).files, [
-    { path: "/kb/source.md", is_dir: false },
+    { path: "/files/a.md", is_dir: false },
   ]);
-  assert.deepEqual((await backend.grep("anything", "/workfiles")).matches, [
-    { path: "/workfiles/a.md", line: 1, text: "work" },
+  assert.deepEqual((await backend.grep("anything", "/files")).matches, [
+    { path: "/files/a.md", line: 1, text: "work" },
   ]);
-  assert.deepEqual((await backend.glob("/workfiles/**/*.md", "/")).files, [
-    { path: "/workfiles/a.md", is_dir: false },
+  assert.deepEqual((await backend.glob("/files/**/*.md", "/")).files, [
+    { path: "/files/a.md", is_dir: false },
   ]);
 });
 
@@ -441,7 +444,7 @@ test("MountedAgentFilesystemBackend exposes optional /skills mount as read-only"
     edit: async () => ({ error: "readonly" }),
   };
   const working = {
-    ls: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    ls: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     read: async () => ({ content: "work" }),
     readRaw: async () => ({
       data: {
@@ -452,9 +455,9 @@ test("MountedAgentFilesystemBackend exposes optional /skills mount as read-only"
       },
     }),
     grep: async () => ({
-      matches: [{ path: "/workfiles/a.md", line: 1, text: "work" }],
+      matches: [{ path: "/files/a.md", line: 1, text: "work" }],
     }),
-    glob: async () => ({ files: [{ path: "/workfiles/a.md", is_dir: false }] }),
+    glob: async () => ({ files: [{ path: "/files/a.md", is_dir: false }] }),
     write: async (path: string) => ({ path }),
     edit: async (path: string) => ({ path, occurrences: 1 }),
   };
@@ -487,7 +490,7 @@ test("MountedAgentFilesystemBackend exposes optional /skills mount as read-only"
 
   assert.deepEqual(
     (await backend.ls("/")).files?.map((item) => item.path),
-    ["/kb/", "/skills/", "/workfiles/"],
+    ["/files/", "/kb/", "/skills/"],
   );
   assert.deepEqual((await backend.ls("/skills")).files, [
     { path: "/skills/skill-a/SKILL.md", is_dir: false },
@@ -542,7 +545,7 @@ test("MountedAgentFilesystemBackend routes upload and download by mount", async 
       calls.push(`${path}:${content}`);
       return { path };
     },
-    edit: async () => ({ path: "/workfiles/a.md", occurrences: 1 }),
+    edit: async () => ({ path: "/files/a.md", occurrences: 1 }),
   };
   const skills = {
     ls: async () => ({ files: [] }),
@@ -574,7 +577,7 @@ test("MountedAgentFilesystemBackend routes upload and download by mount", async 
 
   const downloads = await backend.downloadFiles([
     "/kb/a.md",
-    "/workfiles/a.md",
+    "/files/a.md",
     "/skills/skill-a/SKILL.md",
     "/conversation_history/session.md",
   ]);
@@ -582,7 +585,7 @@ test("MountedAgentFilesystemBackend routes upload and download by mount", async 
   assert.equal(downloads[0]!.content, null);
   assert.equal(
     new TextDecoder().decode(downloads[1]!.content!),
-    "work:/workfiles/a.md",
+    "work:/files/a.md",
   );
   assert.equal(
     new TextDecoder().decode(downloads[2]!.content!),
@@ -592,12 +595,12 @@ test("MountedAgentFilesystemBackend routes upload and download by mount", async 
   assert.equal(knowledgeReadRawCalls, 0);
 
   const uploads = await backend.uploadFiles([
-    ["/workfiles/a.md", new TextEncoder().encode("hello")],
+    ["/files/a.md", new TextEncoder().encode("hello")],
     ["/kb/a.md", new TextEncoder().encode("no")],
     ["/conversation_history/session.md", new TextEncoder().encode("no")],
   ]);
   assert.equal(uploads[0]!.error, null);
   assert.equal(uploads[1]!.error, "permission_denied");
   assert.equal(uploads[2]!.error, "permission_denied");
-  assert.deepEqual(calls, ["/workfiles/a.md:hello"]);
+  assert.deepEqual(calls, ["/files/a.md:hello"]);
 });

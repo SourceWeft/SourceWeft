@@ -7,6 +7,8 @@ export * from "./artifacts";
 export * from "./messages";
 export * from "./threads";
 export * from "./personas";
+export * from "./source-selection";
+export * from "./files";
 export * from "./stream";
 export * from "./skills";
 export * from "./working-files";
@@ -29,3 +31,6 @@ export * from "./api-response";
 export * from "./agent-tools";
 export * from "./agent-confirmations";
 export * from "./agent-questions";
+
+export * from "./billing-runtime";
+export * from "./deployment-capabilities";

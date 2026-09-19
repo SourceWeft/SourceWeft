@@ -60,9 +60,18 @@ describe("resolveArtifactPreviewRenderer", () => {
     ).toBe("video-presentation");
   });
 
-  it("returns null for unsupported artifacts", () => {
+  it("uses the shared file viewer when no capability owns the preview", () => {
     expect(
-      resolveArtifactPreviewRenderer(context({ artifactType: "file" })),
-    ).toBe(null);
+      resolveArtifactPreviewRenderer(context({ artifactType: "file" }))?.id,
+    ).toBe("file-preview");
+  });
+
+  it("does not try to render pending or missing files", () => {
+    expect(
+      resolveArtifactPreviewRenderer(context({ status: "pending" })),
+    ).toBeNull();
+    expect(
+      resolveArtifactPreviewRenderer({ ...context({}), proxyFileUrl: null }),
+    ).toBeNull();
   });
 });

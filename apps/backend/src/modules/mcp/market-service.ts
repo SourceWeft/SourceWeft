@@ -53,7 +53,11 @@ export class MarketService {
   }
 
   async countMcpByCategory(
-    input: { query?: string; includeDesktopOnly?: boolean } = {},
+    input: {
+      query?: string;
+      includeDesktopOnly?: boolean;
+      desktopOnly?: boolean;
+    } = {},
   ) {
     if (!this.isEnabled()) {
       return { counts: {}, total: 0 };

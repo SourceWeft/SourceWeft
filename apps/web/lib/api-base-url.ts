@@ -1,36 +1,43 @@
-const DEFAULT_API_PORT = "3001";
-const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+import { publicRuntimeConfig } from "./public-runtime-config";
 
-function isLocalhostUrl(value: string) {
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/**
+ * Development only. A loopback API origin is only reachable — and only same-site for
+ * cookies — from a page served by that same host. A simulator, a phone on the LAN or a
+ * `*.localhost` alias is served from a different host, which would leave the session
+ * cookie cross-site and dropped. Keep the API port and follow the page's host.
+ */
+export function followPageHost(
+  configured: string,
+  pageHostname: string | undefined,
+) {
+  if (!pageHostname) {
+    return configured;
+  }
+
   try {
-    const url = new URL(value);
-    return LOCALHOST_NAMES.has(url.hostname);
+    const url = new URL(configured);
+    if (!LOOPBACK_HOSTNAMES.has(url.hostname)) {
+      return configured;
+    }
+    if (url.hostname === pageHostname) {
+      return configured;
+    }
+
+    url.hostname = pageHostname;
+    return url.origin;
   } catch {
-    return false;
+    return configured;
   }
 }
 
-function resolveBrowserApiBaseUrl(configured?: string) {
-  if (typeof window === "undefined") {
-    return configured || `http://localhost:${DEFAULT_API_PORT}`;
-  }
-
-  const configuredBaseUrl = configured?.trim();
-  if (configuredBaseUrl && !isLocalhostUrl(configuredBaseUrl)) {
-    return configuredBaseUrl.replace(/\/$/, "");
-  }
-
-  const { protocol, hostname } = window.location;
-  if (!LOCALHOST_NAMES.has(hostname)) {
-    return `${protocol}//${hostname}:${DEFAULT_API_PORT}`;
-  }
-
-  return (configuredBaseUrl || `http://localhost:${DEFAULT_API_PORT}`).replace(
-    /\/$/,
-    "",
-  );
-}
-
-export const apiBaseUrl = resolveBrowserApiBaseUrl(
-  process.env.NEXT_PUBLIC_API_BASE_URL,
-);
+// All browser HTTP, authentication, SSE and websocket clients share this origin.
+export const apiBaseUrl =
+  followPageHost(
+    publicRuntimeConfig().apiBaseUrl.replace(/\/$/, ""),
+    typeof window === "undefined" ? undefined : window.location.hostname,
+  ) ||
+  (typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:3001");

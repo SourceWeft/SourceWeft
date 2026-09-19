@@ -1,0 +1,57 @@
+{
+  "gateways": [
+    {
+      "slug": "selfhost-test",
+      "providerName": "selfhost-test",
+      "providerKind": "openai-compatible",
+      "baseUrl": "http://model-fixture:8787/v1",
+      "apiKeyEnv": "SELFHOST_MODEL_KEY",
+      "supports": [
+        "chat",
+        "embeddings"
+      ],
+      "activation": {
+        "env": "SELFHOST_MODEL_ENABLED",
+        "default": false
+      },
+      "modelCatalog": {
+        "enabled": false
+      },
+      "isDefault": true
+    }
+  ],
+  "chatProfiles": [
+    {
+      "gatewaySlug": "selfhost-test",
+      "providerName": "selfhost-test",
+      "isDefault": true,
+      "isActive": true,
+      "pricing": {
+        "source": "manual",
+        "inputCostPerToken": 0,
+        "outputCostPerToken": 0
+      },
+      "profileAlias": "chat-default",
+      "modelAlias": "chat-default",
+      "targetModel": "selfhost-test"
+    }
+  ],
+  "embeddingProfiles": [
+    {
+      "gatewaySlug": "selfhost-test",
+      "providerName": "selfhost-test",
+      "isDefault": true,
+      "isActive": true,
+      "pricing": {
+        "source": "manual",
+        "inputCostPerToken": 0,
+        "outputCostPerToken": 0
+      },
+      "profileAlias": "embed-default",
+      "modelAlias": "embed-default",
+      "targetModel": "selfhost-embedding",
+      "requestedDimensions": 1024,
+      "vectorStrategy": "auto"
+    }
+  ]
+}

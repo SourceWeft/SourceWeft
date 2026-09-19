@@ -1,5 +1,6 @@
 "use client";
 
+export { AboutPanel } from "./dashboard-settings-center/about-panel";
 export { AccountPanel } from "./dashboard-settings-center/account-panel";
 export { BillingPanel } from "./dashboard-settings-center/billing-panel";
 export { DashboardSettingsCenterModal } from "./dashboard-settings-center/settings-center-shell";

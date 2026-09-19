@@ -1,14 +1,16 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SourceWeft",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.3",
   "identifier": "nicelab.sourceweft",
   "build": {
-    "devUrl": "http://localhost:3000/dashboard",
+    "devUrl": "http://localhost:3000/dashboard/chat",
     "frontendDist": "../placeholder-dist"
   },
   "bundle": {
     "active": true,
+    "copyright": "© LEI QIN. All rights reserved.",
+    "publisher": "SourceWeft",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -29,10 +31,10 @@
       {
         "label": "main",
         "title": "SourceWeft",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 960,
-        "minHeight": 640,
+        "width": 1280,
+        "height": 840,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
         "visible": true,
         "create": false
@@ -42,7 +44,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["sourceweft"]
+        "schemes": [
+          "sourceweft"
+        ]
       }
     }
   }

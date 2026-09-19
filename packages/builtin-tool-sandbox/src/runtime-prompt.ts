@@ -51,7 +51,7 @@ export function buildSandboxRuntimePrompt(
       : null,
     `- ${EXECUTE_TOOL_NAME} runs commands in the provider sandbox filesystem and uses ${defaultCwd} by default.`,
     capabilities.collectToolAvailable
-      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use it for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`
+      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Files. Do not use it for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`
       : null,
   ].filter((line): line is string => line !== null);
 
@@ -82,36 +82,42 @@ export function buildSandboxRuntimePrompt(
   // Skill-staging branches (docs/architecture/sandbox-skill-staging.md).
   // Each conditional replaces its line(s) IN PLACE so the unstaged prompt
   // stays byte-identical to the pre-staging prompt.
-  const skillsVfsLine = capabilities.skillScriptsStaged
-    ? `- /skills is SourceWeft skill content: readable through SourceWeft file tools, and materialized read-only at the same /skills/<name>/ paths inside the sandbox, so ${EXECUTE_TOOL_NAME} commands may run bundled skill scripts directly (for example python3 /skills/<name>/scripts/tool.py).`
-    : "- /skills is SourceWeft DB-backed VFS skill guidance accessed only through SourceWeft file tools.";
-  const executeNamespaceLines = capabilities.skillScriptsStaged
-    ? `- ${SOURCEWEFT_WORK_ROOT} and ${SOURCEWEFT_KB_ROOT} inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
+  const skillsVfsLine =
+    capabilities.skillScriptsStaged && pathPolicy?.skillsRoot
+      ? `- /skills contains virtual skill guidance. Executable skill bundles are materialized under ${pathPolicy.skillsRoot}/<name>/ inside this computer's workspace. Use that physical path for bundled scripts; /skills itself is not a local OS path.`
+      : capabilities.skillScriptsStaged
+        ? `- /skills is SourceWeft skill content: readable through SourceWeft file tools, and materialized read-only at the same /skills/<name>/ paths inside the sandbox, so ${EXECUTE_TOOL_NAME} commands may run bundled skill scripts directly (for example python3 /skills/<name>/scripts/tool.py).`
+        : "- /skills is SourceWeft DB-backed VFS skill guidance accessed only through SourceWeft file tools.";
+  const executeNamespaceLines =
+    capabilities.skillScriptsStaged && pathPolicy?.skillsRoot
+      ? `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills are virtual SourceWeft paths, not local OS paths. Use ${pathPolicy.workspaceRoot} for local files and ${pathPolicy.skillsRoot} for installed skill scripts. Do not modify staged skill resources.`
+      : capabilities.skillScriptsStaged
+        ? `- ${SOURCEWEFT_WORK_ROOT} and ${SOURCEWEFT_KB_ROOT} inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
 - Never include ${SOURCEWEFT_WORK_ROOT} or ${SOURCEWEFT_KB_ROOT} in an ${EXECUTE_TOOL_NAME} command. They are not sandbox paths, even for mkdir, ls, cat, test, node, python, or shell redirection.
 - Never write to /skills from ${EXECUTE_TOOL_NAME} commands: it is platform-managed and read-only. prepare and collect cannot target /skills.`
-    : `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
+        : `- ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
 - Never include ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, or /skills in an ${EXECUTE_TOOL_NAME} command. They are not sandbox paths, even for mkdir, ls, cat, test, node, python, or shell redirection.`;
   const skillsPrepareRule = capabilities.skillScriptsStaged
-    ? `- ${SOURCEWEFT_KB_ROOT} is not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile. Skill bundles are already staged under /skills and need no preparation.`
+    ? `- ${SOURCEWEFT_KB_ROOT} is not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile. Skill bundles are already staged under ${pathPolicy?.skillsRoot ?? "/skills"} and need no preparation.`
     : `- ${SOURCEWEFT_KB_ROOT} and /skills are not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile.`;
 
   return `<sandbox_rules>
 - SourceWeft VFS and the provider sandbox filesystem are separate namespaces.
-- ${SOURCEWEFT_WORK_ROOT} is SourceWeft DB-backed VFS Workfiles: database-persisted, thread-scoped working files accessed only through SourceWeft file tools.
+- ${SOURCEWEFT_WORK_ROOT} is SourceWeft DB-backed VFS Files: database-persisted, thread-scoped working files accessed only through SourceWeft file tools.
 - ${SOURCEWEFT_KB_ROOT} is SourceWeft DB-backed VFS source evidence accessed only through SourceWeft source/file tools.
 ${skillsVfsLine}
 - SourceWeft VFS logical paths are not mounted into sandbox command execution and are not automatically synced with the sandbox filesystem.
 - Preparing files is explicit selected-content materialization, not a ${SOURCEWEFT_WORK_ROOT} directory mount, mirror, root-level copy, or bidirectional sync.
 ${executeNamespaceLines}
 ${providerPolicyLines}
-- Sandbox files become SourceWeft durable state only when explicitly collected back into ${SOURCEWEFT_WORK_ROOT} as text Workfiles or published through explicit artifact pipelines.
+- Sandbox files become SourceWeft durable state only when explicitly collected back into ${SOURCEWEFT_WORK_ROOT} as text Files or published through explicit artifact pipelines.
 - Put all scratch files, QA renders, thumbnails, and artifacts that SourceWeft may need to read, inspect, collect, or publish under the provider sandbox read/write roots, normally ${defaultCwd}. Do not use /tmp for those files.
 - Use the sandbox for command execution, dependency installation, format conversion, batch processing, testing, or computation.
 ${bridgeInstructions.join("\n")}
-- Commands needing Workfiles should prepare the selected ${SOURCEWEFT_WORK_ROOT}/... files into one of the provider prepare target roots, then explicitly work from those sandbox paths.
+- Commands needing Files should prepare the selected ${SOURCEWEFT_WORK_ROOT}/... files into one of the provider prepare target roots, then explicitly work from those sandbox paths.
 ${virtualPathExecutionRule}
 ${skillsPrepareRule}
-- Prepared files, collected Workfiles, and sandbox outputs are not citable evidence.
+- Prepared files, collected Files, and sandbox outputs are not citable evidence.
 - Verify factual claims against ${SOURCEWEFT_KB_ROOT}, retrieval, web, or another citable source before final answers.
 </sandbox_rules>${environmentSummary}`;
 }

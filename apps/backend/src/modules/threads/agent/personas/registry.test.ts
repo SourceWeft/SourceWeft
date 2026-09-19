@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { BUILTIN_PERSONAS } from "./builtin";
+import { READ_ONLY_BUSINESS_TOOL_NAMES } from "../subagents/read-only";
 import {
   applyPersonaToolAllowlist,
   filterToolsForPersona,
@@ -35,9 +36,10 @@ test("findPersona resolves by slug and tolerates blanks", () => {
   assert.equal(findPersona(""), null);
 });
 
-test("read-scoped personas allow only search_sources among business tools", () => {
+test("read-scoped personas allow only the read-only business tools", () => {
   const explore = findPersona("explore");
-  assert.deepEqual(explore?.toolAllowlist, [AGENT_TOOL_NAMES.searchSources]);
+  assert.deepEqual(explore?.toolAllowlist, [...READ_ONLY_BUSINESS_TOOL_NAMES]);
+  assert.ok(explore?.toolAllowlist?.includes(AGENT_TOOL_NAMES.searchSources));
   assert.ok(explore?.filesystemPermissions?.length);
   assert.equal(findPersona("general-purpose")?.toolAllowlist, undefined);
 });

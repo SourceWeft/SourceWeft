@@ -47,7 +47,7 @@ test("streams growing write_file content across fragments", () => {
     index: 0,
     id: "c1",
     name: "write_file",
-    args: '{"path":"/workfiles/a.py","content":"pri',
+    args: '{"path":"/files/a.py","content":"pri',
   });
   assert.equal(first.length, 1);
   assert.equal(first[0]!.type, "tool-input-delta");
@@ -55,7 +55,7 @@ test("streams growing write_file content across fragments", () => {
     assert.equal(first[0]!.id, "c1");
     assert.equal(first[0]!.tool, "write_file");
     assert.equal(first[0]!.input.content, "pri");
-    assert.equal(first[0]!.input.path, "/workfiles/a.py");
+    assert.equal(first[0]!.input.path, "/files/a.py");
   }
 
   const second = feed(runtime, { index: 0, args: 'nt(1)"}' });

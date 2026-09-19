@@ -182,8 +182,9 @@ try {
     BACKEND_API_PORT: "3001",
     HOSTNAME: "0.0.0.0",
     PORT: "3000",
-    NEXT_PUBLIC_API_BASE_URL: "http://localhost:3001",
-    NEXT_PUBLIC_WEB_BASE_URL: "http://localhost:3000",
+    PUBLIC_API_BASE_URL: "http://localhost:3001",
+    PUBLIC_WEB_BASE_URL: "http://localhost:3000",
+    INTERNAL_API_BASE_URL: "http://127.0.0.1:3001",
     BETTER_AUTH_TRUSTED_ORIGINS: "http://localhost:3000,http://localhost:3001",
     MODEL_PRICING_SYNC_INTERVAL_MS: "3600000",
     MODEL_CATALOG_REFRESH_INTERVAL_MS: "3600000",
@@ -269,7 +270,7 @@ try {
         assert.equal((await state(name)).Running, true);
         assert.doesNotMatch(
           await logs(name),
-          /Worker runtime error|Scheduler task failed|Unhandled|Fatal error/i,
+          /Worker runtime error|Scheduler task failed|Unhandled|Fatal error|Dynamic require of|deliverable_pipeline_builtin_fallback_load_failed/i,
         );
       }
       await docker(["stop", "-t", "20", name]);

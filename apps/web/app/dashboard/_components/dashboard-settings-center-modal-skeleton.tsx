@@ -1,5 +1,11 @@
 "use client";
 
+import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
+import {
+  isSettingsTabAvailable,
+  resolveSettingsTab,
+} from "../../../lib/billing-edition/visibility";
+
 import type { SettingsCenterTab } from "./dashboard-settings-center/types";
 
 type SkeletonProps = {
@@ -250,13 +256,15 @@ export function SettingsCenterPanelSkeleton({
 }: {
   activeTab?: SettingsCenterTab;
 }) {
-  if (activeTab === "team") {
+  const billingAvailable = useBillingAvailable();
+  const visibleTab = resolveSettingsTab(activeTab, billingAvailable);
+  if (visibleTab === "team") {
     return <TeamPanelSkeleton />;
   }
-  if (activeTab === "usage") {
+  if (visibleTab === "usage") {
     return <UsagePanelSkeleton />;
   }
-  if (activeTab === "billing") {
+  if (visibleTab === "billing") {
     return <BillingPanelSkeleton />;
   }
   return <AccountPanelSkeleton />;
@@ -267,6 +275,7 @@ export function DashboardSettingsCenterModalSkeleton({
 }: {
   activeTab?: SettingsCenterTab;
 }) {
+  const billingAvailable = useBillingAvailable();
   const navItems: SettingsCenterTab[] = [
     "account",
     "team",
@@ -296,18 +305,24 @@ export function DashboardSettingsCenterModalSkeleton({
 
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
-                {navItems.map((item) => (
-                  <div
-                    className={cx(
-                      "flex h-8 items-center gap-2.5 rounded-md px-2.5",
-                      item === activeTab && "bg-background shadow-sm",
-                    )}
-                    key={item}
-                  >
-                    <SettingsSkeletonBlock className="h-3.5 w-3.5 shrink-0 rounded-sm" />
-                    <SettingsSkeletonLine className="w-20" />
-                  </div>
-                ))}
+                {navItems
+                  .filter((item) =>
+                    isSettingsTabAvailable(item, billingAvailable),
+                  )
+                  .map((item) => (
+                    <div
+                      className={cx(
+                        "flex h-8 items-center gap-2.5 rounded-md px-2.5",
+                        item ===
+                          resolveSettingsTab(activeTab, billingAvailable) &&
+                          "bg-background shadow-sm",
+                      )}
+                      key={item}
+                    >
+                      <SettingsSkeletonBlock className="h-3.5 w-3.5 shrink-0 rounded-sm" />
+                      <SettingsSkeletonLine className="w-20" />
+                    </div>
+                  ))}
               </div>
             </nav>
           </aside>

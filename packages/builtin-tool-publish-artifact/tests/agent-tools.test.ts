@@ -1044,7 +1044,7 @@ test("publishArtifact publishes slides from work_file source", async () => {
       title: "Workfile Deck",
       source: {
         kind: "work_file",
-        path: "/workfiles/decks/workfile-deck.pptx",
+        path: "/files/decks/workfile-deck.pptx",
       },
     }),
   });
@@ -1119,7 +1119,7 @@ test("publishArtifact publishes HTML file artifacts from work_file source", asyn
       description: "Generated HTML artifact",
       source: {
         kind: "work_file",
-        path: "/workfiles/example.html",
+        path: "/files/example.html",
       },
     },
   });
@@ -1135,7 +1135,7 @@ test("publishArtifact publishes HTML file artifacts from work_file source", asyn
   const published =
     mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0].spec;
   assert.equal(published?.payload.source.kind, "work_file");
-  assert.equal(published?.payload.source.path, "/workfiles/example.html");
+  assert.equal(published?.payload.source.path, "/files/example.html");
   assert.equal(published?.attachments?.[0]?.contentType, "text/html");
 });
 
@@ -1577,7 +1577,7 @@ test("PPTX_OUTPUT_INVALID_MIME is thrown here, before the writer is reached", as
           title: "Wrong Mime",
           source: {
             kind: "work_file",
-            path: "/workfiles/deck.pptx",
+            path: "/files/deck.pptx",
           },
         }),
       }),

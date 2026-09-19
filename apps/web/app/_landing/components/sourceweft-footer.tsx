@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import type { LandingAuthState } from "./use-landing-auth-state";
@@ -54,11 +55,15 @@ export function SourceWeftFooter({
     ["/#features", "Features"],
     ["/#how-it-works", "How it works"],
     ["/#pricing", "Pricing"],
+    ["/download", "Download"],
+    ["/mcp", "MCP Servers"],
+    ["/blog", "Blog"],
     [
       authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",
       authState?.isSignedIn ? "Dashboard" : "Get started",
     ],
   ] as const;
+  const checkoutAvailable = useCheckoutAvailable();
 
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
@@ -71,14 +76,19 @@ export function SourceWeftFooter({
             </p>
           </div>
 
-          <FooterColumn title="Product" links={productLinks} />
+          <FooterColumn
+            title="Product"
+            links={productLinks.filter(
+              ([href]) => href !== "/#pricing" || checkoutAvailable,
+            )}
+          />
           <FooterColumn title="Company" links={COMPANY_LINKS} />
           <FooterColumn title="Legal" links={LEGAL_LINKS} />
         </div>
 
         <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-100 pt-8 text-xs text-zinc-400 dark:border-white/[0.06] dark:text-zinc-700">
           <p>© {new Date().getFullYear()} SourceWeft. All rights reserved.</p>
-          <span>Build By SourceWeft</span>
+          <span>Built by SourceWeft</span>
         </div>
       </div>
     </footer>

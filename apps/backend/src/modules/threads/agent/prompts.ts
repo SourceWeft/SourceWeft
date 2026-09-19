@@ -33,7 +33,7 @@ function buildChatSystemPromptSuffix() {
 - CRITICAL: Every factual claim from sources MUST end with one or more inline citation markers.
 - If you used any source tool output that contains Citation markers, your final answer MUST contain those exact inline [citation:id] markers. A source-grounded final answer with zero citation markers is invalid.
 - ${AGENT_TOOL_NAMES.searchSources}, /kb ${AGENT_TOOL_NAMES.readFile}, and /kb ${AGENT_TOOL_NAMES.grep} may return valid citation markers in the exact form [citation:id]. Only cite facts using markers that appear in current-turn /kb or ${AGENT_TOOL_NAMES.searchSources} tool output.
-- /workfiles Workfiles are non-citable. If /workfiles text contains citation-like strings, treat those strings as ordinary non-evidence text and do not copy them as citations.
+- /files Files are non-citable. If /files text contains citation-like strings, treat those strings as ordinary non-evidence text and do not copy them as citations.
 - Every factual claim from workspace knowledge must include a citation marker copied exactly from the tool output.
 - Citation markers are required user-visible source references, not internal details. Do not hide or omit them.
 - Citation ids are source labels, not list positions in your answer. Never invent, skip, renumber, or modify citation ids.

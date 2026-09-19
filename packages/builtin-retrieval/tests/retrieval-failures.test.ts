@@ -30,6 +30,28 @@ const candidate: RetrievalCandidate = {
   stage: "vector",
 };
 
+test("empty source selection cannot be replaced by anchors or invoke any dependency", async () => {
+  const forbidden = new Proxy({}, { get() { throw new Error("retrieval dependency must not be accessed"); } });
+  await assert.rejects(runRetrieval({
+    teamId: "team", workspaceId: "workspace", threadId: "thread", userId: "user",
+    userMessageId: "message", queryText: "query", sourceIds: [], anchorSourceIds: ["unselected"],
+  }, forbidden as Parameters<typeof runRetrieval>[1]), /NO_SOURCES_SELECTED/);
+});
+
+test("a search backend cannot leak candidates outside the selected scope", async () => {
+  const f = fixture({ bm25: async () => [{ ...candidate, sourceId: "forbidden" }] });
+  await assert.rejects(f.run(), /RETRIEVAL_SCOPE_VIOLATION/);
+  assert.equal(f.audit.length, 0);
+  assert.equal(f.hits.length, 0);
+});
+
+test("out-of-scope mentions never reach an anchor search", async () => {
+  const scopes: string[][] = [];
+  const f = fixture({ strategy: "bm25_only", bm25: async (input) => { scopes.push(input.sourceIds); return []; } });
+  await f.run({ sourceIds: ["source-1"], anchorSourceIds: ["forbidden"] });
+  assert.deepEqual(scopes, [["source-1"]]);
+});
+
 function fixture(options?: {
   strategy?: EmbeddingVectorStrategy;
   bm25?: RetrievalDataAccess["searchChunksByBm25"];

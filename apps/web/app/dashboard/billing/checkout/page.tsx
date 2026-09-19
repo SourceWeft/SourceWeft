@@ -1,4 +1,5 @@
-import { BillingCheckoutClient } from "./billing-checkout-client";
+// Generated commercial billing route; subject to enterprise/LICENSE.
+import { BillingCheckoutClient } from "../../../../lib/billing-edition/client";
 
 type CheckoutSearchParams = {
   billingInterval?: string;

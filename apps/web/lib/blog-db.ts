@@ -1,5 +1,7 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
+import { cache } from "react";
 import { Pool } from "pg";
 import { SITE_URL } from "../app/seo";
 
@@ -107,8 +109,20 @@ export function absoluteBlogPostUrl(slug: string) {
   return `${SITE_URL}${blogPostPath(slug)}`;
 }
 
-export async function listPublishedBlogPosts() {
-  const result = await getPool().query<BlogRow>(
+// Published content is identical for every visitor and only changes when the
+// backend `blog:sync` runs, so rows are cached rather than re-queried per hit.
+// Rows (not mapped objects) are cached because the data cache round-trip turns
+// timestamps into strings, which `normalizeDate` already tolerates.
+const BLOG_CACHE_REVALIDATE_SECONDS = 300;
+
+const cachedBlogPostRows = unstable_cache(
+  async () => (await queryPublishedBlogPostRows()).rows,
+  ["blog-published-posts"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
+async function queryPublishedBlogPostRows() {
+  return getPool().query<BlogRow>(
     `
       select
         p.id,
@@ -159,12 +173,20 @@ export async function listPublishedBlogPosts() {
     `,
     [PUBLIC_BLOG_LOCALE],
   );
-
-  return result.rows.map(mapSummaryRow);
 }
 
-export async function listPublishedBlogTags() {
-  const result = await getPool().query<{ tag: string }>(
+export async function listPublishedBlogPosts() {
+  return (await cachedBlogPostRows()).map(mapSummaryRow);
+}
+
+const cachedBlogTagRows = unstable_cache(
+  async () => (await queryPublishedBlogTagRows()).rows,
+  ["blog-published-tags"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
+async function queryPublishedBlogTagRows() {
+  return getPool().query<{ tag: string }>(
     `
       select distinct tag.value as tag
       from blog_posts p
@@ -177,12 +199,20 @@ export async function listPublishedBlogTags() {
     `,
     [PUBLIC_BLOG_LOCALE],
   );
-
-  return result.rows.map((row) => row.tag);
 }
 
-export async function getPublishedBlogPost(slug: string) {
-  const result = await getPool().query<BlogRow>(
+export async function listPublishedBlogTags() {
+  return (await cachedBlogTagRows()).map((row) => row.tag);
+}
+
+const cachedBlogPostRow = unstable_cache(
+  async (slug: string) => (await queryPublishedBlogPostRow(slug)).rows[0] ?? null,
+  ["blog-published-post"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
+async function queryPublishedBlogPostRow(slug: string) {
+  return getPool().query<BlogRow>(
     `
       select
         p.id,
@@ -222,8 +252,11 @@ export async function getPublishedBlogPost(slug: string) {
     `,
     [PUBLIC_BLOG_LOCALE, slug],
   );
+}
 
-  const row = result.rows[0];
+// `cache` dedupes the generateMetadata + page render pair within one request.
+export const getPublishedBlogPost = cache(async (slug: string) => {
+  const row = await cachedBlogPostRow(slug);
   return row
     ? ({
         ...mapSummaryRow(row),
@@ -231,16 +264,24 @@ export async function getPublishedBlogPost(slug: string) {
         contentText: row.content_text ?? "",
       } satisfies BlogPostDetail)
     : null;
-}
+});
 
-export async function listPublishedBlogSitemapEntries() {
-  const result = await getPool().query<{
-    article_id: string;
-    locale: string;
-    slug: string;
-    updated_at: Date | string | null;
-    published_at: Date | string | null;
-  }>(
+type BlogSitemapRow = {
+  article_id: string;
+  locale: string;
+  slug: string;
+  updated_at: Date | string | null;
+  published_at: Date | string | null;
+};
+
+const cachedBlogSitemapRows = unstable_cache(
+  async () => (await queryBlogSitemapRows()).rows,
+  ["blog-sitemap-entries"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
+async function queryBlogSitemapRows() {
+  return getPool().query<BlogSitemapRow>(
     `
       select article_id, locale, slug, updated_at, published_at
       from blog_posts
@@ -251,8 +292,10 @@ export async function listPublishedBlogSitemapEntries() {
     `,
     [PUBLIC_BLOG_LOCALE],
   );
+}
 
-  return result.rows.map(
+export async function listPublishedBlogSitemapEntries() {
+  return (await cachedBlogSitemapRows()).map(
     (row) =>
       ({
         articleId: row.article_id,
@@ -265,13 +308,35 @@ export async function listPublishedBlogSitemapEntries() {
   );
 }
 
+const cachedRelatedBlogPostRows = unstable_cache(
+  async (articleId: string, locale: BlogLocale, tags: string[], limit: number) =>
+    (await queryRelatedBlogPostRows({ articleId, limit, locale, tags })).rows,
+  ["blog-related-posts"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
 export async function listRelatedBlogPosts(input: {
   articleId: string;
   locale: BlogLocale;
   tags: string[];
   limit?: number;
 }) {
-  const result = await getPool().query<BlogRow>(
+  const rows = await cachedRelatedBlogPostRows(
+    input.articleId,
+    input.locale,
+    input.tags,
+    input.limit ?? 3,
+  );
+  return rows.map(mapSummaryRow);
+}
+
+async function queryRelatedBlogPostRows(input: {
+  articleId: string;
+  locale: BlogLocale;
+  tags: string[];
+  limit: number;
+}) {
+  return getPool().query<BlogRow>(
     `
       select
         p.id,
@@ -315,10 +380,8 @@ export async function listRelatedBlogPosts(input: {
         p.published_at desc nulls last
       limit $4
     `,
-    [input.locale, input.articleId, input.tags, input.limit ?? 3],
+    [input.locale, input.articleId, input.tags, input.limit],
   );
-
-  return result.rows.map(mapSummaryRow);
 }
 
 function mapSummaryRow(row: BlogRow): BlogPostSummary {

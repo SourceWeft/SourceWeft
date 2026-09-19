@@ -1,0 +1,15 @@
+{
+  "tag": "v0.2.0-test.3",
+  "releasedAt": "2026-05-26",
+  "commit": "17b8821",
+  "category": "Release",
+  "title": "Add the MCP market and approval-backed agent tools",
+  "summary": "This test release introduces the MCP market with an approval resume flow, expands connector management, and publishes the shared market contracts package.",
+  "items": [
+    "Added the MCP market and the approval resume flow, backed by an MCP runtime whose agent tools run behind approvals.",
+    "Expanded connector source management, OAuth handling, and chat startup behavior, and added a connector catalog with public content pages.",
+    "Added Notion webhooks and Notion agent tools, then removed the unused Notion connector surfaces.",
+    "Published the market contracts package from its own package directory and hardened connector config and market runtime builds.",
+    "Added the SourceWeft Postgres image and simplified backend test discovery."
+  ]
+}

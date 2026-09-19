@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   oxc: {
@@ -8,6 +8,8 @@ export default defineConfig({
   },
   test: {
     setupFiles: ["./vitest.setup.ts"],
+    // Browser acceptance uses Playwright and real services, not Vitest.
+    exclude: [...configDefaults.exclude, "e2e/**"],
     coverage: {
       exclude: [".next/**", "next-env.d.ts"],
       provider: "v8",

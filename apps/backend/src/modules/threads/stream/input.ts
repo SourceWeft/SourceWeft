@@ -509,6 +509,7 @@ export async function resolveRefreshThreadStreamInput(
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
+    localCaller: input.localCaller,
     content: latestUserMessage.content,
     existingImageParts: extractImagePartsFromContentJson(
       latestUserMessage.contentJson,
@@ -593,6 +594,7 @@ export async function resolveResumeThreadStreamInput(
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
+    localCaller: input.localCaller,
     content: latestUserMessage.content,
     existingImageParts: extractImagePartsFromContentJson(
       latestUserMessage.contentJson,
@@ -663,6 +665,7 @@ export async function resolveEditThreadStreamInput(
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
+    localCaller: input.localCaller,
     content: input.content,
     ...(shouldUseSubmittedEditImages(input) ? { images: input.images } : {}),
     existingImageParts: !shouldUseSubmittedEditImages(input)

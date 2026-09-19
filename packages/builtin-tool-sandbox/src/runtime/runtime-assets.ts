@@ -32,6 +32,8 @@ const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const SAFE_ENV_VAR = /^[A-Z_][A-Z0-9_]*$/u;
 
 export type RuntimeAssetSessionLike = {
+  skillsRoot?: string;
+  checksumCommand?: "sha256sum" | "shasum -a 256";
   readonly rootDir: string;
   execute(
     command: string,
@@ -169,13 +171,14 @@ function unpackAndPromoteCommand(input: {
   plan: RuntimeAssetPlan;
   stagingDir: string;
   assetDir: string;
+  checksumCommand?: "sha256sum" | "shasum -a 256";
 }): string {
   const { plan } = input;
   const executables = [plan.entrypoint, ...(plan.makeExecutable ?? [])];
   return [
     "set -e",
     `cd ${shellQuoteSingle(input.stagingDir)}`,
-    `echo ${shellQuoteSingle(`${plan.sha256}  asset.zip`)} | sha256sum -c - >/dev/null`,
+    `echo ${shellQuoteSingle(`${plan.sha256}  asset.zip`)} | ${input.checksumCommand ?? "sha256sum"} -c - >/dev/null`,
     "unzip -q asset.zip",
     "rm -f asset.zip",
     ...executables.map(
@@ -257,7 +260,10 @@ async function ensureRuntimeAsset(input: {
 
   const rootDir = session.rootDir.replace(/\/$/u, "");
   const assetDir =
-    plan.installDir ?? `${rootDir}/${ASSETS_DIR}/${plan.name}/${plan.version}`;
+    plan.installDir?.startsWith("/skills/") && session.skillsRoot
+      ? `${session.skillsRoot}/${plan.installDir.slice("/skills/".length)}`
+      : (plan.installDir ??
+        `${rootDir}/${ASSETS_DIR}/${plan.name}/${plan.version}`);
   const stagingDir = `${assetDir}.staging`;
   const entrypointPath = `${assetDir}/${plan.entrypoint}`;
   const execute = (command: string, label: string) =>
@@ -313,7 +319,12 @@ async function ensureRuntimeAsset(input: {
           `rm -rf ${shellQuoteSingle(stagingDir)}`,
           `mkdir -p ${shellQuoteSingle(stagingDir)}`,
           `curl -fsSL --retry 4 --retry-all-errors --connect-timeout 15 -o ${shellQuoteSingle(`${stagingDir}/asset.zip`)} ${shellQuoteSingle(url)}`,
-          unpackAndPromoteCommand({ plan, stagingDir, assetDir }),
+          unpackAndPromoteCommand({
+            plan,
+            stagingDir,
+            assetDir,
+            checksumCommand: session.checksumCommand,
+          }),
         ].join(" && ");
         const result = await execute(command, "fetch");
         if (result.exitCode === 0) {
@@ -375,7 +386,9 @@ async function ensureRuntimeAsset(input: {
           "upload-prepare",
         );
         if (prepare.exitCode !== 0) {
-          throw new Error(`staging mkdir failed: ${prepare.output.slice(-200)}`);
+          throw new Error(
+            `staging mkdir failed: ${prepare.output.slice(-200)}`,
+          );
         }
         const [uploaded] = await session.uploadFiles([[uploadPath, content]]);
         if (uploaded?.error) {
@@ -393,7 +406,12 @@ async function ensureRuntimeAsset(input: {
           }
         }
         const result = await execute(
-          unpackAndPromoteCommand({ plan, stagingDir, assetDir }),
+          unpackAndPromoteCommand({
+            plan,
+            stagingDir,
+            assetDir,
+            checksumCommand: session.checksumCommand,
+          }),
           "upload-unpack",
         );
         if (result.exitCode === 0) {

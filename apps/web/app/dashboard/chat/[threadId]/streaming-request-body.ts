@@ -35,6 +35,7 @@ type BuildStreamingRequestBodyInput = {
   selectedModels: SelectedModels;
   searchEnabled: boolean;
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   skillIds?: string[];
   streamWithSelectedLlm: boolean;
   thinking?: RequestThinkingConfig;
@@ -97,6 +98,7 @@ export function buildStreamingThreadRequestBody(
       ? { mentionedSourceIds: input.mentionedSourceIds }
       : {}),
     ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+    ...(input.sourceSelectionRevision !== undefined ? { sourceSelectionRevision: input.sourceSelectionRevision } : {}),
     timezone: input.timezone,
     idempotencyKey: input.durableRunKey,
   };

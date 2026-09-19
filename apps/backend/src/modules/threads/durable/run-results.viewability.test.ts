@@ -13,7 +13,31 @@ vi.mock("../thread/repository", async (importActual) => {
   };
 });
 
-const { isRunThreadViewable } = await import("./run-results");
+const { isRunThreadViewable, getRunResult } = await import("./run-results");
+
+test("completed API result retains reasoning but excludes its internal fixed base", async () => {
+  const metadata = {
+    reasoning: "before\nafter",
+    reasoningWrite: {
+      runId: "run",
+      parentRunId: "prior",
+      base: "before",
+      revision: 2,
+      terminal: true,
+    },
+  };
+  const run = {
+    snapshotJson: {
+      thread: { id: "thread" },
+      userMessage: { id: "user" },
+      assistantMessage: { id: "assistant", metadata },
+    },
+  } as unknown as Parameters<typeof getRunResult>[0];
+  const result = await getRunResult(run);
+  assert.equal(result.assistantMessage.metadata.reasoning, metadata.reasoning);
+  assert.equal("reasoningWrite" in result.assistantMessage.metadata, false);
+  assert.equal(metadata.reasoningWrite.base, "before");
+});
 
 const context = {
   teamId: "team-1",

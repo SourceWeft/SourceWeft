@@ -1,4 +1,5 @@
-import { BillingSuccessClient } from "./billing-success-client";
+// Generated commercial billing route; subject to enterprise/LICENSE.
+import { BillingSuccessClient } from "../../../lib/billing-edition/client";
 
 export default async function BillingPage({
   searchParams,

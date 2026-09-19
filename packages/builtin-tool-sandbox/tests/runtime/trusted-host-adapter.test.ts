@@ -263,6 +263,9 @@ function createHarness(
     modelExecuteTimeouts,
     recordedOperations,
     runtime,
+    enableNativeFiles() {
+      provider.nativeFileOperations = true;
+    },
     setCommandHandler(handler: typeof commandHandler) {
       commandHandler = handler;
     },
@@ -964,4 +967,19 @@ describe("trusted sandbox host adapter", () => {
     assert.deepEqual(harness.deletedSandboxIds, ["provider-sandbox-1"]);
     assert.deepEqual(harness.expiredSandboxIds, ["sandbox-generation-1"]);
   });
+});
+
+test("native downloads use rooted snapshots without GNU shell path probes", async () => {
+  const harness = createHarness();
+  harness.enableNativeFiles();
+  const bytes = await harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/b.bin" });
+  assert.deepEqual([...bytes], [4, 5]);
+  assert.equal(harness.executeInputs.length, 0);
+  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/etc/secret" }));
+  assert.equal(harness.downloadInputs.length, 1);
+  harness.setDownloadHandler(async () => Buffer.alloc(9));
+  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/b.bin" }), /SANDBOX_HOST_DOWNLOAD_TOO_LARGE/);
+  harness.setDownloadHandler(async () => { throw new Error("LOCAL_PATH_DENIED: symlink"); });
+  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/link" }), /LOCAL_PATH_DENIED/);
+  assert.equal(harness.executeInputs.length, 0);
 });

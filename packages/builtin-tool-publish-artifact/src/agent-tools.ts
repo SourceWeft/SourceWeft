@@ -102,7 +102,7 @@ const pptxArtifactRuntimePromptProvider = {
       "For PPT Deck visual QA, first render the actual PPTX to PDF with LibreOffice, then render slide JPG files with pdftoppm, print QA_IMAGE_COUNT and PREVIEW_IMAGE_PATH, inspect the rendered slide images, and include a visible visual QA summary before publishing.",
       "After publishing a PPT Deck, the final response must report the rendered slide image count and visual QA result, not only placeholder/content checks.",
       "Supported source kinds in this phase are `sandbox_path` for sandbox files and `work_file` for SourceWeft workfiles.",
-      "`/workfiles` is text-oriented working memory and is not the fallback destination for binary sandbox outputs; publish binary outputs as artifacts instead.",
+      "`/files` is text-oriented working memory and is not the fallback destination for binary sandbox outputs; publish binary outputs as artifacts instead.",
       "Do not create artifact manifest JSON files or move files only to satisfy a fixed output directory.",
     ];
   },

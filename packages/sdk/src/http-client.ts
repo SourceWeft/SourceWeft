@@ -4,6 +4,7 @@ export type HttpClientOptions = {
   baseUrl: string;
   getToken?: () => string | undefined | Promise<string | undefined>;
   credentials?: RequestCredentials;
+  getHeaders?: (path: string) => Promise<Record<string, string>>;
 };
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
@@ -48,15 +49,15 @@ export class HttpClientError extends Error {
 export class HttpClient {
   private readonly baseUrl: string;
   private readonly getToken?: () =>
-    | string
-    | undefined
-    | Promise<string | undefined>;
+    string | undefined | Promise<string | undefined>;
   private readonly credentials?: RequestCredentials;
+  private readonly getHeaders?: HttpClientOptions["getHeaders"];
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.getToken = options.getToken;
     this.credentials = options.credentials;
+    this.getHeaders = options.getHeaders;
   }
 
   async get<T>(path: string): Promise<T> {
@@ -104,10 +105,39 @@ export class HttpClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  async getBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+    return (
+      await this.response(path, { method: "GET", signal, cache: "no-store" })
+    ).blob();
+  }
+
+  async putBytes<T>(
+    path: string,
+    body: Blob,
+    expectedRevision?: string,
+  ): Promise<T> {
+    return this.request<T>(path, {
+      method: "PUT",
+      body,
+      headers: {
+        "content-type": body.type || "application/octet-stream",
+        ...(expectedRevision ? { "if-match": `"${expectedRevision}"` } : {}),
+      },
+    });
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<T> {
+    return (await (await this.response(path, init)).json()) as T;
+  }
+
+  private async response(path: string, init: RequestInit): Promise<Response> {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     const token = await this.getToken?.();
     const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(
+      (await this.getHeaders?.(path)) ?? {},
+    ))
+      headers.set(key, value);
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
@@ -122,7 +152,7 @@ export class HttpClient {
       throw await this.toHttpError(response);
     }
 
-    return (await response.json()) as T;
+    return response;
   }
 
   private async toHttpError(response: Response): Promise<HttpClientError> {

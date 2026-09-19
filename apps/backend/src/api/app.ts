@@ -5,7 +5,10 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "../modules/auth";
-import { handleCreemScheduledCancelWebhook } from "../modules/billing/providers/creem-webhook-bypass";
+import {
+  handleBillingAuthRequest,
+  getBillingDeploymentCapabilities,
+} from "../billing-host/bindings";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { describeError } from "./response/error-detail";
@@ -19,6 +22,7 @@ import { registerConnectorOAuthRoutes } from "./routes/connectors-oauth";
 import { registerConnectorWebhookRoutes } from "./routes/connectors-webhooks";
 import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
+import { registerLocalDeviceRoutes } from "./routes/local-devices";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerPublicShareRoutes } from "./routes/public-shares";
@@ -53,7 +57,12 @@ export function createApp() {
         // so a misconfigured/empty allow-list must fail closed, not open.
         return config.auth.trustedOrigins.includes(origin) ? origin : "";
       },
-      allowHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],
+      allowHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Workspace-Id",
+        "X-Local-Proof",
+      ],
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
       exposeHeaders: [
         "set-auth-token",
@@ -70,7 +79,7 @@ export function createApp() {
     const authRequest = withBetterAuthClientIp(c);
 
     if (c.req.method === "POST") {
-      const scheduledCancelResponse = await handleCreemScheduledCancelWebhook(
+      const scheduledCancelResponse = await handleBillingAuthRequest(
         authRequest.clone(),
       );
       if (scheduledCancelResponse) {
@@ -104,11 +113,16 @@ export function createApp() {
 
   registerAuthMetaRoutes(app);
   registerDesktopAuthRoutes(app);
+  registerLocalDeviceRoutes(app);
   registerConnectorOAuthRoutes(app);
   registerConnectorWebhookRoutes(app);
   registerWorkspaceRoutes(app);
   registerDashboardRoutes(app);
   registerUserSettingsRoutes(app);
+  app.get("/v1/deployment/capabilities", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json(getBillingDeploymentCapabilities());
+  });
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerMarketRoutes(app);

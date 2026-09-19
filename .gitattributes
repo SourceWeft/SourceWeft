@@ -1,0 +1,3 @@
+# Preserve the official crate license and unified-diff context verbatim.
+third_party/rust/glib-0.18.5/LICENSE whitespace=-blank-at-eof
+third_party/rust/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

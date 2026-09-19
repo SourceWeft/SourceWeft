@@ -8,6 +8,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocalOperationStatus } from "../local-conversation-status";
 import type { ToolConfirmationDecision as ToolConfirmationWireDecision } from "@sourceweft/sdk";
 import {
   Confirmation,
@@ -157,6 +158,7 @@ function ToolConfirmationPanel({
   workspaceId?: string | null;
 }) {
   const { confirmation } = item;
+  const localStatus = useLocalOperationStatus();
   const initialStatus = confirmation.status ?? confirmation.action.status;
   const [state, setState] = useState<ConfirmationState>(
     confirmationStatusToState(initialStatus),
@@ -200,6 +202,7 @@ function ToolConfirmationPanel({
   );
 
   async function respond(decision: ToolConfirmationWireDecision) {
+    if (localStatus.blocked && decision !== "reject") return;
     if (submittedConfirmationIdRef.current === confirmation.id) {
       return;
     }
@@ -298,9 +301,13 @@ function ToolConfirmationPanel({
   }
 
   return (
-    <Confirmation approval={approval} state={state}>
+    <Confirmation
+      approval={approval}
+      state={state}
+      className="min-h-0 max-h-[min(420px,calc(45svh-3.5rem))] overflow-hidden"
+    >
       <ConfirmationRequest>
-        <ConfirmationTitle className="block">
+        <ConfirmationTitle className="block min-h-0 overflow-y-auto overscroll-contain pr-1 [overflow-wrap:anywhere]">
           <span className="flex items-start gap-2">
             <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
             <span className="min-w-0">
@@ -325,7 +332,7 @@ function ToolConfirmationPanel({
                     View command ({commandText.split("\n").length} lines,{" "}
                     {commandText.length} characters)
                   </summary>
-                  <pre className="mt-1 max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs leading-5">
+                  <pre className="mt-1 max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-5">
                     {commandText}
                   </pre>
                 </details>
@@ -369,9 +376,9 @@ function ToolConfirmationPanel({
           </ConfirmationTitle>
         </div>
       ) : null}
-      <ConfirmationActions className="flex-wrap">
+      <ConfirmationActions className="shrink-0 flex-wrap border-t border-border/50 bg-background pt-2">
         {offersAlwaysAllow ? (
-          <label className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             Remember for
             <select
               aria-label="How long to remember this approval"
@@ -390,7 +397,10 @@ function ToolConfirmationPanel({
         ) : null}
         {decisionOptions.map((option) => (
           <ConfirmationAction
-            disabled={!respondable}
+            disabled={
+              !respondable ||
+              (localStatus.blocked && option.decision !== "reject")
+            }
             key={option.decision}
             onClick={() => void respond(option.decision)}
             {...(option.description ? { title: option.description } : {})}
@@ -457,7 +467,7 @@ export function ToolInterventionBar({
   return (
     <div
       className={cn(
-        "border-t border-border/70 bg-background/95 px-4 py-3 shadow-[0_-8px_24px_hsl(var(--background)/0.9)] backdrop-blur",
+        "min-h-0 max-h-[min(480px,45svh)] shrink-0 border-t border-border/70 bg-background/95 px-3 py-2 shadow-[0_-8px_24px_hsl(var(--background)/0.9)] backdrop-blur sm:px-4",
         className,
       )}
     >
@@ -470,7 +480,7 @@ export function ToolInterventionBar({
             <div className="min-w-0">
               {visibleItems.length > 1 ? (
                 <>
-                  <TabsList className="max-w-[50vw] overflow-x-auto">
+                  <TabsList className="max-w-full overflow-x-auto">
                     {visibleItems.map((item, index) => (
                       <TabsTrigger
                         className="min-w-0 max-w-40 truncate"

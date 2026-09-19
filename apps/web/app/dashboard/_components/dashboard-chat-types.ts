@@ -1,6 +1,7 @@
 export type ChatVisibility = "private" | "workspace" | "public_link";
 
 export type ChatItem = {
+  executionTarget?: import("@sourceweft/contracts").ThreadExecutionTarget;
   id: string;
   title: string;
   updatedAt: string;
@@ -8,9 +9,9 @@ export type ChatItem = {
   visibility: ChatVisibility;
   status?: "ready" | "running" | "attention";
   /** The thread this sub-agent conversation nests under; null at top level. */
-  parentThreadId: string | null;
+  parentThreadId?: string | null;
   /** The persona driving the thread; null for an ordinary chat. */
-  personaId: string | null;
+  personaId?: string | null;
   /** One visible level: the sub-agent conversations nested under this chat. */
   children?: ChatItem[];
 };

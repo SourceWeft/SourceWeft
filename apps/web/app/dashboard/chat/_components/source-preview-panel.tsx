@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FileCitationPreview } from "./file-citation-preview";
 import {
   Code2,
   Download,
@@ -30,7 +31,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
-import { RawImage } from "../../../_components/raw-image";
+import { Preview } from "@sourceweft/preview/react";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
 
@@ -160,17 +161,24 @@ export function SourcePreviewPanel({
   useEffect(() => {
     if (open) {
       const isChunkCitation = Boolean(
-        citation?.chunkId && !citation.externalUri,
+        citation?.chunkId && !citation.externalUri && !citation.fileReference,
       );
       setPreviewMode(isChunkCitation ? "chunks" : "preview");
       setRawChunkIds(new Set());
     }
-  }, [citation?.chunkId, citation?.externalUri, open, source?.id]);
+  }, [
+    citation?.chunkId,
+    citation?.externalUri,
+    citation?.fileReference,
+    open,
+    source?.id,
+  ]);
 
   useEffect(() => {
     if (
       !open ||
       citation?.externalUri ||
+      citation?.fileReference ||
       !workspaceId ||
       (!citation && !source)
     ) {
@@ -311,6 +319,15 @@ export function SourcePreviewPanel({
     });
   };
 
+  if (citation?.fileReference)
+    return (
+      <FileCitationPreview
+        reference={citation.fileReference}
+        excerpt={citation.content ?? citation.excerpt}
+        open={open}
+        onOpenChange={onOpenChange}
+      />
+    );
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
@@ -545,68 +562,28 @@ export function SourcePreviewPanel({
 
                     <div className="relative">
                       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.10),transparent_42%)]" />
-                      {sourceMimeType?.startsWith("image/") &&
-                      sourcePreviewUrl ? (
-                        <div className="relative flex min-h-[520px] items-center justify-center overflow-hidden bg-[linear-gradient(180deg,hsl(var(--muted)/0.10),transparent_18%),radial-gradient(circle_at_center,hsl(var(--background)),hsl(var(--muted)/0.32))] p-5 sm:p-8">
-                          <div className="absolute inset-0 bg-[linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28)),linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28))] bg-[position:0_0,14px_14px] bg-[size:28px_28px] opacity-[0.18]" />
-                          <div className="relative max-h-[72vh] w-full overflow-hidden rounded-[24px] border border-white/60 bg-white/88 p-4 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)] backdrop-blur dark:border-white/10 dark:bg-black/20">
-                            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-                            <RawImage
-                              alt={title}
-                              className="max-h-[calc(72vh-2rem)] w-full rounded-[18px] object-contain"
-                              src={sourcePreviewUrl}
-                            />
-                          </div>
+                      {sourcePreviewUrl || sourceDownloadUrl ? (
+                        <div className="h-[72vh]">
+                          <Preview
+                            source={{
+                              name: title,
+                              mimeType: sourceMimeType,
+                              url: (sourcePreviewUrl || sourceDownloadUrl)!,
+                            }}
+                          />
                         </div>
-                      ) : sourceMimeType === "application/pdf" &&
-                        sourcePreviewUrl ? (
-                        <div className="bg-muted/8 p-4 sm:p-5">
-                          <div className="overflow-hidden rounded-[22px] border border-border/70 bg-background shadow-[0_20px_60px_-36px_hsl(var(--foreground)/0.4)]">
-                            <iframe
-                              className="h-[72vh] w-full"
-                              src={sourcePreviewUrl}
-                              title={`${title} source file`}
-                            />
-                          </div>
-                        </div>
-                      ) : isTextSourceMimeType(sourceMimeType) &&
-                        sourceFileContent ? (
-                        <div className="bg-muted/8 p-4 sm:p-5">
-                          <div className="overflow-hidden rounded-[22px] border border-border/70 bg-background shadow-[0_20px_60px_-36px_hsl(var(--foreground)/0.35)]">
-                            <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-xs leading-6 text-foreground">
-                              {sourceFileContent}
-                            </pre>
-                          </div>
+                      ) : isTextSourceMimeType(sourceMimeType) ? (
+                        <div className="h-[72vh]">
+                          <Preview
+                            source={{
+                              name: title,
+                              mimeType: sourceMimeType,
+                              text: sourceFileContent,
+                            }}
+                          />
                         </div>
                       ) : (
-                        <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center px-6 py-12 text-center">
-                          <div className="inline-flex size-14 items-center justify-center rounded-[20px] border border-dashed border-border bg-background/75 text-muted-foreground shadow-sm">
-                            <PanelTopOpen className="size-6" />
-                          </div>
-                          <p className="mt-4 text-sm font-semibold text-foreground">
-                            暂不支持预览
-                          </p>
-                          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                            该文件格式暂不支持在线预览，可下载源文件查看。
-                          </p>
-                          {sourceDownloadUrl ? (
-                            <Button
-                              asChild
-                              className="mt-5 gap-1.5 rounded-xl"
-                              size="sm"
-                              variant="outline"
-                            >
-                              <a
-                                href={sourceDownloadUrl}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                <Download className="size-3.5" />
-                                Download source file
-                              </a>
-                            </Button>
-                          ) : null}
-                        </div>
+                        <p className="p-6">No source file is available.</p>
                       )}
                     </div>
                   </section>

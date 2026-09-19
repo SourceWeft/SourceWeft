@@ -4,6 +4,7 @@ import {
   listMarketCategoriesResponseSchema,
   listMarketKeysResponseSchema,
   listMarketMcpResponseSchema,
+  marketCategoryCountsResponseSchema,
   type ListMarketMcpRequest,
 } from "@sourceweft/market-contracts";
 
@@ -78,6 +79,9 @@ export class MarketClient {
     if (input.runtime) {
       params.set("runtime", input.runtime);
     }
+    if (typeof input.desktopOnly === "boolean") {
+      params.set("desktopOnly", String(input.desktopOnly));
+    }
     if (typeof input.includeDesktopOnly === "boolean") {
       params.set("includeDesktopOnly", String(input.includeDesktopOnly));
     }
@@ -99,6 +103,29 @@ export class MarketClient {
       "/v1/mcp/categories",
       { method: "GET" },
       listMarketCategoriesResponseSchema,
+    );
+  }
+
+  countMcpByCategory(
+    input: Pick<
+      ListMarketMcpRequest,
+      "query" | "includeDesktopOnly" | "desktopOnly"
+    > = {},
+  ) {
+    const params = new URLSearchParams();
+    if (input.query) {
+      params.set("query", input.query);
+    }
+    if (typeof input.desktopOnly === "boolean") {
+      params.set("desktopOnly", String(input.desktopOnly));
+    }
+    if (typeof input.includeDesktopOnly === "boolean") {
+      params.set("includeDesktopOnly", String(input.includeDesktopOnly));
+    }
+    return this.request(
+      appendQuery("/v1/mcp/category-counts", params),
+      { method: "GET" },
+      marketCategoryCountsResponseSchema,
     );
   }
 

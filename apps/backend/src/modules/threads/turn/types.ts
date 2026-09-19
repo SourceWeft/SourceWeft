@@ -149,6 +149,7 @@ export type LegacyThreadProfileAliasInput = Partial<
 >;
 
 export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
+  localCaller?: import("../../devices/access").LocalExecutionCaller;
   workspaceId: string;
   threadId: string;
   userId: string;
@@ -157,6 +158,7 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   existingImageParts?: ChatMessageImagePart[];
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   tools?: ThreadToolsSelection;
   command?: ThreadCommandSelection;
   invocation?: ThreadInvocationSelection;
@@ -202,6 +204,7 @@ export type TraceContinuationMetadata = {
 };
 
 export type PreparedThreadTurn = {
+  localCaller?: import("../../devices/access").LocalExecutionCaller;
   userId: string;
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
@@ -214,6 +217,7 @@ export type PreparedThreadTurn = {
   mentionedSourceIds: string[];
   effectiveMentionedSourceIds: string[];
   selectedSourceIds: string[];
+  sourceSelectionRevision: number;
   sourceIds: string[];
   sourceScope: {
     requestedSourceIds: string[];
@@ -249,6 +253,7 @@ export type PreparedThreadTurn = {
   timezone: string;
   userMessage: MessageRecord;
   runTraceId: string;
+  reasoningRun: import("./reasoning-state").ReasoningRun;
   /** Durable chat-run identity. Set before capability tools are bound. */
   threadRunId?: string;
   createdUserMessage: boolean;

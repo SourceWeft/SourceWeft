@@ -15,8 +15,8 @@ function formatRoots(roots: readonly string[]) {
 
 export const sandboxToolDescriptions = {
   prepareSandboxWorkspace: `Materialize explicitly selected SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources. A file entry may instead name a ready workspace artifact by artifactId to stage its primary bytes (for example a generated image) into the sandbox.`,
-  execute: `Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as ${SOURCEWEFT_WORK_ROOT}, /kb, or /skills in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Workfiles under provider sandbox paths before execution. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.`,
-  collectSandboxOutputs: `Persist explicitly selected provider sandbox text outputs from provider-allowed collect source roots into SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use this tool for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
+  execute: `Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as ${SOURCEWEFT_WORK_ROOT}, /kb, or /skills in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Files under provider sandbox paths before execution. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.`,
+  collectSandboxOutputs: `Persist explicitly selected provider sandbox text outputs from provider-allowed collect source roots into SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Files. Do not use this tool for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
 } as const;
 
 export function buildSandboxToolDescriptions(
@@ -36,7 +36,7 @@ export const sandboxToolInterruptDescriptions = {
   [PREPARE_SANDBOX_TOOL_NAME]: `Materialize selected SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files. Review paths and sizes before transfer.`,
   [EXECUTE_TOOL_NAME]:
     "Execute a shell command in the provider sandbox filesystem. Review command intent, network access, and expected outputs before running.",
-  [COLLECT_SANDBOX_OUTPUTS_TOOL_NAME]: `Persist selected provider sandbox text outputs into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfiles. Review destination paths before persisting output.`,
+  [COLLECT_SANDBOX_OUTPUTS_TOOL_NAME]: `Persist selected provider sandbox text outputs into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Files. Review destination paths before persisting output.`,
 } as const;
 
 export const prepareSandboxWorkspaceSchema = z.object({

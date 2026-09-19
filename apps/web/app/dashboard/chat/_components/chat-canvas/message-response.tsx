@@ -15,7 +15,7 @@ import type { CitationRecord } from "./types";
 
 const CITATION_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
-const WORKFILE_PATH_PATTERN = /\/workfiles\/[^\s`"'<>()[\]{}，。！？；：、]+/g;
+const WORKFILE_PATH_PATTERN = /\/files\/[^\s`"'<>()[\]{}，。！？；：、]+/g;
 const WORKFILE_TRAILING_PUNCTUATION_PATTERN = /[.,!?;:]+$/;
 
 function splitCitationIds(value: string) {
@@ -175,7 +175,7 @@ function parseWorkfilePaths(input: {
     while ((match = WORKFILE_PATH_PATTERN.exec(child)) !== null) {
       const rawPath = match[0];
       const path = rawPath.replace(WORKFILE_TRAILING_PUNCTUATION_PATTERN, "");
-      if (!path || path === "/workfiles/") {
+      if (!path || path === "/files/") {
         continue;
       }
 

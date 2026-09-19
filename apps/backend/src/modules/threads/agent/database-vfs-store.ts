@@ -31,10 +31,15 @@ function sourceIdsClause(input: {
   teamId: string;
   workspaceId: string;
   sourceIds: string[] | undefined;
+  includeAncestorDirectories?: boolean;
 }) {
   const sourceIds = input.sourceIds;
   if (!sourceIds || sourceIds.length === 0) {
     return sql`and false`;
+  }
+  // Ancestors are navigation metadata only, never additional searchable evidence.
+  if (!input.includeAncestorDirectories) {
+    return sql`and s.id = any(${toPostgresTextArray(sourceIds)}::text[])`;
   }
   return sql`and s.id in (
     with recursive visible_sources as (
@@ -122,6 +127,7 @@ export async function listVirtualFsSources(input: {
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         sourceIds: input.sourceIds,
+        includeAncestorDirectories: true,
       })}
     group by s.id
     order by s.parent_source_id nulls first, s.source_type asc, s.title asc, s.updated_at desc

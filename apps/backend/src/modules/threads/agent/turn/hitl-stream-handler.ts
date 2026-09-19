@@ -1,3 +1,6 @@
+import { isAgentToolDomain } from "@sourceweft/agent-tool-registry";
+import { db, localDevices, localThreadBindings } from "@sourceweft/db";
+import { eq } from "drizzle-orm";
 import { Command } from "@langchain/langgraph";
 import type { createThreadAgent } from "..";
 import { buildConnectorActionApprovalScope } from "../../../connectors/agent-tool-idempotency";
@@ -8,7 +11,11 @@ import type {
 import { ContentError } from "../../../content/errors";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
-import type { AgentCheckpointRef, PreparedThreadTurn, ToolCallTrace } from "../..";
+import type {
+  AgentCheckpointRef,
+  PreparedThreadTurn,
+  ToolCallTrace,
+} from "../..";
 import { finalizeMessageRenderBlocks } from "../../turn/render-blocks";
 import { logger } from "../../../../shared/logger";
 import { resolveAssistantContentFromUpdatesChunk } from "./content";
@@ -185,7 +192,17 @@ export async function* handleHitlStreamChunk(input: {
   //
   // The same resume budget bounds this path: an auto-approved resume that keeps
   // re-interrupting must not loop forever just because a trust rule exists.
-  if (input.autoApprovedHitlResumeCount < input.maxAutoApprovedHitlResumes) {
+  if (
+    !(
+      input.prepared?.thread.executionTarget?.kind === "local" &&
+      hitlInterrupts.some((request) =>
+        request.actionRequests.some((action) =>
+          isAgentToolDomain(action.name, "sandbox"),
+        ),
+      )
+    ) &&
+    input.autoApprovedHitlResumeCount < input.maxAutoApprovedHitlResumes
+  ) {
     const trustedApproval = await resolveTrustedHitlApproval({
       connectorContext: input.connectorToolContext,
       hitlInterrupts,
@@ -283,6 +300,48 @@ export async function* handleHitlStreamChunk(input: {
         connectorContext: input.connectorToolContext,
         reviewConfig,
       });
+      if (
+        confirmation.domain === "sandbox" &&
+        input.prepared?.thread.executionTarget?.kind === "local"
+      ) {
+        const binding = await db.query.localThreadBindings.findFirst({
+          where: eq(localThreadBindings.threadId, input.threadId),
+        });
+        const device = await db.query.localDevices.findFirst({
+          where: eq(
+            localDevices.id,
+            input.prepared.thread.executionTarget.deviceId,
+          ),
+        });
+        if (!binding?.workspacePath || !device)
+          throw new ContentError(
+            409,
+            "LOCAL_BINDING_INVALID",
+            "Unable to verify the working directory for local approval.",
+          );
+        confirmation.subject = { ...confirmation.subject, label: device.name };
+        confirmation.preview = {
+          ...confirmation.preview,
+          summary: `${device.name} · ${binding.workspacePath}`,
+          requestJson: {
+            ...action.args,
+            cwd:
+              typeof action.args.cwd === "string"
+                ? action.args.cwd
+                : binding.workspacePath,
+          },
+        };
+        confirmation.execution = {
+          ...confirmation.execution,
+          sourceweft: {
+            ...confirmation.execution.sourceweft,
+            localDeviceId: device.id,
+          },
+        };
+        confirmation.decisionOptions = confirmation.decisionOptions.filter(
+          (option) => option.decision !== "approve_always",
+        );
+      }
       const latencyMs = 0;
       const nextToolCall: ToolCallTrace = {
         id: toolCallId,

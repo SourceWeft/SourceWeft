@@ -4,13 +4,14 @@
  * Usage: node scripts/generate-icons.mjs
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import {
   existsSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
   copyFileSync,
+  rmSync,
 } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -23,18 +24,20 @@ function ensureDir(dir) {
 }
 
 async function loadSharp() {
-  try {
-    const { default: sharp } = await import("sharp");
-    return sharp;
-  } catch {
-    console.log("sharp not found, installing...");
-    execSync("pnpm add -D sharp", { cwd: ROOT, stdio: "inherit" });
-    const { default: sharp } = await import("sharp");
-    return sharp;
-  }
+  const { default: sharp } = await import("sharp");
+  return sharp;
 }
 
-const SVG_PATH = join(ROOT, "assets/logo.svg");
+const LOGO_PATH = join(ROOT, "assets/logo.svg");
+const SVG_PATH = join(ROOT, "assets/app-icon.svg");
+const DESKTOP_SVG_PATH = join(ROOT, "assets/desktop-icon.svg");
+const MACOS_SVG_PATH = join(ROOT, "assets/macos-icon.svg");
+// Browser tabs share the rounded white plate used by the desktop icon.
+const BROWSER_ICON_OPTIONS = {
+  svgPath: DESKTOP_SVG_PATH,
+  transparent: true,
+  rgba: true,
+};
 const ICON_DENSITY = 300;
 const SQUARE_ICON_SIZE = 1024;
 
@@ -45,35 +48,57 @@ const TARGETS = {
   docsApp: join(ROOT, "apps/docs/app"),
   extPublic: join(ROOT, "apps/extension/public"),
   tauriIcons: join(ROOT, "apps/desktop/src-tauri/icons"),
+  mobileIcons: join(ROOT, "apps/mobile/src-tauri/icons"),
+  iosIcons: join(
+    ROOT,
+    "apps/mobile/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset",
+  ),
 };
 
-async function getSourcePNG(sharp) {
-  return sharp(SVG_PATH, { density: ICON_DENSITY })
+async function getSourcePNG(sharp, svgPath = SVG_PATH) {
+  return sharp(svgPath, { density: ICON_DENSITY })
     .ensureAlpha()
     .png()
     .toBuffer();
 }
 
 async function renderPngBuffer(sharp, size, opts = {}) {
-  const { bg = { r: 255, g: 255, b: 255, alpha: 0 } } = opts;
-  const source = await getSourcePNG(sharp);
+  const { bg = { r: 255, g: 255, b: 255, alpha: 0 }, rgba = false, transparent = false, svgPath = SVG_PATH } = opts;
+  const source = await getSourcePNG(sharp, svgPath);
 
-  return sharp(source)
-    .resize(size, size, { fit: "contain", background: bg })
-    .png()
-    .toBuffer();
+  const pipeline = sharp(source)
+    .resize(size, size, { fit: "contain", background: bg });
+  if (!transparent) pipeline.flatten({ background: "white" });
+  // Tauri embeds desktop PNGs at compile time and requires an RGBA buffer.
+  // Preserve desktop transparency; iOS app icons continue to omit alpha.
+  if (rgba) pipeline.ensureAlpha();
+  return pipeline.png().toBuffer();
 }
 
 async function genPNG(sharp, size, outPath, opts = {}) {
-  const pngBuffer = await renderPngBuffer(sharp, size, opts);
+  const desktop = outPath.startsWith(TARGETS.tauriIcons);
+  const pngBuffer = await renderPngBuffer(sharp, size, {
+    rgba: desktop,
+    transparent: desktop,
+    // Desktop PNGs also supply the native app icon during Tauri development.
+    svgPath: desktop ? MACOS_SVG_PATH : SVG_PATH,
+    ...opts,
+  });
   writeFileSync(outPath, pngBuffer);
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
 
-async function genICO(sharp, outPath) {
+async function genICO(sharp, outPath, opts = {}) {
   const sizes = [16, 32, 48];
+  const desktop = outPath.startsWith(TARGETS.tauriIcons);
   const pngBuffers = await Promise.all(
-    sizes.map((sz) => renderPngBuffer(sharp, sz)),
+    // ICO entries declare 32 bits per pixel; decoders require RGBA PNG payloads.
+    sizes.map((sz) => renderPngBuffer(sharp, sz, {
+      rgba: true,
+      transparent: desktop,
+      svgPath: desktop ? DESKTOP_SVG_PATH : SVG_PATH,
+      ...opts,
+    })),
   );
 
   const ico = buildICO(pngBuffers, sizes);
@@ -112,8 +137,8 @@ function getSvgViewBox(svg) {
   return values;
 }
 
-function renderSquareSvgIcon() {
-  const source = readFileSync(SVG_PATH, "utf8");
+function renderSquareSvgIcon(svgPath) {
+  const source = readFileSync(svgPath, "utf8");
   const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] =
     getSvgViewBox(source);
   const scale = SQUARE_ICON_SIZE / Math.max(viewBoxWidth, viewBoxHeight);
@@ -135,8 +160,8 @@ ${body}
 `;
 }
 
-function genSquareSVG(outPath) {
-  writeFileSync(outPath, renderSquareSvgIcon());
+function genSquareSVG(outPath, svgPath = SVG_PATH) {
+  writeFileSync(outPath, renderSquareSvgIcon(svgPath));
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
 
@@ -204,15 +229,67 @@ async function genICNS(sharp, tauriIconsDir) {
     await genPNG(sharp, size, join(iconsetDir, name));
   }
 
-  try {
-    execSync(
-      `iconutil -c icns "${iconsetDir}" -o "${join(tauriIconsDir, "icon.icns")}"`,
-      { stdio: "pipe" },
-    );
-    console.log(`  ✓ apps/desktop/src-tauri/icons/icon.icns`);
-    execSync(`rm -rf "${iconsetDir}"`);
-  } catch {
-    console.warn("  ⚠ iconutil not available, skipping icon.icns generation");
+  execFileSync(
+    "iconutil",
+    ["-c", "icns", iconsetDir, "-o", join(tauriIconsDir, "icon.icns")],
+    { stdio: "pipe" },
+  );
+  console.log(
+    `  ✓ ${join(tauriIconsDir, "icon.icns").replace(ROOT + "/", "")}`,
+  );
+  rmSync(iconsetDir, { recursive: true });
+}
+
+async function genMobileIcons(sharp) {
+  const sizes = {
+    "32x32.png": 32,
+    "64x64.png": 64,
+    "128x128.png": 128,
+    "128x128@2x.png": 256,
+    "icon.png": 512,
+    "StoreLogo.png": 50,
+  };
+  for (const size of [30, 44, 71, 89, 107, 142, 150, 284, 310]) {
+    sizes[`Square${size}x${size}Logo.png`] = size;
+  }
+  for (const [name, size] of Object.entries(sizes)) {
+    await genPNG(sharp, size, join(TARGETS.mobileIcons, name));
+  }
+  await genICO(sharp, join(TARGETS.mobileIcons, "icon.ico"));
+  await genICNS(sharp, TARGETS.mobileIcons);
+
+  const catalog = JSON.parse(
+    readFileSync(join(TARGETS.iosIcons, "Contents.json"), "utf8"),
+  );
+  for (const entry of catalog.images) {
+    const size = Number.parseFloat(entry.size) * Number.parseFloat(entry.scale);
+    await genPNG(sharp, size, join(TARGETS.iosIcons, entry.filename));
+  }
+
+  for (const [density, scale] of Object.entries({
+    mdpi: 1,
+    hdpi: 1.5,
+    xhdpi: 2,
+    xxhdpi: 3,
+    xxxhdpi: 4,
+  })) {
+    const dir = join(TARGETS.mobileIcons, "android", `mipmap-${density}`);
+    ensureDir(dir);
+    await genPNG(sharp, 48 * scale, join(dir, "ic_launcher.png"));
+    await genPNG(sharp, 48 * scale, join(dir, "ic_launcher_round.png"));
+    // Keep the mark within Android's central 66/108 adaptive-icon safe area.
+    const foreground = await renderPngBuffer(sharp, 66 * scale);
+    await sharp({
+      create: {
+        width: 108 * scale,
+        height: 108 * scale,
+        channels: 4,
+        background: "white",
+      },
+    })
+      .composite([{ input: foreground, gravity: "centre" }])
+      .png()
+      .toFile(join(dir, "ic_launcher_foreground.png"));
   }
 }
 
@@ -226,23 +303,25 @@ async function main() {
 
   if (shouldGenerate("web")) {
     console.log("📱 Web (apps/web):");
-    copyFileSync(SVG_PATH, join(TARGETS.webPublic, "logo.svg"));
+    copyFileSync(LOGO_PATH, join(TARGETS.webPublic, "logo.svg"));
     console.log(`  ✓ apps/web/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.webPublic, "apple-touch-icon.png"));
-    await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"));
-    await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"));
-    genSquareSVG(join(TARGETS.webPublic, "icon.svg"));
-    genSquareSVG(join(TARGETS.webApp, "icon.svg"));
-    await genICO(sharp, join(TARGETS.webApp, "favicon.ico"));
+    await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"), BROWSER_ICON_OPTIONS);
+    await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"), BROWSER_ICON_OPTIONS);
+    genSquareSVG(join(TARGETS.webPublic, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    genSquareSVG(join(TARGETS.webApp, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    await genICO(sharp, join(TARGETS.webApp, "favicon.ico"), BROWSER_ICON_OPTIONS);
   }
 
   if (shouldGenerate("docs")) {
     console.log("\n📚 Docs (apps/docs):");
-    copyFileSync(SVG_PATH, join(TARGETS.docsPublic, "logo.svg"));
+    copyFileSync(LOGO_PATH, join(TARGETS.docsPublic, "logo.svg"));
     console.log(`  ✓ apps/docs/public/logo.svg`);
     await genPNG(sharp, 180, join(TARGETS.docsPublic, "apple-touch-icon.png"));
-    await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"));
-    await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"));
+    await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"), BROWSER_ICON_OPTIONS);
+    genSquareSVG(join(TARGETS.docsPublic, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    genSquareSVG(join(TARGETS.docsApp, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
+    await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"), BROWSER_ICON_OPTIONS);
   }
 
   if (shouldGenerate("extension")) {
@@ -261,6 +340,11 @@ async function main() {
     await genPNG(sharp, 512, join(TARGETS.tauriIcons, "icon.png"));
     await genICO(sharp, join(TARGETS.tauriIcons, "icon.ico"));
     await genICNS(sharp, TARGETS.tauriIcons);
+  }
+
+  if (shouldGenerate("mobile")) {
+    console.log("\n📱 Mobile (apps/mobile):");
+    await genMobileIcons(sharp);
   }
 
   console.log("\n✅ All icons generated successfully!\n");

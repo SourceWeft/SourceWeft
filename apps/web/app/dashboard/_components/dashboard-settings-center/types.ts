@@ -6,7 +6,9 @@ export type SettingsCenterTab =
   | "workspace"
   | "usage"
   | "billing"
-  | "approvals";
+  | "approvals"
+  | "local"
+  | "about";
 export type BillingScope = "personal" | "team";
 export type BillingInterval = "monthly" | "yearly";
 export type BillingSummary = Awaited<

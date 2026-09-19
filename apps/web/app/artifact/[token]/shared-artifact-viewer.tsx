@@ -9,6 +9,7 @@ import {
 } from "@sourceweft/agent-tool-registry/ui";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
 import { RawImage } from "../../_components/raw-image";
+import { Preview } from "@sourceweft/preview/react";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
 
@@ -81,11 +82,9 @@ export function SharedArtifactViewer({
   // viewer never sees two.
   const capabilityOwnsDownload = Boolean(capability?.blocksDefaultDownload);
 
-  const canInlineEmbed =
-    Boolean(artifact.fileUrl) && artifact.inlinePreviewable;
   const hasVisual =
     Boolean(capabilityContent) ||
-    canInlineEmbed ||
+    Boolean(artifact.fileUrl) ||
     Boolean(artifact.previewImageUrl);
 
   // Track the browser's own fullscreen state so Esc / F11 / the OS control keep
@@ -137,15 +136,8 @@ export function SharedArtifactViewer({
   // iframe, else the poster image, else a download prompt.
   const preview =
     capabilityContent ??
-    (canInlineEmbed && artifact.fileUrl ? (
-      // Sandboxed + cross-checked by the /raw endpoint's `CSP: sandbox` header:
-      // the artifact runs in an opaque origin and cannot reach this page.
-      <iframe
-        title={title}
-        src={artifact.fileUrl}
-        className="h-full w-full border-0"
-        sandbox="allow-scripts allow-popups allow-forms allow-modals"
-      />
+    (artifact.fileUrl ? (
+      <Preview source={{ name: title, url: artifact.fileUrl }} />
     ) : artifact.previewImageUrl ? (
       <div className="flex h-full flex-col items-center justify-center overflow-auto p-6">
         <RawImage

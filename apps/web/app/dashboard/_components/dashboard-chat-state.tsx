@@ -23,7 +23,6 @@ import {
   dashboardClient,
   workspaceClient,
 } from "../../../lib/sdk";
-import { clearStoredSourceSelection } from "../chat/_components/source-selection-storage";
 import {
   resolveWorkspaceSwitchTransition,
   type WorkspaceSwitchStatus,
@@ -54,6 +53,10 @@ const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
 };
 
 type DashboardChatState = {
+  workTarget: import("@sourceweft/contracts").ThreadExecutionTarget | null;
+  setWorkTarget: (
+    target: import("@sourceweft/contracts").ThreadExecutionTarget | null,
+  ) => void;
   mode: ViewMode;
   sourcesVisible: boolean;
   organizationId: string | null;
@@ -187,6 +190,25 @@ export function DashboardChatStateProvider({
 
   const [mode, setMode] = useState<ViewMode>("new");
   const [sourcesVisible, setSourcesVisible] = useState(true);
+  const [panelPreferenceLoaded, setPanelPreferenceLoaded] = useState(false);
+  useEffect(() => {
+    try {
+      setSourcesVisible(
+        localStorage.getItem("sourceweft:hub-expanded") !== "false",
+      );
+    } catch {
+      /* Optional local layout preference. */
+    }
+    setPanelPreferenceLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!panelPreferenceLoaded) return;
+    try {
+      localStorage.setItem("sourceweft:hub-expanded", String(sourcesVisible));
+    } catch {
+      /* The current session still retains the preference. */
+    }
+  }, [sourcesVisible, panelPreferenceLoaded]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Workspace");
   const [organizationId, setOrganizationId] = useState<string | null>(null);
@@ -195,6 +217,9 @@ export function DashboardChatStateProvider({
     Array<{ id: string; name: string }>
   >([]);
 
+  const [workTarget, setWorkTarget] = useState<
+    import("@sourceweft/contracts").ThreadExecutionTarget | null
+  >(null);
   const [sharedChats, setSharedChats] = useState<ChatItem[]>([]);
   const [privateChats, setPrivateChats] = useState<ChatItem[]>([]);
   const [archivedChats, setArchivedChats] = useState<ChatItem[]>([]);
@@ -949,7 +974,6 @@ export function DashboardChatStateProvider({
       if (!workspaceId) return;
 
       await contentClient.deleteThread(workspaceId, id);
-      clearStoredSourceSelection(workspaceId, id);
       removeChatFromState(id);
     },
     [workspaceId, removeChatFromState],
@@ -1013,7 +1037,6 @@ export function DashboardChatStateProvider({
     );
 
     privateIds.forEach(removeChatFromState);
-    privateIds.forEach((id) => clearStoredSourceSelection(workspaceId, id));
 
     setActiveChatId((value) => {
       if (!privateIds.has(value)) return value;
@@ -1060,7 +1083,6 @@ export function DashboardChatStateProvider({
     );
 
     archivedIds.forEach(removeChatFromState);
-    archivedIds.forEach((id) => clearStoredSourceSelection(workspaceId, id));
 
     setActiveChatId((value) => {
       if (!archivedIds.has(value)) return value;
@@ -1072,6 +1094,8 @@ export function DashboardChatStateProvider({
 
   const state = useMemo<DashboardChatState>(
     () => ({
+      workTarget,
+      setWorkTarget,
       mode,
       sourcesVisible,
       organizationId,
@@ -1116,6 +1140,7 @@ export function DashboardChatStateProvider({
       clearArchivedChats,
     }),
     [
+      workTarget,
       mode,
       sourcesVisible,
       organizationId,

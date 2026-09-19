@@ -1,5 +1,7 @@
 "use client";
 
+import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
+import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
 import { AuthUIProvider } from "@daveyplate/better-auth-ui";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
@@ -18,23 +20,9 @@ import {
   customAuthViewPaths,
   customOrganizationViewPaths,
 } from "../lib/auth-ui-config";
-import { registerBuiltinAgentTools } from "../lib/register-builtin-agent-tools";
 import { userSettingsClient } from "../lib/sdk";
 
-registerBuiltinAgentTools();
-
-function resolveWebBaseUrl() {
-  const configuredBaseUrl = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
-  if (configuredBaseUrl) {
-    return configuredBaseUrl.replace(/\/$/, "");
-  }
-
-  if (typeof window !== "undefined" && window.location.origin) {
-    return window.location.origin;
-  }
-
-  return "http://localhost:3000";
-}
+import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
 
 function shouldIgnoreCancelledPasskey(message?: string) {
   if (!message) {
@@ -95,7 +83,13 @@ function ThemeSettingsSync() {
   return null;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  initialCapabilities = null,
+}: {
+  children: React.ReactNode;
+  initialCapabilities?: DeploymentCapabilities | null;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const webBaseUrl = resolveWebBaseUrl();
@@ -196,7 +190,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <ThemeSettingsSync />
         <GoogleOneTap />
         <TooltipProvider>
-          <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+          <DeploymentCapabilitiesProvider
+            initialCapabilities={initialCapabilities}
+          >
+            <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+          </DeploymentCapabilitiesProvider>
         </TooltipProvider>
         <Toaster closeButton position="top-right" richColors />
       </AuthUIProvider>

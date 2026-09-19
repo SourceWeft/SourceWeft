@@ -11,18 +11,72 @@ permissions:
   id-token: write
   attestations: write
 
+env:
+  DOWNLOADS_S3_ENDPOINT: ${{ vars.DOWNLOADS_S3_ENDPOINT }}
+  DOWNLOADS_S3_BUCKET: ${{ vars.DOWNLOADS_S3_BUCKET }}
+  DOWNLOADS_S3_REGION: ${{ vars.DOWNLOADS_S3_REGION }}
+  DOWNLOADS_S3_FORCE_PATH_STYLE: ${{ vars.DOWNLOADS_S3_FORCE_PATH_STYLE }}
+  DOWNLOADS_S3_PREFIX: ${{ vars.DOWNLOADS_S3_PREFIX }}
+  DOWNLOADS_PUBLIC_BASE_URL: ${{ vars.DOWNLOADS_PUBLIC_BASE_URL }}
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      latest: ${{ steps.config.outputs.latest }}
+      prerelease: ${{ steps.config.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Validate release tag
+        id: config
+        run: node scripts/ci/verify-release-config.mjs
+      - name: Require changelog notes for the tag
+        run: node scripts/ci/verify-changelog-entry.mjs
+      - name: Validate download storage configuration
+        run: node scripts/ci/publish-downloads.mjs validate
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+
+  quality:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      packages: read
+
+  desktop:
+    needs: preflight
+    uses: ./.github/workflows/desktop-build.yml
+    permissions:
+      contents: read
+
   release:
+    needs: [preflight, quality, desktop]
     name: Build and publish release
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
       - name: Resolve image name
         id: image
@@ -47,11 +101,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
+          flavor: latest=false
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.preflight.outputs.latest == 'true' }}
+            type=raw,value=latest,enable=${{ needs.preflight.outputs.latest == 'true' }}
+
+      - name: Resolve build metadata
+        id: buildmeta
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -61,20 +120,73 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
-          build-args: |
-            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
-            NEXT_PUBLIC_WEB_BASE_URL=${{ vars.NEXT_PUBLIC_WEB_BASE_URL || 'http://localhost:3000' }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED || 'false' }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID || '' }}
-            NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED || 'false' }}
-            NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID || '' }}
 
-      - name: Create GitHub release
+      - name: Verify published images support anonymous installation
+        env:
+          RELEASE_IMAGE: ${{ steps.image.outputs.name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          registry_config=$(mktemp -d)
+          trap 'rm -rf "$registry_config"' EXIT
+          DOCKER_CONFIG="$registry_config" docker manifest inspect "$RELEASE_IMAGE:$RELEASE_TAG" > /dev/null
+          DOCKER_CONFIG="$registry_config" docker manifest inspect ghcr.io/sourceweft/sourceweft-postgres:17 > /dev/null
+
+      - name: Package self-hosting instructions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: tar -czf "sourceweft-selfhost-${RELEASE_TAG}.tar.gz" docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/README.zh-CN.md docker/compose.legacy-volumes.yml
+
+      - name: Download desktop installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-verification-*
+          path: release-installers
+          merge-multiple: true
+
+      - name: Update GitHub release draft
+        id: github_release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          name: ${{ github.ref_name }}
+          draft: true
+          files: |
+            sourceweft-selfhost-*.tar.gz
+            release-installers/**/*.dmg
+            release-installers/**/*.exe
+          fail_on_unmatched_files: true
+          body: |
+            Self-hosting files for Web/Docker, plus macOS and Windows candidate installers.
+
+            Desktop installers are provided for testing without distribution signing or macOS notarization. Local device execution is not yet supported on Windows.
+            See docker/README.md in the self-hosting archive for installation and upgrade instructions. Translations are provided in separate README files.
           generate_release_notes: true
+          prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
+
+      - name: Upload and verify public downloads
+        run: node scripts/ci/publish-downloads.mjs upload
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+
+      - name: Publish completed release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.github_release.outputs.id }}
+        run: |
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -f tag_name="$GITHUB_REF_NAME" -f name="$GITHUB_REF_NAME" \
+            --jq .html_url
+
+      - name: Promote verified download channel
+        run: node scripts/ci/publish-downloads.mjs promote
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}

@@ -21,11 +21,11 @@ test("parses sandbox prepare result JSON", () => {
         totalBytes: 3072,
         files: [
           {
-            sourcePath: "/workfiles/input.md",
+            sourcePath: "/files/input.md",
             sandboxPath: "/workspace/input/input.md",
           },
           {
-            sourcePath: "/workfiles/data.csv",
+            sourcePath: "/files/data.csv",
             sandboxPath: "/workspace/input/data.csv",
           },
         ],
@@ -56,11 +56,11 @@ test("parses sandbox collect result JSON", () => {
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { path: "/workfiles/report.md" },
+            target: { path: "/files/report.md" },
           },
           {
             sandboxPath: "/workspace/output/chart.png",
-            targetPath: "/workfiles/chart.png",
+            targetPath: "/files/chart.png",
           },
         ],
       }),
@@ -74,7 +74,7 @@ test("parses sandbox collect result JSON", () => {
       status: null,
       totalBytes: 4096,
       filePaths: [],
-      outputPaths: ["/workfiles/report.md", "/workfiles/chart.png"],
+      outputPaths: ["/files/report.md", "/files/chart.png"],
       truncated: null,
       exitCode: null,
     },
@@ -133,11 +133,11 @@ test("builds an execute view without treating a non-zero exit as a tool failure"
 
 test("recognizes recoverable execute preflight failures returned as exit code one", () => {
   const output =
-    "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute cannot use /workfiles/report.md\nHint: prepare the file first.";
+    "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute cannot use /files/report.md\nHint: prepare the file first.";
 
   assert.deepEqual(
     getSandboxExecuteView({
-      input: { command: "cat /workfiles/report.md" },
+      input: { command: "cat /files/report.md" },
       output: {
         output,
         exitCode: 1,
@@ -147,7 +147,7 @@ test("recognizes recoverable execute preflight failures returned as exit code on
     }),
     {
       code: "SANDBOX_EXECUTE_VFS_PATH_DENIED",
-      command: "cat /workfiles/report.md",
+      command: "cat /files/report.md",
       exitCode: 1,
       message: null,
       output,
@@ -176,7 +176,7 @@ test("builds prepare transfer mappings from requests and completed sizes", () =>
             sandboxPath: "/workspace/input/image.png",
           },
           {
-            sourcePath: "/workfiles/report.md",
+            sourcePath: "/files/report.md",
             sandboxPath: "/workspace/input/report.md",
           },
         ],
@@ -191,7 +191,7 @@ test("builds prepare transfer mappings from requests and completed sizes", () =>
             sizeBytes: 200,
           },
           {
-            sourcePath: "/workfiles/report.md",
+            sourcePath: "/files/report.md",
             sandboxPath: "/workspace/input/report.md",
             sizeBytes: 100,
           },
@@ -210,9 +210,9 @@ test("builds prepare transfer mappings from requests and completed sizes", () =>
           target: "/workspace/input/image.png",
         },
         {
-          key: "requested-1:/workfiles/report.md->/workspace/input/report.md",
+          key: "requested-1:/files/report.md->/workspace/input/report.md",
           sizeBytes: 100,
-          source: "/workfiles/report.md",
+          source: "/files/report.md",
           target: "/workspace/input/report.md",
         },
       ],
@@ -231,7 +231,7 @@ test("builds collect mappings with clickable Workfile targets", () => {
       outputs: [
         {
           sandboxPath: "/workspace/output/report.md",
-          target: { kind: "workfile", path: "/workfiles/report.md" },
+          target: { kind: "workfile", path: "/files/report.md" },
         },
       ],
     },
@@ -241,7 +241,7 @@ test("builds collect mappings with clickable Workfile targets", () => {
       outputs: [
         {
           sandboxPath: "/workspace/output/report.md",
-          targetPath: "/workfiles/report.md",
+          targetPath: "/files/report.md",
           sizeBytes: 512,
         },
       ],
@@ -260,7 +260,7 @@ test("builds collect mappings with clickable Workfile targets", () => {
       {
         sizeBytes: 512,
         source: "/workspace/output/report.md",
-        target: "/workfiles/report.md",
+        target: "/files/report.md",
       },
     ],
   );
@@ -385,11 +385,11 @@ test("formats sandbox prepare operation details for tool cards", () => {
       input: {
         files: [
           {
-            sourcePath: "/workfiles/a.md",
+            sourcePath: "/files/a.md",
             sandboxPath: "/workspace/input/a.md",
           },
           {
-            sourcePath: "/workfiles/b.md",
+            sourcePath: "/files/b.md",
             sandboxPath: "/workspace/input/b.md",
           },
         ],
@@ -404,7 +404,7 @@ test("formats sandbox prepare operation details for tool cards", () => {
       },
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Inputs", value: "2 files" },
       { label: "Size", value: "2 KiB" },
       {
@@ -414,7 +414,7 @@ test("formats sandbox prepare operation details for tool cards", () => {
       {
         label: "Requested transfer",
         value:
-          "/workfiles/a.md -> /workspace/input/a.md, /workfiles/b.md -> /workspace/input/b.md",
+          "/files/a.md -> /workspace/input/a.md, /files/b.md -> /workspace/input/b.md",
       },
     ],
   );
@@ -427,7 +427,7 @@ test("formats sandbox prepare recoverable failure details for tool cards", () =>
       input: {
         files: [
           {
-            sourcePath: "/workfiles/missing.md",
+            sourcePath: "/files/missing.md",
             sandboxPath: "/workspace/input/missing.md",
           },
         ],
@@ -442,7 +442,7 @@ test("formats sandbox prepare recoverable failure details for tool cards", () =>
       },
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Status", value: "Failed" },
       { label: "Code", value: "ENOENT" },
       { label: "Message", value: "ENOENT: no such file" },
@@ -450,7 +450,7 @@ test("formats sandbox prepare recoverable failure details for tool cards", () =>
       { label: "Inputs", value: "1 file" },
       {
         label: "Requested transfer",
-        value: "/workfiles/missing.md -> /workspace/input/missing.md",
+        value: "/files/missing.md -> /workspace/input/missing.md",
       },
     ],
   );
@@ -471,7 +471,7 @@ test("formats sandbox prepare request details when execution fails before result
       output: {},
     }),
     [
-      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Operation", value: "Prepared workspace" },
       { label: "Inputs", value: "1 file" },
       {
         label: "Requested transfer",
@@ -489,12 +489,12 @@ test("summarizes sandbox collect results for tool cards", () => {
         ok: true,
         totalBytes: 512,
         outputs: [
-          { target: { path: "/workfiles/report.md" } },
-          { targetPath: "/workfiles/chart.csv" },
+          { target: { path: "/files/report.md" } },
+          { targetPath: "/files/chart.csv" },
         ],
       },
     }),
-    "Collected 2 outputs · 512 B · /workfiles/report.md, /workfiles/chart.csv",
+    "Collected 2 outputs · 512 B · /files/report.md, /files/chart.csv",
   );
 });
 
@@ -507,11 +507,11 @@ test("summarizes sandbox collect recoverable failures for tool cards", () => {
         type: "sandbox_collect_error",
         status: "failed",
         code: "SANDBOX_COLLECT_CONFLICT",
-        message: "/workfiles/report.md already exists",
+        message: "/files/report.md already exists",
         recoverable: true,
       },
     }),
-    "Failed · SANDBOX_COLLECT_CONFLICT · /workfiles/report.md already exists",
+    "Failed · SANDBOX_COLLECT_CONFLICT · /files/report.md already exists",
   );
 });
 
@@ -523,38 +523,38 @@ test("formats sandbox collect operation details for tool cards", () => {
         ok: true,
         totalBytes: 512,
         outputs: [
-          { target: { path: "/workfiles/report.md" } },
-          { targetPath: "/workfiles/chart.csv" },
+          { target: { path: "/files/report.md" } },
+          { targetPath: "/files/chart.csv" },
         ],
       },
     }),
     [
-      { label: "Operation", value: "Collected sandbox outputs" },
+      { label: "Operation", value: "Collected output files" },
       { label: "Outputs", value: "2 files" },
       { label: "Size", value: "512 B" },
       {
         label: "Output paths",
-        value: "/workfiles/report.md, /workfiles/chart.csv",
+        value: "/files/report.md, /files/chart.csv",
       },
     ],
   );
 });
 
-test("extracts unique collected /workfiles paths for clickable tool-card links", () => {
+test("extracts unique collected /files paths for clickable tool-card links", () => {
   assert.deepEqual(
     getSandboxCollectedWorkfilePaths({
       toolName: "collect_sandbox_outputs",
       output: {
         ok: true,
         outputs: [
-          { target: { path: "/workfiles/report.md" } },
-          { targetPath: "/workfiles/report.md" },
+          { target: { path: "/files/report.md" } },
+          { targetPath: "/files/report.md" },
           { targetPath: "/workspace/output/internal.txt" },
-          { targetPath: "/workfiles/charts/summary.csv" },
+          { targetPath: "/files/charts/summary.csv" },
         ],
       },
     }),
-    ["/workfiles/report.md", "/workfiles/charts/summary.csv"],
+    ["/files/report.md", "/files/charts/summary.csv"],
   );
 });
 
@@ -564,7 +564,7 @@ test("does not extract collected workfile links for non-collect tools", () => {
       toolName: "execute",
       output: {
         ok: true,
-        outputs: [{ targetPath: "/workfiles/report.md" }],
+        outputs: [{ targetPath: "/files/report.md" }],
       },
     }),
     [],
@@ -596,7 +596,7 @@ test("formats sandbox execute operation details for tool cards", () => {
       },
     }),
     [
-      { label: "Operation", value: "Executed sandbox command" },
+      { label: "Operation", value: "Executed command" },
       { label: "Exit code", value: "1" },
       { label: "Output", value: "Truncated" },
     ],
@@ -638,7 +638,7 @@ test("formats sandbox operation timeline for tool cards", () => {
     [
       {
         key: "0-create",
-        label: "Created sandbox",
+        label: "Prepared workspace",
         status: "succeeded",
         detail: "Sandbox ready",
         duration: "120ms",
@@ -681,11 +681,11 @@ test("surfaces the command output text in the operation timeline", () => {
   assert.equal(items[0]?.detail, "Exit code 0 · 2 output chars");
 });
 
-test("orders 'Created sandbox' before the command that triggered its cold start", () => {
+test("orders 'Prepared workspace' before the command that triggered its cold start", () => {
   // Real-world shape: the execute row is claimed at start (createdAt = T0), but
   // the sandbox `create` row is written at completion (createdAt = T0 + 13s),
   // because the execute triggered the cold start. Recovered start ordering must
-  // still put "Created sandbox" first.
+  // still put "Prepared workspace" first.
   const labels = getSandboxToolOperationTimeline({
     toolName: "execute",
     output: {
@@ -708,7 +708,7 @@ test("orders 'Created sandbox' before the command that triggered its cold start"
     },
   }).map((item) => item.label);
 
-  assert.deepEqual(labels, ["Created sandbox", "Executed command"]);
+  assert.deepEqual(labels, ["Prepared workspace", "Executed command"]);
 });
 
 test("keeps command ops in claim (createdAt) order", () => {
@@ -742,7 +742,7 @@ test("keeps command ops in claim (createdAt) order", () => {
 
   // create (start ≈ 07:00:00) first, then the two executes by their createdAt.
   assert.deepEqual(labels, [
-    "Created sandbox",
+    "Prepared workspace",
     "Executed command",
     "Executed command",
   ]);
@@ -766,7 +766,7 @@ test("formats sandbox operations array as operation timeline", () => {
             type: "collect",
             status: "succeeded",
             result: {
-              outputs: [{ targetPath: "/workfiles/report.md" }],
+              outputs: [{ targetPath: "/files/report.md" }],
               totalBytes: 512,
             },
           },
@@ -876,24 +876,24 @@ test("maps sandbox transfer errors to user-safe messages", () => {
     getSandboxToolSafeErrorMessage({
       toolName: "collect_sandbox_outputs",
       error:
-        "SANDBOX_COLLECT_CONFLICT: /workfiles/report.md already exists. Set overwrite=true or choose a new path.",
+        "SANDBOX_COLLECT_CONFLICT: /files/report.md already exists. Set overwrite=true or choose a new path.",
     }),
-    "A target /workfiles file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+    "A target /files file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
       toolName: "prepare_sandbox_workspace",
       error: "SANDBOX_TOTAL_SIZE_EXCEEDED: prepared files exceed total limit.",
     }),
-    "The selected files exceed the total sandbox transfer limit. Reduce the number or size of files and try again.",
+    "The selected files exceed the total file transfer limit. Reduce the number or size of files and try again.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
       toolName: "prepare_sandbox_workspace",
       error:
-        "SANDBOX_PREPARE_PATH_DENIED: sourcePath must be under /workfiles/.",
+        "SANDBOX_PREPARE_PATH_DENIED: sourcePath must be under /files/.",
     }),
-    "Prepare requires sourcePath under SourceWeft DB-backed /workfiles and sandboxPath under a provider-allowed prepare target root.",
+    "Choose an existing workfile and an authorized destination directory.",
   );
 });
 
@@ -904,22 +904,22 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_COMMAND_TIMEOUT: sandbox command exceeded the configured timeout.",
     }),
-    "The sandbox command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
+    "The command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
       toolName: "execute",
       error: "SANDBOX_PROVIDER_AUTH_FAILED: sandbox credentials failed.",
     }),
-    "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
+    "The execution service could not authenticate. Contact your administrator.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
       toolName: "execute",
       error:
-        "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include /workfiles.",
+        "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include /files.",
     }),
-    "Execute commands referenced a SourceWeft VFS path that is not available in the sandbox. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+    "The command referenced a file that is not available in the working directory. Prepare the required files before running the command.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
@@ -927,7 +927,7 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error:
         "SANDBOX_SKILL_STAGING_UNAVAILABLE: skill bundles could not be staged into this sandbox, so /skills paths are not executable here.",
     }),
-    "Skill files could not be staged into this sandbox, so /skills paths cannot be executed here. Read the skill file with file tools, save the needed content as a Workfile, prepare it into /workspace, then run that copy.",
+    "The required skill files could not be prepared in the working directory. Check the skill files and try again.",
   );
 });
 

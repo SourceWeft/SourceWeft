@@ -875,7 +875,7 @@ test("SourceWeftSandboxBackend returns recoverable failure for VFS paths in exec
     operationStore,
   );
 
-  const result = await backend.execute("mkdir -p /workfiles/ppt-deck");
+  const result = await backend.execute("mkdir -p /files/ppt-deck");
 
   assert.equal(result.exitCode, 1);
   assert.equal(result.truncated, false);
@@ -944,10 +944,10 @@ test("SourceWeftSandboxBackend escalates repeated VFS path execute failures in t
     false,
   );
 
-  const first = await backend.execute("ls /workfiles", {
+  const first = await backend.execute("ls /files", {
     toolCallId: "call-vfs-1",
   });
-  const second = await backend.execute("ls /workfiles", {
+  const second = await backend.execute("ls /files", {
     toolCallId: "call-vfs-2",
   });
 
@@ -1318,14 +1318,14 @@ test("SourceWeftSandboxBackend rejects SourceWeft DB-backed VFS paths for sandbo
   const { backend, provider } = createBackend();
 
   assert.match(
-    (await backend.write("/workfiles/output.md", "x")).error ?? "",
+    (await backend.write("/files/output.md", "x")).error ?? "",
     /SANDBOX_FILE_PATH_DENIED|SANDBOX_READ_PATH_DENIED/u,
   );
-  const executeResult = await backend.execute("node /workfiles/output.js");
+  const executeResult = await backend.execute("node /files/output.js");
   assert.equal(executeResult.exitCode, 1);
   assert.equal(executeResult.truncated, false);
   assert.match(executeResult.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
-  assert.match(executeResult.output, /\/workfiles/u);
+  assert.match(executeResult.output, /\/files/u);
   assert.deepEqual(provider.executed, []);
   assert.deepEqual(provider.ensuredDirectories, []);
   assert.deepEqual(provider.uploadedFiles, []);
@@ -1335,7 +1335,7 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
   const { backend } = createBackend();
 
   const downloads = await backend.downloadFiles([
-    "/workfiles/output.md",
+    "/files/output.md",
     "/workspace/ppt-deck/missing.md",
   ]);
 
@@ -1349,7 +1349,7 @@ test("SourceWeftSandboxBackend returns recoverable error for absolute glob patte
   const { backend } = createBackend();
 
   const result = await backend.glob(
-    "/workfiles/**/*.md",
+    "/files/**/*.md",
     "/workspace/ppt-deck",
   );
 
@@ -1490,9 +1490,9 @@ test("skill staging leaves non-/skills commands and unconfigured runtimes untouc
   assert.deepEqual(plainProvider.executed, []);
 
   // Configured runtime, command without /skills: no deferral in play, and
-  // /workfiles stays denied fast even with staging configured.
+  // /files stays denied fast even with staging configured.
   const { backend } = createSkillStagingBackend({});
-  const workfiles = await backend.execute("cat /workfiles/notes.md", {
+  const workfiles = await backend.execute("cat /files/notes.md", {
     toolCallId: "tool-call-skill-6",
   });
   assert.equal(workfiles.exitCode, 1);
@@ -1559,5 +1559,138 @@ test("required runtime asset staging exposes its resolved executable path", asyn
   assert.equal(
     manager.requiredAssetResolutions()?.[0]?.entrypointPath,
     "/workspace/.sourceweft-assets/chrome-headless-shell/149.0.7790.0/chrome-headless-shell",
+  );
+});
+
+test("native file tools share disk state without invoking Linux shell helpers", async () => {
+  const { files, provider } = createProvider();
+  const nativeSearches: Array<{ paths: string[]; pattern: string }> = [];
+  provider.nativeFileOperations = true;
+  provider.listFiles = async (input) =>
+    [...files.entries()]
+      .filter(
+        ([path]) =>
+          path.startsWith(`${input.sandboxPath}/`) ||
+          path === input.sandboxPath,
+      )
+      .map(([path, bytes]) => ({ path, size: bytes.length, is_dir: false }));
+  provider.nativeGrep = async ({ paths, pattern }) => {
+    nativeSearches.push({ paths, pattern });
+    return {
+      matches: paths.flatMap((path) =>
+        new TextDecoder()
+          .decode(files.get(path))
+          .split("\n")
+          .flatMap((text, index) =>
+            text.includes(pattern) ? [{ path, line: index + 1, text }] : [],
+          ),
+      ),
+      visitedPaths: paths,
+      skipped: [],
+      truncated: false,
+    };
+  };
+  provider.readTextFile = async (input) =>
+    new TextDecoder("utf-8", { fatal: true }).decode(
+      files.get(input.sandboxPath),
+    );
+  provider.replaceTextFile = async (input) => {
+    assert.equal(
+      new TextDecoder().decode(files.get(input.sandboxPath)),
+      input.expected,
+    );
+    files.set(input.sandboxPath, new TextEncoder().encode(input.content));
+  };
+  const { backend } = createBackendWithProvider(provider);
+  await backend.write("/workspace/note.txt", "before\nline2");
+  assert.equal(
+    (await backend.ls("/workspace")).files?.[0]?.path,
+    "/workspace/note.txt",
+  );
+  assert.equal((await backend.glob("*.txt", "/workspace")).files?.length, 1);
+  assert.equal(
+    (await backend.read("/workspace/note.txt", 1, 1)).content,
+    "line2",
+  );
+  assert.equal(
+    (await backend.grep("before", "/workspace")).matches?.[0]?.line,
+    1,
+  );
+  assert.deepEqual(nativeSearches, [
+    { paths: ["/workspace/note.txt"], pattern: "before" },
+  ]);
+  assert.equal(
+    (await backend.edit("/workspace/note.txt", "before", "after")).occurrences,
+    1,
+  );
+  files.set("/workspace/note.txt", new TextEncoder().encode("external change"));
+  assert.equal(
+    (await backend.read("/workspace/note.txt")).content,
+    "external change",
+  );
+  assert.ok((await backend.write("/files/wrong.txt", "wrong")).error);
+  assert.deepEqual(provider.systemExecuted, []);
+  assert.deepEqual(provider.executed, []);
+});
+
+test("native grep fails explicitly when the provider has no native search capability", async () => {
+  const { provider } = createProvider();
+  provider.nativeFileOperations = true;
+  provider.listFiles = async () => [
+    { path: "/workspace/note.txt", size: 6, is_dir: false },
+  ];
+  const { backend } = createBackendWithProvider(provider);
+  await assert.rejects(
+    backend.grep("before", "/workspace"),
+    /NATIVE_SEARCH_UNAVAILABLE/,
+  );
+  assert.deepEqual(provider.systemExecuted, []);
+  assert.deepEqual(provider.executed, []);
+});
+
+test("PC runtime removes prepare/collect while cloud runtime retains the bridge", async () => {
+  const { AgentSandboxService } = await import("../../src/sandbox-service");
+  const { provider } = createProvider();
+  const service = new AgentSandboxService({
+    getConfig: () => ({
+      enabled: true,
+      provider: "fake",
+      toolApprovalEnabled: true,
+      limits,
+    }),
+    getProviderFactory: () => ({
+      id: "fake",
+      createProvider: () => provider,
+      getConfigurationStatus: () => ({ configured: true, missing: [] }),
+    }),
+    logWarn: () => {},
+  });
+  const input = {
+    context,
+    filesystem: {} as import("deepagents").BackendProtocolV2,
+  };
+  const pc = service.createRuntimeForTurn(
+    { ...input, executionTarget: { kind: "local", deviceId: "pc" } },
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.ok(
+    !pc.tools.some((tool) =>
+      ["prepare_sandbox_workspace", "collect_sandbox_outputs"].includes(
+        tool.name,
+      ),
+    ),
+  );
+  assert.match(pc.buildRuntimePrompt(), /only|same physical files/);
+  const cloud = service.createRuntimeForTurn(
+    input,
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.ok(
+    cloud.tools.some((tool) => tool.name === "prepare_sandbox_workspace"),
+  );
+  assert.ok(
+    cloud.tools.some((tool) => tool.name === "collect_sandbox_outputs"),
   );
 });

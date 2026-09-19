@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import {
@@ -14,7 +15,7 @@ import { tool } from "@langchain/core/tools";
 import { createAgent } from "langchain";
 import { z } from "zod";
 import type { ObserveSink, UsageInfo } from "@sourceweft/model-gateway";
-import type { ContentBillingPort } from "../../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
 import type { ModelUsageContext } from "./context";
 import { openBillingScope } from "./scope";
 
@@ -79,7 +80,7 @@ class ScriptedChatModel extends BaseChatModel {
 }
 
 function createBilling(): ContentBillingPort {
-  return {
+  return adaptBillingTestPort({
     getSummary: vi.fn(async (teamId: string) => ({
       teamId,
       billingMode: "enforced",
@@ -87,7 +88,7 @@ function createBilling(): ContentBillingPort {
     })),
     meterConsume: vi.fn(),
     meterIngestion: vi.fn(),
-  } as unknown as ContentBillingPort;
+  }) as unknown as ContentBillingPort;
 }
 
 function meterUsageStub() {

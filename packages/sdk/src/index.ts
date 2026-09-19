@@ -53,3 +53,5 @@ export {
   SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/contracts";
 export * from "@sourceweft/contracts/mcp";
+
+export { DeploymentClient } from "./deployment-client";

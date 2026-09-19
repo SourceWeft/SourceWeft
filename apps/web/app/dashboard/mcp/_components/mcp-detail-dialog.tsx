@@ -35,7 +35,7 @@ import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
-import { McpIcon } from "../../_components/dashboard-icons";
+import { McpIcon } from "../../../_components/site-icons";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpDetail = Awaited<

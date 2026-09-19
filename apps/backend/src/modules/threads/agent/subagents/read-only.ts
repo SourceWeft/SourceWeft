@@ -21,6 +21,9 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
  */
 export const READ_ONLY_BUSINESS_TOOL_NAMES = new Set<string>([
   AGENT_TOOL_NAMES.searchSources,
+  AGENT_TOOL_NAMES.readDocument,
+  AGENT_TOOL_NAMES.searchFiles,
+  AGENT_TOOL_NAMES.viewImage,
 ]);
 
 /** Deny-write filesystem policy: read the knowledge base and working files only. */
@@ -28,7 +31,7 @@ export const READ_ONLY_FILESYSTEM_PERMISSIONS: FilesystemPermission[] = [
   { operations: ["read"], paths: ["/"], mode: "allow" },
   {
     operations: ["read"],
-    paths: ["/kb", "/kb/**", "/workfiles", "/workfiles/**"],
+    paths: ["/kb", "/kb/**", "/files", "/files/**"],
     mode: "allow",
   },
   { operations: ["read"], paths: ["/**"], mode: "deny" },
@@ -58,13 +61,29 @@ export function filterReadOnlyBusinessTools(
  */
 export function readOnlyChildMiddleware(input: {
   backend: AnyBackendProtocol;
+  workingDirectory?: string;
   middleware: readonly AgentMiddleware[];
 }): AgentMiddleware[] {
   return [
     createFilesystemMiddleware({
       backend: input.backend,
       tools: [...READ_ONLY_FILESYSTEM_TOOLS],
-      permissions: READ_ONLY_FILESYSTEM_PERMISSIONS,
+      permissions: input.workingDirectory
+        ? [
+            {
+              operations: ["read"],
+              paths: [
+                "/",
+                "/kb",
+                "/kb/**",
+                input.workingDirectory,
+                `${input.workingDirectory}/**`,
+              ],
+              mode: "allow",
+            },
+            { operations: ["read", "write"], paths: ["/**"], mode: "deny" },
+          ]
+        : READ_ONLY_FILESYSTEM_PERMISSIONS,
     }),
     ...input.middleware,
   ];

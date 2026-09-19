@@ -2,7 +2,7 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import { writeFile } from "node:fs/promises";
 import { database } from "@sourceweft/db";
-import { scopeMemberLedgerKey } from "../modules/billing/ledger";
+import { scopeMemberLedgerKey } from "@sourceweft/billing/ledger";
 import type { MeteredModelCallTrace } from "../shared/model-gateway/billing/context";
 
 // Operational audit only. Never calls a model, settlement, pricing, or an

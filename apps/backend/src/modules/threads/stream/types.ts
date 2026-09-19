@@ -8,11 +8,13 @@ import type {
 } from "../turn/types";
 
 export type RefreshThreadInput = {
+  localCaller?: import("../../devices/access").LocalExecutionCaller;
   workspaceId: string;
   threadId: string;
   userId: string;
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   tools?: ThreadToolsSelection;
   command?: ThreadCommandSelection;
   invocation?: ThreadInvocationSelection;

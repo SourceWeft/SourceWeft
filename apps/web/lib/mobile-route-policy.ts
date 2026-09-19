@@ -77,6 +77,10 @@ function sheetTitleForPath(pathname: string) {
     return "Blog";
   }
 
+  if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
+    return "MCP Market";
+  }
+
   const segment = pathname.split("/").filter(Boolean).at(0);
   if (!segment) {
     return "SourceWeft";

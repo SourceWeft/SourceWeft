@@ -1,5 +1,26 @@
 import { z } from "zod";
 
+export const threadExecutionTargetSchema = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("cloud") }).strict(),
+    z
+      .object({
+        kind: z.literal("local"),
+        deviceId: z.string().uuid(),
+        folderId: z.string().uuid().optional(),
+        directoryGrantId: z.string().uuid().optional(),
+      })
+      .strict(),
+  ])
+  .refine(
+    (target) =>
+      target.kind !== "local" || !(target.folderId && target.directoryGrantId),
+    {
+      message: "Specify one working directory grant.",
+    },
+  );
+export type ThreadExecutionTarget = z.infer<typeof threadExecutionTargetSchema>;
+
 /** A failed run whose error cannot be rendered from a persisted assistant message. */
 export type ThreadRunFailureSummary = {
   id: string;
@@ -15,6 +36,7 @@ export const threadSchema = z.object({
   teamId: z.string(),
   workspaceId: z.string(),
   title: z.string(),
+  executionTarget: threadExecutionTargetSchema.optional(),
   modelSettings: z.object({
     llmProfileAlias: z.string().nullable().optional(),
     imageProfileAlias: z.string().nullable().optional(),
@@ -109,6 +131,8 @@ export const threadModelSettingsPatchSchema =
   );
 
 export const createThreadRequestSchema = z.object({
+  creationContextId: z.string().uuid().optional(),
+  executionTarget: threadExecutionTargetSchema.optional(),
   title: z.string().trim().min(1).max(200).optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
   chatPreferences: threadChatPreferencesSchema.optional(),

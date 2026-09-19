@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -7,7 +8,7 @@ import {
   TargetHealthRegistry,
 } from "@sourceweft/model-gateway";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../modules/content/billing-port";
+import type { LegacyBillingTestPort as ContentBillingPort } from "../../test/billing-runtime";
 import type { GenerationCostResolver } from "../../modules/llm-observability/sink";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
@@ -47,21 +48,17 @@ beforeAll(async () => {
   writer = await import("../../modules/llm-observability/writer");
   sinkModule = await import("../../modules/llm-observability/sink");
   billed = await import("./billed-client");
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Embedding usage integration",
-      slug: workspaceId,
-    });
-  await schema.db
-    .insert(schema.modelGatewayConfigs)
-    .values({
-      id: gatewayConfigId,
-      slug: gatewayConfigId,
-      baseUrl: "https://embedding.test.invalid/v1",
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Embedding usage integration",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.modelGatewayConfigs).values({
+    id: gatewayConfigId,
+    slug: gatewayConfigId,
+    baseUrl: "https://embedding.test.invalid/v1",
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -182,7 +179,7 @@ test("real SDK two-batch usage=74 and receipt IDs persist; covered ingestion and
     const meterUsage = vi.fn(async () => {
       throw new Error("Covered embedding must not reach model metering");
     });
-    const billing: ContentBillingPort = {
+    const billing: ContentBillingPort = adaptBillingTestPort({
       getSummary: vi.fn(
         async () =>
           ({
@@ -199,7 +196,7 @@ test("real SDK two-batch usage=74 and receipt IDs persist; covered ingestion and
           "Embedding tokens must not add an ingestion page charge",
         );
       }),
-    };
+    });
     const result = await billed.withBilledModelGateway(
       {
         billing,

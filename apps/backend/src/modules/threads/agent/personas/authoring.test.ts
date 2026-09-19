@@ -11,6 +11,7 @@ import {
   uniquePersonaSlug,
 } from "./authoring";
 import { findPersona } from "./registry";
+import { READ_ONLY_BUSINESS_TOOL_NAMES } from "../subagents/read-only";
 import { presentPersona } from "./present";
 
 function code(error: unknown) {
@@ -24,7 +25,8 @@ test("a clone of explore keeps its read-only stance and allowlist unless edited"
   assert.equal(draft.name, "Explore");
   assert.equal(draft.systemPrompt, explore.systemPrompt);
   assert.equal(draft.filesystemPolicy, "read_only");
-  assert.deepEqual(draft.toolAllowlist, [AGENT_TOOL_NAMES.searchSources]);
+  assert.deepEqual(draft.toolAllowlist, [...READ_ONLY_BUSINESS_TOOL_NAMES]);
+  assert.ok(draft.toolAllowlist?.includes(AGENT_TOOL_NAMES.searchSources));
   assert.deepEqual(draft.modelSettings, {});
 
   const edited = buildPersonaDraft({

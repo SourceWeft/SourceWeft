@@ -1,4 +1,6 @@
 import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { contentClient } from "../../../../../../lib/sdk";
 
 import {
   AlertDialog,
@@ -11,15 +13,8 @@ import {
   AlertDialogTitle,
 } from "@sourceweft/ui-web/components/ui/alert-dialog";
 import { buttonVariants } from "@sourceweft/ui-web/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@sourceweft/ui-web/components/ui/dialog";
-import { WorkfileContentViewer } from "../../workfile-content-viewer";
-import { basename, formatBytes } from "../lib/format";
+import { FilePreviewDialog } from "../../file-preview-dialog";
+import { formatBytes } from "../lib/format";
 import {
   workfilePurposeLabel,
   type WorkfileDetail,
@@ -33,34 +28,69 @@ export function WorkfilePreviewDialog({
   onOpenChange: (open: boolean) => void;
   previewWorkfile: WorkfileDetail | null;
 }) {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<{
+    key: string;
+    blob?: Blob;
+    error?: string;
+  } | null>(null);
+  const key = previewWorkfile
+    ? `${previewWorkfile.workspaceId}:${previewWorkfile.threadId}:${previewWorkfile.path}:${previewWorkfile.contentHash}`
+    : "";
+  const binary = previewWorkfile?.payloadKind === "object";
+  useEffect(() => {
+    if (!previewWorkfile || !binary) return;
+    const controller = new AbortController();
+    setState({ key });
+    void contentClient
+      .readFileBlob(
+        previewWorkfile.workspaceId,
+        previewWorkfile.threadId,
+        previewWorkfile.path,
+        controller.signal,
+      )
+      .then((blob) => {
+        if (!controller.signal.aborted) setState({ key, blob });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setState({
+            key,
+            error:
+              error instanceof Error ? error.message : "Could not read file.",
+          });
+      });
+    return () => controller.abort();
+  }, [key, binary, attempt, previewWorkfile]);
+  const current = state?.key === key ? state : null;
+  const source = useMemo(
+    () =>
+      previewWorkfile && current?.blob
+        ? {
+            name: previewWorkfile.path.split("/").pop()!,
+            mimeType: previewWorkfile.mimeType,
+            blob: current.blob,
+          }
+        : undefined,
+    [previewWorkfile, current?.blob],
+  );
   return (
-    <Dialog onOpenChange={onOpenChange} open={Boolean(previewWorkfile)}>
-      <DialogContent
-        className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
-        constrainWidth={false}
-      >
-        <DialogHeader className="border-b px-5 py-4 text-left">
-          <DialogTitle>
-            {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
-          </DialogTitle>
-          <DialogDescription>
-            {previewWorkfile
-              ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-              : "Assistant-created working material from this thread."}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-5">
-          {previewWorkfile ? (
-            <WorkfileContentViewer
-              className="h-full min-h-[360px]"
-              contentText={previewWorkfile.contentText}
-              mimeType={previewWorkfile.mimeType}
-              path={previewWorkfile.path}
-            />
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <FilePreviewDialog
+      onOpenChange={onOpenChange}
+      open={Boolean(previewWorkfile)}
+      path={previewWorkfile?.path ?? ""}
+      description={
+        previewWorkfile
+          ? `Cloud · ${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
+          : "Files in this conversation."
+      }
+      contentText={binary ? undefined : previewWorkfile?.contentText}
+      source={source}
+      loading={Boolean(binary && !current?.blob && !current?.error)}
+      error={current?.error}
+      onRetry={binary ? () => setAttempt((value) => value + 1) : undefined}
+      mimeType={previewWorkfile?.mimeType}
+    />
   );
 }
 
@@ -83,9 +113,9 @@ export function DeleteWorkfileDialog({
     <AlertDialog onOpenChange={onOpenChange} open={Boolean(deleteWorkfile)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
+          <AlertDialogTitle>Delete file?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will remove the Workfile from this thread. This action cannot
+            This will remove the file from this conversation. This action cannot
             be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>

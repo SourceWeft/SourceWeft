@@ -16,12 +16,13 @@ let container: HTMLDivElement | null = null;
 
 function workfile(overrides: Partial<WorkfileDetail> = {}): WorkfileDetail {
   return {
+    payloadKind: "inline_text", contentHash: "a".repeat(64), origin: "unknown",
     contentText: "console.log('deck');\n",
     createdAt: "2026-06-20T00:00:00.000Z",
     createdBy: null,
     id: "workfile-1",
     mimeType: "text/markdown",
-    path: "/workfiles/deck.js",
+    path: "/files/deck.js",
     purpose: null,
     sizeBytes: 17 * 1024,
     teamId: "team-1",
@@ -82,7 +83,7 @@ test("ThreadDialogs renders .js workfiles as code even when mime type is markdow
   assert.match(element.textContent ?? "", /deck\.js/);
   assert.match(
     element.textContent ?? "",
-    /\/workfiles\/deck\.js · 17 KB · Workfile/,
+    /\/files\/deck\.js · 17 KB · Workfile/,
   );
   assert.ok(element.querySelector('[data-language="javascript"]'));
   assert.match(element.textContent ?? "", /console\.log\('deck'\);/);

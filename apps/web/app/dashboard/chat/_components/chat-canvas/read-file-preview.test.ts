@@ -36,8 +36,8 @@ function readFileToolCall(input: {
 
 test("resolves read_file path from supported input fields", () => {
   assert.equal(
-    resolveReadFilePath({ path: "/workfiles/a.md" }),
-    "/workfiles/a.md",
+    resolveReadFilePath({ path: "/files/a.md" }),
+    "/files/a.md",
   );
   assert.equal(
     resolveReadFilePath({ file_path: "/kb/source.md" }),
@@ -61,7 +61,7 @@ test("builds ordinary read_file preview with file name and first six lines", () 
         "line six",
         "line seven",
       ].join("\n"),
-      input: { file_path: "/workfiles/notes/report.md" },
+      input: { file_path: "/files/notes/report.md" },
     }),
   );
 
@@ -74,7 +74,7 @@ test("builds ordinary read_file preview with file name and first six lines", () 
     "line six",
   ]);
   assert.equal(preview?.fileName, "report.md");
-  assert.equal(preview?.path, "/workfiles/notes/report.md");
+  assert.equal(preview?.path, "/files/notes/report.md");
   assert.equal(preview?.lineLimit, READ_FILE_PREVIEW_LINE_LIMIT);
   assert.equal(preview?.isTruncated, true);
 });
@@ -95,7 +95,7 @@ test("shows the file path even when read_file returns empty visible content", ()
   const preview = getReadFilePreview(
     readFileToolCall({
       content: "",
-      input: { path: "/workfiles/empty.md" },
+      input: { path: "/files/empty.md" },
     }),
   );
 

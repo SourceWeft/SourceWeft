@@ -4,13 +4,13 @@ import type { ContentBillingPort } from "../../../modules/content/billing-port";
 export type AdmissionDecision =
   | {
       readonly allowed: true;
-      readonly availableCredits: number;
+      readonly availableCredits: number | null;
       readonly billingMode: BillingMode;
     }
   | {
       readonly allowed: false;
       readonly reason: "insufficient_credits";
-      readonly availableCredits: number;
+      readonly availableCredits: number | null;
       readonly billingMode: BillingMode;
     };
 
@@ -43,11 +43,13 @@ export async function admitCoveredScope(
   userId: string,
 ): Promise<AdmissionDecision> {
   try {
-    const summary = await billing.getSummary(teamId, userId);
+    const state = await billing.getExecutionState(teamId, userId);
+    if (state.kind === "unmetered")
+      return { allowed: true, availableCredits: null, billingMode: "disabled" };
     return {
       allowed: true,
-      availableCredits: summary.credits.available,
-      billingMode: summary.billingMode,
+      availableCredits: state.availableCredits,
+      billingMode: state.mode,
     };
   } catch {
     return { allowed: true, availableCredits: 0, billingMode: "enforced" };
@@ -80,9 +82,11 @@ export const billingAdmission = {
     teamId: string;
     userId: string;
   }): Promise<AdmissionDecision> {
-    const summary = await billing.getSummary(teamId, userId);
-    const billingMode = summary.billingMode;
-    const availableCredits = summary.credits.available;
+    const state = await billing.getExecutionState(teamId, userId);
+    if (state.kind === "unmetered")
+      return { allowed: true, availableCredits: null, billingMode: "disabled" };
+    const billingMode = state.mode;
+    const availableCredits = state.availableCredits;
 
     // Only enforced mode denies. Shadow and disabled modes are observation-only
     // by definition, and auto-grant shortfalls further down the stack.

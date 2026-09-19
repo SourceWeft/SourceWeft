@@ -1,0 +1,8 @@
+# Opt in ONLY to reuse volumes created by the old Compose. Never use this for a new instance.
+volumes:
+  postgres_data:
+    external: true
+    name: sourceweft-postgres
+  redis_data:
+    external: true
+    name: sourceweft-redis

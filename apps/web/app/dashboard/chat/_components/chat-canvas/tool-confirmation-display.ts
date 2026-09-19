@@ -59,7 +59,7 @@ function sandboxPrepareDetailLines(confirmation: ToolConfirmationDisplayInput) {
     );
   }
   lines.push(
-    "Selected SourceWeft /workfiles Workfile content will be materialized as ordinary sandbox files.",
+    "Selected SourceWeft /files Workfile content will be materialized as ordinary sandbox files.",
   );
   return lines;
 }
@@ -104,14 +104,16 @@ function sandboxExecuteDetailLines(
   const command = sandboxExecuteCommandText({ confirmation, toolCallInput });
   const cwdRecord = record(confirmation.preview.requestJson).cwd;
   const cwd =
-    typeof cwdRecord === "string" && cwdRecord ? cwdRecord : "/workspace";
+    typeof cwdRecord === "string" && cwdRecord
+      ? cwdRecord
+      : "conversation working directory";
   const summary = command
     ? sandboxExecuteSummary(command)
     : "command not provided";
   return [
     sandboxRiskLine(confirmation),
     `Command: ${summary}`,
-    `CWD: ${cwd}`,
+    `Working directory: ${cwd}`,
     "Review network, dependency, and secret-access risk before approving.",
     confirmation.editableArgs ? "Editable before approval" : null,
   ].filter((line): line is string => Boolean(line));
@@ -138,7 +140,7 @@ function sandboxCollectDetailLines(confirmation: ToolConfirmationDisplayInput) {
     );
   }
   lines.push(
-    "Outputs become durable only after collection into /workfiles or a supported artifact path.",
+    "Outputs become durable only after collection into /files or a supported artifact path.",
   );
   return lines;
 }
@@ -216,7 +218,9 @@ export function requestDetailLines(
 ) {
   const sandboxLines = sandboxRequestDetailLines(confirmation, toolCallInput);
   if (sandboxLines) {
-    return sandboxLines.map((line) => compactText(line, 160));
+    return sandboxLines.map((line) =>
+      line.startsWith("Working directory: ") ? line : compactText(line, 160),
+    );
   }
   const toolMetadata = confirmationToolMetadata(confirmation);
   const lines = [

@@ -1,6 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
+import {
+  LocalOperationContext,
+  LocalConversationNotice,
+  useLocalConversationStatus,
+} from "../../_components/local-conversation-status";
 import { ChatCanvas } from "../../_components/chat-canvas";
 import { ChatErrorNotice } from "../../_components/chat-canvas/chat-error-notice";
 import { selectedModelCapabilities } from "../../_components/model-catalog-utils";
@@ -88,6 +93,7 @@ export function DashboardChatThreadPageView({
   cancelEditing,
   composerInitialCommand,
   composerInitialInput,
+  firstTurn,
   composerResetKey,
   composerOptions,
   disabledToolNames,
@@ -171,8 +177,11 @@ export function DashboardChatThreadPageView({
   workfilesRefreshKey,
   workspaceId,
   workspaceName,
+  localQueuePaused,
+  resumeLocalQueue,
 }: ReturnType<typeof useThreadPageController>) {
   const chatHubContext = useChatHubContext();
+  const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const chatHubRegistration = useMemo<ChatHubRegistration>(
     () => ({
       activeCitationIndex,
@@ -205,6 +214,7 @@ export function DashboardChatThreadPageView({
       subagentPanel,
       threadCitations,
       threadId,
+      threadTitle,
       workfilesRefreshKey,
       workspaceId,
       workspaceName,
@@ -238,6 +248,7 @@ export function DashboardChatThreadPageView({
       subagentPanel,
       threadCitations,
       threadId,
+      threadTitle,
       workfilesRefreshKey,
       workspaceId,
       workspaceName,
@@ -246,176 +257,216 @@ export function DashboardChatThreadPageView({
   useRegisterChatHub(chatHubRegistration);
 
   return (
-    <div className="flex h-full min-h-0 w-full overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <ThreadHeader
-          activeSubagentId={subagentPanel?.threadId ?? null}
-          availableModels={availableModels}
-          byokCredentials={byokCredentials}
-          byokModels={byokModels}
-          byokProviders={byokProviders}
-          byokSelections={selectedByokModels}
-          embedMode={embedMode}
-          isModelCatalogLoading={chatUiState.status === "model-loading"}
+    <LocalOperationContext.Provider
+      value={{ blocked: !localStatus.ready, message: localStatus.message }}
+    >
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <ThreadHeader
+            workspaceId={workspaceId}
+            threadId={threadId}
+            activeSubagentId={subagentPanel?.threadId ?? null}
+            embedMode={embedMode}
+            onOpenInNewWindow={openThreadInNewWindow}
+            onOpenParentThread={openParentThread}
+            onOpenSubagent={openSubagent}
+            parentThread={parentThread}
+            subagentChildren={subagentChildren}
+            availableModels={availableModels}
+            byokCredentials={byokCredentials}
+            byokModels={byokModels}
+            byokProviders={byokProviders}
+            byokSelections={selectedByokModels}
+            isModelCatalogLoading={chatUiState.status === "model-loading"}
+            isPersistentLayout={isPersistentLayout}
+            onAddByokModel={setByokModelConfig}
+            onByokSelect={handleThreadByokSelect}
+            onModelSelect={handleModelSelect}
+            onOpenHub={() => {
+              chatHubContext?.setMobileHubOpen(true);
+            }}
+            onToggleSources={toggleSourcesVisible}
+            presenceSlot={<ThreadPresenceAvatars viewers={presentViewers} />}
+            selectedModels={selectedModels}
+            setSelectedModels={setSelectedModels}
+            sourcesVisible={sourcesVisible}
+            threadTitle={threadTitle}
+          />
+
+          <LocalConversationNotice status={localStatus} />
+          {firstTurn.recovery && (
+            <div role="alert" className="shrink-0 border-b px-4 py-3 text-sm">
+              <p>{firstTurn.recovery.message}</p>
+              <p className="max-h-32 overflow-auto whitespace-pre-wrap">
+                {firstTurn.recovery.turn.content}
+              </p>
+              {!!firstTurn.recovery.turn.images?.length && (
+                <p>
+                  {firstTurn.recovery.turn.images.length} attached images saved
+                </p>
+              )}
+              <button
+                type="button"
+                className="mt-2 underline"
+                disabled={!localStatus.ready}
+                onClick={() => void firstTurn.retry()}
+              >
+                Retry first message
+              </button>
+            </div>
+          )}
+          {localQueuePaused && localStatus.ready && queuedSends.length > 0 && (
+            <div className="border-b px-4 py-2 text-sm" role="status">
+              Queued messages were paused while the computer was unavailable.
+              <button
+                type="button"
+                className="ml-3 underline"
+                onClick={resumeLocalQueue}
+              >
+                Resume queued messages
+              </button>
+            </div>
+          )}
+          {latestRunFailure && !activeThreadRun && !isStreaming && (
+            <div className="shrink-0 px-4 pt-3">
+              <ChatErrorNotice
+                title="Message could not be started"
+                message={latestRunFailure.errorMessage}
+                code={latestRunFailure.errorCode}
+              />
+            </div>
+          )}
+
+          {chatUiState.status === "model-error" ? (
+            <ModelCatalogErrorState />
+          ) : chatUiState.status === "empty" &&
+            chatUiState.errorKind === "thread" ? (
+            <ThreadUnavailableState />
+          ) : shouldRenderThreadSkeleton(chatUiState) ? (
+            <ChatCanvasPanelSkeleton variant="thread" />
+          ) : (
+            <ChatCanvas
+              activeVersionByGroup={activeVersionByGroup}
+              assistantVersionById={assistantVersionById}
+              activeThreadRun={activeThreadRun}
+              otherUserRunActive={otherUserRunActive}
+              typingIndicator={<ThreadTypingIndicator typing={typingViewers} />}
+              onComposerType={onComposerType}
+              queuedSends={queuedSends}
+              onCancelQueuedSend={onCancelQueuedSend}
+              chatExecutionState={chatExecutionState}
+              allSources={librarySources}
+              availableSkills={availableSkills}
+              capabilityCatalog={capabilityCatalog}
+              composerInitialCommand={composerInitialCommand}
+              composerInitialInput={composerInitialInput}
+              composerResetKey={composerResetKey}
+              composerOptions={composerOptions}
+              editingMessageId={editingMessageId}
+              highlightedMessageId={highlightedMessageId}
+              hasOlderMessages={Boolean(olderMessagesCursor)}
+              isEditing={Boolean(editingMessageId && editingGroupId)}
+              isLoadingOlderMessages={isLoadingOlderMessages}
+              isStreaming={isStreaming}
+              isStopping={isStopping}
+              messageGroups={messageGroups}
+              mode="thread"
+              onActiveVersionChange={handleActiveVersionChange}
+              artifactStatuses={artifactStatuses}
+              onArtifactPreview={handleArtifactPreview}
+              onCancelEditing={cancelEditing}
+              onComposerOptionsChange={handleComposerOptionsChange}
+              onCitationClick={handleCitationClick}
+              onSourcePreview={handleSourcePreview}
+              onWorkfileClick={handleWorkfilePreview}
+              onRemoveSource={(id) =>
+                persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
+              }
+              onRefreshLatest={handleRefreshLatest}
+              onResumeToolConfirmation={handleResumeToolConfirmation}
+              onRestartFromMessage={handleRestartFromMessage}
+              onSendMessage={handleSendMessage}
+              onSkillSelectionChange={handleSkillSelectionChange}
+              onStopStreaming={handleStopStreaming}
+              searchEnabled={searchEnabled}
+              onSearchEnabledChange={setSearchEnabled}
+              sourceMentionLoader={loadSourceMentions}
+              selectedSources={selectedSources}
+              selectedSkillIds={activeSkillIds}
+              selectedMcpInstallIds={activeMcpInstallIds}
+              selectedMcpToolIds={activeMcpToolIds}
+              sourcesVisible={sourcesVisible}
+              thinkingCapabilities={selectedModels.llm?.capabilities}
+              toolConfirmationInterventionSignal={
+                toolConfirmationInterventionSignal
+              }
+              modelCapabilities={selectedModelCapabilities(selectedModels)}
+              imageModelAvailable={Boolean(selectedModels.image)}
+              imageModelAlias={selectedModels.image?.modelAlias ?? null}
+              notionConnectorId={activeConnectorTools.notionConnectorId}
+              activeConnectorIds={activeConnectorTools.activeConnectorIds}
+              disabledToolNames={disabledToolNames}
+              onDisabledToolNamesChange={setDisabledToolNames}
+              onLoadOlderMessages={() => void loadOlderThreadMessages()}
+              onReloadMessages={loadThreadMessages}
+              thinkingSettings={thinkingSettings}
+              onThinkingSettingsChange={handleThinkingSettingsChange}
+              threadTitle={threadTitle}
+              workspaceId={workspaceId}
+            />
+          )}
+        </div>
+
+        <ThreadSidePanels
+          isDesktopPanel={isDesktopPanel}
           isPersistentLayout={isPersistentLayout}
-          onAddByokModel={setByokModelConfig}
-          onByokSelect={handleThreadByokSelect}
-          onModelSelect={handleModelSelect}
-          onOpenHub={() => {
-            chatHubContext?.setMobileHubOpen(true);
-          }}
-          onOpenInNewWindow={openThreadInNewWindow}
-          onOpenParentThread={openParentThread}
-          onOpenSubagent={openSubagent}
-          onToggleSources={toggleSourcesVisible}
-          parentThread={parentThread}
-          presenceSlot={<ThreadPresenceAvatars viewers={presentViewers} />}
-          selectedModels={selectedModels}
-          setSelectedModels={setSelectedModels}
+          subagentPanel={subagentPanel}
+          onArtifactPreviewClose={() => setPreviewArtifact(null)}
+          previewArtifact={previewArtifact}
           sourcesVisible={sourcesVisible}
-          subagentChildren={subagentChildren}
-          threadTitle={threadTitle}
+          workspaceId={workspaceId}
         />
 
-        {latestRunFailure && !activeThreadRun && !isStreaming && (
-          <div className="shrink-0 px-4 pt-3">
-            <ChatErrorNotice
-              title="Message could not be started"
-              message={latestRunFailure.errorMessage}
-              code={latestRunFailure.errorCode}
-            />
-          </div>
-        )}
-
-        {chatUiState.status === "model-error" ? (
-          <ModelCatalogErrorState />
-        ) : chatUiState.status === "empty" &&
-          chatUiState.errorKind === "thread" ? (
-          <ThreadUnavailableState />
-        ) : shouldRenderThreadSkeleton(chatUiState) ? (
-          <ChatCanvasPanelSkeleton variant="thread" />
-        ) : (
-          <ChatCanvas
-            activeVersionByGroup={activeVersionByGroup}
-            assistantVersionById={assistantVersionById}
-            activeThreadRun={activeThreadRun}
-            otherUserRunActive={otherUserRunActive}
-            typingIndicator={<ThreadTypingIndicator typing={typingViewers} />}
-            onComposerType={onComposerType}
-            queuedSends={queuedSends}
-            onCancelQueuedSend={onCancelQueuedSend}
-            chatExecutionState={chatExecutionState}
-            allSources={librarySources}
-            availableSkills={availableSkills}
-            capabilityCatalog={capabilityCatalog}
-            composerInitialCommand={composerInitialCommand}
-            composerInitialInput={composerInitialInput}
-            composerResetKey={composerResetKey}
-            composerOptions={composerOptions}
-            editingMessageId={editingMessageId}
-            highlightedMessageId={highlightedMessageId}
-            hasOlderMessages={Boolean(olderMessagesCursor)}
-            isEditing={Boolean(editingMessageId && editingGroupId)}
-            isLoadingOlderMessages={isLoadingOlderMessages}
-            isStreaming={isStreaming}
-            isStopping={isStopping}
-            messageGroups={messageGroups}
-            mode="thread"
-            onActiveVersionChange={handleActiveVersionChange}
-            artifactStatuses={artifactStatuses}
-            onArtifactPreview={handleArtifactPreview}
-            onCancelEditing={cancelEditing}
-            onComposerOptionsChange={handleComposerOptionsChange}
-            onCitationClick={handleCitationClick}
-            onSourcePreview={handleSourcePreview}
-            onWorkfileClick={handleWorkfilePreview}
-            onRemoveSource={(id) =>
-              persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
+        <ThreadDialogs
+          byokCredentials={byokCredentials}
+          byokModelConfig={byokModelConfig}
+          byokProviders={byokProviders}
+          onByokConfigured={({ model, selection, type }) => {
+            if (!model || !selection) {
+              return;
             }
-            onRefreshLatest={handleRefreshLatest}
-            onResumeToolConfirmation={handleResumeToolConfirmation}
-            onRestartFromMessage={handleRestartFromMessage}
-            onSendMessage={handleSendMessage}
-            onSkillSelectionChange={handleSkillSelectionChange}
-            onStopStreaming={handleStopStreaming}
-            searchEnabled={searchEnabled}
-            onSearchEnabledChange={setSearchEnabled}
-            sourceMentionLoader={loadSourceMentions}
-            selectedSources={selectedSources}
-            selectedSkillIds={activeSkillIds}
-            selectedMcpInstallIds={activeMcpInstallIds}
-            selectedMcpToolIds={activeMcpToolIds}
-            sourcesVisible={sourcesVisible}
-            thinkingCapabilities={selectedModels.llm?.capabilities}
-            toolConfirmationInterventionSignal={
-              toolConfirmationInterventionSignal
+            handleThreadByokSelect({ model, selection, type });
+          }}
+          onByokModelConfigOpenChange={(open) => {
+            if (!open) {
+              setByokModelConfig(null);
             }
-            modelCapabilities={selectedModelCapabilities(selectedModels)}
-            imageModelAvailable={Boolean(selectedModels.image)}
-            imageModelAlias={selectedModels.image?.modelAlias ?? null}
-            notionConnectorId={activeConnectorTools.notionConnectorId}
-            activeConnectorIds={activeConnectorTools.activeConnectorIds}
-            disabledToolNames={disabledToolNames}
-            onDisabledToolNamesChange={setDisabledToolNames}
-            onLoadOlderMessages={() => void loadOlderThreadMessages()}
-            onReloadMessages={loadThreadMessages}
-            thinkingSettings={thinkingSettings}
-            onThinkingSettingsChange={handleThinkingSettingsChange}
-            threadTitle={threadTitle}
-            workspaceId={workspaceId}
-          />
-        )}
+          }}
+          onByokStateChange={({ credentials, models, providers }) => {
+            setByokCredentials(credentials);
+            setByokModels(models);
+            setByokProviders(providers);
+          }}
+          onPreviewSourceOpenChange={(open) => {
+            if (!open) {
+              setPreviewCitation(null);
+              setPreviewSource(null);
+            }
+          }}
+          onPreviewWorkfileOpenChange={(open) => {
+            if (!open) {
+              setPreviewWorkfile(null);
+            }
+          }}
+          onShortcutsOpenChange={setShortcutsOpen}
+          previewCitation={previewCitation}
+          previewSource={previewSource}
+          previewWorkfile={previewWorkfile}
+          shortcutDefinitions={shortcutDefinitions}
+          shortcutsOpen={shortcutsOpen}
+          workspaceId={workspaceId}
+        />
       </div>
-
-      <ThreadSidePanels
-        isDesktopPanel={isDesktopPanel}
-        isPersistentLayout={isPersistentLayout}
-        onArtifactPreviewClose={() => setPreviewArtifact(null)}
-        previewArtifact={previewArtifact}
-        sourcesVisible={sourcesVisible}
-        subagentPanel={subagentPanel}
-        workspaceId={workspaceId}
-      />
-
-      <ThreadDialogs
-        byokCredentials={byokCredentials}
-        byokModelConfig={byokModelConfig}
-        byokProviders={byokProviders}
-        onByokConfigured={({ model, selection, type }) => {
-          if (!model || !selection) {
-            return;
-          }
-          handleThreadByokSelect({ model, selection, type });
-        }}
-        onByokModelConfigOpenChange={(open) => {
-          if (!open) {
-            setByokModelConfig(null);
-          }
-        }}
-        onByokStateChange={({ credentials, models, providers }) => {
-          setByokCredentials(credentials);
-          setByokModels(models);
-          setByokProviders(providers);
-        }}
-        onPreviewSourceOpenChange={(open) => {
-          if (!open) {
-            setPreviewCitation(null);
-            setPreviewSource(null);
-          }
-        }}
-        onPreviewWorkfileOpenChange={(open) => {
-          if (!open) {
-            setPreviewWorkfile(null);
-          }
-        }}
-        onShortcutsOpenChange={setShortcutsOpen}
-        previewCitation={previewCitation}
-        previewSource={previewSource}
-        previewWorkfile={previewWorkfile}
-        shortcutDefinitions={shortcutDefinitions}
-        shortcutsOpen={shortcutsOpen}
-        workspaceId={workspaceId}
-      />
-    </div>
+    </LocalOperationContext.Provider>
   );
 }

@@ -105,7 +105,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
 
   constructor(input: {
     knowledge: BackendProtocolV2;
-    working: BackendProtocolV2;
+    working?: BackendProtocolV2 | null;
     skills?: BackendProtocolV2 | null;
     mounts?: AgentFilesystemMountCapability[];
   }) {
@@ -126,10 +126,14 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
         capability: knowledgeCapability,
         backend: reportingFailures(input.knowledge),
       },
-      {
-        capability: workingCapability,
-        backend: reportingFailures(input.working),
-      },
+      ...(input.working
+        ? [
+            {
+              capability: workingCapability,
+              backend: reportingFailures(input.working),
+            },
+          ]
+        : []),
       ...(input.skills
         ? [
             {
@@ -141,7 +145,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     ];
     this.defaultMount =
       this.mounts.find(
-        (mount) => mount.capability.evidenceRole === "source_evidence",
+        (mount) => mount.capability.root === WORK_MOUNT.root,
       ) ?? this.mounts[0]!;
     this.writableMounts = this.mounts.filter(
       (mount) => mount.capability.writable,

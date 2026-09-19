@@ -208,15 +208,85 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1788884180399,
-      "tag": "0029_subagent_threads",
+      "when": 1788886472468,
+      "tag": "0029_loving_rhino",
       "breakpoints": true
     },
     {
       "idx": 30,
       "version": "7",
-      "when": 1788886736370,
-      "tag": "0030_agent_personas",
+      "when": 1788888824746,
+      "tag": "0030_purple_wallow",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788933789089,
+      "tag": "0031_waffo_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788955095080,
+      "tag": "0032_subscription_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788977052266,
+      "tag": "0033_local_directory_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788977052267,
+      "tag": "0034_local_work_contexts",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789059102762,
+      "tag": "0035_thread_source_selection",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789059102763,
+      "tag": "0036_files_root",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789059102764,
+      "tag": "0037_file_payloads",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789059102765,
+      "tag": "0038_file_citations",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789802215415,
+      "tag": "0039_draft_folder_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789816542505,
+      "tag": "0040_subagent_threads",
       "breakpoints": true
     }
   ]

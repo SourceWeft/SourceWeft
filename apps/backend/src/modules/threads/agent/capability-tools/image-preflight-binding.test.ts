@@ -4,6 +4,7 @@ import { agentToolTurnPreflights } from "@sourceweft/agent-tool-registry";
 import type {
   AgentToolModelProfileView,
   AgentToolTurnPreflightInput,
+  AgentToolWebProvider,
 } from "@sourceweft/contracts/agent-tools";
 import {
   buildEffectiveToolsSelection,
@@ -18,8 +19,12 @@ import { resolveSelectedSkillRuntimeContract } from "../../turn/active-skill-run
 import { resolveActiveSkillPromptIds } from "../../turn/invoked-skills";
 import { resolveCapabilitySkillRuntimeWorkflow } from "../../turn/capability-command-workflows";
 import type { EnabledSkillDescriptor } from "../../../skills/types";
+import { AgentCitationRegistry } from "../citation-registry";
 
 const hostMocks = vi.hoisted(() => ({
+  webProvider: vi.fn<() => Promise<AgentToolWebProvider | null>>(
+    async () => null,
+  ),
   getClient: vi.fn(async () => {
     throw new Error("Binding must not execute a model request");
   }),
@@ -31,7 +36,7 @@ const hostMocks = vi.hoisted(() => ({
 // Keep all actual capability discovery, factories and host service wiring.
 // Only external execution is stubbed; no model/storage request is needed to bind.
 vi.mock("../../../sources/web-provider", () => ({
-  createDefaultWebProvider: async () => null,
+  createDefaultWebProvider: hostMocks.webProvider,
 }));
 vi.mock("./host-services", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./host-services")>();
@@ -73,6 +78,7 @@ async function prepareImageBinding(
     lookupError?: Error;
     invokedSkillIds?: string[];
     sandboxAvailable?: boolean;
+    webAccessEnabled?: boolean;
   } = {},
 ) {
   const preflight = agentToolTurnPreflights().find(
@@ -161,7 +167,7 @@ async function prepareImageBinding(
       result.selection !== undefined
         ? { generate_image: result.selection }
         : {},
-    webAccessEnabled: false,
+    webAccessEnabled: input.webAccessEnabled ?? false,
   });
   const toolPermissions = resolveToolPermissions({
     command: null,
@@ -184,7 +190,7 @@ async function prepareImageBinding(
     toolPermissions,
     runtimeTools: buildRuntimeTools({ tools: effectiveTools, toolPermissions }),
     turnState: { generate_image: result.state },
-    webAccessEnabled: false,
+    webAccessEnabled: input.webAccessEnabled ?? false,
   } as unknown as CapabilityAgentToolsForTurnInput["prepared"];
   return {
     result,
@@ -193,7 +199,7 @@ async function prepareImageBinding(
       createCapabilityAgentToolsForTurn({
         prepared,
         billing: {} as never,
-        runtime: {} as never,
+        runtime: { citationRegistry: new AgentCitationRegistry() } as never,
         filesystemBackend: { backend: {} } as never,
         sandboxRuntime: input.sandboxAvailable
           ? ({
@@ -206,7 +212,55 @@ async function prepareImageBinding(
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  hostMocks.webProvider.mockResolvedValue(null);
+});
+
+test("unconfigured optional web provider does not block ordinary chat bindings", async () => {
+  const { prepared, bind } = await prepareImageBinding({
+    webAccessEnabled: true,
+  });
+  assert.equal(prepared.runtimeTools.web_search?.shouldBind, true);
+  const names = (await bind()).tools.map((tool) => tool.name);
+  assert.ok(names.includes("search_sources"));
+  assert.ok(!names.includes("web_search"));
+  assert.ok(!names.includes("web_fetch"));
+});
+
+test("explicit web invocation fails clearly when its provider is unconfigured", async () => {
+  const { prepared, bind } = await prepareImageBinding({
+    webAccessEnabled: true,
+  });
+  prepared.invocation = {
+    kind: "fixed_tool_choice",
+    target: "capability_tool",
+    toolName: "web_search",
+  } as typeof prepared.invocation;
+  await assert.rejects(
+    bind(),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "WEB_PROVIDER_UNAVAILABLE",
+  );
+});
+
+test("configured web provider binds both web tools without executing a request", async () => {
+  const search = vi.fn(async () => {
+    throw new Error("Must not execute search during binding");
+  });
+  const fetch = vi.fn(async () => {
+    throw new Error("Must not execute fetch during binding");
+  });
+  hostMocks.webProvider.mockResolvedValue({ name: "test", search, fetch });
+  const { bind } = await prepareImageBinding({ webAccessEnabled: true });
+  const names = (await bind()).tools.map((tool) => tool.name);
+  assert.ok(names.includes("web_search"));
+  assert.ok(names.includes("web_fetch"));
+  assert.equal(search.mock.calls.length, 0);
+  assert.equal(fetch.mock.calls.length, 0);
+});
 
 test("default skill image availability agrees with strict host bindings when no image profile exists", async () => {
   const { prepared, result, bind } = await prepareImageBinding();

@@ -1,3 +1,4 @@
+import { adaptBillingTestPort } from "../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 
@@ -49,14 +50,14 @@ vi.mock("../../shared/model-gateway", async () => {
   };
 });
 
-vi.mock("../../modules/billing", () => ({
-  billingService: {
+vi.mock("../../billing-host/bindings", () => ({
+  billingRuntime: adaptBillingTestPort({
     getSummary: vi.fn(async (teamId: string) => ({
       teamId,
       billingMode: "enforced",
       credits: { available: 1000, consumedThisCycle: 0 },
     })),
-  },
+  }),
 }));
 
 // The completion adapter resolves through modules/artifacts/publish, which

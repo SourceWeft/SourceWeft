@@ -12,7 +12,7 @@ import {
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import { requireConnectorWorkspace } from "./permissions";
 import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
-import { billingService } from "../billing";
+import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { enqueueConnectorSyncJob } from "../content/queue";
 import {
   findSourceRecordByConnectorExternalId,
@@ -49,7 +49,9 @@ function fallbackEventId(input: {
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
-  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+  return Array.from(
+    new Set(values.filter((value): value is string => Boolean(value))),
+  );
 }
 
 function hasTargetedSync(targets: ConnectorWebhookTarget[]) {
@@ -132,7 +134,10 @@ export class ConnectorWebhookService {
       payloadMetadataJson: event.metadata,
     });
 
-    if (webhookEvent.status === "processed" || webhookEvent.status === "queued") {
+    if (
+      webhookEvent.status === "processed" ||
+      webhookEvent.status === "queued"
+    ) {
       return { event: webhookEvent, duplicate: true };
     }
 
@@ -163,9 +168,9 @@ export class ConnectorWebhookService {
 
       const syncRunIds: string[] = [];
       for (const connector of connectors) {
-        const shouldFullResync = meaningfulTargets.some(
-          (target) => target.action === "sync",
-        ) && !hasTargetedSync(meaningfulTargets);
+        const shouldFullResync =
+          meaningfulTargets.some((target) => target.action === "sync") &&
+          !hasTargetedSync(meaningfulTargets);
         const syncExternalIds = uniqueStrings(
           meaningfulTargets
             .filter((target) => target.action === "sync")
@@ -261,7 +266,9 @@ export class ConnectorWebhookService {
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "";
       if (
-        /relation .*connector_webhook_events.* does not exist/i.test(rawMessage) ||
+        /relation .*connector_webhook_events.* does not exist/i.test(
+          rawMessage,
+        ) ||
         /connector_webhook_events/i.test(rawMessage)
       ) {
         logger.warn("Connector webhook event storage is not ready", {

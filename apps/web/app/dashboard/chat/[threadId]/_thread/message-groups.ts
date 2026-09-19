@@ -179,21 +179,7 @@ function resolveContextSourceIds(input: {
   messages: ChatMessageItem[];
   activeSourceIds: string[];
 }) {
-  if (input.activeSourceIds.length > 0) {
-    return input.activeSourceIds;
-  }
-
-  const sourceIds: string[] = [];
-  const seen = new Set<string>();
-  for (const message of input.messages) {
-    for (const sourceId of resolveMessageSourceIds(message)) {
-      if (!seen.has(sourceId)) {
-        seen.add(sourceId);
-        sourceIds.push(sourceId);
-      }
-    }
-  }
-  return sourceIds;
+  return [...input.activeSourceIds];
 }
 
 function resolveRefreshSourceIds(input: {
@@ -201,25 +187,7 @@ function resolveRefreshSourceIds(input: {
   assistantMessageId: string;
   groups: VersionedMessageGroup[];
 }) {
-  const assistantVersion = input.groups
-    .flatMap((group) => group.versions)
-    .find((version) => version.id === input.assistantMessageId);
-  const sourceUserMessageId = assistantVersion?.sourceUserMessageId;
-  if (!sourceUserMessageId) {
-    return [] as string[];
-  }
-
-  const userVersion = input.groups
-    .filter((group) => group.role === "user")
-    .flatMap((group) => group.versions)
-    .find((version) => version.id === sourceUserMessageId);
-
-  const sourceIds = userVersion?.sourceIds ?? [];
-  if (sourceIds.length > 0) {
-    return sourceIds;
-  }
-
-  return input.activeSourceIds ?? [];
+  return [...(input.activeSourceIds ?? [])];
 }
 
 function resolveEditSourceIds(input: {
@@ -227,16 +195,7 @@ function resolveEditSourceIds(input: {
   editingMessageId: string;
   groups: VersionedMessageGroup[];
 }) {
-  if (input.activeSourceIds.length > 0) {
-    return input.activeSourceIds;
-  }
-
-  const userVersion = input.groups
-    .filter((group) => group.role === "user")
-    .flatMap((group) => group.versions)
-    .find((version) => version.id === input.editingMessageId);
-
-  return userVersion?.sourceIds ?? [];
+  return [...input.activeSourceIds];
 }
 
 function resolveAssistantSourceUserMessageId(

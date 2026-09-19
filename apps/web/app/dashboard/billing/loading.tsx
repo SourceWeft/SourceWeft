@@ -1,3 +1,4 @@
+// Generated commercial billing route; subject to enterprise/LICENSE.
 import {
   BillingRouteSkeleton,
   DashboardContentRouteSkeleton,

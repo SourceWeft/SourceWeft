@@ -1,4 +1,5 @@
 "use client";
+import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
 
 import type { ReactNode } from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
@@ -52,40 +53,10 @@ export function getTeamInitials(name: string) {
     .join("");
 }
 
-type SourceweftOrganizationMetadata = {
-  sourceweft?: {
-    kind?: "personal" | "team";
-  };
-};
-
-function parseOrganizationMetadata(metadata: unknown) {
-  if (!metadata) return {};
-  if (typeof metadata === "object") {
-    return metadata as SourceweftOrganizationMetadata;
-  }
-  if (typeof metadata !== "string") return {};
-
-  try {
-    let parsed: unknown = JSON.parse(metadata);
-    if (typeof parsed === "string") {
-      parsed = JSON.parse(parsed);
-    }
-
-    return parsed && typeof parsed === "object"
-      ? (parsed as SourceweftOrganizationMetadata)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-export function isPersonalOrganization(org: { metadata?: unknown }) {
-  return parseOrganizationMetadata(org.metadata).sourceweft?.kind === "personal";
-}
-
-export function getVisibleTeamOrganizations<T extends DashboardTeamOrganization>(
-  orgs: T[],
-) {
+export { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
+export function getVisibleTeamOrganizations<
+  T extends DashboardTeamOrganization,
+>(orgs: T[]) {
   return orgs.filter((org) => !isPersonalOrganization(org));
 }
 
@@ -118,7 +89,10 @@ export function useDashboardTeamSelector() {
   const user: DashboardTeamUser = {
     email: sessionState?.user?.email,
     image: sessionState?.user?.image,
-    initials: getUserInitials(sessionState?.user?.name, sessionState?.user?.email),
+    initials: getUserInitials(
+      sessionState?.user?.name,
+      sessionState?.user?.email,
+    ),
     name: sessionState?.user?.name,
   };
   const items: DashboardTeamItem[] = [
@@ -141,11 +115,12 @@ export function useDashboardTeamSelector() {
     })),
   ];
 
-  const currentItem = (activeOrg
-    ? items.find((item) => item.id === activeOrg.id) ?? items[0]
-    : personalOrg
-      ? items.find((item) => item.id === personalOrg.id)
-      : items[0]) ?? null;
+  const currentItem =
+    (activeOrg
+      ? (items.find((item) => item.id === activeOrg.id) ?? items[0])
+      : personalOrg
+        ? items.find((item) => item.id === personalOrg.id)
+        : items[0]) ?? null;
 
   async function switchTeam(item: DashboardTeamItem) {
     await authClient.organization.setActive({
@@ -205,9 +180,14 @@ export function DashboardTeamDisplay({
       <div className={classes.wrapper}>
         <Avatar className={classes.avatar}>
           {item.isPersonal ? (
-            <AvatarImage src={user.image ?? undefined} alt={user.name ?? "User"} />
+            <AvatarImage
+              src={user.image ?? undefined}
+              alt={user.name ?? "User"}
+            />
           ) : null}
-          <AvatarFallback className={cn(classes.fallback)}>{fallback}</AvatarFallback>
+          <AvatarFallback className={cn(classes.fallback)}>
+            {fallback}
+          </AvatarFallback>
         </Avatar>
       </div>
       <span className={cn("truncate", labelClassName)}>{item.name}</span>

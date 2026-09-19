@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
-  Apple,
   CheckCircle2,
   Loader2,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
+import { AppleIcon, GoogleIcon } from "../../_components/brand-icons";
 import { Logo } from "@sourceweft/ui-web/logo";
 import { authClient } from "../../../lib/auth-client";
 import {
@@ -100,7 +100,7 @@ export function MobileLoginView({ path }: { path: string }) {
           return;
         }
 
-        router.replace("/dashboard");
+        router.replace("/dashboard/chat");
         router.refresh();
       } catch {
         // Stay on the mobile auth form when the session probe is unavailable.
@@ -143,7 +143,7 @@ export function MobileLoginView({ path }: { path: string }) {
     const session = await authClient.getSession();
 
     if (hasActiveSession(session)) {
-      router.replace("/dashboard");
+      router.replace("/dashboard/chat");
       router.refresh();
       return;
     }
@@ -285,9 +285,7 @@ export function MobileLoginView({ path }: { path: string }) {
               {isGoogleSubmitting ? (
                 <Loader2 className="size-5 animate-spin" />
               ) : (
-                <span className="flex size-5 items-center justify-center rounded-full bg-background text-sm font-bold text-foreground">
-                  G
-                </span>
+                <GoogleIcon className="size-5" />
               )}
               Continue with Google
             </button>
@@ -298,7 +296,7 @@ export function MobileLoginView({ path }: { path: string }) {
               tabIndex={-1}
               type="button"
             >
-              <Apple className="size-[18px] fill-current" />
+              <AppleIcon className="size-[18px]" />
               Continue with Apple
             </button>
           </div>

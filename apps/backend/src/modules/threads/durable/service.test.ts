@@ -510,6 +510,7 @@ test("handled confirmation metadata replaces stale approval_requested tool calls
     snapshot: {
       finishReason: "tool_confirmation_requested",
       reasoning: "before approval",
+      reasoningRun: { runId: "run-1", parentRunId: null, base: "" },
       reasoningSegments: [
         {
           id: "reasoning-before",

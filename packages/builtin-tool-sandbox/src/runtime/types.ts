@@ -1,7 +1,7 @@
 import type { ExecuteResponse } from "deepagents";
 import type { SandboxCommandBudget } from "./command-budgets";
 
-export const SOURCEWEFT_WORK_ROOT = "/workfiles";
+export const SOURCEWEFT_WORK_ROOT = "/files";
 export const SOURCEWEFT_KB_ROOT = "/kb";
 /**
  * Platform skill-staging contract root (docs/architecture/sandbox-skill-staging.md).
@@ -34,6 +34,8 @@ export type SandboxStatus =
 export type SandboxProviderId = string;
 
 export type SandboxProviderPathPolicy = {
+  /** Host-local skill files may live under the bound workspace instead of /skills. */
+  skillsRoot?: string;
   workspaceRoot: string;
   defaultCwd: string;
   prepareTargetRoots: readonly string[];
@@ -81,6 +83,7 @@ export type SandboxCollectedOutput = {
 };
 
 export type SandboxRuntimeContext = {
+  localCaller?: { sessionId: string; nativeAccessId?: string };
   teamId: string;
   workspaceId: string;
   threadId: string;
@@ -187,7 +190,11 @@ export type SandboxProvider = {
     signal?: AbortSignal;
     timeoutMs?: number;
   }): Promise<Buffer>;
+  /** Native I/O enforces bound-root/no-follow access itself; downloads return
+   * bounded immutable snapshots and must reject unsafe links and file races. */
+  nativeFileOperations?: boolean;
   listFiles?(input: {
+    recursive?: boolean;
     providerSandboxId: string;
     sandboxPath: string;
   }): Promise<
@@ -202,6 +209,12 @@ export type SandboxProvider = {
     providerSandboxId: string;
     sandboxPath: string;
   }): Promise<string>;
+  replaceTextFile?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+    content: string;
+    expected: string;
+  }): Promise<unknown>;
   writeTextFile?(input: {
     providerSandboxId: string;
     sandboxPath: string;
@@ -226,6 +239,20 @@ export type SandboxProvider = {
       text: string;
     }>
   >;
+  nativeGrep?(input: {
+    providerSandboxId: string;
+    paths: string[];
+    pattern: string;
+    literal?: boolean;
+    ignoreCase?: boolean;
+    firstPerFile?: boolean;
+    signal?: AbortSignal;
+  }): Promise<{
+    matches: Array<{ path: string; line: number; text: string }>;
+    visitedPaths: string[];
+    skipped: string[];
+    truncated: boolean;
+  }>;
   globFiles?(input: {
     providerSandboxId: string;
     pattern: string;

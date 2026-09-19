@@ -3,7 +3,7 @@
 import {
   getPricingConfig,
   planFamilyToPricingPlanId,
-} from "@sourceweft/contracts/pricing";
+} from "../app/_landing/pricing-config";
 import { trackEvent, type AnalyticsParams } from "./analytics";
 
 type BillingInterval = "monthly" | "yearly";
@@ -36,9 +36,7 @@ function getPlanPriceCents(input: {
   plan: CheckoutPlan;
   seatCount?: number;
 }) {
-  const plan = getPricingConfig().find(
-    (item) => item.id === input.plan,
-  );
+  const plan = getPricingConfig().find((item) => item.id === input.plan);
   if (!plan) {
     return undefined;
   }

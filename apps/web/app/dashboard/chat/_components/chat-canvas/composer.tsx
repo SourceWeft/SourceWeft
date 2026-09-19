@@ -1,4 +1,9 @@
 import {
+  readChatDraft,
+  writeChatDraft,
+  type ChatDraft,
+} from "../../../../../lib/chat-drafts";
+import {
   Fragment,
   useEffect,
   useMemo,
@@ -40,6 +45,7 @@ import {
   PromptInputSubmit,
   PromptInputTools,
   usePromptInputAttachments,
+  usePromptInputController,
   type PromptInputMentionSourceLoader,
   type PromptInputMessage,
   type PromptInputSegment,
@@ -386,7 +392,10 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
   return option.valueType === "boolean" ? false : undefined;
 }
 
-export function Composer({
+function ComposerBody({
+  draftKey,
+  draftPaused = false,
+  workingFolderSlot,
   isEditing = false,
   placeholder,
   onSubmit,
@@ -424,6 +433,9 @@ export function Composer({
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
 }: {
+  draftKey?: string;
+  draftPaused?: boolean;
+  workingFolderSlot?: import("react").ReactNode;
   isEditing?: boolean;
   placeholder?: string;
   onSubmit?: (
@@ -1368,12 +1380,13 @@ export function Composer({
   }, [isEditing, inputKey]);
 
   return (
-    <div className={className} ref={rootRef}>
+    <div className={cn("chat-composer min-w-0", className)} ref={rootRef}>
       <PromptInputProvider
         initialAttachments={initialAttachments}
         initialInput={initialInput}
         key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachments.map((a) => a.id).join(",")}`}
       >
+        {draftKey && <DraftMirror draftKey={draftKey} paused={draftPaused} />}
         <PromptInput
           accept="image/png,image/jpeg,image/webp,image/gif"
           maxFileSize={10 * 1024 * 1024}
@@ -1574,6 +1587,7 @@ export function Composer({
           />
           <PromptInputBody>
             <PromptInputMentionEditor
+              className="min-h-14 max-h-[min(192px,25svh)]"
               autoFocus={isEditing}
               data-chat-prompt-editor="true"
               initialSegments={initialPromptSegments}
@@ -1631,7 +1645,8 @@ export function Composer({
             />
           </PromptInputBody>
           <PromptInputFooter className="border-t-0">
-            <PromptInputTools className="w-full flex-wrap gap-3">
+            <PromptInputTools className="w-full flex-nowrap gap-2">
+              {workingFolderSlot}
               <div className="flex min-w-0 items-center gap-1.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -2475,6 +2490,8 @@ function ComposerAttachmentsHeader({
   const images = attachments.files.filter((file) =>
     file.mediaType?.startsWith("image/"),
   );
+  const [showAllImages, setShowAllImages] = useState(false);
+  const visibleImages = images.length > 2 && !showAllImages ? [] : images;
   const showSourceCountOnly = selectedSources.length > 2;
   const visibleSources = showSourceCountOnly ? [] : selectedSources;
 
@@ -2483,8 +2500,14 @@ function ComposerAttachmentsHeader({
   }
 
   return (
-    <PromptInputHeader className="items-start">
-      <Attachments className="gap-2.5 pt-0.5" variant="inline">
+    <PromptInputHeader
+      data-composer-attachments
+      className="min-w-0 items-start"
+    >
+      <Attachments
+        className="max-h-20 max-w-full overflow-y-auto gap-2 pt-0.5"
+        variant="inline"
+      >
         {showSourceCountOnly ? (
           <Attachment
             className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
@@ -2518,7 +2541,17 @@ function ComposerAttachmentsHeader({
             </Attachment>
           ))
         )}
-        {images.map((file) => (
+        {images.length > 2 ? (
+          <button
+            type="button"
+            className="rounded-lg bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            aria-expanded={showAllImages}
+            onClick={() => setShowAllImages((value) => !value)}
+          >
+            {images.length} images · {showAllImages ? "Collapse" : "Show"}
+          </button>
+        ) : null}
+        {visibleImages.map((file) => (
           <ComposerImageAttachment
             attachment={file}
             key={file.id}
@@ -2561,13 +2594,17 @@ function ComposerImageAttachment({
           </Attachment>
         </div>
       </AttachmentHoverCardTrigger>
-      <AttachmentHoverCardContent>
+      <AttachmentHoverCardContent
+        data-composer-image-preview
+        className="pointer-events-none max-w-[calc(100vw-2rem)]"
+        side="top"
+      >
         <div className="space-y-3">
           {attachment.url ? (
-            <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
+            <div className="flex max-h-[min(240px,40svh)] w-56 max-w-full items-center justify-center overflow-hidden rounded-md border bg-muted/30">
               <RawImage
                 alt={label}
-                className="max-h-full max-w-full object-contain"
+                className="h-auto max-h-[min(240px,40svh)] w-auto max-w-full object-contain"
                 height={384}
                 src={attachment.url}
                 width={320}
@@ -2575,7 +2612,12 @@ function ComposerImageAttachment({
             </div>
           ) : null}
           <div className="space-y-1 px-0.5">
-            <h4 className="font-semibold text-sm leading-none">{label}</h4>
+            <h4
+              className="line-clamp-3 break-words text-sm font-semibold leading-5 [overflow-wrap:anywhere]"
+              title={label}
+            >
+              {label}
+            </h4>
             {attachment.mediaType ? (
               <p className="font-mono text-muted-foreground text-xs">
                 {attachment.mediaType}
@@ -2611,5 +2653,137 @@ function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
       <ImageIcon className="size-4" />
       <span className="sr-only">Add image</span>
     </PromptInputButton>
+  );
+}
+
+function DraftMirror({
+  draftKey,
+  paused,
+}: {
+  draftKey: string;
+  paused: boolean;
+}) {
+  const { textInput, attachments } = usePromptInputController();
+  const [status, setStatus] = useState("saved");
+  useEffect(() => {
+    if (paused) return;
+    let live = true;
+    setStatus("saving");
+    void writeChatDraft(draftKey, textInput.value, attachments.files).then(
+      () => {
+        if (live) setStatus("saved");
+      },
+      (error) => {
+        if (live) {
+          setStatus("error");
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to save your draft. Please do not refresh yet.",
+          );
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [draftKey, paused, textInput.value, attachments.files]);
+  return <span hidden data-draft-status={status} />;
+}
+function PersistentComposer(
+  props: import("react").ComponentProps<typeof ComposerBody> & {
+    draftKey: string;
+  },
+) {
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    draft: ChatDraft | null;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const loadKey = `${props.draftKey}:${props.inputKey ?? 0}:${retry}`;
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void readChatDraft(props.draftKey).then(
+      (draft) => {
+        if (active) {
+          setLoaded({ key: loadKey, draft });
+          setPaused(false);
+        }
+      },
+      (e) => {
+        if (active) setError(e instanceof Error ? e.message : "Unable to restore your draft.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [props.draftKey, loadKey]);
+  const files = useMemo(
+    () =>
+      loaded?.draft?.files.map((file) => ({
+        id: file.id,
+        type: "file" as const,
+        filename: file.filename,
+        mediaType: file.mediaType,
+        url: URL.createObjectURL(file.blob),
+      })) ?? [],
+    [loaded],
+  );
+  useEffect(
+    () => () => {
+      files.forEach((file) => URL.revokeObjectURL(file.url));
+    },
+    [files],
+  );
+  if (error)
+    return (
+      <div role="alert" className="space-y-2 text-sm text-destructive">
+        {error}
+        <button
+          type="button"
+          className="ml-2 underline"
+          onClick={() => setRetry((value) => value + 1)}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  if (loaded?.key !== loadKey)
+    return (
+      <div className="min-h-24 text-sm text-muted-foreground">
+        Restoring your draft…
+      </div>
+    );
+  return (
+    <ComposerBody
+      {...props}
+      key={`${props.draftKey}:${props.inputKey ?? 0}:${retry}`}
+      draftPaused={paused}
+      initialInput={props.initialInput ?? loaded.draft?.text ?? ""}
+      initialAttachments={files}
+      onSubmit={(...args) => {
+        setPaused(true);
+        void writeChatDraft(
+          props.draftKey,
+          args[4] ?? args[0].text,
+          args[0].files,
+        ).catch((e) =>
+          toast.error(e instanceof Error ? e.message : "Failed to save your draft."),
+        );
+        props.onSubmit?.(...args);
+      }}
+    />
+  );
+}
+export function Composer(
+  props: import("react").ComponentProps<typeof ComposerBody>,
+) {
+  return props.draftKey ? (
+    <PersistentComposer {...props} draftKey={props.draftKey} />
+  ) : (
+    <ComposerBody {...props} />
   );
 }

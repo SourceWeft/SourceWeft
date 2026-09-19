@@ -66,12 +66,17 @@ import {
 } from "./thread-utils";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import { mergeCommittedArtifactOutputsIntoMessage } from "./artifact-output-reconcile";
+import { useLocalConversationStatus } from "../../_components/local-conversation-status";
+import { reportLocalAvailabilityError } from "../../../../../lib/local-availability-events";
 
 export type ThreadStreamActionInput = {
+  onAccepted?: () => void;
+  onBlocked?: (message: string) => void;
   mode: "send" | "refresh" | "edit" | "resume";
   content?: string;
   mentionedSourceIds?: string[];
   sourceIds?: string[];
+  sourceSelectionRevision?: number;
   skillIds?: string[];
   tools?: ChatSendInput["tools"];
   images?: ChatSendInput["images"];
@@ -196,9 +201,18 @@ export function useThreadStreamAction({
   updateChatTitle,
   workspaceId,
 }: UseThreadStreamActionInput) {
+  const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const streamThreadAction = useCallback(
     async (input: ThreadStreamActionInput) => {
       if (!workspaceId) {
+        input.onBlocked?.("The workspace is not ready.");
+        return;
+      }
+      if (!input.attachOnly && !localStatus.ready) {
+        input.onBlocked?.(
+          localStatus.message ?? "The computer is unavailable.",
+        );
+        toast.error(localStatus.message ?? "The computer is unavailable.");
         return;
       }
 
@@ -277,6 +291,9 @@ export function useThreadStreamAction({
               ? { effectiveMentionedSourceIds: input.mentionedSourceIds }
               : {}),
             ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+            ...(input.sourceSelectionRevision !== undefined
+              ? { sourceSelectionRevision: input.sourceSelectionRevision }
+              : {}),
             ...(localEffectiveSourceIds.length > 0
               ? { effectiveSourceIds: localEffectiveSourceIds }
               : {}),
@@ -733,6 +750,7 @@ export function useThreadStreamAction({
             }));
           },
           onPersistedUserMessageId: (messageId) => {
+            input.onAccepted?.();
             persistedUserMessageId = messageId;
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
@@ -743,6 +761,7 @@ export function useThreadStreamAction({
             preparedEffectiveSourceIds = sourceIds;
           },
           onPreparedThreadRun: (threadRun) => {
+            input.onAccepted?.();
             preparedThreadRunId = toNullableString(threadRun.id);
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
@@ -796,6 +815,7 @@ export function useThreadStreamAction({
           shouldRenderToolCall,
           skillIds: input.skillIds,
           sourceIds: input.sourceIds,
+          sourceSelectionRevision: input.sourceSelectionRevision,
           streamRenderBuffer,
           streamThinkingStepsById,
           streamToolCallsById,
@@ -895,6 +915,10 @@ export function useThreadStreamAction({
         clearAttachedRunKeyIfCurrent(durableRunKey);
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
+        reportLocalAvailabilityError(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/stream`,
+          error,
+        );
         // The server's one-run-per-thread backstop: this queued send lost the
         // race for the free window. Don't restore the composer or toast — the
         // controller re-queues it (see onRunAlreadyActive) so it isn't lost.
@@ -993,6 +1017,8 @@ export function useThreadStreamAction({
       updateChatTitle,
       updateActiveRunIfCurrent,
       workspaceId,
+      localStatus.ready,
+      localStatus.message,
     ],
   );
 

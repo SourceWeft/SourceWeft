@@ -1,4 +1,5 @@
 import type { MeterConsumeResponse } from "@sourceweft/contracts";
+import { clientReasoningMetadata } from "../turn/reasoning-state";
 import {
   invokeDeepAgentTurn,
   type DeepAgentTurnOutcome,
@@ -111,7 +112,7 @@ export type ThreadStreamRunOptions = {
   createErrorMessage?: typeof createThreadStreamErrorMessage;
   onFinalized?: (result: {
     assistantMessage: MessageRecord;
-    billing: MeterConsumeResponse;
+    billing: MeterConsumeResponse | undefined;
     retrieval: {
       embeddingProfileId: string | null;
       vectorStrategy: EmbeddingVectorStrategy | null;
@@ -1238,7 +1239,10 @@ class ContentThreadStreamService {
       return {
         thread: prepared.thread,
         userMessage: prepared.userMessage,
-        assistantMessage,
+        assistantMessage: {
+          ...assistantMessage,
+          metadata: clientReasoningMetadata(assistantMessage.metadata),
+        },
         billing,
         retrieval: {
           embeddingProfileId: completedOutcome.retrieval?.profile.id ?? null,

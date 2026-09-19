@@ -1,6 +1,7 @@
+import { SkillParseError } from "../../modules/skills/frontmatter";
 import type { Context } from "hono";
 import { ZodError } from "zod";
-import { isBillingError } from "../../modules/billing/errors";
+import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
 import { isMcpError } from "../../modules/mcp/errors";
@@ -82,6 +83,7 @@ function jsonResponse(c: Context, body: unknown, statusCode: number) {
 }
 
 export function toApiError(error: unknown): ApiError {
+  if (error instanceof SkillParseError) return new ApiError(422, error.code, error.message, { file: "SKILL.md", line: error.line, column: error.column });
   if (error instanceof ApiError) {
     return error;
   }

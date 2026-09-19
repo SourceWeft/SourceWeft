@@ -1,3 +1,4 @@
+import { currentSourceWeftToolInvocationSignal } from "./middleware/tool-call-context";
 import type {
   BackendProtocolV2,
   EditResult,
@@ -164,7 +165,7 @@ function missingWorkingFileHint(normalizedPath: string) {
     return "";
   }
 
-  return ` If '${name}' is an uploaded, selected, referenced, attached, or @mentioned source, use ${AGENT_TOOL_NAMES.searchSources} or list/read the Source Library under /kb instead of ${WORK_ROOT} Workfiles.`;
+  return ` If '${name}' is an uploaded, selected, referenced, attached, or @mentioned source, use ${AGENT_TOOL_NAMES.searchSources} or list/read the Source Library under /kb instead of ${WORK_ROOT} Files.`;
 }
 
 function compactWhitespace(value: string) {
@@ -209,6 +210,10 @@ function uniqueFootnoteLabel(baseLabel: string, usedLabels: Set<string>) {
 
 function buildWorkfileReferenceText(citation: AgentCitation) {
   const title = compactWhitespace(citation.sourceTitle || "Untitled source");
+  if (citation.fileReference) {
+    const reference = citation.fileReference;
+    return `File: ${reference.file.relativePath}. Location: ${JSON.stringify(reference.locator)}. Version: ${reference.file.revision}.`;
+  }
   if (citation.externalUri) {
     const lead = title ? trimSentence(title) : "Web source.";
     return `${lead} ${citation.externalUri}`;
@@ -320,7 +325,11 @@ export function rewriteWorkfileCitationMarkers(input: {
         if (!label) {
           const baseLabel = slugifyFootnoteLabel(
             citation.sourceTitle || citation.externalUri || "source",
-            citation.externalUri ? "web-source" : "source",
+            citation.fileReference
+              ? "file"
+              : citation.externalUri
+                ? "web-source"
+                : "source",
           );
           label = uniqueFootnoteLabel(baseLabel, state.usedLabels);
         }
@@ -356,6 +365,7 @@ export function rewriteWorkfileCitationMarkers(input: {
 }
 
 export class WorkingFilesBackend implements BackendProtocolV2 {
+  private readonly observedRevisions = new Map<string, string>();
   constructor(
     private readonly input: {
       teamId: string;
@@ -388,6 +398,10 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         userId: this.input.userId,
         path: normalized,
       });
+      this.observedRevisions.set(
+        normalized,
+        `sha256:${result.file.contentHash}`,
+      );
       return result.file;
     } catch (error) {
       if (isWorkingFileNotFoundError(error)) {
@@ -472,6 +486,11 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         };
       }
 
+      if (file.payloadKind === "object")
+        return {
+          error:
+            "BINARY_FILE_USE_READER: Use read_document or view_image for this file.",
+        };
       const safeContent = sanitizeNonCitableCitationMarkers(file.contentText);
       const lines = lineNumberContent(safeContent).split("\n");
       const boundedOffset = Math.max(0, offset);
@@ -497,7 +516,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
           `Workfile: ${basename(file.path)}`,
           `MIME: ${file.mimeType}`,
           file.purpose ? `Purpose: ${file.purpose}` : null,
-          "Workfiles are database-persisted thread working memory, not source evidence. Use them to continue or supplement thread work, but do not cite this file as a source.",
+          "Files are database-persisted thread working memory, not source evidence. Use them to continue or supplement thread work, but do not cite this file as a source.",
           "",
           selected.join("\n"),
           more,
@@ -519,6 +538,11 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
           error: `ENOENT: no such thread working file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'.${missingWorkingFileHint(normalized)}`,
         };
       }
+      if (file.payloadKind === "object")
+        return {
+          error:
+            "BINARY_FILE_USE_READER: Use read_document or view_image for this file.",
+        };
       const data: FileData = {
         content: sanitizeNonCitableCitationMarkers(file.contentText),
         mimeType: file.mimeType,
@@ -559,6 +583,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       );
       const matches: GrepMatch[] = [];
       for (const file of targetFiles) {
+        if (file.payloadKind === "object") continue;
         if (matcher && !matcher.test(file.path)) {
           continue;
         }
@@ -589,13 +614,20 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
     try {
       const normalized = normalizeWorkingFilePath(filePath);
       const result = await workingFilesService.putWorkingFile({
+        signal: currentSourceWeftToolInvocationSignal(),
         workspaceId: this.input.workspaceId,
         threadId: this.input.threadId,
         userId: this.input.userId,
         path: normalized,
         contentText: this.prepareContentForPersistence(content),
         mimeType: inferMimeType(normalized),
+        expectedRevision: this.observedRevisions.get(normalized),
+        origin: "agent_created",
       });
+      this.observedRevisions.set(
+        normalized,
+        `sha256:${result.file.contentHash}`,
+      );
       return {
         path: result.file.path,
         filesUpdate: null,
@@ -618,6 +650,11 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       if (!file) {
         return { error: `Error: File '${normalized}' not found` };
       }
+      if (file.payloadKind === "object")
+        return {
+          error:
+            "BINARY_FILE_USE_READER: This file cannot be edited as inline text.",
+        };
       const replacement = performStringReplacement(
         file.contentText,
         oldString,
@@ -629,12 +666,14 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       }
       const [contentText, occurrences] = replacement;
       const result = await workingFilesService.putWorkingFile({
+        signal: currentSourceWeftToolInvocationSignal(),
         workspaceId: this.input.workspaceId,
         threadId: this.input.threadId,
         userId: this.input.userId,
         path: normalized,
         contentText: this.prepareContentForPersistence(contentText),
         mimeType: file.mimeType,
+        expectedRevision: `sha256:${file.contentHash}`,
         purpose: file.purpose as WorkingFilePurpose | null,
       });
       return {
@@ -649,32 +688,26 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
   }
 
   async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
-    const encoder = new TextEncoder();
     return Promise.all(
       paths.map(async (filePath) => {
+        const normalized = normalizeWorkingFilePath(filePath);
         try {
-          const normalized = normalizeWorkingFilePath(filePath);
-          const file = await this.getFile(normalized);
-          if (!file) {
+          const { file, bytes } = await workingFilesService.readBytes({
+            workspaceId: this.input.workspaceId,
+            threadId: this.input.threadId,
+            userId: this.input.userId,
+            path: normalized,
+          });
+          this.observedRevisions.set(normalized, `sha256:${file.contentHash}`);
+          return { path: filePath, content: bytes, error: null };
+        } catch (error) {
+          if (isWorkingFileNotFoundError(error))
             return {
               path: filePath,
               content: null,
               error: "file_not_found" as const,
             };
-          }
-          return {
-            path: filePath,
-            content: encoder.encode(
-              sanitizeNonCitableCitationMarkers(file.contentText),
-            ),
-            error: null,
-          };
-        } catch {
-          return {
-            path: filePath,
-            content: null,
-            error: "invalid_path" as const,
-          };
+          throw error;
         }
       }),
     );
@@ -683,28 +716,22 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
   async uploadFiles(
     files: Array<[string, Uint8Array]>,
   ): Promise<FileUploadResponse[]> {
-    const decoder = new TextDecoder();
     return Promise.all(
       files.map(async ([filePath, content]) => {
-        try {
-          const normalized = normalizeWorkingFilePath(filePath);
-          await workingFilesService.putWorkingFile({
-            workspaceId: this.input.workspaceId,
-            threadId: this.input.threadId,
-            userId: this.input.userId,
-            path: normalized,
-            contentText: this.prepareContentForPersistence(
-              decoder.decode(content),
-            ),
-            mimeType: inferMimeType(normalized),
-          });
-          return { path: filePath, error: null };
-        } catch (error) {
-          return {
-            path: filePath,
-            error: fileOperationErrorFromMessage(error),
-          };
-        }
+        const normalized = normalizeWorkingFilePath(filePath);
+        const { file } = await workingFilesService.putBytes({
+        signal: currentSourceWeftToolInvocationSignal(),
+          workspaceId: this.input.workspaceId,
+          threadId: this.input.threadId,
+          userId: this.input.userId,
+          path: normalized,
+          bytes: Buffer.from(content),
+          mimeType: "application/octet-stream",
+          expectedRevision: this.observedRevisions.get(normalized),
+          origin: "agent_created",
+        });
+        this.observedRevisions.set(normalized, `sha256:${file.contentHash}`);
+        return { path: filePath, error: null };
       }),
     );
   }

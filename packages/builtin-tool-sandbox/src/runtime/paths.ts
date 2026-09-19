@@ -274,7 +274,7 @@ export function assertExecuteCommandPathPolicy(
 /**
  * True when the command references the /skills contract root — the signal the
  * execute path uses to defer the final policy check until skill staging has
- * resolved for the sandbox (two-phase check: /workfiles and /kb fail fast,
+ * resolved for the sandbox (two-phase check: /files and /kb fail fast,
  * /skills-referencing commands are re-asserted with the staging outcome).
  */
 export function commandReferencesSkillsRoot(command: string) {

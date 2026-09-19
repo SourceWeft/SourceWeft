@@ -14,12 +14,14 @@ import {
   type ThreadChatPreferencesPatch,
 } from "../chat-preferences";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 
 type RawThreadRow = {
   id: string;
   team_id: string;
   workspace_id: string;
   title: string;
+  execution_target_json?: ThreadExecutionTarget;
   model_settings_json: ThreadModelSettingsInput | undefined;
   chat_preferences_json: unknown;
   visibility: ThreadRecord["visibility"];
@@ -37,6 +39,7 @@ const THREAD_RETURNING_SQL = `
   team_id,
   workspace_id,
   title,
+  execution_target_json,
   model_settings_json,
   chat_preferences_json,
   visibility,
@@ -75,6 +78,7 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     teamId: row.team_id,
     workspaceId: row.workspace_id,
     title: row.title,
+    executionTarget: row.execution_target_json ?? { kind: "cloud" },
     modelSettings: normalizePersistedThreadModelSettings(
       row.model_settings_json,
     ),
@@ -135,6 +139,7 @@ async function countUsedSourceIdsByThread(input: {
 }
 
 export async function createThreadRecord(input: {
+  id?: string;
   teamId: string;
   workspaceId: string;
   title: string;
@@ -145,8 +150,9 @@ export async function createThreadRecord(input: {
   parentThreadId?: string | null;
   personaId?: string | null;
   origin?: ThreadRecord["origin"];
+  executionTarget?: ThreadExecutionTarget;
 }) {
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const modelSettings = normalizeThreadModelSettings(input.modelSettings);
   const chatPreferences = normalizeThreadChatPreferences(input.chatPreferences);
   const result = await database.query<RawThreadRow>(
@@ -162,9 +168,11 @@ export async function createThreadRecord(input: {
         visibility,
         parent_thread_id,
         persona_id,
-        origin
+        origin,
+        execution_target_json
       )
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb)
+      on conflict (id) do nothing
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -179,9 +187,25 @@ export async function createThreadRecord(input: {
       input.parentThreadId ?? null,
       input.personaId ?? null,
       input.origin ?? "user",
+      JSON.stringify(input.executionTarget ?? { kind: "cloud" }),
     ],
   );
-  const row = result.rows[0];
+  const row =
+    result.rows[0] ??
+    (input.id
+      ? (
+          await database.query<RawThreadRow>(
+            `select ${THREAD_RETURNING_SQL} from threads where id=$1 and workspace_id=$2 and team_id=$3 and created_by=$4 and execution_target_json=$5::jsonb`,
+            [
+              id,
+              input.workspaceId,
+              input.teamId,
+              input.createdBy,
+              JSON.stringify(input.executionTarget ?? { kind: "cloud" }),
+            ],
+          )
+        ).rows[0]
+      : undefined);
 
   if (!row) {
     throw new Error("Failed to create thread");

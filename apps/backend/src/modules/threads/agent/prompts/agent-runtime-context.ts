@@ -69,7 +69,7 @@ function buildSelectedSourceManifest(input: {
     "<selected_source_manifest>",
     `These are the current turn's ${label} Source Library entries visible under /kb.`,
     "Resolve user @mentions, attachment labels, and filenames against title, original_file, and mention_labels below.",
-    "Do not synthesize /workfiles/<filename> for @mentions or source filenames. /workfiles contains only thread Workfiles.",
+    "Do not synthesize /files/<filename> for @mentions or source filenames. /files contains only thread Files.",
     ...input.sources.map(formatRuntimeSourceReference),
     input.omittedCount > 0
       ? `- ${input.omittedCount} additional source entries omitted from this manifest; use ls('/kb') if you need to enumerate them.`

@@ -117,6 +117,7 @@ function countSelectedSourceCoverage(
 }
 
 export function useSources(input: {
+  expansionScope?: string;
   workspaceId?: string | null;
   currentWorkspaceIdRef: { current: string | null | undefined };
   initialSources: SourceItem[];
@@ -125,6 +126,7 @@ export function useSources(input: {
   onSourceMerge?: (sources: SourceItem[]) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  onAutomaticSelectionChange?: (ids: string[]) => void;
   manualConnectorSyncSourcesRef: {
     current: Map<string, { knownSourceIds: Set<string> }>;
   };
@@ -132,6 +134,7 @@ export function useSources(input: {
 }) {
   const {
     workspaceId,
+    expansionScope,
     currentWorkspaceIdRef,
     initialSources,
     initialSourcesLoaded,
@@ -139,6 +142,7 @@ export function useSources(input: {
     onSourceMerge,
     selectedIds,
     onSelectionChange,
+    onAutomaticSelectionChange = onSelectionChange,
     manualConnectorSyncSourcesRef,
     addSourceDialog,
   } = input;
@@ -177,11 +181,17 @@ export function useSources(input: {
   const [isDeletingSelectedSources, setIsDeletingSelectedSources] =
     useState(false);
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(
-    () => readStoredSourceTreeExpansion(workspaceId).expandedDirectoryIds,
+    () =>
+      readStoredSourceTreeExpansion(expansionScope ?? workspaceId)
+        .expandedDirectoryIds,
   );
   const [userCollapsedDirectoryIds, setUserCollapsedDirectoryIds] = useState<
     Set<string>
-  >(() => readStoredSourceTreeExpansion(workspaceId).userCollapsedDirectoryIds);
+  >(
+    () =>
+      readStoredSourceTreeExpansion(expansionScope ?? workspaceId)
+        .userCollapsedDirectoryIds,
+  );
   const expandedDirectoryIdsRef = useRef<Set<string>>(expandedDirectoryIds);
   const userCollapsedDirectoryIdsRef = useRef<Set<string>>(
     userCollapsedDirectoryIds,
@@ -255,14 +265,14 @@ export function useSources(input: {
       );
       if (!areStringArraysEqual(nextSelectedIds, currentSelectedIds)) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       for (const sourceId of nextSelectedIds) {
         pendingAutoSelectSourceIdsRef.current.delete(sourceId);
       }
     },
-    [fullSourceTree, onSelectionChange],
+    [fullSourceTree, onAutomaticSelectionChange],
   );
 
   const selectPendingAutoSources = useCallback(
@@ -291,7 +301,7 @@ export function useSources(input: {
 
       if (!areStringArraysEqual(nextSelectedIds, currentSelectedIds)) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       const selectedSourceIds = new Set(
@@ -305,7 +315,7 @@ export function useSources(input: {
         }
       }
     },
-    [onSelectionChange],
+    [onAutomaticSelectionChange],
   );
 
   const selectNewManualConnectorSources = useCallback(
@@ -352,7 +362,7 @@ export function useSources(input: {
         !areStringArraysEqual(nextSelectedIds, currentSelectedIds)
       ) {
         selectedIdsRef.current = nextSelectedIds;
-        onSelectionChange(nextSelectedIds);
+        onAutomaticSelectionChange(nextSelectedIds);
       }
 
       const selectedSourceIds = new Set(
@@ -368,7 +378,7 @@ export function useSources(input: {
         }
       }
     },
-    [manualConnectorSyncSourcesRef, onSelectionChange],
+    [manualConnectorSyncSourcesRef, onAutomaticSelectionChange],
   );
 
   useEffect(() => {
@@ -499,12 +509,12 @@ export function useSources(input: {
       setExpandedDirectoryIds(nextExpanded);
       setUserCollapsedDirectoryIds(nextCollapsed);
       persistSourceTreeExpansion({
-        workspaceId,
+        workspaceId: expansionScope ?? workspaceId,
         expandedDirectoryIds: nextExpanded,
         userCollapsedDirectoryIds: nextCollapsed,
       });
     },
-    [workspaceId],
+    [workspaceId, expansionScope],
   );
 
   const mergeIncrementalSources = useCallback(
@@ -590,7 +600,9 @@ export function useSources(input: {
     }
     initializedSourcesWorkspaceIdRef.current =
       sourceHydration.initializedWorkspaceId;
-    const storedExpansion = readStoredSourceTreeExpansion(workspaceId);
+    const storedExpansion = readStoredSourceTreeExpansion(
+      expansionScope ?? workspaceId,
+    );
     expansionWorkspaceIdRef.current = workspaceId;
     expandedDirectoryIdsRef.current = storedExpansion.expandedDirectoryIds;
     userCollapsedDirectoryIdsRef.current =
@@ -617,6 +629,7 @@ export function useSources(input: {
   }, [
     commitSources,
     workspaceId,
+    expansionScope,
     initialSources,
     initialSourcesLoaded,
     refreshSources,
@@ -629,7 +642,10 @@ export function useSources(input: {
     }
 
     let cancelled = false;
+    let polling = false;
     const timer = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
       try {
         const { items: statuses } = await contentClient.listSourceStatuses(
           workspaceId,
@@ -639,27 +655,45 @@ export function useSources(input: {
           return;
         }
 
-        const nextPending: string[] = [];
-        let shouldRefresh = false;
-        for (const result of statuses) {
-          const current = result.status.status;
-          if (current === "queued" || current === "processing") {
-            nextPending.push(result.id);
-            continue;
-          }
+        const completed = statuses.filter(
+          (result) =>
+            result.status.status !== "queued" &&
+            result.status.status !== "processing",
+        );
+        if (completed.length === 0) return;
 
-          shouldRefresh = true;
-          if (current === "failed") {
-            toast.error("Source processing failed.");
-          }
+        const results = await Promise.allSettled(
+          completed.map(({ id }) => contentClient.getSource(workspaceId, id)),
+        );
+        if (cancelled || currentWorkspaceIdRef.current !== workspaceId) {
+          return;
         }
 
-        setPendingSourceIds(nextPending);
-        if (shouldRefresh) {
-          void refreshSources();
+        const mapped = results.flatMap((result) =>
+          result.status === "fulfilled"
+            ? mapSourcesToUi([result.value.source])
+            : [],
+        );
+        // Do not restore a source deleted while its detail request was in flight.
+        const existingIds = new Set(
+          sourcesRef.current.map((source) => source.id),
+        );
+        mergeIncrementalSources(
+          mapped.filter((source) => existingIds.has(source.id)),
+        );
+        const finishedIds = new Set(
+          mapped
+            .filter((source) => !isSyncingSource(source))
+            .map((source) => source.id),
+        );
+        setPendingSourceIds((prev) => prev.filter((id) => !finishedIds.has(id)));
+        if (mapped.some((source) => source.status === "Failed")) {
+          toast.error("Source processing failed.");
         }
       } catch {
-        // Keep polling quietly; source listing refresh will surface errors.
+        // Keep pending IDs so the next poll retries without reloading the list.
+      } finally {
+        polling = false;
       }
     }, 4000);
 
@@ -667,7 +701,12 @@ export function useSources(input: {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [workspaceId, pendingSourceIds, refreshSources]);
+  }, [
+    workspaceId,
+    pendingSourceIds,
+    mergeIncrementalSources,
+    currentWorkspaceIdRef,
+  ]);
 
   useEffect(() => {
     const syncingIds = sources

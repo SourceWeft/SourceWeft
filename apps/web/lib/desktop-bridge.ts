@@ -22,6 +22,7 @@ type SourceWeftDesktopBridge = {
 declare global {
   interface Window {
     __SOURCEWEFT_DESKTOP__?: SourceWeftDesktopBridge;
+    __SOURCEWEFT_TITLEBAR_OVERLAY__?: boolean;
   }
 }
 
@@ -41,6 +42,17 @@ export type AutostartState = {
   requested: boolean;
   supported: boolean;
   reason?: string | null;
+};
+
+/** Native capability discovery only; does not authorize local execution. */
+export type LocalHostStatus = {
+  protocolVersion: number;
+  platformSupported: boolean;
+  storageInitialized: boolean;
+  authenticatedDispatchAvailable: boolean;
+  deviceId: string | null;
+  connected: boolean;
+  connectionError: string | null;
 };
 
 type DesktopListener<TPayload> = (payload: TPayload) => void;
@@ -75,7 +87,14 @@ async function invokeDesktop<TResult>(
     throw new Error("SourceWeft desktop bridge is not available.");
   }
 
-  return bridge.invoke<TResult>(command, args);
+  try {
+    return await bridge.invoke<TResult>(command, args);
+  } catch (error) {
+    // Tauri rejects Rust Result errors and IPC denials as strings.
+    // Preserve that diagnosis instead of losing it at Error-only UI boundaries.
+    if (typeof error === "string") throw new Error(error);
+    throw error;
+  }
 }
 
 async function listenDesktop<TPayload>(
@@ -94,11 +113,48 @@ export const desktopBridge = {
   isAvailable() {
     return Boolean(
       (typeof window !== "undefined" && window.__SOURCEWEFT_DESKTOP__) ||
-        nativeBridge.isAvailable("desktop"),
+      nativeBridge.isAvailable("desktop"),
     );
   },
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");
+  },
+  titlebarAction(action: "drag" | "toggleMaximize") {
+    return invokeDesktop<void>("desktop_titlebar_action", { action });
+  },
+  chooseLocalFolder(ticket: string, userId: string) {
+    return invokeDesktop<{ id: string; name: string }>("choose_local_folder", {
+      ticket,
+      userId,
+    });
+  },
+  localHostStatus() {
+    return invokeDesktop<LocalHostStatus>("local_host_status");
+  },
+  authenticateLocalHost(ticket: string, userId: string) {
+    return invokeDesktop<{
+      needsProof?: boolean;
+      deviceId?: string;
+      proof?: string;
+      expiresAt?: string;
+      remoteEnabled?: boolean;
+    }>("authenticate_local_host", { ticket, userId });
+  },
+  enableLocalHost(ticket: string) {
+    return invokeDesktop<{
+      deviceId: string | null;
+      connected: boolean;
+      error: string | null;
+    }>("enable_local_host", { ticket });
+  },
+  chooseWorkingDirectory(ticket: string, userId: string) {
+    return invokeDesktop<{ id: string; path: string; name: string }>(
+      "choose_working_directory",
+      { ticket, userId },
+    );
+  },
+  disconnectLocalHost() {
+    return invokeDesktop<void>("disconnect_local_host");
   },
   showMainWindow() {
     return invokeDesktop<void>("show_main_window");

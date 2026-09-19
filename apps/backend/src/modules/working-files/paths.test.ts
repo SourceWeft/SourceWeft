@@ -8,33 +8,33 @@ import {
   parentWorkingDirectory,
 } from "./paths";
 
-test("normalizeWorkingFilePath anchors relative paths under /workfiles", () => {
+test("normalizeWorkingFilePath anchors relative paths under /files", () => {
   assert.equal(
     normalizeWorkingFilePath("notes/todo.md"),
-    "/workfiles/notes/todo.md",
+    "/files/notes/todo.md",
   );
   assert.equal(
-    normalizeWorkingFilePath("/workfiles//notes///todo.md"),
-    "/workfiles/notes/todo.md",
+    normalizeWorkingFilePath("/files//notes///todo.md"),
+    "/files/notes/todo.md",
   );
 });
 
 test("normalizeWorkingFilePath rejects roots and traversal", () => {
   assert.throws(() => normalizeWorkingFilePath(""), /path is required/);
   assert.throws(
-    () => normalizeWorkingFilePath("/workfiles"),
+    () => normalizeWorkingFilePath("/files"),
     /must point to a file/,
   );
   assert.throws(
     () => normalizeWorkingFilePath("/kb/source.md"),
-    /only expose \/workfiles/,
+    /only expose \/files/,
   );
   assert.throws(
     () => normalizeWorkingFilePath("/work/old.md"),
-    /only expose \/workfiles/,
+    /only expose \/files/,
   );
   assert.throws(
-    () => normalizeWorkingFilePath("/workfiles/../secret"),
+    () => normalizeWorkingFilePath("/files/../secret"),
     /invalid working file path/,
   );
   assert.throws(
@@ -46,14 +46,14 @@ test("normalizeWorkingFilePath rejects roots and traversal", () => {
 test("normalizeWorkingFsPath allows root and work directories", () => {
   assert.equal(normalizeWorkingFsPath(undefined), WORK_ROOT);
   assert.equal(normalizeWorkingFsPath("/"), "/");
-  assert.equal(normalizeWorkingFsPath("/workfiles/notes/"), "/workfiles/notes");
+  assert.equal(normalizeWorkingFsPath("/files/notes/"), "/files/notes");
 });
 
 test("working path helpers resolve parent and basename", () => {
   assert.equal(
-    parentWorkingDirectory("/workfiles/notes/todo.md"),
-    "/workfiles/notes",
+    parentWorkingDirectory("/files/notes/todo.md"),
+    "/files/notes",
   );
-  assert.equal(parentWorkingDirectory("/workfiles/todo.md"), "/workfiles");
-  assert.equal(basename("/workfiles/notes/todo.md"), "todo.md");
+  assert.equal(parentWorkingDirectory("/files/todo.md"), "/files");
+  assert.equal(basename("/files/notes/todo.md"), "todo.md");
 });

@@ -1,21 +1,28 @@
+/* Shared precompiled utilities precede app utilities so responsive variants win. */
+@import "@sourceweft/ui-web/styles.css";
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/sora";
-@import "@fontsource-variable/noto-sans-arabic";
-@import "@fontsource-variable/noto-sans-devanagari";
-@import "@fontsource-variable/noto-sans-hebrew";
-@import "@fontsource-variable/noto-sans-jp";
-@import "@fontsource-variable/noto-sans-kr";
-@import "@fontsource-variable/noto-sans-sc";
-@import "@fontsource-variable/noto-sans-tc";
-@import "@fontsource-variable/noto-sans-thai";
-@import "@sourceweft/ui-web/styles.css";
+/* Script-specific UI fonts load with the signed-in app (app/dashboard/layout.tsx);
+   marketing pages are Latin-only and must not ship ~480 extra @font-face rules. */
 @import "@sourceweft/tailwind-config";
 @import "@daveyplate/better-auth-ui/css";
 
+/* Explicit app scanning also works in Git worktrees under ignored parent directories. */
+@source ".";
+
 /* Scan shared UI package so app Tailwind sees utilities used in workspace components. */
-@source "../../packages/ui/src";
+@source "../../../packages/ui/src";
+/* Optional commercial UI ships in the same build and loads at runtime. */
+@source "../../../enterprise/billing/src/ui";
+/* Streamdown supplies runtime markup, including negative margins for its toolbar. */
+@source "../node_modules/streamdown/dist/*.js";
+
+/* The read-only image preview's positioning wrapper must also let clicks through. */
+[data-radix-popper-content-wrapper]:has([data-composer-image-preview]) {
+  pointer-events: none;
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -75,13 +82,13 @@
   --font-ui-cjk-jp:
     "Noto Sans JP Variable", "Hiragino Sans", "Yu Gothic", sans-serif;
   --font-ui-cjk-kr:
-    "Noto Sans KR Variable", "Apple SD Gothic Neo", "Malgun Gothic",
-    sans-serif;
+    "Noto Sans KR Variable", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-ui-cjk-sc:
     "Noto Sans SC Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-ui-cjk-tc:
     "Noto Sans TC Variable", "PingFang TC", "Microsoft JhengHei", sans-serif;
-  --font-ui-thai: "Noto Sans Thai Variable", "Leelawadee UI", Tahoma, sans-serif;
+  --font-ui-thai:
+    "Noto Sans Thai Variable", "Leelawadee UI", Tahoma, sans-serif;
   --font-ui: var(--font-ui-latin);
   --font-brand: var(--font-brand-sora);
   --font-mono: var(--font-mono-latin);
@@ -167,25 +174,25 @@ html:lang(he) .font-brand {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: #171717;
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: #212121;
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: #242424;
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: #2a2a2a;
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  --muted: #242424;
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --accent: #2a2a2a;
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --sidebar-background: oklch(0.205 0 0);
+  --sidebar-background: #1f1f1f;
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.922 0 0);
   --sidebar-primary-foreground: oklch(0.205 0 0);
@@ -430,4 +437,65 @@ html:lang(he) .font-brand {
   align-items: center;
   display: flex;
   gap: 0.65rem;
+}
+
+/* Keep desktop panels usable in short WebViews and at browser text zoom. */
+[data-short-window="true"] .chat-composer [data-chat-prompt-editor] {
+  min-height: 3.5rem;
+  max-height: min(10rem, 25svh);
+}
+.settings-center {
+  container-type: inline-size;
+}
+
+/* An approval keeps its controls visible without unmounting the draft editor. */
+[data-approval-pending="true"] .chat-composer [data-chat-prompt-editor] {
+  max-height: 3.5rem;
+}
+[data-approval-pending="true"] [data-composer-attachments] {
+  max-height: 2rem;
+  overflow-y: auto;
+}
+@container (max-width: 720px) {
+  .settings-center-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-center-grid > aside {
+    max-height: 9rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-center-grid > aside > div {
+    display: none;
+  }
+  .settings-center-grid nav > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .settings-center-grid nav button {
+    width: auto;
+  }
+}
+@media (max-height: 720px) {
+  .settings-center-content {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+}
+
+[data-short-window="true"] .chat-empty-title {
+  font-size: 1.875rem;
+  line-height: 1.2;
+}
+@media (max-height: 600px) {
+  [data-short-window="true"] .chat-empty-title {
+    font-size: 1.625rem;
+    line-height: 1.2;
+  }
+  .chat-empty-description,
+  .chat-empty-eyebrow {
+    display: none;
+  }
 }

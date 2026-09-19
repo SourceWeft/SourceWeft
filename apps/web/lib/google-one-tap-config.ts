@@ -1,17 +1,10 @@
+import { publicRuntimeConfig } from "./public-runtime-config";
 export function resolveGoogleOneTapConfig() {
-  const enabled =
-    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED?.trim().toLowerCase() ===
-    "true";
-  const clientId =
-    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "";
-  const fedCmEnabled =
-    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED?.trim().toLowerCase() ===
-    "true";
-
+  const config = publicRuntimeConfig();
   return {
-    active: enabled && Boolean(clientId),
-    clientId,
-    enabled,
-    fedCmEnabled,
+    active: config.googleOneTapEnabled && Boolean(config.googleOneTapClientId),
+    enabled: config.googleOneTapEnabled,
+    clientId: config.googleOneTapClientId,
+    fedCmEnabled: config.googleOneTapFedCmEnabled,
   };
 }

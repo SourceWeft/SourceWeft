@@ -1,0 +1,14 @@
+{
+  "tag": "v0.2.0-rc.2",
+  "releasedAt": "2026-09-17",
+  "commit": "41b2396",
+  "category": "Release",
+  "title": "Desktop packaging and deployment fixes",
+  "summary": "This release candidate fixes desktop bundle packaging, finalizes isolated desktop download publication, and reorganizes the deployment documentation.",
+  "items": [
+    "Encoded the mobile Tauri bundle icons as RGBA so desktop packaging succeeds.",
+    "Finalized isolated desktop download publication in the release pipeline.",
+    "Applied deployment and workspace fixes while preparing 0.2.0-rc.2.",
+    "Reorganized the README and extracted the sandbox execution guides."
+  ]
+}
