@@ -1,13 +1,11 @@
-"use client";
-
 import * as React from "react";
-import { Sparkles } from "lucide-react";
+import { BookOpen } from "lucide-react";
 
-type DashboardIconProps = React.SVGProps<SVGSVGElement> & {
+type SiteIconProps = React.SVGProps<SVGSVGElement> & {
   className?: string;
 };
 
-export function McpIcon({ className, ...props }: DashboardIconProps) {
+export function McpIcon({ className, ...props }: SiteIconProps) {
   return (
     <svg
       aria-hidden="true"
@@ -25,6 +23,6 @@ export function McpIcon({ className, ...props }: DashboardIconProps) {
   );
 }
 
-export function SkillIcon({ className, ...props }: DashboardIconProps) {
-  return <Sparkles aria-hidden="true" className={className} {...props} />;
+export function SkillIcon({ className, ...props }: SiteIconProps) {
+  return <BookOpen aria-hidden="true" className={className} {...props} />;
 }

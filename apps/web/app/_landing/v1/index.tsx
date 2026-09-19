@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard } from "lucide-react";
+import {
+  ArrowRight,
+  Brain,
+  Check,
+  Database,
+  FileText,
+  Layers,
+  LayoutDashboard,
+} from "lucide-react";
 import { SourceWeftFooter } from "../components/sourceweft-footer";
 import { SourceWeftHeader } from "../components/sourceweft-header";
 import { SourceWeftBrandMark } from "../components/sourceweft-brand";
@@ -12,89 +20,6 @@ import {
 import { getPricingConfig } from "../pricing-config";
 import { useDeploymentCapabilities } from "../../../lib/billing-edition/capabilities";
 import { PricingToggle } from "./pricing-toggle";
-
-// ─── tiny SVG icons (inline, no external dep) ────────────────────────────────
-
-function IconBrain() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-      <path
-        d="M9.5 2a4.5 4.5 0 0 1 4.5 4.5v.086A4.5 4.5 0 0 1 17.5 11c0 .17-.01.339-.028.504A4 4 0 0 1 20 15.5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4 4 4 0 0 1 2.528-3.696A4.5 4.5 0 0 1 6 10.5a4.5 4.5 0 0 1 3.5-4.414V2Z"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function IconDatabase() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-      <ellipse
-        cx="12"
-        cy="5"
-        rx="8"
-        ry="3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M4 5v5c0 1.657 3.582 3 8 3s8-1.343 8-3V5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M4 10v5c0 1.657 3.582 3 8 3s8-1.343 8-3v-5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function IconLayers() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-      <path
-        d="M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function IconArrow() {
-  return (
-    <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 16 16">
-      <path
-        d="M3 8h10M9 4l4 4-4 4"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 16 16">
-      <path
-        d="M3 8l3.5 3.5L13 4.5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
@@ -171,7 +96,9 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                   <LayoutDashboard className="size-4" />
                 ) : null}
                 {primaryLabel}
-                {authState.isSignedIn ? null : <IconArrow />}
+                {authState.isSignedIn ? null : (
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                )}
               </Link>
               <a
                 href="#how-it-works"
@@ -255,22 +182,7 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                             key={src}
                             className="relative z-10 inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-400 dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-500"
                           >
-                            <svg
-                              className="h-3 w-3"
-                              fill="none"
-                              viewBox="0 0 12 12"
-                            >
-                              <path
-                                d="M2 2h5l3 3v5H2V2Z"
-                                stroke="currentColor"
-                                strokeWidth="1"
-                              />
-                              <path
-                                d="M7 2v3h3"
-                                stroke="currentColor"
-                                strokeWidth="1"
-                              />
-                            </svg>
+                            <FileText aria-hidden="true" className="h-3 w-3" />
                             {src}
                           </span>
                         ),
@@ -373,7 +285,7 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                     Ask anything about your knowledge base…
                   </span>
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
-                    <IconArrow />
+                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
                   </span>
                 </div>
               </div>
@@ -419,7 +331,7 @@ function SocialProof() {
 function FeaturesSection() {
   const features = [
     {
-      icon: <IconBrain />,
+      icon: <Brain aria-hidden="true" className="h-5 w-5" />,
       title: "Multiple outputs from your sources",
       description:
         "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations.",
@@ -430,7 +342,7 @@ function FeaturesSection() {
       ],
     },
     {
-      icon: <IconDatabase />,
+      icon: <Database aria-hidden="true" className="h-5 w-5" />,
       title: "Connect everything",
       description:
         "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. SourceWeft indexes your existing tools so your knowledge is always at hand.",
@@ -441,7 +353,7 @@ function FeaturesSection() {
       ],
     },
     {
-      icon: <IconLayers />,
+      icon: <Layers aria-hidden="true" className="h-5 w-5" />,
       title: "Works everywhere you do",
       description:
         "Web app, desktop, and browser extension — all in sync. Capture a page anywhere, continue the conversation on any device. Your notebook travels with you.",
@@ -491,7 +403,7 @@ function FeaturesSection() {
                     key={b}
                     className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500"
                   >
-                    <IconCheck />
+                    <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
                     {b}
                   </li>
                 ))}
@@ -577,7 +489,7 @@ function HowItWorks() {
                   {src.name}
                 </span>
                 <span className="ml-auto text-emerald-500">
-                  <IconCheck />
+                  <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
                 </span>
               </div>
             ))}

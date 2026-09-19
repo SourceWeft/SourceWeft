@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { SkillIcon } from "../../../../_components/dashboard-icons";
+import { SkillIcon } from "../../../../../_components/site-icons";
 import {
   SKILL_SELECTION_LIMIT_MESSAGE,
   toggleSkillSelection,

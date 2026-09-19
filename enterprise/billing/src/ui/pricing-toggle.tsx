@@ -2,6 +2,7 @@
 import { useBillingUiHost } from "./context";
 import type { BillingClient } from "@sourceweft/sdk";
 
+import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { TeamCheckoutDialog } from "./team-checkout-dialog";
@@ -385,19 +386,10 @@ function PricingToggleInner({
                     key={feature}
                     className="flex items-start gap-2.5 text-sm text-zinc-600 dark:text-zinc-300"
                   >
-                    <svg
+                    <Check
+                      aria-hidden="true"
                       className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-400"
-                      fill="none"
-                      viewBox="0 0 16 16"
-                    >
-                      <path
-                        d="M3 8l3.5 3.5L13 4.5"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1.5"
-                      />
-                    </svg>
+                    />
                     {feature}
                   </li>
                 ))}

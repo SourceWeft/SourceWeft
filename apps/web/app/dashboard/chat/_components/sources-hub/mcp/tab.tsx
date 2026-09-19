@@ -5,7 +5,7 @@ import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../../../../lib/relative-time";
-import { McpIcon } from "../../../../_components/dashboard-icons";
+import { McpIcon } from "../../../../../_components/site-icons";
 import { HubEmptyState } from "../components/hub-empty-state";
 import { TypeBadge } from "../type-badge";
 

@@ -32,7 +32,7 @@ import {
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { contentClient } from "../../../../lib/sdk";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>

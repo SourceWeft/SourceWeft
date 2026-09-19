@@ -36,7 +36,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 

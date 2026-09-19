@@ -43,7 +43,7 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../../lib/sdk";
-import { McpIcon, SkillIcon } from "../../../_components/dashboard-icons";
+import { McpIcon, SkillIcon } from "../../../../_components/site-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";

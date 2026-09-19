@@ -20,7 +20,7 @@ import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>

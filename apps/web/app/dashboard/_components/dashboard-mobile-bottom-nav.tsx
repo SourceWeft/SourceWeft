@@ -9,7 +9,7 @@ import {
   User,
 } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { McpIcon, SkillIcon } from "./dashboard-icons";
+import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 
 const items = [

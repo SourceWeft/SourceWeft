@@ -30,7 +30,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { McpIcon } from "../../_components/dashboard-icons";
+import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
 

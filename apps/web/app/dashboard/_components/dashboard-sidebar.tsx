@@ -30,7 +30,7 @@ import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
-import { McpIcon, SkillIcon } from "./dashboard-icons";
+import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
