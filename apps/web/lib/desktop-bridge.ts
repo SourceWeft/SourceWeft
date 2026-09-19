@@ -35,6 +35,7 @@ export type DesktopInfo = {
   appName: string;
   appVersion: string;
   tauriVersion: string;
+  updaterProtocolVersion?: number;
 };
 
 export type AutostartState = {
@@ -173,6 +174,52 @@ export const desktopBridge = {
   onDeepLink(handler: DesktopListener<DeepLinkPayload>) {
     return listenDesktop("sourceweft:deep-link", handler);
   },
+};
+
+export type UpdatePreferences = {
+  schemaVersion: number;
+  channel: "stable" | "preview";
+  autoCheck: boolean;
+  autoDownload: boolean;
+  snoozedUntil?: number;
+};
+export type DesktopUpdateState = {
+  protocolVersion: number;
+  revision: number;
+  currentVersion: string;
+  status: string;
+  preferences: UpdatePreferences | null;
+  candidateId: string | null;
+  version: string | null;
+  notes: string | null;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  lastChecked: number | null;
+  error: string | null;
+  operationId: string | null;
+};
+export const desktopUpdates = {
+  state: () => invokeDesktop<DesktopUpdateState>("get_update_state"),
+  check: () => invokeDesktop<void>("check_for_updates"),
+  download: (candidateId: string) =>
+    invokeDesktop<void>("download_update", { candidateId }),
+  install: (candidateId: string) =>
+    invokeDesktop<void>("install_update", { candidateId }),
+  cancelDownload: (operationId: string) =>
+    invokeDesktop<void>("cancel_update_download", { operationId }),
+  cancelInstall: (operationId: string) =>
+    invokeDesktop<void>("cancel_update_install", { operationId }),
+  preferences: (
+    value: Pick<UpdatePreferences, "channel" | "autoCheck" | "autoDownload">,
+  ) => invokeDesktop<void>("set_update_preferences", value),
+  snooze: (candidateId: string) =>
+    invokeDesktop<void>("snooze_update", { candidateId }),
+  saved: (operationId: string, error: string | null) =>
+    invokeDesktop<void>("acknowledge_update_save", { operationId, error }),
+  onState: (handler: DesktopListener<DesktopUpdateState>) =>
+    listenDesktop("sourceweft:update", handler),
+  onSave: (handler: DesktopListener<{ operationId: string }>) =>
+    listenDesktop("sourceweft:update-save", handler),
 };
 
 export async function handleDesktopAuthDeepLink(input: {

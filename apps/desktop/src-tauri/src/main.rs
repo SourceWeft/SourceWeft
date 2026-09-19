@@ -5,6 +5,7 @@ mod local_bridge;
 mod native_access;
 mod remote_host;
 mod window_chrome;
+mod updater;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -63,6 +64,7 @@ struct DesktopInfo {
     app_name: String,
     app_version: String,
     tauri_version: &'static str,
+    updater_protocol_version: u32,
 }
 
 #[derive(Serialize)]
@@ -99,7 +101,18 @@ fn main() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            updater::get_update_state,
+            updater::check_for_updates,
+            updater::download_update,
+            updater::install_update,
+            updater::cancel_update_download,
+            updater::cancel_update_install,
+            updater::acknowledge_update_save,
+            updater::set_update_preferences,
+            updater::snooze_update,
             hub_window::hub_window_action,
             hub_window::hub_window_send,
             preview_window::open_file_preview,
@@ -154,6 +167,7 @@ fn main() {
             app.add_capability(preview_window::reader_capability(&base))?;
             create_main_window(app)?;
             setup_tray(app)?;
+            updater::setup(app.handle()).map_err(std::io::Error::other)?;
             emit_startup_deep_links(app.handle());
 
             Ok(())
@@ -354,6 +368,7 @@ fn desktop_info(app: AppHandle, window: tauri::WebviewWindow) -> Result<DesktopI
         app_name: app.package_info().name.clone(),
         app_version: app.package_info().version.to_string(),
         tauri_version: tauri::VERSION,
+        updater_protocol_version: 1,
     })
 }
 
@@ -465,7 +480,8 @@ fn same_origin(left: &Url, right: &Url) -> bool {
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open SourceWeft", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit SourceWeft", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let update = MenuItem::with_id(app, "update", "Check for Updates…", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &update, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .menu(&menu)
@@ -572,6 +588,7 @@ fn register_deep_links(_app: &AppHandle) {
 
 fn handle_tray_action(app: &AppHandle, menu_id: &str) {
     match menu_id {
+        "update" => updater::menu(app),
         "open" => {
             let _ = focus_main_window(app);
         }

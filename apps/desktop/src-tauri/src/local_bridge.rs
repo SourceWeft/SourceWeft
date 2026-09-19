@@ -23,10 +23,11 @@ pub async fn authenticate_local_host(
     user_id: String,
 ) -> Result<serde_json::Value, String> {
     crate::authorize_desktop_window(&app, &window, true)?;
-    app.try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM")?
-        .authenticate(ticket, user_id)
-        .await
+    let host = app
+        .try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM")?;
+    let _lease = host.host.admission.enter().map_err(str::to_owned)?;
+    host.authenticate(ticket, user_id).await
 }
 
 #[tauri::command]
@@ -59,6 +60,7 @@ pub async fn enable_local_host(
     let host = app
         .try_state::<crate::remote_host::RemoteHost>()
         .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?;
+    let _lease = host.host.admission.enter().map_err(str::to_owned)?;
     host.enroll(ticket).await
 }
 
@@ -79,10 +81,11 @@ pub async fn choose_local_folder(
     user_id: String,
 ) -> Result<serde_json::Value, String> {
     crate::authorize_desktop_window(&app, &window, true)?;
-    app.try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM")?
-        .choose_folder(ticket, user_id)
-        .await
+    let host = app
+        .try_state::<crate::remote_host::RemoteHost>()
+        .ok_or("UNSUPPORTED_PLATFORM")?;
+    let _lease = host.host.admission.enter().map_err(str::to_owned)?;
+    host.choose_folder(ticket, user_id).await
 }
 
 /// Compatibility entry point; all folder selection uses account-bound authorization.

@@ -12,6 +12,18 @@ permissions:
   packages: read
 
 jobs:
+  update-signatures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - run: cargo build --locked --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - run: node --test scripts/ci/desktop-update-signatures.test.mjs
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/debug/sourceweft-update-verifier
   lint-and-type:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -34,7 +46,7 @@ jobs:
             turbo-${{ runner.os }}-node22.23.2-
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=moderate
-      - run: node --test scripts/ci/verify-release-config.test.mjs scripts/ci/publish-downloads.test.mjs docker/selfhost-config.test.mjs
+      - run: node --test scripts/ci/verify-release-config.test.mjs scripts/ci/publish-downloads.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/desktop-update-manifest.test.mjs docker/selfhost-config.test.mjs
       - run: pnpm lint
       - run: pnpm check-types
 

@@ -1,11 +1,13 @@
 import {
   readChatDraft,
+  registerChatDraftFlusher,
   writeChatDraft,
   type ChatDraft,
 } from "../../../../../lib/chat-drafts";
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2665,6 +2667,10 @@ function DraftMirror({
 }) {
   const { textInput, attachments } = usePromptInputController();
   const [status, setStatus] = useState("saved");
+  useLayoutEffect(() => registerChatDraftFlusher(async () => {
+    if (paused) throw new Error("A draft submission is still in progress.");
+    await writeChatDraft(draftKey, textInput.value, attachments.files);
+  }), [draftKey, paused, textInput.value, attachments.files]);
   useEffect(() => {
     if (paused) return;
     let live = true;

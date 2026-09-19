@@ -69,6 +69,15 @@ impl LocalHost {
         action: &str,
         payload: Value,
     ) -> Result<Value> {
+        let lease = self.admission.enter().map_err(|code| HostError::new(code, "Local host is preparing an update"))?;
+        self.dispatch_admitted(&lease, calls, id, owner, thread, action, payload)
+    }
+
+    /// The transport holds the admission lease until the result has been sent.
+    pub fn dispatch_admitted(
+        &self, _lease: &super::maintenance::Lease, calls: &Executions, id: &str,
+        owner: &str, thread: &str, action: &str, payload: Value,
+    ) -> Result<Value> {
         if calls.is_cancelled(id) {
             return Err(HostError::new(
                 "CALL_CANCELLED",

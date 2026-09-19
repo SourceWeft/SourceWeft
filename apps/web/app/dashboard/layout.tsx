@@ -11,6 +11,7 @@ import type { Metadata, Viewport } from "next";
 import type * as React from "react";
 
 import { DashboardLayoutClient } from "./dashboard-layout-client";
+import { DesktopUpdateRuntime } from "./_components/desktop-update-runtime";
 import { NO_INDEX_METADATA } from "../seo";
 
 export const metadata: Metadata = NO_INDEX_METADATA;
@@ -30,5 +31,10 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardLayoutClient>{children}</DashboardLayoutClient>;
+  return (
+    <>
+      <DesktopUpdateRuntime />
+      <DashboardLayoutClient>{children}</DashboardLayoutClient>
+    </>
+  );
 }

@@ -77,7 +77,17 @@ function publicUrl(config, path) {
   return `${config.publicBaseUrl}/${objectKey(config, path).split("/").map(encodeURIComponent).join("/")}`;
 }
 
-export async function prepareManifest(config, directory, tag, repository) {
+export async function prepareManifest(
+  config,
+  directory,
+  tag,
+  repository,
+  policy = "candidate",
+) {
+  assert(
+    ["candidate", "signed"].includes(policy),
+    "Invalid desktop publication policy",
+  );
   const { version, prerelease } = releaseVersion(tag);
   assert(/^[\w.-]+\/[\w.-]+$/.test(repository), "Invalid GitHub repository");
   const files = await filesUnder(directory);
@@ -96,8 +106,15 @@ export async function prepareManifest(config, directory, tag, repository) {
       version,
       "Installer version does not match release tag",
     );
-    assert(["macos", "windows"].includes(entry.platform), "Invalid platform");
+    assert(
+      ["macos", "windows", "linux"].includes(entry.platform),
+      "Invalid platform",
+    );
     assert(["arm64", "x64"].includes(entry.arch), "Invalid architecture");
+    assert(
+      entry.platform !== "linux" || entry.arch === "x64",
+      "Linux packages require x64",
+    );
     const id = `${entry.platform}-${entry.arch}`;
     assert(!seen.has(id), `Duplicate platform: ${id}`);
     seen.add(id);
@@ -107,18 +124,24 @@ export async function prepareManifest(config, directory, tag, repository) {
       "Unsafe installer filename",
     );
     assert(
-      entry.filename.endsWith(entry.platform === "macos" ? ".dmg" : ".exe"),
+      entry.filename.endsWith(
+        entry.platform === "macos"
+          ? ".dmg"
+          : entry.platform === "linux"
+            ? ".AppImage"
+            : ".exe",
+      ),
       "Installer extension does not match platform",
     );
     assert.equal(
       entry.distributionSigned,
-      false,
-      "Update publication policy before shipping signed builds",
+      policy === "signed" && entry.platform !== "linux",
+      "Installer signing does not match publication policy",
     );
     assert.equal(
       entry.notarized,
-      false,
-      "Update publication policy before shipping notarized builds",
+      policy === "signed" && entry.platform === "macos",
+      "Installer notarization does not match publication policy",
     );
     assert.equal(
       entry.localExecutionSupported,
@@ -153,8 +176,15 @@ export async function prepareManifest(config, directory, tag, repository) {
       artifacts.some((a) => a.platform === "windows"),
     "Both macOS and Windows installers are required",
   );
+  if (policy === "signed") {
+    assert.deepEqual(
+      [...seen].sort(),
+      ["macos-arm64", "macos-x64", "windows-x64", "linux-x64"].sort(),
+      "Signed releases require every configured desktop target",
+    );
+  }
   assert.equal(
-    files.filter((file) => /\.(dmg|exe)$/.test(file)).length,
+    files.filter((file) => /\.(dmg|exe|AppImage)$/.test(file)).length,
     artifacts.length,
     "Unlisted installers found",
   );
@@ -382,6 +412,7 @@ if (
       "release-installers",
       process.env.GITHUB_REF_NAME,
       process.env.GITHUB_REPOSITORY,
+      process.env.DESKTOP_PUBLICATION_POLICY ?? "candidate",
     );
     const store = s3Store(config);
     try {
