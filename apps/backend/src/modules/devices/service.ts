@@ -164,7 +164,7 @@ async function validateLegacyDirectoryGrant(
 export async function localCall(input: {
   deviceId: string;
   userId: string;
-  threadId: string;
+  threadId: string | null;
   runId?: string;
   id?: string;
   action: string;
@@ -178,25 +178,23 @@ export async function localCall(input: {
     input.deviceId,
     input.caller,
   );
-  const bound = await db.query.localThreadBindings.findFirst({
-    where: and(
-      eq(localThreadBindings.threadId, input.threadId),
-      eq(localThreadBindings.deviceId, input.deviceId),
-      eq(localThreadBindings.userId, input.userId),
-    ),
-  });
-  if (!bound)
-    throw new ContentError(
-      403,
-      "LOCAL_BINDING_INVALID",
-      "This action does not belong to a conversation on this computer.",
-    );
-  if (bound.folderId) {
+  const folderRead = input.threadId === null;
+  const validateFolder = async () => {
+    if (
+      !["folder.list", "folder.read"].includes(input.action) ||
+      typeof input.payload.folderId !== "string" ||
+      !input.payload.folderId
+    )
+      throw new ContentError(
+        403,
+        "LOCAL_FOLDER_SCOPE_INVALID",
+        "Only authorized folder reads may run without a conversation.",
+      );
     const folder = await db.query.localFolderGrants.findFirst({
       where: and(
-        eq(localFolderGrants.id, bound.folderId),
-        eq(localFolderGrants.deviceId, input.deviceId),
+        eq(localFolderGrants.id, input.payload.folderId),
         eq(localFolderGrants.userId, input.userId),
+        eq(localFolderGrants.deviceId, input.deviceId),
         isNull(localFolderGrants.revokedAt),
       ),
     });
@@ -204,25 +202,62 @@ export async function localCall(input: {
       throw new ContentError(
         403,
         "LOCAL_FOLDER_REVOKED",
-        "Access to this working directory has been revoked.",
+        "Access to this working directory is unavailable or revoked.",
       );
-  }
-
-  if (!bound.folderId) {
-    const thread = await db.query.threads.findFirst({
-      where: eq(threads.id, input.threadId),
+  };
+  if (input.threadId === null) await validateFolder();
+  else {
+    if (input.action.startsWith("folder."))
+      throw new ContentError(
+        403,
+        "LOCAL_FOLDER_SCOPE_INVALID",
+        "Folder reads require a folder scope.",
+      );
+    const bound = await db.query.localThreadBindings.findFirst({
+      where: and(
+        eq(localThreadBindings.threadId, input.threadId),
+        eq(localThreadBindings.deviceId, input.deviceId),
+        eq(localThreadBindings.userId, input.userId),
+      ),
     });
-    if (
-      thread?.executionTargetJson.kind === "local" &&
-      thread.executionTargetJson.directoryGrantId
-    )
-      await validateLegacyDirectoryGrant(
-        input.userId,
-        input.deviceId,
-        thread.executionTargetJson.directoryGrantId,
+    if (!bound)
+      throw new ContentError(
+        403,
+        "LOCAL_BINDING_INVALID",
+        "This action does not belong to a conversation on this computer.",
       );
-  }
+    if (bound.folderId) {
+      const folder = await db.query.localFolderGrants.findFirst({
+        where: and(
+          eq(localFolderGrants.id, bound.folderId),
+          eq(localFolderGrants.deviceId, input.deviceId),
+          eq(localFolderGrants.userId, input.userId),
+          isNull(localFolderGrants.revokedAt),
+        ),
+      });
+      if (!folder)
+        throw new ContentError(
+          403,
+          "LOCAL_FOLDER_REVOKED",
+          "Access to this working directory has been revoked.",
+        );
+    }
 
+    if (!bound.folderId) {
+      const thread = await db.query.threads.findFirst({
+        where: eq(threads.id, input.threadId),
+      });
+      if (
+        thread?.executionTargetJson.kind === "local" &&
+        thread.executionTargetJson.directoryGrantId
+      )
+        await validateLegacyDirectoryGrant(
+          input.userId,
+          input.deviceId,
+          thread.executionTargetJson.directoryGrantId,
+        );
+    }
+  }
   const device = await db.query.localDevices.findFirst({
     where: and(
       eq(localDevices.id, input.deviceId),
@@ -296,9 +331,20 @@ export async function localCall(input: {
       where: eq(localToolInvocations.id, id),
     });
     if (current?.status === "succeeded") {
-      if (input.action === "file.read" || input.action === "file.binary.chunk") {
+      if (folderRead) {
         await requireDeviceAccess(input.userId, input.deviceId, input.caller);
-        return consumeLocalFileReply({ userId: input.userId, deviceId: input.deviceId, invocationId: id }, current.result ?? {});
+        await validateFolder();
+      }
+      if (
+        input.action === "folder.read" ||
+        input.action === "file.read" ||
+        input.action === "file.binary.chunk"
+      ) {
+        await requireDeviceAccess(input.userId, input.deviceId, input.caller);
+        return consumeLocalFileReply(
+          { userId: input.userId, deviceId: input.deviceId, invocationId: id },
+          current.result ?? {},
+        );
       }
       return current.result ?? {};
     }

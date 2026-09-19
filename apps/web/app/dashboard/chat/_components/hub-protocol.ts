@@ -31,6 +31,8 @@ export type HubSnapshot = {
   view?: HubViewState;
 };
 export type HubAction =
+  | { type: "work-folder"; folderId: string }
+  | { type: "choose-work-folder" }
   | { type: "sources"; ids: string[] }
   | { type: "auto-sources"; ids: string[] }
   | { type: "skills"; ids: string[] }
@@ -126,6 +128,19 @@ export function validateHubCommand(
     value.length <= 10000 &&
     value.every((id) => typeof id === "string" && id.length <= 500);
   switch (command.action.type) {
+    case "work-folder":
+    case "choose-work-folder":
+      if (
+        snapshot.data.mode !== "new" ||
+        snapshot.data.draftWorkContext?.disabled ||
+        snapshot.data.draftWorkContext?.target?.kind !== "local"
+      )
+        return "The working directory can only be changed before starting a local conversation.";
+      return command.action.type === "choose-work-folder" ||
+        (typeof command.action.folderId === "string" &&
+          command.action.folderId.length <= 500)
+        ? null
+        : "Invalid folder selection.";
     case "auto-sources":
     case "sources":
     case "skills":

@@ -82,6 +82,9 @@ export function HubSlot() {
       hubSkills={registration.hubSkills}
       capabilityCatalog={registration.capabilityCatalog}
       mode={registration.mode}
+      draftWorkContext={registration.draftWorkContext}
+      onWorkFolderChange={registration.onWorkFolderChange}
+      onChooseWorkFolder={registration.onChooseWorkFolder}
       onArtifactOpen={(artifact) => {
         context?.desktop.saveView({
           ...context.desktop.getView(),
@@ -157,6 +160,9 @@ function MobileHubDrawer() {
           hubSkills={registration.hubSkills}
           capabilityCatalog={registration.capabilityCatalog}
           mode={registration.mode}
+          draftWorkContext={registration.draftWorkContext}
+          onWorkFolderChange={registration.onWorkFolderChange}
+          onChooseWorkFolder={registration.onChooseWorkFolder}
           onArtifactOpen={(artifact) => {
             registration.onArtifactOpen(artifact);
             context.setMobileHubOpen(false);

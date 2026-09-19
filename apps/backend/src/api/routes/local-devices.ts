@@ -24,6 +24,7 @@ import {
 import { requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 import {
+  localCall,
   claimEnrollment,
   createEnrollment,
   isOnline,
@@ -103,7 +104,12 @@ export function registerLocalDeviceRoutes(app: Hono) {
           providerSandboxId,
           sandboxPath: path,
         });
-        if (bytes.length > 1024 * 1024) throw new ApiError(413, "FILE_TOO_LARGE", "Text previews are limited to 1 MiB.");
+        if (bytes.length > 1024 * 1024)
+          throw new ApiError(
+            413,
+            "FILE_TOO_LARGE",
+            "Text previews are limited to 1 MiB.",
+          );
         let content: string;
         try {
           content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -205,6 +211,46 @@ export function registerLocalDeviceRoutes(app: Hono) {
         data.remoteEnabled,
       ),
     );
+  });
+  app.get("/v1/local-devices/:deviceId/folders/:folderId/files", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const session = await requireSession(c);
+    if (!session) throw ApiError.unauthorized();
+    const caller = await resolveLocalCaller(
+      session.user.id,
+      session.session.id,
+      c.req.header("X-Local-Proof"),
+    );
+    const download = c.req.query("download") === "true";
+    const result = await localCall({
+      userId: session.user.id,
+      deviceId: c.req.param("deviceId"),
+      threadId: null,
+      caller,
+      action: download ? "folder.read" : "folder.list",
+      payload: {
+        folderId: c.req.param("folderId"),
+        path: c.req.query("path") ?? "",
+      },
+    });
+    if (download) {
+      if (typeof result.content !== "string")
+        throw new ApiError(
+          502,
+          "INVALID_LOCAL_REPLY",
+          "The computer returned an invalid file.",
+        );
+      const bytes = Buffer.from(result.content, "base64");
+      if (bytes.length > 1024 * 1024)
+        throw new ApiError(
+          413,
+          "FILE_TOO_LARGE",
+          "Draft file previews are limited to 1 MiB.",
+        );
+      c.header("Content-Type", "application/octet-stream");
+      return c.body(new Uint8Array(bytes));
+    }
+    return ApiResponse.success(c, result);
   });
   app.get("/v1/local-devices/:deviceId/folders", async (c) => {
     const session = await requireSession(c);

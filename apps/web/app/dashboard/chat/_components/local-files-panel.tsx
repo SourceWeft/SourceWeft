@@ -47,20 +47,21 @@ export function LocalFilesPanel(props: LocalFilesPanelProps) {
     <LocalFilesBrowser
       key={`${availability.scopeKey}:${props.workspaceId}:${props.threadId}`}
       {...props}
+      basePath={`/v1/workspaces/${encodeURIComponent(props.workspaceId)}/threads/${encodeURIComponent(props.threadId)}/local-files`}
       availability={availability}
     />
   );
 }
 
-function LocalFilesBrowser({
-  workspaceId,
-  threadId,
+export function LocalFilesBrowser({
   variant = "panel",
   computerName,
   searchQuery = "",
   availability,
-}: LocalFilesPanelProps & {
-  availability: ReturnType<typeof useLocalConversationStatus>;
+  basePath,
+}: Omit<LocalFilesPanelProps, "workspaceId" | "threadId"> & {
+  basePath: string;
+  availability: { ready: boolean; message: string | null };
 }) {
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const localStatus = availability;
@@ -72,7 +73,7 @@ function LocalFilesBrowser({
   const [revision, setRevision] = useState(0);
   const [previewRevision, setPreviewRevision] = useState(0);
   const [loading, setLoading] = useState(true);
-  const base = `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/local-files`;
+  const base = basePath;
   const sourceLabel = computerName;
 
   // Listing and preview requests have separate lifecycles. Opening a file does
@@ -212,7 +213,9 @@ function LocalFilesBrowser({
           <button
             type="button"
             aria-label="Parent folder"
-            disabled={!localStatus.ready || directory.path === directory.root}
+            disabled={
+              !localStatus.ready || !!error || directory.path === directory.root
+            }
             onClick={() =>
               setPath(directory.path.slice(0, directory.path.lastIndexOf("/")))
             }
@@ -231,6 +234,9 @@ function LocalFilesBrowser({
       {error && (
         <p role="alert" className="p-4 text-sm text-destructive">
           {error}
+          {directory
+            ? " The last listing may be out of date; refresh to try again."
+            : ""}
         </p>
       )}
       {directory && (
@@ -260,7 +266,7 @@ function LocalFilesBrowser({
                 <button
                   type="button"
                   aria-label={`${file.is_dir ? "Open folder" : "Preview"} ${basename(file.path)}`}
-                  disabled={!localStatus.ready}
+                  disabled={!localStatus.ready || !!error}
                   title={file.is_dir ? "Open folder" : "Preview in app"}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 py-2 text-left text-sm"
                   onClick={(event) => {
@@ -298,7 +304,7 @@ function LocalFilesBrowser({
                   <button
                     type="button"
                     aria-label={`Download ${basename(file.path)}`}
-                    disabled={!localStatus.ready}
+                    disabled={!localStatus.ready || !!error}
                     className="p-2 text-muted-foreground"
                     onClick={() => download(file.path)}
                   >

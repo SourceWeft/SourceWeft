@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   online: true,
   content: Buffer.from("disk content"),
   owned: vi.fn(),
+  folderCall: vi.fn(),
 }));
 vi.mock("../middleware/auth-session", () => ({
   requireSession: async () =>
@@ -22,6 +23,15 @@ vi.mock("../../modules/devices/access", () => ({
   requireDeviceAccess: vi.fn(),
 }));
 vi.mock("../../modules/devices/service", () => ({
+  localCall: async (input: unknown) => {
+    state.folderCall(input);
+    return {
+      content: state.content.toString("base64"),
+      root: "/project",
+      path: "/project",
+      files: [],
+    };
+  },
   ownedThread: async (...args: unknown[]) => {
     state.owned(...args);
     return {
@@ -107,4 +117,29 @@ test("binary download preserves bytes while text preview rejects binary content"
   expect(Buffer.from(await result.arrayBuffer())).toEqual(state.content);
   expect(result.headers.get("content-disposition")).toContain("a.bin");
   expect((await server.request(`${route}?content=true`)).status).toBe(415);
+});
+
+test("draft folder listing and download use a folder scope without creating a conversation", async () => {
+  const server = app();
+  const list = await server.request("/v1/local-devices/pc/folders/grant/files");
+  expect(list.status).toBe(200);
+  expect(list.headers.get("cache-control")).toBe("no-store");
+  expect(state.folderCall).toHaveBeenCalledWith(
+    expect.objectContaining({
+      threadId: null,
+      deviceId: "pc",
+      userId: "owner",
+      action: "folder.list",
+      payload: { folderId: "grant", path: "" },
+    }),
+  );
+  expect(state.owned).not.toHaveBeenCalled();
+  const binary = await server.request(
+    "/v1/local-devices/pc/folders/grant/files?path=hello.txt&download=true",
+  );
+  expect(Buffer.from(await binary.arrayBuffer())).toEqual(state.content);
+  state.session = false;
+  expect(
+    (await server.request("/v1/local-devices/pc/folders/grant/files")).status,
+  ).toBe(401);
 });

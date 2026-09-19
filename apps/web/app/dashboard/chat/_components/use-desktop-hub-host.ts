@@ -278,6 +278,12 @@ export function useDesktopHubHost(
           const r = reg.current;
           const action = command.action;
           switch (action.type) {
+            case "work-folder":
+              r.onWorkFolderChange?.(action.folderId);
+              break;
+            case "choose-work-folder":
+              await r.onChooseWorkFolder?.();
+              break;
             case "auto-sources": {
               const additions = action.ids.filter(
                 (id) => !scope!.data.activeSourceIds.includes(id),

@@ -781,6 +781,81 @@ export function DashboardChatPageClient() {
     },
     [setActiveMcpInstallIds, setActiveMcpToolIds],
   );
+  const creationMounted = useRef(false);
+  useEffect(() => {
+    creationMounted.current = true;
+    return () => {
+      creationMounted.current = false;
+    };
+  }, []);
+  const currentCreation = useRef({
+    creation: creationContext,
+    disabled: isCreatingFirstThread,
+    workspaceId,
+  });
+  currentCreation.current = {
+    creation: creationContext,
+    disabled: isCreatingFirstThread,
+    workspaceId,
+  };
+  const draftWorkContext = useMemo(
+    () => ({
+      target: creationContext.target,
+      nativeId: creationContext.nativeId,
+      selectedDevice: creationContext.selectedDevice,
+      ready: creationContext.ready,
+      error: creationContext.error,
+      disabled: isCreatingFirstThread,
+    }),
+    [
+      creationContext.target,
+      creationContext.nativeId,
+      creationContext.selectedDevice,
+      creationContext.ready,
+      creationContext.error,
+      isCreatingFirstThread,
+    ],
+  );
+  const onWorkFolderChange = useCallback((folderId: string) => {
+    if (!creationMounted.current || currentCreation.current.disabled)
+      throw new Error(
+        "The conversation is starting. Its directory cannot change.",
+      );
+    currentCreation.current.creation.setFolder(folderId);
+  }, []);
+  const onChooseWorkFolder = useCallback(async () => {
+    const initial = currentCreation.current;
+    const target = initial.creation.target;
+    if (
+      initial.disabled ||
+      target?.kind !== "local" ||
+      target.deviceId !== initial.creation.nativeId
+    )
+      throw new Error(
+        "Select a folder on the chosen computer before starting the conversation.",
+      );
+    const challenge = await localRequest<{ ticket: string; userId: string }>(
+      "/v1/local-devices/enroll",
+      {},
+    );
+    const folder = await desktopBridge.chooseLocalFolder(
+      challenge.ticket,
+      challenge.userId,
+    );
+    const current = currentCreation.current;
+    if (
+      !creationMounted.current ||
+      current.disabled ||
+      current.workspaceId !== initial.workspaceId ||
+      current.creation.draftId !== initial.creation.draftId ||
+      current.creation.userId !== initial.creation.userId ||
+      current.creation.target !== target
+    )
+      throw new Error(
+        "The conversation changed while choosing a folder. Select it again in the current conversation.",
+      );
+    current.creation.setFolder(folder.id);
+  }, []);
   const chatHubRegistration = useMemo<ChatHubRegistration>(
     () => ({
       activeCitationIndex: null,
@@ -801,6 +876,9 @@ export function DashboardChatPageClient() {
         workspaceId,
       ),
       mode: "new",
+      draftWorkContext,
+      onWorkFolderChange,
+      onChooseWorkFolder,
       onArtifactOpen: setPreviewArtifact,
       onArtifactPreviewClose: () => setPreviewArtifact(null),
       onMcpSelectionChange: handleMcpSelectionChange,
@@ -818,6 +896,9 @@ export function DashboardChatPageClient() {
       workspaceName,
     }),
     [
+      draftWorkContext,
+      onWorkFolderChange,
+      onChooseWorkFolder,
       activeMcpInstallIds,
       activeMcpToolIds,
       activeSkillIds,
@@ -957,7 +1038,10 @@ export function DashboardChatPageClient() {
 
       if (!creationContext.target || creationContext.error) {
         preserveDraft();
-        toast.error(creationContext.error || "Please wait for the computer to finish initializing.");
+        toast.error(
+          creationContext.error ||
+            "Please wait for the computer to finish initializing.",
+        );
         return;
       }
       if (
@@ -1202,6 +1286,7 @@ export function DashboardChatPageClient() {
                 composerDraftKey={`${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${contextKey}`}
                 workingFolderSlot={
                   <WorkingFolderPicker
+                    onChooseFolder={onChooseWorkFolder}
                     creation={creationContext}
                     disabled={isCreatingFirstThread}
                   />

@@ -437,22 +437,30 @@ export async function revokeFolderAccess(
         eq(localThreadBindings.deviceId, deviceId),
       ),
     );
-  if (bindings.length)
-    await db
-      .update(localToolInvocations)
-      .set({ status: "cancel_requested", error: "LOCAL_FOLDER_REVOKED" })
-      .where(
-        and(
-          inArray(
-            localToolInvocations.threadId,
-            bindings.map((b) => b.threadId),
+  await db
+    .update(localToolInvocations)
+    .set({ status: "cancel_requested", error: "LOCAL_FOLDER_REVOKED" })
+    .where(
+      and(
+        or(
+          bindings.length
+            ? inArray(
+                localToolInvocations.threadId,
+                bindings.map((b) => b.threadId),
+              )
+            : sql`false`,
+          and(
+            eq(localToolInvocations.deviceId, deviceId),
+            eq(localToolInvocations.userId, userId),
+            sql`${localToolInvocations.payload}->>'folderId' = ${folderId}`,
           ),
-          inArray(localToolInvocations.status, [
-            "pending",
-            "accepted",
-            "running",
-          ]),
         ),
-      );
+        inArray(localToolInvocations.status, [
+          "pending",
+          "accepted",
+          "running",
+        ]),
+      ),
+    );
   return { revoked: true };
 }

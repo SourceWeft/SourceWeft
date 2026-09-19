@@ -29,6 +29,9 @@ export type ChatHubMode = "new" | "thread";
 
 export type ChatHubRegistration = {
   mode: ChatHubMode;
+  draftWorkContext?: import("./draft-files-panel").DraftWorkContext;
+  onWorkFolderChange?: (folderId: string) => void;
+  onChooseWorkFolder?: () => Promise<void>;
   workspaceId: string | null;
   workspaceName: string | null;
   threadId: string | null;

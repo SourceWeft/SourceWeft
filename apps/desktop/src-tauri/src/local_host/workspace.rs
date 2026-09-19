@@ -20,7 +20,8 @@ pub struct Workspace {
 /// never assembled from model-controlled paths, account IDs or conversation titles.
 pub struct LocalHost {
     pub(crate) db: Mutex<Connection>,
-    pub(crate) binary_reads: Mutex<std::collections::HashMap<String, super::files::BinaryReadSession>>,
+    pub(crate) binary_reads:
+        Mutex<std::collections::HashMap<String, super::files::BinaryReadSession>>,
     base: PathBuf,
 }
 
@@ -165,6 +166,31 @@ impl LocalHost {
         Ok(
             serde_json::json!({"id":id,"path":path,"name":path.file_name().unwrap_or_default().to_string_lossy()}),
         )
+    }
+
+    pub(crate) fn granted_directory(&self, owner: &str, grant: &str) -> Result<PathBuf> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Directory database lock failed."))?;
+        let selected: Option<(String, u64, u64)> = db.query_row(
+            "SELECT path,root_device,root_inode FROM directory_grants WHERE id=?1 AND owner_id=?2",
+            params![grant, owner], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let (path, device, inode) = selected.ok_or_else(|| {
+            HostError::new(
+                "DIRECTORY_GRANT_DENIED",
+                "The directory grant is unavailable.",
+            )
+        })?;
+        let path = PathBuf::from(path);
+        self.check_selected_directory(&path)?;
+        if root_identity(&path)? != (device, inode) {
+            return Err(HostError::new(
+                "WORKSPACE_REPLACED",
+                "The selected directory was replaced.",
+            ));
+        }
+        Ok(path)
     }
 
     pub fn workspace_base(&self) -> PathBuf {
@@ -390,9 +416,13 @@ impl LocalHost {
             .db
             .lock()
             .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Workspace database lock failed."))?;
-        let bound: Option<(String, Option<String>)> = db.query_row(
-            "SELECT id,directory_grant_id FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
-            params![owner, thread], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        let bound: Option<(String, Option<String>)> = db
+            .query_row(
+                "SELECT id,directory_grant_id FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
+                params![owner, thread],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
         if let Some((id, previous_grant)) = bound {
             if requested_id.is_some_and(|value| value != id) || previous_grant.as_deref() != grant {
                 return Err(HostError::new(
@@ -410,7 +440,10 @@ impl LocalHost {
                 "SELECT path,root_device,root_inode FROM directory_grants WHERE id=?1 AND owner_id=?2",
                 params![grant, owner], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
             let (path, device, inode) = selected.ok_or_else(|| {
-                HostError::new("DIRECTORY_GRANT_DENIED", "The directory grant is unavailable.")
+                HostError::new(
+                    "DIRECTORY_GRANT_DENIED",
+                    "The directory grant is unavailable.",
+                )
             })?;
             let path = PathBuf::from(path);
             self.check_selected_directory(&path)?;
