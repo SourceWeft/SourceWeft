@@ -5,7 +5,7 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   // Avoid hydration mismatch; only render after mount.
@@ -17,7 +17,9 @@ export function ThemeToggle() {
     return <span className="h-8 w-8" />;
   }
 
-  const isDark = theme === "dark";
+  // resolvedTheme folds "system" into the scheme actually applied, so the
+  // first click on a system-dark page switches to light instead of no-op.
+  const isDark = resolvedTheme === "dark";
 
   return (
     <button

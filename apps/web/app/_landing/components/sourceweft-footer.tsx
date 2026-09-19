@@ -55,6 +55,7 @@ export function SourceWeftFooter({
     ["/#features", "Features"],
     ["/#how-it-works", "How it works"],
     ["/#pricing", "Pricing"],
+    ["/download", "Download"],
     ["/mcp", "MCP Servers"],
     ["/blog", "Blog"],
     [
