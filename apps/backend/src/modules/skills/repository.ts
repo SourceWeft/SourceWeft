@@ -181,13 +181,43 @@ function skillManifestJson(input: {
   } satisfies SkillManifestJson;
 }
 
+/**
+ * Which `skill_entitlements` rows reach this workspace — shared by every
+ * predicate that reads grants (`visibleSkillCondition` here, `registryAccess`
+ * in the registry) so the two can never drift apart again.
+ *
+ * A row that names a workspace grants THAT workspace only; its `team_id` is
+ * just the owning team, not a second scope. Only a row with no workspace is a
+ * team-wide grant. Installing writes both columns, so matching on
+ * `team_id OR workspace_id` let one workspace's install expose — and make
+ * installable — a restricted skill in every workspace of the team.
+ *
+ * An empty id never matches: the registry admin route reads with blank ids,
+ * and `team_id` has no foreign key that would rule out a blank row.
+ */
+export function skillEntitlementScopeCondition(input: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  const scopes = [];
+  if (input.workspaceId) {
+    scopes.push(sql`${skillEntitlements.workspaceId} = ${input.workspaceId}`);
+  }
+  if (input.teamId) {
+    scopes.push(
+      sql`(${skillEntitlements.workspaceId} is null and ${skillEntitlements.teamId} = ${input.teamId})`,
+    );
+  }
+  return scopes.length > 0 ? sql`(${sql.join(scopes, sql` or `)})` : sql`false`;
+}
+
 function visibleSkillCondition(input: { teamId: string; workspaceId: string }) {
   return or(
     eq(skillDefinitions.visibility, "public"),
     sql`${skillDefinitions.visibility} = 'restricted' and exists (
       select 1 from ${skillEntitlements}
       where ${skillEntitlements.skillId} = ${skillDefinitions.id}
-        and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
+        and ${skillEntitlementScopeCondition(input)}
         and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
     )`,
     and(

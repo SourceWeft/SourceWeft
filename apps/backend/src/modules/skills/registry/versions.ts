@@ -15,6 +15,7 @@ import type {
 } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
 import { readSkillDocuments } from "../documents";
+import { skillEntitlementScopeCondition } from "../repository";
 import { getSkillLogo } from "../logo";
 import { isMarketAdmin } from "../../market/admin";
 import { teamAuditService } from "../../team-audit";
@@ -32,12 +33,15 @@ function missing(): never {
   );
 }
 export function registryAccess(input: RegistryViewer) {
+  // Grants follow the same scope rule as the catalog: a row naming a workspace
+  // reaches that workspace only, a row without one reaches the whole team, and
+  // the blank ids the admin route reads with reach nothing.
   return or(
     eq(skillDefinitions.visibility, "public"),
     eq(skillDefinitions.ownerUserId, input.userId),
     sql`${isMarketAdmin(input.userId)}`,
     sql`exists (select 1 from ${skillEntitlements} where ${skillEntitlements.skillId} = ${skillDefinitions.id}
-      and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
+      and ${skillEntitlementScopeCondition(input)}
       and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now()))`,
   );
 }
@@ -236,8 +240,43 @@ function sameConfigContract(
     })
   );
 }
+export type VersionEscalation = { addsScripts: boolean; newFlags: string[] };
+/**
+ * What a version can do that the installed one cannot. Moving a pin is
+ * otherwise a quiet `skills.manage` action, so gaining scripts — or scan flags
+ * nobody in this workspace has looked at — has to be said out loud first.
+ * Downgrades and sideways moves return null.
+ */
+export function describeVersionEscalation(
+  current: SkillManifestJson,
+  target: SkillManifestJson,
+): VersionEscalation | null {
+  const addsScripts =
+    target.registry?.capability === "executable" &&
+    current.registry?.capability !== "executable";
+  const known = new Set(current.registry?.scan.flags ?? []);
+  const newFlags = [
+    ...new Set(
+      (target.registry?.scan.flags ?? []).filter((flag) => !known.has(flag)),
+    ),
+  ];
+  return addsScripts || newFlags.length > 0 ? { addsScripts, newFlags } : null;
+}
+function escalationMessage(escalation: VersionEscalation): string {
+  const parts = [
+    escalation.addsScripts ? "adds executable scripts" : null,
+    escalation.newFlags.length
+      ? `carries new scan flags (${escalation.newFlags.join(", ")})`
+      : null,
+  ].filter(Boolean);
+  return `This version ${parts.join(" and ")}. Acknowledge the change to switch to it.`;
+}
 export async function switchRegistryVersion(
-  input: RegistryViewer & { workspaceSkillId: string; skillVersionId: string },
+  input: RegistryViewer & {
+    workspaceSkillId: string;
+    skillVersionId: string;
+    acknowledgeEscalation?: boolean;
+  },
 ) {
   const result = await db.transaction(async (tx) => {
     const [installed] = await tx
@@ -301,7 +340,20 @@ export async function switchRegistryVersion(
         workspaceSkill: installed,
         fromVersionId: previous.id,
         changed: false,
+        escalation: null,
       };
+    const escalation = describeVersionEscalation(
+      previous.manifestJson,
+      target.manifestJson,
+    );
+    if (escalation && input.acknowledgeEscalation !== true) {
+      throw new ContentError(
+        409,
+        "SKILL_VERSION_ESCALATION",
+        escalationMessage(escalation),
+        { details: escalation },
+      );
+    }
     const [updated] = await tx
       .update(workspaceSkills)
       .set({ skillVersionId: target.id, updatedAt: new Date() })
@@ -311,6 +363,7 @@ export async function switchRegistryVersion(
       workspaceSkill: updated!,
       fromVersionId: previous.id,
       changed: true,
+      escalation,
     };
   });
   if (result.changed)
@@ -324,6 +377,11 @@ export async function switchRegistryVersion(
         workspaceId: input.workspaceId,
         fromVersionId: result.fromVersionId,
         toVersionId: input.skillVersionId,
+        // Only present when the switch was an acknowledged escalation, so the
+        // audit trail shows who accepted scripts or new flags.
+        ...(result.escalation
+          ? { acknowledgedEscalation: result.escalation }
+          : {}),
       },
     });
   return { workspaceSkill: result.workspaceSkill };
