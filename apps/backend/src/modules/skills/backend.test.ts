@@ -189,3 +189,26 @@ Do not cite [citation:c1] or citation:c2.`,
     /non-citable citation marker c3, c4 removed/i,
   );
 });
+
+// `install_skill` mounts what it installs into the running turn's backend.
+test("SelectedSkillsBackend serves a skill added after construction", async () => {
+  const backend = new SelectedSkillsBackend([]);
+  assert.deepEqual(await backend.ls("/"), { files: [] });
+
+  backend.addSkill(skills[0]!);
+  assert.deepEqual(await backend.ls("/"), {
+    files: [{ path: "/meeting-summary/", is_dir: true }],
+  });
+  assert.equal(
+    (await backend.read("/meeting-summary/SKILL.md")).content,
+    skillMd,
+  );
+
+  // Re-adding a name replaces its files rather than leaving stale ones behind.
+  backend.addSkill({ ...skills[0]!, files: [skills[0]!.files[0]!] });
+  const files = (await backend.ls("/meeting-summary")).files ?? [];
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["/meeting-summary/SKILL.md"],
+  );
+});

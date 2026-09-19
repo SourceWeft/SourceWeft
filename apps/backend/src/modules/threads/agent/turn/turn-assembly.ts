@@ -119,7 +119,7 @@ export interface FilesystemBackend {
   workingFilesBackend: WorkingFilesBackend;
   localFiles: boolean;
   filesystemMounts: ReturnType<typeof createDefaultFilesystemMounts>;
-  skillsBackend: SelectedSkillsBackend | null;
+  skillsBackend: SelectedSkillsBackend;
 }
 
 export function buildFilesystemBackend(
@@ -148,14 +148,15 @@ export function buildFilesystemBackend(
     citationRegistry: runtime.citationRegistry,
   });
 
-  const skillsBackend =
-    prepared.enabledSkills.length > 0
-      ? new SelectedSkillsBackend(prepared.enabledSkills)
-      : null;
+  // Always present, even with nothing enabled: `install_skill` mounts what it
+  // installs into this backend so the skill is readable within the same turn.
+  // The advertised mount list and the skills prompt section still follow what
+  // the turn STARTED with, so a turn without skills keeps its prompt unchanged.
+  const skillsBackend = new SelectedSkillsBackend(prepared.enabledSkills);
 
   const localFiles = prepared.thread.executionTarget?.kind === "local";
   const filesystemMounts = createDefaultFilesystemMounts({
-    skillsEnabled: Boolean(skillsBackend),
+    skillsEnabled: prepared.enabledSkills.length > 0,
   }).filter((mount) => !localFiles || mount.backendKind !== "workfiles");
 
   const backend = new MountedAgentFilesystemBackend({
@@ -258,9 +259,7 @@ export function buildAgentBackend(input: {
           ),
         }
       : {}),
-    ...(filesystemBackend.skillsBackend
-      ? { "/skills/": filesystemBackend.skillsBackend }
-      : {}),
+    "/skills/": filesystemBackend.skillsBackend,
     ...(sandboxRuntime
       ? {
           "/": new PrefixedBackendAdapter("/", defaultBackend),
@@ -469,6 +468,10 @@ export async function buildRuntimePromptContext(
     commandSuccessCriteria: prepared.commandSuccessCriteria,
     enabledSkills: prepared.enabledSkills,
     invokedSkillIds: prepared.invokedSkillIds,
+    skillCatalogAvailable: filterAllowedTools(
+      prepared,
+      toolCollection.skillTools,
+    ).some((tool) => tool.name === "search_skills"),
     toolRuntimePromptProviders: sandboxPromptProvider
       ? [sandboxPromptProvider]
       : [],
@@ -799,7 +802,7 @@ export async function buildThreadAgentAssembly(
     });
   }
 
-  const skills = skillsBackend ? ["/skills/"] : undefined;
+  const skills = prepared.enabledSkills.length > 0 ? ["/skills/"] : undefined;
   const childMiddleware = (subagentType: string) =>
     [fileImages.middleware(), ...createSourceWeftSubagentMiddlewareStack({
       backend,
@@ -1118,6 +1121,12 @@ export async function buildToolCollection(
       teamId: prepared.workspace.organizationId,
       workspaceId: prepared.workspace.id,
       userId: prepared.userId,
+      ...(filesystemBackend
+        ? {
+            mountSkill: (skill) =>
+              filesystemBackend.skillsBackend.addSkill(skill),
+          }
+        : {}),
     }),
     webTools: [...capabilityAgentTools.webTools],
     artifactTools: [...capabilityAgentTools.artifactTools],

@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { AgentTurnTool } from "../threads/agent/capability-tools/types";
 import { ContentError } from "../content/errors";
 import { contentSkillsService } from "./service";
+import { resolveSelectedSkills } from "./selection";
+import type { EnabledSkillDescriptor } from "./types";
 import { RegistrySubmissionError } from "./registry/errors";
 import { logger } from "../../shared/logger";
 
@@ -15,20 +17,61 @@ import { logger } from "../../shared/logger";
  * `lh skill install <source>`, Continue's `readSkill` — with the CLI
  * indirection dropped, since we already are a tool-calling agent.
  *
- * A skill installed here takes effect on the NEXT turn: the turn's skill set is
- * written into the checkpoint before the model runs, so the /skills mount and
- * the available-skills list are fixed for the current turn. The tool result
- * says so explicitly, because the alternative — the model installing a skill
- * and then confidently trying to use it in the same breath — reads as a bug to
- * the user. (OpenHands hit the same wall and answers it with a banner telling
- * the user to start a new conversation; ours is one turn, not one thread.)
+ * A turn's skill set is written into the checkpoint before the model runs, so
+ * the available-skills list in the prompt is fixed for the current turn. What
+ * is NOT fixed is the /skills mount: `mountSkill` adds a freshly installed
+ * skill to it, so the tool result can hand the model the path to read and the
+ * skill is usable in the same breath — the alternative (OpenHands' banner
+ * telling the user to start over; our earlier "takes effect next turn") reads
+ * as a bug to the person who just asked for the thing. Scripts are the
+ * exception: the sandbox stages skill bundles when it is acquired, so an
+ * executable skill's scripts only become runnable from the next turn, and the
+ * result says so.
  */
 
 export type SkillAgentToolContext = {
   teamId: string;
   workspaceId: string;
   userId: string;
+  /** Adds a skill to this turn's /skills mount. Absent → next-turn only. */
+  mountSkill?: (skill: EnabledSkillDescriptor) => void;
 };
+
+/**
+ * Mount what was just installed into the running turn; returns the slugs that
+ * are now readable. Best effort — a failure here must not turn a successful
+ * install into an error, it only means the skill waits for the next turn.
+ */
+async function mountInstalledSkills(
+  context: SkillAgentToolContext,
+  workspaceSkillIds: string[],
+): Promise<Map<string, string>> {
+  const mounted = new Map<string, string>();
+  if (!context.mountSkill || workspaceSkillIds.length === 0) {
+    return mounted;
+  }
+  try {
+    const wanted = new Set(workspaceSkillIds);
+    // Resolves every enabled skill; the ones already mounted are skipped.
+    const skills = await resolveSelectedSkills({
+      teamId: context.teamId,
+      workspaceId: context.workspaceId,
+      skillIds: [],
+    });
+    for (const skill of skills) {
+      if (wanted.has(skill.workspaceSkillId)) {
+        context.mountSkill(skill);
+        mounted.set(skill.workspaceSkillId, `/skills/${skill.name}/SKILL.md`);
+      }
+    }
+  } catch (error) {
+    logger.warn("Could not mount installed skill into the running turn", {
+      workspaceId: context.workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return mounted;
+}
 
 /**
  * Provenance the model needs to make, or advise on, a judgement.
@@ -119,7 +162,7 @@ export function buildSkillAgentTools(
     {
       name: "search_skills",
       description:
-        "Search this workspace's skill catalog: its own and its team's skills, the opt-in built-ins, and the public community skills. Returns each match's slug, name, description and provenance — for a community skill that is publisher, license, review state and source URL; pass it on when you recommend one. Use it when the user asks what skills exist, or when a task calls for a capability none of the available skills cover. It does NOT search GitHub or any other site — to add a skill that is not in the catalog yet, call install_skill with its GitHub repository.",
+        "Search this workspace's skill catalog: its own and its team's skills, the opt-in built-ins, and the public community skills. Returns each match's slug, name, description and provenance — for a community skill that is publisher, license, review state and source URL; pass it on when you recommend one. Use it when the user asks what skills exist — and on your own initiative when a task involves a specialised file format, workflow or domain that none of your available skills cover: search here BEFORE improvising, and if there is a good match, install it with install_skill, read its SKILL.md, follow it in this same turn, and tell the user which skill you installed and used. Prefer built-in and this workspace's or team's own skills over community ones. Do not search for routine tasks you already handle well. It does NOT search GitHub or any other site — to add a skill that is not in the catalog yet, call install_skill with its GitHub repository.",
       schema: z.object({
         query: z
           .string()
@@ -146,20 +189,33 @@ export function buildSkillAgentTools(
           (item) => item.capability === "executable",
         );
 
+        const mounted = await mountInstalledSkills(
+          context,
+          installed.flatMap((item) =>
+            item.workspaceSkill ? [item.workspaceSkill.id] : [],
+          ),
+        );
         if (installed.length > 0) {
           lines.push(
             `Installed and switched on ${installed.length} skill(s):`,
-            ...installed.map(describe),
+            ...installed.map((item) => {
+              const path = item.workspaceSkill
+                ? mounted.get(item.workspaceSkill.id)
+                : undefined;
+              return `${describe(item)}${path ? `\n  [read now: ${path}]` : ""}`;
+            }),
             "",
-            "They take effect on your NEXT turn; this turn's skill set was fixed before you started. Tell the user what you installed and where it came from.",
+            mounted.size === installed.length
+              ? "They are usable in THIS turn: before acting on one, read its SKILL.md at the path shown and follow it. They are not in your available-skills list until the next turn, so go by these paths. Tell the user what you installed and where it came from."
+              : "They take effect on your NEXT turn; this turn's skill set was fixed before you started. Tell the user what you installed and where it came from.",
           );
         }
         if (withScripts.length > 0) {
           lines.push(
             "",
-            `Of those, ${withScripts.length} ship executable scripts that can now run in the sandbox: ${withScripts
+            `Of those, ${withScripts.length} ship executable scripts: ${withScripts
               .map((item) => item.slug)
-              .join(", ")}. Say so.`,
+              .join(", ")}. Their instructions apply now, but the scripts are staged into the sandbox when a turn starts, so they become runnable from the NEXT turn. Say so.`,
           );
         }
         if (queued.length > 0) {

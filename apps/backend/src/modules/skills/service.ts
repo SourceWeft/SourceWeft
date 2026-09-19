@@ -195,6 +195,20 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
   return base;
 }
 
+const SKILL_SEARCH_MAX_TERMS = 8;
+
+/** The whole query plus its individual words, lowercased, shortest dropped. */
+function skillSearchTerms(query: string): string[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
+    return [];
+  }
+  const words = normalized
+    .split(/[\s,，、;；/|]+/u)
+    .filter((word) => word.length >= REGISTRY_SEARCH_MIN_QUERY_LENGTH);
+  return [...new Set([normalized, ...words])].slice(0, SKILL_SEARCH_MAX_TERMS);
+}
+
 export type InstalledSkillResult = {
   slug: string;
   displayName: string;
@@ -439,6 +453,8 @@ export class ContentSkillsService {
     workspaceId: string;
     userId: string;
     query?: string;
+    /** Match ANY of these instead of `query` as one phrase. */
+    terms?: string[];
   }): Promise<CatalogRow[]> {
     const conditions = [
       eq(skillDefinitions.sourceType, "registry_github"),
@@ -457,18 +473,23 @@ export class ContentSkillsService {
         ),
       ),
     ];
-    if (input.query) {
-      const like = `%${input.query}%`;
+    const terms = input.terms ?? (input.query ? [input.query] : []);
+    if (terms.length > 0) {
       conditions.push(
         or(
-          ilike(skillDefinitions.displayName, like),
-          ilike(skillDefinitions.description, like),
-          // The slug matters as much as the prose: it carries the author's own
-          // name for the skill, which is what someone types when they already
-          // know what they want ("internal-comms"). Matching only display name
-          // and description made that exact search miss, and the caller then
-          // had to guess at synonyms.
-          ilike(skillDefinitions.slug, like),
+          ...terms.flatMap((term) => {
+            const like = `%${term}%`;
+            return [
+              ilike(skillDefinitions.displayName, like),
+              ilike(skillDefinitions.description, like),
+              // The slug matters as much as the prose: it carries the author's
+              // own name for the skill, which is what someone types when they
+              // already know what they want ("internal-comms"). Matching only
+              // display name and description made that exact search miss, and
+              // the caller then had to guess at synonyms.
+              ilike(skillDefinitions.slug, like),
+            ];
+          }),
         ),
       );
     }
@@ -540,6 +561,11 @@ export class ContentSkillsService {
    * meeting-notes skill" and truthfully report that nothing matched. Registry
    * rows keep their SQL filter (that index is the large one); the rest of the
    * catalog is a handful of rows and is matched in process.
+   *
+   * Matching is per TERM, not per phrase. Measured live: a model searches the
+   * way it thinks — "费曼学习法 Feynman technique explain" — and a whole-phrase
+   * ILIKE answered "nothing" for a catalog that had `feynman` in it. Any term
+   * may match; the more terms an entry matches, the higher it ranks.
    */
   async searchCatalog(input: {
     teamId: string;
@@ -547,11 +573,21 @@ export class ContentSkillsService {
     userId: string;
     query: string;
   }) {
-    const { items: registryItems, query } = await this.searchRegistry(input);
-    if (query.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
-      return { items: registryItems, query };
+    const query = input.query.trim();
+    const terms = skillSearchTerms(query);
+    if (terms.length === 0) {
+      return { items: [] as SkillCatalogItem[], query };
     }
-    const needle = query.toLowerCase();
+    const matchCount = (item: SkillCatalogItem) => {
+      const haystack =
+        `${item.slug} ${item.displayName} ${item.description}`.toLowerCase();
+      return terms.filter((term) => haystack.includes(term)).length;
+    };
+    const registryItems = (
+      await this.listRegistryCatalogRows({ ...input, terms })
+    )
+      .filter((row) => row.version.manifestJson.listing !== "hidden")
+      .map(mapCatalogRow);
     const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
       .filter(
         (row) =>
@@ -560,14 +596,15 @@ export class ContentSkillsService {
             row.version.manifestJson.managed === true) &&
           row.version.manifestJson.listing !== "hidden",
       )
-      .map(mapCatalogRow)
-      .filter((item) =>
-        [item.slug, item.displayName, item.description].some((text) =>
-          text.toLowerCase().includes(needle),
-        ),
-      );
+      .map(mapCatalogRow);
+    const byRelevance = compareSkillSearchRelevance(query);
     const items = [...ownItems, ...registryItems]
-      .sort(compareSkillSearchRelevance(query))
+      .map((item) => ({ item, matches: matchCount(item) }))
+      .filter((entry) => entry.matches > 0)
+      .sort(
+        (a, b) => b.matches - a.matches || byRelevance(a.item, b.item),
+      )
+      .map((entry) => entry.item)
       .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
     return { items, query };
   }
@@ -1095,4 +1132,5 @@ export const testExports = {
   mapCatalogRow,
   parseSkillInstallSource,
   pickInstallableByName,
+  skillSearchTerms,
 };

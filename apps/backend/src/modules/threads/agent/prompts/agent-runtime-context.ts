@@ -167,6 +167,8 @@ export function buildAgentRuntimeContext(input: {
   commandSuccessCriteria?: PreparedThreadTurn["commandSuccessCriteria"];
   enabledSkills?: EnabledSkillDescriptor[];
   invokedSkillIds?: string[];
+  /** `search_skills` / `install_skill` are bound this turn. */
+  skillCatalogAvailable?: boolean;
   toolRuntimePromptProviders?: ToolRuntimePromptProvider[];
   timezone: string;
   selectedSources?: VirtualFsSource[];
@@ -211,6 +213,20 @@ export function buildAgentRuntimeContext(input: {
   });
   if (invokedSkillsPrompt) {
     lines.push(invokedSkillsPrompt);
+  }
+
+  if (input.skillCatalogAvailable) {
+    // In the prompt, not only in the tool description: measured live, a model
+    // asked to "explain X with the Feynman technique" answered from memory and
+    // never looked, because nothing told it a catalog was worth checking.
+    lines.push(
+      "<skill_catalog>",
+      "This workspace has a skill catalog beyond the skills already listed as available; a skill carries this workspace's preferred way of doing a kind of task.",
+      "When a request names a method, framework, template, house style, document format or workflow — for example \"the Feynman technique\", \"our brand guidelines\", \"a PRD\", \"a code review checklist\" — and no available skill covers it, you MUST call search_skills with that name FIRST, even if you could answer from general knowledge. Also search the catalog before telling the user that such guidance does not exist in the workspace.",
+      "If a result fits, call install_skill with its slug, read the SKILL.md path the result gives you, follow it in this same turn, and tell the user which skill you installed and used. Prefer built-in and this workspace's or team's own skills over community ones. If nothing fits, answer normally.",
+      "Do NOT search for ordinary questions, conversation, or tasks an available skill already covers.",
+      "</skill_catalog>",
+    );
   }
 
   const commandSuccessInstruction = buildCommandSuccessInstruction(

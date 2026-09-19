@@ -263,7 +263,10 @@ test("mapCatalogRow forwards defaultEnabled without inferring it from visibility
 
 test("skillSearchRelevanceRank: name matches outrank description matches", () => {
   const base = { displayName: "Meeting Summary", description: "notes" };
-  assert.equal(skillSearchRelevanceRank({ ...base, query: "meeting summary" }), 0);
+  assert.equal(
+    skillSearchRelevanceRank({ ...base, query: "meeting summary" }),
+    0,
+  );
   assert.equal(skillSearchRelevanceRank({ ...base, query: "meeting" }), 1);
   assert.equal(skillSearchRelevanceRank({ ...base, query: "summary" }), 2);
   assert.equal(
@@ -297,4 +300,17 @@ test("compareSkillSearchRelevance: a name hit sorts above a description-only hit
     sorted.map((item) => item.displayName),
     ["Meeting Summary", "Standup Bot"],
   );
+});
+
+// A model searches the way it thinks — several words, often two languages.
+// Whole-phrase matching answered "nothing" for a catalog that had the skill.
+test("skill search matches per term, keeping the whole phrase as one of them", () => {
+  assert.deepEqual(
+    testExports.skillSearchTerms("费曼学习法 Feynman technique"),
+    ["费曼学习法 feynman technique", "费曼学习法", "feynman", "technique"],
+  );
+  assert.deepEqual(testExports.skillSearchTerms("pdf"), ["pdf"]);
+  // Too short to mean anything; single characters would match everything.
+  assert.deepEqual(testExports.skillSearchTerms("a"), []);
+  assert.deepEqual(testExports.skillSearchTerms("a pdf"), ["a pdf", "pdf"]);
 });
