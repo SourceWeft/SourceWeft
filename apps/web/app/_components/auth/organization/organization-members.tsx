@@ -152,6 +152,7 @@ export function OrganizationMembers({
       tableState.setPagination((current) => ({ ...current, pageIndex: 0 }))
     }
     previousOrganizationId.current = organizationId
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the listed method is stable; depending on its owner object would re-run this effect on every render of the parent.
   }, [activeOrganization?.id, tableState.setPagination])
 
   const { data: membersData, isPending: membersPending } =
@@ -241,6 +242,7 @@ export function OrganizationMembers({
         pageIndex: lastPageIndex
       }))
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the listed method is stable; depending on its owner object would re-run this effect on every render of the parent.
   }, [
     membersData,
     paged,

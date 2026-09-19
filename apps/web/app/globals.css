@@ -7,7 +7,6 @@
 /* Script-specific UI fonts load with the signed-in app (app/dashboard/layout.tsx);
    marketing pages are Latin-only and must not ship ~480 extra @font-face rules. */
 @import "@sourceweft/tailwind-config";
-@import "@daveyplate/better-auth-ui/css";
 
 /* Explicit app scanning also works in Git worktrees under ignored parent directories. */
 @source ".";

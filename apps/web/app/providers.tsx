@@ -2,24 +2,27 @@
 
 import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
-import { AuthUIProvider } from "@daveyplate/better-auth-ui";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
-import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider, useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect } from "react";
-import { Toaster, toast as sonnerToast } from "sonner";
+import { useEffect, useRef } from "react";
+import { Toaster } from "sonner";
 import { DEFAULT_USER_THEME } from "@sourceweft/contracts";
+import { AuthProvider } from "./_components/auth/auth-provider";
 import { GoogleOneTap } from "./google-one-tap";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
-import {
-  additionalFields,
-  customAccountViewPaths,
-  customAuthViewPaths,
-  customOrganizationViewPaths,
-} from "../lib/auth-ui-config";
+import { additionalFields } from "../lib/auth-ui-config";
+import { apiKeyPlugin } from "../lib/auth/api-key-plugin";
+import { emailOtpPlugin } from "../lib/auth/email-otp-plugin";
+import { magicLinkPlugin } from "../lib/auth/magic-link-plugin";
+import { multiSessionPlugin } from "../lib/auth/multi-session-plugin";
+import { organizationPlugin } from "../lib/auth/organization-plugin";
+import { passkeyPlugin } from "../lib/auth/passkey-plugin";
+import { twoFactorPlugin } from "../lib/auth/two-factor-plugin";
+import { getQueryClient } from "../lib/query-client";
 import { userSettingsClient } from "../lib/sdk";
 
 import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
@@ -83,18 +86,29 @@ function ThemeSettingsSync() {
   return null;
 }
 
-export function Providers({
-  children,
-  initialCapabilities = null,
-}: {
-  children: React.ReactNode;
-  initialCapabilities?: DeploymentCapabilities | null;
-}) {
+/**
+ * Re-renders server components when the signed-in user changes.
+ *
+ * The old auth UI package offered an `onSessionChange` callback for this; the
+ * successor has no equivalent, so watch the session directly. `/dashboard` is
+ * excluded because it holds client state a refresh would discard.
+ */
+function SessionRefreshSync() {
+  const { data: session } = authClient.useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const webBaseUrl = resolveWebBaseUrl();
+  const userId = session?.user?.id ?? null;
+  const previousUserId = useRef<string | null | undefined>(undefined);
 
-  const handleSessionChange = useCallback(() => {
+  useEffect(() => {
+    const previous = previousUserId.current;
+    previousUserId.current = userId;
+
+    // Skip the first observed value: nothing changed, we just learned it.
+    if (previous === undefined || previous === userId) {
+      return;
+    }
+
     const normalizedPathname = pathname?.replace(/\/+$/, "") || "/";
     if (
       normalizedPathname === "/dashboard" ||
@@ -104,7 +118,21 @@ export function Providers({
     }
 
     router.refresh();
-  }, [pathname, router]);
+  }, [pathname, router, userId]);
+
+  return null;
+}
+
+export function Providers({
+  children,
+  initialCapabilities = null,
+}: {
+  children: React.ReactNode;
+  initialCapabilities?: DeploymentCapabilities | null;
+}) {
+  const router = useRouter();
+  const webBaseUrl = resolveWebBaseUrl();
+  const queryClient = getQueryClient();
 
   useEffect(() => {
     const handler = (event: PromiseRejectionEvent) => {
@@ -126,78 +154,41 @@ export function Providers({
       enableSystem
       disableTransitionOnChange
     >
-      <AuthUIProvider
-        Link={Link}
-        baseURL={webBaseUrl}
-        account={{
-          basePath: "/account",
-          fields: ["image", "name", "company", "role", "timezone", "bio"],
-          viewPaths: customAccountViewPaths,
-        }}
-        additionalFields={additionalFields}
-        apiKey={{
-          prefix: "vm_",
-        }}
-        authClient={authClient}
-        credentials={{
-          forgotPassword: true,
-        }}
-        localizeErrors={false}
-        magicLink
-        multiSession
-        navigate={router.push}
-        onSessionChange={handleSessionChange}
-        organization={{
-          apiKey: true,
-          basePath: "/organization",
-          viewPaths: customOrganizationViewPaths,
-        }}
-        passkey
-        replace={router.replace}
-        redirectTo="/dashboard"
-        signUp={{
-          fields: ["name"],
-        }}
-        social={{
-          providers: ["google", "github"] satisfies SocialProvider[],
-        }}
-        toast={({ message, variant }) => {
-          if (variant === "error" && shouldIgnoreCancelledPasskey(message)) {
-            return;
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider
+          additionalFields={additionalFields}
+          authClient={authClient}
+          baseURL={webBaseUrl}
+          emailAndPassword={{ forgotPassword: true }}
+          Link={Link}
+          navigate={({ to, replace }) =>
+            replace ? router.replace(to) : router.push(to)
           }
-
-          const text = message || "Operation completed";
-          if (variant === "error") {
-            sonnerToast.error(text);
-            return;
-          }
-
-          if (variant === "warning") {
-            sonnerToast.warning(text);
-            return;
-          }
-
-          if (variant === "success") {
-            sonnerToast.success(text);
-            return;
-          }
-
-          sonnerToast(text);
-        }}
-        twoFactor={["otp", "totp"]}
-        viewPaths={customAuthViewPaths}
-      >
-        <ThemeSettingsSync />
-        <GoogleOneTap />
-        <TooltipProvider>
-          <DeploymentCapabilitiesProvider
-            initialCapabilities={initialCapabilities}
-          >
-            <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
-          </DeploymentCapabilitiesProvider>
-        </TooltipProvider>
-        <Toaster closeButton position="top-right" richColors />
-      </AuthUIProvider>
+          plugins={[
+            magicLinkPlugin(),
+            emailOtpPlugin({ signIn: true }),
+            passkeyPlugin(),
+            twoFactorPlugin({ enrollmentMethods: ["otp", "totp"] }),
+            multiSessionPlugin(),
+            apiKeyPlugin({ organization: true }),
+            organizationPlugin(),
+          ]}
+          redirectTo="/dashboard"
+          socialProviders={["google", "github"]}
+        >
+          <ThemeSettingsSync />
+          <SessionRefreshSync />
+          <GoogleOneTap />
+          <TooltipProvider>
+            <DeploymentCapabilitiesProvider
+              initialCapabilities={initialCapabilities}
+            >
+              <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+            </DeploymentCapabilitiesProvider>
+          </TooltipProvider>
+          <Toaster closeButton position="top-right" richColors />
+        </AuthProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

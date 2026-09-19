@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { useAuthenticate } from "@better-auth-ui/react";
 import { CheckIcon, Loader2, MailCheck, XIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -125,7 +125,9 @@ export function AcceptInvitationClient() {
   const searchParams = useSearchParams();
   const invitationId = searchParams.get("invitationId");
   const redirectTo = getSafeRedirectTo(searchParams.get("redirectTo"));
-  const authState = useAuthenticate({ enabled: Boolean(invitationId) });
+  const authState = useAuthenticate(authClient, {
+    enabled: Boolean(invitationId),
+  });
   const { refetch: refetchSession } = authClient.useSession();
   const { refetch: refetchOrganizations } = authClient.useListOrganizations();
   const { refetch: refetchActiveOrganization } =

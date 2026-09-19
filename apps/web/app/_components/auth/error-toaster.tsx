@@ -16,6 +16,30 @@ import {
 import { useEffect } from "react"
 import { toast } from "sonner"
 
+/**
+ * A passkey ceremony the person dismissed themselves is not a failure worth a
+ * toast; the browser reports it as `NotAllowedError` or an abort message.
+ */
+function isCancelledPasskey(error: unknown) {
+  if (error instanceof DOMException && error.name === "NotAllowedError") {
+    return true
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? (error as { message?: unknown }).message
+        : undefined
+
+  return (
+    typeof message === "string" &&
+    /(auth_cancelled|registration_cancelled|ceremony_aborted|notallowederror|cancelled|canceled)/i.test(
+      message
+    )
+  )
+}
+
 export function ErrorToaster() {
   const { localization } = useAuth()
   const queryClient = useQueryClient()
@@ -63,6 +87,7 @@ export function ErrorToaster() {
       // Every form that sets a new password renders this one against the
       // password field, so a toast would just repeat it.
       if (isPasswordCompromisedError(error)) return
+      if (isCancelledPasskey(error)) return
 
       if (
         getAuthErrorCode(error) === "EMAIL_NOT_VERIFIED" &&

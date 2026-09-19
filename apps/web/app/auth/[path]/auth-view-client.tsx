@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthView } from "@daveyplate/better-auth-ui";
+import { Auth } from "../../_components/auth/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   detectNativeHostKind,
@@ -80,5 +80,5 @@ export function AuthViewClient({ path }: { path: string }) {
     return <DesktopConfirmView onFallback={fallbackToAuthView} />;
   }
 
-  return <AuthView key={renderKey} path={path} socialLayout="grid" />;
+  return <Auth key={renderKey} path={path} socialLayout="grid" />;
 }

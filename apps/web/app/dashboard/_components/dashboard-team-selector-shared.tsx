@@ -2,7 +2,7 @@
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
 
 import type { ReactNode } from "react";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { useAuthenticate } from "@better-auth-ui/react";
 import { useRouter } from "next/navigation";
 import { authClient } from "../../../lib/auth-client";
 import {
@@ -68,7 +68,7 @@ export function getPersonalOrganization<T extends DashboardTeamOrganization>(
 
 export function useDashboardTeamSelector() {
   const router = useRouter();
-  const authState = useAuthenticate();
+  const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
     | {
         user?: { email?: string; image?: string | null; name?: string };
