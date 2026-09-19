@@ -9,7 +9,7 @@ import {
 import { useAuth, useCopyToClipboard } from "@better-auth-ui/react"
 import { format } from "date-fns"
 import { CalendarIcon, Check, ChevronDownIcon, Copy } from "lucide-react"
-import { type ComponentType, useRef, useState } from "react"
+import { type ComponentType, type ReactNode, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { buttonVariants } from "@sourceweft/ui-web/components/ui/button"
@@ -25,6 +25,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/combobox"
 import {
   Field,
+  FieldDescription,
   FieldContent,
   FieldError,
   FieldLabel
@@ -64,6 +65,13 @@ export type AdditionalFieldProps = {
   isPending?: boolean
   /** Complete suffix appended to labels for fields that are not required. */
   optionalLabel?: string
+}
+
+/** Upstream has no per-field description; ours renders one when configured. */
+function fieldDescription(field: AdditionalFieldProps["field"]) {
+  return field.description ? (
+    <FieldDescription>{field.description}</FieldDescription>
+  ) : null
 }
 
 function valueToString(value: AdditionalFieldFormValue) {
@@ -135,6 +143,16 @@ function CopyButton({
 }
 
 /** Renders a single additional user field via shadcn primitives. */
+declare module "@better-auth-ui/core" {
+  interface AdditionalField {
+    /**
+     * Helper copy shown under the input. Not part of the upstream type: the
+     * successor dropped it, and our profile fields still want it.
+     */
+    description?: ReactNode
+  }
+}
+
 export function AdditionalField({
   name,
   field: configuredField,
@@ -160,6 +178,7 @@ export function AdditionalField({
       : configuredField
   const inputType = resolveInputType(field)
   const fieldErrors = getFormFieldErrors(errors ?? [])
+  const description = fieldDescription(field)
 
   if (field.render) {
     const FieldRenderer = field.render as ComponentType<AdditionalFieldProps>
@@ -188,6 +207,7 @@ export function AdditionalField({
     return (
       <Field data-invalid={isInvalid}>
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
         <Textarea
           id={name}
@@ -213,6 +233,7 @@ export function AdditionalField({
     return (
       <Field data-invalid={isInvalid}>
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
         <Input
           id={name}
@@ -274,6 +295,7 @@ export function AdditionalField({
 
         <FieldContent>
           <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
         </FieldContent>
         <FieldError errors={fieldErrors} />
       </Field>
@@ -296,6 +318,7 @@ export function AdditionalField({
 
         <FieldContent>
           <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
         </FieldContent>
         <FieldError errors={fieldErrors} />
       </Field>
@@ -306,6 +329,7 @@ export function AdditionalField({
     return (
       <Field data-invalid={isInvalid}>
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
         <Select
           name={name}
@@ -345,6 +369,7 @@ export function AdditionalField({
     return (
       <Field data-invalid={isInvalid}>
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
         <Combobox
           items={field.options ?? []}
@@ -418,6 +443,7 @@ function InputField({
   errors,
   isPending
 }: AdditionalFieldProps) {
+  const description = fieldDescription(field)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldErrors = getFormFieldErrors(errors ?? [])
 
@@ -438,6 +464,7 @@ function InputField({
     return (
       <Field data-invalid={isInvalid}>
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
         <InputGroup>
           {hasPrefix && (
@@ -487,6 +514,7 @@ function InputField({
   return (
     <Field data-invalid={isInvalid}>
       <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
 
       <Input
         id={name}
@@ -524,6 +552,7 @@ function SliderField({
   errors,
   isPending
 }: AdditionalFieldProps) {
+  const description = fieldDescription(field)
   const maxFractionDigits = field.formatOptions?.maximumFractionDigits
   const min = field.min ?? 0
   const max = field.max ?? 100
@@ -538,6 +567,7 @@ function SliderField({
     <Field data-invalid={isInvalid}>
       <div className="flex items-center justify-between gap-2">
         <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
+        {description}
         <span className="text-sm text-muted-foreground tabular-nums">
           {formatter.format(numericValue)}
         </span>

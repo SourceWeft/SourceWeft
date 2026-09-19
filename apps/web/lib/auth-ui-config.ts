@@ -71,13 +71,15 @@ export const organizationStaticPaths = Array.from(
 
 /**
  * These render in the profile view only, never on sign-up, which is what the
- * old `account.fields` / `signUp.fields` pair expressed. The successor has no
- * per-field description, so those strings are gone.
+ * old `account.fields` / `signUp.fields` pair expressed. `description` is not
+ * part of the successor's `AdditionalField`; our copy of `additional-field.tsx`
+ * augments the type and renders it.
  */
 export const additionalFields: AdditionalFields = [
   {
     inputType: "textarea",
     label: "Bio",
+    description: "Displayed in your profile",
     name: "bio",
     placeholder: "Tell people what you are building",
     profile: true,
@@ -87,6 +89,7 @@ export const additionalFields: AdditionalFields = [
   },
   {
     label: "Company",
+    description: "Used for organization and billing context",
     name: "company",
     placeholder: "SourceWeft Inc.",
     profile: true,
@@ -96,6 +99,7 @@ export const additionalFields: AdditionalFields = [
   },
   {
     label: "Role",
+    description: "Your role in the team",
     name: "role",
     placeholder: "Founder / Engineer / PM",
     profile: true,
@@ -105,6 +109,7 @@ export const additionalFields: AdditionalFields = [
   },
   {
     label: "Timezone",
+    description: "Used for notifications and scheduling",
     name: "timezone",
     placeholder: "Asia/Shanghai",
     profile: true,
