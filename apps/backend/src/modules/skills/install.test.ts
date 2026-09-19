@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 vi.mock("./repository", () => ({
   findInstallableSkillsByName: async () => state.byName,
   findCatalogSkillVersionForWorkspace: async () => state.byVersion,
+  mapWorkspaceSkill: (row: unknown) => row,
   upsertWorkspaceSkill: async (input: Record<string, unknown>) => {
     state.upserts.push(input);
     return { id: "ws-skill-1", enabled: input.enabled ?? true };
@@ -128,6 +129,17 @@ test("links to other sites are refused, not handed to the GitHub reader", async 
     { code: "SKILL_SOURCE_UNSUPPORTED" },
   );
   assert.equal(state.submits.length, 0);
+  assert.equal(state.upserts.length, 0);
+});
+
+test("a skill already on at this version is reported, not rewritten", async () => {
+  state.byName = [
+    row("feynman", {
+      enabled: { id: "ws-1", enabled: true, skillVersionId: "ver-feynman" },
+    }),
+  ];
+  const { skills } = await installBySource("feynman");
+  assert.equal(skills[0]?.status, "already_installed");
   assert.equal(state.upserts.length, 0);
 });
 

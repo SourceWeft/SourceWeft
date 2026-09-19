@@ -58,7 +58,7 @@ export function assertRegistryStorageInvariant(
   }
 }
 
-function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
+export function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
   return {
     id: row.id,
     teamId: row.teamId,
@@ -422,6 +422,36 @@ export async function findInstallableSkillsByName(input: {
     .limit(INSTALLABLE_NAME_MATCH_LIMIT);
   const exact = rows.filter((row) => row.definition.slug === name);
   return exact.length > 0 ? exact : rows;
+}
+
+/**
+ * How many workspaces have each skill installed and switched on — the one
+ * quality signal we can compute ourselves. LobeHub and skills.sh both lead
+ * search results with an install count for the same reason: a description says
+ * what a skill claims, adoption says whether anyone kept it.
+ */
+export async function countSkillInstalls(skillIds: string[]) {
+  const counts = new Map<string, number>();
+  if (skillIds.length === 0) {
+    return counts;
+  }
+  const rows = await db
+    .select({
+      skillId: workspaceSkills.skillId,
+      installs: sql<number>`count(distinct ${workspaceSkills.workspaceId})::int`,
+    })
+    .from(workspaceSkills)
+    .where(
+      and(
+        inArray(workspaceSkills.skillId, skillIds),
+        eq(workspaceSkills.enabled, true),
+      ),
+    )
+    .groupBy(workspaceSkills.skillId);
+  for (const row of rows) {
+    counts.set(row.skillId, row.installs);
+  }
+  return counts;
 }
 
 export async function findCatalogSkillVersionForWorkspace(input: {

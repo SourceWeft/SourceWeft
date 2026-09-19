@@ -8,6 +8,7 @@ import {
 } from "./builtin";
 import {
   BuiltinSkillSlugConflictError,
+  countSkillInstalls,
   createNextCustomSkillVersionDraft,
   createWorkspaceCustomSkillDraft,
   deleteCustomSkillVersionFileRecord,
@@ -19,6 +20,7 @@ import {
   listCustomSkillVersionFileRecords,
   listWorkspaceInstalledSkills,
   loadSkillVersionBundle,
+  mapWorkspaceSkill,
   publishWorkspaceCustomSkillVersion,
   syncBuiltinSkillMetadata,
   updateWorkspaceCustomDraftMetadata,
@@ -210,6 +212,13 @@ function isSkillSlugUniqueViolation(error: unknown): boolean {
   return false;
 }
 
+function skillSourceTrustRank(sourceType: string) {
+  if (sourceType === "builtin") {
+    return 0;
+  }
+  return sourceType === "registry_github" ? 2 : 1;
+}
+
 const SKILL_SEARCH_MAX_TERMS = 8;
 
 /** The whole query plus its individual words, lowercased, shortest dropped. */
@@ -233,8 +242,11 @@ export type InstalledSkillResult = {
   license: string | null;
   flagged: boolean;
   sourceUrl: string | null;
-  /** `queued`: indexed but held for review, so not installed. */
-  status: "installed" | "queued";
+  /**
+   * `already_installed`: on and at this version already, nothing written.
+   * `queued`: indexed but held for review, so not installed.
+   */
+  status: "installed" | "already_installed" | "queued";
   workspaceSkill: WorkspaceSkillRecord | null;
 };
 
@@ -607,7 +619,11 @@ export class ContentSkillsService {
     const query = input.query.trim();
     const terms = skillSearchTerms(query);
     if (terms.length === 0) {
-      return { items: [] as SkillCatalogItem[], query };
+      return {
+        items: [] as Array<SkillCatalogItem & { installCount: number }>,
+        query,
+        total: 0,
+      };
     }
     const matchCount = (item: SkillCatalogItem) => {
       const haystack =
@@ -628,16 +644,33 @@ export class ContentSkillsService {
           row.version.manifestJson.listing !== "hidden",
       )
       .map(mapCatalogRow);
-    const byRelevance = compareSkillSearchRelevance(query);
-    const items = [...ownItems, ...registryItems]
+    const matched = [...ownItems, ...registryItems]
       .map((item) => ({ item, matches: matchCount(item) }))
-      .filter((entry) => entry.matches > 0)
+      .filter((entry) => entry.matches > 0);
+    const installs = await countSkillInstalls(
+      matched.map((entry) => entry.item.skillId),
+    );
+    const byRelevance = compareSkillSearchRelevance(query);
+    const items = matched
       .sort(
-        (a, b) => b.matches - a.matches || byRelevance(a.item, b.item),
+        (a, b) =>
+          b.matches - a.matches ||
+          skillSearchRelevanceRank({ ...a.item, query }) -
+            skillSearchRelevanceRank({ ...b.item, query }) ||
+          // Same textual fit: first-party before the workspace's own before
+          // third-party, then whatever more workspaces actually keep on.
+          skillSourceTrustRank(a.item.sourceType) -
+            skillSourceTrustRank(b.item.sourceType) ||
+          (installs.get(b.item.skillId) ?? 0) -
+            (installs.get(a.item.skillId) ?? 0) ||
+          byRelevance(a.item, b.item),
       )
-      .map((entry) => entry.item)
-      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
-    return { items, query };
+      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT)
+      .map((entry) => ({
+        ...entry.item,
+        installCount: installs.get(entry.item.skillId) ?? 0,
+      }));
+    return { items, query, total: matched.length };
   }
 
   /**
@@ -683,6 +716,19 @@ export class ContentSkillsService {
       userId: input.userId,
     };
     const install = async (row: CatalogRow): Promise<InstalledSkillResult> => {
+      // Same version, already on: nothing to write. Saying "installed" again
+      // would have the agent announce an install that did not happen.
+      if (
+        row.enabled?.enabled &&
+        row.enabled.skillVersionId === row.version.id &&
+        input.configJson === undefined
+      ) {
+        return {
+          ...describeInstallableRow(row),
+          status: "already_installed",
+          workspaceSkill: mapWorkspaceSkill(row.enabled),
+        };
+      }
       const workspaceSkill = await upsertWorkspaceSkill({
         teamId: input.teamId,
         workspaceId: input.workspaceId,

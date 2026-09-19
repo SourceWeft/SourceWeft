@@ -3,6 +3,7 @@ import { beforeEach, test, vi } from "vitest";
 import type { EnabledSkillDescriptor } from "./types";
 
 const state = vi.hoisted(() => ({
+  search: { items: [] as unknown[], total: 0 },
   installed: [] as unknown[],
   enabledSkills: [] as unknown[],
   resolveFails: false,
@@ -11,6 +12,7 @@ const state = vi.hoisted(() => ({
 vi.mock("./service", () => ({
   contentSkillsService: {
     installSkill: async () => ({ skills: state.installed }),
+    searchCatalog: async () => ({ ...state.search, query: "q" }),
   },
 }));
 vi.mock("./selection", () => ({
@@ -95,4 +97,63 @@ test("scripts are reported as next-turn even when the instructions are usable no
     result,
     /scripts are staged into the sandbox when a turn starts/,
   );
+});
+
+async function search() {
+  const tools = buildSkillAgentTools({
+    teamId: "team",
+    workspaceId: "workspace",
+    userId: "user",
+  });
+  const tool = tools.find((item) => item.name === "search_skills")!;
+  return String(await tool.invoke({ query: "pdf" }));
+}
+
+// An empty result is where a model gives up or wanders off to the web.
+test("an empty search says what to try next instead of just 'nothing'", async () => {
+  state.search = { items: [], total: 0 };
+  const result = await search();
+  assert.match(result, /retry ONCE with a single short keyword/);
+  assert.match(result, /pass it to install_skill/);
+});
+
+test("search results carry the signals a choice needs", async () => {
+  const item = (slug: string, extra: Record<string, unknown>) => ({
+    slug,
+    displayName: slug,
+    description: "d",
+    sourceType: "registry_github",
+    license: "MIT",
+    flagged: false,
+    verified: false,
+    sourceUrl: null,
+    installCount: 0,
+    enabled: false,
+    installable: true,
+    ...extra,
+  });
+  state.search = {
+    total: 40,
+    items: [
+      item("feynman", { sourceType: "builtin", installCount: 12 }),
+      item("gh-o-r-pdf", { enabled: true }),
+      item("gh-o-r-held", { installable: false }),
+    ],
+  };
+  const result = await search();
+  assert.match(result, /40 skills match .* the best 3/);
+  assert.match(
+    result,
+    /1\. feynman .*\n.*built-in, first-party.*on in 12 workspace/,
+  );
+  assert.match(result, /gh-o-r-pdf[\s\S]*ALREADY installed and on here/);
+  assert.match(result, /gh-o-r-held[\s\S]*HELD for review/);
+});
+
+test("re-installing something already on reports that nothing changed", async () => {
+  state.installed = [
+    { ...installedSkill("gh-o-r-notes"), status: "already_installed" },
+  ];
+  const result = await install(() => undefined);
+  assert.match(result, /Already installed and on — nothing changed/);
 });
