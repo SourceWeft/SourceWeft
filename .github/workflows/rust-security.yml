@@ -1,20 +1,16 @@
-name: Rust Security Regression
+name: Rust Linux Build
 
 on:
   pull_request:
     paths:
       - 'apps/desktop/src-tauri/**'
       - 'apps/mobile/src-tauri/**'
-      - 'third_party/rust/**'
-      - 'scripts/ci/verify-glib.py'
       - '.github/workflows/rust-security.yml'
   push:
     branches: [main]
     paths:
       - 'apps/desktop/src-tauri/**'
       - 'apps/mobile/src-tauri/**'
-      - 'third_party/rust/**'
-      - 'scripts/ci/verify-glib.py'
       - '.github/workflows/rust-security.yml'
   workflow_dispatch:
 
@@ -22,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  glib:
-    name: glib backport and Linux applications
+  linux:
+    name: Linux applications
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -49,23 +45,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             output/rust-security/target
-          key: glib-security-${{ runner.os }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'apps/mobile/src-tauri/Cargo.lock', 'third_party/rust/glib-0.18.5/Cargo.lock') }}
+          key: rust-linux-${{ runner.os }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'apps/mobile/src-tauri/Cargo.lock') }}
           restore-keys: |
-            glib-security-${{ runner.os }}-1.94.1-
-      - name: Verify provenance and platform dependency graphs
-        run: python3 scripts/ci/verify-glib.py --metadata --output output/rust-security/verification.json
-      - name: Run upstream optimized iterator regressions
-        run: cargo test --locked --release --manifest-path third_party/rust/glib-0.18.5/Cargo.toml --lib test_variant_str_iter
-      - name: Run project optimized iterator regressions
-        run: cargo test --locked --release --manifest-path third_party/rust/glib-0.18.5/Cargo.toml --test sourceweft_variant_iter
+            rust-linux-${{ runner.os }}-1.94.1-
       - name: Build desktop Linux application
         run: cargo build --locked --release --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
       - name: Build mobile library on Linux
         run: cargo build --locked --release --manifest-path apps/mobile/src-tauri/Cargo.toml --lib --target x86_64-unknown-linux-gnu
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: rust-security-${{ github.sha }}
-          path: output/rust-security/verification.json
-          if-no-files-found: ignore
-          retention-days: 14

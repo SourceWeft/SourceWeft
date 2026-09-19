@@ -10,7 +10,6 @@ on:
   pull_request:
     paths:
       - "apps/desktop/**"
-      - "third_party/rust/**"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-build.yml"
       - "scripts/ci/desktop-release-artifacts.mjs"
@@ -50,7 +49,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/desktop/src-tauri/target
-          key: desktop-${{ runner.os }}-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'third_party/rust/**') }}
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
       - name: Verify platform boundary
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test unsupported_local_host
