@@ -16,17 +16,22 @@ const input = {
 };
 function service() {
   const instance = new ContentSkillsService();
-  vi.spyOn(instance, "listCatalog").mockResolvedValue({
-    items: [
-      {
-        catalogId: input.catalogId,
-        skillVersionId: "version",
-        sourceType: "registry_github",
-      } as SkillCatalogItem,
-    ],
-  });
+  // The detail resolves its item with a direct query; stub that seam so these
+  // tests stay about documents, not the database.
+  vi.spyOn(
+    instance as unknown as {
+      findCatalogItemById: () => Promise<SkillCatalogItem | null>;
+    },
+    "findCatalogItemById",
+  ).mockResolvedValue({
+    catalogId: input.catalogId,
+    skillVersionId: "version",
+    sourceType: "registry_github",
+  } as SkillCatalogItem);
+  listCatalog = vi.spyOn(instance, "listCatalog");
   return instance;
 }
+let listCatalog: ReturnType<typeof vi.spyOn>;
 test("registry previews forward the viewer to version authorization and preserve real README", async () => {
   mocks.getRegistryVersionDetail.mockResolvedValue({
     readmeContent: "# Author introduction",
@@ -42,6 +47,8 @@ test("registry previews forward the viewer to version authorization and preserve
   expect(result.readmePath).toBe("readme.md");
   expect(result.skillContent).toBe("# Instructions");
   expect(result.skill.hasReadme).toBe(true);
+  // One skill's detail must never cost a full catalog listing.
+  expect(listCatalog).not.toHaveBeenCalled();
 });
 test("authorization and storage failures are not converted into missing documentation", async () => {
   const error = new Error("Skill version is not available to this workspace");

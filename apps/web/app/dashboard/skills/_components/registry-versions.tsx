@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@sourceweft/ui-web/components/ui/select";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 
 export function RegistryVersions({
@@ -82,14 +83,33 @@ export function RegistryVersions({
   }, [workspaceId, catalogId, selected, onView, reload]);
   async function switchVersion() {
     if (!list?.installed) return;
+    const installedId = list.installed.id;
     setBusy(true);
     setError(null);
     try {
-      await contentClient.switchRegistryVersion(
-        workspaceId,
-        list.installed.id,
-        selected,
-      );
+      try {
+        await contentClient.switchRegistryVersion(
+          workspaceId,
+          installedId,
+          selected,
+        );
+      } catch (e) {
+        // A version that adds scripts or new scan flags is not switched to
+        // silently: the API names what escalates and waits for a yes.
+        if (
+          !(e instanceof HttpClientError) ||
+          e.code !== "SKILL_VERSION_ESCALATION" ||
+          !window.confirm(`${e.message}\n\nSwitch to it anyway?`)
+        ) {
+          throw e;
+        }
+        await contentClient.switchRegistryVersion(
+          workspaceId,
+          installedId,
+          selected,
+          { acknowledgeEscalation: true },
+        );
+      }
       setReload((v) => v + 1);
       onChanged();
     } catch (e) {

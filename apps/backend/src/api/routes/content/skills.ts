@@ -10,11 +10,14 @@ import {
   createCustomSkillVersionRequestSchema,
   putCustomSkillVersionFileRequestSchema,
   enableWorkspaceSkillRequestSchema,
+  listSkillsCatalogQuerySchema,
   updateCustomSkillVersionRequestSchema,
   updateWorkspaceSkillRequestSchema,
 } from "@sourceweft/contracts";
 import { contentSkillsService } from "../../../modules/skills";
+import { decodeSkillCatalogCursor } from "../../../modules/skills/service";
 import { submitRegistrySkillRequestSchema } from "../../../modules/skills/registry/contracts";
+import { isContentError } from "../../../modules/content/errors";
 import { RegistrySubmissionError } from "../../../modules/skills/registry/errors";
 import { requireSkillWorkspace } from "../../../modules/skills/registry/permissions";
 import { submitRegistrySkillFromGitHub } from "../../../modules/skills/registry/submit";
@@ -82,22 +85,68 @@ export function registerSkillRoutes(app: Hono) {
     });
     const body = switchSkillVersionSchema.safeParse(await c.req.json());
     if (!body.success) throw ApiError.validation();
-    return ApiResponse.success(
-      c,
-      await switchRegistryVersion({
-        ...context,
-        userId,
-        workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
-        skillVersionId: body.data.skillVersionId,
-      }),
-    );
+    try {
+      return ApiResponse.success(
+        c,
+        await switchRegistryVersion({
+          ...context,
+          userId,
+          workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
+          skillVersionId: body.data.skillVersionId,
+          acknowledgeEscalation: body.data.acknowledgeEscalation,
+        }),
+      );
+    } catch (error) {
+      // `toApiError` drops a ContentError's details on purpose (they can carry
+      // internals). This one IS the payload: the client shows what escalates
+      // and retries with `acknowledgeEscalation`.
+      if (isContentError(error) && error.code === "SKILL_VERSION_ESCALATION") {
+        throw new ApiError(
+          error.statusCode,
+          error.code,
+          error.message,
+          error.details as Record<string, unknown>,
+        );
+      }
+      throw error;
+    }
   });
   app.get("/skills/catalog", async (c) => {
     const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const parsed = listSkillsCatalogQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+    if (parsed.data.cursor && !decodeSkillCatalogCursor(parsed.data.cursor)) {
+      throw ApiError.validation({ cursor: "Not a catalog cursor" });
+    }
     const result = await contentSkillsService.listCatalog({
       teamId,
       workspaceId,
       userId: getSessionUserId(session),
+      limit: parsed.data.limit,
+      cursor: parsed.data.cursor,
+      query: parsed.data.q,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  // Registered before `/skills/catalog/:catalogId`: Hono matches in
+  // registration order, and that route would otherwise take `by-slug` for a
+  // catalogId.
+  app.get("/skills/catalog/by-slug/:slug", async (c) => {
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const slug = requireRouteParam(c, "slug").trim();
+    if (!slug || slug.length > 200) {
+      throw ApiError.validation({ slug: "Expected 1 to 200 characters" });
+    }
+    const result = await contentSkillsService.getCatalogSkillDetailBySlug({
+      teamId,
+      workspaceId,
+      userId: getSessionUserId(session),
+      slug,
     });
     return ApiResponse.success(c, result);
   });

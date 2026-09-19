@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { skillManifestJsonSchema } from "../src/skills";
+import {
+  listSkillsCatalogQuerySchema,
+  skillManifestJsonSchema,
+} from "../src/skills";
 
 function manifest(defaultEnabled?: boolean) {
   return {
@@ -27,4 +30,16 @@ test("skill manifest preserves an explicit default selection independently of vi
     skillManifestJsonSchema.parse(manifest()).defaultEnabled,
     undefined,
   );
+});
+
+test("catalog query defaults to one page of 50 and refuses out-of-range paging", () => {
+  assert.deepEqual(listSkillsCatalogQuerySchema.parse({}), { limit: 50 });
+  assert.deepEqual(
+    listSkillsCatalogQuerySchema.parse({ limit: "100", cursor: "abc", q: " pdf " }),
+    { limit: 100, cursor: "abc", q: "pdf" },
+  );
+  for (const limit of ["0", "101", "1.5", "many"]) {
+    assert.equal(listSkillsCatalogQuerySchema.safeParse({ limit }).success, false);
+  }
+  assert.equal(listSkillsCatalogQuerySchema.safeParse({ cursor: "" }).success, false);
 });

@@ -55,14 +55,38 @@ type ResolvedWorkspace = {
   name: string;
 };
 
+// The gallery filters, counts and sorts on the client, so it needs the whole
+// catalog rather than a window of it: follow `nextCursor` to the end. Pages
+// after the first carry community skills only.
+const CATALOG_PAGE_SIZE = 100;
+
+async function fetchAllCatalogPages(
+  targetWorkspaceId: string,
+): Promise<SkillsCatalogResponse> {
+  const items: SkillCatalogItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await contentClient.listSkillsCatalog(targetWorkspaceId, {
+      limit: CATALOG_PAGE_SIZE,
+      cursor,
+    });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+    // A cursor handed out twice would loop forever; stop with what we have.
+    if (cursor && seenCursors.has(cursor)) break;
+    if (cursor) seenCursors.add(cursor);
+  } while (cursor);
+  return { items, nextCursor: null };
+}
+
 function fetchSkillsCatalog(targetWorkspaceId: string) {
   const pending = catalogRequestsByWorkspace.get(targetWorkspaceId);
   if (pending) {
     return pending;
   }
 
-  const promise = contentClient
-    .listSkillsCatalog(targetWorkspaceId)
+  const promise = fetchAllCatalogPages(targetWorkspaceId)
     .finally(() => {
       if (catalogRequestsByWorkspace.get(targetWorkspaceId) === promise) {
         catalogRequestsByWorkspace.delete(targetWorkspaceId);
