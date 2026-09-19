@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import {
-  Apple,
   ArrowRight,
   Check,
   Container,
@@ -17,6 +16,7 @@ import {
   Smartphone,
   Terminal,
 } from "lucide-react";
+import { AppleIcon } from "../_components/brand-icons";
 
 import {
   GITHUB_RELEASES_URL,
@@ -41,7 +41,7 @@ export const PLATFORM_ICONS: Record<
   DownloadPlatform,
   ComponentType<{ className?: string }>
 > = {
-  macos: Apple,
+  macos: AppleIcon,
   windows: Monitor,
   linux: Terminal,
 };
@@ -341,7 +341,7 @@ export function MobileSection({
         <div className="grid gap-4 md:grid-cols-2">
           {MOBILE_PLATFORMS.map((entry) => {
             const href = STORE_LINKS[entry.id];
-            const Icon = entry.id === "ios" ? Apple : Smartphone;
+            const Icon = entry.id === "ios" ? AppleIcon : Smartphone;
             return (
               <article
                 key={entry.id}
