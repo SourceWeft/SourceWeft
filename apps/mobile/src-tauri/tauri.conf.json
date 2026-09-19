@@ -37,7 +37,7 @@
         "resizable": true,
         "fullscreen": false,
         "visible": true,
-        "create": true
+        "create": false
       }
     ]
   },

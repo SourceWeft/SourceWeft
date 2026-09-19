@@ -9,6 +9,7 @@
     "android": "tauri android dev",
     "android:build": "tauri android build",
     "ios": "tauri ios dev",
+    "ios:sim": "tauri ios dev -c '{\"build\":{\"devUrl\":\"http://sw.localhost:3000\"}}'",
     "ios:build": "tauri ios build",
     "check-types": "tsc --noEmit"
   },
