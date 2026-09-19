@@ -5,14 +5,15 @@ import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
 import { SITE_NAME, SITE_URL } from "../seo";
 import { detectPlatform } from "../../lib/detect-platform";
 import {
-  DOWNLOAD_CHANNEL_REVALIDATE_SECONDS,
   fetchDownloadChannels,
   type DownloadChannelManifest,
 } from "../../lib/download-channels";
 import { DOWNLOAD_FAQ_ITEMS, PLATFORM_DISPLAY } from "./download-content";
 import { DownloadPage } from "./download-page";
 
-export const revalidate = DOWNLOAD_CHANNEL_REVALIDATE_SECONDS;
+// Next parses segment config statically, so this has to be a literal.
+// Keep it equal to DOWNLOAD_CHANNEL_REVALIDATE_SECONDS in lib/download-channels.
+export const revalidate = 300;
 
 const description =
   "Download SourceWeft for macOS and Windows, find the iOS and Android apps, or use the web app, browser extension, and self-hosted Docker bundle. Every desktop installer is listed with its SHA-256 checksum.";
