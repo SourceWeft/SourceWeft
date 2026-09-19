@@ -2,6 +2,7 @@
 
 import type { OrganizationAuthClient } from "@better-auth-ui/core/plugins/organization"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
+import { getAuthErrorCode } from "@better-auth-ui/core"
 import { useCheckSlug } from "@better-auth-ui/react/plugins/organization"
 import { useDebouncer } from "@tanstack/react-pacer"
 import { Check, X } from "lucide-react"
@@ -59,7 +60,21 @@ export function SlugField({
     data: checkSlugData,
     error: checkSlugError,
     reset: resetCheckSlug
-  } = useCheckSlug(authClient)
+  } = useCheckSlug(authClient, {
+    // A taken slug is an expected validation result, not a failure worth a
+    // toast — the field renders the reason itself.
+    meta: { errorPresentation: "inline" }
+  })
+
+  const slugCheckMessage = checkSlugError
+    ? getAuthErrorCode(checkSlugError) === "ORGANIZATION_SLUG_ALREADY_TAKEN"
+      ? // `OrganizationLocalization` is derived from a const and cannot be
+        // augmented, so this one lives here with the rest of our own copy.
+        "That slug is already taken."
+      : authLocalization.errors.generic
+    : undefined
+
+  const shownError = slugError ?? slugCheckMessage
 
   const debouncer = useDebouncer(
     (next: string) => {
@@ -85,7 +100,7 @@ export function SlugField({
   }, [checkSlugEnabled, value, debouncer.maybeExecute, resetCheckSlug])
 
   return (
-    <Field data-invalid={!!slugError}>
+    <Field data-invalid={!!shownError}>
       <FieldLabel htmlFor={id}>{localization.slug}</FieldLabel>
 
       <InputGroup>
@@ -105,7 +120,7 @@ export function SlugField({
             e.preventDefault()
             setSlugError(authLocalization.auth.fieldRequired)
           }}
-          aria-invalid={!!slugError}
+          aria-invalid={!!shownError}
           placeholder={localization.slugPlaceholder}
           required
           disabled={disabled}
@@ -124,7 +139,7 @@ export function SlugField({
         )}
       </InputGroup>
 
-      <FieldError>{slugError}</FieldError>
+      <FieldError>{shownError}</FieldError>
     </Field>
   )
 }
