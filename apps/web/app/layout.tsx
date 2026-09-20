@@ -9,6 +9,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
+import { resolveRequireEmailVerification } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { Providers } from "./providers";
 import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
@@ -64,7 +65,10 @@ export default async function RootLayout({
   await connection();
   const runtimeConfig = serverPublicRuntimeConfig();
   const gtmId = runtimeConfig.gtmId;
-  const capabilities = await resolveDeploymentCapabilities();
+  const [capabilities, requireEmailVerification] = await Promise.all([
+    resolveDeploymentCapabilities(),
+    resolveRequireEmailVerification(),
+  ]);
 
   return (
     <html lang="en" dir="ltr" suppressHydrationWarning>
@@ -80,7 +84,10 @@ export default async function RootLayout({
       </head>
       {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
       <body className="flex min-h-svh flex-col antialiased">
-        <Providers initialCapabilities={capabilities}>
+        <Providers
+          initialCapabilities={capabilities}
+          requireEmailVerification={requireEmailVerification}
+        >
           <DesktopWindowChrome />
           {children}
         </Providers>

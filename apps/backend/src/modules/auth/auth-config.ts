@@ -22,6 +22,7 @@ import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 import { database } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
+import { mailDeliveryConfigured } from "../mail/delivery";
 import {
   isPersonalOrganizationMetadata,
   parseSourceweftOrganizationKind,
@@ -234,7 +235,12 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       // is what lets someone sign up under another person's address. Requiring
       // the proof also stops better-auth from revoking a password later, when
       // a magic link or email code finally proves who owns the address.
-      requireEmailVerification: true,
+      //
+      // Only where mail can be delivered. Without it the link never arrives —
+      // a fresh self-hosted install would lock its own operator out — and the
+      // later proof this guards against cannot happen either, since magic
+      // links and email codes are not delivered.
+      requireEmailVerification: mailDeliveryConfigured(),
       ...(isRuntimeMode
         ? {
             async sendResetPassword(data) {
