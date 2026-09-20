@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
 import { registryVersionTakesCurrent } from "./repository";
@@ -72,7 +72,41 @@ export async function listRegistryReviewQueue(): Promise<
  * current version — unless that one is pinned to a NEWER commit, in which case
  * the approved version is published as history and the catalog is not rolled
  * back (`registryVersionTakesCurrent`).
+ *
+ * Revoking the CURRENT version hands currency to the best published version
+ * left (`pickRevocationSuccessor`), so one bad release does not take the whole
+ * skill out of the catalog while good older ones exist. Workspaces pinned to the
+ * revoked version are not moved: the pin is theirs, and the runtime revocation
+ * gate already covers it.
  */
+function committedAtMs(committedAt: string | undefined): number | null {
+  const ms = committedAt ? Date.parse(committedAt) : Number.NaN;
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Which published version becomes current when the current one is revoked.
+ * Same ordering `registryVersionTakesCurrent` enforces on the way in, applied on
+ * the way out: the newest commit wins, a version with no recorded commit date
+ * ranks below every dated one, and ties (equal dates, or no date on either
+ * side) fall to the newer write.
+ */
+export function pickRevocationSuccessor<
+  T extends { committedAt: string | undefined; createdAt: Date },
+>(candidates: T[]): T | null {
+  const ranked = [...candidates].sort((a, b) => {
+    const left = committedAtMs(a.committedAt);
+    const right = committedAtMs(b.committedAt);
+    if (left !== right) {
+      if (left === null) return 1;
+      if (right === null) return -1;
+      return right - left;
+    }
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
+  return ranked[0] ?? null;
+}
+
 export async function setRegistrySkillVersionStatus(
   skillVersionId: string,
   target: "published" | "deprecated",
@@ -137,6 +171,33 @@ export async function setRegistrySkillVersionStatus(
         "REGISTRY_METADATA_MISSING",
         "This version has no registry metadata",
       );
+    // Taking down the live current version: line up its successor first so the
+    // audit record below can name it. Drafts are never candidates — only what
+    // an admin (or a clean auto-index) already published.
+    const successor =
+      target === "deprecated" &&
+      version.status === "published" &&
+      version.isCurrent
+        ? pickRevocationSuccessor(
+            (
+              await tx
+                .select()
+                .from(skillVersions)
+                .where(
+                  and(
+                    eq(skillVersions.skillId, identity.skillId),
+                    eq(skillVersions.status, "published"),
+                    ne(skillVersions.id, skillVersionId),
+                  ),
+                )
+                .for("update")
+            ).map((row) => ({
+              row,
+              committedAt: row.manifestJson.registry?.committedAt,
+              createdAt: row.createdAt,
+            })),
+          )?.row ?? null
+        : null;
     const manifestJson = {
       ...version.manifestJson,
       registry: {
@@ -162,6 +223,7 @@ export async function setRegistrySkillVersionStatus(
           ...(decision.reason?.trim()
             ? { reason: decision.reason.trim() }
             : {}),
+          ...(successor ? { promotedSkillVersionId: successor.id } : {}),
         },
       },
     };
@@ -219,6 +281,22 @@ export async function setRegistrySkillVersionStatus(
         updatedAt: now,
       })
       .where(eq(skillVersions.id, skillVersionId));
+    if (successor) {
+      // After the write above: at most one version of a skill may be current.
+      await tx
+        .update(skillVersions)
+        .set({ isCurrent: true, updatedAt: now })
+        .where(eq(skillVersions.id, successor.id));
+      // Display fields follow the current version, as they do on publish.
+      await tx
+        .update(skillDefinitions)
+        .set({
+          displayName: successor.manifestJson.displayName,
+          description: successor.manifestJson.description,
+          updatedAt: now,
+        })
+        .where(eq(skillDefinitions.id, identity.skillId));
+    }
     return { skillVersionId, status: target };
   });
 }

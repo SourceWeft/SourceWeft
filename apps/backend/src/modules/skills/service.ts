@@ -29,6 +29,7 @@ import {
   upsertWorkspaceSkill,
 } from "./repository";
 import {
+  scanCustomSkillBundle,
   validateCustomSkillBundle,
   validateCustomSkillFileInput,
 } from "./custom-validation";
@@ -1436,7 +1437,12 @@ export class ContentSkillsService {
       description: bundle.description,
       version: bundle.version,
       contentHash: bundle.contentHash,
-      manifestJson: bundle.manifestJson,
+      // Same scan a community skill gets, but only recorded: the author is a
+      // member of this workspace, so flags neither block nor queue the publish.
+      manifestJson: {
+        ...bundle.manifestJson,
+        customScan: scanCustomSkillBundle({ files: bundle.files }),
+      },
     });
     if (!customSkill) {
       throw new ContentError(
