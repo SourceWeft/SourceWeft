@@ -56,6 +56,28 @@ Cloudflare account ceiling is far above this (6 TiB memory / 1,500 vCPU
 concurrently, i.e. 1,500+ `standard-1` instances), and billing is for container
 running time, not for the configured maximum.
 
+### When the image cannot be built
+
+`bridge:deploy` builds the container image with the local Docker daemon, which
+must reach Docker Hub. If it cannot (a proxy that covers the host but not the
+Docker VM is the usual cause), the run fails at "Building image" — AFTER the
+Worker script has already been uploaded, so the Worker is on the new SDK while
+the container stays as it was. Fix the network and run it again.
+
+Capacity alone does not need a build. Point `image` at the image that is
+already live and deploy that config; only `max_instances` changes:
+
+```sh
+cd bridge/sandbox-bridge
+npx wrangler containers list                 # application id
+npx wrangler containers info <id>            # its "image": registry.cloudflare.com/…@sha256:…
+# copy wrangler.jsonc, replace "image": "./Dockerfile" with that reference, then:
+npx wrangler deploy --config <the copy>      # --dry-run first
+```
+
+A new ceiling took a few minutes to be honoured after such a deploy; until
+then the bridge still answered "instance limit reached (3/3)".
+
 ## Rollback to Daytona
 
 Set `SOURCEWEFT_SANDBOX_PROVIDER=daytona` and restart the backend. Sandbox DB

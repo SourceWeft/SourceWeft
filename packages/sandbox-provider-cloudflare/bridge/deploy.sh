@@ -69,6 +69,16 @@ fi
 # points image: "./Dockerfile", so this is all that's needed.
 echo "==> Injecting SourceWeft custom image (Dockerfile + install-base.sh)"
 cp "$SCRIPT_DIR/Dockerfile" "$BRIDGE_DIR/Dockerfile"
+# The Worker talks to the control plane inside the container, so the container
+# base must be the SAME release as the @cloudflare/sandbox SDK the Worker is
+# built with. This script updates the SDK above; a base tag fixed in the
+# Dockerfile would fall behind it on every run. The tag in the repo's Dockerfile
+# is only the default for building it by hand.
+SDK_VERSION="$(node -p "require('$BRIDGE_DIR/node_modules/@cloudflare/sandbox/package.json').version")"
+echo "==> Matching the container base to @cloudflare/sandbox $SDK_VERSION"
+perl -pi -e 's#^(FROM docker\.io/cloudflare/sandbox:)\S+#${1}'"$SDK_VERSION"'#' "$BRIDGE_DIR/Dockerfile"
+grep -q "^FROM docker.io/cloudflare/sandbox:$SDK_VERSION\$" "$BRIDGE_DIR/Dockerfile" \
+  || { echo "ERROR: could not set the container base version in Dockerfile" >&2; exit 1; }
 cp "$REPO_ROOT/docker/sourceweft-sandbox/install-base.sh" "$BRIDGE_DIR/install-base.sh"
 cp -R "$REPO_ROOT/docker/sourceweft-sandbox/html-runtime" "$BRIDGE_DIR/"
 # The stock template may ship a restrictive .dockerignore (e.g. `*` + !Dockerfile);
