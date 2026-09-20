@@ -10,6 +10,7 @@ import {
   resolvePinnedGitHubSource,
   type PinnedGitHubSource,
 } from "../../market/parser/github-zip";
+import type { GitHubRequestOptions } from "../../market/parser/github";
 
 /**
  * Stage 2 — Read (fetch + locate SKILL.md).
@@ -201,38 +202,53 @@ function isBundleFile(skillDir: string, entryPath: string): boolean {
 }
 
 /**
+ * Map the shared reader's transport/size failures onto submission errors; it
+ * deliberately knows nothing about this module's error taxonomy. Anything else
+ * is returned untouched for the caller to rethrow.
+ */
+export function mapRegistryArchiveError(error: unknown): unknown {
+  if (!(error instanceof GitHubArchiveError)) {
+    return error;
+  }
+  return new RegistrySubmissionError(
+    error.code === "ARCHIVE_TOO_LARGE"
+      ? "REGISTRY_SUBMISSION_TOO_LARGE"
+      : error.code === "ARCHIVE_UNPINNED"
+        ? "REGISTRY_SUBMISSION_UNPINNED"
+        : error.code === "ARCHIVE_TIMEOUT"
+          ? "REGISTRY_SUBMISSION_TIMEOUT"
+          : "REGISTRY_SUBMISSION_NOT_SKILL",
+    error.message,
+  );
+}
+
+/**
  * Fetch a submitted GitHub repo as an in-memory zipball and return every
  * discovered skill bundle with per-file digests. The commit is pinned to an
  * immutable 40-hex sha (rejected otherwise — the record must be frozen, §2/§5).
+ *
+ * The asynchronous ingest runs the same three steps as separate stages
+ * (`resolvePinnedGitHubSource` → `downloadRepoZip` →
+ * `readRegistrySkillsFromArchive`) so it can report progress between them.
  */
 export async function readRegistrySkillsFromGitHub(
   repoUrl: string,
+  options?: GitHubRequestOptions,
 ): Promise<ReadRegistryResult> {
   try {
-    return await readSkills(repoUrl);
+    const source = await resolvePinnedGitHubSource(repoUrl, options);
+    const zip = await downloadRepoZip(source, options);
+    return await readRegistrySkillsFromArchive(zip, source);
   } catch (error) {
-    // Map the shared reader's transport/size failures onto submission errors;
-    // it deliberately knows nothing about this module's error taxonomy.
-    if (error instanceof GitHubArchiveError) {
-      throw new RegistrySubmissionError(
-        error.code === "ARCHIVE_TOO_LARGE"
-          ? "REGISTRY_SUBMISSION_TOO_LARGE"
-          : error.code === "ARCHIVE_UNPINNED"
-            ? "REGISTRY_SUBMISSION_UNPINNED"
-            : error.code === "ARCHIVE_TIMEOUT"
-              ? "REGISTRY_SUBMISSION_TIMEOUT"
-              : "REGISTRY_SUBMISSION_NOT_SKILL",
-        error.message,
-      );
-    }
-    throw error;
+    throw mapRegistryArchiveError(error);
   }
 }
 
-async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
-  const source = await resolvePinnedGitHubSource(repoUrl);
-  const zip = await downloadRepoZip(source);
-
+/** Locate and decode every skill bundle in an already-downloaded zipball. */
+export async function readRegistrySkillsFromArchive(
+  zip: Buffer,
+  source: PinnedGitHubSource,
+): Promise<ReadRegistryResult> {
   const entries = await listZipEntries(zip);
   const entryPaths = entries.map((entry) => entry.path);
   const skillDirs = discoverSkillDirectories(entryPaths, source.subpath);
