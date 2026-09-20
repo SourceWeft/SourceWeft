@@ -82,6 +82,8 @@ export const workspaceSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -105,6 +107,8 @@ export const workspaceInstalledSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   // Registry entries only: whether the bundle ships runnable scripts. Surfaced
   // because an `executable` skill installs DISABLED — the UI has to be able to

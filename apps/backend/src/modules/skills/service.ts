@@ -831,6 +831,8 @@ export class ContentSkillsService {
       | { kind: "version"; skillId: string; skillVersionId: string }
       | { kind: "source"; source: string; skill?: string };
     configJson?: Record<string, unknown>;
+    /** Who is installing; recorded on the row. Defaults to a person. */
+    installedVia?: "user" | "agent";
   }): Promise<{ skills: InstalledSkillResult[] }> {
     const scope = {
       teamId: input.teamId,
@@ -859,6 +861,7 @@ export class ContentSkillsService {
         enabledBy: input.userId,
         // Re-installing must not wipe the config of a skill already in place.
         configJson: input.configJson ?? row.enabled?.configJson,
+        installedVia: input.installedVia ?? "user",
       });
       return {
         ...describeInstallableRow(row),

@@ -1,0 +1,2 @@
+ALTER TABLE "workspace_skills" ADD COLUMN "installed_via" text DEFAULT 'user' NOT NULL;--> statement-breakpoint
+ALTER TABLE "workspace_skills" ADD CONSTRAINT "workspace_skills_installed_via_check" CHECK ("workspace_skills"."installed_via" in ('user', 'agent'));

@@ -78,3 +78,11 @@ test("a prompt-only skill never shows it, on or off", () => {
   // Builtins and custom skills carry no registry capability at all.
   expect(render(registrySkill(), false)).not.toContain("Ships scripts");
 });
+
+// The agent installs as the user, so the row is the only place this shows.
+test("a skill the agent installed says so; one a person installed does not", () => {
+  expect(render(registrySkill({ installedVia: "agent" }), true)).toContain(
+    "Added by agent",
+  );
+  expect(render(registrySkill(), true)).not.toContain("Added by agent");
+});

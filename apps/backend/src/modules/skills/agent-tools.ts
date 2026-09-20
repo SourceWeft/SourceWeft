@@ -190,6 +190,7 @@ export function buildSkillAgentTools(
           workspaceId: context.workspaceId,
           userId: context.userId,
           ref: { kind: "source", source, ...(skill ? { skill } : {}) },
+          installedVia: "agent",
         });
 
         const lines: string[] = [];

@@ -288,6 +288,13 @@
       "when": 1789816542505,
       "tag": "0040_subagent_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789864744302,
+      "tag": "0041_installed_via",
+      "breakpoints": true
     }
   ]
 }

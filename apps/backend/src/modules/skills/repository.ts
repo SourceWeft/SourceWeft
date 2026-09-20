@@ -69,6 +69,7 @@ export function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord 
     configJson: row.configJson ?? {},
     enabledBy: row.enabledBy,
     enabledAt: row.enabledAt?.toISOString() ?? null,
+    installedVia: row.installedVia,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -148,6 +149,7 @@ function mapWorkspaceInstalledSkill(row: {
     configJson: workspaceSkill.configJson,
     enabledBy: workspaceSkill.enabledBy,
     enabledAt: workspaceSkill.enabledAt,
+    installedVia: workspaceSkill.installedVia,
     ...(manifest.registry?.capability
       ? { registryCapability: manifest.registry.capability }
       : {}),
@@ -575,6 +577,12 @@ export async function upsertWorkspaceSkill(input: {
    * ends up running third-party code they never chose to turn on.
    */
   enabled?: boolean;
+  /**
+   * Set only by an INSTALL (catalog UI → `user`, `install_skill` → `agent`).
+   * Left undefined by paths that merely switch a skill back on, so re-enabling
+   * never rewrites who installed it.
+   */
+  installedVia?: "user" | "agent";
 }) {
   const enabled = input.enabled ?? true;
   const now = new Date();
@@ -607,6 +615,7 @@ export async function upsertWorkspaceSkill(input: {
           configJson: input.configJson ?? {},
           enabledBy: input.enabledBy,
           enabledAt: now,
+          ...(input.installedVia ? { installedVia: input.installedVia } : {}),
           updatedAt: now,
         })
         .where(eq(workspaceSkills.id, existing.id))
@@ -629,6 +638,7 @@ export async function upsertWorkspaceSkill(input: {
         configJson: input.configJson ?? {},
         enabledBy: input.enabledBy,
         enabledAt: now,
+        installedVia: input.installedVia ?? "user",
         createdAt: now,
         updatedAt: now,
       })

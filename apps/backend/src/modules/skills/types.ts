@@ -75,6 +75,8 @@ export type WorkspaceSkillRecord = {
   configJson: Record<string, unknown>;
   enabledBy: string | null;
   enabledAt: string | null;
+  /** `agent`: installed by the chat agent on its own initiative. */
+  installedVia: "user" | "agent";
   createdAt: string;
   updatedAt: string;
 };
@@ -98,6 +100,8 @@ export type WorkspaceInstalledSkillItem = {
   configJson: Record<string, unknown>;
   enabledBy: string | null;
   enabledAt: string | null;
+  /** `agent`: installed by the chat agent on its own initiative. */
+  installedVia: "user" | "agent";
   /** Registry entries only — see the contracts schema for why it is surfaced. */
   registryCapability?: "prompt-only" | "executable";
   capabilities?: {
