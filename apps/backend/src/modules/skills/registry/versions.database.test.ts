@@ -1,7 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { beforeAll, afterAll, describe, test, expect } from "vitest";
+import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+
+// PostgreSQL is real; the object store under `../storage` is a map.
+const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
+vi.mock("../../sources/storage", () => ({
+  getContentStorageBucketName: () => "bucket",
+  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
+    store.objects.has(key),
+  uploadFileObject: async (input: { key: string; body: Buffer }) => {
+    store.objects.set(input.key, input.body);
+    return { bucket: "bucket", key: input.key };
+  },
+  downloadFileObject: async ({ key }: { key: string }) =>
+    store.objects.get(key)!,
+}));
 
 describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
   "registry real PostgreSQL lifecycle",
@@ -63,16 +77,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         description: `Version ${marker}`,
         commitSha,
         storagePointer: `github:fixture/skills@${commitSha}#writer`,
-        contentHash: hash,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
           {
             path: "SKILL.md",
-            contentText,
+            bytes: Buffer.from(contentText) as Uint8Array,
             mimeType: "text/markdown",
-            sizeBytes: Buffer.byteLength(contentText),
-            contentHash: hash,
           },
         ],
         manifestJson: {
@@ -87,6 +98,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/writer`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: viewer.userId,
+            // Currency follows commit age: later markers are later commits.
+            committedAt: `2026-01-${String(marker.charCodeAt(0) - 96).padStart(2, "0")}T00:00:00Z`,
             capability: "prompt-only" as const,
             scan: {
               reviewRequired: flagged,
@@ -129,7 +142,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       await expect(
         repo.upsertRegistrySkillIndex({
           ...source,
-          files: [{ ...source.files[0]!, contentHash: "different" }],
+          files: [{ ...source.files[0]!, bytes: Buffer.from("different") }],
         }),
       ).rejects.toMatchObject({ code: "REGISTRY_VERSION_CONFLICT" });
       await review.setRegistrySkillVersionStatus(
@@ -184,9 +197,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         skillVersionId: b.skillVersionId,
         description: "Version b",
       });
-      expect(
-        resolved[0]!.files.find((f) => f.path === "SKILL.md")!.contentText,
-      ).toContain("Body b");
+      // SKILL.md comes off the version row; the manifest carries no body.
+      expect(resolved[0]!.skillMd).toContain("Body b");
+      expect(resolved[0]!.files.map((f) => f.path)).toEqual(["SKILL.md"]);
+      expect(resolved[0]!.bundle?.sha256).toMatch(/^[a-f0-9]{64}$/);
       await versions.switchRegistryVersion({
         ...viewer,
         workspaceSkillId: installed.id,

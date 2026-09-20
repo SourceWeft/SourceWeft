@@ -15,6 +15,7 @@ import { tool } from "langchain";
 import { test } from "vitest";
 import { z } from "zod";
 import { SelectedSkillsBackend } from "../../skills/backend";
+import { inlineSkillContent } from "../../skills/file-content";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import { skillMetadataForTurn } from "./turn/turn-assembly";
 
@@ -36,7 +37,7 @@ function skill(name: string): EnabledSkillDescriptor {
     name,
     version: "1.0.0",
     description,
-    files: [
+    ...inlineSkillContent([
       {
         path: "SKILL.md",
         contentText: markdown,
@@ -44,7 +45,7 @@ function skill(name: string): EnabledSkillDescriptor {
         sizeBytes: Buffer.byteLength(markdown),
         contentHash: `hash-${name}`,
       },
-    ],
+    ]),
   };
 }
 

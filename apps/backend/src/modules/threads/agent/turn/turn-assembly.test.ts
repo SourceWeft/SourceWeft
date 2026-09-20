@@ -11,6 +11,8 @@ import type { PreparedThreadTurn } from "../..";
 import type { EnabledSkillDescriptor } from "../../../skills/types";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { SelectedSkillsBackend } from "../../../skills/backend";
+import { inlineSkillContent } from "../../../skills/file-content";
+import { SKILL_STORAGE_LIMITS } from "../../../skills/storage";
 import { TurnSkillSandboxAssets } from "../../../skills/sandbox-assets";
 import type { FilesystemBackend, ToolCollection } from "./turn-assembly";
 import { initializeSandboxProviderRegistry } from "../sandbox-service/provider-registry";
@@ -636,7 +638,7 @@ Read this before creating slides.`;
           name: "ppt-deck",
           version: "1.0.0",
           description: "Create a PowerPoint deck in the sandbox.",
-          files: [
+          ...inlineSkillContent([
             {
               path: "SKILL.md",
               contentText: skillMarkdown,
@@ -644,7 +646,7 @@ Read this before creating slides.`;
               sizeBytes: Buffer.byteLength(skillMarkdown, "utf8"),
               contentHash: "hash-ppt-deck-skill",
             },
-          ],
+          ]),
         },
       ]),
       skillSandboxAssets: new TurnSkillSandboxAssets(),
@@ -868,7 +870,7 @@ describe("skill installed mid-turn", () => {
       name: "notes",
       version: "1.0.0",
       description: "Notes",
-      files: [
+      ...inlineSkillContent([
         {
           path: "SKILL.md",
           contentText: markdown,
@@ -876,9 +878,9 @@ describe("skill installed mid-turn", () => {
           sizeBytes: Buffer.byteLength(markdown, "utf8"),
           contentHash: "hash-notes",
         },
-      ],
+      ]),
       ...overrides,
-    } as EnabledSkillDescriptor;
+    };
   }
 
   function freshFilesystemBackend(): FilesystemBackend {
@@ -929,6 +931,76 @@ describe("skill installed mid-turn", () => {
     }
   });
 
+  // One bad enabled skill used to throw SKILL_SANDBOX_ASSET_INVALID here and
+  // take down every sandbox turn of the workspace.
+  test("an enabled skill that cannot be staged degrades alone at turn start", async () => {
+    const prepared = createPreparedTurn();
+    prepared.enabledSkills = [
+      installedSkill(),
+      installedSkill({
+        name: "oversized",
+        workspaceSkillId: "workspace-skill-oversized",
+        files: [
+          ...installedSkill().files,
+          {
+            path: "blob.bin",
+            mimeType: "application/octet-stream",
+            sizeBytes: SKILL_STORAGE_LIMITS.maxFileBytes + 1,
+            contentHash: "hash-blob",
+            isText: false,
+          },
+        ],
+      }),
+      installedSkill({
+        name: "no-entry",
+        workspaceSkillId: "workspace-skill-no-entry",
+        ...inlineSkillContent([
+          {
+            path: "README.md",
+            contentText: "no SKILL.md here",
+            mimeType: "text/markdown",
+            sizeBytes: 16,
+            contentHash: "hash-readme",
+          },
+        ]),
+      }),
+    ];
+    const turnFilesystem: FilesystemBackend = {
+      ...freshFilesystemBackend(),
+      skillsBackend: new SelectedSkillsBackend(prepared.enabledSkills),
+    };
+    const createRuntime = vi.spyOn(agentSandboxService, "createRuntimeForTurn");
+    try {
+      const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+        prepared,
+        filesystemBackend: turnFilesystem,
+      });
+      assert.ok(sandboxRuntime);
+      const skillAssets = createRuntime.mock.calls.at(-1)?.[0].skillAssets;
+      assert.ok(skillAssets);
+
+      // The healthy skill still stages; the other two are handed to the
+      // sandbox manager as failed, which is what turns a command naming them
+      // into the recoverable SANDBOX_SKILL_STAGING_UNAVAILABLE.
+      assert.deepEqual(
+        (await skillAssets.plans()).map((plan) => plan.installDir),
+        ["/skills/notes"],
+      );
+      assert.deepEqual(
+        skillAssets.unstageable?.().map((skill) => [skill.name, skill.error]),
+        [
+          ["oversized", "not stageable: file_too_large"],
+          ["no-entry", "not stageable: missing_skill_md"],
+        ],
+      );
+      // Its instructions stay readable through the /skills mount.
+      const read = await turnFilesystem.skillsBackend.read("/oversized/SKILL.md");
+      assert.match(String(read.content), /# notes/u);
+    } finally {
+      createRuntime.mockRestore();
+    }
+  });
+
   test("scripts wait for the next turn without a sandbox, without execute, on a PC, or over the staging caps — the mount stands", async () => {
     const prepared = createPreparedTurn();
     const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
@@ -962,10 +1034,10 @@ describe("skill installed mid-turn", () => {
               ...installedSkill().files,
               {
                 path: "blob.bin",
-                contentText: "x",
                 mimeType: "application/octet-stream",
-                sizeBytes: 5 * 1024 * 1024,
+                sizeBytes: SKILL_STORAGE_LIMITS.maxFileBytes + 1,
                 contentHash: "hash-blob",
+                isText: false,
               },
             ],
           }),
@@ -979,7 +1051,14 @@ describe("skill installed mid-turn", () => {
         ...input,
       });
       assert.deepEqual(mounted, { scriptsStageable: false }, label);
-      assert.equal(turnFilesystem.skillSandboxAssets.hasPlans(), false, label);
+      assert.deepEqual(await turnFilesystem.skillSandboxAssets.plans(), [], label);
+      // Only a bundle that was REJECTED is remembered: commands naming it get
+      // the recoverable staging error instead of a bare "No such file".
+      assert.deepEqual(
+        turnFilesystem.skillSandboxAssets.unstageable().map((s) => s.name),
+        label === "bundle too large" ? ["notes"] : [],
+        label,
+      );
       const read = await turnFilesystem.skillsBackend.read("/notes/SKILL.md");
       assert.equal(read.error, undefined, label);
     }

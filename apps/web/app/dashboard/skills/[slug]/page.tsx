@@ -2,6 +2,7 @@
 
 import { SkillAvatar } from "../_components/skill-avatar";
 
+import { SkillContentRestricted } from "../_components/skill-content-restricted";
 import { SkillIntroduction } from "../_components/skill-introduction";
 
 import * as React from "react";
@@ -167,6 +168,18 @@ export default function SkillDetailPage() {
           : currentDetail,
       );
       toast.success("Skill installed");
+      if (detail.contentRestricted) {
+        // Installing is what unlocks a community skill's full text. Fetched in
+        // place: the install already succeeded, so a failure here only leaves
+        // the notice up until the next load.
+        const generation = detailGenerationRef.current;
+        void contentClient
+          .getSkillCatalogDetailBySlug(workspace.id, item.slug)
+          .then((result) => {
+            if (detailGenerationRef.current === generation) setDetail(result);
+          })
+          .catch(() => undefined);
+      }
     } catch (installError) {
       toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
     } finally {
@@ -299,10 +312,16 @@ export default function SkillDetailPage() {
                     </TabsList>
                   </div>
                   <TabsContent className="m-0 px-5 py-5" value="overview">
-                    {detail ? <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} /> : null}
+                    {detail?.contentRestricted ? (
+                      <SkillContentRestricted description={detail.skill.description} sourceUrl={detail.skill.sourceUrl} />
+                    ) : detail ? (
+                      <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} />
+                    ) : null}
                   </TabsContent>
                   <TabsContent className="m-0 px-5 py-5" value="skill">
-                    {skillContent ? (
+                    {detail?.contentRestricted ? (
+                      <SkillContentRestricted sourceUrl={detail.skill.sourceUrl} />
+                    ) : skillContent ? (
                       <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
                         {skillContent}
                       </MessageResponse>

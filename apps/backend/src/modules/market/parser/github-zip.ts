@@ -45,7 +45,11 @@ export const GITHUB_ZIP_LIMITS = Object.freeze({
   maxArchiveBytes: GITHUB_ARCHIVE_LIMITS.maxArchiveBytes,
   /** Entries considered across the whole repo (dirs excluded). */
   maxEntries: GITHUB_ARCHIVE_LIMITS.maxEntries,
-  /** Per-file ceiling, applied to declared and actual size alike. */
+  /**
+   * Default per-file ceiling, applied to declared and actual size alike. A
+   * caller whose files are legitimately larger raises it per read
+   * (`ReadZipEntriesOptions.maxFileBytes`).
+   */
   maxFileBytes: 512 * 1024,
   /** Cumulative uncompressed ceiling across every entry we decompress. */
   maxTotalUncompressedBytes: 64 * 1024 * 1024,
@@ -244,6 +248,16 @@ export type ReadZipEntriesOptions = {
    * whole repository and a single large asset should not sink the ingest.
    */
   oversize?: "reject" | "skip";
+  /**
+   * Per-file ceiling for THIS read, overriding `GITHUB_ZIP_LIMITS.maxFileBytes`.
+   *
+   * The default is sized for the MCP market, which only ever reads manifests
+   * and READMEs. A skill bundle legitimately carries fonts, images and
+   * templates, so the skills reader passes its own per-file storage limit
+   * here instead of the default being raised for everyone. The cumulative
+   * ceiling still applies on top.
+   */
+  maxFileBytes?: number;
 };
 
 export async function readZipEntries(
@@ -252,6 +266,7 @@ export async function readZipEntries(
   options: ReadZipEntriesOptions = {},
 ): Promise<Map<string, Buffer>> {
   const oversize = options.oversize ?? "reject";
+  const maxFileBytes = options.maxFileBytes ?? GITHUB_ZIP_LIMITS.maxFileBytes;
   let declaredTotal = 0;
   let rejection: GitHubArchiveError | null = null;
 
@@ -268,7 +283,7 @@ export async function readZipEntries(
             if (!path || path.endsWith("/") || !keep(path)) {
               return false;
             }
-            if (file.originalSize > GITHUB_ZIP_LIMITS.maxFileBytes) {
+            if (file.originalSize > maxFileBytes) {
               if (oversize === "skip") {
                 return false;
               }
@@ -305,7 +320,7 @@ export async function readZipEntries(
     if (!path) {
       continue;
     }
-    if (bytes.byteLength > GITHUB_ZIP_LIMITS.maxFileBytes) {
+    if (bytes.byteLength > maxFileBytes) {
       if (oversize === "skip") {
         continue;
       }

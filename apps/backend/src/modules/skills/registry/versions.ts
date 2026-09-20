@@ -14,8 +14,11 @@ import type {
   RegistryVersionsResponse,
 } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
-import { readSkillDocuments } from "../documents";
-import { skillEntitlementScopeCondition } from "../repository";
+import { readSkillVersionDocuments } from "../documents";
+import {
+  listSkillVersionFileManifest,
+  skillEntitlementScopeCondition,
+} from "../repository";
 import { getSkillLogo } from "../logo";
 import { isMarketAdmin } from "../../market/admin";
 import { teamAuditService } from "../../team-audit";
@@ -176,11 +179,9 @@ export async function getRegistryVersionDetail(
     )
     .limit(1);
   if (!version) missing();
-  const files = await db
-    .select()
-    .from(skillVersionFiles)
-    .where(eq(skillVersionFiles.skillVersionId, version.id))
-    .orderBy(skillVersionFiles.path);
+  // The manifest only: the diff below needs paths and digests, and the
+  // documents come from `skill_md` plus one bounded README read.
+  const files = await listSkillVersionFileManifest(version.id);
   const [previous] = await db
     .select()
     .from(skillVersions)
@@ -195,7 +196,10 @@ export async function getRegistryVersionDetail(
     .limit(1);
   const older = previous
     ? await db
-        .select()
+        .select({
+          path: skillVersionFiles.path,
+          contentHash: skillVersionFiles.contentHash,
+        })
         .from(skillVersionFiles)
         .where(eq(skillVersionFiles.skillVersionId, previous.id))
     : [];
@@ -203,7 +207,7 @@ export async function getRegistryVersionDetail(
   const current = new Map(files.map((f) => [f.path, f.contentHash]));
   return {
     version: mapVersion(version, privileged),
-    ...readSkillDocuments(files),
+    ...(await readSkillVersionDocuments({ version, files })),
     files: files.map(({ path, contentHash, sizeBytes }) => ({
       path,
       contentHash,

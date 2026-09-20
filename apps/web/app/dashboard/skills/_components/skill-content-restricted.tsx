@@ -1,0 +1,46 @@
+import { ExternalLink, Lock } from "lucide-react";
+
+/**
+ * Shown in place of a community skill's SKILL.md / README when the server
+ * withheld them (`contentRestricted`): the catalog indexes other people's
+ * repositories, so the full text goes to workspaces that installed the skill.
+ * The listing around it — description, license, scan state, files — is complete.
+ */
+export function SkillContentRestricted({
+  description,
+  sourceUrl,
+}: {
+  /** The listing's own summary, for the overview tab. */
+  description?: string;
+  sourceUrl?: string | null;
+}) {
+  return (
+    <div className="min-w-0 space-y-4 text-sm">
+      {description ? <p className="leading-7">{description}</p> : null}
+      <p
+        className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-4 py-3 text-muted-foreground"
+        role="note"
+      >
+        <Lock className="mt-0.5 size-4 shrink-0" />
+        <span>
+          Install to read the full instructions
+          {sourceUrl ? (
+            <>
+              {" — or "}
+              <a
+                className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
+                href={sourceUrl}
+                rel="noreferrer noopener"
+                target="_blank"
+              >
+                view the source
+                <ExternalLink className="size-3.5" />
+              </a>
+            </>
+          ) : null}
+          .
+        </span>
+      </p>
+    </div>
+  );
+}

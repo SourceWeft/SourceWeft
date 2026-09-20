@@ -11,12 +11,16 @@ import {
   skillVersions,
   workspaceSkills,
 } from "@sourceweft/db";
-import type { SkillBundleFile } from "./builtin";
+import { readSkillObjectFile } from "./file-content";
 import type {
+  SkillFileContent,
   WorkspaceInstalledSkillItem,
   WorkspaceSkillRecord,
 } from "./types";
 import type { ValidatedCustomSkillFile } from "./custom-validation";
+// One source → storage rule for every version write site; it lives with the
+// registry writer, which is where the third storage type (`object`) comes from.
+import { assertSkillStorageInvariant } from "./registry/repository";
 
 // Enough to show a person every collision on a short name without letting a
 // common suffix pull an unbounded set.
@@ -27,36 +31,6 @@ type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
 type SkillVersionRow = typeof skillVersions.$inferSelect;
 type SkillVersionFileRow = typeof skillVersionFiles.$inferSelect;
 
-/**
- * Hard invariant (docs/architecture/skill-registry-index.md §0): `repo_builtin`
- * storage and the `builtin` source are strictly co-extensive — each is used by
- * the other and by nothing else. A builtin's bodies live on disk in the repo, so
- * letting any other source claim `repo_builtin` would point it at files we ship,
- * and letting a builtin claim `db_text` would shadow those files with rows.
- * The DB CHECK constraints can only see one column at a time, so this
- * cross-column biconditional lives in code, called at every skill_versions
- * write entry.
- *
- * Registry (`registry_github`) skills are deliberately NOT special-cased: they
- * store their bundle in `skill_version_files` exactly like custom skills do.
- * What keeps us an indexer rather than a redistributor is not withholding the
- * bytes — the model is served them either way — but refusing to expose any
- * endpoint that hands a skill's content back out as a retrievable artifact.
- * Attribution rides along in `manifestJson.registry` (`sourceUrl`, `repoUrl`,
- * `license`) and the pinned commit in `storagePointer`.
- */
-export function assertRegistryStorageInvariant(
-  sourceType: SkillDefinitionRow["sourceType"],
-  storageType: SkillVersionRow["storageType"],
-): void {
-  const isRepoBuiltin = storageType === "repo_builtin";
-  const isBuiltin = sourceType === "builtin";
-  if (isRepoBuiltin !== isBuiltin) {
-    throw new Error(
-      `Skill storage invariant violated: storageType='${storageType}' with sourceType='${sourceType}' (repo_builtin ⇔ builtin)`,
-    );
-  }
-}
 
 export function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
   return {
@@ -722,6 +696,94 @@ export async function deleteWorkspaceSkillRecord(input: {
   });
 }
 
+/**
+ * A file's manifest row: everything but its bytes. `contentText` is filled only
+ * for the version's documents (SKILL.md, README*) and only when the row stores
+ * them inline (`db_text`), so the catalog and a turn get what they show up
+ * front without any other body leaving the database.
+ */
+export type SkillVersionFileManifestRow = {
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
+  objectKey: string | null;
+  contentText: string | null;
+};
+
+/** `readSkillDocuments`' README pattern, in Postgres syntax (matched with `~*`). */
+const README_PATH_PATTERN = "^readme(\\.[a-z0-9-]+)?\\.md$";
+
+export async function listSkillVersionFileManifest(
+  skillVersionId: string,
+): Promise<SkillVersionFileManifestRow[]> {
+  return db
+    .select({
+      path: skillVersionFiles.path,
+      mimeType: skillVersionFiles.mimeType,
+      sizeBytes: skillVersionFiles.sizeBytes,
+      contentHash: skillVersionFiles.contentHash,
+      objectKey: skillVersionFiles.objectKey,
+      contentText: sql<
+        string | null
+      >`case when ${skillVersionFiles.path} = 'SKILL.md' or ${skillVersionFiles.path} ~* ${README_PATH_PATTERN} then ${skillVersionFiles.contentText} end`,
+    })
+    .from(skillVersionFiles)
+    .where(eq(skillVersionFiles.skillVersionId, skillVersionId))
+    .orderBy(skillVersionFiles.path);
+}
+
+/**
+ * One file's content, bounded, from wherever its row keeps it: inline text
+ * (`db_text`) or a blob (`object`). A binary blob is reported, never fetched.
+ * Null when the version has no such path.
+ */
+export async function readSkillVersionFile(input: {
+  skillVersionId: string;
+  path: string;
+  maxBytes?: number;
+  signal?: AbortSignal;
+}): Promise<SkillFileContent | null> {
+  const [row] = await db
+    .select({
+      contentText: skillVersionFiles.contentText,
+      objectKey: skillVersionFiles.objectKey,
+      mimeType: skillVersionFiles.mimeType,
+      sizeBytes: skillVersionFiles.sizeBytes,
+    })
+    .from(skillVersionFiles)
+    .where(
+      and(
+        eq(skillVersionFiles.skillVersionId, input.skillVersionId),
+        eq(skillVersionFiles.path, input.path),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    return null;
+  }
+  if (row.contentText !== null) {
+    return { text: row.contentText };
+  }
+  if (!row.objectKey) {
+    // Unreachable under skill_version_files_content_location_check.
+    throw new Error(`Skill file '${input.path}' has no stored content`);
+  }
+  return readSkillObjectFile({
+    objectKey: row.objectKey,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+}
+
+/**
+ * A version and its file MANIFEST — no bodies beyond the documents (see
+ * `SkillVersionFileManifestRow`). Content is read one file at a time through
+ * `readSkillVersionFile`. `repo_builtin` versions have no rows: their files are
+ * on disk.
+ */
 export async function loadSkillVersionBundle(input: {
   teamId: string;
   workspaceId: string;
@@ -749,21 +811,10 @@ export async function loadSkillVersionBundle(input: {
     return null;
   }
 
-  const fileRows =
-    versionRow.version.storageType === "db_text"
-      ? await db
-          .select()
-          .from(skillVersionFiles)
-          .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId))
-      : [];
-
-  const files: SkillBundleFile[] = fileRows.map((file) => ({
-    path: file.path,
-    contentText: file.contentText,
-    mimeType: file.mimeType,
-    sizeBytes: file.sizeBytes,
-    contentHash: file.contentHash,
-  }));
+  const files =
+    versionRow.version.storageType === "repo_builtin"
+      ? []
+      : await listSkillVersionFileManifest(input.skillVersionId);
 
   return {
     definition: versionRow.definition,
@@ -801,7 +852,7 @@ export async function syncBuiltinSkillMetadata(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
-  assertRegistryStorageInvariant("builtin", "repo_builtin");
+  assertSkillStorageInvariant("builtin", "repo_builtin");
   const now = new Date();
   return db.transaction(async (tx) => {
     // Every API instance runs this at boot. Without the lock, two instances
@@ -935,7 +986,7 @@ export async function createWorkspaceCustomSkillDraft(input: {
   description: string;
   version?: string;
 }) {
-  assertRegistryStorageInvariant("workspace_custom", "db_text");
+  assertSkillStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const skillId = randomUUID();
@@ -1023,7 +1074,7 @@ export async function createNextCustomSkillVersionDraft(input: {
   // `definition.sourceType` is read from the DB (not a constant), so this is a
   // real biconditional check: a registry_github definition must never mint a
   // db_text version.
-  assertRegistryStorageInvariant(definition.sourceType, "db_text");
+  assertSkillStorageInvariant(definition.sourceType, "db_text");
 
   const versionId = randomUUID();
   const [version] = await db
@@ -1221,7 +1272,7 @@ export async function publishWorkspaceCustomSkillVersion(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
-  assertRegistryStorageInvariant("workspace_custom", "db_text");
+  assertSkillStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const [draftVersion] = await tx

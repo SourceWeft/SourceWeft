@@ -60,6 +60,17 @@ export type SandboxRuntimeAssetStaging = {
  */
 export type SandboxSkillStaging = SandboxRuntimeAssetStaging & {
   hasPlans?: () => boolean;
+  /**
+   * Skills the host could not plan at all (over a limit, malformed). They are
+   * recorded as failed without touching the sandbox, so a command naming
+   * `/skills/<name>` gets the same recoverable staging error a failed transfer
+   * produces — one bad skill degrades alone instead of failing the turn.
+   */
+  unstageable?: () => ReadonlyArray<{
+    name: string;
+    version: string;
+    error: string;
+  }>;
 };
 
 /** What was attempted for one skill name in one provider sandbox. */
@@ -664,9 +675,16 @@ export class SandboxManager {
     );
     current.tail = run;
     await run;
-    this.latestSkillResolutions = [...current.attempts.values()].map(
-      (attempt) => attempt.resolution,
-    );
+    // Read after staging: building a plan can itself move a skill here. The
+    // host's verdict wins over an earlier attempt under the same name.
+    const unstageable = staging.unstageable?.() ?? [];
+    const unstageableNames = new Set(unstageable.map((skill) => skill.name));
+    this.latestSkillResolutions = [
+      ...[...current.attempts.values()]
+        .map((attempt) => attempt.resolution)
+        .filter((resolution) => !unstageableNames.has(resolution.name)),
+      ...unstageable.map((skill) => ({ ...skill, ok: false, ms: 0 })),
+    ];
   }
 
   private async stagePendingSkillPlans(

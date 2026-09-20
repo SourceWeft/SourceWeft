@@ -35,6 +35,7 @@ function readResult(skillCount = 1) {
       repoUrl: "https://github.com/acme/skills",
     },
     commitSha: "a".repeat(40),
+    committedAt: "2026-02-01T10:00:00.000Z",
     skills: Array.from({ length: skillCount }, (_, i) => ({
       repoSubpath: `skills/s${i}`,
       dirName: `s${i}`,
@@ -52,7 +53,6 @@ function analyzed(overrides: Record<string, unknown> = {}) {
     repoSubpath: "skills/writer",
     capability: "prompt-only" as const,
     license: "MIT",
-    contentSha256: "h",
     scan: { reviewRequired: false, flags: [] as string[] },
     fileManifest: [
       {
@@ -106,25 +106,41 @@ test("a clean, new skill indexes and stores a pointer + published version", asyn
   );
 });
 
-test("the commit date rides into the stored manifest; an unknown one is omitted", async () => {
+test("the commit date rides into the stored manifest", async () => {
   mocks.analyze.mockReturnValue(analyzed());
-
-  mocks.read.mockResolvedValue({
-    ...readResult(1),
-    committedAt: "2026-02-01T10:00:00.000Z",
-  });
+  mocks.read.mockResolvedValue(readResult(1));
   await submitRegistrySkillFromGitHub({ repoUrl: "acme/skills", userId: "me" });
   assert.equal(
     mocks.upsert.mock.calls[0]?.[0].manifestJson.registry.committedAt,
     "2026-02-01T10:00:00.000Z",
   );
+});
 
-  mocks.read.mockResolvedValue(readResult(1));
-  await submitRegistrySkillFromGitHub({ repoUrl: "acme/skills", userId: "me" });
+test("a skill the reader refused for its size is that skill's failure; the rest still index", async () => {
+  const read = readResult(2);
+  Object.assign(read.skills[0]!, {
+    rejection: new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      "Skill 'skills/s0' has 201 files, more than the 200-file limit for one skill",
+    ),
+  });
+  mocks.read.mockResolvedValue(read);
+  mocks.analyze.mockReturnValue(analyzed());
+
+  const result = await submitRegistrySkillFromGitHub({
+    repoUrl: "https://github.com/acme/skills",
+    userId: "me",
+  });
+
+  assert.equal(result.status, "indexed");
+  assert.equal(result.skills[0]?.status, "failed");
   assert.equal(
-    "committedAt" in mocks.upsert.mock.calls[1]?.[0].manifestJson.registry,
-    false,
+    result.skills[0]?.diagnostics[0]?.code,
+    "REGISTRY_SUBMISSION_TOO_LARGE",
   );
+  // Never analyzed, never written — not indexed with part of it missing.
+  assert.equal(mocks.analyze.mock.calls.length, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 1);
 });
 
 test("a flagged skill queues for review (draft version)", async () => {
@@ -225,17 +241,31 @@ test("unexpected read failures are not mislabeled as invalid skills", async () =
   );
 });
 
-test("submission persists the detected logo separately from runtime file bodies", async () => {
+test("submission persists the detected logo and hands the index every file as bytes", async () => {
   const read = readResult(1);
+  const skillMd = Buffer.from(
+    "---\nname: writer\ndescription: Writer\nlogo: https://example.com/writer.png\n---\nBody",
+  );
+  const font = new Uint8Array([0, 1, 0, 0, 255, 254]);
   Object.assign(read.skills[0]!, {
     files: [
       {
         bundlePath: "SKILL.md",
-        contentText:
-          "---\nname: writer\ndescription: Writer\nlogo: https://example.com/writer.png\n---\nBody",
+        bytes: skillMd,
+        isText: true,
+        contentText: skillMd.toString("utf8"),
         mimeType: "text/markdown",
-        sizeBytes: 90,
+        sizeBytes: skillMd.byteLength,
         sha256: "hash",
+      },
+      {
+        bundlePath: "fonts/Inter.ttf",
+        bytes: font,
+        isText: false,
+        contentText: null,
+        mimeType: "font/ttf",
+        sizeBytes: font.byteLength,
+        sha256: "font-hash",
       },
     ],
   });
@@ -250,6 +280,10 @@ test("submission persists the detected logo separately from runtime file bodies"
     url: "https://example.com/writer.png",
     source: "skill",
   });
-  assert.equal(saved.files.length, 1);
-  assert.equal(saved.files[0].path, "SKILL.md");
+  assert.deepEqual(saved.files, [
+    { path: "SKILL.md", bytes: skillMd, mimeType: "text/markdown" },
+    { path: "fonts/Inter.ttf", bytes: font, mimeType: "font/ttf" },
+  ]);
+  // The content hash is the bundle's digest, which only the index can know.
+  assert.equal("contentHash" in saved, false);
 });

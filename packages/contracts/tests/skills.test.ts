@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as skillContracts from "../src/skills";
 import {
   createSkillSubmissionRequestSchema,
+  getSkillCatalogDetailResponseSchema,
   listSkillsCatalogQuerySchema,
   skillSubmissionSchema,
   skillManifestJsonSchema,
@@ -120,4 +122,30 @@ test("a skill submission carries per-stage progress and per-skill install outcom
   });
   assert.deepEqual(Object.keys(parsed.stages), ["resolve", "download"]);
   assert.equal(parsed.results[0]?.install?.status, "skipped");
+});
+
+test("a skill detail may say its full text was withheld from this viewer", () => {
+  // Only what the detail schema itself owns; `skill` has its own coverage.
+  const documents = getSkillCatalogDetailResponseSchema.omit({ skill: true });
+  const open = { readmeContent: "# R", readmePath: "README.md", skillContent: "# S" };
+  assert.equal(documents.parse(open).contentRestricted, undefined);
+  assert.deepEqual(
+    documents.parse({
+      readmeContent: null,
+      readmePath: "README.md",
+      skillContent: null,
+      contentRestricted: true,
+    }),
+    {
+      readmeContent: null,
+      readmePath: "README.md",
+      skillContent: null,
+      contentRestricted: true,
+    },
+  );
+});
+
+test("the synchronous submit request is gone; submissions are the only intake", () => {
+  assert.equal("submitRegistrySkillRequestSchema" in skillContracts, false);
+  assert.equal("createSkillSubmissionRequestSchema" in skillContracts, true);
 });

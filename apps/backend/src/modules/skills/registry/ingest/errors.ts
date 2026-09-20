@@ -50,7 +50,11 @@ export function isTransientIngestError(error: unknown): boolean {
     );
   }
   if (error instanceof RegistrySubmissionError) {
-    return error.code === "REGISTRY_SUBMISSION_TIMEOUT";
+    return (
+      error.code === "REGISTRY_SUBMISSION_TIMEOUT" ||
+      // The date exists for every commit; only GitHub's metadata read failed.
+      error.code === "REGISTRY_SUBMISSION_UNDATED"
+    );
   }
   if (error instanceof SkillParseError || isContentError(error)) {
     return false;

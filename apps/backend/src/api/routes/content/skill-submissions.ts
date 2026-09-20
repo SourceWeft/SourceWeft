@@ -21,8 +21,9 @@ import { ensureObjectBody, requireRouteParam } from "./helpers";
 
 /**
  * Asynchronous community-skill ingest: create a submission (the worker does
- * the GitHub read, scan and indexing), then poll it. Replaces the synchronous
- * `POST /skills/registry/submit`, which stays until its callers have moved.
+ * the GitHub read, scan and indexing), then poll it. A submission is
+ * the only way a community skill gets indexed: the web dialog and the external
+ * sync tool create one here, the agent's `install_skill` creates one in-process.
  */
 
 async function resolveViewer(

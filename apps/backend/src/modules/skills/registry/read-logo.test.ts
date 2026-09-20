@@ -11,10 +11,14 @@ vi.mock("../../market/parser/github-zip", async (original) => ({
     repo: "skills",
     subpath: "",
     commitSha: "a".repeat(40),
+    committedAt: "2026-02-01T10:00:00.000Z",
   })),
   downloadRepoZip: vi.fn(async () => Buffer.alloc(0)),
   listZipEntries: vi.fn(async () =>
-    [...archive.files.keys()].map((path) => ({ path })),
+    [...archive.files].map(([path, bytes]) => ({
+      path,
+      declaredSize: bytes.byteLength,
+    })),
   ),
   readZipEntries: vi.fn(
     async (_zip, wanted: (path: string) => boolean) =>
@@ -22,7 +26,7 @@ vi.mock("../../market/parser/github-zip", async (original) => ({
   ),
 }));
 
-test("binary logos survive archive reading as presentation candidates, isolated by skill directory", async () => {
+test("a binary logo is read as a bundle file of its own skill, and is what the logo is made from", async () => {
   const png = await sharp({
     create: { width: 12, height: 12, channels: 4, background: "blue" },
   })
@@ -44,8 +48,13 @@ test("binary logos survive archive reading as presentation candidates, isolated 
   );
   const writer = read.skills.find((skill) => skill.dirName === "writer")!;
   const editor = read.skills.find((skill) => skill.dirName === "editor")!;
-  expect(writer.images?.[0]?.bytes).toEqual(png);
-  expect(writer.files.map((file) => file.bundlePath)).toEqual(["SKILL.md"]);
+  expect(writer.files.map((file) => [file.bundlePath, file.isText])).toEqual([
+    ["assets/logo.png", false],
+    ["SKILL.md", true],
+  ]);
+  expect(Buffer.from(writer.files[0]!.bytes)).toEqual(png);
+  expect(writer.files[0]!.mimeType).toBe("image/png");
+  expect(editor.files.map((file) => file.bundlePath)).toEqual(["SKILL.md"]);
   expect((await extractRegistryLogo(writer)).logo?.path).toBe(
     "assets/logo.png",
   );

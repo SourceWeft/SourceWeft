@@ -17,14 +17,35 @@ import type { EnabledSkillDescriptor } from "./types";
 import { sanitizeNonCitableCitationMarkers } from "../threads/agent/fs-utils";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 
+/**
+ * A mounted file is its manifest entry plus a way back to the skill that owns
+ * it. No body lives here: SKILL.md comes from the descriptor's `skillMd`, every
+ * other text file is fetched through the descriptor's `readFile` the first time
+ * it is read (and cached there for the turn), and a binary is never fetched.
+ */
 type SkillFileEntry = {
   path: string;
-  contentText: string;
+  skillName: string;
+  relativePath: string;
   mimeType: string;
   sizeBytes: number;
   contentHash: string;
+  isText: boolean;
   modifiedAt: string;
+  skill: Pick<EnabledSkillDescriptor, "skillMd" | "readFile">;
 };
+
+type LoadedSkillFile =
+  | { kind: "text"; text: string }
+  | { kind: "binary"; notice: string }
+  | { kind: "error"; error: string };
+
+/**
+ * grep reads bodies, so it is bounded: a file past this size is skipped rather
+ * than downloaded to be scanned line by line. Instructions and scripts are far
+ * below it; what exceeds it is data, which `read_file` still pages through.
+ */
+const MAX_GREP_FILE_BYTES = 512 * 1024;
 
 function normalizePath(value: string | null | undefined) {
   const raw = value?.trim() || "/";
@@ -111,11 +132,14 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       const fullPath = normalizePath(`/${skill.name}/${file.path}`);
       this.filesByPath.set(fullPath, {
         path: fullPath,
-        contentText: file.contentText,
+        skillName: skill.name,
+        relativePath: file.path,
         mimeType: file.mimeType,
         sizeBytes: file.sizeBytes,
         contentHash: file.contentHash,
+        isText: file.isText,
         modifiedAt: now,
+        skill,
       });
 
       const segments = fullPath.split("/").filter(Boolean);
@@ -123,6 +147,41 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
         this.directoryPaths.add(`/${segments.slice(0, index).join("/")}`);
         this.directoryPaths.add(`/${segments.slice(0, index).join("/")}/`);
       }
+    }
+  }
+
+  private binaryNotice(file: SkillFileEntry, sizeBytes = file.sizeBytes) {
+    return `Binary file (${file.mimeType}, ${sizeBytes} bytes). Not readable as text; available to scripts in the sandbox at /skills/${file.skillName}/${file.relativePath}.`;
+  }
+
+  /** The only place a body is obtained. Never throws: a failed fetch is an error result. */
+  private async loadFile(file: SkillFileEntry): Promise<LoadedSkillFile> {
+    if (file.relativePath === "SKILL.md" && file.skill.skillMd !== undefined) {
+      return { kind: "text", text: file.skill.skillMd };
+    }
+    if (!file.isText) {
+      return { kind: "binary", notice: this.binaryNotice(file) };
+    }
+    if (!file.skill.readFile) {
+      return {
+        kind: "error",
+        error: `EIO: skill file content is unavailable, ${AGENT_TOOL_NAMES.readFile} '${file.path}'`,
+      };
+    }
+    try {
+      const content = await file.skill.readFile(file.relativePath);
+      return "text" in content
+        ? { kind: "text", text: content.text }
+        : {
+            kind: "binary",
+            notice: this.binaryNotice(file, content.sizeBytes),
+          };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        kind: "error",
+        error: `EIO: could not load skill file, ${AGENT_TOOL_NAMES.readFile} '${file.path}': ${message}`,
+      };
     }
   }
 
@@ -213,14 +272,22 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       };
     }
 
+    const loaded = await this.loadFile(file);
+    if (loaded.kind === "error") {
+      return { error: loaded.error };
+    }
+    if (loaded.kind === "binary") {
+      return { mimeType: "text/plain", content: loaded.notice };
+    }
+
     if (normalized.endsWith("/SKILL.md")) {
       return {
         mimeType: file.mimeType,
-        content: sanitizeNonCitableCitationMarkers(file.contentText),
+        content: sanitizeNonCitableCitationMarkers(loaded.text),
       };
     }
 
-    const safeContent = sanitizeNonCitableCitationMarkers(file.contentText);
+    const safeContent = sanitizeNonCitableCitationMarkers(loaded.text);
     const lines = safeContent.split(/\r?\n/);
     const boundedOffset = Math.max(0, offset);
     const boundedLimit = Math.max(1, Math.min(limit, 1000));
@@ -249,9 +316,16 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
         error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'`,
       };
     }
+    const loaded = await this.loadFile(file);
+    if (loaded.kind === "error") {
+      return { error: loaded.error };
+    }
     const data: FileData = {
-      content: sanitizeNonCitableCitationMarkers(file.contentText),
-      mimeType: file.mimeType,
+      content:
+        loaded.kind === "binary"
+          ? loaded.notice
+          : sanitizeNonCitableCitationMarkers(loaded.text),
+      mimeType: loaded.kind === "binary" ? "text/plain" : file.mimeType,
       created_at: file.modifiedAt,
       modified_at: file.modifiedAt,
     };
@@ -260,14 +334,24 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
 
   async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
     const encoder = new TextEncoder();
-    return paths.map((filePath) => {
+    const download = async (
+      filePath: string,
+    ): Promise<FileDownloadResponse> => {
       const normalized = normalizePath(filePath);
       const file = this.filesByPath.get(normalized);
       if (file) {
+        const loaded = await this.loadFile(file);
+        if (loaded.kind === "error") {
+          // The protocol has no I/O error code; "not found" is the closest a
+          // caller can act on (it skips the file instead of parsing garbage).
+          return { path: filePath, content: null, error: "file_not_found" };
+        }
         return {
           path: filePath,
           content: encoder.encode(
-            sanitizeNonCitableCitationMarkers(file.contentText),
+            loaded.kind === "binary"
+              ? loaded.notice
+              : sanitizeNonCitableCitationMarkers(loaded.text),
           ),
           error: null,
         };
@@ -287,7 +371,8 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
         content: null,
         error: "file_not_found",
       };
-    });
+    };
+    return Promise.all(paths.map(download));
   }
 
   async glob(pattern: string, path = "/"): Promise<GlobResult> {
@@ -347,7 +432,17 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       if (globMatcher && !globMatcher.test(file.path)) {
         continue;
       }
-      const lines = file.contentText.split(/\r?\n/);
+      // Only text the search can reach is fetched: binaries never, oversized
+      // files never, and nothing outside `base` — so grepping one skill does
+      // not download its neighbours.
+      if (!file.isText || file.sizeBytes > MAX_GREP_FILE_BYTES) {
+        continue;
+      }
+      const loaded = await this.loadFile(file);
+      if (loaded.kind !== "text") {
+        continue;
+      }
+      const lines = loaded.text.split(/\r?\n/);
       for (const [index, line] of lines.entries()) {
         if (regex.test(line)) {
           matches.push({

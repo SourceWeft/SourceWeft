@@ -10,6 +10,7 @@ import {
 import { RegistrySubmissionError } from "../errors";
 import {
   readRegistrySkillsFromArchive,
+  requireCommittedAt,
   type ReadRegistryResult,
 } from "../read";
 import {
@@ -30,8 +31,9 @@ import type {
  * `audit` stage is an insertion into `GITHUB_INGEST_STAGES`, ahead of
  * `triage-write` so its verdict can feed triage.
  *
- * Only `triage-write` touches the catalog, and it runs after everything that
- * can reject the source — a failure in any earlier stage leaves nothing behind.
+ * Only `triage-write` touches object storage and the catalog, and it runs after
+ * everything that can reject the source — a failure in any earlier stage leaves
+ * nothing behind.
  */
 
 export type InstallSkillFn = (input: {
@@ -102,11 +104,13 @@ const resolveStage: IngestStage = {
     ctx.source = await ctx.deps.resolveSource(ctx.submission.sourceInput, {
       signal: ctx.signal,
     });
+    // Refused here rather than at the write: an undated commit cannot be
+    // ordered against the skill's other versions, so there is no point
+    // downloading it.
+    const committedAt = requireCommittedAt(ctx.source);
     return {
       commitSha: ctx.source.commitSha,
-      commitCommittedAt: ctx.source.committedAt
-        ? new Date(ctx.source.committedAt)
-        : null,
+      commitCommittedAt: new Date(committedAt),
     };
   },
 };

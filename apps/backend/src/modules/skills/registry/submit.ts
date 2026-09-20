@@ -100,6 +100,11 @@ export async function analyzeSubmittedSkills(input: {
   const seenSlugs = new Set<string>();
   for (const discovered of input.skills) {
     try {
+      // Over a storage limit: refused by the reader, reported as this skill's
+      // failure. Its bundle was never read, so there is nothing to analyze.
+      if (discovered.rejection) {
+        throw discovered.rejection;
+      }
       const analyzed = analyzeRegistrySkill({ owner, repo, discovered });
       const branding = await extractRegistryLogo(discovered);
       analyzed.diagnostics.push(...branding.diagnostics);
@@ -123,9 +128,11 @@ export async function analyzeSubmittedSkills(input: {
 }
 
 /**
- * Stages 4-5 — triage one analyzed skill and write its catalog rows. The only
- * place a submission touches `skill_definitions` / `skill_versions`. Safe to
- * repeat: an identical commit returns the version already stored.
+ * Stages 4-5 — triage one analyzed skill, store its bundle and write its
+ * catalog rows. The only place a submission touches object storage or
+ * `skill_definitions` / `skill_versions`. Safe to repeat: objects are
+ * content-addressed, and an identical commit returns the version already
+ * stored.
  */
 export async function writeSubmittedSkill(input: {
   read: Pick<ReadRegistryResult, "source" | "commitSha" | "committedAt">;
@@ -171,7 +178,7 @@ export async function writeSubmittedSkill(input: {
         submittedBy: input.userId,
         // Orders this commit against the skill's other versions when the
         // index decides which one is current.
-        ...(committedAt ? { committedAt } : {}),
+        committedAt,
         capability: analyzed.capability,
         scan: analyzed.scan,
         ingestion: {
@@ -194,14 +201,13 @@ export async function writeSubmittedSkill(input: {
       submitterId: input.userId,
       storagePointer,
       commitSha,
-      contentHash: analyzed.contentSha256,
       manifestJson,
+      // Raw bytes, text and binary alike: the index stores them as blobs and
+      // as the bundle, then writes the rows that point at them.
       files: discovered.files.map((file) => ({
         path: file.bundlePath,
-        contentText: file.contentText,
+        bytes: file.bytes,
         mimeType: file.mimeType,
-        sizeBytes: file.sizeBytes,
-        contentHash: file.sha256,
       })),
       versionStatus: decision.versionStatus,
       outcome: decision.outcome,

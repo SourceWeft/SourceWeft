@@ -119,4 +119,6 @@ test("skill submissions address the async ingest endpoints with encoded ids and 
     source: "owner/repo",
     install: { skill: "pdf" },
   });
+  // The synchronous `/skills/registry/submit` endpoint no longer exists.
+  assert.equal("submitRegistrySkill" in client, false);
 });

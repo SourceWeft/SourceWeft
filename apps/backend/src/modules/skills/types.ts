@@ -1,5 +1,4 @@
 import type { SkillManifestJson } from "@sourceweft/db";
-import type { SkillBundleFile } from "./builtin";
 
 export type SkillSourceType =
   | "builtin"
@@ -34,6 +33,36 @@ export type SkillOptionDescriptor = {
   }>;
 };
 
+/**
+ * One file of a skill as a turn sees it: everything about the file except its
+ * bytes. Listing, globbing and sandbox planning work from this alone.
+ */
+export type SkillFileManifestEntry = {
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
+  /** False for bytes the model cannot read (fonts, images, archives). */
+  isText: boolean;
+};
+
+export type SkillFileContent =
+  | { text: string }
+  | { binary: true; sizeBytes: number };
+
+/**
+ * Fetches one file's content by its bundle-relative path, from wherever the
+ * skill's storage type keeps it. Rejects for a path outside the manifest.
+ */
+export type SkillFileReader = (path: string) => Promise<SkillFileContent>;
+
+/** The stored zip of an `object` version — what the sandbox downloads. */
+export type SkillStoredBundle = {
+  sha256: string;
+  objectKey: string;
+  sizeBytes: number;
+};
+
 export type EnabledSkillDescriptor = {
   skillVersionId?: string;
   workspaceSkillId: string;
@@ -62,7 +91,24 @@ export type EnabledSkillDescriptor = {
     enabled?: boolean;
   };
   defaultConfig?: Record<string, unknown>;
-  files: SkillBundleFile[];
+  /**
+   * The file MANIFEST — never bodies. Resolving a turn's skills used to load
+   * every file of every enabled skill; now a body is fetched when read.
+   */
+  files: SkillFileManifestEntry[];
+  /**
+   * SKILL.md's text, available up front for every storage type. Optional only
+   * so metadata-only descriptors (prompt/tool-selection fixtures) stay valid;
+   * `resolveSelectedSkills` always sets it, and `readFile` with it.
+   */
+  skillMd?: string;
+  /** Lazy content, bound to the skill's storage type; cached for the turn. */
+  readFile?: SkillFileReader;
+  /**
+   * Set for `object` versions only: the sandbox stages this stored bundle.
+   * Without it (`db_text`, `repo_builtin`) the bundle is zipped in process.
+   */
+  bundle?: SkillStoredBundle;
 };
 
 export type WorkspaceSkillRecord = {

@@ -11,7 +11,10 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import type { RegistrySkillResult } from "@sourceweft/contracts";
+import type {
+  RegistrySkillResult,
+  SkillSubmission,
+} from "@sourceweft/contracts";
 const api = process.env.SKILL_E2E_API_URL ?? "http://localhost:3311";
 const web = process.env.SKILL_E2E_WEB_URL ?? "http://localhost:3310";
 const defaultSource =
@@ -128,26 +131,39 @@ async function login(page: Page, role = "owner") {
   ).toBeVisible({ timeout: 45000 });
   return new URL(catalog.url()).pathname.split("/")[3]!;
 }
+// Submitting only STARTS a background import. The dialog follows it; the test
+// reads the same submission record to its end, so every assertion below is
+// about the finished import.
 async function submit(page: Page, url = source) {
   await page.getByRole("button", { name: "Submit skill", exact: true }).click();
   await page.getByLabel("GitHub skill repository").fill(url);
   const wait = page.waitForResponse(
     (r) =>
-      r.url().endsWith("/skills/registry/submit") &&
+      r.url().endsWith("/skills/registry/submissions") &&
       r.request().method() === "POST",
-    { timeout: 90000 },
+    { timeout: 30000 },
   );
-  const [response] = await Promise.all([
+  const [created] = await Promise.all([
     wait,
     page.getByRole("button", { name: "Submit", exact: true }).click(),
   ]);
-  return {
-    response,
-    body: (await response.json()) as {
-      skills?: RegistrySkillResult[];
-      details?: { skills: RegistrySkillResult[] };
-    },
-  };
+  // 202 for a new import, 200 when this source is already being imported.
+  expect([200, 202], await created.text()).toContain(created.status());
+  let { submission } = (await created.json()) as { submission: SkillSubmission };
+  const ws = new URL(created.url()).pathname.split("/")[3]!;
+  await expect
+    .poll(
+      async () => {
+        const r = await page.request.get(
+          `${api}/v1/workspaces/${ws}/skills/registry/submissions/${submission.id}`,
+        );
+        ({ submission } = (await r.json()) as { submission: SkillSubmission });
+        return submission.status;
+      },
+      { timeout: 180000, intervals: [2000] },
+    )
+    .toMatch(/^(succeeded|failed)$/);
+  return { submission, skills: submission.results as RegistrySkillResult[] };
 }
 async function publish(item: RegistrySkillResult) {
   if (item.status === "indexed") return;
@@ -181,9 +197,9 @@ test("E1 real GitHub import, review, version details and install", async ({
   page,
 }) => {
   const ws = await login(page);
-  const { response, body } = await submit(page);
-  expect(response.status()).toBe(201);
-  const item = body.skills![0]!;
+  const { submission, skills } = await submit(page);
+  expect(submission.status, JSON.stringify(submission.error)).toBe("succeeded");
+  const item = skills[0]!;
   expect(item).toMatchObject({
     name: skillName,
     version: new URL(source).pathname.split("/")[4]!.slice(0, 12),
@@ -229,8 +245,9 @@ test("E2 mixed malformed fixtures return every item", async ({ page }) => {
     "BLOCKED: fixed public mixed fixture URL not supplied",
   );
   const ws = await login(page);
-  const { response, body } = await submit(page, fixtures.mixed!);
-  expect(response.status()).toBe(201);
+  const { submission, skills } = await submit(page, fixtures.mixed!);
+  const body = { skills };
+  expect(submission.status, JSON.stringify(submission.error)).toBe("succeeded");
   expect(body.skills!.some((s) => s.status === "failed")).toBeTruthy();
   expect(body.skills!.some((s) => s.status === "indexed")).toBeTruthy();
   if (fixtures.fileHashes) {
@@ -288,11 +305,11 @@ test("E3 malformed-only fixture permits correction", async ({ page }) => {
     "BLOCKED: fixed invalid fixture URL not supplied",
   );
   await login(page);
-  const { response, body } = await submit(page, fixtures.invalid!);
-  expect(response.status()).toBe(422);
-  expect(body.details!.skills.every((s) => s.status === "failed")).toBeTruthy();
+  const { submission, skills } = await submit(page, fixtures.invalid!);
+  expect(submission.status).toBe("failed");
+  expect(skills.every((s) => s.status === "failed")).toBeTruthy();
   await closeResult(page);
-  expect((await submit(page)).response.status()).toBe(201);
+  expect((await submit(page)).submission.status).toBe("succeeded");
 });
 test("E4 builtin contracts and public capability spoof remain distinct", async ({
   page,
@@ -313,12 +330,12 @@ test("E4 builtin contracts and public capability spoof remain distinct", async (
     ),
   ).toBeTruthy();
   const result = await submit(page, fixtures.spoof!);
-  expect(result.response.status()).toBe(201);
+  expect(result.submission.status).toBe("succeeded");
   const fresh = await page.request.get(
     `${api}/v1/workspaces/${ws}/skills/catalog`,
   );
   const external = (await fresh.json()).items.find(
-    (item: { slug: string }) => item.slug === result.body.skills![0]!.slug,
+    (item: { slug: string }) => item.slug === result.skills[0]!.slug,
   );
   expect(external).toMatchObject({
     sourceType: "registry_github",
@@ -333,18 +350,18 @@ test("E5 repeat import is immutable and other user cannot claim it", async ({
 }) => {
   await login(page);
   const first = await submit(page);
-  await publish(first.body.skills![0]!);
+  await publish(first.skills[0]!);
   await closeResult(page);
   const again = await submit(page);
-  expect(again.body.skills![0]).toMatchObject({
-    skillVersionId: first.body.skills![0]!.skillVersionId,
+  expect(again.skills[0]).toMatchObject({
+    skillVersionId: first.skills[0]!.skillVersionId,
     status: "indexed",
   });
   const context = await browser.newContext({ baseURL: web });
   const other = await context.newPage();
   await login(other, "other");
   const rejected = await submit(other);
-  expect(rejected.response.status()).toBe(422);
+  expect(rejected.submission.status).toBe("failed");
   await expect(
     other.getByRole("region", { name: "Import results" }),
   ).toContainText("failed");
@@ -358,7 +375,7 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
     "BLOCKED: same-skill changed-content B fixture URL not supplied",
   );
   const ws = await login(page);
-  const a = (await submit(page)).body.skills![0]!;
+  const a = (await submit(page)).skills[0]!;
   await publish(a);
   await closeResult(page);
   const catalog = await page.request.get(
@@ -387,7 +404,7 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
       )
     ).status(),
   ).toBe(200);
-  const b = (await submit(page, fixtures.versionB!)).body.skills![0]!;
+  const b = (await submit(page, fixtures.versionB!)).skills[0]!;
   const still = await page.request.get(`${api}/v1/workspaces/${ws}/skills`);
   expect(
     (await still.json()).items.find(
@@ -482,7 +499,7 @@ test("E7 review reasons persist and revoked versions cannot be installed", async
   page,
 }) => {
   const ws = await login(page);
-  const a = (await submit(page)).body.skills![0]!;
+  const a = (await submit(page)).skills[0]!;
   expect(
     (
       await admin.post(
@@ -494,7 +511,7 @@ test("E7 review reasons persist and revoked versions cannot be installed", async
   await publish(a);
   await closeResult(page);
   if (fixtures.versionC) {
-    const pending = (await submit(page, fixtures.versionC)).body.skills![0]!;
+    const pending = (await submit(page, fixtures.versionC)).skills[0]!;
     expect(pending.status).toBe("queued");
     const reject = await admin.post(
       `/v1/skills/registry/admin/submissions/${pending.skillVersionId}/reject`,
@@ -529,7 +546,7 @@ test("E7 review reasons persist and revoked versions cannot be installed", async
   );
   expect((await d.json()).version.moderation.reason).toBe("E2E revoked sample");
   const repeat = await submit(page);
-  expect(repeat.response.status()).toBe(422);
+  expect(repeat.submission.status).toBe("failed");
   await expect(
     page.getByRole("region", { name: "Import results" }),
   ).toContainText("revoked");
@@ -539,11 +556,11 @@ test("E8 published is not public; explicit admin visibility controls history acc
   browser,
 }) => {
   const ws = await login(page);
-  const a = (await submit(page)).body.skills![0]!;
+  const a = (await submit(page)).skills[0]!;
   await publish(a);
   await closeResult(page);
   if (fixtures.versionB) {
-    const b = (await submit(page, fixtures.versionB)).body.skills![0]!;
+    const b = (await submit(page, fixtures.versionB)).skills[0]!;
     await publish(b);
     await closeResult(page);
   }

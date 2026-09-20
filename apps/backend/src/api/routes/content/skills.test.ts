@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   getCatalogSkillDetail: vi.fn(),
   getCatalogSkillDetailBySlug: vi.fn(),
+  getRegistryVersionDetail: vi.fn(),
 }));
 
 vi.mock("../../middleware/auth-session", () => ({
@@ -28,11 +29,7 @@ vi.mock("../../../modules/skills/service", () => ({
 }));
 vi.mock("../../../modules/skills/registry/versions", () => ({
   listRegistryVersions: vi.fn(),
-  getRegistryVersionDetail: vi.fn(),
   switchRegistryVersion: vi.fn(),
-}));
-vi.mock("../../../modules/skills/registry/submit", () => ({
-  submitRegistrySkillFromGitHub: vi.fn(),
 }));
 vi.mock("../../../modules/skills/registry/permissions", () => ({
   requireSkillWorkspace: vi.fn(),
@@ -100,5 +97,30 @@ test("by-slug is not shadowed by the catalogId route", async () => {
   await createTestApp().request(`${base}/skill_1%3Aversion_1`);
   assert.deepEqual(mocks.getCatalogSkillDetail.mock.calls, [
     [{ ...viewer, catalogId: "skill_1:version_1" }],
+  ]);
+});
+
+// Community skills are imported through `/skills/registry/submissions` only.
+test("the synchronous submit endpoint is gone", async () => {
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace_1/skills/registry/submit",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repoUrl: "acme/skills" }),
+    },
+  );
+  assert.equal(response.status, 404);
+});
+
+// The service applies the full-text rule; the raw registry read does not.
+test("a version's detail is read through the service", async () => {
+  mocks.getRegistryVersionDetail.mockResolvedValue({ contentRestricted: true });
+  const response = await createTestApp().request(
+    `${base}/skill_1%3Aversion_1/versions/version_0`,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(mocks.getRegistryVersionDetail.mock.calls, [
+    [{ ...viewer, catalogId: "skill_1:version_1", versionId: "version_0" }],
   ]);
 });

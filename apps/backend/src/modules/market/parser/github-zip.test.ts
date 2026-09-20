@@ -68,6 +68,23 @@ describe("readZipEntries", () => {
     );
   });
 
+  test("a caller may raise the per-file ceiling for its own read only", async () => {
+    // The skills reader carries fonts and images; the MCP market's default
+    // (asserted above) is untouched by another caller's higher limit.
+    const size = GITHUB_ZIP_LIMITS.maxFileBytes + 1;
+    const zip = repoZip({ "assets/font.ttf": "x".repeat(size) });
+    const files = await readZipEntries(zip, () => true, {
+      maxFileBytes: size,
+    });
+    assert.equal(files.get("assets/font.ttf")?.byteLength, size);
+    await assert.rejects(
+      () => readZipEntries(zip, () => true, { maxFileBytes: size - 1 }),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_TOO_LARGE",
+    );
+  });
+
   test("skips an oversize entry when asked, keeping the rest", async () => {
     // Whole-repo prospecting must not lose a submission over one large asset.
     const files = await readZipEntries(

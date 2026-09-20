@@ -1,7 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { beforeAll, afterAll, describe, test, expect } from "vitest";
+import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+
+// PostgreSQL is real; the object store under `../storage` is a map.
+const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
+vi.mock("../../sources/storage", () => ({
+  getContentStorageBucketName: () => "bucket",
+  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
+    store.objects.has(key),
+  uploadFileObject: async (input: { key: string; body: Buffer }) => {
+    store.objects.set(input.key, input.body);
+    return { bucket: "bucket", key: input.key };
+  },
+}));
 
 /**
  * Revoking the current version must not take the skill out of the catalog while
@@ -21,6 +33,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       workspaceId = `skill-ws-${randomUUID()}`;
     const viewer = { teamId, workspaceId, userId: "skill-owner" };
     const ids = new Set<string>();
+    const OLDEST = "2025-12-01T00:00:00.000Z";
     const OLDER = "2026-01-01T00:00:00.000Z";
     const NEWER = "2026-02-01T00:00:00.000Z";
     const NEWEST = "2026-03-01T00:00:00.000Z";
@@ -59,7 +72,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     function input(
       slug: string,
       marker: string,
-      options: { committedAt?: string; flagged?: boolean } = {},
+      options: { committedAt: string; flagged?: boolean },
     ) {
       const flagged = options.flagged ?? false;
       const commitSha = marker.repeat(40),
@@ -72,16 +85,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         description: `Version ${marker}`,
         commitSha,
         storagePointer: `github:fixture/skills@${commitSha}#writer`,
-        contentHash: hash,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
           {
             path: "SKILL.md",
-            contentText,
+            bytes: Buffer.from(contentText),
             mimeType: "text/markdown",
-            sizeBytes: Buffer.byteLength(contentText),
-            contentHash: hash,
           },
         ],
         manifestJson: {
@@ -96,9 +106,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/writer`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: "skill-owner",
-            ...(options.committedAt
-              ? { committedAt: options.committedAt }
-              : {}),
+            committedAt: options.committedAt,
             capability: "prompt-only" as const,
             scan: {
               reviewRequired: flagged,
@@ -149,13 +157,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           | undefined
       )?.promotedSkillVersionId;
 
-    test("currency passes down the published versions by commit date, an undated legacy row last", async () => {
+    test("currency passes down the published versions by commit date", async () => {
       const slug = newSlug();
-      // Stored out of commit order, and the undated row is NOT the oldest write,
-      // so neither write order nor created_at alone yields the right successor.
+      // Stored out of commit order, and the oldest commit is NOT the oldest
+      // write, so neither write order nor created_at alone yields the right
+      // successor. (Every registry version is dated: ingest refuses the rest.)
       const b = await upsert(input(slug, "b", { committedAt: NEWER }));
       const a = await upsert(input(slug, "a", { committedAt: OLDER }));
-      const legacy = await upsert(input(slug, "d"));
+      const legacy = await upsert(input(slug, "d", { committedAt: OLDEST }));
       const c = await upsert(input(slug, "c", { committedAt: NEWEST }));
       let after = await state(c.skillId);
       expect(after.versions.every((v) => v.status === "published")).toBe(true);
@@ -199,11 +208,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       }
     });
 
-    test("undated versions rank among themselves by created_at, newest first", async () => {
+    test("versions of equal commit date rank among themselves by created_at, newest first", async () => {
       const slug = newSlug();
-      const first = await upsert(input(slug, "a"));
-      const second = await upsert(input(slug, "b"));
-      const third = await upsert(input(slug, "c"));
+      const first = await upsert(input(slug, "a", { committedAt: OLDER }));
+      const second = await upsert(input(slug, "b", { committedAt: OLDER }));
+      const third = await upsert(input(slug, "c", { committedAt: OLDER }));
       // Pin created_at so the order under test cannot hinge on the clock, and
       // does not coincide with the order the rows were written in.
       for (const [saved, createdAt] of [

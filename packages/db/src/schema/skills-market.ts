@@ -25,7 +25,7 @@ type SkillDefinitionSourceType =
   | "registry_github";
 type SkillDefinitionStatus = "active" | "archived";
 type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
-type SkillVersionStorageType = "repo_builtin" | "db_text";
+type SkillVersionStorageType = "repo_builtin" | "db_text" | "object";
 export type SkillManifestVisibility =
   "public" | "restricted" | "workspace" | "team";
 export type SkillManifestJson = {
@@ -152,7 +152,9 @@ export type SkillManifestJson = {
       path: string;
       sha256: string;
       sizeBytes: number;
-      role: "model-readable" | "script";
+      // `asset`: a non-text resource (font, image, template) — carried for
+      // scripts to use in the sandbox, never read by the model as text.
+      role: "model-readable" | "script" | "asset";
     }[];
   };
 };
@@ -234,6 +236,14 @@ export const skillVersions = pgTable(
     isCurrent: boolean("is_current").notNull().default(false),
     contentHash: text("content_hash").notNull(),
     manifestJson: jsonb("manifest_json").$type<SkillManifestJson>().notNull(),
+    // `object` versions keep only SKILL.md in the database — it is what the
+    // catalog shows and what a turn loads up front. Every file, SKILL.md
+    // included, lives in object storage as a content-addressed blob, and the
+    // whole skill as one deterministic zip the sandbox downloads.
+    skillMd: text("skill_md"),
+    bundleSha256: text("bundle_sha256"),
+    bundleObjectKey: text("bundle_object_key"),
+    bundleSizeBytes: integer("bundle_size_bytes"),
     createdBy: text("created_by"),
     publishedAt: timestamp("published_at", {
       withTimezone: true,
@@ -253,7 +263,11 @@ export const skillVersions = pgTable(
     ),
     check(
       "skill_versions_storage_type_check",
-      sql`${table.storageType} in ('repo_builtin', 'db_text')`,
+      sql`${table.storageType} in ('repo_builtin', 'db_text', 'object')`,
+    ),
+    check(
+      "skill_versions_object_bundle_check",
+      sql`${table.storageType} <> 'object' or (${table.skillMd} is not null and ${table.bundleSha256} is not null and ${table.bundleObjectKey} is not null and ${table.bundleSizeBytes} is not null)`,
     ),
     uniqueIndex("skill_versions_skill_version_uq").on(
       table.skillId,
@@ -275,7 +289,12 @@ export const skillVersionFiles = pgTable(
       .notNull()
       .references(() => skillVersions.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
-    contentText: text("content_text").notNull(),
+    // Inline text (`db_text` versions: workspace-authored skills) OR a blob in
+    // object storage (`object` versions) — never neither. A row is the file's
+    // manifest entry either way: path, type, size and sha256 stay queryable
+    // without touching the bytes.
+    contentText: text("content_text"),
+    objectKey: text("object_key"),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     contentHash: text("content_hash").notNull(),
@@ -289,6 +308,10 @@ export const skillVersionFiles = pgTable(
       table.path,
     ),
     check("skill_version_files_size_check", sql`${table.sizeBytes} >= 0`),
+    check(
+      "skill_version_files_content_location_check",
+      sql`(${table.contentText} is not null) <> (${table.objectKey} is not null)`,
+    ),
     check(
       "skill_version_files_relative_path_check",
       sql`${table.path} <> '' and ${table.path} not like '/%' and ${table.path} not like '../%' and ${table.path} not like '%/../%'`,

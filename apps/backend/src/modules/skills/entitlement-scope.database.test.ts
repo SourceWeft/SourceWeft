@@ -55,7 +55,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         skillId: input.skillId,
         version,
         status: "published",
-        storageType: "db_text",
+        // Community skills are `object` versions: SKILL.md on the row, bytes in
+        // object storage (not needed by these tests, so the keys are inert).
+        storageType: "object",
+        skillMd: "---\nname: fixture\ndescription: fixture\n---\n",
+        bundleSha256: "0".repeat(64),
+        bundleObjectKey: `skills/bundles/${"0".repeat(64)}.zip`,
+        bundleSizeBytes: 1,
         storagePointer: `github:fixture/skills@${input.marker.repeat(40)}#scope`,
         isCurrent: input.isCurrent,
         contentHash: `hash-${input.marker}`,

@@ -3743,13 +3743,13 @@ test("runtime prompt points active skills at SKILL.md without preloading content
         files: [
           {
             path: "SKILL.md",
-            contentText:
-              "Explain with simple analogies and check understanding.",
             mimeType: "text/markdown",
             sizeBytes: 40,
             contentHash: "hash",
+            isText: true,
           },
         ],
+        skillMd: "Explain with simple analogies and check understanding.",
       },
     ],
     invokedSkillIds: ["skill-1"],

@@ -53,7 +53,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           skillId,
           version: "aaaaaaaaaaaa",
           status: "published" as const,
-          storageType: "db_text" as const,
+          // Community skills are `object` versions: SKILL.md on the row, bytes in
+          // object storage (not needed by these tests, so the keys are inert).
+          storageType: "object" as const,
+          skillMd: "---\nname: fixture\ndescription: fixture\n---\n",
+          bundleSha256: "0".repeat(64),
+          bundleObjectKey: `skills/bundles/${"0".repeat(64)}.zip`,
+          bundleSizeBytes: 1,
           storagePointer: `github:fixture/skills@${"a".repeat(40)}#x`,
           isCurrent: true,
           contentHash: "hash",
@@ -116,7 +122,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             slug,
             // Every third name is shared, so the id tie-break is exercised.
             displayName:
-              index % 3 === 0 ? `Paging ${tag} shared` : `Paging ${tag} ${slug}`,
+              index % 3 === 0
+                ? `Paging ${tag} shared`
+                : `Paging ${tag} ${slug}`,
             visibility: "public",
           }),
         );
@@ -176,8 +184,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
 
       // Same walk, same order — and a different page size cuts the same
       // sequence, so the order belongs to the data and not to the paging.
-      assert.deepEqual((await walk(stranger, { limit: 25, query: tag })).flat(), slugs);
-      assert.deepEqual((await walk(stranger, { limit: 100, query: tag })).flat(), slugs);
+      assert.deepEqual(
+        (await walk(stranger, { limit: 25, query: tag })).flat(),
+        slugs,
+      );
+      assert.deepEqual(
+        (await walk(stranger, { limit: 100, query: tag })).flat(),
+        slugs,
+      );
       assert.equal(slugs.at(-1), lastSlug);
     });
 

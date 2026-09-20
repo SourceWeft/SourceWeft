@@ -1,20 +1,32 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "vitest";
 import { analyzeRegistrySkill } from "./analyze";
 import { RegistrySubmissionError } from "./errors";
-import type { DiscoveredSkill, DiscoveredSkillFile } from "./read";
+import {
+  discoveredSkillFile,
+  type DiscoveredSkill,
+  type DiscoveredSkillFile,
+} from "./read";
 
-function file(bundlePath: string, contentText: string): DiscoveredSkillFile {
-  const bytes = Buffer.from(contentText, "utf8");
-  return {
+/** A bundle file as the reader builds it: text from a string, binary from bytes. */
+function file(
+  bundlePath: string,
+  content: string | Uint8Array,
+): DiscoveredSkillFile {
+  return discoveredSkillFile(
     bundlePath,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-    sizeBytes: bytes.byteLength,
-    mimeType: bundlePath.endsWith(".md") ? "text/markdown" : "text/plain",
-    contentText,
-  };
+    typeof content === "string" ? Buffer.from(content, "utf8") : content,
+  );
 }
+
+// Leading bytes of real formats, padded with bytes that are not valid UTF-8.
+const binary = (...magic: number[]) =>
+  new Uint8Array([...magic, 0x00, 0xff, 0xfe, 0x00, 0x01]);
+const TTF = binary(0x00, 0x01, 0x00, 0x00);
+const PNG = binary(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+const ELF = binary(0x7f, 0x45, 0x4c, 0x46);
+const MACH_O = binary(0xcf, 0xfa, 0xed, 0xfe);
+const PE = binary(0x4d, 0x5a, 0x90);
 
 function skillMd(input: {
   name?: string;
@@ -256,8 +268,81 @@ test("fileManifest paths are bundle-relative with correct roles", () => {
   assert.equal(byPath.get("SKILL.md")?.role, "model-readable");
   assert.equal(byPath.get("resources/notes.md")?.role, "model-readable");
   assert.equal(byPath.get("scripts/run.py")?.role, "script");
-  // contentSha256 pins the SKILL.md bytes for runtime cross-check.
-  assert.equal(analyzed.contentSha256, byPath.get("SKILL.md")?.sha256);
+});
+
+test("fonts and images are kept as assets: listed, unscanned, and no reason for review", () => {
+  const analyzed = analyzeRegistrySkill({
+    owner: OWNER,
+    repo: REPO,
+    discovered: discovered({
+      files: [
+        file("SKILL.md", skillMd({ name: "poster", description: "Posters" })),
+        file("fonts/Inter.ttf", TTF),
+        file("assets/cover.png", PNG),
+      ],
+    }),
+  });
+  const byPath = new Map(
+    analyzed.fileManifest.map((entry) => [entry.path, entry]),
+  );
+  assert.equal(byPath.get("fonts/Inter.ttf")?.role, "asset");
+  assert.equal(byPath.get("assets/cover.png")?.role, "asset");
+  assert.equal(byPath.get("fonts/Inter.ttf")?.sizeBytes, TTF.byteLength);
+  assert.deepEqual(analyzed.scan, { reviewRequired: false, flags: [] });
+  assert.equal(analyzed.capability, "prompt-only");
+  assert.deepEqual(analyzed.diagnostics, []);
+});
+
+test("a compiled binary is held for review and named, whatever it is called", () => {
+  for (const [bundlePath, bytes] of [
+    ["bin/tool", ELF],
+    ["bin/tool-macos", MACH_O],
+    ["bin/tool.exe", PE],
+    // The extension is the author's claim; the bytes are the file.
+    ["assets/logo.png", ELF],
+    // A jar is a zip by magic, so only its name gives it away.
+    ["lib/helper.jar", binary(0x50, 0x4b, 0x03, 0x04)],
+  ] as const) {
+    const analyzed = analyzeRegistrySkill({
+      owner: OWNER,
+      repo: REPO,
+      discovered: discovered({
+        files: [
+          file("SKILL.md", skillMd({ name: "tool", description: "Tool" })),
+          file(bundlePath, bytes),
+        ],
+      }),
+    });
+    assert.deepEqual(analyzed.scan, {
+      reviewRequired: true,
+      flags: ["binary:executable"],
+    });
+    assert.deepEqual(analyzed.findings, [
+      { ruleId: "binary:executable", file: bundlePath },
+    ]);
+    assert.equal(analyzed.diagnostics[0]?.code, "BINARY_EXECUTABLE");
+    assert.equal(analyzed.diagnostics[0]?.file, bundlePath);
+    // Shipping code is what `executable` means, compiled or not.
+    assert.equal(analyzed.capability, "executable");
+    assert.equal(
+      analyzed.fileManifest.find((entry) => entry.path === bundlePath)?.role,
+      "asset",
+    );
+  }
+});
+
+test("a SKILL.md that is not text is not a skill", () => {
+  assert.throws(
+    () =>
+      analyzeRegistrySkill({
+        owner: OWNER,
+        repo: REPO,
+        discovered: discovered({ files: [file("SKILL.md", PNG)] }),
+      }),
+    (error) =>
+      error instanceof RegistrySubmissionError &&
+      error.code === "REGISTRY_SUBMISSION_INVALID_SKILL",
+  );
 });
 
 test("a script referencing a path above the bundle is flagged (PR-4)", () => {

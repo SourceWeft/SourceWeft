@@ -1,17 +1,25 @@
 import { ContentError } from "../content/errors";
+import { getBuiltinSkillBySlug, loadBuiltinSkillBundle } from "./builtin";
 import {
-  getBuiltinSkillBySlug,
-  loadBuiltinSkillBundle,
-  type SkillBundleFile,
-} from "./builtin";
+  createSkillFileReader,
+  inlineSkillContent,
+  isTextSkillMimeType,
+  readSkillObjectFile,
+} from "./file-content";
 import {
   findEnabledWorkspaceSkillRecordBySlug,
   listEnabledWorkspaceSkillRecords,
   listWorkspaceSkillRecordsByIds,
   loadSkillVersionBundle,
+  readSkillVersionFile,
 } from "./repository";
 import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
-import type { EnabledSkillDescriptor, WorkspaceSkillRecord } from "./types";
+import type {
+  EnabledSkillDescriptor,
+  SkillFileManifestEntry,
+  SkillFileReader,
+  WorkspaceSkillRecord,
+} from "./types";
 
 const BUILTIN_SKILL_ID_PREFIX = "builtin:";
 
@@ -72,6 +80,7 @@ export async function resolveSelectedSkills(input: {
   listEnabledWorkspaceSkills?: typeof listEnabledWorkspaceSkillRecords;
   listWorkspaceSkillsByIds?: typeof listWorkspaceSkillRecordsByIds;
   loadWorkspaceSkillVersion?: typeof loadSkillVersionBundle;
+  readWorkspaceSkillFile?: typeof readSkillVersionFile;
 }): Promise<EnabledSkillDescriptor[]> {
   const skillIds = normalizeSkillIds(input.skillIds);
   if (skillIds.length > MAX_SELECTED_SKILLS_PER_TURN) {
@@ -92,6 +101,8 @@ export async function resolveSelectedSkills(input: {
     input.listEnabledWorkspaceSkills ?? listEnabledWorkspaceSkillRecords;
   const loadWorkspaceSkillVersion =
     input.loadWorkspaceSkillVersion ?? loadSkillVersionBundle;
+  const readWorkspaceSkillFile =
+    input.readWorkspaceSkillFile ?? readSkillVersionFile;
   const [selectedRecords, enabledWorkspaceRecords] = await Promise.all([
     listWorkspaceSkillsByIds({
       teamId: input.teamId,
@@ -145,6 +156,7 @@ export async function resolveSelectedSkills(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       loadWorkspaceSkillVersion,
+      readWorkspaceSkillFile,
     });
     result.push(resolved);
   }
@@ -215,7 +227,7 @@ async function resolveBuiltinRuntimeSkill(
     slash: skill.manifestJson.slash,
     slashConfig: skill.manifestJson.slashConfig,
     defaultConfig: skill.manifestJson.defaultConfig,
-    files: bundle.files,
+    ...inlineSkillContent(bundle.files),
   };
 }
 
@@ -224,6 +236,7 @@ async function resolveWorkspaceRuntimeSkill(input: {
   teamId: string;
   workspaceId: string;
   loadWorkspaceSkillVersion: typeof loadSkillVersionBundle;
+  readWorkspaceSkillFile: typeof readSkillVersionFile;
 }): Promise<EnabledSkillDescriptor> {
   const bundle = await input.loadWorkspaceSkillVersion({
     teamId: input.teamId,
@@ -249,20 +262,10 @@ async function resolveWorkspaceRuntimeSkill(input: {
     );
   }
 
-  let files: SkillBundleFile[] | undefined;
-  if (bundle.version.storageType === "repo_builtin") {
-    files = (await loadBuiltinSkillBundle(bundle.version.storagePointer))
-      ?.files;
-  } else {
-    files = bundle.files;
-  }
-  if (!files) {
-    throw new ContentError(
-      404,
-      "SKILL_FILES_NOT_FOUND",
-      "Selected skill files could not be loaded",
-    );
-  }
+  const content = await resolveWorkspaceSkillContent({
+    bundle,
+    readWorkspaceSkillFile: input.readWorkspaceSkillFile,
+  });
   return {
     workspaceSkillId: input.record.id,
     selectionId: input.record.id,
@@ -280,7 +283,87 @@ async function resolveWorkspaceRuntimeSkill(input: {
     slash: bundle.version.manifestJson.slash,
     slashConfig: bundle.version.manifestJson.slashConfig,
     defaultConfig: bundle.version.manifestJson.defaultConfig,
+    ...content,
+  };
+}
+
+/**
+ * Binds a stored version's content to where its storage type keeps it. Nothing
+ * here reads a body: `object` and `db_text` hand back the manifest plus a
+ * reader that fetches one file when it is first read.
+ */
+async function resolveWorkspaceSkillContent(input: {
+  bundle: NonNullable<Awaited<ReturnType<typeof loadSkillVersionBundle>>>;
+  readWorkspaceSkillFile: typeof readSkillVersionFile;
+}): Promise<
+  Pick<EnabledSkillDescriptor, "files" | "skillMd" | "readFile" | "bundle">
+> {
+  const { version } = input.bundle;
+  if (version.storageType === "repo_builtin") {
+    const files = (await loadBuiltinSkillBundle(version.storagePointer))?.files;
+    if (!files) {
+      throw new ContentError(
+        404,
+        "SKILL_FILES_NOT_FOUND",
+        "Selected skill files could not be loaded",
+      );
+    }
+    return inlineSkillContent(files);
+  }
+
+  const rows = new Map(input.bundle.files.map((row) => [row.path, row]));
+  const files: SkillFileManifestEntry[] = input.bundle.files.map((row) => ({
+    path: row.path,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    contentHash: row.contentHash,
+    // Inline rows are text by construction: a `text` column cannot hold bytes.
+    isText: row.objectKey === null || isTextSkillMimeType(row.mimeType),
+  }));
+
+  if (version.storageType === "object") {
+    const readFile: SkillFileReader = createSkillFileReader({
+      files,
+      fetch: (file) =>
+        readSkillObjectFile({
+          objectKey: rows.get(file.path)!.objectKey!,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+        }),
+    });
+    return {
+      files,
+      // skill_versions_object_bundle_check guarantees all four columns.
+      skillMd: version.skillMd!,
+      readFile,
+      bundle: {
+        sha256: version.bundleSha256!,
+        objectKey: version.bundleObjectKey!,
+        sizeBytes: version.bundleSizeBytes!,
+      },
+    };
+  }
+
+  const readFile = createSkillFileReader({
     files,
+    fetch: async (file) => {
+      const content = await input.readWorkspaceSkillFile({
+        skillVersionId: version.id,
+        path: file.path,
+      });
+      if (!content) {
+        throw new Error(`ENOENT: no such skill file '${file.path}'`);
+      }
+      return content;
+    },
+  });
+  return {
+    files,
+    // The manifest rows of a `db_text` version carry SKILL.md's text inline.
+    // A version without one still resolves: it must not take the turn down,
+    // it just has nothing to read and cannot be staged.
+    skillMd: rows.get("SKILL.md")?.contentText ?? undefined,
+    readFile,
   };
 }
 

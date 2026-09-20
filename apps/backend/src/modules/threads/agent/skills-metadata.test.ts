@@ -9,6 +9,7 @@ import { MemorySaver, Overwrite } from "@langchain/langgraph";
 import { CompositeBackend, StateBackend, createDeepAgent } from "deepagents";
 import { test } from "vitest";
 import { SelectedSkillsBackend } from "../../skills/backend";
+import { inlineSkillContent } from "../../skills/file-content";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import { skillMetadataForTurn } from "./turn/turn-assembly";
 
@@ -48,7 +49,7 @@ function selectedSkill(name: string): EnabledSkillDescriptor {
     name,
     version: "1.0.0",
     description,
-    files: [
+    ...inlineSkillContent([
       {
         path: "SKILL.md",
         contentText: markdown,
@@ -56,7 +57,7 @@ function selectedSkill(name: string): EnabledSkillDescriptor {
         sizeBytes: Buffer.byteLength(markdown),
         contentHash: `hash-${name}`,
       },
-    ],
+    ]),
   };
 }
 

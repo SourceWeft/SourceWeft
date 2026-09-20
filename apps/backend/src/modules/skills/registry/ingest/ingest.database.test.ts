@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { strToU8, zipSync } from "fflate";
+import { strToU8, unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { and, eq, inArray, like } from "drizzle-orm";
 
@@ -9,6 +9,40 @@ const enqueue = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("./queue", () => ({
   SKILL_REGISTRY_INGEST_JOB: "skill-registry-ingest",
   enqueueSkillIngestJob: enqueue,
+}));
+
+// PostgreSQL is real; the object store under `../../storage` is a map, so what
+// the rows point at can be read back and uploads can be counted or failed.
+const store = vi.hoisted(() => ({
+  objects: new Map<string, { body: Buffer; contentType: string }>(),
+  uploads: [] as string[],
+  failOn: null as RegExp | null,
+}));
+vi.mock("../../../sources/storage", () => ({
+  getContentStorageBucketName: () => "bucket",
+  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
+    store.objects.has(key),
+  uploadFileObject: async (input: {
+    key: string;
+    body: Buffer;
+    contentType: string;
+  }) => {
+    if (store.failOn?.test(input.key)) {
+      throw new Error("object storage is down");
+    }
+    store.uploads.push(input.key);
+    store.objects.set(input.key, {
+      body: input.body,
+      contentType: input.contentType,
+    });
+    return { bucket: "bucket", key: input.key };
+  },
+  downloadFileObject: async ({ key }: { key: string }) =>
+    store.objects.get(key)!.body,
+  downloadSandboxAssetObject: async ({ key }: { key: string }) =>
+    store.objects.get(key)!.body,
+  getSandboxAssetDownloadUrl: async ({ key }: { key: string }) =>
+    `https://storage.test/${key}?signed`,
 }));
 
 /**
@@ -46,23 +80,28 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       `---\nname: ${name}\ndescription: ${name} fixture\n---\n${body}\n`;
 
     /** A GitHub-shaped zipball: everything under one `<repo>-<sha>/` root. */
-    function zipball(files: Record<string, string>) {
+    function zipball(files: Record<string, string | Uint8Array>) {
       return Buffer.from(
         zipSync(
           Object.fromEntries(
-            Object.entries(files).map(([path, text]) => [
+            Object.entries(files).map(([path, content]) => [
               `skills-abc/${path}`,
-              strToU8(text),
+              typeof content === "string" ? strToU8(content) : content,
             ]),
           ),
         ),
       );
     }
 
+    // Not valid UTF-8: none of these could ever have been a `text` column.
+    const TTF = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff, 0xfe, 0x00]);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const MACH_O = new Uint8Array([0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01]);
+
     function github(input: {
       repo: string;
       sha: string;
-      files: Record<string, string>;
+      files: Record<string, string | Uint8Array>;
     }) {
       const calls = { resolve: 0, download: 0 };
       return {
@@ -128,7 +167,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       await data.closeDatabase();
     });
 
-    beforeEach(() => enqueue.mockClear());
+    beforeEach(() => {
+      enqueue.mockClear();
+      store.failOn = null;
+    });
 
     test("re-submitting an in-flight source returns that record; a finished one frees the slot", async () => {
       const source = `${owner}/dedupe`;
@@ -226,11 +268,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         files: {
           "skills/writer/SKILL.md": skillMd("writer"),
           "skills/writer/references/guide.md": "# Guide\n",
+          "skills/writer/fonts/Inter.ttf": TTF,
+          "skills/writer/assets/cover.png": PNG,
           "skills/broken/SKILL.md": "no frontmatter here\n",
         },
       });
       const source = `${owner}/${repoName}`;
       const { submission } = await service.createSkillSubmission({ ...alice, source });
+      const uploadsBefore = store.uploads.length;
 
       const outcome = await pipeline.runIngestPipeline({
         submissionId: submission.id,
@@ -298,6 +343,81 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(firstVersions).toHaveLength(1);
       expect(firstVersions[0]!.id).toBe(byPath["skills/writer"]!.skillVersionId);
 
+      // What was written: a manifest in the database, the bytes in storage.
+      const [version] = await data.db
+        .select()
+        .from(data.skillVersions)
+        .where(eq(data.skillVersions.id, firstVersions[0]!.id));
+      expect(version).toMatchObject({
+        storageType: "object",
+        skillMd: skillMd("writer"),
+        status: "published",
+        isCurrent: true,
+      });
+      expect(version!.contentHash).toBe(version!.bundleSha256);
+      expect(version!.bundleObjectKey).toBe(
+        `skills/bundles/${version!.bundleSha256}.zip`,
+      );
+      expect(version!.manifestJson.registry?.committedAt).toBe(
+        "2026-02-01T10:00:00.000Z",
+      );
+      const bundleObject = store.objects.get(version!.bundleObjectKey!)!;
+      expect(version!.bundleSizeBytes).toBe(bundleObject.body.byteLength);
+      const bundle = unzipSync(new Uint8Array(bundleObject.body));
+      expect(Object.keys(bundle).sort()).toEqual([
+        "SKILL.md",
+        "assets/cover.png",
+        "fonts/Inter.ttf",
+        "references/guide.md",
+      ]);
+      expect(bundle["fonts/Inter.ttf"]).toEqual(TTF);
+      expect(bundle["assets/cover.png"]).toEqual(PNG);
+
+      const fileRows = await data.db
+        .select()
+        .from(data.skillVersionFiles)
+        .where(eq(data.skillVersionFiles.skillVersionId, version!.id));
+      expect(
+        fileRows
+          .map((row) => [row.path, row.mimeType, row.sizeBytes])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      ).toEqual([
+        ["assets/cover.png", "image/png", PNG.byteLength],
+        ["fonts/Inter.ttf", "font/ttf", TTF.byteLength],
+        ["references/guide.md", "text/markdown", 8],
+        ["SKILL.md", "text/markdown", Buffer.byteLength(skillMd("writer"))],
+      ]);
+      for (const row of fileRows) {
+        expect(row.contentText).toBeNull();
+        expect(row.objectKey).toBe(
+          `skills/blobs/${row.contentHash.slice(0, 2)}/${row.contentHash}`,
+        );
+        expect(store.objects.get(row.objectKey!)!.body.byteLength).toBe(
+          row.sizeBytes,
+        );
+      }
+      expect(
+        new Uint8Array(
+          store.objects.get(
+            fileRows.find((row) => row.path === "fonts/Inter.ttf")!.objectKey!,
+          )!.body,
+        ),
+      ).toEqual(TTF);
+      const roles = Object.fromEntries(
+        version!.manifestJson.registry!.fileManifest.map((entry) => [
+          entry.path,
+          entry.role as string,
+        ]),
+      );
+      expect(roles).toEqual({
+        "SKILL.md": "model-readable",
+        "references/guide.md": "model-readable",
+        "fonts/Inter.ttf": "asset",
+        "assets/cover.png": "asset",
+      });
+      // Four blobs and one bundle; the broken skill stored nothing.
+      expect(store.uploads.slice(uploadsBefore)).toHaveLength(5);
+
       // The same commit again — a retried job, or the same person re-importing.
       const second = await service.createSkillSubmission({ ...alice, source });
       expect(second.created).toBe(true);
@@ -313,8 +433,103 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         secondRow.results.find((item) => item.slug === slug)?.skillVersionId,
       ).toBe(byPath["skills/writer"]!.skillVersionId);
       expect(await versionsOf()).toHaveLength(1);
+      // Content-addressed: the second run found every object already there.
+      expect(store.uploads.slice(uploadsBefore)).toHaveLength(5);
       // One download per run, never one per stage.
       expect(fake.calls).toEqual({ resolve: 2, download: 2 });
+    });
+
+    test("a compiled binary in the bundle holds the skill for review, stored but not published", async () => {
+      const repoName = `bin${tag}`;
+      const fake = github({
+        repo: repoName,
+        sha: "f".repeat(40),
+        files: {
+          "SKILL.md": skillMd(`bin${tag}`),
+          "bin/tool": MACH_O,
+        },
+      });
+      const { submission } = await service.createSkillSubmission({
+        ...alice,
+        source: `${owner}/${repoName}`,
+      });
+      await pipeline.runIngestPipeline({
+        submissionId: submission.id,
+        signal: signal(),
+        willRetryTransient: true,
+        deps: fake.deps,
+      });
+      const [result] = (await fresh(submission.id)).results;
+      expect(result).toMatchObject({
+        status: "queued",
+        flags: ["binary:executable"],
+      });
+      expect(result!.diagnostics).toEqual([
+        expect.objectContaining({ code: "BINARY_EXECUTABLE", file: "bin/tool" }),
+      ]);
+      const [version] = await data.db
+        .select()
+        .from(data.skillVersions)
+        .where(eq(data.skillVersions.id, result!.skillVersionId!));
+      expect(version).toMatchObject({ status: "draft", isCurrent: false });
+      expect(version!.manifestJson.registry).toMatchObject({
+        capability: "executable",
+        scan: { reviewRequired: true, flags: ["binary:executable"] },
+      });
+      expect(version!.manifestJson.registry!.ingestion!.findings).toEqual([
+        { ruleId: "binary:executable", file: "bin/tool" },
+      ]);
+    });
+
+    test("a failed object write leaves no rows behind, and the retry completes the skill", async () => {
+      const repoName = `down${tag}`;
+      const fake = github({
+        repo: repoName,
+        sha: "9".repeat(40),
+        files: {
+          "SKILL.md": skillMd(`down${tag}`, `Body ${tag}`),
+          "fonts/Inter.ttf": new Uint8Array([...TTF, 0x09]),
+        },
+      });
+      const definitions = () =>
+        data.db
+          .select({ id: data.skillDefinitions.id })
+          .from(data.skillDefinitions)
+          .where(like(data.skillDefinitions.slug, `gh-${owner}-${repoName}%`));
+      const { submission } = await service.createSkillSubmission({
+        ...alice,
+        source: `${owner}/${repoName}`,
+      });
+
+      // The blobs go in, the bundle does not: the write is not complete.
+      store.failOn = /^skills\/bundles\//;
+      await expect(
+        pipeline.runIngestPipeline({
+          submissionId: submission.id,
+          signal: signal(),
+          willRetryTransient: true,
+          deps: fake.deps,
+        }),
+      ).rejects.toThrow("object storage is down");
+      expect(await definitions()).toEqual([]);
+      const between = await fresh(submission.id);
+      expect(between.status).toBe("queued");
+      expect(between.stages["triage-write"]?.status).toBe("failed");
+
+      store.failOn = null;
+      const before = store.uploads.length;
+      await pipeline.runIngestPipeline({
+        submissionId: submission.id,
+        signal: signal(),
+        willRetryTransient: true,
+        deps: fake.deps,
+      });
+      expect((await fresh(submission.id)).status).toBe("succeeded");
+      expect(await definitions()).toHaveLength(1);
+      // Only what was missing: the blobs from the failed attempt were reused.
+      expect(store.uploads.slice(before)).toEqual([
+        expect.stringMatching(/^skills\/bundles\//),
+      ]);
     });
 
     test("a deterministic failure ends failed with its code and leaves the catalog untouched", async () => {

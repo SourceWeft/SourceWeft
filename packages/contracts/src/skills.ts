@@ -251,15 +251,6 @@ export const searchRegistrySkillsResponseSchema = z.object({
   query: z.string(),
 });
 
-// POST /skills/registry/submit — one GitHub-URL intake. The authoritative URL
-// parse (github.com allowlist + traversal stripping) is server-side, so the wire
-// shape is deliberately just a non-empty string (skill-registry-index.md §3).
-export const submitRegistrySkillRequestSchema = z
-  .object({
-    repoUrl: z.string().trim().min(1),
-  })
-  .strict();
-
 // `indexed` = clean scan → auto-published catalog entry; `queued` = flagged or
 // sticky (§4 triage) → held for review. `slug` is the derived collision-safe key.
 export const skillDiagnosticSchema = z.object({
@@ -283,6 +274,8 @@ export const registrySkillResultSchema = z.object({
   diagnostics: z.array(skillDiagnosticSchema),
 });
 export type RegistrySkillResult = z.infer<typeof registrySkillResultSchema>;
+// The ingest core's summary of one source (backend `registry/submit.ts`). No
+// endpoint returns it any more — submissions carry the per-skill results.
 export const submitRegistrySkillResponseSchema = z.object({
   status: z.enum(["indexed", "queued"]),
   slug: z.string().optional(),
@@ -298,6 +291,11 @@ export const getSkillCatalogDetailResponseSchema = z.object({
   readmeContent: z.string().nullable(),
   readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
+  // true when `readmeContent`/`skillContent` are null because this viewer does
+  // not get a community skill's full text — it goes to a workspace that
+  // installed the skill, to its submitter and to market admins. The listing
+  // (`skill`, with its `sourceUrl`) is complete either way.
+  contentRestricted: z.boolean().optional(),
 });
 
 export const enableWorkspaceSkillRequestSchema = z
@@ -445,9 +443,6 @@ export type ListSkillsCatalogResponse = z.infer<
 export type SearchRegistrySkillsResponse = z.infer<
   typeof searchRegistrySkillsResponseSchema
 >;
-export type SubmitRegistrySkillRequest = z.infer<
-  typeof submitRegistrySkillRequestSchema
->;
 export type SubmitRegistrySkillResponse = z.infer<
   typeof submitRegistrySkillResponseSchema
 >;
@@ -549,6 +544,8 @@ export const registryVersionDetailSchema = z.object({
   readmeContent: z.string().nullable(),
   readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
+  // Same rule as `getSkillCatalogDetailResponseSchema.contentRestricted`.
+  contentRestricted: z.boolean().optional(),
   files: z.array(
     z.object({
       path: z.string(),
@@ -646,9 +643,9 @@ export const skillSubmissionSchema = z.object({
 });
 export type SkillSubmission = z.infer<typeof skillSubmissionSchema>;
 /**
- * `source` is deliberately just a non-empty string (see
- * `submitRegistrySkillRequestSchema`): the server's GitHub source parser is the
- * authority and also accepts the `owner/repo` shorthand.
+ * `source` is deliberately just a non-empty string, not a URL schema: the
+ * server's GitHub source parser is the authority (github.com allowlist,
+ * traversal stripping) and also accepts the `owner/repo` shorthand.
  */
 export const createSkillSubmissionRequestSchema = z
   .object({

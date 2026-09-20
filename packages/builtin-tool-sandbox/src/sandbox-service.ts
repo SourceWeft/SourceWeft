@@ -52,7 +52,7 @@ export type SandboxRuntimeRequest = {
    */
   skillAssets?: Pick<
     import("./runtime/sandbox-manager").SandboxSkillStaging,
-    "plans" | "hasPlans" | "logger"
+    "plans" | "hasPlans" | "unstageable" | "logger"
   >;
   /** Host-catalog assets required by the tools bound for this turn. */
   runtimeAssets?: Pick<

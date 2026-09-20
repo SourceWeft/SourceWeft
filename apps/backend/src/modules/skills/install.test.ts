@@ -9,13 +9,20 @@ const state = vi.hoisted(() => ({
   byName: [] as unknown[],
   byVersion: null as unknown,
   held: null as unknown,
-  submitted: null as unknown,
+  // Published registry rows the repo + path lookup finds (slug, storagePointer).
+  published: [] as Array<{ slug: string; storagePointer: string }>,
+  submission: null as unknown,
   upserts: [] as Array<Record<string, unknown>>,
-  submits: [] as string[],
+  submissions: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("./repository", () => ({
-  findInstallableSkillsByName: async () => state.byName,
+  // Like the real lookup: an exact slug wins over short-name matches.
+  findInstallableSkillsByName: async (input: { name: string }) => {
+    const rows = state.byName as Array<{ definition: { slug: string } }>;
+    const exact = rows.filter((item) => item.definition.slug === input.name);
+    return exact.length > 0 ? exact : rows;
+  },
   findCatalogSkillVersionForWorkspace: async () => state.byVersion,
   mapWorkspaceSkill: (row: unknown) => row,
   upsertWorkspaceSkill: async (input: Record<string, unknown>) => {
@@ -23,17 +30,39 @@ vi.mock("./repository", () => ({
     return { id: "ws-skill-1", enabled: input.enabled ?? true };
   },
 }));
-vi.mock("./registry/submit", () => ({
-  submitRegistrySkillFromGitHub: async (input: { repoUrl: string }) => {
-    state.submits.push(input.repoUrl);
-    return state.submitted;
+vi.mock("./registry/ingest/service", () => ({
+  createSkillSubmission: async (input: Record<string, unknown>) => {
+    state.submissions.push(input);
+    return { submission: state.submission, created: true };
   },
 }));
+// The only inline query `installSkill` runs is the published repo + path
+// lookup; everything else goes through the mocked repository.
+vi.mock("@sourceweft/db", async (original) => {
+  const query: Record<string, unknown> = {};
+  for (const method of ["from", "innerJoin", "where", "orderBy", "limit"]) {
+    query[method] = () => query;
+  }
+  query.then = (
+    resolve: (rows: unknown) => unknown,
+    reject: (error: unknown) => unknown,
+  ) => Promise.resolve(state.published).then(resolve, reject);
+  return {
+    ...(await original<typeof import("@sourceweft/db")>()),
+    db: { select: () => query },
+  };
+});
+// Skill blobs live in object storage, whose client is built at import time
+// from config this file stubs down to what `installSkill` reads.
+vi.mock("./storage", () => ({ readSkillBlob: vi.fn() }));
 vi.mock("./registry/repository", () => ({
   getRegistrySkillBySlug: async () => state.held,
 }));
 vi.mock("../../shared/config", () => ({
-  config: { auth: { webBaseUrl: "https://app.sourceweft.test" } },
+  config: {
+    auth: { webBaseUrl: "https://app.sourceweft.test" },
+    market: { adminUserIds: [] },
+  },
 }));
 
 const { contentSkillsService } = await import("./service");
@@ -67,9 +96,10 @@ beforeEach(() => {
   state.byName = [];
   state.byVersion = null;
   state.held = null;
-  state.submitted = null;
+  state.published = [];
+  state.submission = { id: "sub-1", status: "queued", results: [] };
   state.upserts = [];
-  state.submits = [];
+  state.submissions = [];
 });
 
 // The catalog lookup is visibility-scoped, so another submitter's `restricted`
@@ -80,7 +110,7 @@ test("a slug the workspace cannot see is not installed and nothing is granted", 
     code: "SKILL_NOT_FOUND",
   });
   assert.equal(state.upserts.length, 0);
-  assert.equal(state.submits.length, 0);
+  assert.equal(state.submissions.length, 0);
 });
 
 test("a visible slug installs switched on", async () => {
@@ -115,7 +145,7 @@ test("a link to our own skill page names a catalog entry", async () => {
   ];
   await installBySource("https://app.sourceweft.test/dashboard/skills/feynman");
   assert.equal(state.upserts.length, 1);
-  assert.equal(state.submits.length, 0);
+  assert.equal(state.submissions.length, 0);
 });
 
 test("links to other sites are refused, not handed to the GitHub reader", async () => {
@@ -128,7 +158,7 @@ test("links to other sites are refused, not handed to the GitHub reader", async 
     installBySource("https://evil.test/dashboard/skills/feynman"),
     { code: "SKILL_SOURCE_UNSUPPORTED" },
   );
-  assert.equal(state.submits.length, 0);
+  assert.equal(state.submissions.length, 0);
   assert.equal(state.upserts.length, 0);
 });
 
@@ -149,41 +179,165 @@ test("re-installing keeps the config already in place", async () => {
   assert.deepEqual(state.upserts[0]?.configJson, { depth: 3 });
 });
 
-test("a repository is submitted, then only its clean skills are installed", async () => {
-  state.submitted = {
-    status: "queued",
-    skills: [
-      {
-        sourcePath: "skills/a",
-        name: "a",
-        slug: "gh-o-r-a",
-        status: "indexed",
-        flags: [],
-        diagnostics: [],
-      },
-      {
-        sourcePath: "skills/b",
-        name: "b",
-        slug: "gh-o-r-b",
-        status: "queued",
-        flags: ["x"],
-        diagnostics: [],
-      },
-      { sourcePath: "skills/c", status: "failed", flags: [], diagnostics: [] },
-    ],
-  };
+// Reading a repository can take minutes, so the install path only STARTS the
+// import; the worker installs when it is done.
+test("a repository not in the catalog becomes a submission with an on-complete install, and nothing is installed yet", async () => {
+  const result = await installBySource("o/r", "a");
+  assert.deepEqual(state.submissions, [
+    { ...scope, source: "o/r", install: { skill: "a", installedVia: "user" } },
+  ]);
+  assert.deepEqual(result.skills, []);
+  assert.equal(result.submission, state.submission);
+  assert.equal(state.upserts.length, 0);
+
+  state.submissions = [];
+  await contentSkillsService.installSkill({
+    ...scope,
+    ref: { kind: "source", source: "https://github.com/o/r" },
+    installedVia: "agent",
+  });
+  assert.deepEqual(state.submissions, [
+    {
+      ...scope,
+      source: "https://github.com/o/r",
+      install: { installedVia: "agent" },
+    },
+  ]);
+});
+
+test("a reference already published at that repo + path installs from the catalog, with no submission", async () => {
+  state.published = [{ slug: "gh-o-r-a", storagePointer: "github:o/r@abc#skills/a" }];
   state.byName = [row("gh-o-r-a")];
-  state.held = row("gh-o-r-b");
-  const { skills } = await installBySource("o/r");
-  assert.deepEqual(state.submits, ["o/r"]);
+  const result = await installBySource(
+    "https://github.com/o/r/tree/main/skills/a",
+  );
+  assert.equal(state.submissions.length, 0);
+  assert.equal(result.submission, undefined);
   assert.deepEqual(
-    skills.map((item) => [item.slug, item.status]),
+    result.skills.map((item) => [item.slug, item.status]),
+    [["gh-o-r-a", "installed"]],
+  );
+  assert.equal(state.upserts[0]?.skillId, "def-gh-o-r-a");
+});
+
+test("`skill` picks the published skill of that name out of the repository", async () => {
+  state.published = [
+    { slug: "gh-o-r-a", storagePointer: "github:o/r@abc#skills/a" },
+    { slug: "gh-o-r-b", storagePointer: "github:o/r@abc#skills/b" },
+  ];
+  state.byName = [row("gh-o-r-a"), row("gh-o-r-b")];
+  const { skills } = await installBySource("o/r", "b");
+  assert.deepEqual(skills.map((item) => item.slug), ["gh-o-r-b"]);
+  assert.equal(state.submissions.length, 0);
+});
+
+test("a published skill this workspace cannot see, or one pinned to another commit, is imported instead", async () => {
+  // Published, but the visibility-scoped lookup does not return it.
+  state.published = [{ slug: "gh-o-r-a", storagePointer: "github:o/r@abc#a" }];
+  state.byName = [row("gh-someone-else-a")];
+  await installBySource("https://github.com/o/r/tree/main/a");
+  assert.equal(state.submissions.length, 1);
+  assert.equal(state.upserts.length, 0);
+
+  state.byName = [row("gh-o-r-a")];
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  await installBySource(`https://github.com/o/r/tree/${sha}/a`);
+  assert.equal(state.submissions.length, 2);
+  assert.equal(state.upserts.length, 0);
+});
+
+function finished(results: unknown[]) {
+  return {
+    id: "sub-1",
+    status: "succeeded",
+    sourceInput: "o/r",
+    results,
+  } as unknown as Parameters<
+    typeof contentSkillsService.describeSubmissionInstall
+  >[0]["submission"];
+}
+const result = (name: string, status: string, extra = {}) => ({
+  sourcePath: `skills/${name}`,
+  name,
+  slug: `gh-o-r-${name}`,
+  status,
+  flags: [],
+  diagnostics: [],
+  ...extra,
+});
+
+test("a finished submission reports what the worker installed, what was held and what failed to switch on", async () => {
+  state.byName = [
+    row("gh-o-r-a", {
+      enabled: { id: "ws-a", enabled: true, skillVersionId: "ver-gh-o-r-a" },
+    }),
+  ];
+  state.held = row("gh-o-r-b");
+  const outcome = await contentSkillsService.describeSubmissionInstall({
+    ...scope,
+    submission: finished([
+      result("a", "indexed", { install: { status: "installed" } }),
+      result("b", "queued", { install: { status: "skipped" } }),
+      result("c", "indexed", {
+        install: {
+          status: "failed",
+          error: { code: "X", message: "quota exceeded" },
+        },
+      }),
+      { sourcePath: "skills/d", status: "failed", flags: [], diagnostics: [] },
+    ]),
+  });
+  assert.deepEqual(
+    outcome.skills.map((item) => [item.slug, item.status]),
     [
+      // The worker's verdict, not "already installed" from asking again.
       ["gh-o-r-a", "installed"],
       ["gh-o-r-b", "queued"],
     ],
   );
+  assert.equal(outcome.skills[0]?.workspaceSkill?.id, "ws-a");
+  assert.deepEqual(outcome.failures, [
+    { slug: "gh-o-r-c", message: "quota exceeded" },
+  ]);
+  assert.equal(state.upserts.length, 0);
+});
+
+test("a submission that carried no install is installed when it is described", async () => {
+  state.byName = [row("gh-o-r-a")];
+  const outcome = await contentSkillsService.describeSubmissionInstall({
+    ...scope,
+    submission: finished([result("a", "indexed"), result("b", "indexed")]),
+    skill: "a",
+    installedVia: "agent",
+  });
+  assert.deepEqual(
+    outcome.skills.map((item) => [item.slug, item.status]),
+    [["gh-o-r-a", "installed"]],
+  );
   assert.equal(state.upserts.length, 1);
+  assert.equal(state.upserts[0]?.installedVia, "agent");
+});
+
+test("an unknown `skill`, or nothing installable, is an error that names what the source ships", async () => {
+  await assert.rejects(
+    contentSkillsService.describeSubmissionInstall({
+      ...scope,
+      submission: finished([result("a", "indexed")]),
+      skill: "zzz",
+    }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "SKILL_NOT_FOUND");
+      assert.match(error.message, /It ships: a/);
+      return true;
+    },
+  );
+  await assert.rejects(
+    contentSkillsService.describeSubmissionInstall({
+      ...scope,
+      submission: finished([result("a", "indexed")]),
+    }),
+    { code: "SKILL_NOT_FOUND" },
+  );
 });
 
 test("the catalog UI path installs by id through the same visibility check", async () => {

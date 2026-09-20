@@ -1,10 +1,9 @@
 import { sha256 } from "../hash";
-import { LOGO_FILE_PATTERN, MAX_LOGO_BYTES } from "./logo";
+import { SKILL_STORAGE_LIMITS } from "../storage";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
   GitHubArchiveError,
-  GITHUB_ZIP_LIMITS,
   listZipEntries,
   readZipEntries,
   resolvePinnedGitHubSource,
@@ -25,14 +24,13 @@ import type { GitHubRequestOptions } from "../../market/parser/github";
  */
 
 /**
- * DoS bounds on the ANALYZED skill bundles. The archive-level caps (compressed
- * size, entry count, per-file and cumulative uncompressed size) live in
- * `github-zip.ts`; `maxSkillFileBytes` mirrors its per-file ceiling so a file we
- * index is always re-readable within the same cap.
+ * What one skill bundle may carry is `SKILL_STORAGE_LIMITS` — the same numbers
+ * the object store and the sandbox staging run under, so a skill that can be
+ * indexed can always be stored and staged. The archive-level caps (compressed
+ * size, entry count, cumulative uncompressed size) live in `github-zip.ts`.
+ * What is left here is the one bound that is about the catalog, not bytes.
  */
 export const REGISTRY_READ_LIMITS = Object.freeze({
-  maxSkillFileBytes: GITHUB_ZIP_LIMITS.maxFileBytes,
-  maxSkillFilesPerBundle: 200,
   /**
    * An anti-spam bound on the SHARED catalog, not a resource bound — bytes are
    * already capped in `github-zip.ts`, and a 90-skill repository measured only
@@ -55,7 +53,7 @@ const SKIP_DIR_NAMES = new Set(["node_modules", "dist", ".git"]);
 /** Containers under which per-skill subdirectories live (§3 Stage 2). */
 const SKILL_CONTAINERS = ["skills", ".claude/skills", ".agents/skills"];
 
-/** Mirrors builtin.ts TEXT_MIME_BY_EXTENSION; anything else serves as text. */
+/** Mirrors builtin.ts TEXT_MIME_BY_EXTENSION; any other text serves as plain. */
 const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -65,23 +63,62 @@ const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 /**
- * A skill bundle is text — SKILL.md, references, scripts. Real repos also ship
- * binary assets alongside them (anthropics/skills ships 56 `.ttf` fonts under
- * `canvas-design/`), and those cannot be carried: `contentText` is a Postgres
- * `text` column, so invalid UTF-8 is rejected at insert time, and a lossy
- * decode would store mojibake whose sha256 no longer matches the source. They
- * are dropped from the bundle rather than mangled — binary assets are a known
- * non-goal — which also keeps `fileManifest` an honest description of what we
- * actually carry.
+ * What skills actually ship next to their text: fonts (anthropics/skills
+ * carries 56 `.ttf` under `canvas-design/`), images, document templates. The
+ * type is recorded on the manifest row and set on the stored blob; a binary
+ * with no entry here is an opaque octet stream.
+ */
+const BINARY_MIME_BY_EXTENSION: Record<string, string> = {
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+  ".pdf": "application/pdf",
+  ".zip": "application/zip",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".docx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".dotx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xltx":
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+  ".pptx":
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".potx":
+    "application/vnd.openxmlformats-officedocument.presentationml.template",
+};
+
+/**
+ * Whether the bytes are text a reader can be handed as a string: valid UTF-8
+ * with no NUL. Decided by round-trip, not by extension — a lossy decode would
+ * produce a string whose bytes no longer match the file's sha256. Everything
+ * else is carried as the bytes it is; nothing is dropped for being binary.
  */
 function isUtf8Text(bytes: Buffer, decoded: string): boolean {
   return !decoded.includes("\0") && Buffer.from(decoded, "utf8").equals(bytes);
 }
 
-function mimeTypeFor(bundlePath: string): string {
+function mimeTypeFor(bundlePath: string, isText: boolean): string {
   const dot = bundlePath.lastIndexOf(".");
   const ext = dot < 0 ? "" : bundlePath.slice(dot).toLowerCase();
-  return TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain";
+  return isText
+    ? (TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain")
+    : (BINARY_MIME_BY_EXTENSION[ext] ?? "application/octet-stream");
 }
 
 export type DiscoveredSkillFile = {
@@ -91,12 +128,42 @@ export type DiscoveredSkillFile = {
   sha256: string;
   sizeBytes: number;
   mimeType: string;
-  contentText: string;
-};
+  /** The file exactly as the archive held it — what is stored and bundled. */
+  bytes: Uint8Array;
+} & (
+  | {
+      isText: true;
+      /**
+       * `bytes` decoded, for the consumers that read text: the safety scan,
+       * frontmatter parsing, logo metadata. Never what gets stored.
+       */
+      contentText: string;
+    }
+  | { isText: false; contentText: null }
+);
+
+/** Build a `DiscoveredSkillFile` from raw bytes; the one place `isText` is decided. */
+export function discoveredSkillFile(
+  bundlePath: string,
+  raw: Uint8Array,
+): DiscoveredSkillFile {
+  const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  const decoded = bytes.toString("utf8");
+  const isText = isUtf8Text(bytes, decoded);
+  const base = {
+    bundlePath,
+    // sha256 is over the raw bytes, so integrity stays byte-exact.
+    sha256: sha256(bytes),
+    sizeBytes: bytes.byteLength,
+    mimeType: mimeTypeFor(bundlePath, isText),
+    bytes,
+  };
+  return isText
+    ? { ...base, isText: true, contentText: decoded }
+    : { ...base, isText: false, contentText: null };
+}
 
 export type DiscoveredSkill = {
-  /** Bounded image candidates for presentation metadata, outside the text runtime bundle. */
-  images?: Array<{ path: string; bytes: Buffer }>;
   /**
    * Skill directory relative to the REPO ROOT. Empty string when the skill sits
    * at the repo root.
@@ -105,7 +172,13 @@ export type DiscoveredSkill = {
   /** Last path segment of the skill dir. */
   dirName: string;
   files: DiscoveredSkillFile[];
-  excludedFiles?: Array<{ path: string; reason: string }>;
+  /**
+   * Set when the bundle is over a storage limit. None of its files were read,
+   * and analysis reports this as the skill's own failure — so one oversized
+   * skill does not cost a repository its other skills, and a skill is never
+   * indexed with part of its bundle missing.
+   */
+  rejection?: RegistrySubmissionError;
 };
 
 export type ReadRegistryResult = {
@@ -113,13 +186,72 @@ export type ReadRegistryResult = {
   /** Immutable 40-hex commit the submission is pinned to. */
   commitSha: string;
   /**
-   * Committer date of `commitSha` (ISO 8601), or undefined when GitHub's commit
-   * metadata could not be read. Orders this submission against other commits of
-   * the same skill when deciding which version is current.
+   * Committer date of `commitSha` (ISO 8601). Orders this submission against
+   * other commits of the same skill when deciding which version is current, so
+   * a submission without one is refused (`requireCommittedAt`).
    */
-  committedAt?: string;
+  committedAt: string;
   skills: DiscoveredSkill[];
 };
+
+/**
+ * Every registry version is ordered by its commit's age, so an undated one
+ * cannot be placed: it would either never become current or always do. GitHub
+ * only fails to supply the date when the source named a full sha and the commit
+ * metadata read failed — a later attempt can succeed, which is why the ingest
+ * treats this code as transient.
+ */
+export function requireCommittedAt(source: PinnedGitHubSource): string {
+  const ms = source.committedAt ? Date.parse(source.committedAt) : Number.NaN;
+  if (Number.isNaN(ms)) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_UNDATED",
+      `Could not read the commit date of ${source.commitSha.slice(0, 12)} from GitHub, and a skill version cannot be ordered without it. Try again shortly.`,
+    );
+  }
+  return source.committedAt!;
+}
+
+function formatMiB(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
+}
+
+/**
+ * The three bundle limits, against whatever sizes are known. Run twice: on the
+ * archive's DECLARED sizes before anything is inflated, and again on the actual
+ * bytes, because declared sizes are attacker-controlled.
+ */
+function bundleLimitViolation(
+  skillDir: string,
+  files: ReadonlyArray<{ path: string; sizeBytes: number }>,
+): RegistrySubmissionError | null {
+  const label =
+    skillDir === ""
+      ? "The skill at the repository root"
+      : `Skill '${skillDir}'`;
+  const limits = SKILL_STORAGE_LIMITS;
+  if (files.length > limits.maxFiles) {
+    return new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      `${label} has ${files.length} files, more than the ${limits.maxFiles}-file limit for one skill`,
+    );
+  }
+  const oversize = files.find((file) => file.sizeBytes > limits.maxFileBytes);
+  if (oversize) {
+    return new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      `${label}: file '${oversize.path}' is ${formatMiB(oversize.sizeBytes)}, more than the ${formatMiB(limits.maxFileBytes)} limit for one file`,
+    );
+  }
+  const total = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+  if (total > limits.maxBundleBytes) {
+    return new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      `${label} is ${formatMiB(total)} in total, more than the ${formatMiB(limits.maxBundleBytes)} limit for one skill`,
+    );
+  }
+  return null;
+}
 
 /** `a/b/c.md` → `a/b`; a root-level path → `""`. */
 function dirNameOf(filePath: string): string {
@@ -237,6 +369,8 @@ export async function readRegistrySkillsFromGitHub(
 ): Promise<ReadRegistryResult> {
   try {
     const source = await resolvePinnedGitHubSource(repoUrl, options);
+    // Before the download: an undated commit is refused whatever it contains.
+    requireCommittedAt(source);
     const zip = await downloadRepoZip(source, options);
     return await readRegistrySkillsFromArchive(zip, source);
   } catch (error) {
@@ -244,11 +378,12 @@ export async function readRegistrySkillsFromGitHub(
   }
 }
 
-/** Locate and decode every skill bundle in an already-downloaded zipball. */
+/** Locate and read every skill bundle in an already-downloaded zipball. */
 export async function readRegistrySkillsFromArchive(
   zip: Buffer,
   source: PinnedGitHubSource,
 ): Promise<ReadRegistryResult> {
+  const committedAt = requireCommittedAt(source);
   const entries = await listZipEntries(zip);
   const entryPaths = entries.map((entry) => entry.path);
   const skillDirs = discoverSkillDirectories(entryPaths, source.subpath);
@@ -266,28 +401,21 @@ export async function readRegistrySkillsFromArchive(
     );
   }
 
-  const wanted = new Map<string, string>();
+  // A file belongs to the innermost skill that contains it: the longest
+  // matching skill dir wins, so a nested skill's files are not also counted
+  // against (or bundled into) the skill above it.
+  const ownerOf = new Map<string, string>();
   for (const skillDir of skillDirs) {
-    const bundlePaths = entryPaths.filter((entryPath) =>
-      isBundleFile(skillDir, entryPath),
-    );
-    if (bundlePaths.length > REGISTRY_READ_LIMITS.maxSkillFilesPerBundle) {
-      throw new RegistrySubmissionError(
-        "REGISTRY_SUBMISSION_TOO_LARGE",
-        `Skill bundle exceeds the ${REGISTRY_READ_LIMITS.maxSkillFilesPerBundle}-file limit`,
-      );
-    }
-    for (const bundlePath of bundlePaths) {
-      // A nested skill dir belongs to the innermost skill that owns it; the
-      // longest matching prefix wins.
-      const current = wanted.get(bundlePath);
-      if (!current || skillDir.length > current.length) {
-        wanted.set(bundlePath, skillDir);
+    for (const entryPath of entryPaths) {
+      if (!isBundleFile(skillDir, entryPath)) {
+        continue;
+      }
+      const current = ownerOf.get(entryPath);
+      if (current === undefined || skillDir.length > current.length) {
+        ownerOf.set(entryPath, skillDir);
       }
     }
   }
-
-  const files = await readZipEntries(zip, (entryPath) => wanted.has(entryPath));
 
   const skills: DiscoveredSkill[] = skillDirs.map((skillDir) => ({
     repoSubpath: skillDir,
@@ -295,6 +423,47 @@ export async function readRegistrySkillsFromArchive(
     files: [],
   }));
   const byDir = new Map(skills.map((skill) => [skill.repoSubpath, skill]));
+  const bundlePathOf = (entryPath: string, skillDir: string) =>
+    entryPath.slice(skillDir === "" ? 0 : skillDir.length + 1);
+
+  // First gate, on declared sizes: an over-limit skill is refused before a
+  // byte of it is inflated, and its files are left out of the read.
+  const declared = new Map<
+    string,
+    Array<{ path: string; sizeBytes: number }>
+  >();
+  for (const entry of entries) {
+    const skillDir = ownerOf.get(entry.path);
+    if (skillDir === undefined) {
+      continue;
+    }
+    const list = declared.get(skillDir) ?? [];
+    list.push({
+      path: bundlePathOf(entry.path, skillDir),
+      sizeBytes: entry.declaredSize,
+    });
+    declared.set(skillDir, list);
+  }
+  for (const skill of skills) {
+    const rejection = bundleLimitViolation(
+      skill.repoSubpath,
+      declared.get(skill.repoSubpath) ?? [],
+    );
+    if (rejection) {
+      skill.rejection = rejection;
+    }
+  }
+
+  const wanted = new Map(
+    [...ownerOf].filter(([, skillDir]) => !byDir.get(skillDir)!.rejection),
+  );
+  const files = await readZipEntries(
+    zip,
+    (entryPath) => wanted.has(entryPath),
+    // Fonts, images and templates are bundle content: the per-file ceiling for
+    // a skill is the storage limit, not the reader's manifest-sized default.
+    { maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes },
+  );
 
   for (const [entryPath, skillDir] of wanted) {
     const bytes = files.get(entryPath);
@@ -303,28 +472,25 @@ export async function readRegistrySkillsFromArchive(
         "REGISTRY_READ_FAILED",
         "A requested archive file could not be read",
       );
-    const prefix = skillDir === "" ? "" : `${skillDir}/`;
-    const bundlePath = entryPath.slice(prefix.length);
-    if (LOGO_FILE_PATTERN.test(bundlePath) && bytes.length <= MAX_LOGO_BYTES) {
-      (byDir.get(skillDir)!.images ??= []).push({ path: bundlePath, bytes });
+    byDir
+      .get(skillDir)!
+      .files.push(
+        discoveredSkillFile(bundlePathOf(entryPath, skillDir), bytes),
+      );
+  }
+  // Second gate, on what was actually inflated.
+  for (const skill of skills) {
+    const rejection = bundleLimitViolation(
+      skill.repoSubpath,
+      skill.files.map((file) => ({
+        path: file.bundlePath,
+        sizeBytes: file.sizeBytes,
+      })),
+    );
+    if (rejection) {
+      skill.rejection = rejection;
+      skill.files = [];
     }
-    const contentText = bytes.toString("utf8");
-    if (!isUtf8Text(bytes, contentText)) {
-      const skill = byDir.get(skillDir)!;
-      (skill.excludedFiles ??= []).push({
-        path: bundlePath,
-        reason: "File is not supported UTF-8 text and was not included.",
-      });
-      continue;
-    }
-    byDir.get(skillDir)?.files.push({
-      bundlePath,
-      // sha256 is over the raw bytes, so integrity stays byte-exact.
-      sha256: sha256(bytes),
-      sizeBytes: bytes.byteLength,
-      mimeType: mimeTypeFor(bundlePath),
-      contentText,
-    });
   }
   for (const skill of skills) {
     skill.files.sort((left, right) =>
@@ -332,10 +498,5 @@ export async function readRegistrySkillsFromArchive(
     );
   }
 
-  return {
-    source,
-    commitSha: source.commitSha,
-    ...(source.committedAt ? { committedAt: source.committedAt } : {}),
-    skills,
-  };
+  return { source, commitSha: source.commitSha, committedAt, skills };
 }

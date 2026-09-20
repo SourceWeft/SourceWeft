@@ -1,7 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { beforeAll, afterAll, describe, test, expect } from "vitest";
+import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+
+// PostgreSQL is real; the object store under `../storage` is a map.
+const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
+vi.mock("../../sources/storage", () => ({
+  getContentStorageBucketName: () => "bucket",
+  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
+    store.objects.has(key),
+  uploadFileObject: async (input: { key: string; body: Buffer }) => {
+    store.objects.set(input.key, input.body);
+    return { bucket: "bucket", key: input.key };
+  },
+}));
 
 /**
  * Which version is current is decided by the pinned commit's committer date,
@@ -43,7 +55,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     function input(
       slug: string,
       marker: string,
-      options: { committedAt?: string; flagged?: boolean } = {},
+      options: { committedAt?: string; flagged?: boolean },
     ) {
       const flagged = options.flagged ?? false;
       const commitSha = marker.repeat(40),
@@ -56,16 +68,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         description: `Version ${marker}`,
         commitSha,
         storagePointer: `github:fixture/skills@${commitSha}#writer`,
-        contentHash: hash,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
           {
             path: "SKILL.md",
-            contentText,
+            bytes: Buffer.from(contentText),
             mimeType: "text/markdown",
-            sizeBytes: Buffer.byteLength(contentText),
-            contentHash: hash,
           },
         ],
         manifestJson: {
@@ -248,41 +257,17 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(after.definition.description).toBe("Version b");
     });
 
-    test("legacy versions without committedAt keep newest-write-wins", async () => {
+    test("a version without a commit date is refused, and stores nothing", async () => {
+      // Currency is decided by commit age alone, so an undated version has no
+      // place in the order — ingest fails rather than invent one.
       const slug = newSlug();
-      const first = await upsert(input(slug, "a"));
-      const second = await upsert(input(slug, "b"));
-      let after = await state(first.skillId);
-      expect(after.current).toEqual([second.skillVersionId]);
-      expect(after.definition.description).toBe("Version b");
-
-      // Admin publish between two undated versions behaves as it always did.
-      const draft = await upsert(input(slug, "c", { flagged: true }));
-      await review.setRegistrySkillVersionStatus(
-        draft.skillVersionId,
-        "published",
-        admin,
-      );
-      after = await state(first.skillId);
-      expect(after.current).toEqual([draft.skillVersionId]);
-      expect(after.definition.description).toBe("Version c");
-    });
-
-    test("a dated commit outranks an undated current version, and not the reverse", async () => {
-      const slug = newSlug();
-      const legacy = await upsert(input(slug, "a"));
-      const dated = await upsert(input(slug, "b", { committedAt: OLDER }));
-      let after = await state(legacy.skillId);
+      const dated = await upsert(input(slug, "a", { committedAt: OLDER }));
+      await expect(
+        repo.upsertRegistrySkillIndex(input(slug, "b", {})),
+      ).rejects.toMatchObject({ code: "REGISTRY_SUBMISSION_UNDATED" });
+      const after = await state(dated.skillId);
+      expect(after.versions.map((v) => v.id)).toEqual([dated.skillVersionId]);
       expect(after.current).toEqual([dated.skillVersionId]);
-
-      // Unknown date ranks as oldest once the current version has one.
-      const undated = await upsert(input(slug, "c"));
-      after = await state(legacy.skillId);
-      expect(after.current).toEqual([dated.skillVersionId]);
-      expect(
-        after.versions.find((v) => v.id === undated.skillVersionId),
-      ).toMatchObject({ status: "published", isCurrent: false });
-      expect(after.definition.description).toBe("Version b");
     });
   },
 );

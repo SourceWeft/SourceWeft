@@ -80,7 +80,6 @@ function analyzed(name: string, flags: string[] = []) {
     description: "d",
     repoSubpath: `skills/${name}`,
     capability: "prompt-only" as const,
-    contentSha256: "h",
     scan: { reviewRequired: flags.length > 0, flags },
     fileManifest: [],
     allowedTools: [],
@@ -279,6 +278,36 @@ test("a transient failure goes back to queued while the queue will retry, and to
     code: "REGISTRY_SUBMISSION_FAILED",
     message: "fetch failed",
   });
+});
+
+test("a commit whose date GitHub would not give is refused at resolve: retried while it can be, failed by name once it cannot", async () => {
+  const { committedAt: _unknown, ...undated } = source;
+  const download = vi.fn(async () => Buffer.alloc(0));
+  const undatedDeps = () =>
+    deps({
+      resolveSource: vi.fn(async () => undated),
+      downloadArchive: download,
+    });
+
+  // The date exists; only the metadata read failed — worth another attempt.
+  await assert.rejects(run({ deps: undatedDeps(), willRetryTransient: true }));
+  assert.equal(state.row!.status, "queued");
+
+  await assert.rejects(
+    run({ deps: undatedDeps(), willRetryTransient: false }),
+    (error) =>
+      error instanceof RegistrySubmissionError &&
+      error.code === "REGISTRY_SUBMISSION_UNDATED",
+  );
+  assert.equal(state.row!.status, "failed");
+  assert.equal(
+    (state.row!.error as { code: string }).code,
+    "REGISTRY_SUBMISSION_UNDATED",
+  );
+  assert.equal(state.row!.stage, "resolve");
+  // Nothing was downloaded, let alone stored as an undated version.
+  assert.equal(download.mock.calls.length, 0);
+  assert.equal(mocks.upsert.mock.calls.length, 0);
 });
 
 test("a fired deadline fails the run as a deadline, whatever the interrupted call threw", async () => {

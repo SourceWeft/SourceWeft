@@ -74,8 +74,6 @@ import type {
   ListSkillsCatalogParams,
   ListSkillsCatalogResponse,
   SearchRegistrySkillsResponse,
-  SubmitRegistrySkillRequest,
-  SubmitRegistrySkillResponse,
   ListThreadsRequest,
   ListSourcesResponse,
   ListWorkspaceSkillsResponse,
@@ -767,13 +765,6 @@ export class ContentClient {
   searchSkillRegistry(workspaceId: string, query: string) {
     return this.http.get<SearchRegistrySkillsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/skills/registry/search?q=${encodeURIComponent(query)}`,
-    );
-  }
-
-  submitRegistrySkill(workspaceId: string, input: SubmitRegistrySkillRequest) {
-    return this.http.post<SubmitRegistrySkillResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submit`,
-      input,
     );
   }
 

@@ -1,11 +1,12 @@
 import { tool } from "langchain";
 import { z } from "zod";
+import type { SkillSubmission } from "@sourceweft/contracts";
 import type { AgentTurnTool } from "../threads/agent/capability-tools/types";
 import { ContentError } from "../content/errors";
-import { contentSkillsService } from "./service";
+import { contentSkillsService, type InstalledSkillResult } from "./service";
+import { getSkillSubmission } from "./registry/ingest/service";
 import { resolveSelectedSkills } from "./selection";
 import type { EnabledSkillDescriptor } from "./types";
-import { RegistrySubmissionError } from "./registry/errors";
 import { logger } from "../../shared/logger";
 
 /**
@@ -32,7 +33,17 @@ import { logger } from "../../shared/logger";
  * are runnable. Where staging is not possible — no sandbox this turn, a bundle
  * over the staging caps — the scripts wait for the next turn, and the result
  * says so.
+ *
+ * A GitHub repository the catalog does not have yet is imported by a background
+ * job (fetch, scan, index, then install). `install_skill` waits a short while
+ * for it, because most repositories finish within seconds and the skill is then
+ * usable in the same turn; past that it says the import is still running and
+ * returns, rather than hold the turn for a job that can take minutes.
  */
+
+/** How long `install_skill` waits for a background import before answering. */
+const IMPORT_WAIT_BUDGET_MS = 15_000;
+const IMPORT_POLL_INTERVAL_MS = 1_000;
 
 export type SkillAgentToolContext = {
   teamId: string;
@@ -141,6 +152,67 @@ function describe(input: {
   return `- ${input.slug} — ${input.displayName}: ${input.description}\n${provenanceOf(input)}`;
 }
 
+function isTerminal(submission: SkillSubmission) {
+  return submission.status === "succeeded" || submission.status === "failed";
+}
+
+/**
+ * Follow an import until it finishes or the wait budget runs out, whichever is
+ * first; returns the last state seen. A poll that fails ends the wait early —
+ * the import itself is unaffected, so it is reported as still in progress.
+ */
+async function awaitSubmission(
+  context: SkillAgentToolContext,
+  initial: SkillSubmission,
+): Promise<SkillSubmission> {
+  let submission = initial;
+  const deadline = Date.now() + IMPORT_WAIT_BUDGET_MS;
+  while (!isTerminal(submission)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(IMPORT_POLL_INTERVAL_MS, remaining)),
+    );
+    try {
+      ({ submission } = await getSkillSubmission({
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+        submissionId: submission.id,
+      }));
+    } catch (error) {
+      logger.warn("Could not poll skill import for install_skill", {
+        submissionId: submission.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      break;
+    }
+  }
+  return submission;
+}
+
+function describeImportInProgress(
+  context: SkillAgentToolContext,
+  source: string,
+  submission: SkillSubmission,
+  skill: string | undefined,
+): string {
+  const progress = `Import of ${source} is in progress (stage: ${submission.stage ?? submission.status}).`;
+  // An import this person already had running is reused as is, so it may have
+  // been started without an install, for another skill, or somewhere else.
+  const planned = submission.onComplete?.install;
+  const installsHere =
+    submission.workspaceId === context.workspaceId &&
+    planned !== undefined &&
+    (planned.skill === undefined ||
+      planned.skill.trim().toLowerCase() === skill?.trim().toLowerCase());
+  return installsHere
+    ? `${progress} It will be installed and switched on in this workspace automatically when it finishes; tell the user, and they can ask you to use it in a later message.`
+    : `${progress} It was started earlier without this install, so nothing is switched on automatically; tell the user, and call install_skill with the same source again in a later message, once it has finished.`;
+}
+
 export function buildSkillAgentTools(
   context: SkillAgentToolContext,
 ): AgentTurnTool[] {
@@ -199,13 +271,43 @@ export function buildSkillAgentTools(
   const installSkill = tool(
     async ({ source, skill }: { source: string; skill?: string }) => {
       try {
-        const { skills } = await contentSkillsService.installSkill({
+        const scope = {
           teamId: context.teamId,
           workspaceId: context.workspaceId,
           userId: context.userId,
+        };
+        const started = await contentSkillsService.installSkill({
+          ...scope,
           ref: { kind: "source", source, ...(skill ? { skill } : {}) },
           installedVia: "agent",
         });
+        let skills: InstalledSkillResult[] = started.skills;
+        let failures: Array<{ slug: string; message: string }> = [];
+        if (started.submission) {
+          // A repository the catalog does not have yet: a background import.
+          const submission =
+            started.submission.workspaceId === context.workspaceId
+              ? await awaitSubmission(context, started.submission)
+              : started.submission;
+          if (submission.status === "failed") {
+            logger.info("Agent skill import failed", {
+              source,
+              workspaceId: context.workspaceId,
+              code: submission.error?.code,
+            });
+            return `Could not install '${source}': ${submission.error?.message ?? "the import failed"}`;
+          }
+          if (submission.status !== "succeeded") {
+            return describeImportInProgress(context, source, submission, skill);
+          }
+          ({ skills, failures } =
+            await contentSkillsService.describeSubmissionInstall({
+              ...scope,
+              submission,
+              ...(skill ? { skill } : {}),
+              installedVia: "agent",
+            }));
+        }
 
         const lines: string[] = [];
         const already = skills.filter(
@@ -284,12 +386,16 @@ export function buildSkillAgentTools(
             ...queued.map(describe),
           );
         }
+        if (failures.length > 0) {
+          lines.push(
+            ...(lines.length > 0 ? [""] : []),
+            `${failures.length} skill(s) were indexed but could not be switched on here; install them again by slug:`,
+            ...failures.map((item) => `- ${item.slug}: ${item.message}`),
+          );
+        }
         return lines.join("\n");
       } catch (error) {
-        if (
-          error instanceof RegistrySubmissionError ||
-          error instanceof ContentError
-        ) {
+        if (error instanceof ContentError) {
           logger.info("Agent skill install rejected", {
             source,
             workspaceId: context.workspaceId,
@@ -303,7 +409,7 @@ export function buildSkillAgentTools(
     {
       name: "install_skill",
       description:
-        "Install a skill into this workspace and switch it on, then use it in this same turn. `source` is a slug from search_skills, the author's short name for a skill, a link to this SourceWeft deployment's skill page, a GitHub URL (optionally deep-linked to one skill's directory) or `owner/repo`. When you already hold one of these, call this directly — do not search first. A GitHub repository not in the catalog yet is fetched, scanned and indexed first; every skill it ships is installed unless you pass `skill`. The result tells you which SKILL.md to read; anything the safety scan held for review is reported and not installed. Links to other sites are refused — ask for the GitHub repository instead.",
+        "Install a skill into this workspace and switch it on, then use it in this same turn. `source` is a slug from search_skills, the author's short name for a skill, a link to this SourceWeft deployment's skill page, a GitHub URL (optionally deep-linked to one skill's directory) or `owner/repo`. When you already hold one of these, call this directly — do not search first. A GitHub repository not in the catalog yet is fetched, scanned and indexed first, in the background; every skill it ships is installed unless you pass `skill`. That usually finishes within this call; when it does not, the result says the import is in progress — it installs itself when done, so do not call again to wait for it. The result tells you which SKILL.md to read; anything the safety scan held for review is reported and not installed. Links to other sites are refused — ask for the GitHub repository instead.",
       schema: z.object({
         skill: z
           .string()

@@ -1675,6 +1675,58 @@ test("a mid-turn bundle that fails to stage degrades alone with the recoverable 
   );
 });
 
+test("a skill the host could not plan fails alone, without any sandbox traffic for it", async () => {
+  const { provider } = createProvider();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    skillStaging: {
+      plans: async () => [skillPlan("ppt-deck")],
+      hasPlans: () => true,
+      unstageable: () => [
+        { name: "huge", version: "1.0.0", error: "not stageable: bundle_too_large" },
+      ],
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+    toolApprovalEnabled: true,
+  });
+
+  const failed = await backend.execute("python3 /skills/huge/scripts/run.py", {
+    toolCallId: "tool-call-unstageable-1",
+  });
+  assert.equal(failed.exitCode, 1);
+  assert.match(failed.output, /SANDBOX_SKILL_STAGING_UNAVAILABLE/u);
+  assert.ok(
+    ![...provider.executed, ...provider.systemExecuted].some((command) =>
+      command.includes("/skills/huge"),
+    ),
+  );
+
+  const ok = await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-unstageable-2",
+  });
+  assert.equal(ok.output, "user execute");
+  assert.deepEqual(
+    manager
+      .skillAssetResolutions()
+      ?.map((resolution) => [resolution.name, resolution.ok]),
+    [
+      ["ppt-deck", true],
+      ["huge", false],
+    ],
+  );
+});
+
 test("a missing required runtime asset fails acquisition instead of degrading", async () => {
   const { provider } = createProvider();
   const manager = new SandboxManager({

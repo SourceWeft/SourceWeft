@@ -38,6 +38,7 @@ import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../../_components/site-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
+import { MySubmissions, useSkillSubmissions } from "./skill-submissions";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 
 type SkillsCatalogResponse = Awaited<
@@ -1144,6 +1145,13 @@ export function SkillsGallery({
     }
   }, [onCatalogChange]);
 
+  // An import finishes in the background, whenever it finishes; that is when
+  // the catalog may have gained skills (even a failed one can have indexed some).
+  const submissions = useSkillSubmissions({
+    workspaceId: workspace?.id ?? dashboardState.workspaceId,
+    onFinished: () => void refreshCatalog(),
+  });
+
   const pageLoading =
     catalogStatus === "resolving_workspace" ||
     catalogStatus === "loading_catalog";
@@ -1235,7 +1243,7 @@ export function SkillsGallery({
                 </div>
                 <div className="flex items-center gap-2">
                   <SubmitSkillDialog
-                    onSubmitted={refreshCatalog}
+                    submissions={submissions}
                     workspaceId={workspace?.id ?? dashboardState.workspaceId}
                   />
                   <SortMenu
@@ -1250,6 +1258,7 @@ export function SkillsGallery({
                   {error}
                 </p>
               ) : null}
+              <MySubmissions submissions={submissions} />
 
               {pageLoading ? (
                 <SkillsCatalogSkeletonGrid variant={variant} />

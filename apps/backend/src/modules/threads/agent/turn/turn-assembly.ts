@@ -561,13 +561,16 @@ export interface ThreadAgentAssembly {
  * keeps the empty case exactly as it was before staging existed — the prompt
  * does not announce staged scripts and /skills stays denied in execute until
  * something is registered; on images without a pre-created /skills the runtime
- * degrades safely per plan. Plans are prebuilt (KB-scale, content-cached) so
- * the callbacks the manager invokes are trivially cheap.
+ * degrades safely per plan. A stored bundle's plan is a pointer and an
+ * in-process zip is built once and content-cached, so the callbacks the manager
+ * invokes stay cheap. `unstageable` hands the manager the skills that could not
+ * be planned, which it records as failed without touching the sandbox.
  */
 function skillAssetsForTurn(registry: TurnSkillSandboxAssets) {
   return {
-    plans: async () => registry.plans(),
+    plans: () => registry.plans(),
     hasPlans: () => registry.hasPlans(),
+    unstageable: () => registry.unstageable(),
     logger: {
       info: (message: string, meta?: Record<string, unknown>) =>
         logger.info(message, meta),
@@ -601,17 +604,16 @@ export function mountInstalledSkillForTurn(input: {
   ) {
     return { scriptsStageable: false };
   }
-  try {
-    filesystemBackend.skillSandboxAssets.add([skill]);
-    return { scriptsStageable: true };
-  } catch (error) {
+  const { rejected } = filesystemBackend.skillSandboxAssets.add([skill]);
+  if (rejected.length > 0) {
     logger.warn("Installed skill cannot be staged into the running turn", {
       workspaceId: prepared.workspace.id,
       skill: skill.name,
-      error: error instanceof Error ? error.message : String(error),
+      reason: rejected[0]!.reason,
     });
     return { scriptsStageable: false };
   }
+  return { scriptsStageable: true };
 }
 
 export async function buildSandboxRuntimeForPreparedTurn(input: {
@@ -619,8 +621,10 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
   filesystemBackend: FilesystemBackend;
 }): Promise<AgentSandboxRuntimeForTurn | null> {
   const { prepared, filesystemBackend } = input;
-  // Seeded here rather than where the registry is created, so an unstageable
-  // selected skill still fails the turn at the point it always did.
+  // An enabled skill that cannot be staged (over a limit, malformed) does NOT
+  // fail the turn — it used to, which broke every sandbox turn of the
+  // workspace. The registry records and logs it, /skills commands naming it get
+  // the recoverable staging error, and its instructions stay readable.
   filesystemBackend.skillSandboxAssets.add(prepared.enabledSkills);
   const skillAssets = skillAssetsForTurn(filesystemBackend.skillSandboxAssets);
   const sandboxCandidateTools = new Set([

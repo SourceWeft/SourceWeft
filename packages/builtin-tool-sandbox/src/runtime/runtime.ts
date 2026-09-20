@@ -64,7 +64,7 @@ export function createSandboxRuntimeForTurn(input: {
    * once staging resolved. The plan set may grow during the turn (see
    * SandboxSkillStaging). Absent → exactly today's behavior.
    */
-  skillAssets?: Pick<SandboxSkillStaging, "plans" | "hasPlans" | "logger">;
+  skillAssets?: Pick<SandboxSkillStaging, "plans" | "hasPlans" | "unstageable" | "logger">;
   /** Required capability binaries; failure aborts sandbox acquisition. */
   runtimeAssets?: Pick<SandboxRuntimeAssetStaging, "plans" | "logger">;
 }): SandboxRuntimeForTurn {
