@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { HttpClientError } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -41,6 +42,10 @@ function safeDecode(value: string) {
   } catch {
     return value;
   }
+}
+
+function isSkillNotFound(error: unknown) {
+  return error instanceof HttpClientError && error.code === "SKILL_NOT_FOUND";
 }
 
 function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
@@ -109,18 +114,9 @@ export default function SkillDetailPage() {
       }
 
       setIsLoading(true);
-      const catalog = await contentClient.listSkillsCatalog(resolved.id);
-      if (detailGenerationRef.current !== generation) {
-        return;
-      }
-      const skill = catalog.items.find((item) => item.slug === slug);
-      if (!skill) {
-        setDetail(null);
-        setError("Skill was not found.");
-        return;
-      }
-
-      const result = await contentClient.getSkillCatalogDetail(resolved.id, skill.catalogId);
+      // Resolved by slug on the server. Listing the catalog to find it here
+      // only ever saw one page, so any skill past it read as missing.
+      const result = await contentClient.getSkillCatalogDetailBySlug(resolved.id, slug);
       if (detailGenerationRef.current !== generation) {
         return;
       }
@@ -130,7 +126,11 @@ export default function SkillDetailPage() {
         return;
       }
       setDetail(null);
-      setError(loadError instanceof Error ? loadError.message : "Failed to load skill.");
+      setError(
+        isSkillNotFound(loadError)
+          ? "Skill was not found."
+          : loadError instanceof Error ? loadError.message : "Failed to load skill.",
+      );
     } finally {
       if (detailGenerationRef.current === generation) {
         setIsResolvingWorkspace(false);

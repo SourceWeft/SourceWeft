@@ -1,32 +1,22 @@
 import { unzip } from "fflate";
 import {
   GITHUB_ARCHIVE_LIMITS,
+  GITHUB_REQUEST_TIMEOUTS,
+  GitHubArchiveError,
   githubDownloadHeaders,
   githubFetch,
+  githubTimeoutError,
+  isGitHubTimeoutError,
   normalizeGitHubSource,
-  resolveCommitSha,
+  resolveCommit,
   resolveDefaultBranch,
+  type GitHubRequestOptions,
 } from "./github";
 import type { NormalizedGitHubSource } from "../types";
 
-/**
- * Failure modes a caller has to distinguish. Kept as a code rather than
- * per-caller error classes so this module stays free of any one consumer's
- * error taxonomy — the skills registry and the MCP market each map these onto
- * their own submission errors.
- */
-export type GitHubArchiveErrorCode =
-  "ARCHIVE_UNAVAILABLE" | "ARCHIVE_TOO_LARGE" | "ARCHIVE_UNPINNED";
-
-export class GitHubArchiveError extends Error {
-  constructor(
-    readonly code: GitHubArchiveErrorCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = "GitHubArchiveError";
-  }
-}
+// Declared next to `githubFetch`, which raises the timeout; re-exported so this
+// module stays the one import site for archive readers.
+export { GitHubArchiveError, type GitHubArchiveErrorCode } from "./github";
 
 /**
  * In-memory zipball reader for GitHub repository ingest.
@@ -66,6 +56,11 @@ const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 export type PinnedGitHubSource = NormalizedGitHubSource & {
   /** Immutable 40-hex commit every read and every stored pointer is pinned to. */
   commitSha: string;
+  /**
+   * Committer date of `commitSha` (ISO 8601). Undefined when the source named a
+   * full sha and GitHub's commit metadata could not be read.
+   */
+  committedAt?: string;
 };
 
 /**
@@ -74,6 +69,7 @@ export type PinnedGitHubSource = NormalizedGitHubSource & {
  */
 export async function resolvePinnedGitHubSource(
   repoUrl: string,
+  options?: GitHubRequestOptions,
 ): Promise<PinnedGitHubSource> {
   let source: NormalizedGitHubSource;
   try {
@@ -85,8 +81,26 @@ export async function resolvePinnedGitHubSource(
     );
   }
 
-  const ref = source.ref ?? (await resolveDefaultBranch(source));
-  const commitSha = (await resolveCommitSha(source, ref))?.toLowerCase();
+  let ref = source.ref;
+  if (!ref) {
+    try {
+      ref = await resolveDefaultBranch(source, options);
+    } catch (error) {
+      // A missing or private repository fails here first, with a plain Error
+      // that no caller maps — it used to surface as an HTTP 500 instead of
+      // "this repository is not available". Timeouts and caller aborts keep
+      // their own error.
+      if (error instanceof GitHubArchiveError || options?.signal?.aborted) {
+        throw error;
+      }
+      throw new GitHubArchiveError(
+        "ARCHIVE_UNAVAILABLE",
+        `Could not read ${source.repoUrl}: it does not exist, is private, or GitHub is unreachable`,
+      );
+    }
+  }
+  const commit = await resolveCommit(source, ref, options);
+  const commitSha = commit?.sha.toLowerCase();
   if (!commitSha || !COMMIT_SHA_PATTERN.test(commitSha)) {
     throw new GitHubArchiveError(
       "ARCHIVE_UNPINNED",
@@ -94,7 +108,11 @@ export async function resolvePinnedGitHubSource(
     );
   }
 
-  return { ...source, commitSha };
+  return {
+    ...source,
+    commitSha,
+    ...(commit?.committedAt ? { committedAt: commit.committedAt } : {}),
+  };
 }
 
 /**
@@ -104,9 +122,14 @@ export async function resolvePinnedGitHubSource(
  */
 export async function downloadRepoZip(
   source: PinnedGitHubSource,
+  options: GitHubRequestOptions = {},
 ): Promise<Buffer> {
   const url = `https://codeload.github.com/${source.owner}/${source.repo}/zip/${source.commitSha}`;
-  const response = await githubFetch(url, githubDownloadHeaders());
+  const timeoutMs = options.timeoutMs ?? GITHUB_REQUEST_TIMEOUTS.archiveMs;
+  const response = await githubFetch(url, githubDownloadHeaders(), {
+    ...options,
+    timeoutMs,
+  });
   if (!response.ok || !response.body) {
     throw new GitHubArchiveError(
       "ARCHIVE_UNAVAILABLE",
@@ -127,15 +150,24 @@ export async function downloadRepoZip(
 
   const chunks: Buffer[] = [];
   let total = 0;
-  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    total += chunk.byteLength;
-    if (total > GITHUB_ZIP_LIMITS.maxArchiveBytes) {
-      throw new GitHubArchiveError(
-        "ARCHIVE_TOO_LARGE",
-        "Repository archive exceeds the maximum allowed size",
-      );
+  try {
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      total += chunk.byteLength;
+      if (total > GITHUB_ZIP_LIMITS.maxArchiveBytes) {
+        throw new GitHubArchiveError(
+          "ARCHIVE_TOO_LARGE",
+          "Repository archive exceeds the maximum allowed size",
+        );
+      }
+      chunks.push(Buffer.from(chunk));
     }
-    chunks.push(Buffer.from(chunk));
+  } catch (error) {
+    // The deadline `githubFetch` set also covers the body: headers can arrive
+    // promptly and the stream still stall, which surfaces here, not there.
+    if (isGitHubTimeoutError(error) && !options.signal?.aborted) {
+      throw githubTimeoutError(url, timeoutMs);
+    }
+    throw error;
   }
   return Buffer.concat(chunks, total);
 }

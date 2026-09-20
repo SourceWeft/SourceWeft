@@ -61,3 +61,21 @@ for (const desktopOnly of [true, false, undefined]) {
     );
   });
 }
+
+test("listSkillsCatalog stays parameterless by default and encodes paging when asked", async () => {
+  const { client, paths } = recordingClient();
+
+  await client.listSkillsCatalog("workspace / one");
+  await client.listSkillsCatalog("workspace / one", {
+    limit: 100,
+    cursor: "page + two",
+    q: "pdf tools",
+  });
+  await client.getSkillCatalogDetailBySlug("workspace / one", "gh-owner/x");
+
+  assert.deepEqual(paths, [
+    "/v1/workspaces/workspace%20%2F%20one/skills/catalog",
+    "/v1/workspaces/workspace%20%2F%20one/skills/catalog?limit=100&cursor=page+%2B+two&q=pdf+tools",
+    "/v1/workspaces/workspace%20%2F%20one/skills/catalog/by-slug/gh-owner%2Fx",
+  ]);
+});

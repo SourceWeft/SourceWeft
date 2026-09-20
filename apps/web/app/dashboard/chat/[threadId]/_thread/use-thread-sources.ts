@@ -129,6 +129,7 @@ function workspaceInstalledSkillToChatSkill(
     ...(skill.registryCapability
       ? { registryCapability: skill.registryCapability }
       : {}),
+    ...(skill.installedVia === "agent" ? { installedVia: "agent" } : {}),
   };
 }
 

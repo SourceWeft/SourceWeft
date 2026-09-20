@@ -607,7 +607,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         requireSignature: true,
       }),
       oauthProvider({
-        loginPage: "/auth/login",
+        loginPage: "/auth/sign-in",
         consentPage: "/auth/consent",
         allowDynamicClientRegistration: false,
         allowUnauthenticatedClientRegistration: false,

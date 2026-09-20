@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 vi.mock("./repository", () => ({
   findInstallableSkillsByName: async () => state.byName,
   findCatalogSkillVersionForWorkspace: async () => state.byVersion,
+  mapWorkspaceSkill: (row: unknown) => row,
   upsertWorkspaceSkill: async (input: Record<string, unknown>) => {
     state.upserts.push(input);
     return { id: "ws-skill-1", enabled: input.enabled ?? true };
@@ -131,6 +132,17 @@ test("links to other sites are refused, not handed to the GitHub reader", async 
   assert.equal(state.upserts.length, 0);
 });
 
+test("a skill already on at this version is reported, not rewritten", async () => {
+  state.byName = [
+    row("feynman", {
+      enabled: { id: "ws-1", enabled: true, skillVersionId: "ver-feynman" },
+    }),
+  ];
+  const { skills } = await installBySource("feynman");
+  assert.equal(skills[0]?.status, "already_installed");
+  assert.equal(state.upserts.length, 0);
+});
+
 test("re-installing keeps the config already in place", async () => {
   state.byName = [row("feynman", { enabled: { configJson: { depth: 3 } } })];
   await installBySource("feynman");
@@ -196,4 +208,19 @@ test("the catalog UI path installs by id through the same visibility check", asy
   });
   assert.equal(skills[0]?.workspaceSkill?.id, "ws-skill-1");
   assert.deepEqual(state.upserts[0]?.configJson, { a: 1 });
+});
+
+// The agent acts AS the user, so `enabledBy` cannot tell the two apart.
+test("an install records who performed it", async () => {
+  state.byName = [row("feynman")];
+  await installBySource("feynman");
+  assert.equal(state.upserts[0]?.installedVia, "user");
+
+  state.upserts = [];
+  await contentSkillsService.installSkill({
+    ...scope,
+    ref: { kind: "source", source: "feynman" },
+    installedVia: "agent",
+  });
+  assert.equal(state.upserts[0]?.installedVia, "agent");
 });

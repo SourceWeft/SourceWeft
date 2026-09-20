@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { AgentTurnTool } from "../threads/agent/capability-tools/types";
 import { ContentError } from "../content/errors";
 import { contentSkillsService } from "./service";
+import { resolveSelectedSkills } from "./selection";
+import type { EnabledSkillDescriptor } from "./types";
 import { RegistrySubmissionError } from "./registry/errors";
 import { logger } from "../../shared/logger";
 
@@ -15,20 +17,61 @@ import { logger } from "../../shared/logger";
  * `lh skill install <source>`, Continue's `readSkill` — with the CLI
  * indirection dropped, since we already are a tool-calling agent.
  *
- * A skill installed here takes effect on the NEXT turn: the turn's skill set is
- * written into the checkpoint before the model runs, so the /skills mount and
- * the available-skills list are fixed for the current turn. The tool result
- * says so explicitly, because the alternative — the model installing a skill
- * and then confidently trying to use it in the same breath — reads as a bug to
- * the user. (OpenHands hit the same wall and answers it with a banner telling
- * the user to start a new conversation; ours is one turn, not one thread.)
+ * A turn's skill set is written into the checkpoint before the model runs, so
+ * the available-skills list in the prompt is fixed for the current turn. What
+ * is NOT fixed is the /skills mount: `mountSkill` adds a freshly installed
+ * skill to it, so the tool result can hand the model the path to read and the
+ * skill is usable in the same breath — the alternative (OpenHands' banner
+ * telling the user to start over; our earlier "takes effect next turn") reads
+ * as a bug to the person who just asked for the thing. Scripts are the
+ * exception: the sandbox stages skill bundles when it is acquired, so an
+ * executable skill's scripts only become runnable from the next turn, and the
+ * result says so.
  */
 
 export type SkillAgentToolContext = {
   teamId: string;
   workspaceId: string;
   userId: string;
+  /** Adds a skill to this turn's /skills mount. Absent → next-turn only. */
+  mountSkill?: (skill: EnabledSkillDescriptor) => void;
 };
+
+/**
+ * Mount what was just installed into the running turn; returns the slugs that
+ * are now readable. Best effort — a failure here must not turn a successful
+ * install into an error, it only means the skill waits for the next turn.
+ */
+async function mountInstalledSkills(
+  context: SkillAgentToolContext,
+  workspaceSkillIds: string[],
+): Promise<Map<string, string>> {
+  const mounted = new Map<string, string>();
+  if (!context.mountSkill || workspaceSkillIds.length === 0) {
+    return mounted;
+  }
+  try {
+    const wanted = new Set(workspaceSkillIds);
+    // Resolves every enabled skill; the ones already mounted are skipped.
+    const skills = await resolveSelectedSkills({
+      teamId: context.teamId,
+      workspaceId: context.workspaceId,
+      skillIds: [],
+    });
+    for (const skill of skills) {
+      if (wanted.has(skill.workspaceSkillId)) {
+        context.mountSkill(skill);
+        mounted.set(skill.workspaceSkillId, `/skills/${skill.name}/SKILL.md`);
+      }
+    }
+  } catch (error) {
+    logger.warn("Could not mount installed skill into the running turn", {
+      workspaceId: context.workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return mounted;
+}
 
 /**
  * Provenance the model needs to make, or advise on, a judgement.
@@ -89,42 +132,52 @@ export function buildSkillAgentTools(
 ): AgentTurnTool[] {
   const searchSkills = tool(
     async ({ query }: { query: string }) => {
-      const { items } = await contentSkillsService.searchCatalog({
+      const { items, total } = await contentSkillsService.searchCatalog({
         teamId: context.teamId,
         workspaceId: context.workspaceId,
         userId: context.userId,
         query,
       });
       if (items.length === 0) {
-        return `No skills match "${query}". Only skills already in this workspace's catalog are searchable; to add a new one, call install_skill with its GitHub URL or owner/repo.`;
+        // An empty result is where a model gives up or wanders off, so say what
+        // to do next (LobeHub's skill store spells out the same two rules).
+        return [
+          `No skills match "${query}".`,
+          "Matching is textual: retry ONCE with a single short keyword — the core noun, in English and in the user's language — before concluding nothing fits.",
+          "If the user gave you a skill slug, a SourceWeft skill link or a GitHub repository, do not search: pass it to install_skill. Otherwise, with nothing suitable here, answer normally.",
+        ].join(" ");
       }
       return [
-        `${items.length} skill(s) matching "${query}":`,
-        ...items.map((item) =>
-          describe({
-            slug: item.slug,
-            displayName: item.displayName,
-            description: `${item.description}${item.enabled ? " (already installed and on)" : ""}`,
-            sourceType: item.sourceType,
-            license: item.license,
-            flagged: item.flagged,
-            verified: item.verified,
-            sourceUrl: item.sourceUrl,
-          }),
+        total > items.length
+          ? `${total} skills match "${query}"; the best ${items.length}:`
+          : `${items.length} skill(s) match "${query}":`,
+        ...items.map((item, index) =>
+          [
+            `${index + 1}. ${item.slug} — ${item.displayName}: ${item.description}`,
+            `${provenanceOf({
+              sourceType: item.sourceType,
+              license: item.license,
+              flagged: item.flagged,
+              verified: item.verified,
+              sourceUrl: item.sourceUrl,
+            })}${item.installCount > 0 ? ` · on in ${item.installCount} workspace(s)` : ""}${item.enabled ? " · ALREADY installed and on here" : ""}${item.installable === false ? " · HELD for review — cannot be installed yet" : ""}`,
+          ].join("\n"),
         ),
         "",
-        "Install one with install_skill and its slug — that also switches it on.",
+        "Results are ordered best match first; among equals, built-in before this workspace's own before community, then by adoption. To use one, call install_skill with its slug (it also switches it on). If it is already on here, it is in your available skills — just use it.",
       ].join("\n");
     },
     {
       name: "search_skills",
       description:
-        "Search this workspace's skill catalog: its own and its team's skills, the opt-in built-ins, and the public community skills. Returns each match's slug, name, description and provenance — for a community skill that is publisher, license, review state and source URL; pass it on when you recommend one. Use it when the user asks what skills exist, or when a task calls for a capability none of the available skills cover. It does NOT search GitHub or any other site — to add a skill that is not in the catalog yet, call install_skill with its GitHub repository.",
+        "Search this workspace's skill catalog — its own and its team's skills, the opt-in built-ins, and public community skills. Each result gives the slug to install, what the skill does, where it comes from (for a community skill: publisher, license, scan state, source URL) and how many workspaces keep it on. It searches this catalog only, never GitHub or the web.",
       schema: z.object({
         query: z
           .string()
           .min(1)
-          .describe("What the skill should do, e.g. 'pdf' or 'code review'."),
+          .describe(
+            "One or two short keywords for the capability, e.g. 'pdf', 'code review', 'feynman'. Short beats descriptive: every word is matched separately.",
+          ),
       }),
     },
   );
@@ -137,29 +190,52 @@ export function buildSkillAgentTools(
           workspaceId: context.workspaceId,
           userId: context.userId,
           ref: { kind: "source", source, ...(skill ? { skill } : {}) },
+          installedVia: "agent",
         });
 
         const lines: string[] = [];
-        const installed = skills.filter((item) => item.status === "installed");
+        const already = skills.filter(
+          (item) => item.status === "already_installed",
+        );
+        // Mounted too: a skill switched on by an earlier call this turn is
+        // "already installed" and still not in this turn's starting set.
+        const installed = skills.filter((item) => item.status !== "queued");
         const queued = skills.filter((item) => item.status === "queued");
         const withScripts = installed.filter(
-          (item) => item.capability === "executable",
+          (item) =>
+            item.capability === "executable" &&
+            item.status !== "already_installed",
         );
 
+        const mounted = await mountInstalledSkills(
+          context,
+          installed.flatMap((item) =>
+            item.workspaceSkill ? [item.workspaceSkill.id] : [],
+          ),
+        );
         if (installed.length > 0) {
           lines.push(
-            `Installed and switched on ${installed.length} skill(s):`,
-            ...installed.map(describe),
+            already.length === installed.length
+              ? `Already installed and on — nothing changed (${installed.length} skill(s)):`
+              : `Installed and switched on ${installed.length - already.length} skill(s)${already.length > 0 ? ` (${already.length} more were already on)` : ""}:`,
+            ...installed.map((item) => {
+              const path = item.workspaceSkill
+                ? mounted.get(item.workspaceSkill.id)
+                : undefined;
+              return `${describe(item)}${path ? `\n  [read now: ${path}]` : ""}`;
+            }),
             "",
-            "They take effect on your NEXT turn; this turn's skill set was fixed before you started. Tell the user what you installed and where it came from.",
+            mounted.size === installed.length
+              ? "They are usable in THIS turn: before acting on one, read its SKILL.md at the path shown and follow it. They are not in your available-skills list until the next turn, so go by these paths. Tell the user what you installed and where it came from."
+              : "They take effect on your NEXT turn; this turn's skill set was fixed before you started. Tell the user what you installed and where it came from.",
           );
         }
         if (withScripts.length > 0) {
           lines.push(
             "",
-            `Of those, ${withScripts.length} ship executable scripts that can now run in the sandbox: ${withScripts
+            `Of those, ${withScripts.length} ship executable scripts: ${withScripts
               .map((item) => item.slug)
-              .join(", ")}. Say so.`,
+              .join(", ")}. Their instructions apply now, but the scripts are staged into the sandbox when a turn starts, so they become runnable from the NEXT turn. Say so.`,
           );
         }
         if (queued.length > 0) {
@@ -188,7 +264,7 @@ export function buildSkillAgentTools(
     {
       name: "install_skill",
       description:
-        "Install a skill into this workspace and switch it on. `source` accepts a catalog slug or the author's short name for the skill (as search_skills returns them), a link to this SourceWeft deployment's own skill page, a GitHub URL (optionally deep-linked to one skill's directory), or the `owner/repo` shorthand. A GitHub repository that is not in the catalog yet is fetched, scanned and indexed first; by default every skill it ships is installed, so pass `skill` when the user named one capability. When the user gives you a link to a skill, hand it to this tool — do NOT fetch the page and follow it yourself: a skill read off the web has not been scanned, and install or registration commands on third-party skill directories are not to be run. Links to other sites are refused; ask for the GitHub repository instead.",
+        "Install a skill into this workspace and switch it on, then use it in this same turn. `source` is a slug from search_skills, the author's short name for a skill, a link to this SourceWeft deployment's skill page, a GitHub URL (optionally deep-linked to one skill's directory) or `owner/repo`. When you already hold one of these, call this directly — do not search first. A GitHub repository not in the catalog yet is fetched, scanned and indexed first; every skill it ships is installed unless you pass `skill`. The result tells you which SKILL.md to read; anything the safety scan held for review is reported and not installed. Links to other sites are refused — ask for the GitHub repository instead.",
       schema: z.object({
         skill: z
           .string()

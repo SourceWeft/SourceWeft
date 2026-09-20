@@ -109,6 +109,13 @@ export type SkillManifestJson = {
     sourceUrl: string;
     repoUrl: string;
     submittedBy: string;
+    /**
+     * Committer date (ISO 8601) of the pinned commit. Decides which published
+     * version is current — by commit age, not by which write landed last.
+     * Absent on versions indexed before this was captured, and when GitHub's
+     * commit metadata could not be read; such a version ranks as oldest.
+     */
+    committedAt?: string;
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
@@ -290,6 +297,14 @@ export const workspaceSkills = pgTable(
       .default(emptyJsonObject),
     enabledBy: text("enabled_by"),
     enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "date" }),
+    // Who performed the install: a person in the catalog UI, or the chat agent
+    // on its own initiative (`install_skill`). The agent acts AS the user, so
+    // `enabledBy` cannot tell them apart — and "what did the agent add here?"
+    // is the question someone reviewing a workspace's skills needs answered.
+    installedVia: text("installed_via")
+      .$type<"user" | "agent">()
+      .notNull()
+      .default("user"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -298,6 +313,10 @@ export const workspaceSkills = pgTable(
       .defaultNow(),
   },
   (table) => [
+    check(
+      "workspace_skills_installed_via_check",
+      sql`${table.installedVia} in ('user', 'agent')`,
+    ),
     foreignKey({
       name: "workspace_skills_workspace_team_fk",
       columns: [table.workspaceId, table.teamId],

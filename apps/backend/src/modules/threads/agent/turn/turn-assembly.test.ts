@@ -96,10 +96,11 @@ const filesystemBackend = {
   knowledgeBackend: stubBackend("kb") as never,
   workingFilesBackend: stubBackend("work") as never,
   filesystemMounts: [],
-  skillsBackend: null,
+  skillsBackend: new SelectedSkillsBackend([]),
 } as unknown as FilesystemBackend;
 
 const emptyToolCollection = {
+  skillTools: [],
   webTools: [],
   artifactTools: [],
   presentationTools: [],
@@ -361,7 +362,7 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
       workingFilesBackend: workingBackend as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
     },
     internalContextBackend: new StateBackend({ state: { files: {} } } as never),
     sandboxRuntime: null,
@@ -449,7 +450,7 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
       workingFilesBackend: stubBackend("work") as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ executeCalls }) as never,
@@ -511,7 +512,7 @@ test("preconstructed agent backend receives the host invocation signal", async (
       workingFilesBackend: stubBackend("work") as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ executeCalls }) as never,
@@ -553,7 +554,7 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
       workingFilesBackend: workingBackend as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ fileCalls }) as never,

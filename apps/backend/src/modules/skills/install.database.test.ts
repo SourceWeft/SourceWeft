@@ -142,6 +142,31 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(exact).toHaveLength(1);
     });
 
+    test("who installed is kept when the skill is merely switched back on", async () => {
+      const slug = `gh-fixture-${randomUUID().slice(0, 8)}-via`;
+      const { skillId, versionId } = await seed({ slug, visibility: "public" });
+      const base = {
+        ...owner,
+        skillId,
+        skillVersionId: versionId,
+        enabledBy: owner.userId,
+      };
+      const installed = await skills.upsertWorkspaceSkill({
+        ...base,
+        installedVia: "agent",
+      });
+      expect(installed.installedVia).toBe("agent");
+      // Re-enabling passes no `installedVia` and must not rewrite it …
+      expect((await skills.upsertWorkspaceSkill(base)).installedVia).toBe(
+        "agent",
+      );
+      // … while a person installing it again does.
+      expect(
+        (await skills.upsertWorkspaceSkill({ ...base, installedVia: "user" }))
+          .installedVia,
+      ).toBe("user");
+    });
+
     test("uninstalling takes back the grant that installing gave", async () => {
       const slug = `gh-fixture-${randomUUID().slice(0, 8)}-grant`;
       const { skillId, versionId } = await seed({

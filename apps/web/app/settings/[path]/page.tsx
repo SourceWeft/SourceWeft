@@ -1,16 +1,16 @@
-import { AccountView } from "@daveyplate/better-auth-ui";
 import type { Metadata } from "next";
-import { accountStaticPaths } from "../../../lib/auth-ui-config";
+import { Settings } from "../../_components/auth/settings/settings";
+import { settingsStaticPaths } from "../../../lib/auth-ui-config";
 import { NO_INDEX_METADATA } from "../../seo";
 
 export const dynamicParams = false;
 export const metadata: Metadata = NO_INDEX_METADATA;
 
 export function generateStaticParams() {
-  return accountStaticPaths.map((path) => ({ path }));
+  return settingsStaticPaths.map((path) => ({ path }));
 }
 
-export default async function AccountPage({
+export default async function SettingsPage({
   params,
 }: {
   params: Promise<{ path: string }>;
@@ -19,7 +19,7 @@ export default async function AccountPage({
 
   return (
     <main className="container p-4 md:p-6">
-      <AccountView path={path} />
+      <Settings path={path} />
     </main>
   );
 }

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { strToU8, zipSync } from "fflate";
-import { describe, test } from "vitest";
+import { afterEach, describe, test, vi } from "vitest";
 import {
+  downloadRepoZip,
   GitHubArchiveError,
   GITHUB_ZIP_LIMITS,
   listZipEntries,
   readZipEntries,
+  resolvePinnedGitHubSource,
 } from "./github-zip";
 
 /** GitHub zipballs nest everything under a single `<repo>-<sha>/` directory. */
@@ -96,4 +98,97 @@ describe("readZipEntries", () => {
         error.code === "ARCHIVE_TOO_LARGE",
     );
   });
+});
+
+describe("GitHub requests are bounded in time", () => {
+  const pinned = {
+    owner: "acme",
+    repo: "skills",
+    subpath: "",
+    repoUrl: "https://github.com/acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    commitSha: "a".repeat(40),
+  };
+  const isTimeout = (error: unknown) =>
+    error instanceof GitHubArchiveError && error.code === "ARCHIVE_TIMEOUT";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("a zipball whose headers never arrive times out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal!.reason),
+          );
+        }),
+    );
+    await assert.rejects(downloadRepoZip(pinned, { timeoutMs: 20 }), isTimeout);
+  });
+
+  test("a zipball that stalls mid-body times out too", async () => {
+    // Headers arrive at once and the stream then goes quiet — the deadline has
+    // to cover the body, or this is exactly the hang it exists to prevent.
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]));
+          init?.signal?.addEventListener("abort", () =>
+            controller.error(init.signal!.reason),
+          );
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    await assert.rejects(downloadRepoZip(pinned, { timeoutMs: 20 }), isTimeout);
+  });
+
+  test("pinning carries the committer date, and times out rather than hanging", async () => {
+    vi.stubGlobal("fetch", async (url: string) =>
+      String(url).includes("/commits/")
+        ? Response.json({
+            sha: "B".repeat(40),
+            commit: { committer: { date: "2026-02-01T10:00:00Z" } },
+          })
+        : Response.json({ default_branch: "trunk" }),
+    );
+    const source = await resolvePinnedGitHubSource("acme/skills");
+    assert.equal(source.commitSha, "b".repeat(40));
+    assert.equal(source.committedAt, "2026-02-01T10:00:00.000Z");
+
+    vi.stubGlobal(
+      "fetch",
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal!.reason),
+          );
+        }),
+    );
+    await assert.rejects(
+      resolvePinnedGitHubSource("acme/skills", { timeoutMs: 20 }),
+      isTimeout,
+    );
+  });
+});
+
+// A missing or private repo fails at the default-branch lookup with a plain
+// Error; unmapped, the submit route turned it into an HTTP 500.
+test("an unreadable repository is reported as unavailable, not thrown raw", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response("{}", { status: 404 })) as typeof fetch;
+  try {
+    await assert.rejects(
+      resolvePinnedGitHubSource("ghost-owner/ghost-repo"),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_UNAVAILABLE",
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });

@@ -111,6 +111,12 @@ export type ReadRegistryResult = {
   source: PinnedGitHubSource;
   /** Immutable 40-hex commit the submission is pinned to. */
   commitSha: string;
+  /**
+   * Committer date of `commitSha` (ISO 8601), or undefined when GitHub's commit
+   * metadata could not be read. Orders this submission against other commits of
+   * the same skill when deciding which version is current.
+   */
+  committedAt?: string;
   skills: DiscoveredSkill[];
 };
 
@@ -213,7 +219,9 @@ export async function readRegistrySkillsFromGitHub(
           ? "REGISTRY_SUBMISSION_TOO_LARGE"
           : error.code === "ARCHIVE_UNPINNED"
             ? "REGISTRY_SUBMISSION_UNPINNED"
-            : "REGISTRY_SUBMISSION_NOT_SKILL",
+            : error.code === "ARCHIVE_TIMEOUT"
+              ? "REGISTRY_SUBMISSION_TIMEOUT"
+              : "REGISTRY_SUBMISSION_NOT_SKILL",
         error.message,
       );
     }
@@ -308,5 +316,10 @@ async function readSkills(repoUrl: string): Promise<ReadRegistryResult> {
     );
   }
 
-  return { source, commitSha: source.commitSha, skills };
+  return {
+    source,
+    commitSha: source.commitSha,
+    ...(source.committedAt ? { committedAt: source.committedAt } : {}),
+    skills,
+  };
 }

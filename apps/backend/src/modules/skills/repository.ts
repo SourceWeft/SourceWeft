@@ -58,7 +58,7 @@ export function assertRegistryStorageInvariant(
   }
 }
 
-function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
+export function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
   return {
     id: row.id,
     teamId: row.teamId,
@@ -69,6 +69,7 @@ function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
     configJson: row.configJson ?? {},
     enabledBy: row.enabledBy,
     enabledAt: row.enabledAt?.toISOString() ?? null,
+    installedVia: row.installedVia,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -148,6 +149,7 @@ function mapWorkspaceInstalledSkill(row: {
     configJson: workspaceSkill.configJson,
     enabledBy: workspaceSkill.enabledBy,
     enabledAt: workspaceSkill.enabledAt,
+    installedVia: workspaceSkill.installedVia,
     ...(manifest.registry?.capability
       ? { registryCapability: manifest.registry.capability }
       : {}),
@@ -181,13 +183,43 @@ function skillManifestJson(input: {
   } satisfies SkillManifestJson;
 }
 
+/**
+ * Which `skill_entitlements` rows reach this workspace — shared by every
+ * predicate that reads grants (`visibleSkillCondition` here, `registryAccess`
+ * in the registry) so the two can never drift apart again.
+ *
+ * A row that names a workspace grants THAT workspace only; its `team_id` is
+ * just the owning team, not a second scope. Only a row with no workspace is a
+ * team-wide grant. Installing writes both columns, so matching on
+ * `team_id OR workspace_id` let one workspace's install expose — and make
+ * installable — a restricted skill in every workspace of the team.
+ *
+ * An empty id never matches: the registry admin route reads with blank ids,
+ * and `team_id` has no foreign key that would rule out a blank row.
+ */
+export function skillEntitlementScopeCondition(input: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  const scopes = [];
+  if (input.workspaceId) {
+    scopes.push(sql`${skillEntitlements.workspaceId} = ${input.workspaceId}`);
+  }
+  if (input.teamId) {
+    scopes.push(
+      sql`(${skillEntitlements.workspaceId} is null and ${skillEntitlements.teamId} = ${input.teamId})`,
+    );
+  }
+  return scopes.length > 0 ? sql`(${sql.join(scopes, sql` or `)})` : sql`false`;
+}
+
 function visibleSkillCondition(input: { teamId: string; workspaceId: string }) {
   return or(
     eq(skillDefinitions.visibility, "public"),
     sql`${skillDefinitions.visibility} = 'restricted' and exists (
       select 1 from ${skillEntitlements}
       where ${skillEntitlements.skillId} = ${skillDefinitions.id}
-        and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
+        and ${skillEntitlementScopeCondition(input)}
         and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
     )`,
     and(
@@ -424,6 +456,36 @@ export async function findInstallableSkillsByName(input: {
   return exact.length > 0 ? exact : rows;
 }
 
+/**
+ * How many workspaces have each skill installed and switched on — the one
+ * quality signal we can compute ourselves. LobeHub and skills.sh both lead
+ * search results with an install count for the same reason: a description says
+ * what a skill claims, adoption says whether anyone kept it.
+ */
+export async function countSkillInstalls(skillIds: string[]) {
+  const counts = new Map<string, number>();
+  if (skillIds.length === 0) {
+    return counts;
+  }
+  const rows = await db
+    .select({
+      skillId: workspaceSkills.skillId,
+      installs: sql<number>`count(distinct ${workspaceSkills.workspaceId})::int`,
+    })
+    .from(workspaceSkills)
+    .where(
+      and(
+        inArray(workspaceSkills.skillId, skillIds),
+        eq(workspaceSkills.enabled, true),
+      ),
+    )
+    .groupBy(workspaceSkills.skillId);
+  for (const row of rows) {
+    counts.set(row.skillId, row.installs);
+  }
+  return counts;
+}
+
 export async function findCatalogSkillVersionForWorkspace(input: {
   teamId: string;
   workspaceId: string;
@@ -515,6 +577,12 @@ export async function upsertWorkspaceSkill(input: {
    * ends up running third-party code they never chose to turn on.
    */
   enabled?: boolean;
+  /**
+   * Set only by an INSTALL (catalog UI → `user`, `install_skill` → `agent`).
+   * Left undefined by paths that merely switch a skill back on, so re-enabling
+   * never rewrites who installed it.
+   */
+  installedVia?: "user" | "agent";
 }) {
   const enabled = input.enabled ?? true;
   const now = new Date();
@@ -547,6 +615,7 @@ export async function upsertWorkspaceSkill(input: {
           configJson: input.configJson ?? {},
           enabledBy: input.enabledBy,
           enabledAt: now,
+          ...(input.installedVia ? { installedVia: input.installedVia } : {}),
           updatedAt: now,
         })
         .where(eq(workspaceSkills.id, existing.id))
@@ -569,6 +638,7 @@ export async function upsertWorkspaceSkill(input: {
         configJson: input.configJson ?? {},
         enabledBy: input.enabledBy,
         enabledAt: now,
+        installedVia: input.installedVia ?? "user",
         createdAt: now,
         updatedAt: now,
       })
@@ -702,6 +772,25 @@ export async function loadSkillVersionBundle(input: {
   };
 }
 
+/**
+ * A builtin's slug is already held by a non-builtin skill. Typed so startup
+ * can skip that one builtin instead of refusing to boot: slugs are global and
+ * workspace-authored skills pick their own, so without this a single custom
+ * skill named like a builtin we ship later would take the whole API down.
+ */
+export class BuiltinSkillSlugConflictError extends Error {
+  readonly slug: string;
+  readonly conflictingSourceType: string;
+  constructor(slug: string, conflictingSourceType: string) {
+    super(
+      `Builtin skill slug '${slug}' conflicts with ${conflictingSourceType} skill`,
+    );
+    this.name = "BuiltinSkillSlugConflictError";
+    this.slug = slug;
+    this.conflictingSourceType = conflictingSourceType;
+  }
+}
+
 export async function syncBuiltinSkillMetadata(input: {
   slug: string;
   displayName: string;
@@ -715,6 +804,12 @@ export async function syncBuiltinSkillMetadata(input: {
   assertRegistryStorageInvariant("builtin", "repo_builtin");
   const now = new Date();
   return db.transaction(async (tx) => {
+    // Every API instance runs this at boot. Without the lock, two instances
+    // starting together on a release that adds a builtin both see "no row" and
+    // both insert; the loser dies on the slug unique constraint.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${"builtin:" + input.slug}))`,
+    );
     const [conflict] = await tx
       .select({
         id: skillDefinitions.id,
@@ -729,9 +824,7 @@ export async function syncBuiltinSkillMetadata(input: {
       )
       .limit(1);
     if (conflict) {
-      throw new Error(
-        `Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`,
-      );
+      throw new BuiltinSkillSlugConflictError(input.slug, conflict.sourceType);
     }
 
     const [existing] = await tx

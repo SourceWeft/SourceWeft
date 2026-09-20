@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
+import { registryVersionTakesCurrent } from "./repository";
 
 /**
  * Admin moderation queue for registry submissions — mirrors `market/review.ts`
@@ -67,8 +68,10 @@ export async function listRegistryReviewQueue(): Promise<
  * Approve (publish) or deprecate a queued registry version. Publish only acts on
  * a `draft` (so it can't republish a deprecated version); deprecate acts on a
  * `draft` or `published` version (rejecting a queued submission or taking down a
- * live one). Publishing promotes the version to current and demotes any prior
- * current version.
+ * live one). Publishing promotes the version to current and demotes the prior
+ * current version — unless that one is pinned to a NEWER commit, in which case
+ * the approved version is published as history and the catalog is not rolled
+ * back (`registryVersionTakesCurrent`).
  */
 export async function setRegistrySkillVersionStatus(
   skillVersionId: string,
@@ -162,26 +165,55 @@ export async function setRegistrySkillVersionStatus(
         },
       },
     };
+    let takesCurrent = false;
     if (target === "published") {
-      await tx
-        .update(skillVersions)
-        .set({ isCurrent: false, updatedAt: now })
-        .where(eq(skillVersions.skillId, identity.skillId));
-      await tx
-        .update(skillDefinitions)
-        .set({
-          displayName: version.manifestJson.displayName,
-          description: version.manifestJson.description,
-          ...(decision.visibility ? { visibility: decision.visibility } : {}),
-          updatedAt: now,
-        })
-        .where(eq(skillDefinitions.id, identity.skillId));
+      // Review order is not commit order: a draft can sit in the queue while a
+      // newer commit of the same skill is indexed and goes live.
+      const [current] = await tx
+        .select({ manifestJson: skillVersions.manifestJson })
+        .from(skillVersions)
+        .where(
+          and(
+            eq(skillVersions.skillId, identity.skillId),
+            eq(skillVersions.isCurrent, true),
+          ),
+        )
+        .limit(1);
+      takesCurrent = registryVersionTakesCurrent({
+        candidateCommittedAt: registry.committedAt,
+        current: current
+          ? { committedAt: current.manifestJson.registry?.committedAt }
+          : null,
+      });
+      if (takesCurrent) {
+        await tx
+          .update(skillVersions)
+          .set({ isCurrent: false, updatedAt: now })
+          .where(eq(skillVersions.skillId, identity.skillId));
+      }
+      // Display fields follow the current version only. Visibility is the
+      // admin's decision about the skill as a whole, so it applies either way.
+      if (takesCurrent || decision.visibility) {
+        await tx
+          .update(skillDefinitions)
+          .set({
+            ...(takesCurrent
+              ? {
+                  displayName: version.manifestJson.displayName,
+                  description: version.manifestJson.description,
+                }
+              : {}),
+            ...(decision.visibility ? { visibility: decision.visibility } : {}),
+            updatedAt: now,
+          })
+          .where(eq(skillDefinitions.id, identity.skillId));
+      }
     }
     await tx
       .update(skillVersions)
       .set({
         status: target,
-        isCurrent: target === "published",
+        isCurrent: takesCurrent,
         publishedAt: target === "published" ? now : version.publishedAt,
         manifestJson,
         updatedAt: now,

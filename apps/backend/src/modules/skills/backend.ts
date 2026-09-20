@@ -68,34 +68,60 @@ function compileGrepRegex(pattern: string) {
 }
 
 export class SelectedSkillsBackend implements BackendProtocolV2 {
-  private readonly skillNames: string[];
+  private skillNames: string[] = [];
   private readonly filesByPath = new Map<string, SkillFileEntry>();
   private readonly directoryPaths = new Set<string>(["/"]);
 
   constructor(skills: EnabledSkillDescriptor[]) {
-    const now = new Date().toISOString();
-    this.skillNames = skills
-      .map((skill) => skill.name)
-      .sort((a, b) => a.localeCompare(b));
     for (const skill of skills) {
-      this.directoryPaths.add(`/${skill.name}`);
-      this.directoryPaths.add(`/${skill.name}/`);
-      for (const file of skill.files) {
-        const fullPath = normalizePath(`/${skill.name}/${file.path}`);
-        this.filesByPath.set(fullPath, {
-          path: fullPath,
-          contentText: file.contentText,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-          contentHash: file.contentHash,
-          modifiedAt: now,
-        });
+      this.addSkill(skill);
+    }
+  }
 
-        const segments = fullPath.split("/").filter(Boolean);
-        for (let index = 1; index < segments.length; index += 1) {
-          this.directoryPaths.add(`/${segments.slice(0, index).join("/")}`);
-          this.directoryPaths.add(`/${segments.slice(0, index).join("/")}/`);
-        }
+  /**
+   * Mount one more skill for the rest of this turn.
+   *
+   * A turn's skill set is otherwise fixed before the model runs, so a skill
+   * installed by `install_skill` used to be unreadable until the next turn —
+   * the model announced an install and then had nothing to follow. Adding it
+   * here makes `/skills/<name>/…` readable to the very next tool call.
+   * Re-adding a name replaces its files.
+   */
+  addSkill(skill: EnabledSkillDescriptor) {
+    const root = `/${skill.name}/`;
+    for (const path of [...this.filesByPath.keys()]) {
+      if (path.startsWith(root)) {
+        this.filesByPath.delete(path);
+      }
+    }
+    for (const path of [...this.directoryPaths]) {
+      if (path.startsWith(root)) {
+        this.directoryPaths.delete(path);
+      }
+    }
+    if (!this.skillNames.includes(skill.name)) {
+      this.skillNames = [...this.skillNames, skill.name].sort((a, b) =>
+        a.localeCompare(b),
+      );
+    }
+    const now = new Date().toISOString();
+    this.directoryPaths.add(`/${skill.name}`);
+    this.directoryPaths.add(root);
+    for (const file of skill.files) {
+      const fullPath = normalizePath(`/${skill.name}/${file.path}`);
+      this.filesByPath.set(fullPath, {
+        path: fullPath,
+        contentText: file.contentText,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        contentHash: file.contentHash,
+        modifiedAt: now,
+      });
+
+      const segments = fullPath.split("/").filter(Boolean);
+      for (let index = 1; index < segments.length; index += 1) {
+        this.directoryPaths.add(`/${segments.slice(0, index).join("/")}`);
+        this.directoryPaths.add(`/${segments.slice(0, index).join("/")}/`);
       }
     }
   }

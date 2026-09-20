@@ -7,6 +7,8 @@ import {
   validateBuiltinSkills,
 } from "./builtin";
 import {
+  BuiltinSkillSlugConflictError,
+  countSkillInstalls,
   createNextCustomSkillVersionDraft,
   createWorkspaceCustomSkillDraft,
   deleteCustomSkillVersionFileRecord,
@@ -18,6 +20,7 @@ import {
   listCustomSkillVersionFileRecords,
   listWorkspaceInstalledSkills,
   loadSkillVersionBundle,
+  mapWorkspaceSkill,
   publishWorkspaceCustomSkillVersion,
   syncBuiltinSkillMetadata,
   updateWorkspaceCustomDraftMetadata,
@@ -29,7 +32,8 @@ import {
   validateCustomSkillBundle,
   validateCustomSkillFileInput,
 } from "./custom-validation";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { SKILLS_CATALOG_DEFAULT_PAGE_SIZE } from "@sourceweft/contracts";
 import {
   db,
   skillDefinitions,
@@ -48,6 +52,7 @@ import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
 import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
 // curated index, not a document corpus (skill-registry-index.md §4).
@@ -56,6 +61,40 @@ const REGISTRY_SEARCH_RESULT_LIMIT = 25;
 // Fetch cap before in-process relevance ranking. Bounded so a broad ILIKE
 // match set can't balloon memory; ranking happens over this window.
 const REGISTRY_CATALOG_QUERY_LIMIT = 100;
+
+// Where a page of the registry catalog left off: the (displayName, id) of its
+// last row. A keyset rather than an offset, so a skill indexed or withdrawn
+// while someone pages neither repeats nor skips an entry.
+type RegistryCatalogCursor = { name: string; id: string };
+
+function encodeSkillCatalogCursor(cursor: RegistryCatalogCursor) {
+  return Buffer.from(JSON.stringify([cursor.name, cursor.id])).toString(
+    "base64url",
+  );
+}
+
+/** null for anything that is not a cursor `listCatalog` handed out. */
+export function decodeSkillCatalogCursor(
+  cursor: string,
+): RegistryCatalogCursor | null {
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    );
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === "string" &&
+      typeof parsed[1] === "string" &&
+      parsed[1].length > 0
+    ) {
+      return { name: parsed[0], id: parsed[1] };
+    }
+  } catch {
+    // Not base64url JSON — falls through to null.
+  }
+  return null;
+}
 
 // A catalog row as produced by `listCatalogSkillVersionsForWorkspace` and by
 // the inline registry query below (identical select shape) so both feed the
@@ -195,6 +234,81 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
   return base;
 }
 
+// An always-on builtin (generators like ppt/video/image, `managed: false`) has
+// no install state: it is read from disk and rendered as non-installable.
+function mapBuiltinSkillToCatalogItem(
+  skill: Awaited<ReturnType<typeof listBuiltinSkills>>[number],
+): SkillCatalogItem {
+  return {
+    catalogId: `builtin:${skill.slug}`,
+    selectionId: builtinSkillSelectionId(skill.slug),
+    sourceType: "builtin",
+    skillId: `builtin:${skill.slug}`,
+    skillVersionId: `builtin:${skill.slug}:${skill.version}`,
+    slug: skill.slug,
+    name: skill.displayName,
+    version: skill.version,
+    displayName: skill.displayName,
+    description: skill.description,
+    visibility: skill.visibility,
+    categories: skill.categories,
+    enabledWorkspaceSkillId: null,
+    enabled: true,
+    installable: false,
+    defaultEnabled: skill.manifestJson.defaultEnabled,
+    hasReadme: false,
+    capabilities: skill.manifestJson.capabilities,
+    models: skill.manifestJson.models,
+    commands: skill.manifestJson.commands,
+    tools: skill.manifestJson.tools,
+    options: skill.manifestJson.options,
+    slash: skill.manifestJson.slash,
+    slashConfig: skill.manifestJson.slashConfig,
+    defaultConfig: skill.manifestJson.defaultConfig,
+  };
+}
+
+function catalogItemMatchesQuery(item: SkillCatalogItem, query: string) {
+  const needle = query.toLowerCase();
+  return `${item.slug} ${item.displayName} ${item.description}`
+    .toLowerCase()
+    .includes(needle);
+}
+
+const REGISTRY_SLUG_PREFIX = "gh-";
+
+/** drizzle wraps the driver error, so the pg fields may sit on `cause`. */
+function isSkillSlugUniqueViolation(error: unknown): boolean {
+  for (const candidate of [error, (error as { cause?: unknown })?.cause]) {
+    const pg = candidate as { code?: string; constraint?: string } | undefined;
+    if (pg?.code === "23505" && pg.constraint === "skill_definitions_slug_uq") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function skillSourceTrustRank(sourceType: string) {
+  if (sourceType === "builtin") {
+    return 0;
+  }
+  return sourceType === "registry_github" ? 2 : 1;
+}
+
+const SKILL_SEARCH_MAX_TERMS = 8;
+
+/** The whole query plus its individual words, lowercased, shortest dropped. */
+function skillSearchTerms(query: string): string[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
+    return [];
+  }
+  const words = normalized
+    .split(/[\s,，、;；/|]+/u)
+    .filter((word) => word.length >= REGISTRY_SEARCH_MIN_QUERY_LENGTH);
+  return [...new Set([normalized, ...words])].slice(0, SKILL_SEARCH_MAX_TERMS);
+}
+
 export type InstalledSkillResult = {
   slug: string;
   displayName: string;
@@ -204,8 +318,11 @@ export type InstalledSkillResult = {
   license: string | null;
   flagged: boolean;
   sourceUrl: string | null;
-  /** `queued`: indexed but held for review, so not installed. */
-  status: "installed" | "queued";
+  /**
+   * `already_installed`: on and at this version already, nothing written.
+   * `queued`: indexed but held for review, so not installed.
+   */
+  status: "installed" | "already_installed" | "queued";
   workspaceSkill: WorkspaceSkillRecord | null;
 };
 
@@ -316,31 +433,114 @@ export class ContentSkillsService {
   async syncBuiltinCatalog() {
     await validateBuiltinSkills();
     const synced = [];
+    const skipped: string[] = [];
     for (const skill of await listBuiltinSkills()) {
-      synced.push(
-        await syncBuiltinSkillMetadata({
-          slug: skill.slug,
-          displayName: skill.displayName,
-          description: skill.description,
-          visibility: skill.visibility,
-          version: skill.version,
-          storagePointer: skill.storagePointer,
-          contentHash: skill.contentHash,
-          manifestJson: skill.manifestJson,
-        }),
-      );
+      try {
+        synced.push(
+          await syncBuiltinSkillMetadata({
+            slug: skill.slug,
+            displayName: skill.displayName,
+            description: skill.description,
+            visibility: skill.visibility,
+            version: skill.version,
+            storagePointer: skill.storagePointer,
+            contentHash: skill.contentHash,
+            manifestJson: skill.manifestJson,
+          }),
+        );
+      } catch (error) {
+        // This runs at API boot. A slug collision costs that ONE builtin its
+        // catalog row (a `managed` one is not installable until it is
+        // resolved); anything else — the database being down — still fails
+        // the boot.
+        if (!(error instanceof BuiltinSkillSlugConflictError)) {
+          throw error;
+        }
+        skipped.push(skill.slug);
+        logger.error("Builtin skill not synced: its slug is taken", {
+          slug: error.slug,
+          conflictingSourceType: error.conflictingSourceType,
+        });
+      }
     }
-    return { items: synced };
+    return { items: synced, skipped };
   }
 
   async validateBuiltinCatalog() {
     await validateBuiltinSkills();
   }
 
+  /**
+   * One page of the catalog. Everything that is not a registry skill — managed
+   * builtins, the workspace's and team's own skills, always-on builtins — is a
+   * small bounded set and rides whole on the FIRST page; `limit` and `cursor`
+   * page through the registry, which is the part that grows without bound.
+   * Registry rows come last so a following page simply appends.
+   */
   async listCatalog(input: {
     teamId: string;
     workspaceId: string;
     userId: string;
+    limit?: number;
+    cursor?: string;
+    query?: string;
+  }) {
+    const after = input.cursor
+      ? decodeSkillCatalogCursor(input.cursor)
+      : undefined;
+    if (after === null) {
+      throw new ContentError(
+        400,
+        "INVALID_CURSOR",
+        "Catalog cursor is not valid",
+      );
+    }
+    const query = input.query?.trim() || undefined;
+    const limit = input.limit ?? SKILLS_CATALOG_DEFAULT_PAGE_SIZE;
+
+    const items: SkillCatalogItem[] = after
+      ? []
+      : (await this.listBoundedCatalogItems(input)).filter(
+          (item) => !query || catalogItemMatchesQuery(item, query),
+        );
+
+    // Registry catalog entries: Community publisher, unverified, with
+    // public / submitter-owned-restricted visibility (skill-registry-index.md
+    // §0/§5.5). Same DB-row → `SkillCatalogItem` convergence as the rest. One
+    // row past the page tells us whether another page exists without a count.
+    const registryRows = await this.listRegistryCatalogRows({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      query,
+      after,
+      limit: limit + 1,
+    });
+    const pageRows = registryRows.slice(0, limit);
+    items.push(...pageRows.map(mapCatalogRow));
+    const last = pageRows.at(-1);
+    // `hasReadme` is deliberately left false here. Resolving it per item meant
+    // loading every skill's *entire* bundle — for builtins that is a fresh
+    // capability discovery scan plus a full read of every file — to answer one
+    // boolean the list view never renders. The only consumer is the skill
+    // detail page, and getCatalogSkillDetail fills it in from files it has
+    // already read.
+    return {
+      items,
+      nextCursor:
+        registryRows.length > limit && last
+          ? encodeSkillCatalogCursor({
+              name: last.definition.displayName,
+              id: last.definition.id,
+            })
+          : null,
+    };
+  }
+
+  /** The non-registry part of the catalog: a handful of rows, never paged. */
+  private async listBoundedCatalogItems(input: {
+    teamId: string;
+    workspaceId: string;
   }) {
     // The catalog is synced once at API startup (api/main.ts), which writes a
     // definition/version row for every builtin. `managed` builtins (e.g. feynman)
@@ -350,8 +550,8 @@ export class ContentSkillsService {
     // are read from the filesystem further down and rendered as non-installable.
     const rows = await listCatalogSkillVersionsForWorkspace(input);
 
-    // Registry (`registry_github`) skills are surfaced by a dedicated query
-    // below (own visibility rule + attribution), so they are excluded from the
+    // Registry (`registry_github`) skills are surfaced by their own paged query
+    // (own visibility rule + attribution), so they are excluded from the
     // shared DB-row path here to avoid double-emitting.
     const installableRows = rows.filter(
       (row) =>
@@ -363,16 +563,6 @@ export class ContentSkillsService {
 
     const items: SkillCatalogItem[] = installableRows.map(mapCatalogRow);
 
-    // Registry catalog entries: Community publisher, unverified, with
-    // public / submitter-owned-restricted visibility (skill-registry-index.md
-    // §0/§5.5). Same DB-row → `SkillCatalogItem` convergence as above.
-    const registryRows = await this.listRegistryCatalogRows(input);
-    for (const row of registryRows) {
-      if (row.version.manifestJson.listing === "hidden") {
-        continue;
-      }
-      items.push(mapCatalogRow(row));
-    }
     // Builtins already surfaced via the DB-row path above (managed ones) must not
     // be emitted a second time from disk.
     const managedBuiltinSlugs = new Set(
@@ -387,41 +577,9 @@ export class ContentSkillsService {
       if (managedBuiltinSlugs.has(skill.slug)) {
         continue;
       }
-      items.push({
-        catalogId: `builtin:${skill.slug}`,
-        selectionId: builtinSkillSelectionId(skill.slug),
-        sourceType: "builtin",
-        skillId: `builtin:${skill.slug}`,
-        skillVersionId: `builtin:${skill.slug}:${skill.version}`,
-        slug: skill.slug,
-        name: skill.displayName,
-        version: skill.version,
-        displayName: skill.displayName,
-        description: skill.description,
-        visibility: skill.visibility,
-        categories: skill.categories,
-        enabledWorkspaceSkillId: null,
-        enabled: true,
-        installable: false,
-        defaultEnabled: skill.manifestJson.defaultEnabled,
-        hasReadme: false,
-        capabilities: skill.manifestJson.capabilities,
-        models: skill.manifestJson.models,
-        commands: skill.manifestJson.commands,
-        tools: skill.manifestJson.tools,
-        options: skill.manifestJson.options,
-        slash: skill.manifestJson.slash,
-        slashConfig: skill.manifestJson.slashConfig,
-        defaultConfig: skill.manifestJson.defaultConfig,
-      });
+      items.push(mapBuiltinSkillToCatalogItem(skill));
     }
-    // `hasReadme` is deliberately left false here. Resolving it per item meant
-    // loading every skill's *entire* bundle — for builtins that is a fresh
-    // capability discovery scan plus a full read of every file — to answer one
-    // boolean the list view never renders. The only consumer is the skill
-    // detail page, and getCatalogSkillDetail fills it in from files it has
-    // already read.
-    return { items };
+    return items;
   }
 
   /**
@@ -433,16 +591,30 @@ export class ContentSkillsService {
    * own repository module. Visibility is enforced in SQL AND re-checked in
    * process (defense-in-depth) so a restricted entry never reaches a
    * non-submitter. Pass `query` to additionally ILIKE-filter name/description.
+   *
+   * Rows come back in (displayName, id) order — the id breaks ties, so the
+   * order is total and `after` can resume it exactly. Without an order the
+   * LIMIT below used to pick an arbitrary window once the registry outgrew it.
    */
   private async listRegistryCatalogRows(input: {
     teamId: string;
     workspaceId: string;
     userId: string;
     query?: string;
+    /** Match ANY of these instead of `query` as one phrase. */
+    terms?: string[];
+    /** Only this slug — the direct lookup behind a skill's own page. */
+    slug?: string;
+    /** Resume strictly after this row. */
+    after?: RegistryCatalogCursor;
+    limit?: number;
   }): Promise<CatalogRow[]> {
     const conditions = [
       eq(skillDefinitions.sourceType, "registry_github"),
       eq(skillDefinitions.status, "active"),
+      // In SQL rather than after the fetch, so a hidden entry does not use up
+      // a slot of the page.
+      sql`${skillVersions.manifestJson}->>'listing' is distinct from 'hidden'`,
       or(
         and(eq(skillVersions.status, "published"), eq(skillVersions.isCurrent, true)),
         and(eq(skillDefinitions.ownerUserId, input.userId),
@@ -457,18 +629,31 @@ export class ContentSkillsService {
         ),
       ),
     ];
-    if (input.query) {
-      const like = `%${input.query}%`;
+    if (input.slug) {
+      conditions.push(eq(skillDefinitions.slug, input.slug));
+    }
+    if (input.after) {
+      conditions.push(
+        sql`(${skillDefinitions.displayName}, ${skillDefinitions.id}) > (${input.after.name}, ${input.after.id})`,
+      );
+    }
+    const terms = input.terms ?? (input.query ? [input.query] : []);
+    if (terms.length > 0) {
       conditions.push(
         or(
-          ilike(skillDefinitions.displayName, like),
-          ilike(skillDefinitions.description, like),
-          // The slug matters as much as the prose: it carries the author's own
-          // name for the skill, which is what someone types when they already
-          // know what they want ("internal-comms"). Matching only display name
-          // and description made that exact search miss, and the caller then
-          // had to guess at synonyms.
-          ilike(skillDefinitions.slug, like),
+          ...terms.flatMap((term) => {
+            const like = `%${term}%`;
+            return [
+              ilike(skillDefinitions.displayName, like),
+              ilike(skillDefinitions.description, like),
+              // The slug matters as much as the prose: it carries the author's
+              // own name for the skill, which is what someone types when they
+              // already know what they want ("internal-comms"). Matching only
+              // display name and description made that exact search miss, and
+              // the caller then had to guess at synonyms.
+              ilike(skillDefinitions.slug, like),
+            ];
+          }),
         ),
       );
     }
@@ -490,7 +675,8 @@ export class ContentSkillsService {
         ),
       )
       .where(and(...conditions))
-      .limit(REGISTRY_CATALOG_QUERY_LIMIT);
+      .orderBy(asc(skillDefinitions.displayName), asc(skillDefinitions.id))
+      .limit(input.limit ?? REGISTRY_CATALOG_QUERY_LIMIT);
 
     // Defense-in-depth: re-apply the visibility predicate in process so a
     // restricted entry can never leak even if the SQL guard ever regresses.
@@ -540,6 +726,11 @@ export class ContentSkillsService {
    * meeting-notes skill" and truthfully report that nothing matched. Registry
    * rows keep their SQL filter (that index is the large one); the rest of the
    * catalog is a handful of rows and is matched in process.
+   *
+   * Matching is per TERM, not per phrase. Measured live: a model searches the
+   * way it thinks — "费曼学习法 Feynman technique explain" — and a whole-phrase
+   * ILIKE answered "nothing" for a catalog that had `feynman` in it. Any term
+   * may match; the more terms an entry matches, the higher it ranks.
    */
   async searchCatalog(input: {
     teamId: string;
@@ -547,11 +738,25 @@ export class ContentSkillsService {
     userId: string;
     query: string;
   }) {
-    const { items: registryItems, query } = await this.searchRegistry(input);
-    if (query.length < REGISTRY_SEARCH_MIN_QUERY_LENGTH) {
-      return { items: registryItems, query };
+    const query = input.query.trim();
+    const terms = skillSearchTerms(query);
+    if (terms.length === 0) {
+      return {
+        items: [] as Array<SkillCatalogItem & { installCount: number }>,
+        query,
+        total: 0,
+      };
     }
-    const needle = query.toLowerCase();
+    const matchCount = (item: SkillCatalogItem) => {
+      const haystack =
+        `${item.slug} ${item.displayName} ${item.description}`.toLowerCase();
+      return terms.filter((term) => haystack.includes(term)).length;
+    };
+    const registryItems = (
+      await this.listRegistryCatalogRows({ ...input, terms })
+    )
+      .filter((row) => row.version.manifestJson.listing !== "hidden")
+      .map(mapCatalogRow);
     const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
       .filter(
         (row) =>
@@ -560,16 +765,34 @@ export class ContentSkillsService {
             row.version.manifestJson.managed === true) &&
           row.version.manifestJson.listing !== "hidden",
       )
-      .map(mapCatalogRow)
-      .filter((item) =>
-        [item.slug, item.displayName, item.description].some((text) =>
-          text.toLowerCase().includes(needle),
-        ),
-      );
-    const items = [...ownItems, ...registryItems]
-      .sort(compareSkillSearchRelevance(query))
-      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
-    return { items, query };
+      .map(mapCatalogRow);
+    const matched = [...ownItems, ...registryItems]
+      .map((item) => ({ item, matches: matchCount(item) }))
+      .filter((entry) => entry.matches > 0);
+    const installs = await countSkillInstalls(
+      matched.map((entry) => entry.item.skillId),
+    );
+    const byRelevance = compareSkillSearchRelevance(query);
+    const items = matched
+      .sort(
+        (a, b) =>
+          b.matches - a.matches ||
+          skillSearchRelevanceRank({ ...a.item, query }) -
+            skillSearchRelevanceRank({ ...b.item, query }) ||
+          // Same textual fit: first-party before the workspace's own before
+          // third-party, then whatever more workspaces actually keep on.
+          skillSourceTrustRank(a.item.sourceType) -
+            skillSourceTrustRank(b.item.sourceType) ||
+          (installs.get(b.item.skillId) ?? 0) -
+            (installs.get(a.item.skillId) ?? 0) ||
+          byRelevance(a.item, b.item),
+      )
+      .slice(0, REGISTRY_SEARCH_RESULT_LIMIT)
+      .map((entry) => ({
+        ...entry.item,
+        installCount: installs.get(entry.item.skillId) ?? 0,
+      }));
+    return { items, query, total: matched.length };
   }
 
   /**
@@ -608,6 +831,8 @@ export class ContentSkillsService {
       | { kind: "version"; skillId: string; skillVersionId: string }
       | { kind: "source"; source: string; skill?: string };
     configJson?: Record<string, unknown>;
+    /** Who is installing; recorded on the row. Defaults to a person. */
+    installedVia?: "user" | "agent";
   }): Promise<{ skills: InstalledSkillResult[] }> {
     const scope = {
       teamId: input.teamId,
@@ -615,6 +840,19 @@ export class ContentSkillsService {
       userId: input.userId,
     };
     const install = async (row: CatalogRow): Promise<InstalledSkillResult> => {
+      // Same version, already on: nothing to write. Saying "installed" again
+      // would have the agent announce an install that did not happen.
+      if (
+        row.enabled?.enabled &&
+        row.enabled.skillVersionId === row.version.id &&
+        input.configJson === undefined
+      ) {
+        return {
+          ...describeInstallableRow(row),
+          status: "already_installed",
+          workspaceSkill: mapWorkspaceSkill(row.enabled),
+        };
+      }
       const workspaceSkill = await upsertWorkspaceSkill({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -623,6 +861,7 @@ export class ContentSkillsService {
         enabledBy: input.userId,
         // Re-installing must not wipe the config of a skill already in place.
         configJson: input.configJson ?? row.enabled?.configJson,
+        installedVia: input.installedVia ?? "user",
       });
       return {
         ...describeInstallableRow(row),
@@ -815,17 +1054,34 @@ export class ContentSkillsService {
     userId: string;
     catalogId: string;
   }) {
-    const catalog = await this.listCatalog(input);
-    let item = catalog.items.find(candidate => candidate.catalogId === input.catalogId);
-    if (!item && input.catalogId.includes(":")) {
-      const [skillId, versionId] = input.catalogId.split(":");
-      const [row] = await db.select({ definition: skillDefinitions, version: skillVersions, enabled: workspaceSkills })
-        .from(skillDefinitions).innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
-        .leftJoin(workspaceSkills, and(eq(workspaceSkills.skillId, skillDefinitions.id), eq(workspaceSkills.workspaceId, input.workspaceId), eq(workspaceSkills.teamId, input.teamId)))
-        .where(and(eq(skillDefinitions.id, skillId!), eq(skillVersions.id, versionId!), eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.status, "active"), registryAccess(input),
-          or(eq(skillVersions.status, "published"), eq(skillDefinitions.ownerUserId, input.userId)))) .limit(1);
-      if (row) item = { ...mapCatalogRow(row), displayName: row.version.manifestJson.displayName, description: row.version.manifestJson.description, installable: row.version.status === "published" };
-    }
+    return this.describeCatalogItem(
+      input,
+      await this.findCatalogItemById(input, input.catalogId),
+    );
+  }
+
+  /**
+   * The same detail, addressed by slug — what a skill's own page has. It used
+   * to list the whole catalog and search it, so a skill past the catalog's
+   * window read as "not found". Slugs are unique across every source type.
+   */
+  async getCatalogSkillDetailBySlug(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    slug: string;
+  }) {
+    // Stored rows first, then disk: the order `listCatalog` emits them in.
+    const item =
+      (await this.findStoredCatalogItemBySlug(input, input.slug)) ??
+      (await this.findDiskBuiltinCatalogItem(input, input.slug));
+    return this.describeCatalogItem(input, item);
+  }
+
+  private async describeCatalogItem(
+    viewer: { teamId: string; workspaceId: string; userId: string },
+    item: SkillCatalogItem | null,
+  ) {
     if (!item) {
       throw new ContentError(404, "SKILL_NOT_FOUND", "Skill not found");
     }
@@ -833,14 +1089,132 @@ export class ContentSkillsService {
     // Registry previews use the same viewer/version authorization as version details.
     // Runtime bundle access remains governed by workspace entitlements.
     const documents = item.sourceType === "registry_github"
-      ? await getRegistryVersionDetail({ ...input, versionId: item.skillVersionId })
-      : readSkillDocuments(await this.getSkillFiles(input, item));
+      ? await getRegistryVersionDetail({ ...viewer, catalogId: item.catalogId, versionId: item.skillVersionId })
+      : readSkillDocuments(await this.getSkillFiles(viewer, item));
     return {
       skill: { ...item, hasReadme: documents.readmeContent !== null },
       readmeContent: documents.readmeContent,
       readmePath: documents.readmePath,
       skillContent: documents.skillContent,
     };
+  }
+
+  /**
+   * Resolve a catalogId — `<skillId>:<versionId>` or `builtin:<slug>` — with a
+   * direct query, never by listing the catalog.
+   */
+  private async findCatalogItemById(
+    viewer: { teamId: string; workspaceId: string; userId: string },
+    catalogId: string,
+  ): Promise<SkillCatalogItem | null> {
+    if (catalogId.startsWith("builtin:")) {
+      const slug = catalogId.slice("builtin:".length);
+      return slug ? this.findDiskBuiltinCatalogItem(viewer, slug) : null;
+    }
+    const [skillId, versionId, ...rest] = catalogId.split(":");
+    if (!skillId || !versionId || rest.length > 0) {
+      return null;
+    }
+    const ids = { skillId, versionId };
+    const [registryItem, ownItem] = await Promise.all([
+      this.findRegistryCatalogItemByIds(viewer, ids),
+      this.findOwnCatalogItemByIds(viewer, ids),
+    ]);
+    return registryItem ?? ownItem;
+  }
+
+  /**
+   * Wider than the catalog listing on purpose: a registry version that is not
+   * the current one (an installed older version, the owner's draft) has a
+   * detail page too, under the same access rule as the version endpoints.
+   */
+  private async findRegistryCatalogItemByIds(
+    viewer: { teamId: string; workspaceId: string; userId: string },
+    ids: { skillId: string; versionId: string },
+  ) {
+    const [row] = await db.select({ definition: skillDefinitions, version: skillVersions, enabled: workspaceSkills })
+      .from(skillDefinitions).innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(workspaceSkills, and(eq(workspaceSkills.skillId, skillDefinitions.id), eq(workspaceSkills.workspaceId, viewer.workspaceId), eq(workspaceSkills.teamId, viewer.teamId)))
+      .where(and(eq(skillDefinitions.id, ids.skillId), eq(skillVersions.id, ids.versionId), eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.status, "active"), registryAccess(viewer),
+        or(eq(skillVersions.status, "published"), eq(skillDefinitions.ownerUserId, viewer.userId)))).limit(1);
+    return row ? mapCatalogRow(row) : null;
+  }
+
+  /** A workspace/team skill or a managed builtin, as the catalog lists it. */
+  private async findOwnCatalogItemByIds(
+    viewer: { teamId: string; workspaceId: string },
+    ids: { skillId: string; versionId: string },
+  ) {
+    // Without a userId the repository predicate stays on plain workspace
+    // visibility; the registry has its own rule above.
+    const row = await findCatalogSkillVersionForWorkspace({
+      teamId: viewer.teamId,
+      workspaceId: viewer.workspaceId,
+      skillId: ids.skillId,
+      skillVersionId: ids.versionId,
+    });
+    if (
+      !row ||
+      row.definition.sourceType === "registry_github" ||
+      !row.version.isCurrent ||
+      row.version.manifestJson.listing === "hidden"
+    ) {
+      return null;
+    }
+    return mapCatalogRow(row);
+  }
+
+  /** A DB-backed catalog entry by slug, under the rules the catalog lists by. */
+  private async findStoredCatalogItemBySlug(
+    viewer: { teamId: string; workspaceId: string; userId: string },
+    slug: string,
+  ): Promise<SkillCatalogItem | null> {
+    const [registryRow] = await this.listRegistryCatalogRows({
+      ...viewer,
+      slug,
+      limit: 1,
+    });
+    if (registryRow) {
+      return mapCatalogRow(registryRow);
+    }
+    // Inline for the same reason as the registry query. It only turns the slug
+    // into ids; whether this workspace may see the skill is still decided by
+    // the repository's predicate in `findOwnCatalogItemByIds`.
+    const [current] = await db
+      .select({ skillId: skillDefinitions.id, versionId: skillVersions.id })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .where(
+        and(
+          eq(skillDefinitions.slug, slug),
+          ne(skillDefinitions.sourceType, "registry_github"),
+          eq(skillVersions.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    return current ? this.findOwnCatalogItemByIds(viewer, current) : null;
+  }
+
+  /**
+   * A builtin the catalog serves from disk. A `managed` builtin is listed
+   * under its DB row instead whenever this workspace can see that row, so the
+   * disk form only answers for it when there is none — as in `listCatalog`.
+   */
+  private async findDiskBuiltinCatalogItem(
+    viewer: { teamId: string; workspaceId: string; userId: string },
+    slug: string,
+  ) {
+    const skill = await getBuiltinSkillBySlug(slug);
+    if (!skill || skill.manifestJson.listing === "hidden") {
+      return null;
+    }
+    if (skill.manifestJson.managed === true) {
+      const stored = await this.findStoredCatalogItemBySlug(viewer, slug);
+      if (stored?.sourceType === "builtin") {
+        return null;
+      }
+    }
+    return mapBuiltinSkillToCatalogItem(skill);
   }
 
   private async getSkillFiles(
@@ -880,17 +1254,42 @@ export class ContentSkillsService {
     description: string;
     version?: string;
   }) {
-    return {
-      customSkill: await createWorkspaceCustomSkillDraft({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        name: input.name,
-        displayName: input.displayName ?? displayNameFromName(input.name),
-        description: input.description,
-        version: input.version,
-      }),
-    };
+    // Slugs are global. `gh-…` is the registry's namespace — a custom skill
+    // there blocks that repository's skill from ever being indexed — and a
+    // builtin's name would shadow it (see `syncBuiltinCatalog`).
+    if (
+      input.name.startsWith(REGISTRY_SLUG_PREFIX) ||
+      (await getBuiltinSkillBySlug(input.name))
+    ) {
+      throw new ContentError(
+        409,
+        "SKILL_NAME_RESERVED",
+        `'${input.name}' is reserved. Choose another name.`,
+      );
+    }
+    try {
+      return {
+        customSkill: await createWorkspaceCustomSkillDraft({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          name: input.name,
+          displayName: input.displayName ?? displayNameFromName(input.name),
+          description: input.description,
+          version: input.version,
+        }),
+      };
+    } catch (error) {
+      if (isSkillSlugUniqueViolation(error)) {
+        // Was an unhandled 23505 → HTTP 500.
+        throw new ContentError(
+          409,
+          "SKILL_NAME_TAKEN",
+          `A skill named '${input.name}' already exists. Choose another name.`,
+        );
+      }
+      throw error;
+    }
   }
 
   async createWorkspaceCustomSkillVersion(input: {
@@ -1095,4 +1494,6 @@ export const testExports = {
   mapCatalogRow,
   parseSkillInstallSource,
   pickInstallableByName,
+  skillSearchTerms,
+  isSkillSlugUniqueViolation,
 };

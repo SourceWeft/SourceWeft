@@ -13,8 +13,8 @@ export default [
         {
           paths: [
             {
-              name: "@daveyplate/better-auth-ui",
-              importNames: ["AppleIcon", "GoogleIcon", "GitHubIcon"],
+              name: "@better-auth-ui/react",
+              importNames: ["Apple", "Google", "GitHub"],
               message:
                 "Import brand icons through app/_components/brand-icons so all pages share one entry point.",
             },

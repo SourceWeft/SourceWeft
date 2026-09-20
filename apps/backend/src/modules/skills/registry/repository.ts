@@ -110,11 +110,49 @@ export function buildRegistryUpsertValues(input: {
       storagePointer: input.storagePointer,
       contentHash: input.contentHash,
       manifestJson: input.manifestJson,
-      // Clean submissions become the current, published version; queued drafts
-      // stay non-current so they never surface until an admin approves them.
+      // Only a published version is ELIGIBLE to be current; queued drafts stay
+      // non-current so they never surface until an admin approves them. Whether
+      // an eligible version actually takes over is decided against the stored
+      // current version — see `registryVersionTakesCurrent`.
       isCurrent: input.versionStatus === "published",
     },
   };
+}
+
+function committedAtMs(committedAt: string | undefined): number | null {
+  const ms = committedAt ? Date.parse(committedAt) : Number.NaN;
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Whether a newly PUBLISHED version replaces the current one. Shared by the
+ * index write and admin publish so both agree.
+ *
+ * Currency follows the commit's age, not the order writes happen to land in:
+ * two submissions of one skill can finish in either order, and an admin can
+ * approve an old queued draft after a newer version is already live — neither
+ * may roll the catalog back. So a version takes over only if its commit is not
+ * older than the current version's.
+ *
+ * A version with no recorded commit date ranks as oldest. The exception is when
+ * NEITHER side has one: versions indexed before dates were captured have
+ * nothing to compare, so they keep the original newest-write-wins behaviour.
+ * Equal dates also fall to the newer write.
+ */
+export function registryVersionTakesCurrent(input: {
+  candidateCommittedAt: string | undefined;
+  /** The stored `isCurrent` version, or null when the skill has none. */
+  current: { committedAt: string | undefined } | null;
+}): boolean {
+  if (!input.current) {
+    return true;
+  }
+  const candidate = committedAtMs(input.candidateCommittedAt);
+  const current = committedAtMs(input.current.committedAt);
+  if (candidate === null) {
+    return current === null;
+  }
+  return current === null || candidate >= current;
 }
 
 /**
@@ -292,18 +330,40 @@ export async function upsertRegistrySkillIndex(
       version,
       versionStatus: decision.versionStatus,
     });
+    // Read under the advisory lock, so a concurrent submission of another
+    // commit has either fully landed or not started: the comparison below sees
+    // a settled current version whichever transaction runs second.
+    const [current] = await tx
+      .select({ manifestJson: skillVersions.manifestJson })
+      .from(skillVersions)
+      .where(
+        and(
+          eq(skillVersions.skillId, skillId),
+          eq(skillVersions.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    const isPublished = values.version.status === "published";
+    const takesCurrent =
+      isPublished &&
+      registryVersionTakesCurrent({
+        candidateCommittedAt: input.manifestJson.registry?.committedAt,
+        current: current
+          ? { committedAt: current.manifestJson.registry?.committedAt }
+          : null,
+      });
     if (!existing) {
-      await tx
-        .insert(skillDefinitions)
-        .values({
-          id: skillId,
-          ...values.definition,
-          slug: input.slug,
-          ownerUserId: input.submitterId,
-          createdAt: now,
-          updatedAt: now,
-        });
-    } else if (values.version.isCurrent) {
+      await tx.insert(skillDefinitions).values({
+        id: skillId,
+        ...values.definition,
+        slug: input.slug,
+        ownerUserId: input.submitterId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else if (takesCurrent) {
+      // An older commit that lands late is kept as a historical version only;
+      // the definition keeps describing the version users actually get.
       await tx
         .update(skillDefinitions)
         .set({
@@ -313,35 +373,34 @@ export async function upsertRegistrySkillIndex(
         })
         .where(eq(skillDefinitions.id, skillId));
     }
-    if (values.version.isCurrent) {
+    if (takesCurrent) {
       await tx
         .update(skillVersions)
         .set({ isCurrent: false, updatedAt: now })
         .where(eq(skillVersions.skillId, skillId));
     }
     const skillVersionId = randomUUID();
-    await tx
-      .insert(skillVersions)
-      .values({
-        id: skillVersionId,
-        skillId,
-        ...values.version,
-        createdBy: input.submitterId,
-        publishedAt: values.version.isCurrent ? now : null,
-        createdAt: now,
-        updatedAt: now,
-      });
+    await tx.insert(skillVersions).values({
+      id: skillVersionId,
+      skillId,
+      ...values.version,
+      isCurrent: takesCurrent,
+      createdBy: input.submitterId,
+      // Published is not the same as current: a late-arriving older commit is
+      // published as history without taking over.
+      publishedAt: isPublished ? now : null,
+      createdAt: now,
+      updatedAt: now,
+    });
     if (input.files.length)
-      await tx
-        .insert(skillVersionFiles)
-        .values(
-          input.files.map((file) => ({
-            ...file,
-            id: randomUUID(),
-            skillVersionId,
-            createdAt: now,
-          })),
-        );
+      await tx.insert(skillVersionFiles).values(
+        input.files.map((file) => ({
+          ...file,
+          id: randomUUID(),
+          skillVersionId,
+          createdAt: now,
+        })),
+      );
     return {
       slug: input.slug,
       skillId,

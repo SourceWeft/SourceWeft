@@ -123,8 +123,11 @@ vi.mock("@sourceweft/db", async () => {
   };
 });
 
-const { buildRegistryUpsertValues, upsertRegistrySkillIndex } =
-  await import("./repository");
+const {
+  buildRegistryUpsertValues,
+  registryVersionTakesCurrent,
+  upsertRegistrySkillIndex,
+} = await import("./repository");
 
 const MANIFEST: SkillManifestJson = {
   slug: "gh-acme-skills",
@@ -277,4 +280,29 @@ test("re-submitting an existing source leaves content and status untouched", asy
     dbState.ops.filter((op) => op.op !== "select"),
     [],
   );
+});
+
+test("currency follows the commit date, not the order of writes", () => {
+  const OLDER = "2026-01-01T00:00:00.000Z";
+  const NEWER = "2026-02-01T00:00:00.000Z";
+  const takes = (candidate: string | undefined, current?: string | null) =>
+    registryVersionTakesCurrent({
+      candidateCommittedAt: candidate,
+      current: current === null ? null : { committedAt: current },
+    });
+
+  // Nothing is current yet: the first published version always is.
+  assert.equal(takes(OLDER, null), true);
+  assert.equal(takes(undefined, null), true);
+  // Both dated: not older wins; equal dates fall to the newer write.
+  assert.equal(takes(NEWER, OLDER), true);
+  assert.equal(takes(OLDER, NEWER), false);
+  assert.equal(takes(OLDER, OLDER), true);
+  // Unknown ranks as oldest...
+  assert.equal(takes(undefined, OLDER), false);
+  assert.equal(takes(OLDER, undefined), true);
+  // ...except between two legacy versions, which keep newest-write-wins.
+  assert.equal(takes(undefined, undefined), true);
+  // An unparseable stored date is treated as unknown, not as a comparison.
+  assert.equal(takes("garbage", OLDER), false);
 });

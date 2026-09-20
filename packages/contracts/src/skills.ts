@@ -82,6 +82,8 @@ export const workspaceSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -105,6 +107,8 @@ export const workspaceInstalledSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   // Registry entries only: whether the bundle ships runnable scripts. Surfaced
   // because an `executable` skill installs DISABLED — the UI has to be able to
@@ -214,8 +218,29 @@ export const skillManifestJsonSchema = z.object({
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const SKILLS_CATALOG_DEFAULT_PAGE_SIZE = 50;
+export const SKILLS_CATALOG_MAX_PAGE_SIZE = 100;
+
+// GET /skills/catalog?limit=&cursor=&q= — query params arrive as strings, hence
+// the coercion. `limit` sizes the page of community (registry) skills only: the
+// rest of the catalog (builtins, the workspace's and team's own skills) is a
+// small bounded set returned whole on the first page. `cursor` is the opaque
+// `nextCursor` of the previous page.
+export const listSkillsCatalogQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(SKILLS_CATALOG_MAX_PAGE_SIZE)
+    .default(SKILLS_CATALOG_DEFAULT_PAGE_SIZE),
+  cursor: z.string().min(1).max(1024).optional(),
+  q: z.string().trim().max(200).optional(),
+});
+
 export const listSkillsCatalogResponseSchema = z.object({
   items: z.array(skillCatalogItemSchema),
+  // null once the last page has been served.
+  nextCursor: z.string().nullable(),
 });
 
 // GET /skills/registry/search?q= — relevance-ranked registry entries sharing the
@@ -407,6 +432,13 @@ export type WorkspaceInstalledSkill = z.infer<
   typeof workspaceInstalledSkillSchema
 >;
 export type SkillCatalogItem = z.infer<typeof skillCatalogItemSchema>;
+// What a client passes; the schema above is the server's parse of the same
+// fields off the query string.
+export type ListSkillsCatalogParams = {
+  limit?: number;
+  cursor?: string;
+  q?: string;
+};
 export type ListSkillsCatalogResponse = z.infer<
   typeof listSkillsCatalogResponseSchema
 >;
@@ -532,5 +564,11 @@ export const registryVersionDetailSchema = z.object({
 });
 export type RegistryVersionDetail = z.infer<typeof registryVersionDetailSchema>;
 export const switchSkillVersionSchema = z
-  .object({ skillVersionId: z.string().min(1) })
+  .object({
+    skillVersionId: z.string().min(1),
+    // Required to move an install to a version that adds executable scripts or
+    // new scan flags; without it the API answers 409 SKILL_VERSION_ESCALATION
+    // with what escalates, so the client can ask and retry.
+    acknowledgeEscalation: z.boolean().optional(),
+  })
   .strict();

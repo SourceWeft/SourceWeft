@@ -203,6 +203,8 @@ export type ChatSkillItem = {
    * that runs in the sandbox, not just instructions.
    */
   registryCapability?: "prompt-only" | "executable";
+  /** Set when the chat agent installed this skill on its own initiative. */
+  installedVia?: "agent";
 };
 
 export type CitationRecord = {
