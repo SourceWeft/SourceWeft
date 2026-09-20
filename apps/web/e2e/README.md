@@ -1,13 +1,13 @@
 # Skill registry E2E
 
-Real local Web/API, authentication, PostgreSQL and pinned GitHub downloads. Core APIs are not mocked and skill scripts are not executed.
+Real local Web/API/worker, authentication, PostgreSQL, object storage and pinned GitHub downloads. Core APIs are not mocked and skill scripts are not executed.
 
 ## Prepare an isolated environment
 
 1. Install the frozen lockfile; run the existing builds for `@sourceweft/market-contracts` and `@sourceweft/ui-web`.
 2. In `apps/backend`, run `SKILL_TEST_ENV_SOURCE=/absolute/path/to/admin.env pnpm exec tsx scripts/prepare-skill-tests.ts`. It creates a new isolated database using the existing migration helper and writes `.env.skills-test` with random test secrets. The source database is not modified.
 3. Set `NEXT_PUBLIC_API_BASE_URL=http://localhost:3311` and `NEXT_PUBLIC_WEB_BASE_URL=http://localhost:3310` in that test env. Set the same URLs and isolated DATABASE_URL in web `.env.local`.
-4. Start API from backend: `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/api/main.ts`. Start Web from web: `pnpm exec next dev --port 3310`.
+4. Start API **and the worker** from backend: `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/api/main.ts` and `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/worker/main.ts`. Skill imports are asynchronous — without the worker every submission stays `queued`. The test env carries its own `JOB_QUEUE_NAME`, so this worker never consumes another deployment's jobs. Start Web from web: `pnpm exec next dev --port 3310`.
 5. In backend run `pnpm exec tsx scripts/seed-skills-e2e.ts`, then restart the test API. This uses normal registration and configures only this test deployment's administrator allowlist. Credentials are in an ignored local file.
 6. In web run `pnpm test:e2e:skills`. The suite performs normal browser login once for each user, then reuses genuine session cookies in isolated contexts; authentication and rate limiting stay enabled. Each case clears registry records in the explicitly named disposable database. Do not run other database tests against that database concurrently.
 

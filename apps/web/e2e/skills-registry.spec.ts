@@ -79,7 +79,9 @@ async function authenticate(browser: Browser, role: string) {
     );
     const [response] = await Promise.all([
       signIn,
-      page.getByRole("button", { name: "Login", exact: true }).click(),
+      // The @better-auth-ui sign-in view labels its submit "Sign In" (the old
+      // view said "Login"); the other buttons all start with "Continue with".
+      page.getByRole("button", { name: "Sign In", exact: true }).click(),
     ]);
     expect(
       response.status(),
@@ -121,8 +123,11 @@ async function login(page: Page, role = "owner") {
   await page.context().addCookies(sessions[role]!.cookies);
   const ready = page.waitForResponse(
     (r) =>
-      /\/v1\/workspaces\/[^/]+\/skills\/catalog$/.test(r.url()) &&
-      r.status() === 200,
+      // Match on the path: the gallery pages the catalog, so the URL carries a
+      // query string (`?limit=…`).
+      /\/v1\/workspaces\/[^/]+\/skills\/catalog$/.test(
+        new URL(r.url()).pathname,
+      ) && r.status() === 200,
     { timeout: 60000 },
   );
   const [catalog] = await Promise.all([ready, page.goto("/dashboard/skills")]);
@@ -172,6 +177,14 @@ async function publish(item: RegistrySkillResult) {
     { data: {} },
   );
   expect(r.ok(), await r.text()).toBeTruthy();
+}
+// The version picker is a custom listbox, not a native <select>: open it and
+// choose the option by the short version it displays.
+async function pickVersion(page: Page, version: string) {
+  await page.getByLabel("Version", { exact: true }).click();
+  await page
+    .getByRole("option", { name: new RegExp(version.slice(0, 8)) })
+    .click();
 }
 async function closeResult(page: Page) {
   await page
@@ -284,11 +297,29 @@ test("E2 mixed malformed fixtures return every item", async ({ page }) => {
       file: "SKILL.md",
     });
     expect(broken.diagnostics[0]!.line).toBeGreaterThan(0);
+    // Binary files are KEPT now (object storage), not excluded: the fixture's
+    // `valid/asset.bin` must be in the stored version's file manifest, and no
+    // import may report the old FILE_EXCLUDED diagnostic.
     expect(
       body.skills!.some((s) =>
         s.diagnostics.some((d) => d.code === "FILE_EXCLUDED"),
       ),
-    ).toBeTruthy();
+    ).toBeFalsy();
+    const withAsset = body.skills!.find(
+      (s) => s.status !== "failed" && s.sourcePath.endsWith("/valid"),
+    )!;
+    const assetRow = rows.find(
+      (v: { skillVersionId: string }) =>
+        v.skillVersionId === withAsset.skillVersionId,
+    )!;
+    const assetDetail = await (
+      await page.request.get(
+        `${api}/v1/workspaces/${ws}/skills/catalog/${encodeURIComponent(assetRow.catalogId)}/versions/${withAsset.skillVersionId}`,
+      )
+    ).json();
+    expect(
+      assetDetail.files.map((f: { path: string }) => f.path),
+    ).toContain("asset.bin");
     expect(
       body.skills!.some((s) =>
         s.diagnostics.some((d) => d.code === "DESCRIPTION_SUMMARIZED"),
@@ -420,11 +451,9 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
   await closeResult(page);
   await page.reload();
   await openFormatter(page);
-  await page
-    .getByLabel("Version", { exact: true })
-    .selectOption(b.skillVersionId!);
+  await pickVersion(page, b.version!);
   await expect(
-    page.getByRole("button", { name: "Use selected version" }),
+    page.getByRole("button", { name: "Use this version" }),
   ).toBeEnabled();
   const switchResponse = page.waitForResponse(
     (r) => r.url().endsWith("/version") && r.request().method() === "PUT",
@@ -432,7 +461,7 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
   );
   const [switched] = await Promise.all([
     switchResponse,
-    page.getByRole("button", { name: "Use selected version" }).click(),
+    page.getByRole("button", { name: "Use this version" }).click(),
   ]);
   expect(switched.status()).toBe(200);
   expect((await switched.json()).workspaceSkill).toMatchObject({
@@ -445,11 +474,9 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
       .getByRole("dialog")
       .getByRole("heading", { name: "Writer B", exact: true }),
   ).toBeVisible();
-  await page
-    .getByLabel("Version", { exact: true })
-    .selectOption(a.skillVersionId!);
+  await pickVersion(page, a.version!);
   await expect(
-    page.getByRole("button", { name: "Use selected version" }),
+    page.getByRole("button", { name: "Use this version" }),
   ).toBeEnabled();
   const rollbackResponse = page.waitForResponse(
     (r) => r.url().endsWith("/version") && r.request().method() === "PUT",
@@ -457,7 +484,7 @@ test("E6 published B leaves A installed until explicit switch and rollback", asy
   );
   const [rolledBack] = await Promise.all([
     rollbackResponse,
-    page.getByRole("button", { name: "Use selected version" }).click(),
+    page.getByRole("button", { name: "Use this version" }).click(),
   ]);
   expect(rolledBack.status()).toBe(200);
   expect((await rolledBack.json()).workspaceSkill).toMatchObject({

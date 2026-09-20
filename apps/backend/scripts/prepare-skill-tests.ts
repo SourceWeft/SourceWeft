@@ -28,6 +28,22 @@ const env = {
   BACKEND_API_PORT: "3311",
   BETTER_AUTH_URL: "http://localhost:3311",
   BETTER_AUTH_TRUSTED_ORIGINS: "http://localhost:3310",
+  // Ingest writes every skill file and the bundle to object storage before it
+  // touches the database, so the test deployment needs the same storage the
+  // source env uses. Keys are content-addressed (`skills/blobs|bundles/<sha>`),
+  // so runs cannot collide with each other or with real data.
+  ...Object.fromEntries(
+    [
+      "S3_BUCKET",
+      "S3_REGION",
+      "S3_ENDPOINT",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+      "S3_FORCE_PATH_STYLE",
+      // Unauthenticated GitHub allows 60 requests/hour; one suite run exceeds it.
+      "GITHUB_TOKEN",
+    ].flatMap((key) => (values[key] ? [[key, values[key]]] : [])),
+  ),
 };
 try {
   await writeFile(
