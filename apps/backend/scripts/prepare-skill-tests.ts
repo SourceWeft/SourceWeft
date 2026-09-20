@@ -42,9 +42,75 @@ const env = {
       "S3_FORCE_PATH_STYLE",
       // Unauthenticated GitHub allows 60 requests/hour; one suite run exceeds it.
       "GITHUB_TOKEN",
+      // The chat case (the agent installing a skill mid-conversation) needs a
+      // real model; see `chatGatewayEnv` below.
+      "DEEPSEEK_API_KEY",
     ].flatMap((key) => (values[key] ? [[key, values[key]]] : [])),
   ),
 };
+/**
+ * A minimal model-gateway config for the chat case: the source deployment's
+ * DeepSeek gateway with the chat profiles it serves, plus the embedding
+ * profiles the backend refuses to boot without (and whichever gateway serves
+ * them). The full config cannot be reused — its other gateways reference env
+ * vars this test deployment deliberately does not carry, and must not bill
+ * against. Without a DeepSeek key in the source env there is no file, and the
+ * chat case reports BLOCKED.
+ */
+async function chatGatewayEnv(): Promise<Record<string, string>> {
+  type Target = { gatewaySlug?: string; targets?: Array<{ gatewaySlug: string }> };
+  const sourcePath = values.MODEL_GATEWAY_GLOBAL_CONFIG_PATH;
+  if (!sourcePath || !values.DEEPSEEK_API_KEY) return {};
+  const full = JSON.parse(await readFile(sourcePath, "utf8")) as {
+    gateways?: Array<{ slug: string; providerKind?: string; apiKeyEnv?: string }>;
+    chatProfiles?: Target[];
+    embeddingProfiles?: Target[];
+  };
+  const slugsOf = (profile: Target) => [
+    ...(profile.gatewaySlug ? [profile.gatewaySlug] : []),
+    ...(profile.targets ?? []).map((target) => target.gatewaySlug),
+  ];
+  const embeddingProfiles = full.embeddingProfiles ?? [];
+  const wanted = new Set([
+    ...(full.gateways ?? [])
+      .filter((gateway) => gateway.providerKind === "deepseek")
+      .map((gateway) => gateway.slug),
+    ...embeddingProfiles.flatMap(slugsOf),
+  ]);
+  const gateways = (full.gateways ?? [])
+    .filter((gateway) => wanted.has(gateway.slug))
+    .map((gateway) => ({
+      ...gateway,
+      isDefault: gateway.providerKind === "deepseek",
+    }));
+  const chatProfiles = (full.chatProfiles ?? [])
+    .map((profile) => ({
+      ...profile,
+      targets: (profile.targets ?? []).filter((target) =>
+        wanted.has(target.gatewaySlug),
+      ),
+    }))
+    .filter((profile) => profile.targets.length > 0);
+  if (chatProfiles.length === 0 || embeddingProfiles.length === 0) return {};
+  // Named `.env.*` so the repository's ignore rule covers it.
+  const target = resolve(".env.skills-test.gateway.json");
+  await writeFile(
+    target,
+    JSON.stringify({ gateways, chatProfiles, embeddingProfiles }, null, 2),
+    { mode: 0o600 },
+  );
+  return {
+    MODEL_GATEWAY_GLOBAL_CONFIG_PATH: target,
+    ...Object.fromEntries(
+      gateways.flatMap((gateway) =>
+        gateway.apiKeyEnv && values[gateway.apiKeyEnv]
+          ? [[gateway.apiKeyEnv, values[gateway.apiKeyEnv]!]]
+          : [],
+      ),
+    ),
+  };
+}
+Object.assign(env, await chatGatewayEnv());
 try {
   await writeFile(
     resolve(".env.skills-test"),

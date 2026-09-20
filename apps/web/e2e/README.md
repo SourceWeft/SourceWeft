@@ -11,6 +11,10 @@ Real local Web/API/worker, authentication, PostgreSQL, object storage and pinned
 5. In backend run `pnpm exec tsx scripts/seed-skills-e2e.ts`, then restart the test API. This uses normal registration and configures only this test deployment's administrator allowlist. Credentials are in an ignored local file.
 6. In web run `pnpm test:e2e:skills`. The suite performs normal browser login once for each user, then reuses genuine session cookies in isolated contexts; authentication and rate limiting stay enabled. Each case clears registry records in the explicitly named disposable database. Do not run other database tests against that database concurrently.
 
+### Chat cases (E9–E11)
+
+E9–E11 drive the chat agent with a REAL model: install a catalog skill and use it in the same turn, find a fitting skill without being told about one, and import a GitHub link in the background. `prepare-skill-tests.ts` enables them when the source env has `DEEPSEEK_API_KEY` and `MODEL_GATEWAY_GLOBAL_CONFIG_PATH`: it derives a minimal gateway config (`.env.skills-test.gateway.json`, git-ignored) containing only the DeepSeek gateway, the chat profiles it serves, and the embedding profiles the backend requires at boot. Without a key they report **BLOCKED**. They cost a few model calls per run.
+
 The default source is a real script-bearing Cisco fixture; it is queued by the current local rules. The authenticated test administrator publishes it for installation tests. This does not substitute for malformed or changed-content fixtures.
 
 ## Full acceptance fixtures

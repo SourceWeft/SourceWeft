@@ -154,7 +154,9 @@ async function submit(page: Page, url = source) {
   ]);
   // 202 for a new import, 200 when this source is already being imported.
   expect([200, 202], await created.text()).toContain(created.status());
-  let { submission } = (await created.json()) as { submission: SkillSubmission };
+  let { submission } = (await created.json()) as {
+    submission: SkillSubmission;
+  };
   const ws = new URL(created.url()).pathname.split("/")[3]!;
   await expect
     .poll(
@@ -317,9 +319,9 @@ test("E2 mixed malformed fixtures return every item", async ({ page }) => {
         `${api}/v1/workspaces/${ws}/skills/catalog/${encodeURIComponent(assetRow.catalogId)}/versions/${withAsset.skillVersionId}`,
       )
     ).json();
-    expect(
-      assetDetail.files.map((f: { path: string }) => f.path),
-    ).toContain("asset.bin");
+    expect(assetDetail.files.map((f: { path: string }) => f.path)).toContain(
+      "asset.bin",
+    );
     expect(
       body.skills!.some((s) =>
         s.diagnostics.some((d) => d.code === "DESCRIPTION_SUMMARIZED"),
@@ -633,4 +635,152 @@ test("E8 published is not public; explicit admin visibility controls history acc
     other.getByRole("heading", { name: skillTitle, exact: true }),
   ).toBeVisible();
   await context.close();
+});
+
+// The chat agent and skills, end to end: browser → API → worker → real model.
+// These need a real model, so the isolated deployment must have been prepared
+// from a source env that carries a DeepSeek key.
+type InstalledSkill = {
+  slug: string;
+  workspaceSkillId: string;
+  enabled: boolean;
+  installedVia?: string;
+};
+function chatModelConfigured() {
+  return /^MODEL_GATEWAY_GLOBAL_CONFIG_PATH=/m.test(
+    readFileSync(resolve("../backend/.env.skills-test"), "utf8"),
+  );
+}
+const CHAT_BLOCKED =
+  "BLOCKED: the test deployment has no model configured (no DeepSeek key in the source env)";
+async function installedSkills(page: Page, ws: string) {
+  return (
+    (await (
+      await page.request.get(`${api}/v1/workspaces/${ws}/skills`)
+    ).json()) as { items: InstalledSkill[] }
+  ).items;
+}
+async function uninstall(
+  page: Page,
+  ws: string,
+  match: (s: InstalledSkill) => boolean,
+) {
+  for (const item of (await installedSkills(page, ws)).filter(match))
+    expect(
+      (
+        await page.request.delete(
+          `${api}/v1/workspaces/${ws}/skills/${item.workspaceSkillId}`,
+        )
+      ).ok(),
+    ).toBeTruthy();
+}
+async function say(page: Page, message: string) {
+  await page.goto("/dashboard/chat");
+  const editor = page
+    .getByRole("textbox", {
+      name: "Message your documents, links, or connected tools...",
+    })
+    .filter({ visible: true });
+  await editor.waitFor({ timeout: 60000 });
+  await editor.fill(message);
+  await editor.press("Enter");
+}
+test("E9 the chat agent installs a catalog skill and uses it in the same turn", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+  const ws = await login(page);
+  const feynman = async () =>
+    (await installedSkills(page, ws)).find((item) => item.slug === "feynman");
+  // A previous run leaves the builtin installed; start from "not installed".
+  await uninstall(page, ws, (item) => item.slug === "feynman");
+  expect(await feynman()).toBeUndefined();
+
+  await say(
+    page,
+    "安装 feynman 这个 skill，然后马上用它给我讲讲 TCP 三次握手，三四句话就行。",
+  );
+
+  // The install is the agent's: it lands switched on and marked as such.
+  await expect
+    .poll(async () => (await feynman())?.installedVia, {
+      timeout: 180_000,
+      intervals: [2000],
+    })
+    .toBe("agent");
+  expect((await feynman())?.enabled).toBe(true);
+
+  // Same turn: after the install card, the freshly mounted SKILL.md is loaded
+  // (the chat renders a /skills read as "Load <skill> skill instructions"),
+  // and only then does the answer arrive.
+  await expect(page.getByText("Install Skill", { exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
+  await expect(page.getByText(/Load Feynman skill instructions/i)).toBeVisible({
+    timeout: 120_000,
+  });
+  await expect(page.getByText(/SYN/).last()).toBeVisible({ timeout: 180_000 });
+});
+
+// The user never mentions a skill: the agent has to decide the catalog is worth
+// checking, find the match, install it and use it — all in one turn.
+test("E10 the chat agent finds and installs a fitting skill on its own", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+  const ws = await login(page);
+  await uninstall(page, ws, (item) => item.slug === "feynman");
+
+  await say(page, "用费曼学习法给我讲讲 TCP 三次握手，三四句话就行。");
+
+  await expect
+    .poll(
+      async () =>
+        (await installedSkills(page, ws)).find((i) => i.slug === "feynman")
+          ?.installedVia,
+      { timeout: 180_000, intervals: [2000] },
+    )
+    .toBe("agent");
+  await expect(page.getByText(/Load Feynman skill instructions/i)).toBeVisible({
+    timeout: 120_000,
+  });
+  // It must say what it installed rather than use it silently.
+  await expect(page.getByText(/feynman/i).last()).toBeVisible({
+    timeout: 180_000,
+  });
+});
+
+// A GitHub link in chat is not in the catalog yet: the agent starts a
+// background import (the same one the Submit dialog starts) that installs the
+// skill when it finishes — whether or not that is within this turn.
+test("E11 a GitHub link given in chat is imported in the background and installed", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+  test.skip(!fixtures.sourceA, "BLOCKED: fixture A URL not supplied");
+  const ws = await login(page);
+
+  await say(page, `帮我安装这个 skill：${fixtures.sourceA}`);
+
+  await expect
+    .poll(
+      async () =>
+        (await installedSkills(page, ws)).find((i) =>
+          i.slug.endsWith(`-${fixtures.name}`),
+        )?.installedVia,
+      { timeout: 240_000, intervals: [3000] },
+    )
+    .toBe("agent");
+  const submissions = (await (
+    await page.request.get(
+      `${api}/v1/workspaces/${ws}/skills/registry/submissions`,
+    )
+  ).json()) as { items: SkillSubmission[] };
+  expect(submissions.items[0]).toMatchObject({
+    sourceInput: fixtures.sourceA,
+    status: "succeeded",
+  });
 });
