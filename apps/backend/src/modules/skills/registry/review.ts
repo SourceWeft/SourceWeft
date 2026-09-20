@@ -178,7 +178,7 @@ export async function setRegistrySkillVersionStatus(
       target === "deprecated" &&
       version.status === "published" &&
       version.isCurrent
-        ? pickRevocationSuccessor(
+        ? (pickRevocationSuccessor(
             (
               await tx
                 .select()
@@ -196,7 +196,7 @@ export async function setRegistrySkillVersionStatus(
               committedAt: row.manifestJson.registry?.committedAt,
               createdAt: row.createdAt,
             })),
-          )?.row ?? null
+          )?.row ?? null)
         : null;
     const manifestJson = {
       ...version.manifestJson,
@@ -227,6 +227,19 @@ export async function setRegistrySkillVersionStatus(
         },
       },
     };
+    // What other people see and install is the CURRENT version, so opening a
+    // skill to everyone has to be decided while looking at that one. Approving
+    // an older draft with "make public" would publish a version the admin did
+    // not have in front of them. Restricting is always allowed: it only closes.
+    const refusePublic = () =>
+      new ContentError(
+        409,
+        "SKILL_VISIBILITY_NOT_CURRENT",
+        "This is not the version people would get. Make the skill public from its current version.",
+      );
+    if (decision.visibility === "public" && target !== "published") {
+      throw refusePublic();
+    }
     let takesCurrent = false;
     if (target === "published") {
       // Review order is not commit order: a draft can sit in the queue while a
@@ -247,14 +260,18 @@ export async function setRegistrySkillVersionStatus(
           ? { committedAt: current.manifestJson.registry?.committedAt }
           : null,
       });
+      if (decision.visibility === "public" && !takesCurrent) {
+        throw refusePublic();
+      }
       if (takesCurrent) {
         await tx
           .update(skillVersions)
           .set({ isCurrent: false, updatedAt: now })
           .where(eq(skillVersions.skillId, identity.skillId));
       }
-      // Display fields follow the current version only. Visibility is the
-      // admin's decision about the skill as a whole, so it applies either way.
+      // Display fields follow the current version only. Visibility is about
+      // the skill as a whole; "public" was refused above unless this version
+      // is the one that goes live.
       if (takesCurrent || decision.visibility) {
         await tx
           .update(skillDefinitions)

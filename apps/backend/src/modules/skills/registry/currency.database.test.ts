@@ -210,10 +210,28 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       );
       expect(draft.status).toBe("queued");
 
+      // "Make public" is refused from a version nobody would get: what goes
+      // public is the current one, which is not what is being reviewed here.
+      await expect(
+        review.setRegistrySkillVersionStatus(
+          draft.skillVersionId,
+          "published",
+          {
+            ...admin,
+            visibility: "public",
+          },
+        ),
+      ).rejects.toMatchObject({ code: "SKILL_VISIBILITY_NOT_CURRENT" });
+      const untouched = await state(newer.skillId);
+      expect(untouched.definition.visibility).toBe("restricted");
+      expect(
+        untouched.versions.find((v) => v.id === draft.skillVersionId)!.status,
+      ).toBe("draft");
+
       const result = await review.setRegistrySkillVersionStatus(
         draft.skillVersionId,
         "published",
-        { ...admin, visibility: "public" },
+        admin,
       );
       expect(result).toEqual({
         skillVersionId: draft.skillVersionId,
@@ -231,11 +249,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(approved.manifestJson.registry?.moderation?.action).toBe(
         "publish",
       );
-      // Display fields stay with the current version; the admin's visibility
-      // decision is about the skill and still applies.
+      // Display fields stay with the current version.
       expect(after.definition.displayName).toBe("Writer b");
       expect(after.definition.description).toBe("Version b");
-      expect(after.definition.visibility).toBe("public");
+      expect(after.definition.visibility).toBe("restricted");
     });
 
     test("an admin publishing a NEWER draft still promotes it", async () => {
