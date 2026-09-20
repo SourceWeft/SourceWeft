@@ -142,6 +142,7 @@ test("a version that can do more asks in the app's own dialog, names what change
       if (options) return { workspaceSkill: {} };
       throw new HttpClientError({
         status: 409,
+        statusText: "Conflict",
         code: "SKILL_VERSION_ESCALATION",
         message: "This version adds executable scripts.",
         details: { addsScripts: true, newFlags: ["binary:executable"] },

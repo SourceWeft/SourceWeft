@@ -47,7 +47,9 @@ test("README installation: authentication, private upload, streaming, persistenc
   await page.goto("/auth/sign-in");
   await page.getByLabel("Email", { exact: true }).fill(state.email);
   await page.getByLabel("Password", { exact: true }).fill(state.password);
-  await page.getByRole("button", { name: "Login", exact: true }).click();
+  // The @better-auth-ui sign-in view labels its submit "Sign In" (the old view
+  // said "Login"); the other buttons all start with "Continue with".
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await page.waitForURL(/\/dashboard/);
   if (restart) {
     await page.goto(
