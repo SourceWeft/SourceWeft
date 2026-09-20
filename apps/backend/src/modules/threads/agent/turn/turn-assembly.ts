@@ -60,7 +60,8 @@ import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
 import { listArtifactSummaryRecords } from "../../../artifacts/repository";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
-import { buildSkillSandboxAssetPlans } from "../../../skills/sandbox-assets";
+import { TurnSkillSandboxAssets } from "../../../skills/sandbox-assets";
+import type { EnabledSkillDescriptor } from "../../../skills/types";
 import { buildRequiredSandboxRuntimeAssetPlans } from "../../../../shared/sandbox-assets/plans";
 import { config } from "../../../../shared/config";
 import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
@@ -120,6 +121,13 @@ export interface FilesystemBackend {
   localFiles: boolean;
   filesystemMounts: ReturnType<typeof createDefaultFilesystemMounts>;
   skillsBackend: SelectedSkillsBackend;
+  /**
+   * The bundles this turn's sandbox should hold. Lives beside the /skills
+   * mount because both are the turn's view of its skills and both grow when
+   * `install_skill` runs: the mount makes the skill readable, this makes its
+   * scripts stageable.
+   */
+  skillSandboxAssets: TurnSkillSandboxAssets;
 }
 
 export function buildFilesystemBackend(
@@ -174,6 +182,7 @@ export function buildFilesystemBackend(
     localFiles,
     filesystemMounts,
     skillsBackend,
+    skillSandboxAssets: new TurnSkillSandboxAssets(),
   };
 }
 
@@ -546,19 +555,19 @@ export interface ThreadAgentAssembly {
 
 /**
  * Skill-bundle staging request for the turn
- * (docs/architecture/sandbox-skill-staging.md). Null when no enabled skill
- * has a stageable bundle — the runtime then behaves exactly as before
- * staging existed; on images without a pre-created /skills the runtime
+ * (docs/architecture/sandbox-skill-staging.md). Always handed to the runtime,
+ * even when the turn starts with nothing to stage: `install_skill` can add a
+ * bundle mid-turn, and the sandbox stages it on first /skills use. `hasPlans`
+ * keeps the empty case exactly as it was before staging existed — the prompt
+ * does not announce staged scripts and /skills stays denied in execute until
+ * something is registered; on images without a pre-created /skills the runtime
  * degrades safely per plan. Plans are prebuilt (KB-scale, content-cached) so
- * the callback the manager invokes at sandbox acquisition is trivially cheap.
+ * the callbacks the manager invokes are trivially cheap.
  */
-function skillAssetsForPreparedTurn(prepared: PreparedThreadTurn) {
-  const plans = buildSkillSandboxAssetPlans(prepared.enabledSkills);
-  if (plans.length === 0) {
-    return null;
-  }
+function skillAssetsForTurn(registry: TurnSkillSandboxAssets) {
   return {
-    plans: async () => plans,
+    plans: async () => registry.plans(),
+    hasPlans: () => registry.hasPlans(),
     logger: {
       info: (message: string, meta?: Record<string, unknown>) =>
         logger.info(message, meta),
@@ -568,12 +577,52 @@ function skillAssetsForPreparedTurn(prepared: PreparedThreadTurn) {
   };
 }
 
+/**
+ * `install_skill`'s hook into the running turn: mount the skill so its files
+ * are readable, and register its bundle so the sandbox can stage its scripts.
+ * Registration is best effort — a bundle over the staging caps, or a turn
+ * without a cloud sandbox or without execute, only means the scripts wait for
+ * the next turn; the mount (and the install) stand either way.
+ */
+export function mountInstalledSkillForTurn(input: {
+  prepared: PreparedThreadTurn;
+  filesystemBackend: FilesystemBackend;
+  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+  skill: EnabledSkillDescriptor;
+}) {
+  const { prepared, filesystemBackend, sandboxRuntime, skill } = input;
+  filesystemBackend.skillsBackend.addSkill(skill);
+  // A bound PC materializes bundles under its own skills root, which commands
+  // never address as /skills, so there is no first-use hook to stage from.
+  if (
+    !sandboxRuntime ||
+    prepared.thread.executionTarget?.kind === "local" ||
+    isToolDenied(prepared, AGENT_TOOL_NAMES.execute)
+  ) {
+    return { scriptsStageable: false };
+  }
+  try {
+    filesystemBackend.skillSandboxAssets.add([skill]);
+    return { scriptsStageable: true };
+  } catch (error) {
+    logger.warn("Installed skill cannot be staged into the running turn", {
+      workspaceId: prepared.workspace.id,
+      skill: skill.name,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { scriptsStageable: false };
+  }
+}
+
 export async function buildSandboxRuntimeForPreparedTurn(input: {
   prepared: PreparedThreadTurn;
   filesystemBackend: FilesystemBackend;
 }): Promise<AgentSandboxRuntimeForTurn | null> {
   const { prepared, filesystemBackend } = input;
-  const skillAssets = skillAssetsForPreparedTurn(prepared);
+  // Seeded here rather than where the registry is created, so an unstageable
+  // selected skill still fails the turn at the point it always did.
+  filesystemBackend.skillSandboxAssets.add(prepared.enabledSkills);
+  const skillAssets = skillAssetsForTurn(filesystemBackend.skillSandboxAssets);
   const sandboxCandidateTools = new Set([
     ...(prepared.command?.workflow?.defaultTools ?? []),
     ...Object.values(prepared.runtimeTools)
@@ -661,7 +710,7 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
               }
             },
           },
-          ...(skillAssets ? { skillAssets } : {}),
+          skillAssets,
           ...(runtimeAssets ? { runtimeAssets } : {}),
         });
 
@@ -1124,7 +1173,12 @@ export async function buildToolCollection(
       ...(filesystemBackend
         ? {
             mountSkill: (skill) =>
-              filesystemBackend.skillsBackend.addSkill(skill),
+              mountInstalledSkillForTurn({
+                prepared,
+                filesystemBackend,
+                sandboxRuntime,
+                skill,
+              }),
           }
         : {}),
     }),

@@ -168,3 +168,40 @@ export function buildSkillSandboxAssetPlans(
   }
   return plans;
 }
+
+/**
+ * The skill bundles a turn's sandbox should hold — a set that can GROW while
+ * the turn runs.
+ *
+ * It used to be a snapshot taken once from the skills the turn started with,
+ * which made a skill installed mid-turn readable (the /skills mount is live)
+ * but not runnable until the next turn. The sandbox manager asks for `plans()`
+ * every time it stages and stages only what it has not attempted yet, so
+ * registering the new bundle here is all an install has to do: it is staged
+ * lazily, the first time a command references /skills.
+ *
+ * Keyed by skill name because that is the staging path (`/skills/<name>/`): a
+ * re-registered skill replaces its plan rather than staging twice.
+ */
+export class TurnSkillSandboxAssets {
+  private readonly plansByName = new Map<string, RuntimeAssetPlan>();
+
+  /**
+   * Registers the skills' bundles. Throws SKILL_SANDBOX_ASSET_INVALID for a
+   * bundle that cannot be staged, registering nothing — at turn start that
+   * fails the turn; a mid-turn install catches it and degrades alone.
+   */
+  add(skills: readonly EnabledSkillDescriptor[]) {
+    for (const plan of buildSkillSandboxAssetPlans(skills)) {
+      this.plansByName.set(plan.name, plan);
+    }
+  }
+
+  hasPlans() {
+    return this.plansByName.size > 0;
+  }
+
+  plans(): RuntimeAssetPlan[] {
+    return [...this.plansByName.values()];
+  }
+}

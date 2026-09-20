@@ -823,7 +823,15 @@ export function createTrustedSandboxHostAdapter(input: {
         skillScriptsStaged: skillsDeferred,
       });
       const current = await session();
-      if (skillsDeferred && !input.manager.skillScriptsStaged()) {
+      if (skillsDeferred) {
+        // Same lazy top-up as the model execute path: bundles registered
+        // after acquisition are staged on first /skills use.
+        await input.manager.ensureSkillAssetsStaged(current.sandbox);
+      }
+      if (
+        skillsDeferred &&
+        !input.manager.skillScriptsStagedForCommand(executeInput.command)
+      ) {
         throw new Error(
           "SANDBOX_SKILL_STAGING_UNAVAILABLE: staged skill scripts are unavailable.",
         );
