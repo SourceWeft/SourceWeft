@@ -784,3 +784,212 @@ test("E11 a GitHub link given in chat is imported in the background and installe
     status: "succeeded",
   });
 });
+
+// Real-world repositories, pinned to a commit so the run is reproducible. These
+// exercise what the inert fixtures cannot: binary assets at scale, and a
+// repository that ships many skills.
+const REAL_WORLD = {
+  // 83 files, 54 of them .ttf fonts, ~5.3 MiB — the skill that used to lose
+  // every font at ingest because a text column could not hold them.
+  canvasDesign:
+    "https://github.com/anthropics/skills/tree/34040c9c568585f6929bedeaad110ad08f079624/skills/canvas-design",
+  // 15 skills under skills/.
+  superpowers:
+    "https://github.com/obra/superpowers/tree/5bf4e78011075bcfc0dc295f0724994cd123ee71",
+};
+type VersionDetail = {
+  skillContent: string | null;
+  contentRestricted?: boolean;
+  files: Array<{ path: string; sizeBytes: number; contentHash: string }>;
+};
+async function versionDetail(
+  page: Page,
+  ws: string,
+  item: RegistrySkillResult,
+) {
+  const rows = (
+    (await (
+      await page.request.get(`${api}/v1/workspaces/${ws}/skills/catalog`)
+    ).json()) as { items: Array<{ catalogId: string; skillVersionId: string }> }
+  ).items;
+  const row = rows.find((r) => r.skillVersionId === item.skillVersionId)!;
+  const response = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog/${encodeURIComponent(row.catalogId)}/versions/${item.skillVersionId}`,
+  );
+  expect(response.status(), await response.text()).toBe(200);
+  return (await response.json()) as VersionDetail;
+}
+
+test("E12 a real skill with binary assets is pulled from GitHub whole and installs", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const ws = await login(page);
+  const { submission, skills } = await submit(page, REAL_WORLD.canvasDesign);
+  expect(submission.status, JSON.stringify(submission.error)).toBe("succeeded");
+  expect(skills).toHaveLength(1);
+  const skill = skills[0]!;
+  expect(skill.slug).toBe("gh-anthropics-skills-canvas-design");
+  await publish(skill);
+
+  const detail = await versionDetail(page, ws, skill);
+  const fonts = detail.files.filter((f) => f.path.endsWith(".ttf"));
+  expect(detail.files).toHaveLength(83);
+  expect(fonts).toHaveLength(54);
+  expect(fonts.every((f) => f.sizeBytes > 0)).toBeTruthy();
+  // The submitter may read the instructions it just imported.
+  expect(detail.skillContent).toContain("canvas-design");
+
+  await closeResult(page);
+  const install = await page.request.post(`${api}/v1/workspaces/${ws}/skills`, {
+    data: {
+      skillId: (
+        (await (
+          await page.request.get(`${api}/v1/workspaces/${ws}/skills/catalog`)
+        ).json()) as {
+          items: Array<{ skillId: string; skillVersionId: string }>;
+        }
+      ).items.find((r) => r.skillVersionId === skill.skillVersionId)!.skillId,
+      skillVersionId: skill.skillVersionId,
+    },
+  });
+  expect(install.status(), await install.text()).toBe(201);
+  expect(
+    (await installedSkills(page, ws)).find((i) => i.slug === skill.slug)
+      ?.enabled,
+  ).toBe(true);
+});
+
+test("E13 a many-skill repository indexes every skill, and chat installs just the one that was named", async ({
+  page,
+}) => {
+  test.setTimeout(420_000);
+  test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+  const ws = await login(page);
+  const { submission, skills } = await submit(page, REAL_WORLD.superpowers);
+  expect(submission.status, JSON.stringify(submission.error)).toBe("succeeded");
+  expect(skills).toHaveLength(15);
+  expect(skills.filter((s) => s.status === "failed")).toEqual([]);
+  await closeResult(page);
+  // Importing indexes; it installs nothing unless asked to.
+  expect(
+    (await installedSkills(page, ws)).filter((i) =>
+      i.slug.startsWith("gh-obra-superpowers-"),
+    ),
+  ).toEqual([]);
+  for (const skill of skills) await publish(skill);
+
+  await say(
+    page,
+    "从 obra/superpowers 这个仓库里只安装 test-driven-development 这一个 skill，别的不要装。",
+  );
+  await expect
+    .poll(
+      async () =>
+        (await installedSkills(page, ws))
+          .filter((i) => i.slug.startsWith("gh-obra-superpowers-"))
+          .map((i) => i.slug),
+      { timeout: 240_000, intervals: [3000] },
+    )
+    .toEqual(["gh-obra-superpowers-test-driven-development"]);
+});
+
+// A skill's own files, really inside the cloud sandbox. The model is asked for
+// the sha256 of the skill's script as computed IN the sandbox; it cannot guess
+// a digest, so a match with the hash recorded at ingest proves both that the
+// bundle reached the sandbox byte-for-byte from object storage and that the
+// command actually ran there.
+function sandboxConfigured() {
+  return /^SOURCEWEFT_SANDBOX_ENABLED="?true/m.test(
+    readFileSync(resolve("../backend/.env.skills-test"), "utf8"),
+  );
+}
+const SANDBOX_BLOCKED =
+  "BLOCKED: the test deployment has no sandbox provider configured";
+async function importFormatter(page: Page, ws: string) {
+  const { submission, skills } = await submit(page, defaultSource);
+  expect(submission.status, JSON.stringify(submission.error)).toBe("succeeded");
+  const skill = skills[0]!;
+  await publish(skill);
+  const detail = await versionDetail(page, ws, skill);
+  await closeResult(page);
+  const scriptHash = detail.files.find(
+    (f) => f.path === "formatter.py",
+  )!.contentHash;
+  expect(scriptHash).toMatch(/^[0-9a-f]{64}$/);
+  return { skill, scriptHash };
+}
+const hashPrompt = (slug: string) =>
+  `在沙箱里执行 sha256sum /skills/${slug}/formatter.py ，再用 python3 运行这个文件，把两条命令的原始输出原样告诉我。必须真的执行，不要推测。`;
+
+// The sandbox is an external provider reached over the network; one connection
+// reset there must not turn the whole acceptance run red. These two cases — and
+// only these — get a single retry.
+test.describe("cloud sandbox", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("E14 an installed skill's script runs in the cloud sandbox", async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+    test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+    test.skip(!sandboxConfigured(), SANDBOX_BLOCKED);
+    const ws = await login(page);
+    const { skill, scriptHash } = await importFormatter(page, ws);
+    const catalog = (
+      (await (
+        await page.request.get(`${api}/v1/workspaces/${ws}/skills/catalog`)
+      ).json()) as { items: Array<{ skillId: string; skillVersionId: string }> }
+    ).items.find((r) => r.skillVersionId === skill.skillVersionId)!;
+    expect(
+      (
+        await page.request.post(`${api}/v1/workspaces/${ws}/skills`, {
+          data: {
+            skillId: catalog.skillId,
+            skillVersionId: skill.skillVersionId,
+          },
+        })
+      ).status(),
+    ).toBe(201);
+
+    await say(page, hashPrompt(skill.slug!));
+    await expect(page.getByText(scriptHash).last()).toBeVisible({
+      timeout: 480_000,
+    });
+    await expect(
+      page.getByText("Hello world this is a test.").last(),
+    ).toBeVisible();
+  });
+
+  // The skill is NOT installed when the turn starts: the agent installs it and
+  // runs its script in the same turn, so the bundle has to be staged into a
+  // sandbox that was set up before the skill existed for this workspace.
+  test("E15 a skill installed mid-turn has its script staged and run in that same turn", async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+    test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+    test.skip(!sandboxConfigured(), SANDBOX_BLOCKED);
+    const ws = await login(page);
+    const { skill, scriptHash } = await importFormatter(page, ws);
+    expect(
+      (await installedSkills(page, ws)).find((i) => i.slug === skill.slug),
+    ).toBeUndefined();
+
+    await say(
+      page,
+      `先安装 ${skill.slug} 这个 skill，装好后在同一轮里：${hashPrompt(skill.slug!)}`,
+    );
+    await expect
+      .poll(
+        async () =>
+          (await installedSkills(page, ws)).find((i) => i.slug === skill.slug)
+            ?.installedVia,
+        { timeout: 180_000, intervals: [2000] },
+      )
+      .toBe("agent");
+    await expect(page.getByText(scriptHash).last()).toBeVisible({
+      timeout: 480_000,
+    });
+  });
+});

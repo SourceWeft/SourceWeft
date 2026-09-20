@@ -15,6 +15,14 @@ Real local Web/API/worker, authentication, PostgreSQL, object storage and pinned
 
 E9–E11 drive the chat agent with a REAL model: install a catalog skill and use it in the same turn, find a fitting skill without being told about one, and import a GitHub link in the background. `prepare-skill-tests.ts` enables them when the source env has `DEEPSEEK_API_KEY` and `MODEL_GATEWAY_GLOBAL_CONFIG_PATH`: it derives a minimal gateway config (`.env.skills-test.gateway.json`, git-ignored) containing only the DeepSeek gateway, the chat profiles it serves, and the embedding profiles the backend requires at boot. Without a key they report **BLOCKED**. They cost a few model calls per run.
 
+### Real-world repositories (E12–E13)
+
+Pinned commits of real repositories, for what the inert fixtures cannot show: `anthropics/skills` `canvas-design` (83 files, 54 of them `.ttf` — binaries must survive ingest whole) and `obra/superpowers` (15 skills in one repository; chat then installs only the one that was named).
+
+### Sandbox cases (E14–E15)
+
+A skill's own script really executed in the cloud sandbox: the agent is asked for `sha256sum` of the staged script, and the digest must equal the hash recorded at ingest — the model cannot guess a digest, so a match proves the bundle reached the sandbox byte-for-byte from object storage and the command ran there. E15 installs the skill mid-turn and runs it in that same turn. `prepare-skill-tests.ts` passes the source env's sandbox provider settings (`SOURCEWEFT_SANDBOX_*`, `CF_SANDBOX_*` / `DAYTONA_*`) through; without `SOURCEWEFT_SANDBOX_ENABLED=true` they report **BLOCKED**. They create real sandboxes and take about a minute each.
+
 The default source is a real script-bearing Cisco fixture; it is queued by the current local rules. The authenticated test administrator publishes it for installation tests. This does not substitute for malformed or changed-content fixtures.
 
 ## Full acceptance fixtures

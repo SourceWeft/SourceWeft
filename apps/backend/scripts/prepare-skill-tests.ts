@@ -45,6 +45,17 @@ const env = {
       // The chat case (the agent installing a skill mid-conversation) needs a
       // real model; see `chatGatewayEnv` below.
       "DEEPSEEK_API_KEY",
+      // The sandbox case (a skill's own script run in the cloud sandbox) uses
+      // whichever provider the source deployment runs. Absent → BLOCKED.
+      "SOURCEWEFT_SANDBOX_ENABLED",
+      "SOURCEWEFT_SANDBOX_PROVIDER",
+      "SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED",
+      "CF_SANDBOX_API_KEY",
+      "CF_SANDBOX_BRIDGE_URL",
+      "DAYTONA_API_URL",
+      "DAYTONA_API_KEY",
+      "DAYTONA_SANDBOX_SNAPSHOT",
+      "DAYTONA_SANDBOX_IMAGE",
     ].flatMap((key) => (values[key] ? [[key, values[key]]] : [])),
   ),
 };
