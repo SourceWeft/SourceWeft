@@ -12,6 +12,7 @@ import {
 } from "./content/mcp";
 import { registerSourceRoutes } from "./content/sources";
 import { registerSkillRoutes } from "./content/skills";
+import { registerSkillSubmissionRoutes } from "./content/skill-submissions";
 import { registerThreadRoutes } from "./content/threads";
 import { registerWorkingFileRoutes } from "./content/working-files";
 import { registerSourceSelectionRoutes } from "./content/source-selection";
@@ -25,6 +26,7 @@ export function registerContentRoutes(app: Hono) {
   registerSourceRoutes(workspaceRoutes);
   registerConnectorRoutes(workspaceRoutes);
   registerSkillRoutes(workspaceRoutes);
+  registerSkillSubmissionRoutes(workspaceRoutes);
   registerThreadRoutes(workspaceRoutes);
   registerWorkingFileRoutes(workspaceRoutes);
   registerSourceSelectionRoutes(workspaceRoutes);

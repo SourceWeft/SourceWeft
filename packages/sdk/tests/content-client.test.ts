@@ -79,3 +79,44 @@ test("listSkillsCatalog stays parameterless by default and encodes paging when a
     "/v1/workspaces/workspace%20%2F%20one/skills/catalog/by-slug/gh-owner%2Fx",
   ]);
 });
+
+test("skill submissions address the async ingest endpoints with encoded ids and paging", async () => {
+  const paths: string[] = [];
+  const bodies: unknown[] = [];
+  const client = new ContentClient({
+    get: async (path: string) => {
+      paths.push(`GET ${path}`);
+      return {};
+    },
+    post: async (path: string, body: unknown) => {
+      paths.push(`POST ${path}`);
+      bodies.push(body);
+      return {};
+    },
+  } as never);
+
+  await client.createSkillSubmission("workspace / one", {
+    source: "owner/repo",
+    install: { skill: "pdf" },
+  });
+  await client.listSkillSubmissions("workspace / one");
+  await client.listSkillSubmissions("workspace / one", {
+    limit: 10,
+    cursor: "page + two",
+  });
+  await client.getSkillSubmission("workspace / one", "sub/1");
+  await client.retrySkillSubmission("workspace / one", "sub/1");
+
+  const base = "/v1/workspaces/workspace%20%2F%20one/skills/registry/submissions";
+  assert.deepEqual(paths, [
+    `POST ${base}`,
+    `GET ${base}`,
+    `GET ${base}?limit=10&cursor=page+%2B+two`,
+    `GET ${base}/sub%2F1`,
+    `POST ${base}/sub%2F1/retry`,
+  ]);
+  assert.deepEqual(bodies[0], {
+    source: "owner/repo",
+    install: { skill: "pdf" },
+  });
+});

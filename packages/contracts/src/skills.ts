@@ -572,3 +572,108 @@ export const switchSkillVersionSchema = z
     acknowledgeEscalation: z.boolean().optional(),
   })
   .strict();
+
+// --- Asynchronous registry submissions ---------------------------------------
+// A submission is the progress + outcome record of one background ingest. The
+// client creates it, then polls it: `stage`/`stages` say where the worker is,
+// `results` say what happened to each skill once it is done.
+export const skillSubmissionStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+]);
+export type SkillSubmissionStatus = z.infer<typeof skillSubmissionStatusSchema>;
+export const skillSubmissionErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
+export const skillSubmissionStageSchema = z.object({
+  status: z.enum(["running", "succeeded", "failed"]),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  error: skillSubmissionErrorSchema.optional(),
+});
+export const skillSubmissionSkillResultSchema = registrySkillResultSchema.extend(
+  {
+    // Present only when the submission asked for an install on completion.
+    install: z
+      .object({
+        // `skipped`: held for review, so nothing published to install yet.
+        status: z.enum(["installed", "already_installed", "skipped", "failed"]),
+        error: skillSubmissionErrorSchema.optional(),
+      })
+      .optional(),
+  },
+);
+export type SkillSubmissionSkillResult = z.infer<
+  typeof skillSubmissionSkillResultSchema
+>;
+export const skillSubmissionSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  submittedBy: z.string(),
+  sourceKind: z.enum(["github", "upload"]),
+  sourceInput: z.string(),
+  repoOwner: z.string().nullable(),
+  repoName: z.string().nullable(),
+  ref: z.string().nullable(),
+  subpath: z.string().nullable(),
+  commitSha: z.string().nullable(),
+  commitCommittedAt: z.string().nullable(),
+  target: z.enum(["workspace", "team"]),
+  status: skillSubmissionStatusSchema,
+  stage: z.string().nullable(),
+  // Keyed by stage name; the server emits the keys in execution order.
+  stages: z.record(z.string(), skillSubmissionStageSchema),
+  results: z.array(skillSubmissionSkillResultSchema),
+  onComplete: z
+    .object({
+      install: z
+        .object({
+          skill: z.string().optional(),
+          installedVia: z.enum(["user", "agent"]).optional(),
+        })
+        .optional(),
+    })
+    .nullable(),
+  error: skillSubmissionErrorSchema.nullable(),
+  attempts: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type SkillSubmission = z.infer<typeof skillSubmissionSchema>;
+/**
+ * `source` is deliberately just a non-empty string (see
+ * `submitRegistrySkillRequestSchema`): the server's GitHub source parser is the
+ * authority and also accepts the `owner/repo` shorthand.
+ */
+export const createSkillSubmissionRequestSchema = z
+  .object({
+    source: z.string().trim().min(1).max(2048),
+    // Install what gets indexed into this workspace once the ingest finishes;
+    // `skill` narrows a multi-skill repository to one, by name or slug.
+    install: z
+      .object({ skill: z.string().trim().min(1).max(256).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type CreateSkillSubmissionRequest = z.infer<
+  typeof createSkillSubmissionRequestSchema
+>;
+export const skillSubmissionResponseSchema = z.object({
+  submission: skillSubmissionSchema,
+});
+export type SkillSubmissionResponse = z.infer<
+  typeof skillSubmissionResponseSchema
+>;
+export const listSkillSubmissionsResponseSchema = z.object({
+  items: z.array(skillSubmissionSchema),
+  nextCursor: z.string().nullable(),
+});
+export type ListSkillSubmissionsResponse = z.infer<
+  typeof listSkillSubmissionsResponseSchema
+>;

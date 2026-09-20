@@ -777,6 +777,54 @@ export class ContentClient {
     );
   }
 
+  /**
+   * Start an asynchronous import of a GitHub skill source. Resolves as soon as
+   * the import is queued — poll `getSkillSubmission` for progress and results.
+   * Re-submitting a source that is still importing returns that same record.
+   */
+  createSkillSubmission(
+    workspaceId: string,
+    input: import("@sourceweft/contracts").CreateSkillSubmissionRequest,
+  ) {
+    return this.http.post<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(`/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions`, input);
+  }
+
+  /** The caller's own imports in this workspace, newest first. */
+  listSkillSubmissions(
+    workspaceId: string,
+    params: { limit?: number; cursor?: string } = {},
+  ) {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.cursor) search.set("cursor", params.cursor);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    return this.http.get<
+      import("@sourceweft/contracts").ListSkillSubmissionsResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions${suffix}`,
+    );
+  }
+
+  getSkillSubmission(workspaceId: string, submissionId: string) {
+    return this.http.get<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions/${encode(submissionId)}`,
+    );
+  }
+
+  /** Re-queue a `failed` import; anything else answers 409. */
+  retrySkillSubmission(workspaceId: string, submissionId: string) {
+    return this.http.post<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions/${encode(submissionId)}/retry`,
+      {},
+    );
+  }
+
   listRegistryVersions(workspaceId: string, catalogId: string, cursor?: string) {
     return this.http.get<RegistryVersionsResponse>(`/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/versions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
   }
