@@ -1,9 +1,12 @@
+import type { useTranslations } from "next-intl";
 import type { ToolCallRecord } from "./types";
 import {
   basename,
   resolveWorkfileCodeLanguage,
   type WorkfileCodeLanguage,
 } from "../workfile-content-preview";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export const WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT = 8_000;
 
@@ -220,17 +223,22 @@ export function resolveWorkfileMutationPreview(
   return null;
 }
 
-export function getWorkfileMutationToolTitle(toolCall: ToolCallRecord) {
+export function getWorkfileMutationToolTitle(
+  toolCall: ToolCallRecord,
+  t: Translate,
+) {
   const path = resolveToolPath(toolCall);
   if (!isCodeFilePath(path)) {
     return null;
   }
-  const location = isWorkfilePath(path) ? "Workfile" : "sandbox file";
+  const location = isWorkfilePath(path)
+    ? t("workfile.locationWorkfile")
+    : t("workfile.locationSandboxFile");
   if (toolCall.tool === "write_file") {
-    return `Wrote ${location}: ${basename(path)}`;
+    return t("workfile.wrote", { location, name: basename(path) });
   }
   if (toolCall.tool === "edit_file") {
-    return `Edited ${location}: ${basename(path)}`;
+    return t("workfile.edited", { location, name: basename(path) });
   }
   return null;
 }

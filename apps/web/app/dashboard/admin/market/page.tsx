@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,29 +21,30 @@ import {
 
 const CRITICAL_FLAG = /pipe-to-shell|sudo|base64-exec|internal-address/;
 
-function flagLabel(flag: string) {
+function flagLabel(flag: string, t: ReturnType<typeof useTranslations>) {
   const map: Record<string, string> = {
-    "command:pipe-to-shell": "Installer command: curl | sh",
-    "command:sudo": "sudo",
-    "command:eval": "eval(",
-    "command:base64-exec": "base64 | sh",
-    "command:chmod-exec": "chmod +x",
-    "endpoint:internal-address": "Internal / metadata address",
+    "command:pipe-to-shell": t("flags.pipeToShell"),
+    "command:sudo": t("flags.sudo"),
+    "command:eval": t("flags.eval"),
+    "command:base64-exec": t("flags.base64Exec"),
+    "command:chmod-exec": t("flags.chmodExec"),
+    "endpoint:internal-address": t("flags.internalAddress"),
   };
   return map[flag] ?? flag;
 }
 
-function relativeTime(iso: string) {
+function relativeTime(iso: string, t: ReturnType<typeof useTranslations>) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t("relativeTime.justNow");
+  if (mins < 60) return t("relativeTime.minutes", { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return `${Math.round(hours / 24)} d ago`;
+  if (hours < 24) return t("relativeTime.hours", { count: hours });
+  return t("relativeTime.days", { count: Math.round(hours / 24) });
 }
 
 export default function MarketReviewPage() {
+  const t = useTranslations("dashboardAdmin");
   const [items, setItems] = React.useState<ReviewSubmission[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<Set<string>>(new Set());
@@ -55,13 +57,11 @@ export default function MarketReviewPage() {
     } catch (caught) {
       const status = (caught as { status?: number } | null)?.status;
       setError(
-        status === 403
-          ? "You do not have permission to review market submissions."
-          : "Failed to load the review queue. Please try again.",
+        status === 403 ? t("errors.forbidden") : t("errors.loadFailed"),
       );
       setItems([]);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     void load();
@@ -82,7 +82,7 @@ export default function MarketReviewPage() {
         prev ? prev.filter((item) => item.identifier !== identifier) : prev,
       );
     } catch {
-      setError(`Action failed: ${identifier}`);
+      setError(t("errors.actionFailed", { identifier }));
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
@@ -96,13 +96,13 @@ export default function MarketReviewPage() {
     <div className="mx-auto w-full max-w-5xl px-6 py-10">
       <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <ShieldAlert className="size-4" />
-        Market · Admin
+        {t("eyebrow")}
       </div>
       <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-        Review MCP submissions
+        {t("heading")}
       </h1>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Submissions that pass automated checks are published automatically. This queue contains flagged submissions that need manual review.
+        {t("description")}
       </p>
 
       {error ? (
@@ -115,12 +115,12 @@ export default function MarketReviewPage() {
       {items === null ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Loading review queue…
+          {t("loading")}
         </div>
       ) : items.length === 0 && !error ? (
         <div className="mt-10 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center text-muted-foreground">
           <CheckCircle2 className="size-6 text-emerald-500" />
-          <p className="text-sm">No submissions need review.</p>
+          <p className="text-sm">{t("empty")}</p>
         </div>
       ) : (
         <div className="mt-6 divide-y overflow-hidden rounded-xl border">
@@ -154,8 +154,10 @@ export default function MarketReviewPage() {
                       </a>
                     ) : null}
                     {item.transport ? <span>{item.transport}</span> : null}
-                    {item.submittedBy ? <span>Submitted by {item.submittedBy}</span> : null}
-                    <span>{relativeTime(item.createdAt)}</span>
+                    {item.submittedBy ? (
+                      <span>{t("submittedBy", { name: item.submittedBy })}</span>
+                    ) : null}
+                    <span>{relativeTime(item.createdAt, t)}</span>
                   </div>
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                     {item.flags.map((flag) => (
@@ -163,7 +165,7 @@ export default function MarketReviewPage() {
                         key={flag}
                         variant={CRITICAL_FLAG.test(flag) ? "destructive" : "secondary"}
                       >
-                        ⚠ {flagLabel(flag)}
+                        ⚠ {flagLabel(flag, t)}
                       </Badge>
                     ))}
                   </div>
@@ -179,7 +181,7 @@ export default function MarketReviewPage() {
                     ) : (
                       <CheckCircle2 className="size-4" />
                     )}
-                    Approve and publish
+                    {t("approve")}
                   </Button>
                   <Button
                     disabled={isBusy}
@@ -188,7 +190,7 @@ export default function MarketReviewPage() {
                     variant="outline"
                   >
                     <XCircle className="size-4" />
-                    Reject
+                    {t("reject")}
                   </Button>
                 </div>
               </div>
@@ -198,8 +200,11 @@ export default function MarketReviewPage() {
       )}
 
       <p className="mt-6 text-xs text-muted-foreground">
-        Only users listed in <code className="rounded bg-muted px-1 py-0.5">MARKET_ADMIN_USER_IDS</code>{" "}
-        can access this page. Approval and rejection actions use the same allowlist.
+        {t.rich("footer", {
+          code: (chunks) => (
+            <code className="rounded bg-muted px-1 py-0.5">{chunks}</code>
+          ),
+        })}
       </p>
     </div>
   );

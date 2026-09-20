@@ -8,6 +8,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown,
   Eye,
@@ -410,18 +411,6 @@ const modelTypeLabels: Record<ModelType, string> = {
   vision: "Vision",
 };
 
-const byokAddModelLabels: Record<ModelType, string> = {
-  image: "Add Image Model",
-  llm: "Add Model",
-  vision: "Add Vision Model",
-};
-
-const byokAddCredentialLabels: Record<ModelType, string> = {
-  image: "Add Image Credential",
-  llm: "Add Credential",
-  vision: "Add Vision Credential",
-};
-
 const CUSTOM_BYOK_PROVIDER_NAME = "custom";
 
 function getByokProviderLabel(providerName: string) {
@@ -436,22 +425,29 @@ function getByokProviderLogoSlug(providerName: string) {
     : normalizeProviderSlug(providerName);
 }
 
+type ByokProviderStatusKey =
+  | "addModelId"
+  | "customEndpoint"
+  | "addCredential"
+  | "byokModels"
+  | "notConfigured";
+
 function getByokProviderStatus(input: {
   customCount?: number;
   configured: boolean;
   providerName: string;
   type: ModelType;
-}) {
+}): ByokProviderStatusKey {
   void input.type;
 
   if (input.providerName === CUSTOM_BYOK_PROVIDER_NAME) {
-    return input.configured ? "Add model id" : "Custom endpoint";
+    return input.configured ? "addModelId" : "customEndpoint";
   }
 
   if (!input.configured) {
-    return "Add credential to use";
+    return "addCredential";
   }
-  return (input.customCount ?? 0) > 0 ? "BYOK models" : "Add model id";
+  return (input.customCount ?? 0) > 0 ? "byokModels" : "addModelId";
 }
 
 function createCustomModelItemFromSelection(input: {
@@ -671,6 +667,7 @@ function CatalogModelList({
   selectedModel: ModelItem | null;
   showEmpty?: boolean;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const chefs = [...new Set(models.map((model) => model.chef))];
   const selectedItemRef = useRef<HTMLDivElement | null>(null);
 
@@ -689,7 +686,9 @@ function CatalogModelList({
   return (
     <ModelSelectorList className="max-h-full flex-1 overflow-y-auto">
       {showEmpty ? (
-        <ModelSelectorEmpty>No models available.</ModelSelectorEmpty>
+        <ModelSelectorEmpty>
+          {t("modelSelector.noModelsAvailable")}
+        </ModelSelectorEmpty>
       ) : null}
       {chefs.map((chef) => (
         <ModelSelectorGroup
@@ -765,6 +764,16 @@ function ByokPanel({
   selectedModel: ModelItem | null;
   type: ModelType;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
+  const byokProviderLabel = (name: string) =>
+    name === CUSTOM_BYOK_PROVIDER_NAME
+      ? t("modelSelector.byok.customProvider")
+      : toProviderLabel(name);
+  const statusLabel = (key: ByokProviderStatusKey) =>
+    t(`modelSelector.byok.status.${key}`);
+  const typeLabel = t(`modelSelector.type.${type}`);
+  const addModelLabel = t(`modelSelector.byok.addModel.${type}`);
+  const addCredentialLabel = t(`modelSelector.byok.addCredential.${type}`);
   const [providerName, setProviderName] = useState<string>("");
   const [query, setQuery] = useState("");
   const providerOptions = useMemo(
@@ -797,7 +806,7 @@ function ByokPanel({
   const provider =
     providerOptions.find((item) => item.providerName === providerName) ?? null;
   const providerLabel = provider
-    ? getByokProviderLabel(provider.providerName)
+    ? byokProviderLabel(provider.providerName)
     : "BYOK";
   const providerCredentials = byokCredentials.filter(
     (item) => item.providerName === providerName,
@@ -836,13 +845,15 @@ function ByokPanel({
   });
   const selectedProviderHasKey = providerCredentials.length > 0;
   const providerStatus = provider
-    ? getByokProviderStatus({
-        customCount: customModels.length,
-        configured: selectedProviderHasKey,
-        providerName: provider.providerName,
-        type,
-      })
-    : "Not configured";
+    ? statusLabel(
+        getByokProviderStatus({
+          customCount: customModels.length,
+          configured: selectedProviderHasKey,
+          providerName: provider.providerName,
+          type,
+        }),
+      )
+    : statusLabel("notConfigured");
   const handleAddModel = () => {
     onAddModel?.({
       credentialId: providerCredentials[0]?.id,
@@ -860,24 +871,26 @@ function ByokPanel({
               <ModelSelectorGroup className="p-1" forceMount>
                 {providerOptions.map((item) => {
                   const selected = item.providerName === providerName;
-                  const providerItemLabel = getByokProviderLabel(
+                  const providerItemLabel = byokProviderLabel(
                     item.providerName,
                   );
                   const credentialCount = byokCredentials.filter(
                     (credential) =>
                       credential.providerName === item.providerName,
                   ).length;
-                  const status = getByokProviderStatus({
-                    customCount: createCustomModelItemsFromSavedModels({
-                      credentials: byokCredentials,
+                  const status = statusLabel(
+                    getByokProviderStatus({
+                      customCount: createCustomModelItemsFromSavedModels({
+                        credentials: byokCredentials,
+                        providerName: item.providerName,
+                        savedModels: byokModels,
+                        type,
+                      }).length,
+                      configured: credentialCount > 0,
                       providerName: item.providerName,
-                      savedModels: byokModels,
                       type,
-                    }).length,
-                    configured: credentialCount > 0,
-                    providerName: item.providerName,
-                    type,
-                  });
+                    }),
+                  );
 
                   return (
                     <Tooltip key={item.providerName}>
@@ -935,7 +948,9 @@ function ByokPanel({
               className="h-4 rounded-md px-1.5 text-[9px]"
               variant="outline"
             >
-              {provider?.system ? "System" : "Custom"}
+              {provider?.system
+                ? t("modelSelector.byok.system")
+                : t("modelSelector.byok.custom")}
             </Badge>
             <div className="ml-auto shrink-0 text-xs text-muted-foreground">
               {providerStatus}
@@ -947,12 +962,14 @@ function ByokPanel({
               <div className="max-w-[260px] px-4 py-6 text-center">
                 <KeyRound className="mx-auto mb-2 size-5 text-muted-foreground" />
                 <div className="text-sm font-medium text-foreground">
-                  No {providerLabel} models configured
+                  {t("modelSelector.byok.noModelsConfigured", {
+                    provider: providerLabel,
+                  })}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {providerName === CUSTOM_BYOK_PROVIDER_NAME
-                    ? "Add a model with this provider to get started."
-                    : "Save an API key for this provider to get started."}
+                    ? t("modelSelector.byok.getStartedAddModel")
+                    : t("modelSelector.byok.getStartedSaveKey")}
                 </div>
                 <Button
                   className="mt-4"
@@ -962,8 +979,8 @@ function ByokPanel({
                   variant="secondary"
                 >
                   {providerName === CUSTOM_BYOK_PROVIDER_NAME
-                    ? byokAddModelLabels[type]
-                    : byokAddCredentialLabels[type]}
+                    ? addModelLabel
+                    : addCredentialLabel}
                 </Button>
               </div>
             </div>
@@ -972,7 +989,7 @@ function ByokPanel({
               <div className="flex min-h-0 flex-1 flex-col space-y-3 p-3">
                 <Input
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search models"
+                  placeholder={t("modelSelector.searchModels")}
                   value={query}
                 />
                 {filteredKnownModels.length > 0 ? (
@@ -1002,8 +1019,11 @@ function ByokPanel({
                 ) : (
                   <div className="rounded-md border border-dashed border-border/70 bg-muted/15 px-3 py-4 text-xs text-muted-foreground">
                     {hasKnownModels
-                      ? "No models match this search."
-                      : `No ${modelTypeLabels[type].toLowerCase()} models have been saved for ${providerLabel} yet.`}
+                      ? t("modelSelector.byok.noModelsMatchSearch")
+                      : t("modelSelector.byok.noSavedModels", {
+                          type: typeLabel.toLowerCase(),
+                          provider: providerLabel,
+                        })}
                   </div>
                 )}
               </div>
@@ -1016,9 +1036,7 @@ function ByokPanel({
                   variant="ghost"
                 >
                   <Plus className="size-4 text-primary" />
-                  <span className="text-sm font-medium">
-                    {byokAddModelLabels[type]}
-                  </span>
+                  <span className="text-sm font-medium">{addModelLabel}</span>
                 </Button>
               </div>
             </div>
@@ -1069,6 +1087,7 @@ function SelectorPanel({
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
   scrollToSelectedKey?: number;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const [modelModes, setModelModes] = useState<
     Record<ModelType, "global" | "byok">
   >({
@@ -1107,7 +1126,7 @@ function SelectorPanel({
               value={type}
             >
               <ModelTypeIcon type={type} />
-              {modelTypeLabels[type]}
+              {t(`modelSelector.type.${type}`)}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -1131,19 +1150,21 @@ function SelectorPanel({
                   className="rounded-md text-xs data-active:bg-background data-active:shadow-xs"
                   value="global"
                 >
-                  Global
+                  {t("modelSelector.global")}
                 </TabsTrigger>
                 <TabsTrigger
                   className="rounded-md text-xs data-active:bg-background data-active:shadow-xs"
                   value="byok"
                 >
-                  BYOK
+                  {t("modelSelector.byokTab")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent className="mt-0" value="global">
                 <div className="flex h-[min(382px,calc(100svh-14rem))] min-h-0 flex-col px-2 pt-2 pb-1">
                   <div className="shrink-0 pb-2">
-                    <ModelSelectorInput placeholder="Search models..." />
+                    <ModelSelectorInput
+                      placeholder={t("modelSelector.searchModelsEllipsis")}
+                    />
                   </div>
                   <CatalogModelList
                     models={availableModels[type] ?? []}
@@ -1246,6 +1267,7 @@ export function HeaderModelSelector({
   selectedModels: SelectedModels;
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelType>("llm");
   const [openSequence, setOpenSequence] = useState(0);
@@ -1271,8 +1293,10 @@ export function HeaderModelSelector({
           <ModelSelectorTrigger asChild>
             <button
               type="button"
-              aria-label={`Models: ${primaryModel?.name ?? "Auto"}`}
-              title="Select language, image and vision models"
+              aria-label={t("modelSelector.modelsAriaLabel", {
+                model: primaryModel?.name ?? t("modelSelector.auto"),
+              })}
+              title={t("modelSelector.selectModelsTitle")}
               aria-busy={isLoading && !primaryModel}
               disabled={isLoading && !primaryModel}
               onClick={() => setActiveTab("llm")}
@@ -1285,8 +1309,8 @@ export function HeaderModelSelector({
               <ModelTypeIcon type="llm" />
               <span className={iconOnly ? "sr-only" : "min-w-0 truncate"}>
                 {isLoading && !primaryModel
-                  ? "Loading models…"
-                  : (primaryModel?.name ?? "Auto")}
+                  ? t("modelSelector.loadingModels")
+                  : (primaryModel?.name ?? t("modelSelector.auto"))}
               </span>
               {!iconOnly && byokSelections.llm?.mode === "byok" ? (
                 <KeyRound className="size-3 shrink-0" />
@@ -1313,6 +1337,7 @@ export function HeaderModelSelector({
                 null;
               const isCatalogLoading = isLoading && !model;
               const showByokBadge = byokSelection?.mode === "byok";
+              const typeLabel = t(`modelSelector.type.${type}`);
 
               return (
                 <Tooltip key={type}>
@@ -1322,8 +1347,13 @@ export function HeaderModelSelector({
                         aria-busy={isCatalogLoading || undefined}
                         aria-label={
                           isCatalogLoading
-                            ? `${modelTypeLabels[type]} models loading`
-                            : `${modelTypeLabels[type]} model: ${model?.name ?? "None"}`
+                            ? t("modelSelector.typeModelsLoading", {
+                                type: typeLabel,
+                              })
+                            : t("modelSelector.typeModelAria", {
+                                type: typeLabel,
+                                model: model?.name ?? t("modelSelector.none"),
+                              })
                         }
                         className="flex min-w-0 max-w-[152px] items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
                         disabled={isCatalogLoading}
@@ -1344,7 +1374,10 @@ export function HeaderModelSelector({
                             {isCatalogLoading ? (
                               <span className="block h-2.5 w-16 animate-pulse rounded-full bg-muted-foreground/25" />
                             ) : (
-                              (model?.name ?? `No ${modelTypeLabels[type]}`)
+                              (model?.name ??
+                              t("modelSelector.noTypeModel", {
+                                type: typeLabel,
+                              }))
                             )}
                           </div>
                           {showByokBadge ? (
@@ -1360,12 +1393,23 @@ export function HeaderModelSelector({
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={6}>
                     {isCatalogLoading
-                      ? `${modelTypeLabels[type]} models loading`
+                      ? t("modelSelector.typeModelsLoading", {
+                          type: typeLabel,
+                        })
                       : byokSelection?.mode === "byok"
-                        ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                        ? t("modelSelector.byokTooltip", {
+                            type: typeLabel,
+                            model: model?.name ?? "BYOK",
+                            provider: byokSelection.providerName ?? "BYOK",
+                          })
                         : model
-                          ? `${modelTypeLabels[type]}: ${model.name}`
-                          : `No ${modelTypeLabels[type]} model available`}
+                          ? t("modelSelector.typeTooltip", {
+                              type: typeLabel,
+                              model: model.name,
+                            })
+                          : t("modelSelector.noTypeModelAvailable", {
+                              type: typeLabel,
+                            })}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -1376,7 +1420,7 @@ export function HeaderModelSelector({
 
       <ModelSelectorContent
         className="max-h-[calc(100svh-2rem)] max-w-[92vw] overflow-y-auto sm:max-w-[520px]"
-        title="Select model"
+        title={t("modelSelector.selectModelTitle")}
       >
         <SelectorPanel
           activeTab={activeTab}

@@ -1,14 +1,18 @@
 import type { MouseEvent } from "react";
+import { useTranslations } from "next-intl";
 
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { TypeBadge } from "../type-badge";
-import {
-  skillSourceLabel,
-  type HubSkillItem,
-  type SkillIconSpec,
-} from "./use-skills";
+import type { HubSkillItem, SkillIconSpec } from "./use-skills";
+
+function skillSourceKey(sourceType: HubSkillItem["sourceType"]) {
+  if (sourceType === "builtin") return "builtin";
+  if (sourceType === "team_custom") return "team";
+  if (sourceType === "registry_github") return "community";
+  return "workspace";
+}
 
 export function SkillRow({
   icon,
@@ -27,6 +31,7 @@ export function SkillRow({
   onToggle: (id: string) => void | Promise<void>;
   onOpenSkill: (catalogId: string) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   function handleRowClick(event: MouseEvent<HTMLElement>) {
     if (disabled) {
       return;
@@ -66,7 +71,7 @@ export function SkillRow({
           <button
             className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => onOpenSkill(skill.catalogId)}
-            title="Open skill introduction"
+            title={t("skills.openIntro")}
             type="button"
           >
             {skill.displayName}
@@ -76,10 +81,10 @@ export function SkillRow({
           {skill.description}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <TypeBadge label={skillSourceLabel(skill.sourceType)} />
-          {disabled ? <TypeBadge label="Tool off" /> : null}
+          <TypeBadge label={t(`skills.source.${skillSourceKey(skill.sourceType)}`)} />
+          {disabled ? <TypeBadge label={t("skills.toolOff")} /> : null}
           {skill.sourceType !== "builtin" ? (
-            <TypeBadge label={selected ? "Hub on" : "Hub off"} />
+            <TypeBadge label={selected ? t("skills.hubOn") : t("skills.hubOff")} />
           ) : null}
           {/*
             An `executable` skill is installed switched off on purpose: choosing
@@ -88,7 +93,7 @@ export function SkillRow({
             beside it is exactly how the user opts in.
           */}
           {skill.registryCapability === "executable" && !selected ? (
-            <TypeBadge label="Ships scripts — off until you enable it" />
+            <TypeBadge label={t("skills.shipsScripts")} />
           ) : null}
         </div>
       </div>

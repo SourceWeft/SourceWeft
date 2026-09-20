@@ -2,6 +2,10 @@ import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import createNextIntlPlugin from "next-intl/plugin";
+
+// Points next-intl at our request config (which reads the proxy-set locale header).
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const monorepoRoot = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -72,4 +76,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withNextIntl(nextConfig);

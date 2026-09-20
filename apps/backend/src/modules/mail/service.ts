@@ -69,7 +69,11 @@ export class MailService {
   }
 
   async sendTemplate(input: TemplateMailSendInput): Promise<MailSendResult> {
-    const rendered = renderMailTemplate(input.templateId, input.variables);
+    const rendered = renderMailTemplate(
+      input.templateId,
+      input.variables,
+      input.locale,
+    );
     return this.send({
       to: input.to,
       ...rendered,

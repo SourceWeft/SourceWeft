@@ -1,5 +1,6 @@
 import { Loader2, Presentation, RotateCcw, Sparkles } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { RawImage } from "../../../../../_components/raw-image";
@@ -42,6 +43,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
   searchQuery: string;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const q = searchQuery.trim().toLowerCase();
   const filtered = useMemo(
     () =>
@@ -55,7 +57,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
     return (
       <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
         <Loader2 className="mr-2 size-3.5 animate-spin" />
-        Loading artifacts...
+        {t("artifacts.loading")}
       </div>
     );
   }
@@ -72,7 +74,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
           variant="outline"
         >
           <RotateCcw className="size-3.5" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -84,14 +86,14 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
         <HubEmptyState
           description={
             searchQuery
-              ? "Try a different title, artifact type, or prompt."
-              : "Reports, slides, images, tables, audio briefs, and other finished deliverables will appear here."
+              ? t("artifacts.noMatchDescription")
+              : t("artifacts.emptyDescription")
           }
           icon={Sparkles}
           title={
             searchQuery
-              ? `No artifacts match "${searchQuery}"`
-              : "Finished artifacts will appear here."
+              ? t("artifacts.noMatchTitle", { query: searchQuery })
+              : t("artifacts.emptyTitle")
           }
         />
         {hasMore && searchQuery ? (
@@ -106,7 +108,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
             {isLoadingMore ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : null}
-            Load more
+            {t("artifacts.loadMore")}
           </Button>
         ) : null}
       </div>
@@ -138,7 +140,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
             key={artifact.id}
             disabled={isOpening}
             onClick={() => onPreview(artifact)}
-            title={`Preview ${artifactTitle(artifact)}`}
+            title={t("artifacts.preview", { title: artifactTitle(artifact) })}
             type="button"
           >
             {previewImageUrl ? (
@@ -183,7 +185,9 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 <span>{new Date(artifact.createdAt).toLocaleString()}</span>
                 {artifact.completedAt ? (
                   <span>
-                    completed {new Date(artifact.completedAt).toLocaleString()}
+                    {t("artifacts.completed", {
+                      date: new Date(artifact.completedAt).toLocaleString(),
+                    })}
                   </span>
                 ) : null}
               </div>
@@ -191,7 +195,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
                 <TypeBadge label={artifact.status} />
                 {artifact.isPublic ? (
-                  <TypeBadge label="Public" tone="public" />
+                  <TypeBadge label={t("artifacts.public")} tone="public" />
                 ) : null}
               </div>
               {artifact.promptExcerpt ? (
@@ -213,7 +217,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
           variant="outline"
         >
           {isLoadingMore ? <Loader2 className="size-3.5 animate-spin" /> : null}
-          Load more
+          {t("artifacts.loadMore")}
         </Button>
       ) : null}
     </div>

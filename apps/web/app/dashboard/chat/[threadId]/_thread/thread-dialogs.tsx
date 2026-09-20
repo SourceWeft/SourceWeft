@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,6 @@ import { WorkfileContentViewer } from "../../_components/workfile-content-viewer
 import {
   basename,
   formatBytes,
-  workfilePurposeLabel,
   type WorkfileDetail,
 } from "./message-normalizers";
 
@@ -90,6 +90,21 @@ export function ThreadDialogs({
   shortcutsOpen: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardChat");
+  const purposeLabel = (purpose: WorkfileDetail["purpose"]): string => {
+    switch (purpose) {
+      case "scratch":
+        return t("workfile.purpose.scratch");
+      case "draft":
+        return t("workfile.purpose.draft");
+      case "note":
+        return t("workfile.purpose.note");
+      case "output_candidate":
+        return t("workfile.purpose.candidate");
+      default:
+        return t("workfile.purpose.fallback");
+    }
+  };
   return (
     <>
       <ByokModelConfigDialog
@@ -127,12 +142,14 @@ export function ThreadDialogs({
         >
           <DialogHeader className="border-b px-5 py-4 text-left">
             <DialogTitle>
-              {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
+              {previewWorkfile
+                ? basename(previewWorkfile.path)
+                : t("workfile.title")}
             </DialogTitle>
             <DialogDescription>
               {previewWorkfile
-                ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-                : "Assistant-created working material from this thread."}
+                ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${purposeLabel(previewWorkfile.purpose)}`
+                : t("workfile.fallbackDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto px-5 py-5">

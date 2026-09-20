@@ -1,3 +1,4 @@
+import type { useTranslations } from "next-intl";
 import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import {
   getConnectorToolDisplayLabel,
@@ -14,6 +15,8 @@ import {
   getUserQuestionDisplay,
   isUserQuestionTool,
 } from "./user-question-display";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 function formatToolName(toolName: string) {
   return toolName
@@ -153,31 +156,38 @@ function getSkillBundleFileName(
 
 export function getAssistantToolTitle(
   toolCall: ToolCallRecord,
+  t: Translate,
   toolStep?: ThinkingStepRecord,
   confirmationResolution?: ToolConfirmationResolution | null,
 ) {
   if (isUserQuestionTool(toolCall.tool)) {
-    return getUserQuestionDisplay(toolCall).title;
+    return getUserQuestionDisplay(toolCall, t).title;
   }
   if (isRedactedSkillInstructionRead(toolCall)) {
     const skillDisplayName = getSkillInstructionDisplayName(toolCall.input);
     const bundleFile = getSkillBundleFileName(toolCall.input);
     if (skillDisplayName && bundleFile) {
       return toolCall.status === "running"
-        ? `Reading ${bundleFile} from ${skillDisplayName}`
-        : `Read ${bundleFile} from ${skillDisplayName}`;
+        ? t("toolCard.skill.readingBundleFile", {
+            file: bundleFile,
+            skill: skillDisplayName,
+          })
+        : t("toolCard.skill.readBundleFile", {
+            file: bundleFile,
+            skill: skillDisplayName,
+          });
     }
     if (skillDisplayName) {
       return toolCall.status === "running"
-        ? `Loading ${skillDisplayName} skill instructions`
-        : `Load ${skillDisplayName} skill instructions`;
+        ? t("toolCard.skill.loadingInstructions", { skill: skillDisplayName })
+        : t("toolCard.skill.loadInstructions", { skill: skillDisplayName });
     }
     return toolCall.status === "running"
-      ? "Loading skill instructions"
-      : "Load skill instructions";
+      ? t("toolCard.skill.loadingInstructionsGeneric")
+      : t("toolCard.skill.loadInstructionsGeneric");
   }
 
-  const workfileMutationTitle = getWorkfileMutationToolTitle(toolCall);
+  const workfileMutationTitle = getWorkfileMutationToolTitle(toolCall, t);
   if (workfileMutationTitle) {
     return workfileMutationTitle;
   }
@@ -190,8 +200,8 @@ export function getAssistantToolTitle(
   }
 
   const title =
-    getToolApprovalDisplayLabel(toolCall, confirmationResolution) ??
-    getConnectorToolDisplayLabel(toolCall) ??
+    getToolApprovalDisplayLabel(toolCall, confirmationResolution, t) ??
+    getConnectorToolDisplayLabel(toolCall, t) ??
     getToolDisplayName(toolCall.tool);
 
   return title

@@ -5,9 +5,10 @@ import {
   listPublishedBlogSitemapEntries,
 } from "../lib/blog-db";
 import { listPublicMcp, listPublicMcpCategories } from "../lib/market-mcp";
-import { blogTagPath } from "./blog/_components/blog-list";
-import { mcpCategoryPath } from "./mcp/_components/mcp-display";
+import { blogTagPath } from "./[locale]/blog/_components/blog-list";
+import { mcpCategoryPath } from "./[locale]/mcp/_components/mcp-display";
 import { isIndexableListing, SITE_URL } from "./seo";
+import { sitemapLocaleAlternates } from "../lib/i18n/metadata";
 
 export const dynamic = "force-dynamic";
 
@@ -72,18 +73,30 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     isIndexableListing(count),
   );
 
+  // Group each article's published locale variants so every entry can carry
+  // hreflang links to its real translations (never an untranslated locale).
+  const blogUrlsByArticle = new Map<string, Record<string, string>>();
+  for (const entry of blogPosts) {
+    const group = blogUrlsByArticle.get(entry.articleId) ?? {};
+    group[entry.locale] = `${SITE_URL}${entry.urlPath}`;
+    blogUrlsByArticle.set(entry.articleId, group);
+  }
+
   return [
     {
+      alternates: sitemapLocaleAlternates("/"),
       changeFrequency: "weekly",
       priority: 1,
       url: `${SITE_URL}/`,
     },
     {
+      alternates: sitemapLocaleAlternates("/about"),
       changeFrequency: "monthly",
       priority: 0.5,
       url: `${SITE_URL}/about`,
     },
     {
+      alternates: sitemapLocaleAlternates("/changelog"),
       changeFrequency: "weekly",
       priority: 0.4,
       url: `${SITE_URL}/changelog`,
@@ -99,21 +112,29 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${SITE_URL}/terms`,
     },
     {
+      alternates: sitemapLocaleAlternates("/blog"),
       changeFrequency: "weekly",
       priority: 0.6,
       url: `${SITE_URL}/blog`,
     },
     {
+      alternates: sitemapLocaleAlternates("/mcp"),
       changeFrequency: "daily",
       priority: 0.7,
       url: `${SITE_URL}/mcp`,
     },
-    ...blogPosts.map((post) => ({
-      changeFrequency: "monthly" as const,
-      lastModified: post.updatedAt ?? post.publishedAt ?? undefined,
-      priority: 0.5,
-      url: `${SITE_URL}${post.urlPath}`,
-    })),
+    ...blogPosts.map((post) => {
+      const languages = blogUrlsByArticle.get(post.articleId) ?? {};
+      return {
+        changeFrequency: "monthly" as const,
+        lastModified: post.updatedAt ?? post.publishedAt ?? undefined,
+        priority: 0.5,
+        url: `${SITE_URL}${post.urlPath}`,
+        ...(Object.keys(languages).length > 1
+          ? { alternates: { languages } }
+          : {}),
+      };
+    }),
     ...indexableCategories.map((category) => ({
       changeFrequency: "weekly" as const,
       priority: 0.5,

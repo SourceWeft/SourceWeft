@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -43,18 +44,17 @@ function safeDecode(value: string) {
   }
 }
 
-function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
-  if (sourceType === "builtin") return "Official";
-  if (sourceType === "team_custom") return "Team";
-  return "Workspace";
-}
-
-function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
-  return visibility.charAt(0).toUpperCase() + visibility.slice(1);
-}
-
-
 export default function SkillDetailPage() {
+  const t = useTranslations("dashboardSkills");
+  const publisherLabel = (sourceType: SkillCatalogItem["sourceType"]) => {
+    if (sourceType === "builtin") return t("publisher.official");
+    if (sourceType === "team_custom") return t("publisher.team");
+    return t("publisher.workspace");
+  };
+  const visibilityLabel = (visibility: SkillCatalogItem["visibility"]) =>
+    t.has(`visibility.${visibility}`)
+      ? t(`visibility.${visibility}`)
+      : visibility.charAt(0).toUpperCase() + visibility.slice(1);
   const params = useParams<{ slug?: string | string[] }>();
   const rawSlug = Array.isArray(params.slug)
     ? params.slug[0]
@@ -104,7 +104,7 @@ export default function SkillDetailPage() {
       }
       if (!slug) {
         setDetail(null);
-        setError("Skill slug is missing.");
+        setError(t("detail.errors.slugMissing"));
         return;
       }
 
@@ -116,7 +116,7 @@ export default function SkillDetailPage() {
       const skill = catalog.items.find((item) => item.slug === slug);
       if (!skill) {
         setDetail(null);
-        setError("Skill was not found.");
+        setError(t("detail.errors.notFound"));
         return;
       }
 
@@ -130,14 +130,18 @@ export default function SkillDetailPage() {
         return;
       }
       setDetail(null);
-      setError(loadError instanceof Error ? loadError.message : "Failed to load skill.");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : t("detail.errors.loadFailed"),
+      );
     } finally {
       if (detailGenerationRef.current === generation) {
         setIsResolvingWorkspace(false);
         setIsLoading(false);
       }
     }
-  }, [resolveWorkspace, slug]);
+  }, [resolveWorkspace, slug, t]);
 
   React.useEffect(() => {
     void loadDetail();
@@ -166,9 +170,13 @@ export default function SkillDetailPage() {
             }
           : currentDetail,
       );
-      toast.success("Skill installed");
+      toast.success(t("toasts.installed"));
     } catch (installError) {
-      toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
+      toast.error(
+        installError instanceof Error
+          ? installError.message
+          : t("toasts.installFailed"),
+      );
     } finally {
       setIsInstalling(false);
     }
@@ -178,7 +186,7 @@ export default function SkillDetailPage() {
     if (!workspace || !detail || !detail.skill.enabled) return;
     if (detail.skill.sourceType === "builtin" && detail.skill.installable === false) return;
     if (!detail.skill.enabledWorkspaceSkillId) {
-      toast.error("Skill install record is missing. Refresh and try again.");
+      toast.error(t("toasts.installRecordMissing"));
       return;
     }
 
@@ -196,9 +204,13 @@ export default function SkillDetailPage() {
             }
           : currentDetail,
       );
-      toast.success("Skill uninstalled");
+      toast.success(t("toasts.uninstalled"));
     } catch (uninstallError) {
-      toast.error(uninstallError instanceof Error ? uninstallError.message : "Failed to uninstall skill.");
+      toast.error(
+        uninstallError instanceof Error
+          ? uninstallError.message
+          : t("toasts.uninstallFailed"),
+      );
     } finally {
       setIsUninstalling(false);
     }
@@ -214,7 +226,7 @@ export default function SkillDetailPage() {
         <div className="border-b border-border px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Button asChild aria-label="Back to skills" className="h-8 w-8 rounded-full p-0" size="icon-sm" type="button" variant="ghost">
+              <Button asChild aria-label={t("detail.back")} className="h-8 w-8 rounded-full p-0" size="icon-sm" type="button" variant="ghost">
                 <Link href="/dashboard/skills">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
@@ -232,7 +244,7 @@ export default function SkillDetailPage() {
                       </Badge>
                       {detail.skill.enabled && canManageInstall ? (
                         <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
-                          Installed
+                          {t("status.installed")}
                         </Badge>
                       ) : null}
                     </div>
@@ -240,7 +252,7 @@ export default function SkillDetailPage() {
                 </>
               ) : (
                 <div className="min-w-0">
-                  <h1 className="truncate text-base font-semibold text-foreground">Skill details</h1>
+                  <h1 className="truncate text-base font-semibold text-foreground">{t("detail.titleFallback")}</h1>
                 </div>
               )}
             </div>
@@ -262,7 +274,7 @@ export default function SkillDetailPage() {
                   ) : (
                     <SkillIcon className="h-4 w-4" />
                   )}
-                  {detail.skill.enabled ? "Uninstall" : "Install"}
+                  {detail.skill.enabled ? t("actions.uninstall") : t("actions.install")}
                 </Button>
               ) : null}
             </div>
@@ -279,19 +291,19 @@ export default function SkillDetailPage() {
               {pageLoading ? (
                 <div className="flex items-center justify-center px-5 py-16 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading skill...
+                  {t("loading.skill")}
                 </div>
               ) : error ? (
                 <div role="alert" className="space-y-3 px-5 py-10 text-sm">
                   <p className="text-destructive">{error}</p>
-                  <Button variant="outline" size="sm" onClick={() => void loadDetail()}>Retry</Button>
+                  <Button variant="outline" size="sm" onClick={() => void loadDetail()}>{t("actions.retry")}</Button>
                 </div>
               ) : (
                 <Tabs className="gap-0" defaultValue="overview">
                   <div className="border-b border-border px-5 py-3">
                     <TabsList className="h-8" variant="line">
                       <TabsTrigger className="px-2.5 text-xs" value="overview">
-                        Overview
+                        {t("tabs.overview")}
                       </TabsTrigger>
                       <TabsTrigger className="px-2.5 text-xs" value="skill">
                         SKILL.md
@@ -308,7 +320,7 @@ export default function SkillDetailPage() {
                       </MessageResponse>
                     ) : (
                       <div className="py-10 text-sm text-muted-foreground">
-                        This skill does not include SKILL.md content.
+                        {t("content.noSkillMd")}
                       </div>
                     )}
                   </TabsContent>
@@ -317,33 +329,33 @@ export default function SkillDetailPage() {
             </article>
 
             <aside className="h-fit rounded-2xl border border-border bg-background p-4 shadow-xs">
-              <h2 className="text-sm font-semibold text-foreground">Details</h2>
+              <h2 className="text-sm font-semibold text-foreground">{t("fields.heading")}</h2>
               {detail ? (
                 <dl className="mt-3 space-y-3 text-xs">
                   <div>
-                    <dt className="text-muted-foreground">Name</dt>
+                    <dt className="text-muted-foreground">{t("fields.name")}</dt>
                     <dd className="mt-1 font-medium text-foreground">{detail.skill.name}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Publisher</dt>
+                    <dt className="text-muted-foreground">{t("fields.publisher")}</dt>
                     <dd className="mt-1 font-medium text-foreground">{publisherLabel(detail.skill.sourceType)}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Version</dt>
+                    <dt className="text-muted-foreground">{t("fields.version")}</dt>
                     <dd className="mt-1 font-medium text-foreground">{detail.skill.version}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Visibility</dt>
+                    <dt className="text-muted-foreground">{t("fields.visibility")}</dt>
                     <dd className="mt-1 font-medium text-foreground">{visibilityLabel(detail.skill.visibility)}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">README</dt>
-                    <dd className="mt-1 font-medium text-foreground">{detail.skill.hasReadme ? "Included" : "Not included"}</dd>
+                    <dt className="text-muted-foreground">{t("fields.readme")}</dt>
+                    <dd className="mt-1 font-medium text-foreground">{detail.skill.hasReadme ? t("fields.included") : t("fields.notIncluded")}</dd>
                   </div>
                 </dl>
               ) : (
                 <div className="mt-3 text-xs text-muted-foreground">
-                  No skill loaded.
+                  {t("detail.noSkillLoaded")}
                 </div>
               )}
             </aside>

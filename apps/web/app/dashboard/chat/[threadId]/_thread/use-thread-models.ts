@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { HttpClientError } from "@sourceweft/sdk";
 import {
   normalizeByokProviderOptions,
@@ -62,6 +63,7 @@ export function useThreadModels({
   threadId,
   workspaceId,
 }: UseThreadModelsInput) {
+  const t = useTranslations("dashboardChat");
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
@@ -198,10 +200,10 @@ export function useThreadModels({
           onChatPreferencesChange?.(result.thread.chatPreferences);
         })
         .catch(() => {
-          toast.error("Failed to save Thinking preference for this chat.");
+          toast.error(t("toasts.thinkingPreferenceSaveFailed"));
         });
     },
-    [onChatPreferencesChange, threadId, workspaceId],
+    [onChatPreferencesChange, t, threadId, workspaceId],
   );
 
   const handleSearchEnabledChange = useCallback(
@@ -218,10 +220,10 @@ export function useThreadModels({
           onChatPreferencesChange?.(result.thread.chatPreferences);
         })
         .catch(() => {
-          toast.error("Failed to save web access preference for this chat.");
+          toast.error(t("toasts.webAccessPreferenceSaveFailed"));
         });
     },
-    [onChatPreferencesChange, threadId, workspaceId],
+    [onChatPreferencesChange, t, threadId, workspaceId],
   );
 
   const handleComposerOptionsChange = useCallback(
@@ -239,10 +241,10 @@ export function useThreadModels({
           onChatPreferencesChange?.(result.thread.chatPreferences);
         })
         .catch(() => {
-          toast.error("Failed to save options for this chat.");
+          toast.error(t("toasts.optionsSaveFailed"));
         });
     },
-    [onChatPreferencesChange, threadId, workspaceId],
+    [onChatPreferencesChange, t, threadId, workspaceId],
   );
 
   const loadThreadModelState = useCallback(async () => {
@@ -431,14 +433,15 @@ export function useThreadModels({
               ? error.details.message
               : undefined;
           const message = detailMessage || error.message || error.code;
-          toast.error(`Failed to update model for this thread: ${message}`);
+          toast.error(t("toasts.modelUpdateFailedDetail", { message }));
         } else {
-          toast.error("Failed to update model for this thread.");
+          toast.error(t("toasts.modelUpdateFailed"));
         }
         await loadThreadModelState();
       }
     },
     [
+      t,
       catalogKindEnabled,
       hasSavedThinkingPreference,
       loadThreadModelState,

@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { AgentToolTrustRule } from "@sourceweft/sdk";
+
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const listAgentToolTrustRules = vi.fn();
 const revokeAgentToolTrustRule = vi.fn();
@@ -34,6 +41,14 @@ vi.mock("sonner", () => ({
 }));
 
 import { TrustRulesPanelContent } from "./trust-rules-panel";
+
+function withIntl(node: ReturnType<typeof createElement>) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 function rule(input: Partial<AgentToolTrustRule> = {}): AgentToolTrustRule {
   return {
@@ -67,7 +82,9 @@ async function render() {
   root = createdRoot;
   await act(async () => {
     createdRoot.render(
-      createElement(TrustRulesPanelContent, { workspaceId: "workspace-1" }),
+      withIntl(
+        createElement(TrustRulesPanelContent, { workspaceId: "workspace-1" }),
+      ),
     );
   });
   return container;
@@ -144,7 +161,7 @@ test("no workspace means no request and an empty state", async () => {
   root = createdRoot;
   await act(async () => {
     createdRoot.render(
-      createElement(TrustRulesPanelContent, { workspaceId: null }),
+      withIntl(createElement(TrustRulesPanelContent, { workspaceId: null })),
     );
   });
   assert.equal(listAgentToolTrustRules.mock.calls.length, 0);

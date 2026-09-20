@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
 import type { AssistantActivityItem } from "./assistant-activity-items";
@@ -14,15 +15,16 @@ import type { CitationRecord, ToolConfirmationResolution } from "./types";
 
 export type AssistantActivityPlaceholderPhase = "thinking" | "responding";
 
-function getPlaceholderLabel(phase: AssistantActivityPlaceholderPhase) {
-  return phase === "responding" ? "Responding..." : "Working";
-}
-
 export function AssistantActivityPlaceholder({
   phase,
 }: {
   phase: AssistantActivityPlaceholderPhase;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
+  const placeholderLabel =
+    phase === "responding"
+      ? t("assistantActivity.responding")
+      : t("assistantActivity.working");
   return (
     <div
       className={`${ASSISTANT_ACTIVITY_ROW_CLASS} max-w-2xl text-muted-foreground text-sm`}
@@ -33,7 +35,7 @@ export function AssistantActivityPlaceholder({
       <span
         className={`${ASSISTANT_ACTIVITY_LABEL_CLASS} text-[13px] text-foreground/75`}
       >
-        <Shimmer duration={1}>{getPlaceholderLabel(phase)}</Shimmer>
+        <Shimmer duration={1}>{placeholderLabel}</Shimmer>
       </span>
     </div>
   );

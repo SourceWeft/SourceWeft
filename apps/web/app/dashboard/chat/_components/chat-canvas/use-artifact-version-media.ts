@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   artifactVersionMediaProjectionSchema,
   type ArtifactVersionMediaProjection,
@@ -47,6 +48,7 @@ export function useArtifactVersionMedia(input: {
   artifactVersionId: string;
   enabled: boolean;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const identity = input.workspaceId
     ? `${input.workspaceId}\u0000${input.artifactId}\u0000${input.artifactVersionId}`
     : null;
@@ -86,7 +88,7 @@ export function useArtifactVersionMedia(input: {
         ) {
           setState({
             identity,
-            error: "Artifact version details did not match the request.",
+            error: t("artifact.versionMismatch"),
           });
           return;
         }
@@ -100,7 +102,7 @@ export function useArtifactVersionMedia(input: {
         if (!cancelled) {
           setState({
             identity,
-            error: "Artifact version could not be loaded.",
+            error: t("artifact.versionLoadFailed"),
           });
         }
       });
@@ -108,6 +110,7 @@ export function useArtifactVersionMedia(input: {
       cancelled = true;
     };
   }, [
+    t,
     identity,
     input.artifactId,
     input.artifactVersionId,

@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   Archive,
   Link2,
@@ -82,6 +83,7 @@ function WorkspaceSwitcher({
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   onWorkspaceChange: (workspaceId: string) => void;
 }) {
+  const t = useTranslations("dashboardNav");
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [workspaceNameInput, setWorkspaceNameInput] = useState("");
@@ -101,7 +103,7 @@ function WorkspaceSwitcher({
       setWorkspaceNameInput("");
       setCreateOpen(false);
     } catch {
-      toast.error("Failed to create workspace.");
+      toast.error(t("workspace.createError"));
     } finally {
       setIsSaving(false);
     }
@@ -117,7 +119,7 @@ function WorkspaceSwitcher({
       setWorkspaceNameInput("");
       setRenameOpen(false);
     } catch {
-      toast.error("Failed to rename workspace.");
+      toast.error(t("workspace.renameError"));
     } finally {
       setIsSaving(false);
     }
@@ -145,7 +147,7 @@ function WorkspaceSwitcher({
           sideOffset={4}
         >
           <DropdownMenuLabel className="text-xs text-muted-foreground">
-            Workspaces
+            {t("workspace.workspaces")}
           </DropdownMenuLabel>
           {workspaces.map((workspace, index) => (
             <DropdownMenuItem
@@ -180,18 +182,22 @@ function WorkspaceSwitcher({
             }}
           >
             <span className="flex-1 truncate font-medium text-left">
-              Rename workspace
+              {t("workspace.rename")}
             </span>
           </DropdownMenuItem>
           <DropdownMenuItem
             className="gap-2 p-2"
             onSelect={() => {
-              setWorkspaceNameInput(`Workspace ${workspaces.length + 1}`);
+              setWorkspaceNameInput(
+                t("workspace.defaultName", {
+                  number: workspaces.length + 1,
+                }),
+              );
               setCreateOpen(true);
             }}
           >
             <span className="flex-1 truncate font-medium text-left">
-              Add workspace
+              {t("workspace.add")}
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -200,10 +206,9 @@ function WorkspaceSwitcher({
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add workspace</DialogTitle>
+            <DialogTitle>{t("workspace.add")}</DialogTitle>
             <DialogDescription>
-              Create a workspace to keep sources and chats in a separate
-              context.
+              {t("workspace.addDescription")}
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -214,7 +219,7 @@ function WorkspaceSwitcher({
                 void handleCreateWorkspace();
               }
             }}
-            placeholder="Workspace name"
+            placeholder={t("workspace.namePlaceholder")}
             value={workspaceNameInput}
           />
           <DialogFooter>
@@ -223,14 +228,14 @@ function WorkspaceSwitcher({
               variant="outline"
               onClick={() => setCreateOpen(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={!workspaceNameInput.trim() || isSaving}
               onClick={() => void handleCreateWorkspace()}
               type="button"
             >
-              {isSaving ? "Creating..." : "Create"}
+              {isSaving ? t("workspace.creating") : t("workspace.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -239,9 +244,9 @@ function WorkspaceSwitcher({
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename workspace</DialogTitle>
+            <DialogTitle>{t("workspace.rename")}</DialogTitle>
             <DialogDescription>
-              Update the display name for this workspace.
+              {t("workspace.renameDescription")}
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -252,7 +257,7 @@ function WorkspaceSwitcher({
                 void handleRenameWorkspace();
               }
             }}
-            placeholder="Workspace name"
+            placeholder={t("workspace.namePlaceholder")}
             value={workspaceNameInput}
           />
           <DialogFooter>
@@ -261,14 +266,14 @@ function WorkspaceSwitcher({
               variant="outline"
               onClick={() => setRenameOpen(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={!workspaceNameInput.trim() || isSaving}
               onClick={() => void handleRenameWorkspace()}
               type="button"
             >
-              {isSaving ? "Saving..." : "Save"}
+              {isSaving ? t("workspace.saving") : t("workspace.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -314,6 +319,7 @@ function ChatListRow({
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
 }) {
+  const t = useTranslations("dashboardNav");
   const [menuOpen, setMenuOpen] = useState(false);
   const status = item.status || "ready";
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt);
@@ -324,10 +330,10 @@ function ChatListRow({
     try {
       await onSetVisibility(item.id, shared ? "private" : "workspace");
       toast.success(
-        shared ? "Chat is now private" : "Chat is now visible to the workspace",
+        shared ? t("chats.nowPrivate") : t("chats.nowVisible"),
       );
     } catch {
-      toast.error("Could not change who can see this chat.");
+      toast.error(t("chats.visibilityError"));
     }
   };
 
@@ -366,23 +372,25 @@ function ChatListRow({
                         )}
                         <span className="sr-only">
                           {item.visibility === "public_link"
-                            ? "Anyone with the link"
-                            : "Visible to workspace"}
+                            ? t("chats.anyoneWithLink")
+                            : t("chats.visibleToWorkspace")}
                         </span>
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
                       {item.visibility === "public_link"
-                        ? "Anyone with the link"
-                        : "Visible to workspace"}
+                        ? t("chats.anyoneWithLink")
+                        : t("chats.visibleToWorkspace")}
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
-                <span>{item.sourceCount} sources</span>
+                <span>
+                  {t("chats.sourceCount", { count: item.sourceCount })}
+                </span>
                 <span aria-hidden="true">|</span>
-                <span>{status}</span>
+                <span>{t(`chats.status.${status}`)}</span>
                 <span aria-hidden="true">|</span>
                 <span>{relativeUpdatedAt}</span>
               </div>
@@ -409,7 +417,7 @@ function ChatListRow({
               variant="ghost"
             >
               <MoreHorizontal className="size-3.5" />
-              <span className="sr-only">Open chat actions</span>
+              <span className="sr-only">{t("chats.openActions")}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -418,12 +426,12 @@ function ChatListRow({
                 {shared ? (
                   <>
                     <Lock className="size-4" />
-                    <span>Make private</span>
+                    <span>{t("chats.makePrivate")}</span>
                   </>
                 ) : (
                   <>
                     <Users className="size-4" />
-                    <span>Make visible to workspace</span>
+                    <span>{t("chats.makeVisible")}</span>
                   </>
                 )}
               </DropdownMenuItem>
@@ -431,7 +439,7 @@ function ChatListRow({
             {canArchive ? (
               <DropdownMenuItem onSelect={() => onArchive(item.id)}>
                 <Archive className="size-4" />
-                <span>Archive</span>
+                <span>{t("chats.archive")}</span>
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
@@ -439,7 +447,7 @@ function ChatListRow({
               variant="destructive"
             >
               <Trash2 className="size-4" />
-              <span>Delete</span>
+              <span>{t("chats.delete")}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -492,6 +500,7 @@ function ChatList({
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
 }) {
+  const t = useTranslations("dashboardNav");
   const [isClearing, setIsClearing] = useState(false);
   const [filter, setFilter] = useState<SidebarChatFilter>("all");
   const isArchived = filter === "archived";
@@ -517,7 +526,15 @@ function ChatList({
         ? onClearPrivate
         : undefined;
   const clearItems = isArchived ? archivedChats : privateChats;
-  const clearTitle = isArchived ? "archived chats" : "private chats";
+  const clearTitle = isArchived
+    ? t("chats.clearScope.archived")
+    : t("chats.clearScope.private");
+  const filterLabel =
+    filter === "shared"
+      ? t("chats.shared")
+      : filter === "archived"
+        ? t("chats.archived")
+        : t("chats.private");
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -534,7 +551,7 @@ function ChatList({
     <>
       <div className="group/section-label flex shrink-0 items-center gap-1 px-3 py-2">
         <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          Chats
+          {t("chats.heading")}
         </span>
         {headerActions}
         {onClear && clearItems.length > 0 ? (
@@ -543,27 +560,32 @@ function ChatList({
               <Button
                 className="invisible size-5 pointer-events-none text-destructive opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:visible focus-visible:pointer-events-auto focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/section-label:visible group-hover/section-label:pointer-events-auto group-hover/section-label:opacity-100 group-focus-within/section-label:visible group-focus-within/section-label:pointer-events-auto group-focus-within/section-label:opacity-100"
                 size="icon-xs"
-                title={`Clear all ${clearTitle}`}
+                title={t("chats.clearAll", { scope: clearTitle })}
                 type="button"
                 variant="destructive"
               >
                 <Trash2 className="size-3" />
-                <span className="sr-only">Clear all {clearTitle}</span>
+                <span className="sr-only">
+                  {t("chats.clearAll", { scope: clearTitle })}
+                </span>
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Clear all {clearTitle}?</DialogTitle>
+                <DialogTitle>
+                  {t("chats.clearConfirmTitle", { scope: clearTitle })}
+                </DialogTitle>
                 <DialogDescription>
-                  This will remove {clearItems.length} {clearTitle}, including
-                  chats hidden by the current filter. This action cannot be
-                  undone.
+                  {t("chats.clearConfirmDescription", {
+                    count: clearItems.length,
+                    scope: clearTitle,
+                  })}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
                 <DialogClose asChild>
                   <Button type="button" variant="outline">
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                 </DialogClose>
                 <DialogClose asChild>
@@ -573,7 +595,7 @@ function ChatList({
                     type="button"
                     variant="destructive"
                   >
-                    {isClearing ? "Clearing..." : "Clear all"}
+                    {isClearing ? t("chats.clearing") : t("chats.clearAllButton")}
                   </Button>
                 </DialogClose>
               </DialogFooter>
@@ -587,13 +609,9 @@ function ChatList({
             size="xs"
             type="button"
             variant="secondary"
-            aria-label={`Clear ${filter} filter`}
+            aria-label={t("chats.clearFilter", { filter: filterLabel })}
           >
-            {filter === "shared"
-              ? "Shared"
-              : filter === "archived"
-                ? "Archived"
-                : "Private"}
+            {filterLabel}
             <X className="size-3" />
           </Button>
         ) : null}
@@ -602,8 +620,8 @@ function ChatList({
           variant="ghost"
           size="icon-xs"
           type="button"
-          title="Search all chats"
-          aria-label="Search all chats"
+          title={t("chats.searchAll")}
+          aria-label={t("chats.searchAll")}
           aria-expanded={searchOpen}
           onClick={onToggleSearch}
         >
@@ -620,15 +638,15 @@ function ChatList({
               size="icon-xs"
               type="button"
               variant="ghost"
-              title="Filter chats"
-              aria-label="Filter chats"
+              title={t("chats.filter")}
+              aria-label={t("chats.filter")}
             >
               <ListFilter className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Filter chats
+              {t("chats.filter")}
             </DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={filter}
@@ -645,19 +663,19 @@ function ChatList({
             >
               <DropdownMenuRadioItem value="all">
                 <MessagesSquare className="size-4" />
-                All chats
+                {t("chats.all")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="shared">
                 <Users className="size-4" />
-                Shared
+                {t("chats.shared")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="private">
                 <Lock className="size-4" />
-                Private
+                {t("chats.private")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="archived">
                 <Archive className="size-4" />
-                Archived
+                {t("chats.archived")}
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
@@ -667,9 +685,9 @@ function ChatList({
         <div className="shrink-0 px-3 pb-2">
           <SidebarInput
             autoFocus
-            aria-label="Search all chats"
+            aria-label={t("chats.searchAll")}
             className="h-8 text-xs"
-            placeholder="Search all chats…"
+            placeholder={t("chats.searchPlaceholder")}
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
@@ -699,12 +717,12 @@ function ChatList({
                 role="status"
               >
                 {isLoadingMore && !isArchived
-                  ? "Loading chats..."
+                  ? t("chats.loadingChats")
                   : canLoadMore
-                    ? "No matching chats loaded. Load more to see older chats."
+                    ? t("chats.noMatching")
                     : filter !== "all"
-                      ? `No ${filter} chats.`
-                      : "No chats yet."}
+                      ? t(`chats.filterEmpty.${filter}`)
+                      : t("chats.noneYet")}
               </p>
             ) : null}
             {canLoadMore && onLoadMore ? (
@@ -717,7 +735,7 @@ function ChatList({
                   type="button"
                   variant="ghost"
                 >
-                  {isLoadingMore ? "Loading..." : "Load more"}
+                  {isLoadingMore ? t("chats.loading") : t("chats.loadMore")}
                 </Button>
               </div>
             ) : null}
@@ -792,6 +810,7 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const t = useTranslations("dashboardNav");
   const [chatListResetKey, setChatListResetKey] = useState(0);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -827,7 +846,7 @@ export function DashboardSidebarChatPanel({
             type="button"
           >
             <PenSquare className="size-4 text-muted-foreground" />
-            New chat
+            {t("sidebar.newChat")}
           </Button>
         </div>
       </SidebarHeader>
@@ -845,12 +864,14 @@ export function DashboardSidebarChatPanel({
           <Button
             onClick={onOpenMembers}
             size="icon-xs"
-            title="Invite & manage members"
+            title={t("sidebar.inviteManageMembers")}
             type="button"
             variant="ghost"
           >
             <Share2 className="size-3" />
-            <span className="sr-only">Invite & manage members</span>
+            <span className="sr-only">
+              {t("sidebar.inviteManageMembers")}
+            </span>
           </Button>
         }
         activeId={activeChatId}

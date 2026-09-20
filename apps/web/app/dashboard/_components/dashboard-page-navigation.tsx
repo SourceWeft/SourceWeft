@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -8,6 +9,7 @@ import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 
 /** Non-chat pages must remain navigable when the unified sidebar is hidden. */
 export function DashboardPageNavigation() {
+  const t = useTranslations("dashboardNav");
   const pathname = usePathname();
   const {
     desktopTitlebar,
@@ -23,11 +25,11 @@ export function DashboardPageNavigation() {
     return null;
   const conversationLabel = canDockConversations
     ? conversationsOpen
-      ? "Collapse sidebar"
-      : "Expand sidebar"
+      ? t("sidebar.collapseSidebar")
+      : t("sidebar.expandSidebar")
     : conversationsOpen
-      ? "Hide sidebar"
-      : "Show sidebar";
+      ? t("sidebar.hideSidebar")
+      : t("sidebar.showSidebar");
   return (
     <div
       data-desktop-drag-region

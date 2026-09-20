@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useSyncExternalStore } from "react";
+import { useTranslations } from "next-intl";
 import { Preview } from "@sourceweft/preview/react";
 import type { PreviewSource } from "@sourceweft/preview";
 import { Download, Loader2, RefreshCw } from "lucide-react";
@@ -47,6 +48,7 @@ export function FilePreviewDialog({
   onDownload?: () => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   const contentRef = useRef<HTMLDivElement>(null);
   const desktop = useSyncExternalStore(
     subscribeToDesktop,
@@ -91,13 +93,13 @@ export function FilePreviewDialog({
         <DialogHeader className="min-w-0 space-y-2 border-b px-4 py-3 text-left">
           <div className="flex min-w-0 items-center gap-2 pr-7">
             <DialogTitle className="min-w-0 flex-1 truncate" title={path}>
-              {path ? basename(path) : "File preview"}
+              {path ? basename(path) : t("filePreview.titleFallback")}
             </DialogTitle>
             {onRetry && (
               <Button
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Refresh preview"
+                aria-label={t("actions.refreshPreview")}
                 disabled={loading}
                 onClick={onRetry}
               >
@@ -108,7 +110,7 @@ export function FilePreviewDialog({
               <Button
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Download file"
+                aria-label={t("actions.downloadFile")}
                 onClick={onDownload}
               >
                 <Download className="size-4" />
@@ -125,7 +127,7 @@ export function FilePreviewDialog({
         <div
           ref={contentRef}
           role="document"
-          aria-label="File contents"
+          aria-label={t("filePreview.contentsAria")}
           tabIndex={-1}
           className="min-h-0 min-w-0 overflow-hidden outline-none"
           aria-busy={loading}
@@ -136,7 +138,7 @@ export function FilePreviewDialog({
               className="flex h-full min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground"
             >
               <Loader2 className="size-4 animate-spin" />
-              Loading file preview…
+              {t("filePreview.loading")}
             </div>
           ) : error ? (
             <div
@@ -146,7 +148,9 @@ export function FilePreviewDialog({
               {error}
             </div>
           ) : contentText === "" ? (
-            <p className="text-sm text-muted-foreground">This file is empty.</p>
+            <p className="text-sm text-muted-foreground">
+              {t("filePreview.empty")}
+            </p>
           ) : previewSource ? (
             <Preview key={path} className="h-full" source={previewSource} />
           ) : null}

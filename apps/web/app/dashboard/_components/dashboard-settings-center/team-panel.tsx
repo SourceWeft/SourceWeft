@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Check, ChevronDown, MailPlus, Plus, Trash2, Users } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -36,6 +37,7 @@ export function TeamPanel({
   onScopeChange: (scope: BillingScope) => void;
   teamName?: string;
 }) {
+  const t = useTranslations("dashboardSettings");
   const { data: orgs, refetch: refetchOrganizations } =
     authClient.useListOrganizations();
   const { data: activeOrg, refetch: refetchActiveOrganization } =
@@ -89,7 +91,7 @@ export function TeamPanel({
       setSwitcherOpen(false);
       onScopeChange(isPersonalOrganization(org) ? "personal" : "team");
     } catch {
-      toast.error("Failed to switch team.");
+      toast.error(t("team.switchError"));
     }
   }
 
@@ -98,7 +100,7 @@ export function TeamPanel({
     if (!email) return;
     setInviteError(null);
     if (!activeOrgFull || isPersonalOrganization(activeOrgFull)) {
-      setInviteError("Personal team cannot invite members.");
+      setInviteError(t("team.personalCannotInvite"));
       return;
     }
     setIsInviting(true);
@@ -109,15 +111,15 @@ export function TeamPanel({
         organizationId: activeOrgFull.id,
       })) as { error?: { message?: string } } | null;
       if (result?.error)
-        throw new Error(result.error.message ?? "Failed to send invite.");
+        throw new Error(result.error.message ?? t("team.inviteFailed"));
       await refreshTeamData();
       setInviteOpen(false);
       setInviteEmail("");
       setInviteRole("member");
-      toast.success(`Invitation sent to ${email}`);
+      toast.success(t("team.inviteSent", { email }));
     } catch (err) {
       setInviteError(
-        err instanceof Error ? err.message : "Failed to send invitation.",
+        err instanceof Error ? err.message : t("team.inviteFailedGeneric"),
       );
     } finally {
       setIsInviting(false);
@@ -131,12 +133,12 @@ export function TeamPanel({
         invitationId,
       })) as { error?: { message?: string } } | null;
       if (result?.error)
-        throw new Error(result.error.message ?? "Failed to revoke invitation.");
+        throw new Error(result.error.message ?? t("team.revokeFailed"));
       await refreshTeamData();
-      toast.success("Invitation revoked.");
+      toast.success(t("team.invitationRevoked"));
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to revoke invitation.",
+        err instanceof Error ? err.message : t("team.revokeFailed"),
       );
     } finally {
       setRevokingId(null);
@@ -155,12 +157,16 @@ export function TeamPanel({
         organizationId: activeOrgFull?.id,
       })) as { error?: { message?: string } } | null;
       if (result?.error)
-        throw new Error(result.error.message ?? "Failed to remove member.");
+        throw new Error(result.error.message ?? t("team.removeMemberFailed"));
       await refreshTeamData();
-      toast.success(`${member.user.name || member.user.email} removed.`);
+      toast.success(
+        t("team.memberRemoved", {
+          name: member.user.name || member.user.email,
+        }),
+      );
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to remove member.",
+        err instanceof Error ? err.message : t("team.removeMemberFailed"),
       );
     } finally {
       setRemovingMemberId(null);
@@ -226,7 +232,9 @@ export function TeamPanel({
       {/* ── Team ── */}
       <div className="pb-7 pt-1">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <p className="text-base font-semibold text-foreground">Team</p>
+          <p className="text-base font-semibold text-foreground">
+            {t("team.title")}
+          </p>
           <Button
             onClick={() => setCreateOpen(true)}
             size="sm"
@@ -234,7 +242,7 @@ export function TeamPanel({
             variant="outline"
           >
             <Plus className="h-3.5 w-3.5" />
-            Create team
+            {t("team.createTeam")}
           </Button>
         </div>
 
@@ -314,14 +322,16 @@ export function TeamPanel({
         <>
           <div className="py-7">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-base font-semibold text-foreground">Members</p>
+              <p className="text-base font-semibold text-foreground">
+                {t("team.membersTitle")}
+              </p>
               <Button
                 onClick={() => setInviteOpen(true)}
                 size="sm"
                 type="button"
               >
                 <MailPlus className="h-3.5 w-3.5" />
-                Invite
+                {t("team.invite")}
               </Button>
             </div>
             <div className="overflow-hidden rounded-lg border border-border">
@@ -330,13 +340,13 @@ export function TeamPanel({
                   <thead className="border-b border-border bg-muted/30">
                     <tr>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
-                        Name
+                        {t("team.colName")}
                       </th>
                       <th className="hidden px-4 py-2.5 text-left text-xs font-medium text-muted-foreground sm:table-cell">
-                        Email
+                        {t("team.colEmail")}
                       </th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
-                        Role
+                        {t("team.colRole")}
                       </th>
                       <th className="w-10 px-4 py-2.5" />
                     </tr>
@@ -364,14 +374,16 @@ export function TeamPanel({
                             size="xs"
                             title={
                               m.role === "owner"
-                                ? "Transfer ownership before removing this member"
-                                : "Remove member"
+                                ? t("team.transferOwnershipFirst")
+                                : t("team.removeMember")
                             }
                             type="button"
                             variant="ghost"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                            <span className="sr-only">Remove member</span>
+                            <span className="sr-only">
+                              {t("team.removeMember")}
+                            </span>
                           </Button>
                         </td>
                       </tr>
@@ -380,7 +392,7 @@ export function TeamPanel({
                 </table>
               ) : (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No members yet. Invite someone to get started.
+                  {t("team.noMembers")}
                 </div>
               )}
             </div>
@@ -389,7 +401,7 @@ export function TeamPanel({
           {pendingInvites.length > 0 && (
             <div className="py-7">
               <p className="mb-4 text-base font-semibold text-foreground">
-                Pending invites
+                {t("team.pendingInvites")}
               </p>
               <div className="overflow-hidden rounded-lg border border-border">
                 {pendingInvites.map((inv, i) => (
@@ -413,7 +425,9 @@ export function TeamPanel({
                       type="button"
                       variant="ghost"
                     >
-                      {revokingId === inv.id ? "Revoking…" : "Revoke"}
+                      {revokingId === inv.id
+                        ? t("team.revoking")
+                        : t("team.revoke")}
                     </Button>
                   </div>
                 ))}
@@ -427,8 +441,7 @@ export function TeamPanel({
           <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-5 py-10 text-center">
             <Users className="h-7 w-7 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Personal team does not support members or invites. Create or
-              switch to a team to collaborate.
+              {t("team.personalNoMembers")}
             </p>
             <Button
               onClick={() => setCreateOpen(true)}
@@ -437,7 +450,7 @@ export function TeamPanel({
               variant="outline"
             >
               <Plus className="h-3.5 w-3.5" />
-              Create team
+              {t("team.createTeam")}
             </Button>
           </div>
         </div>
@@ -458,7 +471,7 @@ export function TeamPanel({
       <Dialog onOpenChange={setInviteOpen} open={inviteOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Invite team member</DialogTitle>
+            <DialogTitle>{t("team.inviteMemberTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 px-0.5">
             <div>
@@ -466,7 +479,7 @@ export function TeamPanel({
                 className="mb-1.5 block text-xs font-medium text-muted-foreground"
                 htmlFor="invite-email"
               >
-                Email address
+                {t("team.emailAddress")}
               </label>
               <input
                 autoFocus
@@ -482,7 +495,7 @@ export function TeamPanel({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void handleInvite();
                 }}
-                placeholder="colleague@company.com"
+                placeholder={t("team.emailPlaceholder")}
                 type="email"
                 value={inviteEmail}
               />
@@ -495,13 +508,13 @@ export function TeamPanel({
                 className="mb-1.5 block text-xs font-medium text-muted-foreground"
                 htmlFor="invite-role"
               >
-                Role
+                {t("team.roleLabel")}
               </label>
               <div className="flex rounded-lg border border-border bg-muted/40 p-0.5">
                 {(["member", "admin"] as const).map((r) => (
                   <button
                     className={cn(
-                      "flex-1 rounded-md py-1 text-xs transition-colors capitalize",
+                      "flex-1 rounded-md py-1 text-xs transition-colors",
                       inviteRole === r
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground",
@@ -510,7 +523,9 @@ export function TeamPanel({
                     onClick={() => setInviteRole(r)}
                     type="button"
                   >
-                    {r}
+                    {r === "member"
+                      ? t("team.roleMember")
+                      : t("team.roleAdmin")}
                   </button>
                 ))}
               </div>
@@ -523,7 +538,7 @@ export function TeamPanel({
               type="button"
               onClick={() => setInviteOpen(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={isInviting || !inviteEmail.trim()}
@@ -531,7 +546,7 @@ export function TeamPanel({
               size="sm"
               type="button"
             >
-              {isInviting ? "Sending…" : "Send invite"}
+              {isInviting ? t("team.sending") : t("team.sendInvite")}
             </Button>
           </DialogFooter>
         </DialogContent>

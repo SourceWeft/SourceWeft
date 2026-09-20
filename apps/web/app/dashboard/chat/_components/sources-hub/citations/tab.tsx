@@ -1,4 +1,5 @@
 import { FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -41,19 +42,22 @@ export function CitationsTab({
   searchQuery: string;
   threadCitationItems: DisplayCitationItem[];
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <section className="space-y-1">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-xs font-medium text-foreground">Citations</h3>
+          <h3 className="text-xs font-medium text-foreground">
+            {t("tabs.Citations")}
+          </h3>
           <span className="text-[10px] text-muted-foreground">
             {citationScope === "thread"
-              ? `${threadCitationItems.length} in thread`
-              : `${currentCitationItems.length} current`}
+              ? t("counts.inThread", { count: threadCitationItems.length })
+              : t("counts.current", { count: currentCitationItems.length })}
           </span>
           {searchQuery ? (
             <span className="text-[10px] text-primary">
-              {filteredCitationItems.length} found
+              {t("counts.found", { count: filteredCitationItems.length })}
             </span>
           ) : null}
         </div>
@@ -63,8 +67,18 @@ export function CitationsTab({
         <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
           {(
             [
-              ["current", `Current (${currentCitationItems.length})`],
-              ["thread", `Thread (${threadCitationItems.length})`],
+              [
+                "current",
+                t("citations.scopeCurrent", {
+                  count: currentCitationItems.length,
+                }),
+              ],
+              [
+                "thread",
+                t("citations.scopeThread", {
+                  count: threadCitationItems.length,
+                }),
+              ],
             ] as const
           ).map(([scope, label]) => (
             <button
@@ -87,10 +101,10 @@ export function CitationsTab({
       {filteredCitationItems.length === 0 ? (
         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
           {searchQuery
-            ? `No citations match "${searchQuery}".`
+            ? t("citations.noMatch", { query: searchQuery })
             : citationScope === "thread"
-              ? "No citations found in this thread."
-              : "No citations used in the selected answer."}
+              ? t("citations.noneInThread")
+              : t("citations.noneInAnswer")}
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -149,7 +163,7 @@ export function CitationsTab({
                     variant="outline"
                   >
                     <FileText className="size-3.5" />
-                    Open
+                    {t("citations.open")}
                   </Button>
                 </div>
                 <div className="mt-2 line-clamp-4 rounded-lg border border-input bg-muted/20 px-2.5 py-2 text-sm leading-6 text-foreground/90">

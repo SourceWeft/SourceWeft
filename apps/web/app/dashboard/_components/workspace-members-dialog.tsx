@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -22,11 +23,12 @@ export function WorkspaceMembersDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("dashboardNav");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-4 overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Workspace members</DialogTitle>
+          <DialogTitle>{t("members.dialogTitle")}</DialogTitle>
         </DialogHeader>
         <WorkspaceMembersPanel />
       </DialogContent>

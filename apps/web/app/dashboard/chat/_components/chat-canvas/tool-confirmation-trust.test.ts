@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import {
   AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
   type AgentToolTrustRule,
@@ -8,9 +10,21 @@ import {
   buildTrustPayload,
   describeDecisionOutcome,
   getConfirmationDecisionOptions,
+  getTrustDurationChoices,
   hasAlwaysAllowOption,
-  trustDurationChoices,
 } from "./tool-confirmation-trust";
+import messages from "../../../../../messages/en.json";
+
+// Build a translator without a React context; the en catalog carries the same
+// English copy these helpers used to hardcode, so the assertions still hold.
+// The cast pins it to the loose translator type the helpers accept
+// (createTranslator otherwise infers the concrete catalog/namespace shape).
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
+const trustDurationChoices = getTrustDurationChoices(t);
 
 function trustRule(
   input: Partial<AgentToolTrustRule> = {},
@@ -59,7 +73,7 @@ test("always-allow is offered only when the server listed it", () => {
 });
 
 test("a confirmation without decisionOptions falls back to approve/reject only", () => {
-  const options = getConfirmationDecisionOptions({ decisionOptions: [] });
+  const options = getConfirmationDecisionOptions({ decisionOptions: [] }, t);
   assert.deepEqual(
     options.map((option) => option.decision),
     ["reject", "approve"],
@@ -87,28 +101,37 @@ test("offered durations never exceed the contract maximum", () => {
 });
 
 test("an approve_always response with no trust rule does not claim anything was remembered", () => {
-  const message = describeDecisionOutcome({
-    decision: "approve_always",
-    trustRule: null,
-  });
+  const message = describeDecisionOutcome(
+    {
+      decision: "approve_always",
+      trustRule: null,
+    },
+    t,
+  );
   assert.match(message, /not remembered/i);
   assert.doesNotMatch(message, /automatically/i);
 });
 
 test("an approve_always response with a trust rule reports the expiry", () => {
-  const message = describeDecisionOutcome({
-    decision: "approve_always",
-    trustRule: trustRule(),
-    now: new Date("2026-07-21T00:00:00.000Z"),
-  });
+  const message = describeDecisionOutcome(
+    {
+      decision: "approve_always",
+      trustRule: trustRule(),
+      now: new Date("2026-07-21T00:00:00.000Z"),
+    },
+    t,
+  );
   assert.match(message, /approved automatically until/i);
   assert.doesNotMatch(message, /not remembered/i);
 });
 
 test("plain approve and reject copy is unchanged", () => {
   assert.equal(
-    describeDecisionOutcome({ decision: "approve" }),
+    describeDecisionOutcome({ decision: "approve" }, t),
     "Approved in SourceWeft.",
   );
-  assert.match(describeDecisionOutcome({ decision: "reject" }), /was not run/i);
+  assert.match(
+    describeDecisionOutcome({ decision: "reject" }, t),
+    /was not run/i,
+  );
 });

@@ -8,6 +8,7 @@ import {
   Lightbulb,
   Loader2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
   ASSISTANT_ACTIVITY_DETAIL_CLASS,
@@ -20,7 +21,7 @@ import type { AssistantActivityItem } from "./assistant-activity-items";
 import { AssistantToolCard } from "./assistant-tool-card";
 import { WebToolResults } from "../web-tool-results";
 import type { CitationRecord, ToolConfirmationResolution } from "./types";
-import { formatThoughtDuration } from "./duration-format";
+import { formatCompactDuration } from "./duration-format";
 
 function ActivityStatusCell({ children }: { children: ReactNode }) {
   return <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>{children}</span>;
@@ -67,12 +68,13 @@ function AssistantStepRow({
   item: Extract<AssistantActivityItem, { type: "step" }>;
   nested: boolean;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const [isOpen, setIsOpen] = useState(false);
   const metadataKeys: Array<readonly [string, string]> = [
-    ["sourceCount", "sources"],
-    ["resultCount", "results"],
-    ["hitCount", "hits"],
-    ["latencyMs", "ms"],
+    ["sourceCount", t("assistantActivity.metadata.sources")],
+    ["resultCount", t("assistantActivity.metadata.results")],
+    ["hitCount", t("assistantActivity.metadata.hits")],
+    ["latencyMs", t("assistantActivity.metadata.ms")],
   ];
   const metadataLabels = metadataKeys
     .map(([key, label]) => {
@@ -101,7 +103,9 @@ function AssistantStepRow({
             {item.title}
           </span>
           {item.status === "in_progress" ? (
-            <span className="shrink-0 text-primary/75 text-xs">Running</span>
+            <span className="shrink-0 text-primary/75 text-xs">
+              {t("common.running")}
+            </span>
           ) : null}
         </span>
         {hasDetails ? <ActivityDisclosureIcon isOpen={isOpen} /> : null}
@@ -137,9 +141,14 @@ function AssistantReasoningRow({
   isStreaming?: boolean;
   item: Extract<AssistantActivityItem, { type: "reasoning" }>;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const title = isStreaming
-    ? "Thinking..."
-    : formatThoughtDuration(item.durationMs);
+    ? t("assistantActivity.thinking")
+    : typeof item.durationMs === "number" && Number.isFinite(item.durationMs)
+      ? t("duration.thoughtFor", {
+          duration: formatCompactDuration(item.durationMs),
+        })
+      : t("duration.thoughtForFew");
   const [isOpen, setIsOpen] = useState(isStreaming);
 
   useEffect(() => {

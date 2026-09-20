@@ -22,6 +22,14 @@ import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 import { database } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
+import { i18n } from "@better-auth/i18n";
+import {
+  AUTH_ERROR_LOCALE_DETECTION,
+  AUTH_LOCALE_COOKIE,
+  authErrorTranslations,
+  resolveAuthErrorLocale,
+} from "./auth-error-i18n";
+import { resolveMailLocale } from "./mail-locale";
 import {
   isPersonalOrganizationMetadata,
   parseSourceweftOrganizationKind,
@@ -194,12 +202,17 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
               },
-              async sendDeleteAccountVerification(data) {
+              async sendDeleteAccountVerification(data, request) {
                 const { mailService } = await import("../mail");
+                const locale = await resolveMailLocale({
+                  userId: data.user.id,
+                  headers: request?.headers,
+                });
                 await mailService.sendTemplate({
                   to: data.user.email,
                   templateId: "auth.delete-account",
                   messageType: "auth.delete-account",
+                  locale,
                   variables: {
                     url: data.url,
                   },
@@ -214,12 +227,17 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       requireEmailVerification: false,
       ...(isRuntimeMode
         ? {
-            async sendResetPassword(data) {
+            async sendResetPassword(data, request) {
               const { mailService } = await import("../mail");
+              const locale = await resolveMailLocale({
+                userId: data.user.id,
+                headers: request?.headers,
+              });
               await mailService.sendTemplate({
                 to: data.user.email,
                 templateId: "auth.reset-password",
                 messageType: "auth.reset-password",
+                locale,
                 variables: {
                   url: data.url,
                 },
@@ -232,12 +250,17 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       sendOnSignUp: false,
       ...(isRuntimeMode
         ? {
-            async sendVerificationEmail(data) {
+            async sendVerificationEmail(data, request) {
               const { mailService } = await import("../mail");
+              const locale = await resolveMailLocale({
+                userId: data.user.id,
+                headers: request?.headers,
+              });
               await mailService.sendTemplate({
                 to: data.user.email,
                 templateId: "auth.verify-email",
                 messageType: "auth.verify-email",
+                locale,
                 variables: {
                   url: data.url,
                 },
@@ -274,12 +297,19 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       organization({
         ...(isRuntimeMode
           ? {
-              async sendInvitationEmail(data) {
+              async sendInvitationEmail(data, request) {
                 const { mailService } = await import("../mail");
+                // The invitee may not have an account yet, so there is no stored
+                // preference to read; use the locale of the request that issued
+                // the invitation as a best-effort signal.
+                const locale = await resolveMailLocale({
+                  headers: request?.headers,
+                });
                 await mailService.sendTemplate({
                   to: data.email,
                   templateId: "org.invitation",
                   messageType: "org.invitation",
+                  locale,
                   variables: {
                     inviterLabel:
                       data.inviter.user.name || data.inviter.user.email,
@@ -504,12 +534,17 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         ...(isRuntimeMode
           ? {
               otpOptions: {
-                async sendOTP({ user, otp }) {
+                async sendOTP({ user, otp }, ctx) {
                   const { mailService } = await import("../mail");
+                  const locale = await resolveMailLocale({
+                    userId: user.id,
+                    headers: ctx?.headers,
+                  });
                   await mailService.sendTemplate({
                     to: user.email,
                     templateId: "auth.two-factor-otp",
                     messageType: "auth.two-factor-otp",
+                    locale,
                     variables: {
                       otp,
                     },
@@ -552,17 +587,24 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         resendStrategy: "reuse",
         ...(isRuntimeMode
           ? {
-              async sendVerificationOTP({ email, otp, type }) {
+              async sendVerificationOTP({ email, otp, type }, ctx) {
                 const { mailService } = await import("../mail");
                 const templateType =
                   type === "email-verification" || type === "forget-password"
                     ? type
                     : "sign-in";
+                // OTP is keyed by email; the recipient may be signing up or
+                // resetting a password without a stored preference, so resolve
+                // from the request.
+                const locale = await resolveMailLocale({
+                  headers: ctx?.headers,
+                });
 
                 await mailService.sendTemplate({
                   to: email,
                   templateId: `auth.email-otp.${templateType}`,
                   messageType: "auth.email-otp",
+                  locale,
                   variables: {
                     otp,
                     type,
@@ -577,12 +619,16 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       magicLink(
         isRuntimeMode
           ? {
-              async sendMagicLink({ email, url }) {
+              async sendMagicLink({ email, url }, ctx) {
                 const { mailService } = await import("../mail");
+                const locale = await resolveMailLocale({
+                  headers: ctx?.headers,
+                });
                 await mailService.sendTemplate({
                   to: email,
                   templateId: "auth.magic-link",
                   messageType: "auth.magic-link",
+                  locale,
                   variables: {
                     url,
                   },
@@ -619,6 +665,16 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         cachedTrustedClients: new Set(
           config.auth.extensionEnabled ? [config.auth.extensionClientId] : [],
         ),
+      }),
+      // Localizes better-auth error messages for the request locale. Registered
+      // last so its `after` hook runs after every other plugin's and can
+      // translate errors surfaced by any of them (design §16, D11).
+      i18n({
+        translations: authErrorTranslations,
+        defaultLocale: "en",
+        detection: [...AUTH_ERROR_LOCALE_DETECTION],
+        localeCookie: AUTH_LOCALE_COOKIE,
+        getLocale: resolveAuthErrorLocale,
       }),
     ],
     ...(isRuntimeMode

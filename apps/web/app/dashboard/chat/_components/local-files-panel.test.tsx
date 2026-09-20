@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   download: vi.fn(),
@@ -31,6 +32,17 @@ vi.mock("@sourceweft/preview/react", () => ({
     createElement("div", { "data-testid": "shared-preview" }, source.name),
 }));
 import { LocalFilesPanel } from "./local-files-panel";
+import messages from "../../../../messages/en.json";
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   mocks.ready = true;
@@ -63,12 +75,14 @@ afterEach(async () => {
 test("Hub Files reads the PC directory and clears its preview when offline", async () => {
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, {
-        workspaceId: "w",
-        threadId: "t",
-        variant: "hub",
-        computerName: "Mac A",
-      }),
+      withIntl(
+        createElement(LocalFilesPanel, {
+          workspaceId: "w",
+          threadId: "t",
+          variant: "hub",
+          computerName: "Mac A",
+        }),
+      ),
     ),
   );
   assert.match(container.textContent ?? "", /Files/);
@@ -116,11 +130,13 @@ test("Hub Files reads the PC directory and clears its preview when offline", asy
 test("offline retains a stale listing, disables access and refreshes on recovery", async () => {
   const render = () =>
     root.render(
-      createElement(LocalFilesPanel, {
-        workspaceId: "w",
-        threadId: "offline-test",
-        computerName: "Mac A",
-      }),
+      withIntl(
+        createElement(LocalFilesPanel, {
+          workspaceId: "w",
+          threadId: "offline-test",
+          computerName: "Mac A",
+        }),
+      ),
     );
   await act(async () => render());
   assert.match(container.textContent ?? "", /report.txt/);
@@ -155,7 +171,7 @@ test("offline retains a stale listing, disables access and refreshes on recovery
 test("account/session changes discard stale listings even for the same conversation id", async () => {
   const render = () =>
     root.render(
-      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
     );
   await act(async () => render());
   assert.match(container.textContent ?? "", /report.txt/);
@@ -167,12 +183,14 @@ test("account/session changes discard stale listings even for the same conversat
 test("Hub search filters physical filenames without changing the file store", async () => {
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, {
-        workspaceId: "w",
-        threadId: "t",
-        variant: "hub",
-        searchQuery: "missing",
-      }),
+      withIntl(
+        createElement(LocalFilesPanel, {
+          workspaceId: "w",
+          threadId: "t",
+          variant: "hub",
+          searchQuery: "missing",
+        }),
+      ),
     ),
   );
   assert.match(container.textContent ?? "", /No files match/);
@@ -189,11 +207,13 @@ test("directories navigate instead of opening a file preview", async () => {
   }));
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, {
-        workspaceId: "w",
-        threadId: "t",
-        variant: "hub",
-      }),
+      withIntl(
+        createElement(LocalFilesPanel, {
+          workspaceId: "w",
+          threadId: "t",
+          variant: "hub",
+        }),
+      ),
     ),
   );
   const folder = container.querySelector<HTMLButtonElement>(
@@ -218,7 +238,7 @@ test("preview opens immediately without refetching the list and ignores a late r
   mocks.preview.mockReturnValue(pending);
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
     ),
   );
   const file = container.querySelector<HTMLButtonElement>(
@@ -256,7 +276,7 @@ test("failed binary reads show the error and retain the download action", async 
   mocks.preview.mockRejectedValue(new Error("File read failed"));
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
+      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
     ),
   );
   const file = container.querySelector<HTMLButtonElement>(
@@ -279,7 +299,9 @@ test("failed binary reads show the error and retain the download action", async 
 test("changing conversations closes the old preview and resets directory navigation", async () => {
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "first" }),
+      withIntl(
+        createElement(LocalFilesPanel, { workspaceId: "w", threadId: "first" }),
+      ),
     ),
   );
   const file = container.querySelector<HTMLButtonElement>(
@@ -290,7 +312,9 @@ test("changing conversations closes the old preview and resets directory navigat
   assert.ok(document.querySelector('[role="dialog"]'));
   await act(async () =>
     root.render(
-      createElement(LocalFilesPanel, { workspaceId: "w", threadId: "second" }),
+      withIntl(
+        createElement(LocalFilesPanel, { workspaceId: "w", threadId: "second" }),
+      ),
     ),
   );
   assert.equal(document.querySelector('[role="dialog"]'), null);

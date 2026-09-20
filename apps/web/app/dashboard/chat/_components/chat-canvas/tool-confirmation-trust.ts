@@ -5,6 +5,9 @@ import {
   type ToolConfirmationDecision,
   type ToolConfirmationRequest,
 } from "@sourceweft/sdk";
+import type { useTranslations } from "next-intl";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 /**
  * The decision buttons a confirmation card may show and the "remember this"
@@ -28,17 +31,22 @@ export type ToolConfirmationDecisionOption = {
  * decisions that have always existed, so a missing field can never be the
  * reason a standing-approval button appears.
  */
-const fallbackDecisionOptions: ToolConfirmationDecisionOption[] = [
-  { decision: "reject", label: "Reject" },
-  { decision: "approve", label: "Approve" },
-];
+function getFallbackDecisionOptions(
+  t: Translate,
+): ToolConfirmationDecisionOption[] {
+  return [
+    { decision: "reject", label: t("toolConfirmation.decision.reject") },
+    { decision: "approve", label: t("toolConfirmation.decision.approve") },
+  ];
+}
 
 export function getConfirmationDecisionOptions(
   confirmation: Pick<ToolConfirmationRequest, "decisionOptions">,
+  t: Translate,
 ): ToolConfirmationDecisionOption[] {
   const options = confirmation.decisionOptions;
   if (!Array.isArray(options) || options.length === 0) {
-    return fallbackDecisionOptions;
+    return getFallbackDecisionOptions(t);
   }
   return options;
 }
@@ -46,16 +54,23 @@ export function getConfirmationDecisionOptions(
 export function hasAlwaysAllowOption(
   confirmation: Pick<ToolConfirmationRequest, "decisionOptions">,
 ) {
-  return getConfirmationDecisionOptions(confirmation).some(
-    (option) => option.decision === "approve_always",
-  );
+  // Checks decisions only, so it needs no translator: the fallback used when
+  // `decisionOptions` is empty is always [reject, approve], which can never
+  // contain `approve_always`.
+  const options = confirmation.decisionOptions;
+  if (!Array.isArray(options) || options.length === 0) {
+    return false;
+  }
+  return options.some((option) => option.decision === "approve_always");
 }
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
-function formatDays(seconds: number) {
+function formatDays(seconds: number, t: Translate) {
   const days = Math.max(1, Math.round(seconds / SECONDS_PER_DAY));
-  return `${days} day${days === 1 ? "" : "s"}`;
+  return days === 1
+    ? t("toolConfirmation.trustDuration.day", { count: days })
+    : t("toolConfirmation.trustDuration.days", { count: days });
 }
 
 export type TrustDurationChoice = {
@@ -63,6 +78,13 @@ export type TrustDurationChoice = {
   label: string;
   /** `undefined` means "send no ttlSeconds and let the server apply its default". */
   ttlSeconds?: number;
+};
+
+type TrustDurationDef = {
+  id: string;
+  ttlSeconds?: number;
+  kind: "default" | "plain" | "maximum";
+  seconds: number;
 };
 
 /**
@@ -74,29 +96,54 @@ export type TrustDurationChoice = {
  * caller to ask for less — and are filtered against the contract maximum so a
  * future narrowing of the cap cannot leave a dead option on screen.
  */
-const allTrustDurationChoices: TrustDurationChoice[] = [
-  {
-    id: "default",
-    label: `${formatDays(AGENT_TOOL_TRUST_RULE_DEFAULT_TTL_SECONDS)} (default)`,
-  },
-  { id: "1d", label: formatDays(SECONDS_PER_DAY), ttlSeconds: SECONDS_PER_DAY },
-  {
-    id: "7d",
-    label: formatDays(7 * SECONDS_PER_DAY),
-    ttlSeconds: 7 * SECONDS_PER_DAY,
-  },
-  {
-    id: "max",
-    label: `${formatDays(AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS)} (maximum)`,
-    ttlSeconds: AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
-  },
-];
-
-export const trustDurationChoices = allTrustDurationChoices.filter(
-  (choice) =>
-    choice.ttlSeconds === undefined ||
-    choice.ttlSeconds <= AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
+const trustDurationDefs: TrustDurationDef[] = (
+  [
+    {
+      id: "default",
+      kind: "default",
+      seconds: AGENT_TOOL_TRUST_RULE_DEFAULT_TTL_SECONDS,
+    },
+    {
+      id: "1d",
+      ttlSeconds: SECONDS_PER_DAY,
+      kind: "plain",
+      seconds: SECONDS_PER_DAY,
+    },
+    {
+      id: "7d",
+      ttlSeconds: 7 * SECONDS_PER_DAY,
+      kind: "plain",
+      seconds: 7 * SECONDS_PER_DAY,
+    },
+    {
+      id: "max",
+      ttlSeconds: AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
+      kind: "maximum",
+      seconds: AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
+    },
+  ] satisfies TrustDurationDef[]
+).filter(
+  (def) =>
+    def.ttlSeconds === undefined ||
+    def.ttlSeconds <= AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
 );
+
+export function getTrustDurationChoices(t: Translate): TrustDurationChoice[] {
+  return trustDurationDefs.map((def) => {
+    const days = formatDays(def.seconds, t);
+    const label =
+      def.kind === "default"
+        ? t("toolConfirmation.trustDuration.default", { days })
+        : def.kind === "maximum"
+          ? t("toolConfirmation.trustDuration.maximum", { days })
+          : days;
+    return {
+      id: def.id,
+      label,
+      ...(def.ttlSeconds === undefined ? {} : { ttlSeconds: def.ttlSeconds }),
+    };
+  });
+}
 
 export const defaultTrustDurationChoiceId = "default";
 
@@ -109,16 +156,15 @@ export const defaultTrustDurationChoiceId = "default";
  * the one thing this feature must not do.
  */
 export function buildTrustPayload(choiceId: string) {
-  const choice = trustDurationChoices.find(
-    (candidate) => candidate.id === choiceId,
-  );
-  return typeof choice?.ttlSeconds === "number"
-    ? { ttlSeconds: choice.ttlSeconds }
+  const def = trustDurationDefs.find((candidate) => candidate.id === choiceId);
+  return typeof def?.ttlSeconds === "number"
+    ? { ttlSeconds: def.ttlSeconds }
     : {};
 }
 
 export function formatTrustRuleExpiry(
   expiresAt: string | null | undefined,
+  t: Translate,
   now = new Date(),
 ) {
   if (!expiresAt) {
@@ -130,7 +176,7 @@ export function formatTrustRuleExpiry(
     return null;
   }
   if (time <= now.getTime()) {
-    return "expired";
+    return t("toolConfirmation.trustDuration.expired");
   }
   return parsed.toLocaleDateString(undefined, {
     year: "numeric",
@@ -149,25 +195,29 @@ export function formatTrustRuleExpiry(
  * approval was one-off — claiming otherwise would leave them believing in a
  * grant that does not exist and that no settings screen could show them.
  */
-export function describeDecisionOutcome(input: {
-  decision: ToolConfirmationDecision;
-  trustRule?: AgentToolTrustRule | null;
-  now?: Date;
-}) {
+export function describeDecisionOutcome(
+  input: {
+    decision: ToolConfirmationDecision;
+    trustRule?: AgentToolTrustRule | null;
+    now?: Date;
+  },
+  t: Translate,
+) {
   if (input.decision === "reject") {
-    return "Rejected in SourceWeft. The action was not run.";
+    return t("toolConfirmation.rejectedNotRun");
   }
   if (input.decision !== "approve_always") {
-    return "Approved in SourceWeft.";
+    return t("toolConfirmation.approvedInSourceweft");
   }
   if (!input.trustRule) {
-    return "Approved in SourceWeft. This approval was not remembered — it applies to this action only.";
+    return t("toolConfirmation.outcome.approvedNotRemembered");
   }
   const expiry = formatTrustRuleExpiry(
     input.trustRule.expiresAt,
+    t,
     input.now ?? new Date(),
   );
   return expiry
-    ? `Approved in SourceWeft. This action will be approved automatically until ${expiry}. Manage it in Settings → Approvals.`
-    : "Approved in SourceWeft. This action will be approved automatically. Manage it in Settings → Approvals.";
+    ? t("toolConfirmation.outcome.approvedUntil", { expiry })
+    : t("toolConfirmation.outcome.approvedAlways");
 }

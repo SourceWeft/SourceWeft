@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Check, ChevronDown } from "lucide-react";
 import {
   Popover,
@@ -18,6 +19,7 @@ import {
 import type { BillingOrg } from "./types";
 
 export function OrgSwitcher({ className }: { className?: string }) {
+  const t = useTranslations("dashboardSettings");
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const [open, setOpen] = React.useState(false);
@@ -40,7 +42,7 @@ export function OrgSwitcher({ className }: { className?: string }) {
       await authClient.organization.setActive({ organizationId: orgId });
       setOpen(false);
     } catch {
-      toast.error("Failed to switch team.");
+      toast.error(t("team.switchError"));
     }
   }
 

@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   type ListCapabilityCatalogResponse,
   type McpToolSelection,
@@ -128,26 +129,6 @@ const hubTabStorage = createHubTabStorage<HubTab>({
 const persistHubTab = hubTabStorage.persistHubTab;
 const getLastHubActiveTab = hubTabStorage.getLastHubActiveTab;
 
-const searchPlaceholders: Record<HubTab, string> = {
-  Sources: "Search sources...",
-  Files: "Filter files by name or path...",
-  Artifacts: "Search artifacts...",
-  Skills: "Search installed skills...",
-  MCP: "Search MCP tools...",
-  Citations: "Search citations...",
-  Connectors: "Search connectors...",
-};
-
-const searchScopeLabels: Record<HubTab, string> = {
-  Sources: "Sources",
-  Files: "Files",
-  Artifacts: "Artifacts",
-  Skills: "Skills",
-  MCP: "MCP",
-  Citations: "Citations",
-  Connectors: "Connectors",
-};
-
 function shouldPollConnectorSyncRuns(tab: HubTab) {
   return ACTIVE_SYNC_RUN_TABS.has(tab);
 }
@@ -244,6 +225,7 @@ export function SourcesHub({
   onClose?: () => void;
   variant?: "panel" | "drawer" | "window";
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const [activeTab, setActiveTab] = useState<HubTab>(
     () =>
       (initialView?.tab && [...tabs, "Citations"].includes(initialView.tab)
@@ -560,7 +542,7 @@ export function SourcesHub({
       toast.error(
         getErrorMessage(
           error,
-          enabled ? "Failed to enable skill." : "Failed to disable skill.",
+          enabled ? t("skills.enableFailed") : t("skills.disableFailed"),
         ),
       );
     }
@@ -745,7 +727,7 @@ export function SourcesHub({
         }
       } catch (error) {
         if (artifactOpenGenerationRef.current === generation) {
-          toast.error(getErrorMessage(error, "Could not load the artifact."));
+          toast.error(getErrorMessage(error, t("artifacts.couldNotLoad")));
         }
       } finally {
         if (artifactOpenGenerationRef.current === generation) {
@@ -753,7 +735,7 @@ export function SourcesHub({
         }
       }
     },
-    [onArtifactOpen, workspaceId],
+    [onArtifactOpen, workspaceId, t],
   );
 
   const editing = Boolean(
@@ -816,22 +798,22 @@ export function SourcesHub({
                 variant === "window" && "sr-only",
               )}
             >
-              Hub
+              {t("hub.title")}
             </h2>
             <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
               {pendingSourceIds.length > 0 ? (
                 <span className="inline-flex max-w-32 items-center gap-1 truncate text-[10px] text-muted-foreground">
                   <Loader2 className="size-3 animate-spin" />
-                  syncing {pendingSourceIds.length}
+                  {t("hub.syncing", { count: pendingSourceIds.length })}
                 </span>
               ) : null}
               {onPopOut ? (
                 <Button
-                  aria-label="Open Hub in a separate window"
+                  aria-label={t("hub.openWindow")}
                   title={
                     editing || busy
-                      ? "Finish editing or uploading before moving Hub"
-                      : "Open Hub in a separate window"
+                      ? t("hub.finishBeforeMove")
+                      : t("hub.openWindow")
                   }
                   disabled={windowBusy || editing || busy}
                   className="size-7"
@@ -849,7 +831,7 @@ export function SourcesHub({
               ) : null}
               {onClose ? (
                 <Button
-                  aria-label="Close Hub"
+                  aria-label={t("hub.close")}
                   className="size-7"
                   onClick={onClose}
                   size="icon-xs"
@@ -867,11 +849,11 @@ export function SourcesHub({
             <Input
               className="h-8 rounded-xl bg-muted/35 pr-8 pl-8 text-xs sm:pr-20"
               onChange={(e) => setActiveSearchQuery(e.target.value)}
-              placeholder={searchPlaceholders[activeTab]}
+              placeholder={t(`search.placeholder.${activeTab}`)}
               value={searchQuery}
             />
             <span className="pointer-events-none absolute top-1/2 right-7 hidden -translate-y-1/2 rounded-md bg-background/75 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border/60 sm:inline-flex">
-              {searchScopeLabels[activeTab]}
+              {t(`tabs.${activeTab}`)}
             </span>
             {searchQuery && (
               <button
@@ -886,7 +868,7 @@ export function SourcesHub({
 
           {executionError && (
             <p role="alert" className="mt-2 text-xs text-destructive">
-              Unable to read the file location: {executionError}
+              {t("hub.executionError", { error: executionError })}
             </p>
           )}
           <div className="relative mt-2 border-t pt-2">
@@ -907,7 +889,7 @@ export function SourcesHub({
                   onClick={() => handleActiveTabChange(tab)}
                   type="button"
                 >
-                  <span>{tab}</span>
+                  <span>{t(`tabs.${tab}`)}</span>
                   {tabCounts[tab] !== undefined ? (
                     <span className="ml-1.5 text-[10px] text-current/70">
                       {tabCounts[tab]}
@@ -924,7 +906,7 @@ export function SourcesHub({
               )}
             />
             <button
-              aria-label="Scroll tabs left"
+              aria-label={t("hub.scrollTabsLeft")}
               className={cn(
                 "absolute top-2 bottom-0 left-0 flex items-center pr-2 text-muted-foreground transition-opacity hover:text-foreground",
                 tabScrollState.canScrollLeft
@@ -945,7 +927,7 @@ export function SourcesHub({
               )}
             />
             <button
-              aria-label="Scroll tabs right"
+              aria-label={t("hub.scrollTabsRight")}
               className={cn(
                 "absolute top-2 right-0 bottom-0 flex items-center pl-2 text-muted-foreground transition-opacity hover:text-foreground",
                 tabScrollState.canScrollRight
@@ -972,14 +954,14 @@ export function SourcesHub({
               <div className="mb-2 flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Sources
+                    {t("tabs.Sources")}
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
                     {sources.length}
                   </span>
                   {deferredSearchQueries.Sources ? (
                     <span className="text-[10px] text-primary">
-                      {filteredSourceCount} found
+                      {t("counts.found", { count: filteredSourceCount })}
                     </span>
                   ) : null}
                 </div>
@@ -988,14 +970,14 @@ export function SourcesHub({
                     disabled={isLoading}
                     onClick={() => void refreshSources()}
                     size="icon-xs"
-                    title="Refresh sources"
+                    title={t("sources.refresh")}
                     type="button"
                     variant="ghost"
                   >
                     <RotateCcw
                       className={cn("size-3.5", isLoading && "animate-spin")}
                     />
-                    <span className="sr-only">Refresh sources</span>
+                    <span className="sr-only">{t("sources.refresh")}</span>
                   </Button>
                   <Button
                     disabled={selectableSourceIds.length === 0}
@@ -1003,8 +985,8 @@ export function SourcesHub({
                     size="icon-xs"
                     title={
                       allSelectableSourcesSelected
-                        ? "Unselect all sources"
-                        : "Select all sources"
+                        ? t("sources.unselectAll")
+                        : t("sources.selectAll")
                     }
                     type="button"
                     variant="ghost"
@@ -1016,8 +998,8 @@ export function SourcesHub({
                     )}
                     <span className="sr-only">
                       {allSelectableSourcesSelected
-                        ? "Unselect all sources"
-                        : "Select all sources"}
+                        ? t("sources.unselectAll")
+                        : t("sources.selectAll")}
                     </span>
                   </Button>
                   <Button
@@ -1028,7 +1010,7 @@ export function SourcesHub({
                     }
                     onClick={() => setDeleteSelectedSourcesOpen(true)}
                     size="icon-xs"
-                    title="Delete selected sources"
+                    title={t("sources.deleteSelected")}
                     type="button"
                     variant="ghost"
                   >
@@ -1037,18 +1019,18 @@ export function SourcesHub({
                     ) : (
                       <Trash2 className="size-3.5" />
                     )}
-                    <span className="sr-only">Delete selected sources</span>
+                    <span className="sr-only">{t("sources.deleteSelected")}</span>
                   </Button>
                   <Button
                     disabled={!workspaceId}
                     onClick={() => handleOpenCreateDirectory(null)}
                     size="icon-xs"
-                    title="Create folder"
+                    title={t("sources.createFolder")}
                     type="button"
                     variant="ghost"
                   >
                     <FolderPlus className="size-3.5" />
-                    <span className="sr-only">Create folder</span>
+                    <span className="sr-only">{t("sources.createFolder")}</span>
                   </Button>
                   <Button
                     disabled={!workspaceId}
@@ -1058,7 +1040,7 @@ export function SourcesHub({
                     variant="outline"
                   >
                     <Upload className="size-3.5" />
-                    Add source
+                    {t("sources.addSource")}
                   </Button>
                 </div>
               </div>
@@ -1072,7 +1054,7 @@ export function SourcesHub({
               {isLoading ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center py-6 text-xs text-muted-foreground">
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                  Loading sources...
+                  {t("sources.loading")}
                 </div>
               ) : (
                 <div className="min-h-0 flex-1">
@@ -1111,13 +1093,15 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">Files</h3>
+                  <h3 className="text-xs font-medium text-foreground">
+                    {t("tabs.Files")}
+                  </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {workfiles.length} files
+                    {t("counts.files", { count: workfiles.length })}
                   </span>
                   {deferredSearchQueries.Files ? (
                     <span className="text-[10px] text-primary">
-                      {filteredWorkfileCount} found
+                      {t("counts.found", { count: filteredWorkfileCount })}
                     </span>
                   ) : null}
                 </div>
@@ -1131,19 +1115,19 @@ export function SourcesHub({
                 <Button
                   onClick={() => void refreshWorkfiles()}
                   size="icon-xs"
-                  title="Refresh files"
+                  title={t("files.refresh")}
                   type="button"
                   variant="ghost"
                 >
                   <RotateCcw className="size-3.5" />
-                  <span className="sr-only">Refresh files</span>
+                  <span className="sr-only">{t("files.refresh")}</span>
                 </Button>
               </div>
               <p
                 className="mb-2 text-xs text-muted-foreground"
                 data-testid="workfiles-storage-source"
               >
-                Cloud · saved with this conversation
+                {t("files.storageNote")}
               </p>
               <WorkfilesTab
                 files={workfiles}
@@ -1162,7 +1146,7 @@ export function SourcesHub({
             !cloudWorkfiles &&
             (mode === "new" ? (
               <p className="p-4 text-sm text-muted-foreground">
-                Files will appear when the conversation starts.
+                {t("files.willAppearNew")}
               </p>
             ) : execution?.threadId === threadId &&
               execution.kind === "local" &&
@@ -1181,7 +1165,7 @@ export function SourcesHub({
                 role={executionError ? "alert" : "status"}
                 className="p-4 text-sm text-muted-foreground"
               >
-                {executionError ?? "Loading Files location…"}
+                {executionError ?? t("files.loadingLocation")}
               </p>
             ))}
 
@@ -1190,14 +1174,14 @@ export function SourcesHub({
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Artifacts
+                    {t("tabs.Artifacts")}
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {artifacts.length} artifacts
+                    {t("counts.artifacts", { count: artifacts.length })}
                   </span>
                   {deferredSearchQueries.Artifacts ? (
                     <span className="text-[10px] text-primary">
-                      {filteredArtifactCount} found
+                      {t("counts.found", { count: filteredArtifactCount })}
                     </span>
                   ) : null}
                 </div>
@@ -1205,12 +1189,12 @@ export function SourcesHub({
                   className="size-7"
                   onClick={() => void refreshArtifacts()}
                   size="icon-xs"
-                  title="Refresh artifacts"
+                  title={t("artifacts.refresh")}
                   type="button"
                   variant="ghost"
                 >
                   <RotateCcw className="size-3.5" />
-                  <span className="sr-only">Refresh artifacts</span>
+                  <span className="sr-only">{t("artifacts.refresh")}</span>
                 </Button>
               </div>
               <ArtifactsTab
@@ -1234,19 +1218,19 @@ export function SourcesHub({
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Skills
+                    {t("tabs.Skills")}
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {skillsForHub.length} available
+                    {t("counts.available", { count: skillsForHub.length })}
                   </span>
                   {deferredSearchQueries.Skills ? (
                     <span className="text-[10px] text-primary">
-                      {filteredSkillCount} found
+                      {t("counts.found", { count: filteredSkillCount })}
                     </span>
                   ) : null}
                   {selectedSkillIds.length > 0 ? (
                     <span className="text-[10px] text-primary">
-                      {selectedSkillIds.length} selected
+                      {t("counts.selected", { count: selectedSkillIds.length })}
                     </span>
                   ) : null}
                 </div>
@@ -1257,7 +1241,7 @@ export function SourcesHub({
                   variant="outline"
                 >
                   <SkillIcon className="size-3.5" />
-                  Skills gallery
+                  {t("skills.gallery")}
                 </Button>
               </div>
 
@@ -1280,15 +1264,20 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">MCP</h3>
+                  <h3 className="text-xs font-medium text-foreground">
+                    {t("tabs.MCP")}
+                  </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {mcpInstalls.length} installed
+                    {t("counts.installed", { count: mcpInstalls.length })}
                   </span>
                   {selectedMcpInstallIds.length + selectedMcpToolIds.length >
                   0 ? (
                     <span className="text-[10px] text-primary">
-                      {selectedMcpInstallIds.length + selectedMcpToolIds.length}{" "}
-                      selected
+                      {t("counts.selected", {
+                        count:
+                          selectedMcpInstallIds.length +
+                          selectedMcpToolIds.length,
+                      })}
                     </span>
                   ) : null}
                 </div>
@@ -1296,14 +1285,14 @@ export function SourcesHub({
                   <Button
                     onClick={() => void refreshMcpInstalls()}
                     size="icon-xs"
-                    title="Refresh MCP tools"
+                    title={t("mcp.refresh")}
                     type="button"
                     variant="ghost"
                   >
                     <RotateCcw
                       className={cn("size-3.5", isLoadingMcp && "animate-spin")}
                     />
-                    <span className="sr-only">Refresh MCP tools</span>
+                    <span className="sr-only">{t("mcp.refresh")}</span>
                   </Button>
                   <Button
                     onClick={() => setIsMcpMarketOpen(true)}
@@ -1312,7 +1301,7 @@ export function SourcesHub({
                     variant="outline"
                   >
                     <McpIcon className="size-3.5" />
-                    MCP Market
+                    {t("mcp.market")}
                   </Button>
                 </div>
               </div>
@@ -1587,10 +1576,12 @@ export function SourcesHub({
           constrainWidth={false}
         >
           <DialogHeader className="border-b px-5 py-4 text-left">
-            <DialogTitle>Skills gallery</DialogTitle>
+            <DialogTitle>{t("skills.galleryDialogTitle")}</DialogTitle>
             <DialogDescription>
-              Install reusable skills for{" "}
-              {workspaceName || "the current workspace"}.
+              {t("skills.galleryDialogDescription", {
+                workspace:
+                  workspaceName || t("skills.currentWorkspaceFallback"),
+              })}
             </DialogDescription>
           </DialogHeader>
           <SkillsGallery
@@ -1620,10 +1611,12 @@ export function SourcesHub({
           constrainWidth={false}
         >
           <DialogHeader className="border-b px-5 py-4 text-left">
-            <DialogTitle>MCP Market</DialogTitle>
+            <DialogTitle>{t("mcp.marketDialogTitle")}</DialogTitle>
             <DialogDescription>
-              Install and configure MCP servers for{" "}
-              {workspaceName || "the current workspace"}.
+              {t("mcp.marketDialogDescription", {
+                workspace:
+                  workspaceName || t("skills.currentWorkspaceFallback"),
+              })}
             </DialogDescription>
           </DialogHeader>
           {/* Flex + clip so McpMarket's flex-1 gets a bounded height and its own

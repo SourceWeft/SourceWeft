@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { ThreadSourceSelection } from "@sourceweft/contracts";
 import { contentClient } from "../../../../../lib/sdk";
 const useBrowserLayoutEffect =
@@ -17,6 +18,7 @@ export function useSourceSelection(
   workspaceId: string | null,
   threadId: string,
 ) {
+  const t = useTranslations("dashboardChat");
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [ready, setReady] = useState(false);
   const [revision, setRevision] = useState<number>();
@@ -54,7 +56,7 @@ export function useSourceSelection(
         toast.error(
           error instanceof Error
             ? error.message
-            : "Failed to load Sources. Reload this conversation.",
+            : t("toasts.sourcesLoadFailed"),
         );
       });
     return () => {
@@ -105,7 +107,7 @@ export function useSourceSelection(
           toast.error(
             error instanceof Error
               ? error.message
-              : "Failed to save Sources. Reload this conversation.",
+              : t("toasts.sourcesSaveFailed"),
           );
         });
       return save.then(
@@ -113,7 +115,7 @@ export function useSourceSelection(
         () => false,
       );
     },
-    [workspaceId, threadId],
+    [workspaceId, threadId, t],
   );
 
   return {

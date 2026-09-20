@@ -3,6 +3,7 @@ import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   CreditCard,
@@ -69,6 +70,7 @@ export function DashboardAccountMenu({
   expanded?: boolean;
   settingsRequest?: { id: number; tab: SettingsCenterTab } | null;
 }) {
+  const t = useTranslations("dashboardNav");
   const { isMobile } = useSidebar();
   const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
@@ -111,7 +113,7 @@ export function DashboardAccountMenu({
       await switchTeam(item);
       setTeamSwitcherOpen(false);
     } catch {
-      toast.error("Failed to switch team.");
+      toast.error(t("team.switchError"));
     }
   }
 
@@ -127,7 +129,7 @@ export function DashboardAccountMenu({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                aria-label="Account and settings"
+                aria-label={t("account.accountAndSettings")}
                 className={
                   expanded
                     ? "flex h-10 w-full items-center gap-2 rounded-lg px-1 text-left text-sm hover:bg-sidebar-accent"
@@ -137,7 +139,7 @@ export function DashboardAccountMenu({
               >
                 {userImage ? (
                   <RawImage
-                    alt={userName ?? "User"}
+                    alt={userName ?? t("account.userAlt")}
                     className="h-8 w-8 rounded-lg object-cover"
                     src={userImage}
                   />
@@ -149,7 +151,7 @@ export function DashboardAccountMenu({
                 {expanded && (
                   <>
                     <span className="min-w-0 flex-1 truncate">
-                      {userName || userEmail || "Account"}
+                      {userName || userEmail || t("account.accountFallback")}
                     </span>
                     <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
                   </>
@@ -167,7 +169,7 @@ export function DashboardAccountMenu({
                   <Avatar className="h-8 w-8 rounded-lg">
                     <AvatarImage
                       src={userImage ?? undefined}
-                      alt={userName ?? "User"}
+                      alt={userName ?? t("account.userAlt")}
                     />
                     <AvatarFallback className="rounded-lg">
                       {initials || "SW"}
@@ -175,10 +177,10 @@ export function DashboardAccountMenu({
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">
-                      {userName || "SourceWeft User"}
+                      {userName || t("account.sourceweftUser")}
                     </span>
                     <span className="truncate text-xs">
-                      {userEmail || "Signed in"}
+                      {userEmail || t("account.signedIn")}
                     </span>
                   </div>
                 </div>
@@ -228,7 +230,7 @@ export function DashboardAccountMenu({
                       <Plus className="size-4" />
                     </div>
                     <div className="font-medium text-muted-foreground">
-                      Add team
+                      {t("team.add")}
                     </div>
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
@@ -236,17 +238,17 @@ export function DashboardAccountMenu({
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => openSettings("account")}>
                   <User />
-                  Profile
+                  {t("account.profile")}
                 </DropdownMenuItem>
                 {billingAvailable ? (
                   <>
                     <DropdownMenuItem onClick={() => openSettings("usage")}>
                       <LayoutGrid />
-                      Usage
+                      {t("account.usage")}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => openSettings("billing")}>
                       <CreditCard />
-                      Billing
+                      {t("account.billing")}
                     </DropdownMenuItem>
                   </>
                 ) : null}
@@ -254,11 +256,11 @@ export function DashboardAccountMenu({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void handleSignOut()}>
                 <LogOut />
-                Log out
+                {t("account.logOut")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={dispatchDashboardShortcutsOpen}>
                 <Keyboard />
-                Keyboard shortcuts
+                {t("shortcuts.title")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

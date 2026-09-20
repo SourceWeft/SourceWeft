@@ -1,9 +1,24 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import type { RegistryVersionDetail } from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
+import messages from "../../../../messages/en.json";
+
+// Components under next-intl need the provider in scope; feed it the shell
+// catalog so the rendered chrome matches the English source of truth.
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages} timeZone="UTC">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 const api = vi.hoisted(() => ({
   listRegistryVersions: vi.fn(),
@@ -60,13 +75,15 @@ test("compact version control separates revision and review status, with details
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <RegistryVersions
-        workspaceId="workspace"
-        catalogId="skill:v1"
-        initialVersionId="v1"
-        onView={onView}
-        onChanged={() => {}}
-      />,
+      withIntl(
+        <RegistryVersions
+          workspaceId="workspace"
+          catalogId="skill:v1"
+          initialVersionId="v1"
+          onView={onView}
+          onChanged={() => {}}
+        />,
+      ),
     ),
   );
   expect(container.querySelector('[role="combobox"]')?.textContent).toBe(
@@ -102,16 +119,17 @@ test("changing the viewed version clears old documents; a failed load stays empt
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const render = (id: string) => (
-    <RegistryVersions
-      key={id}
-      workspaceId="workspace"
-      catalogId={`skill:${id}`}
-      initialVersionId={id}
-      onView={onView}
-      onChanged={() => {}}
-    />
-  );
+  const render = (id: string) =>
+    withIntl(
+      <RegistryVersions
+        key={id}
+        workspaceId="workspace"
+        catalogId={`skill:${id}`}
+        initialVersionId={id}
+        onView={onView}
+        onChanged={() => {}}
+      />,
+    );
   await act(async () => root.render(render("v1")));
   await act(async () => root.render(render("v2")));
   expect(onView).toHaveBeenLastCalledWith(null);

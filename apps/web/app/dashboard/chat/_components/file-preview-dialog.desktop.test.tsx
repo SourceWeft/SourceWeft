@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 const { openPreview } = vi.hoisted(() => ({
   openPreview: vi.fn().mockResolvedValue(undefined),
 }));
@@ -15,6 +16,17 @@ vi.mock("sonner", () => ({
   toast: { loading: vi.fn(), dismiss: vi.fn(), error: vi.fn() },
 }));
 import { FilePreviewDialog } from "./file-preview-dialog";
+import messages from "../../../../messages/en.json";
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
@@ -33,12 +45,14 @@ test("desktop opens the native reader and does not mount an inline dialog", asyn
   const onOpenChange = vi.fn();
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, {
-        open: true,
-        path: "file.md",
-        contentText: "# File",
-        onOpenChange,
-      }),
+      withIntl(
+        createElement(FilePreviewDialog, {
+          open: true,
+          path: "file.md",
+          contentText: "# File",
+          onOpenChange,
+        }),
+      ),
     ),
   );
   expect(openPreview).toHaveBeenCalledOnce();
@@ -52,12 +66,16 @@ test("desktop opens the native reader and does not mount an inline dialog", asyn
 test("desktop waits for authorized bytes before handing the file to native", async () => {
   const props = { open: true, path: "file.md", onOpenChange: vi.fn() };
   await act(async () =>
-    root.render(createElement(FilePreviewDialog, { ...props, loading: true })),
+    root.render(
+      withIntl(createElement(FilePreviewDialog, { ...props, loading: true })),
+    ),
   );
   expect(openPreview).not.toHaveBeenCalled();
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, { ...props, contentText: "ready" }),
+      withIntl(
+        createElement(FilePreviewDialog, { ...props, contentText: "ready" }),
+      ),
     ),
   );
   expect(openPreview).toHaveBeenCalledOnce();

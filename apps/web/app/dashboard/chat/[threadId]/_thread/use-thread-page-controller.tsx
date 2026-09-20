@@ -11,10 +11,10 @@ import {
 } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { authClient } from "../../../../../lib/auth-client";
 import {
   planQueuedSendRetry,
-  queuedSendPreview,
   shouldQueueSend,
   type QueuedSend,
 } from "./chat-send-queue";
@@ -126,11 +126,12 @@ export function useThreadPageController({
     workspaceName,
     workspaces,
   } = dashboardState;
+  const t = useTranslations("dashboardChat");
 
   const chatItem = [...privateChats, ...sharedChats].find(
     (chat) => chat.id === threadId,
   );
-  const threadTitle = chatItem?.title ?? "Chat";
+  const threadTitle = chatItem?.title ?? t("thread.fallbackTitle");
 
   const {
     canDockHub: isPersistentLayout,
@@ -823,7 +824,7 @@ export function useThreadPageController({
       maxAttempts: QUEUED_SEND_MAX_ATTEMPTS,
     });
     if ("dropped" in plan) {
-      toast.error("The chat stayed busy — please try again.");
+      toast.error(t("toasts.chatStayedBusy"));
       return;
     }
     // Front-insert so the loser goes next (FIFO fairness).
@@ -834,7 +835,7 @@ export function useThreadPageController({
       () => setRetryTick((tick) => tick + 1),
       QUEUED_SEND_RETRY_BACKOFF_MS,
     );
-  }, []);
+  }, [t]);
 
   const handleSendMessage = useCallback(
     async (
@@ -848,14 +849,14 @@ export function useThreadPageController({
     ) => {
       if (!localConversationStatus.ready) {
         toast.error(
-          localConversationStatus.message ?? "The computer is unavailable.",
+          localConversationStatus.message ?? t("toasts.computerUnavailable"),
         );
         return;
       }
       try {
         await synchronizeHubBeforeSend();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        toast.error(e instanceof Error ? e.message : t("toasts.hubUpdating"));
         return;
       }
       // Set only when replaying a queued send: on a 409 re-queue the same item.
@@ -892,26 +893,24 @@ export function useThreadPageController({
         };
         pendingSendsRef.current = [...pendingSendsRef.current, queued];
         setQueuedSends(pendingSendsRef.current);
-        toast("Queued — will send when the thread is free.");
+        toast(t("toasts.queuedWillSend"));
         return;
       }
       if (modelCatalogStatus !== "ready") {
         toast.error(
           modelCatalogStatus === "error"
-            ? "Model catalog failed to load. Refresh and try again."
-            : "Model catalog is still loading. Try again in a moment.",
+            ? t("modelCatalog.failedToast")
+            : t("modelCatalog.loadingToast"),
         );
         return;
       }
       if (!selectedModels.llm?.capabilities) {
-        toast.error("Chat model capabilities are not loaded yet.");
+        toast.error(t("toasts.modelCapabilitiesNotLoaded"));
         return;
       }
 
       if (!sourceSelectionReady) {
-        toast.error(
-          "Sources are still loading or saving. Wait for completion before sending.",
-        );
+        toast.error(t("toasts.sourcesLoadingOrSavingWait"));
         return;
       }
       const contextSourceIds = resolveContextSourceIds({
@@ -1024,6 +1023,7 @@ export function useThreadPageController({
       });
     },
     [
+      t,
       editingAssistantMessageId,
       editingBranchIndex,
       editingGroupId,
@@ -1122,7 +1122,7 @@ export function useThreadPageController({
       };
 
       if (!sourceSelectionReady) {
-        toast.error("Sources are still loading or saving.");
+        toast.error(t("toasts.sourcesLoadingOrSaving"));
         return;
       }
       const refreshSourceIds = resolveRefreshSourceIds({
@@ -1150,6 +1150,7 @@ export function useThreadPageController({
       });
     },
     [
+      t,
       activeSourceIds,
       sourceSelectionReady,
       sourceSelectionRevision,
@@ -1243,13 +1244,13 @@ export function useThreadPageController({
       workspaces
         .slice(0, DASHBOARD_WORKSPACE_SHORTCUT_LIMIT)
         .map((workspace, index) => ({
-          group: "Workspace",
+          group: t("shortcuts.workspaceGroup"),
           id: `workspace-${workspace.id}`,
           keys: getDashboardWorkspaceShortcutKeys(index, shortcutPlatform),
           onRun: () => handleWorkspaceShortcut(workspace.id),
-          title: `Switch to ${workspace.name}`,
+          title: t("shortcuts.switchToWorkspace", { name: workspace.name }),
         })),
-    [handleWorkspaceShortcut, shortcutPlatform, workspaces],
+    [handleWorkspaceShortcut, shortcutPlatform, t, workspaces],
   );
 
   useDashboardShortcuts(shortcutDefinitions);
@@ -1268,7 +1269,14 @@ export function useThreadPageController({
     },
     queuedSends: queuedSends.map((queued) => ({
       id: queued.id,
-      preview: queuedSendPreview(queued.input),
+      preview: (() => {
+        const text = queued.input.content.trim();
+        if (text.length > 0) return text;
+        const imageCount = queued.input.images?.length ?? 0;
+        if (imageCount > 0)
+          return t("queue.imagesPreview", { count: imageCount });
+        return t("queue.messagePreview");
+      })(),
     })),
     onCancelQueuedSend: cancelQueuedSend,
     chatExecutionState,

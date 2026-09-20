@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
 import { test } from "vitest";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
+import messages from "../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const chats: ComponentProps<typeof DashboardSidebarChatPanel>["privateChats"] =
   [
@@ -33,10 +39,11 @@ function render(activeChatId: string, search = "") {
   const noop = () => {};
   const asyncNoop = async () => {};
   return renderToStaticMarkup(
-    createElement(
-      SidebarProvider,
-      null,
-      createElement(DashboardSidebarChatPanel, {
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {createElement(
+        SidebarProvider,
+        null,
+        createElement(DashboardSidebarChatPanel, {
         heading: null,
         navigation: null,
         footer: null,
@@ -62,8 +69,9 @@ function render(activeChatId: string, search = "") {
         onCreateWorkspace: asyncNoop,
         onRenameWorkspace: asyncNoop,
         onWorkspaceChange: noop,
-      }),
-    ),
+        }),
+      )}
+    </NextIntlClientProvider>,
   );
 }
 test("cloud, local, other computers and legacy conversations stay visible regardless of the active conversation", () => {

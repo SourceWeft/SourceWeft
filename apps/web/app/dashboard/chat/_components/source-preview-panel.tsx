@@ -13,6 +13,7 @@ import {
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import {
   Dialog,
@@ -149,6 +150,7 @@ export function SourcePreviewPanel({
   source?: SourceItem | null;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -236,7 +238,7 @@ export function SourcePreviewPanel({
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "Failed to load source preview.",
+              : t("sourcePreview.loadFailed"),
           );
         }
       })
@@ -249,7 +251,7 @@ export function SourcePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [citation, open, source, workspaceId]);
+  }, [citation, open, source, workspaceId, t]);
 
   useEffect(() => {
     if (!open || !detail || !citation || previewMode !== "chunks") {
@@ -303,9 +305,12 @@ export function SourcePreviewPanel({
   const sourceUpdatedAt = formatTimestamp(detail?.source.updatedAt);
   const sourceTypeLabel =
     formatEnumLabel(detail?.source.sourceType ?? source?.sourceType) ??
-    "Source";
+    t("sourcePreview.sourceFallback");
   const title =
-    detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
+    detail?.source.title ??
+    citation?.sourceTitle ??
+    source?.title ??
+    t("sourcePreview.sourceFallback");
   const isExternalCitation = Boolean(citation?.externalUri);
   const toggleRawChunk = (chunkId: string) => {
     setRawChunkIds((current) => {
@@ -348,17 +353,21 @@ export function SourcePreviewPanel({
                 >
                   <Hash className="size-3" />
                   {typeof citation?.chunkNo === "number"
-                    ? `Chunk ${citation.chunkNo + 1}`
+                    ? t("sourcePreview.chunkLabel", {
+                        number: citation.chunkNo + 1,
+                      })
                     : citation
-                      ? "Cited chunk"
-                      : "Source preview"}
+                      ? t("sourcePreview.citedChunk")
+                      : t("sourcePreview.sourcePreview")}
                 </Badge>
                 {detail?.chunks ? (
                   <Badge
                     className="h-6 rounded-full border-border/60 bg-background/70 px-2.5 text-[11px] text-muted-foreground"
                     variant="outline"
                   >
-                    {detail.chunks.length} chunks
+                    {t("sourcePreview.chunksCount", {
+                      count: detail.chunks.length,
+                    })}
                   </Badge>
                 ) : null}
                 {detail?.source.mimeType ? (
@@ -379,12 +388,12 @@ export function SourcePreviewPanel({
                 ) : null}
                 {isHistoricalCitation ? (
                   <Badge className="h-6 rounded-full border-amber-300/70 bg-amber-100/80 px-2.5 text-[11px] font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
-                    Historical
+                    {t("sourcePreview.historical")}
                   </Badge>
                 ) : null}
                 {isDeletedCitation ? (
                   <Badge className="h-6 rounded-full border-slate-300/70 bg-slate-100/80 px-2.5 text-[11px] font-medium text-slate-700 dark:border-slate-500/30 dark:bg-slate-500/15 dark:text-slate-200">
-                    Source deleted
+                    {t("sourcePreview.sourceDeleted")}
                   </Badge>
                 ) : null}
               </div>
@@ -405,7 +414,13 @@ export function SourcePreviewPanel({
                         key={option.value}
                         value={option.value}
                       >
-                        {option.label}
+                        {t(
+                          `sourcePreview.mode.${
+                            option.value === "source-file"
+                              ? "sourceFile"
+                              : option.value
+                          }`,
+                        )}
                       </TabsTrigger>
                     ))}
                   </TabsList>
@@ -428,7 +443,7 @@ export function SourcePreviewPanel({
                   variant="outline"
                 >
                   <Sparkles className="size-3.5" />
-                  Jump to cited
+                  {t("sourcePreview.jumpToCited")}
                 </Button>
               ) : null}
             </div>
@@ -441,9 +456,9 @@ export function SourcePreviewPanel({
               <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
                 <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
                   <ExternalLink className="size-4" />
-                  Web citation
+                  {t("sourcePreview.webCitation")}
                 </div>
-                This citation points to a public web page.
+                {t("sourcePreview.webCitationNote")}
               </div>
 
               <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
@@ -470,14 +485,14 @@ export function SourcePreviewPanel({
                     variant="outline"
                   >
                     <ExternalLink className="size-3.5" />
-                    Open
+                    {t("sourcePreview.open")}
                   </Button>
                 </div>
                 <div className="px-4 py-4 lg:px-5">
                   <MessageResponse className="text-sm leading-7 text-foreground">
                     {citation.content ||
                       citation.excerpt ||
-                      "No citation content was saved."}
+                      t("sourcePreview.noContentSaved")}
                   </MessageResponse>
                 </div>
               </article>
@@ -486,7 +501,7 @@ export function SourcePreviewPanel({
         ) : isLoading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 size-4 animate-spin" />
-            Loading source preview...
+            {t("sourcePreview.loading")}
           </div>
         ) : isDeletedCitation && citation ? (
           <ScrollArea className="min-h-0 flex-1">
@@ -494,10 +509,9 @@ export function SourcePreviewPanel({
               <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
                 <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
                   <FileText className="size-4" />
-                  Source no longer available
+                  {t("sourcePreview.sourceUnavailable")}
                 </div>
-                The original source was deleted, so only the citation snapshot
-                saved with this answer can be shown.
+                {t("sourcePreview.sourceUnavailableNote")}
               </div>
 
               <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
@@ -508,23 +522,26 @@ export function SourcePreviewPanel({
                     </span>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-foreground">
-                        {citation.sourceTitle?.trim() || "Deleted source"}
+                        {citation.sourceTitle?.trim() ||
+                          t("sourcePreview.deletedSourceFallback")}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {typeof citation.chunkNo === "number"
-                          ? `Chunk ${citation.chunkNo + 1}`
-                          : "Cited chunk"}
+                          ? t("sourcePreview.chunkLabel", {
+                              number: citation.chunkNo + 1,
+                            })
+                          : t("sourcePreview.citedChunk")}
                       </div>
                     </div>
                   </div>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
                     <Sparkles className="size-3.5" />
-                    Preserved citation
+                    {t("sourcePreview.preservedCitation")}
                   </span>
                 </div>
                 <div className="px-4 py-4 lg:px-5">
                   <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                    {citation.excerpt || "No citation excerpt was saved."}
+                    {citation.excerpt || t("sourcePreview.noExcerptSaved")}
                   </MessageResponse>
                 </div>
               </article>
@@ -554,7 +571,7 @@ export function SourcePreviewPanel({
                             target="_blank"
                           >
                             <Download className="size-3.5" />
-                            Download
+                            {t("sourcePreview.download")}
                           </a>
                         </Button>
                       </div>
@@ -583,7 +600,7 @@ export function SourcePreviewPanel({
                           />
                         </div>
                       ) : (
-                        <p className="p-6">No source file is available.</p>
+                        <p className="p-6">{t("sourcePreview.noSourceFile")}</p>
                       )}
                     </div>
                   </section>
@@ -592,30 +609,39 @@ export function SourcePreviewPanel({
                     <div className="overflow-hidden rounded-[24px] border border-border/70 bg-background/92 shadow-[0_18px_60px_-40px_hsl(var(--foreground)/0.45)] backdrop-blur">
                       <div className="border-b border-border/70 px-4 py-3">
                         <div className="text-sm font-semibold text-foreground">
-                          File details
+                          {t("sourcePreview.fileDetails")}
                         </div>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          Quick metadata for the original source asset.
+                          {t("sourcePreview.fileDetailsNote")}
                         </p>
                       </div>
                       <div className="space-y-3 px-4 py-4">
-                        <SourceMetaRow label="Name" value={title} />
-                        <SourceMetaRow label="Type" value={sourceTypeLabel} />
                         <SourceMetaRow
-                          label="Format"
-                          value={sourceMimeType ?? "Unknown"}
+                          label={t("sourcePreview.metaName")}
+                          value={title}
+                        />
+                        <SourceMetaRow
+                          label={t("sourcePreview.metaType")}
+                          value={sourceTypeLabel}
+                        />
+                        <SourceMetaRow
+                          label={t("sourcePreview.metaFormat")}
+                          value={sourceMimeType ?? t("sourcePreview.unknown")}
                         />
                         {sourceSize ? (
-                          <SourceMetaRow label="Size" value={sourceSize} />
+                          <SourceMetaRow
+                            label={t("sourcePreview.metaSize")}
+                            value={sourceSize}
+                          />
                         ) : null}
                         {sourceUpdatedAt ? (
                           <SourceMetaRow
-                            label="Updated"
+                            label={t("sourcePreview.metaUpdated")}
                             value={sourceUpdatedAt}
                           />
                         ) : null}
                         <SourceMetaRow
-                          label="Indexed chunks"
+                          label={t("sourcePreview.metaIndexedChunks")}
                           value={String(detail.chunks.length)}
                         />
                       </div>
@@ -627,14 +653,14 @@ export function SourcePreviewPanel({
           ) : previewMode === "raw" ? (
             <ScrollArea className="min-h-0 flex-1">
               <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
-                {rawMarkdown || "No markdown content available."}
+                {rawMarkdown || t("sourcePreview.noMarkdown")}
               </pre>
             </ScrollArea>
           ) : previewMode === "preview" ? (
             <ScrollArea className="min-h-0 flex-1">
               <article className="mx-auto min-h-full max-w-4xl px-5 py-6 lg:px-8">
                 <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                  {rawMarkdown || "No markdown content available."}
+                  {rawMarkdown || t("sourcePreview.noMarkdown")}
                 </MessageResponse>
               </article>
             </ScrollArea>
@@ -665,7 +691,9 @@ export function SourcePreviewPanel({
                                 block: "center",
                               });
                             }}
-                            title={`Chunk ${index + 1}`}
+                            title={t("sourcePreview.chunkLabel", {
+                              number: index + 1,
+                            })}
                             type="button"
                           >
                             {index + 1}
@@ -710,14 +738,16 @@ export function SourcePreviewPanel({
                               {index + 1}
                             </span>
                             <span className="text-sm font-medium text-foreground">
-                              Chunk {index + 1}
+                              {t("sourcePreview.chunkLabel", {
+                                number: index + 1,
+                              })}
                             </span>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             {isCited ? (
                               <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
                                 <Sparkles className="size-3.5" />
-                                Cited source
+                                {t("sourcePreview.citedSource")}
                               </span>
                             ) : null}
                             <Button
@@ -729,14 +759,14 @@ export function SourcePreviewPanel({
                               variant={isRawOpen ? "secondary" : "ghost"}
                             >
                               <Code2 className="size-3.5" />
-                              Raw
+                              {t("sourcePreview.raw")}
                             </Button>
                           </div>
                         </div>
                         <div className="px-4 py-4 lg:px-5">
                           {isRawOpen ? (
                             <pre className="max-h-96 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap break-words text-muted-foreground">
-                              {chunk.content || "No raw chunk content."}
+                              {chunk.content || t("sourcePreview.noRawChunk")}
                             </pre>
                           ) : (
                             <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
@@ -751,7 +781,7 @@ export function SourcePreviewPanel({
                   {detail.chunks.length === 0 ? (
                     <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
                       <FileText className="mx-auto mb-2 size-5" />
-                      This source has no indexed chunks yet.
+                      {t("sourcePreview.noChunks")}
                     </div>
                   ) : null}
                 </div>

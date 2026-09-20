@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -66,6 +67,8 @@ type WorkspaceWithPreview = Workspace & {
   threads: Thread[];
 };
 
+type Translate = ReturnType<typeof useTranslations>;
+
 type ActivityKind = "workspace" | "source" | "thread";
 
 type ActivityItem = {
@@ -79,17 +82,25 @@ type ActivityItem = {
   updatedAt: string;
 };
 
-function formatRelative(value: string) {
+function formatRelative(value: string, t: Translate) {
   const time = new Date(value).getTime();
   const delta = Date.now() - time;
   const minute = 1000 * 60;
   const hour = minute * 60;
   const day = hour * 24;
 
-  if (delta < minute) return "just now";
-  if (delta < hour) return `${Math.max(1, Math.floor(delta / minute))}m ago`;
-  if (delta < day) return `${Math.max(1, Math.floor(delta / hour))}h ago`;
-  return `${Math.max(1, Math.floor(delta / day))}d ago`;
+  if (delta < minute) return t("relativeTime.justNow");
+  if (delta < hour)
+    return t("relativeTime.minutes", {
+      count: Math.max(1, Math.floor(delta / minute)),
+    });
+  if (delta < day)
+    return t("relativeTime.hours", {
+      count: Math.max(1, Math.floor(delta / hour)),
+    });
+  return t("relativeTime.days", {
+    count: Math.max(1, Math.floor(delta / day)),
+  });
 }
 
 function getWorkspaceLastActivity(workspace: WorkspaceWithPreview) {
@@ -105,6 +116,7 @@ function getWorkspaceLastActivity(workspace: WorkspaceWithPreview) {
 }
 
 function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
+  const t = useTranslations("dashboardHome");
   const visibleSources = workspace.sources.slice(0, 4);
   const extraCount = Math.max(0, workspace.sourceCount - visibleSources.length);
   const cardWidth = visibleSources.length <= 2 ? 116 : 100;
@@ -120,10 +132,10 @@ function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
             <Folder className="h-4.5 w-4.5" />
           </div>
           <div className="mt-2.5 text-sm font-medium text-foreground">
-            No files yet
+            {t("cover.noFilesYet")}
           </div>
           <div className="mt-1 max-w-36 text-xs leading-5 text-muted-foreground/85">
-            Add sources to start building context.
+            {t("cover.addSourcesDescription")}
           </div>
         </div>
       ) : (
@@ -162,7 +174,7 @@ function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
 
           {extraCount > 0 ? (
             <div className="absolute right-3 top-3 rounded-full bg-background/90 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm ring-1 ring-border/60">
-              +{extraCount} files
+              {t("cover.extraFiles", { count: extraCount })}
             </div>
           ) : null}
         </div>
@@ -171,23 +183,23 @@ function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
   );
 }
 
-function getSourceTypeLabel(sourceType: string) {
+function getSourceTypeLabel(sourceType: string, t: Translate) {
   switch (sourceType) {
     case "file_upload":
     case "manual_upload":
-      return "File";
+      return t("sourceType.file");
     case "web_url":
-      return "Web";
+      return t("sourceType.web");
     case "youtube":
-      return "Video";
+      return t("sourceType.video");
     case "note":
-      return "Note";
+      return t("sourceType.note");
     case "artifact":
-      return "Artifact";
+      return t("sourceType.artifact");
     case "connector":
-      return "Connector";
+      return t("sourceType.connector");
     default:
-      return "Source";
+      return t("sourceType.source");
   }
 }
 
@@ -212,15 +224,16 @@ function sortWorkspacesByRecent(workspaces: WorkspaceWithPreview[]) {
 
 function buildActivityItems(
   workspaces: WorkspaceWithPreview[],
+  t: Translate,
 ): ActivityItem[] {
   const items = workspaces.flatMap((workspace) => {
     const workspaceItem: ActivityItem = {
       id: `workspace:${workspace.id}`,
       kind: "workspace",
       title: workspace.name,
-      description: "Created",
+      description: t("activity.created"),
       workspaceName: workspace.name,
-      badgeLabel: "Workspace",
+      badgeLabel: t("badge.workspace"),
       badgeTone: getActivityBadgeTone("workspace"),
       updatedAt: workspace.createdAt,
     };
@@ -229,9 +242,12 @@ function buildActivityItems(
       id: `source:${source.id}`,
       kind: "source",
       title: source.title,
-      description: source.updatedAt === source.createdAt ? "Added" : "Updated",
+      description:
+        source.updatedAt === source.createdAt
+          ? t("activity.added")
+          : t("activity.updated"),
       workspaceName: workspace.name,
-      badgeLabel: getSourceTypeLabel(source.sourceType),
+      badgeLabel: getSourceTypeLabel(source.sourceType, t),
       badgeTone: getActivityBadgeTone("source"),
       updatedAt: source.updatedAt,
     }));
@@ -241,13 +257,11 @@ function buildActivityItems(
       kind: "thread",
       title: thread.title,
       description:
-        thread.sourceCount === 1
-          ? "1 source"
-          : thread.sourceCount > 1
-            ? `${thread.sourceCount} sources`
-            : "Updated",
+        thread.sourceCount > 0
+          ? t("activity.sourceCount", { count: thread.sourceCount })
+          : t("activity.updated"),
       workspaceName: workspace.name,
-      badgeLabel: "Chat",
+      badgeLabel: t("badge.chat"),
       badgeTone: getActivityBadgeTone("thread"),
       updatedAt: thread.updatedAt,
     }));
@@ -289,6 +303,8 @@ function OverviewPanel({
   onOpenWorkspace: (workspaceId: string) => void;
   recentActivity: ActivityItem[];
 }) {
+  const t = useTranslations("dashboardHome");
+
   return (
     <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card lg:min-h-[430px]">
       <div className="grid lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
@@ -300,14 +316,14 @@ function OverviewPanel({
 
             <h1 className="mt-6 text-[1.9rem] font-semibold leading-tight tracking-tight text-foreground md:text-[2.2rem]">
               {featuredWorkspace
-                ? `Resume in ${featuredWorkspace.name}`
-                : "Create your first workspace"}
+                ? t("overview.resumeIn", { name: featuredWorkspace.name })
+                : t("overview.createFirstTitle")}
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground md:text-base">
               {featuredWorkspace
-                ? "Pick up recent sources, review the latest activity, and move back into grounded chat with the right workspace already in focus."
-                : "Set up a workspace to organize sources, keep context together, and route directly into chat."}
+                ? t("overview.resumeDescription")
+                : t("overview.setupDescription")}
             </p>
 
             <div className="mt-6 flex flex-wrap gap-2">
@@ -316,7 +332,7 @@ function OverviewPanel({
                   className="rounded-xl"
                   onClick={() => onOpenWorkspace(featuredWorkspace.id)}
                 >
-                  Open workspace
+                  {t("overview.openWorkspace")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : null}
@@ -332,18 +348,24 @@ function OverviewPanel({
                 ) : (
                   <Plus className="h-4 w-4" />
                 )}
-                Create workspace
+                {t("actions.createWorkspace")}
               </Button>
             </div>
 
             {featuredWorkspace ? (
               <div className="mt-7 flex flex-wrap gap-2">
                 <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-foreground">
-                  {featuredWorkspace.sourceCount} sources
+                  {t("workspace.sources", {
+                    count: featuredWorkspace.sourceCount,
+                  })}
                 </span>
                 <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground">
-                  Updated{" "}
-                  {formatRelative(getWorkspaceLastActivity(featuredWorkspace))}
+                  {t("workspace.updated", {
+                    time: formatRelative(
+                      getWorkspaceLastActivity(featuredWorkspace),
+                      t,
+                    ),
+                  })}
                 </span>
               </div>
             ) : null}
@@ -352,14 +374,14 @@ function OverviewPanel({
 
         <div className="px-7 py-7 lg:px-8 lg:py-8">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-border/70 pb-3 text-sm font-medium text-muted-foreground">
-            <span>Activity</span>
-            <span>Type</span>
+            <span>{t("overview.activityColumn")}</span>
+            <span>{t("overview.typeColumn")}</span>
           </div>
 
           <div className="divide-y divide-border/70">
             {recentActivity.length === 0 ? (
               <div className="py-8 text-sm leading-6 text-muted-foreground">
-                Workspace, source, and chat activity will appear here.
+                {t("overview.activityEmpty")}
               </div>
             ) : null}
             {recentActivity.map((item) => (
@@ -383,7 +405,7 @@ function OverviewPanel({
                     ) : null}
                     <span>·</span>
                     <span className="whitespace-nowrap">
-                      {formatRelative(item.updatedAt)}
+                      {formatRelative(item.updatedAt, t)}
                     </span>
                   </div>
                 </div>
@@ -413,6 +435,8 @@ function CreateWorkspaceCard({
   disabled?: boolean;
   onCreate: () => void;
 }) {
+  const t = useTranslations("dashboardHome");
+
   return (
     <button
       className="min-h-[246px] w-full overflow-hidden rounded-[20px] border border-border/80 bg-card p-3 text-left transition-all duration-200 hover:border-foreground/20 hover:shadow-[0_10px_28px_-22px_rgba(15,23,42,0.26)] disabled:cursor-not-allowed disabled:opacity-60 dark:hover:shadow-none"
@@ -428,10 +452,10 @@ function CreateWorkspaceCard({
 
       <div className="px-1.5 pb-1 pt-3.5">
         <div className="text-base font-semibold tracking-tight text-foreground">
-          Create workspace
+          {t("createCard.title")}
         </div>
         <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-          Start a clean space for sources and chat.
+          {t("createCard.description")}
         </p>
       </div>
     </button>
@@ -445,6 +469,8 @@ function WorkspaceCard({
   onOpen: (workspaceId: string) => void;
   workspace: WorkspaceWithPreview;
 }) {
+  const t = useTranslations("dashboardHome");
+
   return (
     <button
       className="min-h-[246px] w-full overflow-hidden rounded-[20px] border border-border/80 bg-card p-3 text-left transition-all duration-200 hover:border-foreground/20 hover:shadow-[0_10px_28px_-22px_rgba(15,23,42,0.26)] dark:hover:shadow-none"
@@ -459,11 +485,13 @@ function WorkspaceCard({
             {workspace.name}
           </div>
           <div className="mt-1 text-[12.5px] text-muted-foreground">
-            Updated {formatRelative(getWorkspaceLastActivity(workspace))}
+            {t("workspace.updated", {
+              time: formatRelative(getWorkspaceLastActivity(workspace), t),
+            })}
           </div>
         </div>
         <div className="shrink-0 rounded-full bg-muted/70 px-2 py-1 text-[11px] font-medium text-muted-foreground">
-          {workspace.sourceCount} files
+          {t("workspace.files", { count: workspace.sourceCount })}
         </div>
       </div>
     </button>
@@ -471,6 +499,7 @@ function WorkspaceCard({
 }
 
 export default function DashboardPage() {
+  const t = useTranslations("dashboardHome");
   const router = useRouter();
   const dashboardState = useDashboardChatState();
   const resolvedOrganizationId = dashboardState.organizationId;
@@ -525,7 +554,7 @@ export default function DashboardPage() {
                 updatedAt?: string;
               }) => ({
                 id: source.id,
-                title: source.title ?? "Untitled",
+                title: source.title ?? t("fallback.untitledSource"),
                 contentText: source.contentText ?? source.title ?? "",
                 sourceType: source.sourceType ?? "source",
                 status: source.status ?? "created",
@@ -542,7 +571,7 @@ export default function DashboardPage() {
                 updatedAt?: string;
               }) => ({
                 id: thread.id,
-                title: thread.title ?? "Untitled chat",
+                title: thread.title ?? t("fallback.untitledChat"),
                 sourceCount: thread.sourceCount ?? 0,
                 createdAt: thread.createdAt ?? workspace.createdAt,
                 updatedAt: thread.updatedAt ?? workspace.createdAt,
@@ -574,14 +603,14 @@ export default function DashboardPage() {
 
         setActiveWorkspaceId(resolvedWorkspace?.id ?? null);
       } catch {
-        toast.error("Failed to load workspaces.");
+        toast.error(t("toasts.loadFailed"));
       } finally {
         setLoading(false);
       }
     }
 
     void loadWorkspaces();
-  }, [dashboardState.isWorkspaceHydrating, resolvedOrganizationId]);
+  }, [dashboardState.isWorkspaceHydrating, resolvedOrganizationId, t]);
 
   const canCreateWorkspace = Boolean(resolvedOrganizationId);
   const workspaceCollection = workspaces;
@@ -613,8 +642,8 @@ export default function DashboardPage() {
     recentWorkspaces[0] ??
     null;
   const recentActivity = useMemo(
-    () => buildActivityItems(workspaceCollection),
-    [workspaceCollection],
+    () => buildActivityItems(workspaceCollection, t),
+    [t, workspaceCollection],
   );
   const recentScrollRef = useRef<HTMLDivElement>(null);
 
@@ -662,20 +691,22 @@ export default function DashboardPage() {
 
   async function handleCreateWorkspace() {
     if (!resolvedOrganizationId) {
-      toast.error("No active team selected.");
+      toast.error(t("toasts.noActiveTeam"));
       return;
     }
 
     setCreateLoading(true);
 
     try {
-      const name = `Workspace ${workspaces.length + 1}`;
+      const name = t("workspace.defaultName", {
+        number: workspaces.length + 1,
+      });
       const workspace = await workspaceClient.createWorkspace(
         resolvedOrganizationId,
         { name },
       );
 
-      toast.success(`Created "${workspace.name}"`);
+      toast.success(t("toasts.created", { name: workspace.name }));
       setStoredDashboardWorkspaceId(resolvedOrganizationId, workspace.id);
       setActiveWorkspaceId(workspace.id);
       const switched = await dashboardState.switchWorkspace(
@@ -686,7 +717,7 @@ export default function DashboardPage() {
         router.push("/dashboard/chat");
       }
     } catch {
-      toast.error("Failed to create workspace.");
+      toast.error(t("toasts.createFailed"));
     } finally {
       setCreateLoading(false);
     }
@@ -727,7 +758,7 @@ export default function DashboardPage() {
               <Input
                 className="h-10 rounded-xl pl-10 pr-3 text-sm"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search workspaces..."
+                placeholder={t("search.placeholder")}
                 value={search}
               />
             </div>
@@ -738,7 +769,7 @@ export default function DashboardPage() {
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-9 p-4 pb-10 md:p-6 md:pb-12 xl:p-8 xl:pb-16">
           <section className="hidden space-y-4 md:block">
-            <SectionTitle title="Home" />
+            <SectionTitle title={t("sections.home")} />
 
             {loading ? (
               <DashboardHomeOverviewPanelSkeleton />
@@ -764,12 +795,16 @@ export default function DashboardPage() {
               )}
             >
               <SectionTitle
-                title={hasSearchQuery ? "Search results" : "Recent workspaces"}
+                title={
+                  hasSearchQuery
+                    ? t("sections.searchResults")
+                    : t("sections.recentWorkspaces")
+                }
               />
 
               <div className="hidden items-center gap-2 md:flex">
                 <Button
-                  aria-label="Scroll recent workspaces left"
+                  aria-label={t("rail.scrollLeft")}
                   className="h-8 w-8 rounded-full"
                   onClick={() => scrollRecent("prev")}
                   size="icon"
@@ -778,7 +813,7 @@ export default function DashboardPage() {
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <Button
-                  aria-label="Scroll recent workspaces right"
+                  aria-label={t("rail.scrollRight")}
                   className="h-8 w-8 rounded-full"
                   onClick={() => scrollRecent("next")}
                   size="icon"
@@ -803,13 +838,13 @@ export default function DashboardPage() {
                 <div>
                   <p className="text-base font-medium text-foreground">
                     {hasSearchQuery
-                      ? "No workspaces match your search"
-                      : "No workspaces yet"}
+                      ? t("empty.searchTitle")
+                      : t("empty.title")}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {hasSearchQuery
-                      ? "Try a different term, or clear the search to browse recent workspaces again."
-                      : "Create a workspace to start organizing sources and chats."}
+                      ? t("empty.searchDescription")
+                      : t("empty.description")}
                   </p>
                 </div>
                 {!hasSearchQuery ? (
@@ -823,7 +858,7 @@ export default function DashboardPage() {
                     ) : (
                       <Plus className="h-4 w-4" />
                     )}
-                    Create workspace
+                    {t("actions.createWorkspace")}
                   </Button>
                 ) : null}
               </div>

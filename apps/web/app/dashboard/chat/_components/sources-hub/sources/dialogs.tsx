@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Folder, Loader2, Upload, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   AlertDialog,
@@ -53,6 +54,7 @@ export function DirectoryPicker({
   excludeSourceId?: string | null;
   framed?: boolean;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const excludedIds = useMemo(() => {
     const ids = new Set<string>();
     if (!excludeSourceId) return ids;
@@ -119,7 +121,7 @@ export function DirectoryPicker({
         type="button"
       >
         <Folder className="size-3.5 shrink-0" />
-        <span>Sources root</span>
+        <span>{t("addSourceDialog.sourcesRoot")}</span>
       </button>
       <div className="ml-3 border-l border-border/70 pl-1">
         {directoryTree.map(function render(node) {
@@ -199,6 +201,7 @@ export function AddSourceDialog({
   urlTitle: string;
   urlValue: string;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <Dialog onOpenChange={onClose} open={isOpen}>
       <DialogContent
@@ -206,9 +209,9 @@ export function AddSourceDialog({
         constrainWidth={false}
       >
         <DialogHeader>
-          <DialogTitle>Add source</DialogTitle>
+          <DialogTitle>{t("addSourceDialog.title")}</DialogTitle>
           <DialogDescription>
-            Add web pages, text notes, or uploaded files as sources.
+            {t("addSourceDialog.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -218,7 +221,7 @@ export function AddSourceDialog({
               <Folder className="size-3.5" />
               <span className="truncate">
                 {sources.find((source) => source.id === addParentSourceId)
-                  ?.title ?? "Selected folder"}
+                  ?.title ?? t("addSourceDialog.selectedFolderFallback")}
               </span>
             </div>
           ) : null}
@@ -235,7 +238,7 @@ export function AddSourceDialog({
                 onClick={() => onAddTabChange(tab)}
                 type="button"
               >
-                {tab}
+                {t(`addSourceDialog.tab.${tab}`)}
               </button>
             ))}
           </div>
@@ -245,13 +248,13 @@ export function AddSourceDialog({
               <div className="flex h-full flex-col gap-2">
                 <Input
                   onChange={(event) => onTextTitleChange(event.target.value)}
-                  placeholder="Title (optional)"
+                  placeholder={t("addSourceDialog.textTitlePlaceholder")}
                   value={textTitle}
                 />
                 <Textarea
                   className="min-h-0 flex-1"
                   onChange={(event) => onTextContentChange(event.target.value)}
-                  placeholder="Paste or write source content..."
+                  placeholder={t("addSourceDialog.textContentPlaceholder")}
                   value={textContent}
                 />
               </div>
@@ -265,12 +268,11 @@ export function AddSourceDialog({
                 />
                 <Input
                   onChange={(event) => onUrlTitleChange(event.target.value)}
-                  placeholder="Title (optional)"
+                  placeholder={t("addSourceDialog.urlTitlePlaceholder")}
                   value={urlTitle}
                 />
                 <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
-                  SourceWeft will fetch the page content and index it for
-                  search.
+                  {t("addSourceDialog.urlHint")}
                 </div>
               </div>
             ) : (
@@ -300,21 +302,28 @@ export function AddSourceDialog({
                   />
                   <span className="inline-flex items-center gap-1.5 text-foreground">
                     <Upload className="size-3.5" />
-                    {isDragActive ? "Drop files here" : "Drag files here"}
+                    {isDragActive
+                      ? t("addSourceDialog.dropHere")
+                      : t("addSourceDialog.dragHere")}
                   </span>
                   <p className="mt-1 text-[10px]">
-                    or
-                    <button
-                      className="mx-1 inline font-medium text-foreground underline underline-offset-2"
-                      onClick={() => fileInputRef.current?.click()}
-                      type="button"
-                    >
-                      browse
-                    </button>
-                    files
+                    {t.rich("addSourceDialog.browseHint", {
+                      browse: (chunks) => (
+                        <button
+                          className="mx-1 inline font-medium text-foreground underline underline-offset-2"
+                          onClick={() => fileInputRef.current?.click()}
+                          type="button"
+                        >
+                          {chunks}
+                        </button>
+                      ),
+                    })}
                   </p>
                   <p className="mt-1 text-[10px]">
-                    Up to {MAX_FILES} files, {MAX_FILE_SIZE_MB}MB each
+                    {t("addSourceDialog.fileLimits", {
+                      maxFiles: MAX_FILES,
+                      maxSize: MAX_FILE_SIZE_MB,
+                    })}
                   </p>
                 </div>
 
@@ -339,14 +348,16 @@ export function AddSourceDialog({
                             variant="ghost"
                           >
                             <X className="size-3.5" />
-                            <span className="sr-only">Remove file</span>
+                            <span className="sr-only">
+                              {t("addSourceDialog.removeFile")}
+                            </span>
                           </Button>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
-                      No files selected
+                      {t("addSourceDialog.noFilesSelected")}
                     </div>
                   )}
                 </div>
@@ -354,7 +365,7 @@ export function AddSourceDialog({
                 {isSubmitting ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                      <span>Uploading</span>
+                      <span>{t("addSourceDialog.uploading")}</span>
                       <span>{uploadProgress}%</span>
                     </div>
                     <Progress className="h-1.5" value={uploadProgress} />
@@ -372,7 +383,7 @@ export function AddSourceDialog({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             disabled={
@@ -394,15 +405,15 @@ export function AddSourceDialog({
             {isSubmitting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Working...
+                {t("common.working")}
               </>
             ) : (
               <>
                 {addTab === "Text"
-                  ? "Create source"
+                  ? t("addSourceDialog.createSource")
                   : addTab === "URL"
-                    ? "Add URL"
-                    : "Upload files"}
+                    ? t("addSourceDialog.addUrl")
+                    : t("addSourceDialog.uploadFiles")}
               </>
             )}
           </Button>
@@ -437,6 +448,7 @@ export function CreateDirectoryDialog({
   onTitleChange: (value: string) => void;
   sources: SourceItem[];
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <Dialog onOpenChange={onOpenChange} open={isOpen}>
       <DialogContent
@@ -444,22 +456,22 @@ export function CreateDirectoryDialog({
         constrainWidth={false}
       >
         <DialogHeader>
-          <DialogTitle>Create folder</DialogTitle>
+          <DialogTitle>{t("createDirectoryDialog.title")}</DialogTitle>
           <DialogDescription>
-            Add a folder to organize Sources.
+            {t("createDirectoryDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Input
             autoFocus
             onChange={(event) => onTitleChange(event.target.value)}
-            placeholder="Folder name"
+            placeholder={t("createDirectoryDialog.namePlaceholder")}
             value={directoryTitle}
           />
           <Textarea
             className="min-h-28"
             onChange={(event) => onContextChange(event.target.value)}
-            placeholder="README context (optional)"
+            placeholder={t("createDirectoryDialog.readmePlaceholder")}
             value={directoryContext}
           />
           <DirectoryPicker
@@ -475,7 +487,7 @@ export function CreateDirectoryDialog({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             disabled={isSubmitting || !directoryTitle.trim()}
@@ -485,10 +497,10 @@ export function CreateDirectoryDialog({
             {isSubmitting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Working...
+                {t("common.working")}
               </>
             ) : (
-              "Create folder"
+              t("createDirectoryDialog.create")
             )}
           </Button>
         </DialogFooter>
@@ -514,6 +526,7 @@ export function MoveSourceDialog({
   onOpenChange: (open: boolean) => void;
   sources: SourceItem[];
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(moveSource)}>
       <DialogContent
@@ -521,9 +534,9 @@ export function MoveSourceDialog({
         constrainWidth={false}
       >
         <DialogHeader>
-          <DialogTitle>Move source</DialogTitle>
+          <DialogTitle>{t("moveSourceDialog.title")}</DialogTitle>
           <DialogDescription>
-            Choose a destination under the root directory.
+            {t("moveSourceDialog.description")}
           </DialogDescription>
         </DialogHeader>
         {moveSource ? (
@@ -535,7 +548,7 @@ export function MoveSourceDialog({
             />
             <div className="min-w-0">
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Moving
+                {t("moveSourceDialog.moving")}
               </div>
               <div className="truncate text-sm font-medium text-foreground">
                 {moveSource.title}
@@ -557,16 +570,16 @@ export function MoveSourceDialog({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button disabled={isSubmitting} onClick={onMove} type="button">
             {isSubmitting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Moving...
+                {t("moveSourceDialog.movingProgress")}
               </>
             ) : (
-              "Move"
+              t("moveSourceDialog.move")
             )}
           </Button>
         </DialogFooter>
@@ -590,6 +603,7 @@ export function ReadmeDialog({
   readmeContent: string;
   readmeSource: SourceItem | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(readmeSource)}>
       <DialogContent
@@ -597,9 +611,9 @@ export function ReadmeDialog({
         constrainWidth={false}
       >
         <DialogHeader>
-          <DialogTitle>Edit README</DialogTitle>
+          <DialogTitle>{t("readmeDialog.title")}</DialogTitle>
           <DialogDescription>
-            Update the context attached to this folder.
+            {t("readmeDialog.description")}
           </DialogDescription>
         </DialogHeader>
         {readmeSource ? (
@@ -611,7 +625,7 @@ export function ReadmeDialog({
             />
             <div className="min-w-0">
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Folder
+                {t("readmeDialog.folder")}
               </div>
               <div className="truncate text-sm font-medium text-foreground">
                 {readmeSource.title}
@@ -622,7 +636,7 @@ export function ReadmeDialog({
         <Textarea
           className="min-h-52 text-sm"
           onChange={(event) => onContentChange(event.target.value)}
-          placeholder="README context for this folder..."
+          placeholder={t("readmeDialog.placeholder")}
           value={readmeContent}
         />
         <DialogFooter>
@@ -632,16 +646,16 @@ export function ReadmeDialog({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button disabled={isSubmitting} onClick={onSave} type="button">
             {isSubmitting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Saving...
+                {t("common.saving")}
               </>
             ) : (
-              "Save README"
+              t("readmeDialog.save")
             )}
           </Button>
         </DialogFooter>
@@ -661,6 +675,7 @@ export function DeleteSourceDialog({
   onOpenChange: (open: boolean) => void;
   rowBusyById: Record<string, boolean>;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const isDeleting = Boolean(deleteSource && rowBusyById[deleteSource.id]);
 
   return (
@@ -668,13 +683,14 @@ export function DeleteSourceDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            Delete{" "}
-            {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
+            {deleteSource?.sourceType === "directory"
+              ? t("deleteSourceDialog.titleFolder")
+              : t("deleteSourceDialog.titleSource")}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {deleteSource?.sourceType === "directory"
-              ? "This will remove the folder and its sources from this workspace. This action cannot be undone."
-              : "This will remove the source from this workspace. This action cannot be undone."}
+              ? t("deleteSourceDialog.descriptionFolder")
+              : t("deleteSourceDialog.descriptionSource")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {deleteSource ? (
@@ -685,7 +701,9 @@ export function DeleteSourceDialog({
           </div>
         ) : null}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isDeleting}>
+            {t("common.cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             className={buttonVariants({ variant: "destructive" })}
             disabled={isDeleting}
@@ -699,10 +717,10 @@ export function DeleteSourceDialog({
             {isDeleting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Deleting...
+                {t("common.deleting")}
               </>
             ) : (
-              "Delete"
+              t("common.delete")
             )}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -724,18 +742,22 @@ export function DeleteSelectedSourcesDialog({
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete selected sources?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("deleteSelectedSourcesDialog.title")}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            This will delete {count} selected source{count === 1 ? "" : "s"},
-            including contents of any selected folders. This cannot be undone.
+            {t("deleteSelectedSourcesDialog.description", { count })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isDeleting}>
+            {t("common.cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             className={buttonVariants({ variant: "destructive" })}
             disabled={isDeleting || count === 0}
@@ -745,7 +767,7 @@ export function DeleteSelectedSourcesDialog({
             }}
           >
             {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            Delete
+            {t("common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

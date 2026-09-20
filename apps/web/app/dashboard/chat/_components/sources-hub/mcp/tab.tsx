@@ -1,5 +1,6 @@
 import { CircleAlert, Loader2 } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 
 import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
@@ -26,6 +27,7 @@ function McpRow({
   selectedToolIds: string[];
   onSelectionChange: (selection: McpToolSelection) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const selectedInstallSet = useMemo(
     () => new Set(selectedInstallIds),
     [selectedInstallIds],
@@ -116,10 +118,10 @@ function McpRow({
             <TypeBadge
               label={
                 install.official
-                  ? "Official"
+                  ? t("mcp.official")
                   : install.verified
-                    ? "Verified"
-                    : "Unverified"
+                    ? t("mcp.verified")
+                    : t("mcp.unverified")
               }
             />
           </div>
@@ -132,15 +134,15 @@ function McpRow({
               <TypeBadge
                 label={
                   install.credentialStatus === "configured"
-                    ? "Auth configured"
-                    : "Auth required"
+                    ? t("mcp.authConfigured")
+                    : t("mcp.authRequired")
                 }
               />
             ) : null}
             {!install.webExecutable || install.desktopOnly ? (
-              <TypeBadge label="Desktop only" />
+              <TypeBadge label={t("mcp.desktopOnly")} />
             ) : null}
-            {!install.enabled ? <TypeBadge label="Disabled" /> : null}
+            {!install.enabled ? <TypeBadge label={t("mcp.disabled")} /> : null}
             <span
               className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
               title={install.lastError ?? undefined}
@@ -152,8 +154,10 @@ function McpRow({
                 )}
               />
               {install.lastTestedAt
-                ? `Tested ${formatShortRelativeTime(install.lastTestedAt)}`
-                : "Not tested"}
+                ? t("mcp.tested", {
+                    time: formatShortRelativeTime(install.lastTestedAt),
+                  })
+                : t("mcp.notTested")}
             </span>
           </div>
         </div>
@@ -191,8 +195,7 @@ function McpRow({
           ))}
           {enabledTools.length > 8 ? (
             <div className="px-1.5 text-[10px] text-muted-foreground">
-              {enabledTools.length - 8} more tools are available when the server
-              is selected.
+              {t("mcp.moreTools", { count: enabledTools.length - 8 })}
             </div>
           ) : null}
         </div>
@@ -218,6 +221,7 @@ export function McpTab({
   selectedInstallIds: string[];
   selectedToolIds: string[];
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const q = searchQuery.trim().toLowerCase();
   const filtered = useMemo(
     () =>
@@ -246,7 +250,7 @@ export function McpTab({
       <HubEmptyState
         description={loadingError}
         icon={CircleAlert}
-        title="MCP tools could not be loaded."
+        title={t("mcp.loadError")}
       />
     );
   }
@@ -255,7 +259,7 @@ export function McpTab({
     return (
       <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
         <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-        Loading MCP tools...
+        {t("mcp.loading")}
       </div>
     );
   }
@@ -265,14 +269,14 @@ export function McpTab({
       <HubEmptyState
         description={
           searchQuery
-            ? "Try a different server, tool, or description."
-            : "Install MCP servers from the MCP Market to use them in chat."
+            ? t("mcp.noMatchDescription")
+            : t("mcp.emptyDescription")
         }
         icon={McpIcon}
         title={
           searchQuery
-            ? `No MCP tools match "${searchQuery}"`
-            : "No MCP tools installed."
+            ? t("mcp.noMatchTitle", { query: searchQuery })
+            : t("mcp.emptyTitle")
         }
       />
     );

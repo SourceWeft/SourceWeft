@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import {
   Conversation,
   ConversationContent,
@@ -17,13 +18,6 @@ import type {
   PromptThinkingSettings,
 } from "./types";
 import type { ComposerOptionsState } from "./composer-options";
-
-const starterSuggestions = [
-  "Summarize the selected sources",
-  "Compare the main claims across these documents",
-  "What changed between these reports?",
-  "List the strongest supporting evidence",
-];
 
 function promptFilesToImages(files: FileUIPart[] | undefined) {
   return (files ?? [])
@@ -109,6 +103,13 @@ export function EmptyState({
   composerOptions?: ComposerOptionsState;
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
+  const starterSuggestions = [
+    t("emptyState.suggestions.summarize"),
+    t("emptyState.suggestions.compareClaims"),
+    t("emptyState.suggestions.whatChanged"),
+    t("emptyState.suggestions.strongestEvidence"),
+  ];
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <Conversation className="h-full min-h-0 flex-1 overflow-hidden">
@@ -118,11 +119,10 @@ export function EmptyState({
               <div className="space-y-2">
                 <div className="space-y-3">
                   <h1 className="chat-empty-title max-w-2xl text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-                    What would you like to work on?
+                    {t("emptyState.title")}
                   </h1>
                   <p className="chat-empty-description max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-                    Start with a prompt, compare evidence, or have the agent
-                    synthesize what matters most before you open a thread.
+                    {t("emptyState.description")}
                   </p>
                 </div>
               </div>
@@ -177,7 +177,7 @@ export function EmptyState({
             onStopStreaming={onStopStreaming}
             onSearchEnabledChange={onSearchEnabledChange}
             onThinkingSettingsChange={onThinkingSettingsChange}
-            placeholder="Message your documents, links, or connected tools..."
+            placeholder={t("composer.placeholder")}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}
             capabilityCatalog={capabilityCatalog}

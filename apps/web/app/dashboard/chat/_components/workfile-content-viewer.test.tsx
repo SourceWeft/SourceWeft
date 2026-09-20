@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, test } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { WorkfileContentViewer } from "./workfile-content-viewer";
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -21,7 +27,11 @@ async function renderViewer(props: {
   root = createdRoot;
 
   await act(async () => {
-    createdRoot.render(createElement(WorkfileContentViewer, props));
+    createdRoot.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(WorkfileContentViewer, props)}
+      </NextIntlClientProvider>,
+    );
   });
 
   return container;

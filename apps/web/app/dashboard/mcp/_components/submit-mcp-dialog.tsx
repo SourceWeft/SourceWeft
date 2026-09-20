@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -22,6 +23,7 @@ import { submitMcp } from "../../../../lib/market-submit";
  * safety-scans it, then either publishes it immediately or routes it to review.
  */
 export function SubmitMcpDialog() {
+  const t = useTranslations("dashboardMcpPanel");
   const [open, setOpen] = React.useState(false);
   const [repoUrl, setRepoUrl] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
@@ -29,26 +31,27 @@ export function SubmitMcpDialog() {
   async function handleSubmit() {
     const trimmed = repoUrl.trim();
     if (!trimmed) {
-      toast.error("Enter a public GitHub repository URL.");
+      toast.error(t("submit.urlRequired"));
       return;
     }
     setSubmitting(true);
     try {
       const result = await submitMcp(trimmed);
       if (result.status === "published") {
-        toast.success(`Published: ${result.identifier}`);
+        toast.success(t("submit.published", { identifier: result.identifier }));
       } else {
         toast.success(
-          `Submitted ${result.identifier}, queued for manual review (${result.flags.length} item(s) to confirm).`,
+          t("submit.queued", {
+            identifier: result.identifier,
+            count: result.flags.length,
+          }),
         );
       }
       setRepoUrl("");
       setOpen(false);
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Submission failed. Make sure this is a public MCP repository.",
+        error instanceof Error ? error.message : t("submit.failed"),
       );
     } finally {
       setSubmitting(false);
@@ -60,17 +63,13 @@ export function SubmitMcpDialog() {
       <DialogTrigger asChild>
         <Button className="h-7 gap-1.5 px-2.5 text-xs" size="sm" variant="outline">
           <Plus className="h-3.5 w-3.5" />
-          Submit MCP
+          {t("submit.trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Submit an MCP server</DialogTitle>
-          <DialogDescription>
-            Paste a public GitHub repository link. We parse it automatically and
-            run a security scan — clean repos are published directly, suspicious
-            ones go to manual review.
-          </DialogDescription>
+          <DialogTitle>{t("submit.title")}</DialogTitle>
+          <DialogDescription>{t("submit.description")}</DialogDescription>
         </DialogHeader>
         <Input
           onChange={(event) => setRepoUrl(event.target.value)}
@@ -89,7 +88,7 @@ export function SubmitMcpDialog() {
             type="button"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Submit
+            {t("submit.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

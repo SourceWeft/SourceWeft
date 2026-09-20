@@ -20,6 +20,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type {
   ListWorkspaceMarketMcpResponse,
   WorkspaceMcpInstall,
@@ -108,29 +109,29 @@ const fallbackCategories: Array<{ key: CategoryKey; label: string }> = [
   { key: "other", label: "Other" },
 ];
 
-const statusOptions: Array<{ key: StatusFilter; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "installed", label: "Installed" },
-  { key: "not_installed", label: "Not installed" },
+const statusOptions: Array<{ key: StatusFilter }> = [
+  { key: "all" },
+  { key: "installed" },
+  { key: "not_installed" },
 ];
 
-const trustOptions: Array<{ key: TrustFilter; label: string }> = [
-  { key: "all", label: "All trust levels" },
-  { key: "trusted", label: "Official or verified" },
-  { key: "unverified", label: "Unverified" },
+const trustOptions: Array<{ key: TrustFilter }> = [
+  { key: "all" },
+  { key: "trusted" },
+  { key: "unverified" },
 ];
 
-const deviceOptions: Array<{ key: DeviceFilter; label: string }> = [
-  { key: "all", label: "All devices" },
-  { key: "web", label: "Web executable" },
-  { key: "desktop", label: "Desktop host" },
+const deviceOptions: Array<{ key: DeviceFilter }> = [
+  { key: "all" },
+  { key: "web" },
+  { key: "desktop" },
 ];
 
-const sortOptions: Array<{ key: SortKey; label: string }> = [
-  { key: "recommended", label: "Recommended" },
-  { key: "name_asc", label: "Name A-Z" },
-  { key: "installed_first", label: "Installed first" },
-  { key: "trusted_first", label: "Trusted first" },
+const sortOptions: Array<{ key: SortKey }> = [
+  { key: "recommended" },
+  { key: "name_asc" },
+  { key: "installed_first" },
+  { key: "trusted_first" },
 ];
 
 const CATALOG_PAGE_SIZE = 100;
@@ -263,29 +264,32 @@ function isGithubSourceUrl(value: string) {
 
 function installStatusMeta(status: WorkspaceMcpInstallStatus): {
   dotClass: string;
-  label: string;
+  statusKey: "error" | "disabled" | "active";
 } {
   if (status === "error") {
-    return { dotClass: "bg-red-500", label: "Error" };
+    return { dotClass: "bg-red-500", statusKey: "error" };
   }
   if (status === "disabled") {
-    return { dotClass: "bg-muted-foreground/50", label: "Disabled" };
+    return { dotClass: "bg-muted-foreground/50", statusKey: "disabled" };
   }
-  return { dotClass: "bg-emerald-500", label: "Active" };
+  return { dotClass: "bg-emerald-500", statusKey: "active" };
 }
 
 function McpStatusIndicator({ install }: { install: WorkspaceMcpInstall }) {
+  const t = useTranslations("dashboardMcpPanel");
   const meta = installStatusMeta(install.status);
   const testedLabel = install.lastTestedAt
-    ? `Tested ${formatShortRelativeTime(install.lastTestedAt)}`
-    : "Not tested yet";
+    ? t("card.tested", {
+        time: formatShortRelativeTime(install.lastTestedAt),
+      })
+    : t("card.notTestedYet");
   return (
     <span
       className="inline-flex min-w-0 items-center gap-1.5"
       title={install.lastError ?? undefined}
     >
       <span
-        aria-label={meta.label}
+        aria-label={t(`installStatus.${meta.statusKey}`)}
         className={cn("size-1.5 shrink-0 rounded-full", meta.dotClass)}
       />
       <span className="truncate">{testedLabel}</span>
@@ -381,6 +385,7 @@ function WorkspaceMenu({
   workspaceName: string | null;
   workspaces: Array<{ id: string; name: string }>;
 }) {
+  const t = useTranslations("dashboardMcpPanel");
   const options =
     workspaceId &&
     workspaceName &&
@@ -403,14 +408,14 @@ function WorkspaceMenu({
         >
           <PanelsTopLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-left font-medium">
-            {activeWorkspace?.name ?? "Select workspace"}
+            {activeWorkspace?.name ?? t("workspace.select")}
           </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         {options.length === 0 ? (
-          <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>
+          <DropdownMenuItem disabled>{t("workspace.none")}</DropdownMenuItem>
         ) : (
           options.map((item) => {
             const active = item.id === workspaceId;
@@ -438,8 +443,8 @@ function SortMenu({
   onChange: (value: SortKey) => void;
   value: SortKey;
 }) {
-  const activeLabel =
-    sortOptions.find((option) => option.key === value)?.label ?? "Recommended";
+  const t = useTranslations("dashboardMcpPanel");
+  const activeLabel = t(`sort.${value}`);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -447,7 +452,7 @@ function SortMenu({
           className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
           type="button"
         >
-          <span>Sort by</span>
+          <span>{t("sort.label")}</span>
           <span>{activeLabel}</span>
           <ChevronDown className="h-3.5 w-3.5" />
         </button>
@@ -459,7 +464,7 @@ function SortMenu({
             key={option.key}
             onClick={() => onChange(option.key)}
           >
-            {option.label}
+            {t(`sort.${option.key}`)}
             {option.key === value ? <Check className="h-3.5 w-3.5" /> : null}
           </DropdownMenuItem>
         ))}
@@ -505,6 +510,7 @@ function McpFilterPanel({
   trustFilter: TrustFilter;
   unverifiedCount: number;
 }) {
+  const t = useTranslations("dashboardMcpPanel");
   const notInstalledCount = Math.max(totalCount - installedCount, 0);
   return (
     <aside
@@ -517,24 +523,30 @@ function McpFilterPanel({
     >
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-foreground">MCP Market</h2>
+          <h2 className="text-sm font-semibold text-foreground">
+            {t("filters.title")}
+          </h2>
           <button
             className="text-[11px] text-muted-foreground hover:text-foreground"
             onClick={onClear}
             type="button"
           >
-            Clear all
+            {t("filters.clearAll")}
           </button>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <FilterFacet defaultOpen label="Search" summary={query.trim() || "all"}>
+        <FilterFacet
+          defaultOpen
+          label={t("filters.facets.search")}
+          summary={query.trim() || t("filters.searchSummaryAll")}
+        >
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-7 pl-8 text-xs"
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="Search MCP"
+              placeholder={t("filters.searchPlaceholder")}
               value={query}
             />
           </div>
@@ -542,10 +554,10 @@ function McpFilterPanel({
 
         <FilterFacet
           defaultOpen
-          label="Category"
+          label={t("filters.facets.category")}
           summary={
             selectedCategories.length === 0
-              ? "All"
+              ? t("filters.categorySummaryAll")
               : categories
                   .filter((item) => selectedCategories.includes(item.key))
                   .map((item) => item.label)
@@ -570,8 +582,8 @@ function McpFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label="Trust"
-          summary={trustOptions.find((item) => item.key === trustFilter)?.label}
+          label={t("filters.facets.trust")}
+          summary={t(`filters.trust.${trustFilter}`)}
         >
           <div className="space-y-1">
             {trustOptions.map((item) => (
@@ -579,7 +591,7 @@ function McpFilterPanel({
                 active={trustFilter === item.key}
                 count={item.key === "unverified" ? unverifiedCount : undefined}
                 key={item.key}
-                label={item.label}
+                label={t(`filters.trust.${item.key}`)}
                 onClick={() => onTrustFilterChange(item.key)}
               />
             ))}
@@ -587,17 +599,15 @@ function McpFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label="Device"
-          summary={
-            deviceOptions.find((item) => item.key === deviceFilter)?.label
-          }
+          label={t("filters.facets.device")}
+          summary={t(`filters.device.${deviceFilter}`)}
         >
           <div className="space-y-1">
             {deviceOptions.map((item) => (
               <FacetChoice
                 active={deviceFilter === item.key}
                 key={item.key}
-                label={item.label}
+                label={t(`filters.device.${item.key}`)}
                 onClick={() => onDeviceFilterChange(item.key)}
               />
             ))}
@@ -605,10 +615,8 @@ function McpFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label="Status"
-          summary={
-            statusOptions.find((item) => item.key === statusFilter)?.label
-          }
+          label={t("filters.facets.status")}
+          summary={t(`filters.status.${statusFilter}`)}
         >
           <div className="space-y-1">
             {statusOptions.map((item) => (
@@ -622,7 +630,7 @@ function McpFilterPanel({
                       : totalCount
                 }
                 key={item.key}
-                label={item.label}
+                label={t(`filters.status.${item.key}`)}
                 onClick={() => onStatusFilterChange(item.key)}
               />
             ))}
@@ -689,6 +697,7 @@ function McpCard({
   onUninstall: (item: MarketMcpItem) => void;
   pendingActions: ReadonlySet<string>;
 }) {
+  const t = useTranslations("dashboardMcpPanel");
   const install = item.install;
   const market = item.market;
   const trusted = isTrustedMcp(market);
@@ -725,7 +734,7 @@ function McpCard({
     >
       <div className="flex items-start gap-2">
         <button
-          aria-label={`View ${market.name} details`}
+          aria-label={t("card.viewDetailsAria", { name: market.name })}
           className="-m-1 flex min-w-0 flex-1 items-start gap-3 rounded-lg p-1 text-left outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onOpenDetails(item)}
           type="button"
@@ -764,7 +773,7 @@ function McpCard({
               {installed ? (
                 <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
                   <Check className="h-3 w-3" />
-                  Installed
+                  {t("badges.installed")}
                 </span>
               ) : null}
             </div>
@@ -783,7 +792,7 @@ function McpCard({
                 variant="ghost"
               >
                 <a
-                  aria-label={`Open ${market.name} source`}
+                  aria-label={t("card.openSourceAria", { name: market.name })}
                   href={sourceUrl}
                   rel="noreferrer noopener"
                   target="_blank"
@@ -797,7 +806,7 @@ function McpCard({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              {sourceIsGithub ? "Open GitHub repository" : "Open source"}
+              {sourceIsGithub ? t("card.openGithub") : t("card.openSource")}
             </TooltipContent>
           </Tooltip>
         ) : null}
@@ -814,20 +823,20 @@ function McpCard({
       <div className="mt-3 flex flex-wrap gap-1.5">
         {market.official ? (
           <Badge className="h-5 px-1.5 text-[10px]" variant="default">
-            Official
+            {t("badges.official")}
           </Badge>
         ) : market.verified ? (
           <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
-            Verified
+            {t("badges.verified")}
           </Badge>
         ) : (
           <Badge className="h-5 gap-1 px-1.5 text-[10px]" variant="outline">
             <AlertTriangle className="h-3 w-3" />
-            Unverified
+            {t("badges.unverified")}
           </Badge>
         )}
         <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
-          {desktopOnly ? "Desktop only" : "Web executable"}
+          {desktopOnly ? t("badges.desktopOnly") : t("badges.webExecutable")}
         </Badge>
         <Badge className="h-5 px-1.5 text-[10px] capitalize" variant="outline">
           {itemCategoryLabel}
@@ -837,10 +846,7 @@ function McpCard({
       {!trusted ? (
         <div className="mt-3 flex max-h-11 gap-2 overflow-hidden rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="line-clamp-2">
-            Unverified MCP can receive this turn&apos;s tool arguments and may
-            perform external actions. Review the server before enabling.
-          </span>
+          <span className="line-clamp-2">{t("card.unverifiedWarning")}</span>
         </div>
       ) : null}
 
@@ -854,8 +860,10 @@ function McpCard({
               )}
               title={
                 needsCredentials
-                  ? "Credentials required"
-                  : `${install.tools.length} tools synced`
+                  ? t("card.credentialsRequired")
+                  : t("card.toolsSyncedTitle", {
+                      count: install.tools.length,
+                    })
               }
             >
               <McpStatusIndicator install={install} />
@@ -863,7 +871,7 @@ function McpCard({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label={`Test ${market.name}`}
+                  aria-label={t("card.testAria", { name: market.name })}
                   disabled={pending || !canExecuteHere}
                   onClick={() => onTest(install)}
                   size="icon-xs"
@@ -876,12 +884,12 @@ function McpCard({
                   )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Test connection</TooltipContent>
+              <TooltipContent>{t("card.testConnection")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label={`Configure ${market.name}`}
+                  aria-label={t("card.configureAria", { name: market.name })}
                   className={cn(needsCredentials && "text-amber-600")}
                   disabled={pending}
                   onClick={() => onConfigure(install)}
@@ -894,14 +902,14 @@ function McpCard({
               </TooltipTrigger>
               <TooltipContent>
                 {needsCredentials
-                  ? "Configure required credentials"
-                  : "Settings"}
+                  ? t("card.configureRequired")
+                  : t("card.settings")}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label={`Uninstall ${market.name}`}
+                  aria-label={t("card.uninstallAria", { name: market.name })}
                   disabled={pending}
                   onClick={() => onUninstall(item)}
                   size="icon-xs"
@@ -911,13 +919,17 @@ function McpCard({
                   <Trash2 className="size-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Uninstall</TooltipContent>
+              <TooltipContent>{t("card.uninstall")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex h-7 items-center border-l border-border pl-1.5">
                   <Switch
-                    aria-label={`${install.enabled ? "Disable" : "Enable"} ${market.name}`}
+                    aria-label={
+                      install.enabled
+                        ? t("card.disableAria", { name: market.name })
+                        : t("card.enableAria", { name: market.name })
+                    }
                     checked={install.enabled}
                     disabled={pending}
                     onCheckedChange={(checked) =>
@@ -927,7 +939,7 @@ function McpCard({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {install.enabled ? "Disable" : "Enable"}
+                {install.enabled ? t("card.disable") : t("card.enable")}
               </TooltipContent>
             </Tooltip>
           </>
@@ -944,7 +956,7 @@ function McpCard({
             ) : (
               <McpIcon className="size-3.5" />
             )}
-            Install
+            {t("card.install")}
           </Button>
         )}
       </div>
@@ -953,6 +965,7 @@ function McpCard({
 }
 
 export function McpMarket() {
+  const t = useTranslations("dashboardMcpPanel");
   const router = useRouter();
   const searchParams = useSearchParams();
   const deepLinkIdentifier = searchParams.get("mcp");
@@ -1121,10 +1134,10 @@ export function McpMarket() {
       setError(
         loadError instanceof Error
           ? loadError.message
-          : "Failed to load MCP market.",
+          : t("errors.loadFailed"),
       );
     }
-  }, [resolveWorkspace, serverQuery, category, deviceFilter]);
+  }, [resolveWorkspace, serverQuery, category, deviceFilter, t]);
 
   React.useEffect(() => {
     void loadCatalog();
@@ -1185,7 +1198,7 @@ export function McpMarket() {
       setNextCursor(result.nextCursor ?? null);
     } catch {
       if (catalogGenerationRef.current === generation)
-        toast.error("Failed to load more MCP servers.");
+        toast.error(t("toasts.loadMoreFailed"));
     } finally {
       if (catalogGenerationRef.current === generation) setIsLoadingMore(false);
     }
@@ -1196,6 +1209,7 @@ export function McpMarket() {
     serverQuery,
     category,
     deviceFilter,
+    t,
   ]);
 
   // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
@@ -1233,19 +1247,19 @@ export function McpMarket() {
     if (!workspace?.id) return;
     oauthCallbackHandledRef.current = true;
     if (status === "connected") {
-      toast.success("MCP server connected");
+      toast.success(t("toasts.connected"));
       if (workspace?.id) {
         invalidateWorkspaceMcpCache(workspace.id);
       }
     } else {
-      toast.error("MCP authorization failed. Please try again.");
+      toast.error(t("toasts.authFailed"));
     }
     const params = new URLSearchParams(searchParams.toString());
     params.delete("mcpOAuth");
     router.replace(
       `/dashboard/mcp${params.toString() ? `?${params.toString()}` : ""}`,
     );
-  }, [router, searchParams, workspace?.id]);
+  }, [router, searchParams, workspace?.id, t]);
 
   async function handleWorkspaceChange(
     nextWorkspaceId: string,
@@ -1280,7 +1294,7 @@ export function McpMarket() {
       setError(
         changeError instanceof Error
           ? changeError.message
-          : "Failed to switch workspace.",
+          : t("errors.switchFailed"),
       );
     }
   }
@@ -1310,7 +1324,7 @@ export function McpMarket() {
       );
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
-      toast.success("MCP installed");
+      toast.success(t("toasts.installed"));
       // Installing an auth server immediately prompts for credentials; the user
       // then Tests to verify the connection. Install and Test stay separate.
       if (result.install.authType !== "none") {
@@ -1320,7 +1334,7 @@ export function McpMarket() {
       toast.error(
         installError instanceof Error
           ? installError.message
-          : "Failed to install MCP.",
+          : t("toasts.installFailed"),
       );
     } finally {
       endPendingAction(pendingKey);
@@ -1343,12 +1357,12 @@ export function McpMarket() {
         ),
       );
       invalidateWorkspaceMcpCache(workspaceId);
-      toast.success("MCP uninstalled");
+      toast.success(t("toasts.uninstalled"));
     } catch (uninstallError) {
       toast.error(
         uninstallError instanceof Error
           ? uninstallError.message
-          : "Failed to uninstall MCP.",
+          : t("toasts.uninstallFailed"),
       );
     } finally {
       endPendingAction(installId);
@@ -1367,12 +1381,12 @@ export function McpMarket() {
       );
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
-      toast.success(enabled ? "MCP enabled" : "MCP disabled");
+      toast.success(enabled ? t("toasts.enabled") : t("toasts.disabled"));
     } catch (toggleError) {
       toast.error(
         toggleError instanceof Error
           ? toggleError.message
-          : "Failed to update MCP.",
+          : t("toasts.updateFailed"),
       );
     } finally {
       endPendingAction(install.id);
@@ -1390,10 +1404,12 @@ export function McpMarket() {
       );
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
-      toast.success(`MCP connection tested: ${result.toolCount} tools`);
+      toast.success(t("toasts.tested", { count: result.toolCount }));
     } catch (testError) {
       toast.error(
-        testError instanceof Error ? testError.message : "Failed to test MCP.",
+        testError instanceof Error
+          ? testError.message
+          : t("toasts.testFailed"),
       );
     } finally {
       endPendingAction(install.id);
@@ -1552,7 +1568,7 @@ export function McpMarket() {
                     variant="outline"
                   >
                     <ListFilter className="h-4 w-4" />
-                    Filters
+                    {t("toolbar.filters")}
                   </Button>
                   <WorkspaceMenu
                     disabled={catalogStatus === "resolving_workspace"}
@@ -1571,7 +1587,7 @@ export function McpMarket() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div
-                    aria-label="MCP device filter"
+                    aria-label={t("toolbar.deviceFilterAria")}
                     className="flex items-center gap-1"
                     role="group"
                   >
@@ -1594,10 +1610,10 @@ export function McpMarket() {
                           <ShieldCheck className="h-3.5 w-3.5" />
                         ) : null}
                         {option.key === "all"
-                          ? "All"
+                          ? t("toolbar.deviceShortAll")
                           : option.key === "web"
-                            ? "Web"
-                            : option.label}
+                            ? t("toolbar.deviceShortWeb")
+                            : t(`filters.device.${option.key}`)}
                       </Button>
                     ))}
                   </div>
@@ -1616,7 +1632,7 @@ export function McpMarket() {
                 <McpSkeletonGrid />
               ) : error ? (
                 <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-5 text-sm text-destructive">
-                  <p className="font-medium">MCP market could not be loaded</p>
+                  <p className="font-medium">{t("errors.loadTitle")}</p>
                   <p className="mt-1 text-destructive/85">{error}</p>
                 </div>
               ) : catalogStatus === "ready" &&
@@ -1624,8 +1640,8 @@ export function McpMarket() {
                 filteredItems.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                   {items.length === 0
-                    ? "No MCP servers are available for this workspace."
-                    : "No MCP servers match the current filters."}
+                    ? t("empty.none")
+                    : t("empty.noMatch")}
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -1662,7 +1678,7 @@ export function McpMarket() {
                     {isLoadingMore ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : null}
-                    Load more
+                    {t("toolbar.loadMore")}
                   </Button>
                 </div>
               ) : null}
@@ -1676,7 +1692,9 @@ export function McpMarket() {
           className="w-[min(100vw,320px)] max-w-none gap-0 overflow-hidden p-0 [&>button]:hidden"
           side="left"
         >
-          <SheetTitle className="sr-only">MCP filters</SheetTitle>
+          <SheetTitle className="sr-only">
+            {t("filters.drawerTitle")}
+          </SheetTitle>
           {drawerFiltersPanel}
         </SheetContent>
       </Sheet>

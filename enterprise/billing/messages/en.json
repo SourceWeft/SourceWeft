@@ -1,0 +1,43 @@
+{
+  "plans": {
+    "free": {
+      "name": "Free",
+      "description": "For individuals exploring SourceWeft",
+      "cta": "Get Started",
+      "features": [
+        "300 pages / month",
+        "3,000 credits / month",
+        "All features included",
+        "Browser extension + desktop app",
+        "Community support"
+      ]
+    },
+    "pro": {
+      "name": "Pro",
+      "description": "For power users who need more capacity",
+      "cta": "Upgrade to Pro",
+      "features": [
+        "6,000 pages / month",
+        "20,000 credits / month",
+        "All features included",
+        "Browser extension + desktop app",
+        "Agent observability",
+        "Priority support"
+      ]
+    },
+    "team": {
+      "name": "Team",
+      "description": "For teams building shared knowledge",
+      "cta": "Create team",
+      "features": [
+        "6,000 pages × seats / month",
+        "20,000 credits × seats / month",
+        "Agent observability",
+        "Shared workspaces & RBAC",
+        "Team analytics",
+        "SSO (coming soon)",
+        "Dedicated support"
+      ]
+    }
+  }
+}

@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
+import { NextIntlClientProvider, createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import { AssistantToolCard } from "./assistant-tool-card";
 import { getAssistantToolTitle } from "./assistant-tool-display";
 import type { ToolCallRecord } from "./types";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 const questions = [{ question: "Which format?", type: "text" as const }];
 const interrupt = JSON.stringify([
@@ -38,7 +50,9 @@ function questionCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
 }
 function render(toolCall: ToolCallRecord) {
   return renderToStaticMarkup(
-    createElement(AssistantToolCard, { toolCall, defaultOpen: true }),
+    <NextIntlClientProvider locale="en" messages={intlMessages} timeZone="UTC">
+      {createElement(AssistantToolCard, { toolCall, defaultOpen: true })}
+    </NextIntlClientProvider>,
   );
 }
 
@@ -95,7 +109,7 @@ test("a saved Command answer renders the question transcript and completed Codex
     },
   });
   const html = render(toolCall);
-  assert.equal(getAssistantToolTitle(toolCall), "Asked 1 question");
+  assert.equal(getAssistantToolTitle(toolCall, t), "Asked 1 question");
   assert.match(html, /Asked 1 question/);
   assert.match(html, /Q: Which format\?/);
   assert.match(html, /A: PDF/);

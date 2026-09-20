@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import type { ToolCallRecord } from "./types";
 import {
   WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT,
   getWorkfileMutationToolTitle,
   resolveWorkfileMutationPreview,
 } from "./workfile-mutation-state";
+import messages from "../../../../../messages/en.json";
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 function toolCall(input: Partial<ToolCallRecord>): ToolCallRecord {
   return {
@@ -180,6 +189,7 @@ test("getWorkfileMutationToolTitle labels sandbox writes distinctly", () => {
         input: { content: "x", path: "/workspace/main.py" },
         tool: "write_file",
       }),
+      t,
     ),
     "Wrote sandbox file: main.py",
   );
@@ -189,6 +199,7 @@ test("getWorkfileMutationToolTitle labels sandbox writes distinctly", () => {
         input: { content: "x", path: "/files/a.py" },
         tool: "write_file",
       }),
+      t,
     ),
     "Wrote Workfile: a.py",
   );

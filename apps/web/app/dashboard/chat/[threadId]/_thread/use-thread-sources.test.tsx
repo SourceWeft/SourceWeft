@@ -1,8 +1,24 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 vi.mock("../../../../../lib/auth-client", () => ({
   authClient: { useSession: () => ({ data: { user: { id: "user" } } }) },
@@ -45,7 +61,9 @@ function Harness({ threadId }: { threadId: string }) {
   return null;
 }
 async function render(threadId: string) {
-  await act(async () => root.render(createElement(Harness, { threadId })));
+  await act(async () =>
+    root.render(withIntl(createElement(Harness, { threadId }))),
+  );
 }
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

@@ -4,6 +4,7 @@ import {
   ChevronRight,
   MessageCircleQuestion,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
   ASSISTANT_ACTIVITY_DETAIL_CLASS,
@@ -25,7 +26,8 @@ export function UserQuestionToolCard({
   contentClassName?: string;
   children?: ReactNode;
 }) {
-  const display = getUserQuestionDisplay(toolCall);
+  const t = useTranslations("dashboardChatCanvas");
+  const display = getUserQuestionDisplay(toolCall, t);
   const openByDefault = defaultOpen ?? (display.waiting || display.failed);
   const [isOpen, setIsOpen] = useState(openByDefault);
   useEffect(() => setIsOpen(openByDefault), [openByDefault]);
@@ -54,11 +56,13 @@ export function UserQuestionToolCard({
           </span>
           {display.waiting ? (
             <span className="text-xs text-muted-foreground/60">
-              Waiting for your answer
+              {t("userQuestion.waitingForAnswer")}
             </span>
           ) : null}
           {display.failed ? (
-            <span className="text-xs text-destructive">Failed</span>
+            <span className="text-xs text-destructive">
+              {t("common.failed")}
+            </span>
           ) : null}
         </span>
         <span className="grid size-4 shrink-0 place-items-center">
@@ -84,7 +88,7 @@ export function UserQuestionToolCard({
                 </p>
               ))}
               {toolCall.status === "completed" && !display.waiting ? (
-                <p>No answer provided</p>
+                <p>{t("userQuestion.noAnswerProvided")}</p>
               ) : null}
             </>
           )}

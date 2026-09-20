@@ -15,6 +15,7 @@
     "./ledger": "./src/server/ledger.ts",
     "./ui": "./src/ui/index.ts",
     "./catalog": "./src/catalog/pricing.ts",
+    "./messages": "./src/messages.ts",
     "./auth-client": "./src/auth-client/index.ts",
     "./provider-sdk": "./src/server/providers/sdk.ts",
     "./integrations/waffo": "./src/integrations/waffo.ts",

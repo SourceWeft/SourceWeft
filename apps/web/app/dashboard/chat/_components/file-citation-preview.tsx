@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Preview } from "@sourceweft/preview/react";
 import type { FileLocator, FileReference } from "@sourceweft/contracts";
 import {
@@ -15,25 +16,6 @@ import { contentClient } from "../../../../lib/sdk";
 import { localRequest } from "../../../../lib/local-execution";
 import { readLocalPreviewBlob } from "../../../../lib/local-file-preview";
 
-export function fileLocationLabel(locator: FileLocator): string {
-  switch (locator.kind) {
-    case "page":
-      return `Page ${locator.page}`;
-    case "slide":
-      return `Slide ${locator.slide}`;
-    case "paragraph":
-      return `Paragraph ${locator.index + 1}`;
-    case "cells":
-      return `${locator.sheet} · ${locator.range}`;
-    case "lines":
-      return locator.start === locator.end
-        ? `Line ${locator.start}`
-        : `Lines ${locator.start}–${locator.end}`;
-    case "image":
-      return "Image";
-  }
-}
-
 export function FileCitationPreview({
   reference,
   excerpt,
@@ -45,6 +27,26 @@ export function FileCitationPreview({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("dashboardChatFiles");
+  // Sheet name and cell range are file data, so they stay untranslated.
+  const fileLocationLabel = (locator: FileLocator): string => {
+    switch (locator.kind) {
+      case "page":
+        return t("location.page", { page: locator.page });
+      case "slide":
+        return t("location.slide", { slide: locator.slide });
+      case "paragraph":
+        return t("location.paragraph", { index: locator.index + 1 });
+      case "cells":
+        return `${locator.sheet} · ${locator.range}`;
+      case "lines":
+        return locator.start === locator.end
+          ? t("location.line", { line: locator.start })
+          : t("location.lines", { start: locator.start, end: locator.end });
+      case "image":
+        return t("location.image");
+    }
+  };
   const key = JSON.stringify(reference);
   const [tab, setTab] = useState<"excerpt" | "original">("excerpt");
   const [allowCurrent, setAllowCurrent] = useState(false);
@@ -93,11 +95,13 @@ export function FileCitationPreview({
         setState({
           key,
           error:
-            error instanceof Error ? error.message : "File is unavailable.",
+            error instanceof Error
+              ? error.message
+              : t("citation.fileUnavailable"),
         });
     });
     return () => controller.abort();
-  }, [key, open, reference]);
+  }, [key, open, reference, t]);
   const current = state?.key === key ? state : null;
   const source = useMemo(
     () =>
@@ -129,13 +133,13 @@ export function FileCitationPreview({
         <DialogHeader>
           <DialogTitle>{reference.file.name}</DialogTitle>
           <DialogDescription>
-            Files ·{" "}
+            {t("citation.filesLabel")} ·{" "}
             {reference.file.backendKind === "local_fs"
-              ? "This computer"
-              : "Cloud"}{" "}
+              ? t("citation.thisComputer")
+              : t("citation.cloud")}{" "}
             · {fileLocationLabel(reference.locator)}
             {reference.file.origin === "agent_created"
-              ? " · AI-created file"
+              ? ` · ${t("citation.aiCreated")}`
               : ""}
           </DialogDescription>
         </DialogHeader>
@@ -145,14 +149,14 @@ export function FileCitationPreview({
             size="sm"
             onClick={() => setTab("excerpt")}
           >
-            Cited excerpt
+            {t("citation.tabExcerpt")}
           </Button>
           <Button
             variant={tab === "original" ? "secondary" : "ghost"}
             size="sm"
             onClick={() => setTab("original")}
           >
-            Original file
+            {t("citation.tabOriginal")}
           </Button>
         </div>
         {current?.error ? (
@@ -161,16 +165,17 @@ export function FileCitationPreview({
           </p>
         ) : current?.matches === false ? (
           <p role="status" className="text-sm text-muted-foreground">
-            File changed since cited. The excerpt below belongs to the cited
-            version.
+            {t("citation.fileChanged")}
           </p>
         ) : !current?.blob ? (
           <p role="status" className="text-sm text-muted-foreground">
-            Checking file version…
+            {t("citation.checkingVersion")}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            {reference.file.relativePath} · Cited version verified
+            {t("citation.citedVerified", {
+              path: reference.file.relativePath,
+            })}
           </p>
         )}
         <div className="min-h-0 flex-1 overflow-auto">
@@ -182,7 +187,7 @@ export function FileCitationPreview({
             <Preview source={source} location={location} className="h-full" />
           ) : current?.matches === false ? (
             <Button onClick={() => setAllowCurrent(true)}>
-              Open current version
+              {t("actions.openCurrent")}
             </Button>
           ) : null}
         </div>

@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 
 import type { SourceConnector } from "@sourceweft/sdk";
 import { useConnectors } from "./use-connectors";
+import messages from "../../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 // The hook imports `connectorsClient` from the web app's SDK barrel. From this
 // `connectors/` subdir that module is six levels up (one deeper than the
@@ -129,7 +135,18 @@ async function mountHook(input: HookInput) {
     return null;
   }
   await act(async () => {
-    created.render(createElement(Harness, input));
+    created.render(
+      // This file has a .ts extension (no JSX), and NextIntlClientProvider's
+      // props type requires `children`, so the 3-arg createElement overload
+      // (children as a trailing positional arg) does not type-check here —
+      // children must be passed inside the props object.
+      // eslint-disable-next-line react/no-children-prop -- see above
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages: intlMessages,
+        children: createElement(Harness, input),
+      }),
+    );
   });
   // Let the mount-time refreshConnectors() resolve.
   await act(async () => {

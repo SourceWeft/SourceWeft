@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { contentClient } from "../../../../../../lib/sdk";
@@ -42,6 +43,7 @@ export function useMcp(input: {
     currentWorkspaceIdRef,
   } = input;
 
+  const t = useTranslations("dashboardSourcesHub");
   const [mcpInstalls, setMcpInstalls] = useState<WorkspaceMcpInstall[]>([]);
   const [isLoadingMcp, setIsLoadingMcp] = useState(false);
   const [mcpLoadingError, setMcpLoadingError] = useState<string | null>(null);
@@ -120,13 +122,13 @@ export function useMcp(input: {
         });
       }
     } catch (error) {
-      setMcpLoadingError(getErrorMessage(error, "Failed to load MCP tools."));
+      setMcpLoadingError(getErrorMessage(error, t("mcp.loadFailed")));
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
         setIsLoadingMcp(false);
       }
     }
-  }, [currentWorkspaceIdRef, workspaceId]);
+  }, [currentWorkspaceIdRef, workspaceId, t]);
 
   useEffect(() => {
     if (!workspaceId) {

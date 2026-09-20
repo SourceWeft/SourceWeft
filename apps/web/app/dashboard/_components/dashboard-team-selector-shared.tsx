@@ -2,6 +2,7 @@
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import { useRouter } from "next/navigation";
 import { authClient } from "../../../lib/auth-client";
@@ -172,6 +173,7 @@ export function DashboardTeamDisplay({
   variant: DashboardTeamIdentityVariant;
   user: DashboardTeamUser;
 }) {
+  const t = useTranslations("dashboardNav");
   const classes = identityVariantClasses[variant];
   const fallback = item.isPersonal ? user.initials : getTeamInitials(item.name);
 
@@ -182,7 +184,7 @@ export function DashboardTeamDisplay({
           {item.isPersonal ? (
             <AvatarImage
               src={user.image ?? undefined}
-              alt={user.name ?? "User"}
+              alt={user.name ?? t("account.userAlt")}
             />
           ) : null}
           <AvatarFallback className={cn(classes.fallback)}>

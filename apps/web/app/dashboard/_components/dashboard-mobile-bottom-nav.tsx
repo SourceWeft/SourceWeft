@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,25 +15,25 @@ import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 
 const items = [
   {
-    label: "Overview",
+    labelKey: "nav.overview",
     href: "/dashboard",
     icon: LayoutDashboard,
     match: (pathname: string) => pathname === "/dashboard",
   },
   {
-    label: "Chat",
+    labelKey: "nav.chat",
     href: "/dashboard/chat",
     icon: MessageSquareText,
     match: (pathname: string) => pathname.startsWith("/dashboard/chat"),
   },
   {
-    label: "Skills",
+    labelKey: "nav.skills",
     href: "/dashboard/skills",
     icon: SkillIcon,
     match: (pathname: string) => pathname.startsWith("/dashboard/skills"),
   },
   {
-    label: "MCP",
+    labelKey: "nav.mcp",
     href: "/dashboard/mcp",
     icon: McpIcon,
     match: (pathname: string) => pathname.startsWith("/dashboard/mcp"),
@@ -40,6 +41,7 @@ const items = [
 ] as const;
 
 export function DashboardMobileBottomNav() {
+  const t = useTranslations("dashboardNav");
   const pathname = usePathname();
   const { openMain, openMe, view } = useDashboardMobileNav();
   const isMeActive = view === "me" || view === "observability";
@@ -57,11 +59,11 @@ export function DashboardMobileBottomNav() {
                 active && "bg-accent text-foreground",
               )}
               href={item.href}
-              key={item.label}
+              key={item.href}
               onClick={openMain}
             >
               <Icon className="h-4 w-4" />
-              <span className="truncate">{item.label}</span>
+              <span className="truncate">{t(item.labelKey)}</span>
             </Link>
           );
         })}
@@ -75,7 +77,7 @@ export function DashboardMobileBottomNav() {
           type="button"
         >
           <User className="h-4 w-4" />
-          <span className="truncate">Me</span>
+          <span className="truncate">{t("nav.me")}</span>
         </button>
       </div>
     </nav>

@@ -23,7 +23,9 @@ export function LegalPage({ title, description, sections }: LegalPageProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SourceWeftHeader authState={authState} />
-      <main>
+      {/* Legal copy is English-only in the first phase (§12); mark the content
+          language explicitly even when the surrounding chrome is localized. */}
+      <main lang="en">
         <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18">
           <header className="border-b border-zinc-200 pb-8 dark:border-white/[0.08]">
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">

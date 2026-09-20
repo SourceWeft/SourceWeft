@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -33,13 +34,15 @@ import type {
 } from "@sourceweft/contracts";
 import { workspaceClient } from "../../../../lib/sdk";
 
-const GUEST_ROLES: { value: GuestRole; label: string; hint: string }[] = [
-  { value: "editor", label: "Editor", hint: "Create and edit content" },
-  { value: "viewer", label: "Viewer", hint: "Read-only access" },
+type GuestRoleKey = "editor" | "viewer";
+
+const GUEST_ROLES: { value: GuestRole; roleKey: GuestRoleKey }[] = [
+  { value: "editor", roleKey: "editor" },
+  { value: "viewer", roleKey: "viewer" },
 ];
 
-function guestRoleLabel(role: GuestRole) {
-  return GUEST_ROLES.find((entry) => entry.value === role)?.label ?? role;
+function guestRoleKeyFor(role: GuestRole): GuestRoleKey | undefined {
+  return GUEST_ROLES.find((entry) => entry.value === role)?.roleKey;
 }
 
 function guestDisplayName(guest: WorkspaceGuest) {
@@ -64,6 +67,14 @@ export function WorkspaceGuestsSection({
   workspaceId: string;
   canManage: boolean;
 }) {
+  const t = useTranslations("dashboardSettings");
+  const guestRoleLabel = React.useCallback(
+    (role: GuestRole) => {
+      const key = guestRoleKeyFor(role);
+      return key ? t(`roles.${key}`) : role;
+    },
+    [t],
+  );
   const [guests, setGuests] = React.useState<WorkspaceGuest[]>([]);
   const [invitations, setInvitations] = React.useState<
     PendingGuestInvitation[]
@@ -92,11 +103,11 @@ export function WorkspaceGuestsSection({
       setGuests(result.guests);
       setInvitations(result.invitations);
     } catch {
-      setLoadError("Could not load guests.");
+      setLoadError(t("guests.loadError"));
     } finally {
       setIsLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, t]);
 
   React.useEffect(() => {
     void refresh();
@@ -106,7 +117,7 @@ export function WorkspaceGuestsSection({
     if (!workspaceId) return;
     const email = inviteEmail.trim();
     if (!email) {
-      toast.error("Enter an email address to invite.");
+      toast.error(t("guests.enterEmail"));
       return;
     }
     setIsInviting(true);
@@ -115,13 +126,13 @@ export function WorkspaceGuestsSection({
         email,
         role: inviteRole,
       });
-      toast.success("Invitation sent");
+      toast.success(t("guests.invitationSent"));
       setInviteOpen(false);
       setInviteEmail("");
       setInviteRole("viewer");
       await refresh();
     } catch {
-      toast.error("Could not send that invitation.");
+      toast.error(t("guests.inviteError"));
     } finally {
       setIsInviting(false);
     }
@@ -135,9 +146,11 @@ export function WorkspaceGuestsSection({
       setGuests((value) =>
         value.filter((entry) => entry.userId !== guest.userId),
       );
-      toast.success(`${guestDisplayName(guest)} removed from workspace`);
+      toast.success(
+        t("guests.guestRemoved", { name: guestDisplayName(guest) }),
+      );
     } catch {
-      toast.error("Could not remove this guest.");
+      toast.error(t("guests.removeGuestError"));
     } finally {
       setPendingUserId(null);
       setRemoveTarget(null);
@@ -152,9 +165,9 @@ export function WorkspaceGuestsSection({
       setInvitations((value) =>
         value.filter((entry) => entry.id !== invitation.id),
       );
-      toast.success("Invitation revoked");
+      toast.success(t("guests.invitationRevoked"));
     } catch {
-      toast.error("Could not revoke this invitation.");
+      toast.error(t("guests.revokeGuestError"));
     } finally {
       setPendingInvitationId(null);
     }
@@ -166,10 +179,9 @@ export function WorkspaceGuestsSection({
     <div className="flex flex-col gap-4 rounded-lg border border-dashed bg-muted/20 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-medium">Guests</h3>
+          <h3 className="text-sm font-medium">{t("guests.title")}</h3>
           <p className="text-xs text-muted-foreground">
-            External collaborators invited to this workspace only. Guests are
-            not part of your team and never exceed editor access.
+            {t("guests.description")}
           </p>
         </div>
         {canManage ? (
@@ -180,7 +192,7 @@ export function WorkspaceGuestsSection({
             type="button"
           >
             <UserPlus className="size-3.5" />
-            Invite guest
+            {t("guests.inviteGuest")}
           </Button>
         ) : null}
       </div>
@@ -188,7 +200,7 @@ export function WorkspaceGuestsSection({
       {isLoading ? (
         <div className="flex items-center gap-2 px-1 py-4 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Loading guests...
+          {t("guests.loading")}
         </div>
       ) : loadError ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -199,13 +211,13 @@ export function WorkspaceGuestsSection({
             type="button"
             variant="outline"
           >
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : isEmpty ? (
         <p className="px-1 py-2 text-xs text-muted-foreground">
-          No guests yet.
-          {canManage ? " Invite an external collaborator to get started." : ""}
+          {t("guests.emptyGuests")}
+          {canManage ? ` ${t("guests.emptyGuestsHint")}` : ""}
         </p>
       ) : (
         <ul className="flex flex-col divide-y rounded-lg border bg-background">
@@ -237,7 +249,7 @@ export function WorkspaceGuestsSection({
                       className="px-1.5 py-0 text-[10px]"
                       variant="secondary"
                     >
-                      Guest
+                      {t("guests.guestBadge")}
                     </Badge>
                   </div>
                   {guest.email && guest.email !== guestDisplayName(guest) ? (
@@ -267,7 +279,9 @@ export function WorkspaceGuestsSection({
                     ) : (
                       <Trash2 className="size-3.5" />
                     )}
-                    <span className="sr-only">Remove guest</span>
+                    <span className="sr-only">
+                      {t("guests.removeGuestSr")}
+                    </span>
                   </Button>
                 ) : (
                   <span className="w-8" aria-hidden="true" />
@@ -298,7 +312,7 @@ export function WorkspaceGuestsSection({
                       className="px-1.5 py-0 text-[10px]"
                       variant="outline"
                     >
-                      Pending
+                      {t("guests.pendingBadge")}
                     </Badge>
                   </div>
                 </div>
@@ -323,7 +337,9 @@ export function WorkspaceGuestsSection({
                     ) : (
                       <Trash2 className="size-3.5" />
                     )}
-                    <span className="sr-only">Revoke invitation</span>
+                    <span className="sr-only">
+                      {t("guests.revokeInvitationSr")}
+                    </span>
                   </Button>
                 ) : (
                   <span className="w-8" aria-hidden="true" />
@@ -342,11 +358,14 @@ export function WorkspaceGuestsSection({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove guest?</DialogTitle>
+            <DialogTitle>{t("guests.removeDialogTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {removeTarget ? guestDisplayName(removeTarget) : "This guest"} will
-            lose access to this workspace.
+            {t("guests.removeDialogBody", {
+              name: removeTarget
+                ? guestDisplayName(removeTarget)
+                : t("guests.thisGuest"),
+            })}
           </p>
           <DialogFooter>
             <Button
@@ -354,7 +373,7 @@ export function WorkspaceGuestsSection({
               type="button"
               variant="outline"
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={pendingUserId === removeTarget?.userId}
@@ -364,7 +383,7 @@ export function WorkspaceGuestsSection({
               type="button"
               variant="destructive"
             >
-              Remove
+              {t("common.remove")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -373,15 +392,16 @@ export function WorkspaceGuestsSection({
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="gap-3">
           <DialogHeader>
-            <DialogTitle>Invite a guest</DialogTitle>
+            <DialogTitle>{t("guests.inviteDialogTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground">
-            Invite someone outside your team to collaborate in this workspace
-            only. They receive an email link to accept.
+            {t("guests.inviteDialogDescription")}
           </p>
 
           <div className="space-y-1.5">
-            <span className="text-xs font-medium">Email address</span>
+            <span className="text-xs font-medium">
+              {t("guests.emailAddress")}
+            </span>
             <Input
               autoFocus
               onChange={(event) => setInviteEmail(event.target.value)}
@@ -391,14 +411,14 @@ export function WorkspaceGuestsSection({
                   void handleInvite();
                 }
               }}
-              placeholder="guest@example.com"
+              placeholder={t("guests.emailPlaceholder")}
               type="email"
               value={inviteEmail}
             />
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-xs font-medium">Role</span>
+            <span className="text-xs font-medium">{t("guests.roleLabel")}</span>
             <Select
               onValueChange={(value) => setInviteRole(value as GuestRole)}
               value={inviteRole}
@@ -410,9 +430,9 @@ export function WorkspaceGuestsSection({
                 {GUEST_ROLES.map((role) => (
                   <SelectItem key={role.value} value={role.value}>
                     <span className="flex flex-col">
-                      <span>{role.label}</span>
+                      <span>{t(`roles.${role.roleKey}`)}</span>
                       <span className="text-[10px] text-muted-foreground">
-                        {role.hint}
+                        {t(`roles.${role.roleKey}Hint`)}
                       </span>
                     </span>
                   </SelectItem>
@@ -427,7 +447,7 @@ export function WorkspaceGuestsSection({
               type="button"
               variant="outline"
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={isInviting || !inviteEmail.trim()}
@@ -437,7 +457,7 @@ export function WorkspaceGuestsSection({
               {isInviting ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : null}
-              Send invitation
+              {t("guests.sendInvitation")}
             </Button>
           </DialogFooter>
         </DialogContent>

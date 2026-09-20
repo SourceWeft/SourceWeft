@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { htmlToText } from "html-to-text";
+import { DEFAULT_LOCALE, getLocaleMeta, isLocale } from "@sourceweft/i18n";
 import { resolveBackendRuntimePath } from "../../shared/runtime-paths";
 
 type TemplateMetadata = {
@@ -33,6 +34,22 @@ function assertTemplateId(templateId: string) {
 
 function readTemplateFile(filename: string) {
   return readFileSync(join(templatesDir, filename), "utf8");
+}
+
+/**
+ * Picks the `<id>.<locale>.html` template variant when one exists for a
+ * supported non-default locale, else the English `<id>.html` (design §16.7).
+ * Reports the language actually resolved so `<html lang>` matches the rendered
+ * copy even when a locale falls back to English.
+ */
+function resolveTemplate(templateId: string, locale?: string) {
+  if (locale && locale !== DEFAULT_LOCALE && isLocale(locale)) {
+    const variant = `${templateId}.${locale}.html`;
+    if (existsSync(join(templatesDir, variant))) {
+      return { filename: variant, effectiveLocale: locale };
+    }
+  }
+  return { filename: `${templateId}.html`, effectiveLocale: DEFAULT_LOCALE };
 }
 
 function parseTemplateFile(raw: string) {
@@ -203,10 +220,13 @@ function buildActionHtml(action: string, url: string) {
 export function renderMailTemplate(
   templateId: string,
   variables: MailTemplateVariables = {},
+  locale?: string,
 ): RenderedMailTemplate {
   assertTemplateId(templateId);
 
-  const template = parseTemplateFile(readTemplateFile(`${templateId}.html`));
+  const { filename, effectiveLocale } = resolveTemplate(templateId, locale);
+  const template = parseTemplateFile(readTemplateFile(filename));
+  const htmlLang = getLocaleMeta(effectiveLocale).htmlLang;
   const baseUrl = resolveBaseUrl(variables);
   const subject = interpolateRaw(template.metadata.subject, variables);
   const heading = interpolateRaw(template.metadata.heading, variables) || subject;
@@ -220,6 +240,7 @@ export function renderMailTemplate(
     baseUrlLabel: baseUrl.replace(/^https?:\/\//, ""),
     bodyHtml,
     heading,
+    htmlLang,
     imageUrl: resolveImageUrl(baseUrl, variables),
     preview,
     siteName: "SourceWeft",

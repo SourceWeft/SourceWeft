@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 
+import { useTranslations } from "next-intl";
+
 import type { SourceConnector } from "@sourceweft/sdk";
 import {
   Alert,
@@ -48,40 +50,46 @@ import type {
 export const disabledConnectorIconButtonClass =
   "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
 
+/** Translator handed to the connector formatting helpers (see repo convention). */
+type ConnectorT = ReturnType<typeof useTranslations>;
+
 const syncReadinessUiByReason: Record<
   string,
   {
-    summary: string;
+    summaryKey: string;
     suppressWebhookSetup?: boolean;
   }
 > = {
   notion_no_pages: {
-    summary: "Connected · No pages shared",
+    summaryKey: "connectors.readinessNoPages",
     suppressWebhookSetup: true,
   },
 };
 
-function formatConnectorDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "Never";
+function formatConnectorDate(value: string | null, t: ConnectorT) {
+  return value ? new Date(value).toLocaleString() : t("connectors.never");
 }
 
-export function formatConnectorSchedule(connector: SourceConnector) {
+export function formatConnectorSchedule(
+  connector: SourceConnector,
+  t: ConnectorT,
+) {
   if (!connector.periodicIndexingEnabled) {
-    return "Manual sync";
+    return t("connectors.schedule.manual");
   }
   const minutes = connector.indexingFrequencyMinutes;
   if (!minutes) {
-    return "Auto sync";
+    return t("connectors.schedule.auto");
   }
   if (minutes % (24 * 60) === 0) {
     const days = minutes / (24 * 60);
-    return `Auto sync every ${days} ${days === 1 ? "day" : "days"}`;
+    return t("connectors.schedule.everyDays", { count: days });
   }
   if (minutes % 60 === 0) {
     const hours = minutes / 60;
-    return `Auto sync every ${hours} ${hours === 1 ? "hour" : "hours"}`;
+    return t("connectors.schedule.everyHours", { count: hours });
   }
-  return `Auto sync every ${minutes} min`;
+  return t("connectors.schedule.everyMinutes", { count: minutes });
 }
 
 function statusTone(status: ConnectorCatalogStatusKind) {
@@ -139,30 +147,39 @@ export function getConnectorAccountLabel(connector: ConnectorItem) {
   return name;
 }
 
-export function compactConnectorProviderMeta(connector: ConnectorItem) {
-  const schedule = formatConnectorSchedule(connector.raw);
+export function compactConnectorProviderMeta(
+  connector: ConnectorItem,
+  t: ConnectorT,
+) {
+  const schedule = formatConnectorSchedule(connector.raw, t);
   return schedule;
 }
 
-function compactConnectorExecutionMeta(connector: ConnectorItem) {
+function compactConnectorExecutionMeta(
+  connector: ConnectorItem,
+  t: ConnectorT,
+) {
   const providerName = getConnectorProviderName(connector.raw.connectorType);
   const lastSync = connector.raw.lastIndexedAt
-    ? `Last sync ${new Date(connector.raw.lastIndexedAt).toLocaleString()}`
-    : "Never synced";
+    ? t("connectors.lastSync", {
+        date: new Date(connector.raw.lastIndexedAt).toLocaleString(),
+      })
+    : t("connectors.neverSynced");
   return [providerName, lastSync].filter(Boolean).join(" · ");
 }
 
 export function formatConnectorReadinessSummary(
   readiness: ConnectorReadinessState | null,
+  t: ConnectorT,
 ) {
   if (!readiness) {
     return null;
   }
-  return (
-    syncReadinessUiByReason[readiness.reason]?.summary ??
-    readiness.message ??
-    "Connected · Setup required"
-  );
+  const summaryKey = syncReadinessUiByReason[readiness.reason]?.summaryKey;
+  if (summaryKey) {
+    return t(summaryKey);
+  }
+  return readiness.message ?? t("connectors.readinessSetupRequired");
 }
 
 function shouldSurfaceWebhookSetupStatus(
@@ -176,6 +193,7 @@ function shouldSurfaceWebhookSetupStatus(
 
 export function getConnectorReadinessFromConfig(
   connector: SourceConnector,
+  t: ConnectorT,
 ): ConnectorReadinessState | null {
   const state = connector.configJson.syncReadiness;
   if (!state || typeof state !== "object" || Array.isArray(state)) {
@@ -189,7 +207,7 @@ export function getConnectorReadinessFromConfig(
   }
   return {
     reason,
-    message: message || "Connector is not ready to sync.",
+    message: message || t("connectors.readinessNotReady"),
   };
 }
 
@@ -211,12 +229,14 @@ function getOAuthConnectorStatus(input: {
   item: ConnectorCatalogItem;
   readiness?: ConnectorReadinessState | null;
   webhookConfig: ConnectorWebhookConfig | null;
+  t: ConnectorT;
 }): ConnectorCatalogStatus {
+  const t = input.t;
   if (input.isBusy) {
     return {
       kind: "syncing",
-      label: "Syncing",
-      detail: "A connector operation is running.",
+      label: t("connectors.status.syncing"),
+      detail: t("connectors.detail.syncing"),
     };
   }
 
@@ -225,22 +245,22 @@ function getOAuthConnectorStatus(input: {
     if (connector.status === "disabled") {
       return {
         kind: "needs_setup",
-        label: "Disabled",
-        detail: "Syncing is disabled. Enable this connector to resume.",
+        label: t("connectors.status.disabled"),
+        detail: t("connectors.detail.disabled"),
       };
     }
     if (connector.status === "error" || connector.raw.lastError) {
       return {
         kind: "error",
-        label: "Error",
-        detail: connector.raw.lastError || "Connector needs attention.",
+        label: t("connectors.status.error"),
+        detail: connector.raw.lastError || t("connectors.detail.needsAttention"),
       };
     }
     if (connector.status === "paused") {
       return {
         kind: "needs_setup",
-        label: "Paused",
-        detail: "Syncing is paused until you resume this connector.",
+        label: t("connectors.status.paused"),
+        detail: t("connectors.detail.paused"),
       };
     }
     if (
@@ -251,34 +271,36 @@ function getOAuthConnectorStatus(input: {
     ) {
       return {
         kind: "needs_setup",
-        label: "Needs setup",
-        detail: "Configure a public HTTPS webhook endpoint.",
+        label: t("connectors.status.needs_setup"),
+        detail: t("connectors.detail.needsSetupWebhook"),
       };
     }
     return {
       kind: "active",
-      label: "Active",
+      label: t("connectors.status.active"),
       detail:
-        formatConnectorReadinessSummary(input.readiness ?? null) ??
-        `Last sync ${formatConnectorDate(connector.raw.lastIndexedAt)}`,
+        formatConnectorReadinessSummary(input.readiness ?? null, t) ??
+        t("connectors.detail.lastSync", {
+          date: formatConnectorDate(connector.raw.lastIndexedAt, t),
+        }),
     };
   }
 
   if (input.hasActiveAccount) {
     return {
       kind: "connected",
-      label: "Connected",
+      label: t("connectors.status.connected"),
       detail:
         input.item.postOAuthMode === "auto_create"
-          ? "Authorization exists without an active connector. Reconnect to create a connector."
-          : "OAuth is connected. Configure this connector to enable syncing.",
+          ? t("connectors.detail.connectedAutoCreate")
+          : t("connectors.detail.connectedConfigure"),
     };
   }
 
   return {
     kind: "available",
-    label: "Available",
-    detail: `Ready to connect with ${input.item.name} OAuth.`,
+    label: t("connectors.status.available"),
+    detail: t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -290,28 +312,30 @@ export function getCatalogStatus(input: {
   connectorWaitingByType: Record<string, boolean>;
   connectorReadinessById?: Record<string, ConnectorReadinessState>;
   webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
+  t: ConnectorT;
 }): ConnectorCatalogStatus {
+  const t = input.t;
   if (input.item.connectMode === "coming_soon") {
     if (input.item.statusKind === "non_indexable") {
       return {
         kind: "coming_soon",
-        label: "Search API",
-        detail: "Non-indexable connector for live agent search.",
+        label: t("connectors.status.searchApi"),
+        detail: t("connectors.detail.comingSoonSearch"),
       };
     }
     if (input.item.statusKind === "indexable") {
       return {
         kind: "coming_soon",
-        label: "Indexable",
-        detail: "Indexable data source connector on the roadmap.",
+        label: t("connectors.status.indexable"),
+        detail: t("connectors.detail.comingSoonIndexable"),
       };
     }
     return {
       kind: "coming_soon",
-      label: "Coming soon",
+      label: t("connectors.status.coming_soon"),
       detail: input.item.isIndexable
-        ? "Indexable data source connector on the roadmap."
-        : "Non-indexable connector on the roadmap.",
+        ? t("connectors.detail.comingSoonIndexable")
+        : t("connectors.detail.comingSoonNonIndexable"),
     };
   }
   const connector = getCatalogConnector(input.item, input.connectors);
@@ -333,6 +357,7 @@ export function getCatalogStatus(input: {
     webhookConfig: connector
       ? (input.webhookConfigsById[connector.id] ?? null)
       : null,
+    t,
   });
 }
 
@@ -423,18 +448,19 @@ export const ConnectorCatalogCard = memoComponent(
     onDisconnect: (connector: ConnectorItem) => void;
     onRequestConnector: (item: ConnectorCatalogItem) => void;
   }) {
+    const t = useTranslations("dashboardSourcesHub");
     const isBusy = status.kind === "syncing";
     const cta =
       item.connectMode === "coming_soon"
-        ? "Request"
+        ? t("connectors.cta.request")
         : isBusy
-          ? "Connecting..."
+          ? t("connectors.cta.connecting")
           : connector
-            ? "Connected"
+            ? t("connectors.cta.connected")
             : status.kind === "connected" &&
                 item.postOAuthMode !== "auto_create"
-              ? "Configure"
-              : "Connect";
+              ? t("connectors.cta.configure")
+              : t("connectors.cta.connect");
 
     function handleAction() {
       if (item.connectMode === "coming_soon") {
@@ -487,19 +513,25 @@ export const ConnectorCatalogCard = memoComponent(
                     disabled={isBusy}
                     onClick={() => onDisconnect(connector)}
                     size="icon-xs"
-                    title={`Disconnect ${item.name}`}
+                    title={t("connectors.disconnect", { name: item.name })}
                     type="button"
                     variant="ghost"
                   >
                     <Power className="size-3.5" />
-                    <span className="sr-only">Disconnect {item.name}</span>
+                    <span className="sr-only">
+                      {t("connectors.disconnect", { name: item.name })}
+                    </span>
                   </Button>
                 ) : null}
               </div>
             </div>
             <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
               <TypeBadge
-                label={item.isIndexable ? "Indexable" : "Search API"}
+                label={
+                  item.isIndexable
+                    ? t("connectors.type.indexable")
+                    : t("connectors.type.searchApi")
+                }
               />
               {item.capabilities.slice(0, 2).map((capability) => (
                 <TypeBadge key={capability} label={capability} />
@@ -521,7 +553,9 @@ export const ConnectorCatalogCard = memoComponent(
                 variant="ghost"
               >
                 <Settings2 className="size-3.5" />
-                <span className="sr-only">Configure {item.name}</span>
+                <span className="sr-only">
+                  {t("connectors.configure", { name: item.name })}
+                </span>
               </Button>
             ) : null}
             {isBusy ? (
@@ -533,7 +567,7 @@ export const ConnectorCatalogCard = memoComponent(
                 variant="outline"
               >
                 <X className="size-3.5" />
-                Cancel
+                {t("connectors.cancel")}
               </Button>
             ) : null}
             <Button
@@ -583,6 +617,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const isBusy = Boolean(connectorBusyById[connector.id]);
   const catalogItem =
     connectorCatalog.find((item) => item.id === connector.raw.connectorType) ??
@@ -610,13 +645,14 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
     },
     readiness: connectorReadinessById[connector.id] ?? null,
     webhookConfig: catalogItem?.supportsWebhook ? webhookConfig : null,
+    t,
   });
   const statusToggleLabel =
     connector.status === "disabled"
-      ? "Enable"
+      ? t("connectors.enableShort")
       : connector.status === "paused"
-        ? "Resume"
-        : "Pause";
+        ? t("connectors.resumeShort")
+        : t("connectors.pauseShort");
   const StatusToggleIcon =
     connector.status === "disabled" || connector.status === "paused"
       ? Play
@@ -635,7 +671,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
             variant="ghost"
           >
             <ArrowLeft className="size-3.5" />
-            Back to catalog
+            {t("connectors.backToCatalog")}
           </Button>
         </div>
       ) : null}
@@ -655,14 +691,14 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
                 <button
                   className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   onClick={() => onOpenSettings(connector)}
-                  title={`Open ${providerName} settings`}
+                  title={t("connectors.openSettings", { name: providerName })}
                   type="button"
                 >
                   {providerName}
                 </button>
               </h4>
               <p className="mt-1 truncate text-xs text-muted-foreground">
-                {compactConnectorExecutionMeta(connector)}
+                {compactConnectorExecutionMeta(connector, t)}
               </p>
             </div>
             <div className="hidden shrink-0 sm:block">
@@ -672,12 +708,14 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
               className="size-7 shrink-0"
               onClick={() => onOpenSettings(connector)}
               size="icon-xs"
-              title={`Open ${providerName} settings`}
+              title={t("connectors.openSettings", { name: providerName })}
               type="button"
               variant="ghost"
             >
               <Settings2 className="size-3.5" />
-              <span className="sr-only">Open {providerName} settings</span>
+              <span className="sr-only">
+                {t("connectors.openSettings", { name: providerName })}
+              </span>
             </Button>
           </div>
           {connector.raw.lastError ? (
@@ -690,14 +728,14 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1 font-medium text-foreground">
                   <Webhook className="size-3.5" />
-                  Webhook URL
+                  {t("connectors.webhookUrl")}
                 </span>
                 {!webhookConfig.isConfigured ? (
                   <Badge
                     className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-300"
                     variant="outline"
                   >
-                    local
+                    {t("connectors.webhookLocal")}
                   </Badge>
                 ) : null}
               </div>
@@ -713,12 +751,11 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
                   variant="ghost"
                 >
                   <Copy className="size-3.5" />
-                  <span className="sr-only">Copy webhook URL</span>
+                  <span className="sr-only">{t("connectors.copyWebhook")}</span>
                 </Button>
               </div>
               <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-                Add this URL in {providerName} connection settings after OAuth
-                is complete. Provider webhooks require public HTTPS.
+                {t("connectors.webhookNote", { name: providerName })}
               </p>
               {catalogItem?.webhookSupportNote ? (
                 <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
@@ -750,10 +787,10 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
           size="xs"
           title={
             connector.status === "paused"
-              ? `Sync paused ${providerName} manually`
+              ? t("connectors.syncPausedManual", { name: providerName })
               : connector.status === "disabled"
-                ? `${providerName} is disabled`
-                : `Sync ${providerName}`
+                ? t("connectors.isDisabled", { name: providerName })
+                : t("connectors.sync", { name: providerName })
           }
           type="button"
           variant="outline"
@@ -763,7 +800,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
           ) : (
             <RotateCcw className="size-3.5" />
           )}
-          Sync now
+          {t("connectors.syncNow")}
         </Button>
         <Button
           className={disabledConnectorIconButtonClass}
@@ -782,12 +819,12 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
           disabled={isBusy}
           onClick={() => onDisconnect(connector)}
           size="xs"
-          title={`Remove ${providerName}`}
+          title={t("connectors.removeAria", { name: providerName })}
           type="button"
           variant="ghost"
         >
           <Power className="size-3.5" />
-          Remove
+          {t("connectors.removeShort")}
         </Button>
       </div>
     </article>

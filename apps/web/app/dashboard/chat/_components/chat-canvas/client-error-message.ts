@@ -18,7 +18,14 @@
  * and that copy takes a non-nullable `string` rather than returning `null` for
  * empty input.
  */
-export function sanitizeClientErrorMessage(value: string | null | undefined) {
+import type { useTranslations } from "next-intl";
+
+type Translate = ReturnType<typeof useTranslations>;
+
+export function sanitizeClientErrorMessage(
+  value: string | null | undefined,
+  t?: Translate,
+) {
   const text = value?.trim();
   if (!text) {
     return null;
@@ -32,8 +39,19 @@ export function sanitizeClientErrorMessage(value: string | null | undefined) {
     const toolName =
       text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
       text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
-    return toolName
-      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
+    // `t` is optional so the pure data-normalizer callers (message-groups,
+    // message-normalizers, streaming-event-handlers) — which have no translator
+    // in reach — keep producing the original English. The UI re-sanitizes at
+    // render time (message-list) with a real translator, so displayed copy is
+    // still localized. The English fallbacks below are byte-identical to the
+    // en.json `errors.toolArgsInvalid*` values.
+    if (toolName) {
+      return t
+        ? t("errors.toolArgsInvalidNamed", { tool: toolName })
+        : `${toolName} failed because the generated tool arguments were invalid. Please retry.`;
+    }
+    return t
+      ? t("errors.toolArgsInvalid")
       : "The generated tool arguments were invalid. Please retry.";
   }
   return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;

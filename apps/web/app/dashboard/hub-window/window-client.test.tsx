@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { HubMessage, HubSnapshot } from "../chat/_components/hub-protocol";
+import messages from "../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const state = vi.hoisted(() => ({
   listener: undefined as ((message: HubMessage) => void) | undefined,
@@ -133,7 +139,13 @@ beforeEach(async () => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(createElement(DesktopHubWindow)));
+  await act(async () =>
+    root.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        <DesktopHubWindow />
+      </NextIntlClientProvider>,
+    ),
+  );
 });
 afterEach(async () => {
   await act(async () => root.unmount());

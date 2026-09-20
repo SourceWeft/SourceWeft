@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   resolveSkillIntroduction,
@@ -7,12 +8,13 @@ import {
 } from "../../../../lib/skill-introduction";
 
 export function SkillIntroduction(props: SkillIntroductionInput) {
+  const t = useTranslations("dashboardSkills");
   const introduction = resolveSkillIntroduction(props);
   return (
     <div className="min-w-0 space-y-4">
       {introduction.source ? (
         <p className="text-xs text-muted-foreground">
-          From {introduction.source}
+          {t("introduction.from", { source: introduction.source })}
         </p>
       ) : null}
       {introduction.content ? (
@@ -27,7 +29,7 @@ export function SkillIntroduction(props: SkillIntroductionInput) {
           <h3 className="font-medium">{props.displayName}</h3>
           <p>{props.description}</p>
           <p className="text-muted-foreground">
-            No detailed description provided.
+            {t("introduction.noDescription")}
           </p>
         </div>
       )}

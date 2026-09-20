@@ -1,8 +1,19 @@
 // @vitest-environment jsdom
-import { act, createElement, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { SkillReadmeDialog } from "./readme-dialog";
+import enMessages from "../../../../../../messages/en.json";
+
+const intlMessages = enMessages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 const api = vi.hoisted(() => ({ getSkillCatalogDetail: vi.fn() }));
 vi.mock("../../../../../../lib/sdk", () => ({ contentClient: api }));
 vi.mock("@sourceweft/ui-web/components/ai-elements/message", () => ({
@@ -32,12 +43,14 @@ test("failed requests show retry; a successful retry displays SKILL.md without i
   root = createRoot(container);
   await act(async () =>
     root.render(
-      createElement(SkillReadmeDialog, {
-        open: true,
-        catalogId: "skill:version",
-        workspaceId: "workspace",
-        onOpenChange: () => {},
-      }),
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(SkillReadmeDialog, {
+          open: true,
+          catalogId: "skill:version",
+          workspaceId: "workspace",
+          onOpenChange: () => {},
+        })}
+      </NextIntlClientProvider>,
     ),
   );
   expect(document.body.textContent).toContain("Connection unavailable");

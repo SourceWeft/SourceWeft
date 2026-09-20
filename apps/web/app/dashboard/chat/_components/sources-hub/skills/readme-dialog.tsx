@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
 import { SkillIntroduction } from "../../../../skills/_components/skill-introduction";
@@ -26,6 +27,7 @@ export function SkillReadmeDialog({
   open: boolean;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const [detail, setDetail] = useState<Awaited<
     ReturnType<typeof contentClient.getSkillCatalogDetail>
   > | null>(null);
@@ -48,7 +50,7 @@ export function SkillReadmeDialog({
       })
       .catch((error) => {
         if (!cancelled) {
-          setError(getErrorMessage(error, "Failed to load skill details."));
+          setError(getErrorMessage(error, t("skills.readmeLoadFailed")));
         }
       })
       .finally(() => {
@@ -57,7 +59,7 @@ export function SkillReadmeDialog({
     return () => {
       cancelled = true;
     };
-  }, [catalogId, open, workspaceId, reload]);
+  }, [catalogId, open, workspaceId, reload, t]);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -68,18 +70,20 @@ export function SkillReadmeDialog({
         <DialogHeader className="border-b px-5 py-4 text-left">
           <div className="flex items-center gap-3">
             {detail ? <SkillAvatar item={detail.skill} /> : null}
-            <DialogTitle>{detail?.skill.displayName ?? "Skill"}</DialogTitle>
+            <DialogTitle>
+              {detail?.skill.displayName ?? t("skills.readmeFallbackTitle")}
+            </DialogTitle>
           </div>
           <DialogDescription>
             {detail?.skill.description ??
-              "Review this skill before selecting it."}
+              t("skills.readmeFallbackDescription")}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto px-5 py-5">
           {isLoading ? (
             <div className="flex items-center justify-center py-14 text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading skill...
+              {t("skills.readmeLoading")}
             </div>
           ) : error ? (
             <div role="alert" className="space-y-3 py-8 text-sm">
@@ -89,7 +93,7 @@ export function SkillReadmeDialog({
                 size="sm"
                 onClick={() => setReload((value) => value + 1)}
               >
-                Retry
+                {t("common.retry")}
               </Button>
             </div>
           ) : detail ? (

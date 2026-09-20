@@ -1,0 +1,3087 @@
+{
+  "metadata": {
+    "home": {
+      "title": "SourceWeft - AI 笔记工作区",
+      "description": "SourceWeft 是一个连接知识来源的 AI 笔记工作区：上传文档、连接你的工具，获得有据可查、带引用的答案。"
+    }
+  },
+  "header": {
+    "nav": {
+      "features": "功能",
+      "howItWorks": "工作原理",
+      "pricing": "定价",
+      "mcpServers": "MCP 服务",
+      "blog": "博客"
+    },
+    "signIn": "登录",
+    "getStarted": "开始使用",
+    "openDashboard": "打开控制台"
+  },
+  "footer": {
+    "tagline": "你的 AI 笔记工作区。连接一切，深入思考。",
+    "product": "产品",
+    "company": "公司",
+    "legal": "法律",
+    "links": {
+      "features": "功能",
+      "howItWorks": "运作方式",
+      "pricing": "定价",
+      "mcpServers": "MCP 服务",
+      "blog": "博客",
+      "dashboard": "仪表板",
+      "getStarted": "开始使用",
+      "about": "关于",
+      "changelog": "更新日志",
+      "privacy": "隐私政策",
+      "terms": "服务条款"
+    },
+    "copyright": "© {year} SourceWeft. 保留所有权利。",
+    "builtBy": "由 SourceWeft 打造"
+  },
+  "landing": {
+    "hero": {
+      "badge": "抢先体验中",
+      "headlineLine1": "你的 AI 笔记",
+      "headlineLine2": "工作区。",
+      "subtitle": "上传资料，连接 Notion、Google Drive、Gmail、Slack 等工具。基于你自己的内容，生成有据可查、带引用的答案，以及音频概览、学习指南、常见问答和深度 AI 洞察。",
+      "ctaSignedIn": "打开控制台",
+      "ctaSignedOut": "免费开始",
+      "seeHowItWorks": "了解工作原理",
+      "stats": {
+        "llmProviders": "个大模型供应商",
+        "outputFormats": "种输出格式",
+        "integrations": "项集成"
+      }
+    },
+    "socialProof": {
+      "heading": "为深入钻研的研究者、学生与创作者而生",
+      "roles": {
+        "researchers": {
+          "title": "研究者",
+          "desc": "需要信任自己的来源"
+        },
+        "writers": {
+          "title": "写作者",
+          "desc": "在笔记之间串联想法"
+        },
+        "developers": {
+          "title": "开发者",
+          "desc": "以文档和 RFC 为伴"
+        },
+        "students": {
+          "title": "学生",
+          "desc": "想真正学会，而不只是读过"
+        }
+      }
+    },
+    "features": {
+      "eyebrow": "功能",
+      "heading": "AI 知识工作区所需的一切",
+      "intro": "上传资料，连接你的工具，获得答案、音频概览、学习指南等等——全部基于你已有的知识，引用可逐条查证。",
+      "items": {
+        "outputs": {
+          "title": "从来源生成多种成果",
+          "description": "提出问题，或生成音频概览、学习指南、常见问答、简报文档或时间线——全部基于你上传的资料，并附带行内引用。",
+          "bullets": [
+            "音频概览与播客",
+            "学习指南、常见问答与时间线",
+            "行内来源引用"
+          ]
+        },
+        "connect": {
+          "title": "连接一切",
+          "description": "不止是上传文件——连接 Notion、Google Drive、Gmail、Slack 等工具。SourceWeft 为你已有的工具建立索引，让知识随手可得。",
+          "bullets": [
+            "Notion、Google Drive、Gmail、Slack",
+            "支持 25+ 种文件格式",
+            "浏览器扩展，随手捕获"
+          ]
+        },
+        "everywhere": {
+          "title": "在你所到之处皆可用",
+          "description": "网页应用、桌面端与浏览器扩展——始终保持同步。在任何地方捕获网页，在任何设备上继续对话。你的笔记随你而行。",
+          "bullets": [
+            "macOS 与 Windows 桌面端",
+            "Chrome 与 Edge 扩展",
+            "移动应用（即将推出）"
+          ]
+        }
+      }
+    },
+    "howItWorks": {
+      "eyebrow": "工作原理",
+      "heading": "几分钟，从零到 AI 加持",
+      "steps": {
+        "step1": {
+          "title": "创建你的工作区",
+          "body": "几秒钟即可创建个人或团队工作区。把知识整理进不同空间——每个项目、主题或人生领域各归其位。"
+        },
+        "step2": {
+          "title": "连接你的知识来源",
+          "body": "连接 Notion、Google Drive、Gmail 或 Slack——或直接放入 PDF、粘贴网址、捕获任意网页。无论知识存放在哪，SourceWeft 都会为其建立索引。"
+        },
+        "step3": {
+          "title": "与你的 AI 对话",
+          "body": "提出问题、获取摘要、探索关联。每个答案都基于你自己的来源，并附带可逐条查证的行内引用。"
+        }
+      }
+    },
+    "pricing": {
+      "eyebrow": "定价",
+      "heading": "简单、透明的定价",
+      "intro": "免费起步。需要更多时再升级。绝无意外账单。"
+    }
+  },
+  "about": {
+    "meta": {
+      "title": "关于 SourceWeft",
+      "description": "SourceWeft 是一个用于有据可查的思考的 AI 笔记工作区：连接知识、引用、学习指南、常见问答与音频概览。"
+    },
+    "hero": {
+      "eyebrow": "关于 SourceWeft",
+      "heading": "一个用于有据可查思考的 AI 笔记工作区。",
+      "subtitle": "SourceWeft 帮助人们收集、连接并推理自己的材料。它专为“来源至关重要”的工作而设计：研究、学习、写作、分析，以及团队知识。",
+      "ctaSignedIn": "打开控制台",
+      "ctaSignedOut": "免费开始",
+      "exploreFeatures": "探索功能",
+      "card": {
+        "title": "为连接知识而生",
+        "subtitle": "来源进，带引用的成果出",
+        "items": [
+          "连接的来源",
+          "行内引用",
+          "学习指南与常见问答",
+          "音频概览"
+        ],
+        "footnote": "每一项成果都力求紧贴塑造它的文档、笔记与连接来源。"
+      }
+    },
+    "principles": {
+      "eyebrow": "产品理念",
+      "heading": "始终保留回到原始材料的线索。",
+      "items": {
+        "grounded": {
+          "title": "答案应当始终附着于来源",
+          "body": "SourceWeft 围绕有据可查的工作构建：引用、可查证的上下文，以及能清楚交代出处的成果。"
+        },
+        "workspace": {
+          "title": "工作区应当贴合你的知识",
+          "body": "上传文件，或连接 Notion、Google Drive、Gmail、Slack 等工具，让你已有的材料无需复制到另一个孤岛即可使用。"
+        },
+        "artifacts": {
+          "title": "AI 应当帮助人们打造经得起时间的成果",
+          "body": "不止于对话，SourceWeft 旨在把来源材料转化为可反复回顾的学习指南、常见问答、时间线、简报与音频概览。"
+        }
+      }
+    },
+    "audiences": {
+      "eyebrow": "为谁而做",
+      "heading": "需要可追溯答案的人。",
+      "items": [
+        "在笔记、论文与来源集之间比对的研究者",
+        "把课堂材料转化为学习指南与有据讲解的学生",
+        "在草稿、片段与参考之间串联想法的写作者与创作者",
+        "需要共享上下文、又不愿丢失回到原始文档线索的团队"
+      ]
+    },
+    "direction": {
+      "eyebrow": "当前方向",
+      "heading": "抢先体验阶段，专注于让连接知识变得可靠。",
+      "items": [
+        "在网页、桌面与浏览器扩展工作流中更深入地覆盖连接来源",
+        "为学习、简报与综合提供更多有据可查的输出格式",
+        "更清晰的引用审阅方式，让生成的成果始终易于查证"
+      ]
+    },
+    "buildLabel": "构建 {sha}"
+  },
+  "changelog": {
+    "meta": {
+      "title": "更新日志",
+      "description": "SourceWeft 的产品更新——连接知识来源、生成有据可查成果的 AI 笔记工作区。"
+    },
+    "badge": "产品更新",
+    "heading": "更新日志",
+    "subtitle": "SourceWeft 发布的简明记录，依据 Git 标签生成，让公开更新始终与已上线的代码对应。",
+    "ctaAbout": "关于 SourceWeft",
+    "ctaFeatures": "查看功能",
+    "category": {
+      "Release": "发布"
+    }
+  },
+  "blog": {
+    "meta": {
+      "title": "博客",
+      "description": "阅读 SourceWeft 关于有据可查的 AI 笔记、研究工作流与可信检索的文章、产品更新与技术指南。",
+      "ogTitle": "SourceWeft 博客"
+    },
+    "badge": "SourceWeft 博客",
+    "heading": "AI 工作区的实战笔记。",
+    "lead": "面向用连接知识来源构建产品的团队的产品文章、实现指南与研究运作范式。",
+    "sublead": "按主题浏览文章，从模型评估到研究运作与产品更新。",
+    "latestWriting": "最新文章",
+    "latestHeading": "指南、更新与系统笔记",
+    "count": "{count, plural, other {# 篇}}来自产品与工程团队的文章",
+    "allPosts": "全部文章",
+    "articleFallbackTag": "文章",
+    "unscheduled": "未排期",
+    "minRead": "{minutes} 分钟阅读",
+    "featured": "精选",
+    "latest": "最新",
+    "readEssay": "阅读文章",
+    "empty": {
+      "title": "文章即将上线。",
+      "body": "目前还没有发布任何文章。请稍后再来查看产品文章、实现指南与研究运作范式。"
+    },
+    "article": {
+      "backToBlog": "返回博客",
+      "shareableUrl": "可分享链接",
+      "readNext": "继续阅读",
+      "keepReading": "继续阅读",
+      "relatedEssays": "相关文章",
+      "allPosts": "全部文章"
+    },
+    "tag": {
+      "back": "返回博客",
+      "topicBadge": "主题",
+      "notFound": "未找到标签",
+      "metaTitle": "#{tag} 相关文章",
+      "description": "{count, plural, other {# 篇}}带 #{tag} 标签的 SourceWeft 文章：产品笔记、实现指南与研究工作流。",
+      "emptyText": "该标签下暂无已发布文章。",
+      "browseAll": "浏览全部文章"
+    }
+  },
+  "mcp": {
+    "meta": {
+      "title": "MCP 服务市场",
+      "description": "浏览面向 SourceWeft 及其他 MCP 客户端的公开 MCP 服务。探索 HTTP、SSE 与桌面 MCP 服务，含工具、运行时与验证信息。",
+      "socialDescription": "一个公开的 MCP 服务目录，含工具、传输、运行时与验证信息。"
+    },
+    "hero": {
+      "badge": "SourceWeft MCP 市场",
+      "subtitle": "{count, plural, other {探索 # 个 MCP 服务}}，工具、传输、鉴权与信任信息一目了然，然后把它们添加到 SourceWeft 工作区。"
+    },
+    "getStarted": {
+      "install": {
+        "title": "安装",
+        "description": "三步把任意列出的服务添加到 SourceWeft 工作区。",
+        "ctaSignedIn": "在控制台中打开 MCP",
+        "ctaSignedOut": "登录以安装",
+        "steps": [
+          "挑选一个服务，查看它的工具、鉴权与信任级别。",
+          "在你的工作区控制台的 MCP 页面添加它。",
+          "私密地连接凭据，然后为对话启用它。"
+        ]
+      },
+      "publish": {
+        "title": "发布",
+        "description": "把你自己的 MCP 服务列给每一个 SourceWeft 工作区。",
+        "ctaSignedIn": "提交你的服务",
+        "ctaSignedOut": "登录以提交",
+        "steps": [
+          "在公开的 GitHub 仓库中发布你的服务源码。",
+          "在控制台的 MCP 页面提交该仓库。",
+          "经审核后上线；受信任的发布者会获得徽章。"
+        ]
+      }
+    },
+    "directory": {
+      "featuredTitle": "精选",
+      "featuredDescription": "来自官方发布者或经审核验证的服务。",
+      "recentTitle": "最近更新",
+      "recentDescription": "新收录的服务与最近更新的条目。",
+      "categoryPopular": "热门的 {category} MCP 服务。",
+      "browseByCategory": "按分类浏览"
+    },
+    "results": "“{query}”的搜索结果",
+    "allServers": "全部 MCP 服务",
+    "search": {
+      "ariaLabel": "搜索 MCP 服务",
+      "placeholder": "按名称、提供方或能力搜索",
+      "button": "搜索"
+    },
+    "listing": {
+      "categories": "分类",
+      "allServersLabel": "全部服务",
+      "marketHome": "市场首页",
+      "serverCount": "{count, plural, other {# 个服务}}",
+      "serverCountOnPage": "{count, plural, other {本页 # 个服务}}",
+      "clearFilters": "清除筛选",
+      "noMatchTitle": "没有符合这些筛选条件的 MCP 服务。",
+      "noMatchBody": "试试更宽泛的搜索或另一个分类。",
+      "syncingTitle": "MCP 服务正在同步。",
+      "syncingBody": "公开市场已可用，但目前还没有已发布的 MCP 服务。",
+      "paginationLabel": "分页",
+      "firstPage": "第一页",
+      "nextPage": "下一页"
+    },
+    "category": {
+      "backToMarket": "返回 MCP 市场",
+      "notFound": "MCP 分类",
+      "title": "{name} MCP 服务",
+      "descriptionTemplate": "浏览公开的 {name} MCP 服务，含工具、传输、运行时与验证信息。",
+      "bodyDescription": "面向 SourceWeft 及其他 MCP 客户端的公开 {name} MCP 服务。",
+      "resultsIn": "在 {category} 中“{query}”的搜索结果"
+    },
+    "badges": {
+      "verification": {
+        "official": "官方",
+        "verified": "已验证",
+        "unverified": "未验证"
+      },
+      "runtime": {
+        "hybrid": "网页 + 桌面",
+        "desktop": "仅桌面",
+        "web": "可网页运行"
+      },
+      "risk": {
+        "read": "读取",
+        "write": "写入",
+        "destructive": "破坏性",
+        "unknown": "未知"
+      }
+    },
+    "card": {
+      "auth": "鉴权",
+      "tools": "{count, plural, other {# 个工具}}",
+      "viewAll": "查看全部"
+    },
+    "tools": {
+      "empty": "工具元数据尚未被收录。",
+      "inputFields": "输入字段：{fields}",
+      "schemaObject": "schema 对象"
+    },
+    "faq": {
+      "eyebrow": "MCP 常见问答",
+      "heading": "MCP 服务基础",
+      "items": {
+        "what": {
+          "question": "什么是 MCP 服务？",
+          "answer": "MCP 服务通过 Model Context Protocol 暴露工具与上下文，让 AI 客户端能以结构化的方式调用外部系统。"
+        },
+        "use": {
+          "question": "如何在 SourceWeft 中使用 MCP 服务？",
+          "answer": "在 SourceWeft 中打开该 MCP 服务，将其安装到工作区，按需配置凭据，然后在控制台为对话运行启用它。"
+        },
+        "safe": {
+          "question": "未验证的 MCP 服务安全吗？",
+          "answer": "未验证的 MCP 服务可能从对话中接收工具参数并执行外部操作。启用前请先审查其提供方、工具与所需凭据。"
+        },
+        "transport": {
+          "question": "HTTP/SSE 与 STDIO MCP 有什么区别？",
+          "answer": "HTTP 与 SSE MCP 服务在远端运行，可从网页运行时使用。STDIO MCP 服务会启动本地进程，因此需要本地桌面宿主。"
+        },
+        "keys": {
+          "question": "MCP 服务需要 API 密钥吗？",
+          "answer": "有些 MCP 服务需要 Bearer 令牌、API 密钥或自定义请求头。SourceWeft 会私密地存储工作区凭据，不会在公开市场页面上展示。"
+        }
+      }
+    },
+    "detail": {
+      "metaFallback": "MCP 服务",
+      "breadcrumbHome": "首页",
+      "breadcrumbServers": "MCP 服务",
+      "updated": "更新于 {date}",
+      "tools": "工具",
+      "auth": "鉴权",
+      "license": "许可证",
+      "language": "语言",
+      "required": "需要",
+      "notRequired": "无需",
+      "unknown": "未知",
+      "addToWorkspace": "添加到工作区",
+      "signInToInstall": "登录以安装",
+      "homepage": "主页",
+      "repository": "仓库",
+      "source": "源码",
+      "nav": {
+        "overview": "概览",
+        "installation": "安装",
+        "tools": "工具（{count}）",
+        "versions": "版本（{count}）",
+        "related": "相关"
+      },
+      "overviewHeading": "概览",
+      "riskSummary": "风险摘要：",
+      "installationHeading": "安装",
+      "inSourceWeft": "在 SourceWeft 中",
+      "step1": "打开 <link>控制台中的 {name}</link>，将其添加到工作区。",
+      "step2": "连接 {name} 凭据。它们会被私密存储，绝不会在公开页面上展示。",
+      "step2Fallback": "所需的",
+      "step3": "为需要使用其工具的对话启用该服务。",
+      "runtimeVia": "{runtime}，通过 {transport}。",
+      "stdioNote": " STDIO 服务会启动本地进程，因此需要 SourceWeft 桌面宿主。",
+      "remoteNote": " 远程服务在工作区中配置后即可从网页运行时运行。",
+      "otherClients": "其他 MCP 客户端",
+      "otherClientsConfig": "把它添加到你客户端的 <code>mcpServers</code> 配置中。",
+      "oauthNote": " 客户端会在首次连接时完成 OAuth 登录。",
+      "followRepo": "参照 <link>仓库</link> 中的启动说明。",
+      "toolsHeading": "工具",
+      "versionsHeading": "版本历史",
+      "latest": "最新",
+      "serverDetails": "服务详情",
+      "identifier": "标识符",
+      "transport": "传输",
+      "runtime": "运行时",
+      "trust": "信任",
+      "published": "发布于",
+      "securityHeading": "安全提示",
+      "securityBody": "MCP 服务会从对话中接收工具参数，并可能执行外部操作。允许列出未验证的服务，但 SourceWeft 会对其加以标记，以便你在启用前先审查该服务。",
+      "relatedHeading": "更多类似 {name} 的服务"
+    }
+  },
+  "languageSwitcher": {
+    "label": "语言",
+    "ariaLabel": "切换语言"
+  },
+  "authUi": {
+    "APP": "应用",
+    "ACCOUNT": "账户",
+    "ACCOUNTS": "账户",
+    "ACCOUNTS_DESCRIPTION": "管理你当前已登录的账户。",
+    "ACCOUNTS_INSTRUCTIONS": "登录另一个账户。",
+    "ADD_ACCOUNT": "添加账户",
+    "ADD_PASSKEY": "添加通行密钥",
+    "ALREADY_HAVE_AN_ACCOUNT": "已有账户？",
+    "AVATAR": "头像",
+    "AVATAR_DESCRIPTION": "点击头像即可从你的文件中上传自定义头像。",
+    "AVATAR_INSTRUCTIONS": "头像为可选项，但强烈建议设置。",
+    "BACKUP_CODE_REQUIRED": "请输入备份码",
+    "BACKUP_CODES": "备份码",
+    "BACKUP_CODES_DESCRIPTION": "请将这些备份码保存在安全的地方。如果你丢失了两步验证方式，可以使用它们来访问你的账户。",
+    "BACKUP_CODE_PLACEHOLDER": "备份码",
+    "BACKUP_CODE": "备份码",
+    "CANCEL": "取消",
+    "CHANGE_PASSWORD": "修改密码",
+    "CHANGE_PASSWORD_DESCRIPTION": "请输入你的当前密码和新密码。",
+    "CHANGE_PASSWORD_INSTRUCTIONS": "请至少使用 8 个字符。",
+    "CHANGE_PASSWORD_SUCCESS": "你的密码已修改。",
+    "CONFIRM_PASSWORD": "确认密码",
+    "CONFIRM_PASSWORD_PLACEHOLDER": "确认密码",
+    "CONFIRM_PASSWORD_REQUIRED": "请确认密码",
+    "CONTINUE_WITH_AUTHENTICATOR": "使用身份验证器继续",
+    "COPIED_TO_CLIPBOARD": "已复制到剪贴板",
+    "COPY_TO_CLIPBOARD": "复制到剪贴板",
+    "COPY_ALL_CODES": "复制全部备份码",
+    "CONTINUE": "继续",
+    "CURRENT_PASSWORD": "当前密码",
+    "CURRENT_PASSWORD_PLACEHOLDER": "当前密码",
+    "CURRENT_SESSION": "当前会话",
+    "UPDATE": "更新",
+    "DELETE": "删除",
+    "DELETE_AVATAR": "删除头像",
+    "DELETE_ACCOUNT": "删除账户",
+    "DELETE_ACCOUNT_DESCRIPTION": "永久删除你的账户及其所有内容。此操作不可撤销，请谨慎操作。",
+    "DELETE_ACCOUNT_INSTRUCTIONS": "请确认删除你的账户。此操作不可撤销，请谨慎操作。",
+    "DELETE_ACCOUNT_VERIFY": "请查收邮件以验证账户删除操作。",
+    "DELETE_ACCOUNT_SUCCESS": "你的账户已删除。",
+    "DISABLE_TWO_FACTOR": "关闭两步验证",
+    "DONT_HAVE_AN_ACCOUNT": "还没有账户？",
+    "DONE": "完成",
+    "EMAIL": "邮箱",
+    "EMAIL_DESCRIPTION": "请输入你要用于登录的邮箱地址。",
+    "EMAIL_INSTRUCTIONS": "请输入有效的邮箱地址。",
+    "EMAIL_IS_THE_SAME": "邮箱未更改",
+    "EMAIL_PLACEHOLDER": "m@example.com",
+    "EMAIL_REQUIRED": "请输入邮箱地址",
+    "EMAIL_VERIFY_CHANGE": "请查收邮件以验证此更改。",
+    "EMAIL_VERIFICATION": "邮箱验证",
+    "EMAIL_VERIFICATION_DESCRIPTION": "请查收邮件中的验证码以完成注册。",
+    "EMAIL_VERIFICATION_SUCCESS": "邮箱验证成功。",
+    "ENABLE_TWO_FACTOR": "开启两步验证",
+    "IS_INVALID": "无效",
+    "IS_REQUIRED": "为必填项",
+    "IS_THE_SAME": "未更改",
+    "FORGOT_AUTHENTICATOR": "无法使用身份验证器？",
+    "FORGOT_PASSWORD": "忘记密码",
+    "FORGOT_PASSWORD_ACTION": "发送重置链接",
+    "FORGOT_PASSWORD_DESCRIPTION": "请输入你的邮箱以重置密码",
+    "FORGOT_PASSWORD_EMAIL": "请查收邮件中的密码重置链接。",
+    "FORGOT_PASSWORD_LINK": "忘记密码？",
+    "LINK": "关联",
+    "MAGIC_LINK": "魔法链接",
+    "MAGIC_LINK_ACTION": "发送魔法链接",
+    "MAGIC_LINK_DESCRIPTION": "请输入你的邮箱以接收魔法链接",
+    "MAGIC_LINK_EMAIL": "请查收邮件中的魔法链接",
+    "NAME": "姓名",
+    "NAME_DESCRIPTION": "请输入你的全名或显示名称。",
+    "NAME_INSTRUCTIONS": "最多使用 32 个字符。",
+    "NAME_PLACEHOLDER": "姓名",
+    "NEW_PASSWORD": "新密码",
+    "NEW_PASSWORD_PLACEHOLDER": "新密码",
+    "NEW_PASSWORD_REQUIRED": "请输入新密码",
+    "ONE_TIME_PASSWORD": "一次性密码",
+    "OR_CONTINUE_WITH": "或使用以下方式继续",
+    "PASSKEY": "通行密钥",
+    "PASSKEYS": "通行密钥",
+    "PASSKEYS_DESCRIPTION": "管理你的通行密钥以实现安全访问。",
+    "PASSKEYS_INSTRUCTIONS": "无需密码即可安全访问你的账户。",
+    "PERSONAL_ACCOUNT": "个人账户",
+    "API_KEYS": "API 密钥",
+    "API_KEYS_DESCRIPTION": "管理你的 API 密钥以实现安全访问。",
+    "API_KEYS_INSTRUCTIONS": "生成 API 密钥以通过程序访问你的账户。",
+    "CREATE_API_KEY": "创建 API 密钥",
+    "CREATE_API_KEY_DESCRIPTION": "为你的 API 密钥输入一个唯一名称，以便与其他密钥区分。",
+    "API_KEY_NAME_PLACEHOLDER": "新建 API 密钥",
+    "API_KEY_CREATED": "API 密钥已创建",
+    "CREATE_API_KEY_SUCCESS": "请复制你的 API 密钥并妥善保管。出于安全考虑，我们无法再次显示它。",
+    "NEVER_EXPIRES": "永不过期",
+    "EXPIRES": "过期时间",
+    "NO_EXPIRATION": "无过期时间",
+    "CREATE_ORGANIZATION": "创建组织",
+    "ORGANIZATION": "组织",
+    "ORGANIZATION_NAME": "名称",
+    "ORGANIZATION_NAME_PLACEHOLDER": "Acme Inc.",
+    "ORGANIZATION_NAME_DESCRIPTION": "这是你的组织的显示名称。",
+    "ORGANIZATION_NAME_INSTRUCTIONS": "最多使用 32 个字符。",
+    "ORGANIZATION_SLUG": "Slug 地址",
+    "ORGANIZATION_SLUG_DESCRIPTION": "这是你的组织的 URL 命名空间。",
+    "ORGANIZATION_SLUG_INSTRUCTIONS": "最多使用 48 个字符。",
+    "ORGANIZATION_SLUG_PLACEHOLDER": "acme-inc",
+    "CREATE_ORGANIZATION_SUCCESS": "组织创建成功",
+    "PASSWORD": "密码",
+    "PASSWORD_PLACEHOLDER": "密码",
+    "PASSWORD_REQUIRED": "请输入密码",
+    "PASSWORDS_DO_NOT_MATCH": "两次输入的密码不一致",
+    "PROVIDERS": "第三方账号",
+    "PROVIDERS_DESCRIPTION": "将你的账户与第三方服务关联。",
+    "RECOVER_ACCOUNT": "恢复账户",
+    "RECOVER_ACCOUNT_ACTION": "恢复账户",
+    "RECOVER_ACCOUNT_DESCRIPTION": "请输入备份码以访问你的账户",
+    "REMEMBER_ME": "记住我",
+    "RESEND_CODE": "重新发送验证码",
+    "RESEND_VERIFICATION_EMAIL": "重新发送验证邮件",
+    "RESET_PASSWORD": "重置密码",
+    "RESET_PASSWORD_ACTION": "保存新密码",
+    "RESET_PASSWORD_DESCRIPTION": "请在下方输入你的新密码",
+    "RESET_PASSWORD_SUCCESS": "密码重置成功",
+    "REQUEST_FAILED": "请求失败",
+    "REVOKE": "撤销",
+    "DELETE_API_KEY": "删除 API 密钥",
+    "DELETE_API_KEY_CONFIRM": "确定要删除此 API 密钥吗？",
+    "API_KEY": "API 密钥",
+    "SIGN_IN": "登录",
+    "SIGN_IN_ACTION": "登录",
+    "SIGN_IN_DESCRIPTION": "请在下方输入你的邮箱以登录账户",
+    "SIGN_IN_WITH": "使用",
+    "SIGN_OUT": "退出登录",
+    "SIGN_UP": "注册",
+    "SIGN_UP_ACTION": "创建账户",
+    "SIGN_UP_DESCRIPTION": "请输入你的信息以创建账户",
+    "SIGN_UP_EMAIL": "请查收邮件中的验证链接。",
+    "SESSIONS": "会话",
+    "SESSIONS_DESCRIPTION": "管理你的活跃会话并撤销访问权限。",
+    "SET_PASSWORD": "设置密码",
+    "SET_PASSWORD_DESCRIPTION": "点击下方按钮，接收一封为你的账户设置密码的邮件。",
+    "SETTINGS": "设置",
+    "SAVE": "保存",
+    "SECURITY": "安全",
+    "SWITCH_ACCOUNT": "切换账户",
+    "TRUST_DEVICE": "信任此设备",
+    "TWO_FACTOR": "两步验证",
+    "TWO_FACTOR_ACTION": "验证",
+    "TWO_FACTOR_DESCRIPTION": "请输入你的一次性密码以继续",
+    "TWO_FACTOR_CARD_DESCRIPTION": "为你的账户增加一层额外的安全保护。",
+    "TWO_FACTOR_DISABLE_INSTRUCTIONS": "请输入你的密码以关闭两步验证。",
+    "TWO_FACTOR_ENABLE_INSTRUCTIONS": "请输入你的密码以开启两步验证",
+    "TWO_FACTOR_ENABLED": "两步验证已开启",
+    "TWO_FACTOR_DISABLED": "两步验证已关闭",
+    "TWO_FACTOR_PROMPT": "两步验证",
+    "TWO_FACTOR_TOTP_LABEL": "使用身份验证器扫描二维码",
+    "SEND_VERIFICATION_CODE": "发送验证码",
+    "UNLINK": "取消关联",
+    "UPDATED_SUCCESSFULLY": "更新成功",
+    "OPTIONAL_BRACKETS": "（可选）",
+    "VERIFY_YOUR_EMAIL": "验证你的邮箱",
+    "VERIFY_YOUR_EMAIL_DESCRIPTION": "请验证你的邮箱地址。请在收件箱中查收验证邮件。如果你没有收到邮件，请点击下方按钮重新发送。",
+    "GO_BACK": "返回",
+    "SESSION_NOT_FRESH": "你的会话已过期，请重新登录。",
+    "UPLOAD_AVATAR": "上传头像",
+    "LOGO": "标志",
+    "LOGO_DESCRIPTION": "点击标志即可从你的文件中上传自定义标志。",
+    "LOGO_INSTRUCTIONS": "标志为可选项，但强烈建议设置。",
+    "UPLOAD": "上传",
+    "UPLOAD_LOGO": "上传标志",
+    "DELETE_LOGO": "删除标志",
+    "PRIVACY_POLICY": "隐私政策",
+    "TERMS_OF_SERVICE": "服务条款",
+    "BY_CONTINUING_YOU_AGREE": "继续即表示你同意",
+    "USER": "用户",
+    "ORGANIZATIONS": "组织",
+    "ORGANIZATIONS_DESCRIPTION": "管理你的组织和成员身份。",
+    "ORGANIZATIONS_INSTRUCTIONS": "创建组织以与其他用户协作。",
+    "LEAVE_ORGANIZATION": "退出组织",
+    "LEAVE_ORGANIZATION_CONFIRM": "确定要退出此组织吗？",
+    "LEAVE_ORGANIZATION_SUCCESS": "你已成功退出该组织。",
+    "MANAGE_ORGANIZATION": "管理组织",
+    "REMOVE_MEMBER": "移除成员",
+    "REMOVE_MEMBER_CONFIRM": "确定要将该成员从组织中移除吗？",
+    "REMOVE_MEMBER_SUCCESS": "成员移除成功",
+    "INVITE_MEMBER": "邀请成员",
+    "MEMBERS": "成员",
+    "MEMBERS_DESCRIPTION": "添加或移除成员并管理他们的角色。",
+    "MEMBERS_INSTRUCTIONS": "邀请新成员加入你的组织。",
+    "INVITE_MEMBER_DESCRIPTION": "发送邀请，将新成员添加到你的组织。",
+    "ROLE": "角色",
+    "SELECT_ROLE": "选择角色",
+    "ADMIN": "管理员",
+    "MEMBER": "成员",
+    "GUEST": "访客",
+    "OWNER": "所有者",
+    "UPDATE_ROLE_DESCRIPTION": "更新该成员的角色",
+    "UPDATE_ROLE": "更新角色",
+    "MEMBER_ROLE_UPDATED": "成员角色更新成功",
+    "SEND_INVITATION": "发送邀请",
+    "SEND_INVITATION_SUCCESS": "邀请发送成功",
+    "PENDING_INVITATIONS": "待处理邀请",
+    "PENDING_INVITATIONS_DESCRIPTION": "管理你的组织的待处理邀请。",
+    "PENDING_USER_INVITATIONS_DESCRIPTION": "你从各组织收到的邀请。",
+    "CANCEL_INVITATION": "取消邀请",
+    "INVITATION_CANCELLED": "邀请已取消",
+    "ACCEPT_INVITATION": "接受邀请",
+    "ACCEPT_INVITATION_DESCRIPTION": "你受邀加入一个组织。",
+    "INVITATION_ACCEPTED": "邀请已接受",
+    "INVITATION_REJECTED": "邀请已拒绝",
+    "ACCEPT": "接受",
+    "REJECT": "拒绝",
+    "INVITATION_EXPIRED": "此邀请已过期",
+    "DELETE_ORGANIZATION": "删除组织",
+    "DELETE_ORGANIZATION_DESCRIPTION": "永久删除你的组织及其所有内容。此操作不可撤销，请谨慎操作。",
+    "DELETE_ORGANIZATION_SUCCESS": "组织删除成功",
+    "DELETE_ORGANIZATION_INSTRUCTIONS": "请输入组织的 slug 以继续：",
+    "SLUG_REQUIRED": "请输入组织 slug",
+    "SLUG_DOES_NOT_MATCH": "slug 不匹配",
+    "MEMBER_SINGULAR": "成员",
+    "MEMBER_PLURAL": "成员",
+    "UNKNOWN": "未知"
+  },
+  "dashboardNav": {
+    "nav": {
+      "overview": "概览",
+      "skills": "技能",
+      "mcp": "MCP",
+      "observability": "可观测性",
+      "chat": "对话",
+      "more": "更多",
+      "me": "我",
+      "mainNavigation": "主导航"
+    },
+    "sidebar": {
+      "newChat": "新建对话",
+      "showConversations": "显示对话",
+      "expandSidebar": "展开侧边栏",
+      "collapseSidebar": "收起侧边栏",
+      "hideSidebar": "隐藏侧边栏",
+      "showSidebar": "显示侧边栏",
+      "sheetTitle": "导航与对话",
+      "inviteManageMembers": "邀请并管理成员",
+      "conversationLoadError": "无法加载对话详情"
+    },
+    "workspace": {
+      "workspaces": "工作区",
+      "rename": "重命名工作区",
+      "add": "添加工作区",
+      "addDescription": "创建工作区，将来源和对话保存在独立的上下文中。",
+      "renameDescription": "更新此工作区的显示名称。",
+      "namePlaceholder": "工作区名称",
+      "defaultName": "工作区 {number}",
+      "creating": "创建中…",
+      "create": "创建",
+      "saving": "保存中…",
+      "save": "保存",
+      "createError": "创建工作区失败。",
+      "renameError": "重命名工作区失败。"
+    },
+    "chats": {
+      "heading": "对话",
+      "searchAll": "搜索所有对话",
+      "searchPlaceholder": "搜索所有对话…",
+      "filter": "筛选对话",
+      "all": "所有对话",
+      "shared": "共享",
+      "private": "私密",
+      "archived": "归档",
+      "clearFilter": "清除{filter}筛选",
+      "openActions": "打开对话操作",
+      "makePrivate": "设为私密",
+      "makeVisible": "设为工作区可见",
+      "archive": "归档",
+      "delete": "删除",
+      "nowPrivate": "对话已设为私密",
+      "nowVisible": "对话现在对工作区可见",
+      "visibilityError": "无法更改此对话的可见性。",
+      "anyoneWithLink": "任何拥有链接的人",
+      "visibleToWorkspace": "对工作区可见",
+      "sourceCount": "{count} 个来源",
+      "status": {
+        "ready": "就绪",
+        "running": "运行中",
+        "attention": "需注意"
+      },
+      "loadingChats": "正在加载对话…",
+      "noMatching": "没有匹配的已加载对话。加载更多以查看较早的对话。",
+      "noneYet": "还没有对话。",
+      "filterEmpty": {
+        "shared": "没有共享对话。",
+        "private": "没有私密对话。",
+        "archived": "没有归档对话。"
+      },
+      "loading": "加载中…",
+      "loadMore": "加载更多",
+      "clearScope": {
+        "archived": "归档对话",
+        "private": "私密对话"
+      },
+      "clearAll": "清除所有{scope}",
+      "clearConfirmTitle": "清除所有{scope}？",
+      "clearConfirmDescription": "这将移除 {count} 个{scope}，包括被当前筛选隐藏的对话。此操作无法撤销。",
+      "clearing": "清除中…",
+      "clearAllButton": "清除全部"
+    },
+    "account": {
+      "accountAndSettings": "账户与设置",
+      "userAlt": "用户",
+      "userAvatarAlt": "用户头像",
+      "accountFallback": "账户",
+      "sourceweftUser": "SourceWeft 用户",
+      "signedIn": "已登录",
+      "profile": "个人资料",
+      "usage": "用量",
+      "billing": "账单",
+      "logOut": "退出登录"
+    },
+    "team": {
+      "add": "添加团队",
+      "teams": "团队",
+      "switcher": "团队切换器",
+      "switchLabel": "切换团队：{name}",
+      "switchError": "切换团队失败。"
+    },
+    "mobileMe": {
+      "signOut": "退出登录",
+      "signingOut": "正在退出登录…",
+      "endSession": "结束此会话",
+      "observeDescription": "LLM 追踪、指标和时间线",
+      "panels": {
+        "account": {
+          "label": "个人资料",
+          "description": "账户、头像、主题和偏好设置"
+        },
+        "team": {
+          "label": "团队",
+          "description": "团队切换、成员和邀请"
+        },
+        "workspace": {
+          "label": "工作区",
+          "description": "谁可以查看和使用此工作区"
+        },
+        "usage": {
+          "label": "用量",
+          "description": "套餐用量和近期活动"
+        },
+        "billing": {
+          "label": "账单",
+          "description": "订阅、套餐和账单门户"
+        },
+        "approvals": {
+          "label": "批准",
+          "description": "你选择始终允许的操作"
+        },
+        "about": {
+          "label": "关于",
+          "description": "版本和构建详情"
+        }
+      }
+    },
+    "members": {
+      "dialogTitle": "工作区成员"
+    },
+    "shortcuts": {
+      "title": "快捷键",
+      "description": "对话工作区中可用的快捷操作。",
+      "searchPlaceholder": "搜索快捷键…",
+      "empty": "未找到快捷键。"
+    },
+    "common": {
+      "cancel": "取消",
+      "back": "返回",
+      "observe": "观测"
+    }
+  },
+  "dashboardSettings": {
+    "common": {
+      "cancel": "取消",
+      "remove": "移除",
+      "retry": "重试",
+      "memberFallback": "成员"
+    },
+    "nav": {
+      "profile": "个人资料",
+      "team": "团队",
+      "usage": "用量",
+      "billing": "账单",
+      "approvals": "审批",
+      "localComputer": "这台电脑",
+      "about": "关于",
+      "userFallback": "SourceWeft 用户",
+      "close": "关闭",
+      "srTitle": "设置中心"
+    },
+    "account": {
+      "profileTitle": "个人资料",
+      "changeAvatar": "更换头像",
+      "changeAvatarOverlay": "更换",
+      "displayName": "显示名称",
+      "displayNamePlaceholder": "你的显示名称",
+      "nameRequired": "请填写名称。",
+      "saving": "保存中…",
+      "saveChanges": "保存更改",
+      "profileSaved": "个人资料已保存",
+      "saveError": "无法保存。",
+      "accountTitle": "账户",
+      "signedInAccount": "当前登录账户",
+      "signOut": "退出登录",
+      "signingOut": "正在退出…",
+      "deleteAccount": "删除账户",
+      "deleteAccountDescription": "永久删除你的账户及所有数据，此操作无法撤销。",
+      "delete": "删除",
+      "deleting": "删除中…",
+      "deleteError": "无法删除账户。",
+      "deleteStarted": "已开始删除账户"
+    },
+    "appearance": {
+      "title": "外观",
+      "theme": {
+        "label": "主题",
+        "description": "选择 SourceWeft 呈现给你的界面外观。",
+        "light": "浅色",
+        "system": "跟随系统",
+        "dark": "深色",
+        "saveError": "无法保存主题设置。"
+      }
+    },
+    "language": {
+      "title": "语言",
+      "label": "界面语言",
+      "description": "选择 SourceWeft 界面显示所用的语言。",
+      "system": "跟随系统",
+      "saveError": "无法保存你的语言设置。",
+      "responseLabel": "回复语言",
+      "responseUnavailable": "尚未开放",
+      "comingSoon": "即将推出"
+    },
+    "team": {
+      "title": "团队",
+      "createTeam": "创建团队",
+      "switchError": "切换团队失败。",
+      "membersTitle": "成员",
+      "invite": "邀请",
+      "colName": "名称",
+      "colEmail": "邮箱",
+      "colRole": "角色",
+      "removeMember": "移除成员",
+      "transferOwnershipFirst": "移除该成员前请先转移所有权",
+      "noMembers": "还没有成员。邀请他人加入以开始协作。",
+      "pendingInvites": "待处理邀请",
+      "revoke": "撤销",
+      "revoking": "撤销中…",
+      "personalNoMembers": "个人团队不支持成员或邀请。创建或切换到团队以开展协作。",
+      "inviteMemberTitle": "邀请团队成员",
+      "emailAddress": "邮箱地址",
+      "emailPlaceholder": "colleague@company.com",
+      "roleLabel": "角色",
+      "roleMember": "成员",
+      "roleAdmin": "管理员",
+      "sendInvite": "发送邀请",
+      "sending": "发送中…",
+      "inviteSent": "已向 {email} 发送邀请",
+      "inviteFailed": "发送邀请失败。",
+      "inviteFailedGeneric": "发送邀请失败。",
+      "personalCannotInvite": "个人团队无法邀请成员。",
+      "revokeFailed": "撤销邀请失败。",
+      "invitationRevoked": "已撤销邀请。",
+      "removeMemberFailed": "移除成员失败。",
+      "memberRemoved": "已移除 {name}。"
+    },
+    "members": {
+      "selectWorkspacePrompt": "选择一个工作区以管理其成员。",
+      "title": "工作区成员",
+      "description": "每个工作区都有各自的成员和角色。团队所有者和管理员始终可以管理所有工作区。",
+      "addMember": "添加成员",
+      "workspaceLabel": "工作区",
+      "selectWorkspacePlaceholder": "选择工作区",
+      "loading": "正在加载成员…",
+      "loadError": "无法加载工作区成员。",
+      "you": "（你）",
+      "teamRoleBadge": "团队{role}",
+      "removeMemberSr": "移除成员",
+      "thisMember": "该成员",
+      "removeDialogTitle": "移除成员？",
+      "removeDialogBody": "{name} 将失去对此工作区的访问权限，但仍是团队成员。",
+      "addDialogTitle": "添加工作区成员",
+      "addDialogDescription": "选择一位团队成员，授予其此工作区的访问权限。若要将新成员加入团队，请先在“团队”面板中邀请他们。",
+      "roleForNewMembers": "新成员的角色",
+      "searchPlaceholder": "按姓名或邮箱搜索团队成员…",
+      "noTeammates": "未找到团队成员。",
+      "everyoneAdded": "团队中的所有人都已在此工作区中。",
+      "roleChanged": "{name} 现在是{role}",
+      "roleChangeError": "无法更改该成员的角色。",
+      "memberRemovedWorkspace": "已将 {name} 从工作区移除",
+      "removeError": "无法移除该成员。",
+      "memberAdded": "已将 {name} 添加为{role}",
+      "addError": "无法添加该成员。"
+    },
+    "roles": {
+      "admin": "管理员",
+      "adminHint": "管理成员、凭据和设置",
+      "editor": "编辑者",
+      "editorHint": "创建和编辑内容",
+      "viewer": "查看者",
+      "viewerHint": "只读访问"
+    },
+    "guests": {
+      "title": "访客",
+      "description": "仅受邀加入此工作区的外部协作者。访客不属于你的团队，且权限不会超过编辑者。",
+      "inviteGuest": "邀请访客",
+      "loading": "正在加载访客…",
+      "loadError": "无法加载访客。",
+      "emptyGuests": "还没有访客。",
+      "emptyGuestsHint": "邀请外部协作者以开始协作。",
+      "guestBadge": "访客",
+      "pendingBadge": "待接受",
+      "removeGuestSr": "移除访客",
+      "revokeInvitationSr": "撤销邀请",
+      "removeDialogTitle": "移除访客？",
+      "thisGuest": "该访客",
+      "removeDialogBody": "{name} 将失去对此工作区的访问权限。",
+      "inviteDialogTitle": "邀请访客",
+      "inviteDialogDescription": "邀请团队以外的人仅在此工作区中协作。他们会收到一封邮件链接以接受邀请。",
+      "emailAddress": "邮箱地址",
+      "emailPlaceholder": "guest@example.com",
+      "roleLabel": "角色",
+      "sendInvitation": "发送邀请",
+      "enterEmail": "请输入要邀请的邮箱地址。",
+      "invitationSent": "已发送邀请",
+      "inviteError": "无法发送该邀请。",
+      "guestRemoved": "已将 {name} 从工作区移除",
+      "removeGuestError": "无法移除该访客。",
+      "invitationRevoked": "已撤销邀请",
+      "revokeGuestError": "无法撤销该邀请。"
+    },
+    "localHost": {
+      "title": "这台电脑",
+      "checkingAccount": "正在核对你的账户…",
+      "description": "在这台 Mac 上处理文件并运行命令。除非你自行选择，否则每个对话都会获得各自的文件夹。",
+      "statusOnline": "这台电脑已在线",
+      "statusConnecting": "正在连接这台电脑…",
+      "statusSettingUp": "正在设置这台电脑…",
+      "remoteAccessTitle": "允许其他设备访问",
+      "remoteAccessDescription": "让使用同一账户的其他设备访问这台电脑。它们可以访问任务文件夹和已授权的工作目录。即使关闭远程访问，你仍可在这台电脑上继续工作。",
+      "turnOffRemoteAccess": "关闭远程访问",
+      "workingDirectoriesTitle": "工作目录",
+      "workingDirectoriesDescription": "每个对话都会获得独立的任务文件夹。移除文件夹访问权限会停止受影响任务的后续本地操作，并保留其中的文件。",
+      "removeAccess": "移除访问权限",
+      "addFolder": "添加文件夹"
+    },
+    "approvals": {
+      "title": "审批",
+      "description": "你在此工作区中选择始终允许的操作。每项授权都仅属于你本人，会自行过期，并可随时在此撤销。",
+      "loading": "正在加载审批…",
+      "empty": "没有已记住的审批。每个需要审批的操作都会先征求你的同意。",
+      "connectorRisk": "连接器：{connector} · 风险：{risk}",
+      "expiresLastUsed": "过期时间：{expiry} · 上次使用：{lastUsed}",
+      "fromConfirmation": "来自确认 {source}",
+      "revoke": "撤销",
+      "revoking": "撤销中…",
+      "revokedToast": "已撤销审批。下次将再次征求你的同意。",
+      "revokeError": "无法撤销审批。",
+      "loadError": "无法加载已记住的审批。"
+    },
+    "about": {
+      "title": "关于",
+      "description": "关于你正在运行的 SourceWeft 客户端的详细信息。报告问题时请附上这些信息。",
+      "detailDesktop": "桌面应用 · {platform} {arch}",
+      "detailDesktopShort": "桌面应用",
+      "detailWeb": "网页版 · {date}",
+      "detailWebShort": "网页版",
+      "buildLabel": "版本 {sha}",
+      "versionUnavailable": "不可用",
+      "versionLoading": "加载中…",
+      "copyAria": "复制版本信息",
+      "viewChangelog": "查看更新日志",
+      "copyDesktopWithInfo": "SourceWeft 桌面版 {version}（{platform} {arch}）",
+      "copyDesktopNoInfo": "SourceWeft 桌面版 {version}",
+      "copyWebWithDate": "SourceWeft 网页构建 {sha}（{date}）",
+      "copyWebNoDate": "SourceWeft 网页构建 {sha}"
+    }
+  },
+  "dashboardSkills": {
+    "actions": {
+      "install": "安装",
+      "uninstall": "卸载",
+      "details": "详情",
+      "retry": "重试",
+      "source": "来源"
+    },
+    "status": {
+      "installed": "已安装",
+      "builtin": "内置",
+      "unavailable": "不可用",
+      "unverified": "未验证",
+      "underReview": "审核中"
+    },
+    "tabs": {
+      "overview": "概览"
+    },
+    "loading": {
+      "skill": "正在加载技能…"
+    },
+    "content": {
+      "noSkillMd": "该技能不包含 SKILL.md 内容。"
+    },
+    "publisher": {
+      "official": "官方",
+      "team": "团队",
+      "community": "社区",
+      "workspace": "工作区"
+    },
+    "visibility": {
+      "public": "公开",
+      "restricted": "受限",
+      "workspace": "工作区",
+      "team": "团队"
+    },
+    "fields": {
+      "heading": "详情",
+      "name": "名称",
+      "publisher": "发布者",
+      "version": "版本",
+      "visibility": "可见性",
+      "readme": "README",
+      "license": "许可证",
+      "included": "已包含",
+      "notIncluded": "未包含"
+    },
+    "toasts": {
+      "installed": "技能已安装",
+      "uninstalled": "技能已卸载",
+      "installFailed": "安装技能失败。",
+      "uninstallFailed": "卸载技能失败。",
+      "installRecordMissing": "技能安装记录缺失。请刷新后重试。"
+    },
+    "gallery": {
+      "filters": "筛选",
+      "clearAll": "全部清除",
+      "filtersDrawerTitle": "技能筛选",
+      "searchPlaceholder": "搜索技能",
+      "summaryAll": "全部",
+      "sortBy": "排序方式",
+      "submitSkill": "提交技能",
+      "facets": {
+        "search": "搜索",
+        "category": "分类",
+        "publisher": "发布者",
+        "status": "状态"
+      },
+      "categories": {
+        "all": "全部",
+        "learn": "学习",
+        "research": "研究",
+        "write": "写作",
+        "review": "审阅",
+        "operate": "运营"
+      },
+      "publishers": {
+        "all": "全部发布者",
+        "official": "官方",
+        "community": "社区",
+        "not_official": "非官方"
+      },
+      "statuses": {
+        "all": "全部",
+        "installed": "已安装",
+        "not_installed": "未安装"
+      },
+      "sort": {
+        "recommended": "推荐",
+        "name_asc": "名称 A-Z",
+        "installed_first": "已安装优先",
+        "official_first": "官方优先"
+      },
+      "workspace": {
+        "select": "选择工作区",
+        "none": "暂无工作区",
+        "current": "当前工作区"
+      },
+      "empty": {
+        "none": "此工作区暂无可用技能。",
+        "noMatch": "没有符合当前筛选条件的技能。"
+      },
+      "error": {
+        "title": "无法加载技能",
+        "loadFailed": "加载技能失败。",
+        "switchFailed": "切换工作区失败。"
+      }
+    },
+    "detail": {
+      "back": "返回技能库",
+      "titleFallback": "技能详情",
+      "noSkillLoaded": "未加载技能。",
+      "errors": {
+        "slugMissing": "缺少技能标识。",
+        "notFound": "未找到技能。",
+        "loadFailed": "加载技能失败。"
+      }
+    },
+    "dialog": {
+      "titleFallback": "技能详情",
+      "descriptionLoading": "正在加载技能详情。",
+      "loadFailed": "加载技能详情失败。",
+      "docsPending": "选定版本加载后将显示文档。",
+      "flaggedNotice": "自动检查在该技能中发现了审核标记。请查看选定版本以了解其当前的审核结论。",
+      "unverifiedNotice": "这是一个从 GitHub 索引的未验证社区技能。安装前请先查看来源——它的指令会在你的对话中运行。"
+    },
+    "versions": {
+      "ariaLabel": "技能版本",
+      "versionLabel": "版本",
+      "loadingVersion": "正在加载版本",
+      "selectedVersion": "选定版本",
+      "recommended": "推荐",
+      "installed": "已安装",
+      "off": "已关闭",
+      "status": {
+        "draft": "审核中",
+        "published": "已发布",
+        "deprecated": "已弃用",
+        "disabled": "已禁用"
+      },
+      "sourceTitle": "查看此确切的来源版本",
+      "viewingDifferent": "正在查看与已安装版本不同的版本。",
+      "useThisVersion": "使用此版本",
+      "moreVersions": "更多版本",
+      "switchFailed": "版本切换失败",
+      "loadFailed": "无法加载版本",
+      "detailsSummary": "版本详情",
+      "files": "{count} 个文件",
+      "reviewNotes": "{count} 条审核说明",
+      "sourceRevision": "来源修订版本",
+      "noDiagnostics": "未记录此版本的导入诊断信息。",
+      "reviewLabel": "审核",
+      "filesSummary": "文件（{count}）"
+    },
+    "submit": {
+      "button": "提交技能",
+      "title": "提交技能",
+      "description": "从公开的 GitHub 仓库按固定版本导入技能。我们会存储技能文件并在使用前进行检查。被标记的技能需等待审核。",
+      "repoAriaLabel": "GitHub 技能仓库",
+      "enterUrl": "请输入公开的 GitHub 仓库 URL。",
+      "selectWorkspace": "提交技能前请先选择工作区。",
+      "interrupted": "提交已中断。",
+      "partialWarning": "部分项目可能已保存；重试前请刷新技能库。",
+      "resultsAriaLabel": "导入结果",
+      "resultsSummary": "{indexed} 个已索引 · {queued} 个待审核 · {failed} 个失败",
+      "skillFallback": "技能",
+      "repositoryRoot": "仓库根目录",
+      "reviewFlags": "审核标记：{flags}",
+      "submit": "提交",
+      "status": {
+        "indexed": "已索引",
+        "queued": "待审核",
+        "failed": "失败"
+      }
+    },
+    "introduction": {
+      "from": "来自 {source}",
+      "noDescription": "未提供详细说明。"
+    },
+    "avatar": {
+      "logoUnavailable": "标志不可用：{name}",
+      "publisherAvatar": "{name} 的 GitHub 发布者头像",
+      "logo": "{name} 标志"
+    }
+  },
+  "dashboardChat": {
+    "common": {
+      "files": "文件",
+      "tryAgain": "重试"
+    },
+    "modelCatalog": {
+      "failedTitle": "模型目录加载失败",
+      "failedRefresh": "发送消息前请先刷新页面。",
+      "failedToast": "模型目录加载失败。请刷新后重试。",
+      "loadingToast": "模型目录仍在加载。请稍后重试。"
+    },
+    "newChat": {
+      "title": "新建对话"
+    },
+    "thread": {
+      "fallbackTitle": "对话",
+      "unavailableTitle": "对话不可用",
+      "unavailableBody": "此对话可能已被删除、移动，或你已无权访问。",
+      "messageNotStarted": "消息未能开始",
+      "retryFirstMessage": "重试第一条消息",
+      "imagesSaved": "已保存 {count} 张附加图片",
+      "queuePaused": "电脑不可用期间，排队的消息已暂停。",
+      "resumeQueued": "恢复排队消息"
+    },
+    "hub": {
+      "srTitle": "Hub"
+    },
+    "artifact": {
+      "srTitle": "制品",
+      "srPreview": "制品预览"
+    },
+    "presence": {
+      "whosViewing": "谁在查看",
+      "guest": "访客",
+      "guestWithName": "{name} · 访客",
+      "member": "成员"
+    },
+    "typing": {
+      "guest": "访客",
+      "someone": "有人",
+      "one": "{name} 正在输入…",
+      "two": "{first} 和 {second} 正在输入…",
+      "several": "多人正在输入…"
+    },
+    "workfile": {
+      "title": "工作文件",
+      "fallbackDescription": "助手在此对话中创建的工作材料。",
+      "purpose": {
+        "scratch": "草稿区",
+        "draft": "草稿",
+        "note": "笔记",
+        "candidate": "候选产出",
+        "fallback": "工作文件"
+      }
+    },
+    "sourceMeta": {
+      "processingFailed": "处理失败",
+      "syncInProgress": "同步中",
+      "untitled": "未命名"
+    },
+    "queue": {
+      "imagesPreview": "{count} 张图片",
+      "messagePreview": "排队的消息"
+    },
+    "work": {
+      "conversationDetails": "对话详情",
+      "chooseCloudOrComputer": "选择云端或电脑",
+      "cloud": "云端",
+      "statusUnavailable": "状态不可用",
+      "offline": "离线",
+      "online": "在线",
+      "computerUnavailable": "电脑不可用",
+      "connecting": "连接中…",
+      "taskFolder": "任务文件夹",
+      "directoryPending": "目录待定",
+      "runsInCloud": "此对话在云端运行。",
+      "fixedComputer": "此对话使用固定的电脑与工作目录。",
+      "computerOnline": "电脑已在线。",
+      "computerOffline": "电脑已离线。重新连接后本地任务可继续。",
+      "workingDirectory": "工作目录",
+      "directoryConnectedWhenUsed": "工作目录将在首次使用时连接。",
+      "myComputers": "我的电脑",
+      "loadingComputers": "正在加载电脑…",
+      "couldNotLoadComputers": "无法加载电脑：{error}",
+      "thisComputer": "这台电脑",
+      "connectComputerEllipsis": "连接电脑…",
+      "filesDescription": "此对话工作目录中的文件。",
+      "connectComputerTitle": "连接电脑",
+      "connectComputerDescription": "在那台电脑上使用同一账户登录，然后在“设置 → 这台电脑”中启用来自其他设备的访问。",
+      "open": "打开",
+      "connect": "连接",
+      "accessDisabled": "访问已禁用",
+      "noComputers": "暂无可用的电脑。",
+      "draftDataUnavailable": "工作目录草稿数据不可用。",
+      "restoreSelectionFailed": "无法恢复工作目录的选择。",
+      "saveSelectionFailed": "无法保存工作目录的选择。请保持此页面打开并重试。",
+      "computerUnavailableChooseAnother": "这台电脑不可用。请选择另一台电脑。"
+    },
+    "folderPicker": {
+      "folderUnavailable": "文件夹不可用",
+      "defaultTaskFolder": "默认任务文件夹",
+      "selectFolder": "选择文件夹…"
+    },
+    "local": {
+      "historyPreserved": "历史记录仍可查看，草稿会被保留。",
+      "checkAgain": "重新检查",
+      "connectComputer": "连接电脑",
+      "couldNotConnect": "无法连接到电脑。"
+    },
+    "shortcuts": {
+      "workspaceGroup": "工作区",
+      "switchToWorkspace": "切换到 {name}"
+    },
+    "toasts": {
+      "mcpSelected": "已为此对话选择 MCP",
+      "hubUpdating": "Hub 正在更新。",
+      "noWorkspace": "尚未选择工作区。",
+      "modelCapabilitiesNotLoaded": "对话模型能力尚未加载。",
+      "waitInitializing": "请等待电脑完成初始化。",
+      "connectComputerFirst": "请先连接所选电脑。",
+      "attachmentsSaveFailed": "无法保存第一条消息的附件。请保持此页面打开并重试。",
+      "draftClearFailed": "对话已创建，但草稿未能清除。",
+      "createConversationFailed": "创建对话失败。",
+      "chatStayedBusy": "对话一直忙碌——请重试。",
+      "computerUnavailable": "电脑不可用。",
+      "queuedWillSend": "已排队——将在对话空闲时发送。",
+      "sourcesLoadingOrSaving": "来源仍在加载或保存中。",
+      "sourcesLoadingOrSavingWait": "来源仍在加载或保存中。请等待完成后再发送。",
+      "workspaceNotReady": "工作区尚未就绪。",
+      "thinkingPreferenceSaveFailed": "无法为此对话保存思考偏好。",
+      "webAccessPreferenceSaveFailed": "无法为此对话保存联网访问偏好。",
+      "optionsSaveFailed": "无法为此对话保存选项。",
+      "modelUpdateFailedDetail": "无法为此对话更新模型：{message}",
+      "modelUpdateFailed": "无法为此对话更新模型。",
+      "noThreadWorkspace": "尚未选择对话工作区。",
+      "workfileLoadFailed": "加载工作文件失败。",
+      "sourcesLoadFailed": "加载来源失败。请重新加载此对话。",
+      "sourcesSaveFailed": "保存来源失败。请重新加载此对话。",
+      "earlierMessagesLoadFailed": "加载更早的消息失败。"
+    },
+    "bootstrap": {
+      "firstMessageNotConfirmed": "第一条消息未确认。其内容已保存在下方。你可以安全地重试相同的请求。",
+      "computerUnavailableSaved": "电脑不可用。你的第一条消息已保存。",
+      "saveSourcesFailed": "开始此对话前无法保存来源。",
+      "firstMessageSavedCheck": "你的第一条消息已保存。重试相同请求前请先查看对话。"
+    }
+  },
+  "dashboardChatCanvas": {
+    "header": {
+      "collapseSidebar": "收起侧边栏",
+      "expandSidebar": "展开侧边栏",
+      "hideSidebar": "隐藏侧边栏",
+      "showSidebar": "显示侧边栏",
+      "showHubWindow": "显示来源窗口",
+      "hideSources": "隐藏来源",
+      "showSources": "显示来源",
+      "openHub": "打开来源面板"
+    },
+    "modelSelector": {
+      "type": {
+        "image": "图像",
+        "llm": "LLM",
+        "vision": "视觉"
+      },
+      "noModelsAvailable": "暂无可用模型。",
+      "searchModels": "搜索模型",
+      "searchModelsEllipsis": "搜索模型…",
+      "global": "全局",
+      "byokTab": "BYOK",
+      "auto": "自动",
+      "none": "无",
+      "loadingModels": "正在加载模型…",
+      "modelsAriaLabel": "模型：{model}",
+      "selectModelsTitle": "选择语言、图像和视觉模型",
+      "selectModelTitle": "选择模型",
+      "typeModelsLoading": "正在加载{type}模型",
+      "typeModelAria": "{type}模型：{model}",
+      "noTypeModel": "无{type}",
+      "byokTooltip": "{type}：{model}（通过 {provider}）",
+      "typeTooltip": "{type}：{model}",
+      "noTypeModelAvailable": "无可用的{type}模型",
+      "byok": {
+        "customProvider": "自定义提供方",
+        "system": "系统",
+        "custom": "自定义",
+        "status": {
+          "addModelId": "添加模型 ID",
+          "customEndpoint": "自定义端点",
+          "addCredential": "添加凭据后使用",
+          "byokModels": "BYOK 模型",
+          "notConfigured": "未配置"
+        },
+        "addModel": {
+          "image": "添加图像模型",
+          "llm": "添加模型",
+          "vision": "添加视觉模型"
+        },
+        "addCredential": {
+          "image": "添加图像凭据",
+          "llm": "添加凭据",
+          "vision": "添加视觉凭据"
+        },
+        "noModelsConfigured": "尚未配置{provider}模型",
+        "getStartedAddModel": "使用此提供方添加一个模型即可开始。",
+        "getStartedSaveKey": "为此提供方保存 API 密钥即可开始。",
+        "noModelsMatchSearch": "没有匹配此搜索的模型。",
+        "noSavedModels": "尚未为{provider}保存任何{type}模型。"
+      }
+    },
+    "byokDialog": {
+      "customProvider": "自定义提供方",
+      "toastConfigured": "BYOK 模型已配置。",
+      "toastFailed": "配置 BYOK 模型失败。",
+      "title": "添加新配置",
+      "description": "设置新的{type} BYOK 模型。",
+      "modelConfiguration": "模型配置",
+      "provider": "提供方",
+      "selectProvider": "选择提供方",
+      "modelId": "模型 ID",
+      "selectModel": "选择模型",
+      "loadingProviderModels": "正在加载提供方模型…",
+      "displayName": "显示名称",
+      "savedCredential": "已保存的凭据",
+      "selectSavedCredential": "选择已保存的凭据",
+      "credentialAliasHelp": "凭据别名用于标识已保存的 API 密钥。模型会保存在该凭据下。",
+      "useNewApiKey": "改用新的 API 密钥",
+      "useExistingCredential": "使用已保存的凭据",
+      "apiKey": "API 密钥",
+      "apiBaseUrl": "API 基础 URL",
+      "systemDefault": "系统默认",
+      "customProviderHelp": "兼容 OpenAI 的提供方和私有代理请在“自定义提供方”下配置。",
+      "cancel": "取消",
+      "addModel": "添加模型"
+    },
+    "common": {
+      "running": "运行中",
+      "failed": "失败",
+      "working": "处理中…",
+      "openPreview": "打开预览：{value}",
+      "subagent": "子智能体",
+      "yes": "是",
+      "no": "否"
+    },
+    "emptyState": {
+      "title": "你想做些什么？",
+      "description": "先输入提示、对比证据，或让智能体在你新建会话前先归纳出最重要的内容。",
+      "suggestions": {
+        "summarize": "总结所选来源",
+        "compareClaims": "对比这些文档中的主要论点",
+        "whatChanged": "这些报告之间有哪些变化？",
+        "strongestEvidence": "列出最有力的支持性证据"
+      }
+    },
+    "composer": {
+      "placeholder": "向你的文档、链接或已连接的工具发送消息…",
+      "unavailable": "不可用",
+      "on": "开",
+      "off": "关",
+      "default": "默认",
+      "changed": "已更改 {count} 项",
+      "skillLimit": "每条消息最多可启用 {max} 个技能。",
+      "options": "选项",
+      "connectorTools": "{name} 工具",
+      "reset": "重置",
+      "enableTool": "启用工具",
+      "noConfigurableOptions": "无可配置的选项",
+      "enableSkill": "启用技能",
+      "thinking": "思考",
+      "auto": "自动",
+      "thinkingEffortUnavailable": "思考强度不可用",
+      "noReasoningOptions": "无可用的推理选项",
+      "webAccess": "联网访问",
+      "disableThinking": "关闭思考",
+      "enableThinking": "开启思考",
+      "cancelEdit": "取消编辑（Esc）",
+      "cancelEditSr": "取消编辑",
+      "stopping": "正在停止",
+      "stop": "停止",
+      "send": "发送",
+      "selectedSources": "已选择 {count} 个来源",
+      "remove": "移除 {name}",
+      "imagesCount": "{count} 张图片",
+      "collapse": "收起",
+      "show": "展开",
+      "addImage": "添加图片",
+      "draftSaveFailedNoRefresh": "保存草稿失败。请暂时不要刷新。",
+      "draftRestoreFailed": "无法恢复你的草稿。",
+      "retry": "重试",
+      "restoringDraft": "正在恢复你的草稿…",
+      "draftSaveFailed": "保存草稿失败。",
+      "slashUseConnectorTools": "使用 {connector} 工具",
+      "slashGroup": {
+        "tools": "工具",
+        "skills": "技能"
+      },
+      "thinkingEffort": {
+        "minimal": "最低",
+        "low": "低",
+        "medium": "标准",
+        "high": "高",
+        "xhigh": "超高"
+      }
+    },
+    "assistantActivity": {
+      "responding": "正在回复…",
+      "working": "处理中",
+      "thinking": "正在思考…",
+      "metadata": {
+        "sources": "个来源",
+        "results": "个结果",
+        "hits": "次命中",
+        "ms": "ms"
+      }
+    },
+    "delegate": {
+      "status": {
+        "running": "运行中",
+        "approval_requested": "等待审批",
+        "completed": "已完成",
+        "error": "失败"
+      },
+      "delegatedTo": "已委派给 {agent}",
+      "delegatedToStatus": "已委派给 {agent} · {status}"
+    },
+    "userQuestion": {
+      "waitingForAnswer": "正在等待你的回答",
+      "noAnswerProvided": "未提供回答",
+      "askingSingular": "正在提问",
+      "askingPlural": "正在提问",
+      "askedSingular": "已提问 {count} 个问题",
+      "askedPlural": "已提问 {count} 个问题",
+      "askedFallback": "已提出一个问题",
+      "errorFallback": "无法获取你的回答。"
+    },
+    "toolCard": {
+      "status": {
+        "running": "运行中",
+        "generating": "生成中",
+        "needs-approval": "需要审批",
+        "failed": "失败",
+        "rejected": "已拒绝",
+        "done": "完成"
+      },
+      "connector": {
+        "failed": "{tool} 失败",
+        "running": "正在运行 {tool}",
+        "completed": "{tool} 已完成"
+      },
+      "skill": {
+        "readingBundleFile": "正在从 {skill} 读取 {file}",
+        "readBundleFile": "已从 {skill} 读取 {file}",
+        "loadingInstructions": "正在加载 {skill} 技能说明",
+        "loadInstructions": "加载 {skill} 技能说明",
+        "loadingInstructionsGeneric": "正在加载技能说明",
+        "loadInstructionsGeneric": "加载技能说明"
+      },
+      "readFile": {
+        "unknownFile": "未知文件",
+        "label": "读取文件：",
+        "previewTruncatedLines": "预览已截断至 {count} 行。",
+        "thisFile": "该文件",
+        "binaryUnsupported": "{path} 不是 UTF-8 文本文件。请使用制品预览、媒体感知检查，或将其发布为制品，而不要使用 read_file。",
+        "noVisibleContent": "（无可见内容）"
+      }
+    },
+    "toolConfirmation": {
+      "resolved": {
+        "expired": "审批已过期且未作出决定。该操作未执行。",
+        "stopped": "审批已停止。该操作未执行。",
+        "rejected": "审批已拒绝。该操作未执行。",
+        "approvedWaiting": "审批已记录。正在等待运行继续。",
+        "approvedMayRun": "审批已记录。该操作现在可以执行。",
+        "failed": "审批失败。该操作未执行。",
+        "running": "审批已记录。该操作正在执行。",
+        "completed": "审批已记录。该操作已完成。"
+      },
+      "approvalLabel": {
+        "failed": "{tool} 审批失败",
+        "expired": "{tool} 审批已过期",
+        "stopped": "{tool} 审批已停止",
+        "rejected": "{tool} 审批已拒绝",
+        "recorded": "{tool} 审批已记录",
+        "waiting": "{tool} 正在等待审批",
+        "actionFailed": "{tool} 已批准的操作失败"
+      },
+      "approvedInSourceweft": "已在 SourceWeft 中批准。",
+      "rejectedInSourceweft": "已在 SourceWeft 中拒绝。",
+      "rejectedNotRun": "已在 SourceWeft 中拒绝。该操作未执行。",
+      "actionFailed": "操作失败。",
+      "confirmationFailed": "确认失败。",
+      "missingWorkspace": "SourceWeft 确认缺少工作区上下文。",
+      "notAttached": "此确认已不再关联到活动运行。",
+      "approving": "正在批准…",
+      "rememberFor": "记住时长",
+      "rememberAria": "记住此审批的时长",
+      "viewCommand": "查看命令（{lines} 行，{characters} 个字符）",
+      "pending": "{count} 个待处理",
+      "waitingForApproval": "正在等待审批",
+      "endApprovalWait": "结束审批等待",
+      "end": "结束",
+      "decision": {
+        "reject": "拒绝",
+        "approve": "批准"
+      },
+      "outcome": {
+        "approvedNotRemembered": "已在 SourceWeft 中批准。此审批未被记住——仅适用于本次操作。",
+        "approvedUntil": "已在 SourceWeft 中批准。在 {expiry} 之前，此操作将被自动批准。可在“设置 → 审批”中管理。",
+        "approvedAlways": "已在 SourceWeft 中批准。此操作将被自动批准。可在“设置 → 审批”中管理。"
+      },
+      "trustDuration": {
+        "day": "{count} 天",
+        "days": "{count} 天",
+        "default": "{days}（默认）",
+        "maximum": "{days}（最长）",
+        "expired": "已过期"
+      },
+      "detail": {
+        "sizeNotProvided": "未提供大小",
+        "risk": "风险：{level}",
+        "prepareFile": "准备 {count} 个文件",
+        "prepareFiles": "准备 {count} 个文件",
+        "unknownSource": "未知来源",
+        "unknownSandboxPath": "未知沙盒路径",
+        "unknownTarget": "未知目标",
+        "workfileMaterialized": "所选的 SourceWeft /files 工作文件内容将被实体化为普通的沙盒文件。",
+        "execSummaryTruncated": "{text}...（{lines} 行，{chars} 个字符）",
+        "conversationWorkingDir": "对话工作目录",
+        "commandNotProvided": "未提供命令",
+        "command": "命令：{summary}",
+        "workingDirectoryPrefix": "工作目录：",
+        "reviewRisk": "批准前请评估网络、依赖和密钥访问方面的风险。",
+        "editableBeforeApproval": "批准前可编辑",
+        "collectOutput": "收集 {count} 个输出",
+        "collectOutputs": "收集 {count} 个输出",
+        "overwriteYes": "是",
+        "overwriteNo": "否",
+        "overwrite": "覆盖：{value}",
+        "outputsDurable": "只有在收集到 /files 或受支持的制品路径后，输出才会持久保存。",
+        "toolAction": "工具操作",
+        "target": "目标：{value}"
+      }
+    },
+    "workfile": {
+      "locationWorkfile": "工作文件",
+      "locationSandboxFile": "沙盒文件",
+      "wrote": "已写入{location}：{name}",
+      "edited": "已编辑{location}：{name}"
+    },
+    "duration": {
+      "thoughtFor": "思考了 {duration}",
+      "thoughtForFew": "思考了几秒"
+    },
+    "messageResponse": {
+      "source": "来源",
+      "citationTitle": "引用 {label}",
+      "possibleEvidence": "可能的证据",
+      "untitledSource": "未命名来源",
+      "moreCount": "还有 {count} 个",
+      "noInlineCitations": "回答中未包含内联引用标记；这些来源是在生成过程中读取或检索的。"
+    },
+    "sources": {
+      "mentionedSource": "提及的来源"
+    },
+    "artifact": {
+      "unavailable": "制品不可用",
+      "noLongerAvailable": "已发布的制品不再可用。",
+      "open": "打开",
+      "publishedArtifact": "已发布的制品",
+      "loadingPublished": "正在加载已发布的制品…",
+      "openArtifact": "打开制品",
+      "attempt": "第 {attempt}/{maxAttempts} 次尝试",
+      "stagesCompleted": "已完成 {completed}/{total} 个阶段",
+      "fallback": "制品",
+      "titleFailed": "{label}失败",
+      "titlePipeline": "{label}流水线",
+      "titleBuilding": "正在生成{label}",
+      "detailsMismatch": "制品详情与请求不匹配。",
+      "detailsLoadFailed": "无法加载制品详情。",
+      "versionMismatch": "制品版本详情与请求不匹配。",
+      "versionLoadFailed": "无法加载制品版本。"
+    },
+    "errors": {
+      "invalidStructuredContent": "模型未返回有效的结构化内容",
+      "toolArgsInvalidNamed": "{tool} 失败，因为生成的工具参数无效。请重试。",
+      "toolArgsInvalid": "生成的工具参数无效。请重试。",
+      "reloadFailed": "重新加载对话消息失败。",
+      "confirmationMissing": "确认消息缺失。请刷新对话后重试。",
+      "noWorkspaceSelected": "尚未选择工作区。",
+      "noResumeData": "确认响应未包含恢复数据。",
+      "resumeHandlerUnavailable": "工具确认恢复处理器不可用。"
+    },
+    "chatRoot": {
+      "queued": "已排队",
+      "cancelQueued": "取消已排队的消息",
+      "computerUnavailable": "电脑不可用。",
+      "keepWritingDraft": "你可以继续撰写草稿。"
+    },
+    "messageList": {
+      "generationStopped": "生成已被用户停止。",
+      "artifactCount": "{count} 个制品",
+      "callSubagent": "调用子智能体",
+      "instruction": "指令",
+      "result": "结果",
+      "sourceCount": "{count} 个来源",
+      "referenced": "引用来源",
+      "copy": "复制",
+      "editPrompt": "编辑提示",
+      "editAndRestart": "编辑并重新开始",
+      "refresh": "刷新",
+      "messageFailed": "消息发送失败",
+      "modelError": "模型错误",
+      "toastCopied": "消息已复制。",
+      "toastCopyFailed": "无法复制该消息。",
+      "loadEarlier": "加载更早的消息",
+      "olderHidden": "已隐藏 {count} 组较早的消息，以保持该长会话的响应速度。",
+      "showHiddenHistory": "显示隐藏的历史记录"
+    },
+    "sandbox": {
+      "placeholder": {
+        "waitingApproval": "执行前正在等待审批。",
+        "notApproved": "执行未获批准。",
+        "running": "命令正在运行。执行完成后将显示输出。",
+        "error": "无法执行该命令。",
+        "noOutput": "命令已完成，但无输出。"
+      },
+      "details": "详情",
+      "commandDetails": "命令详情",
+      "runCommand": "运行命令",
+      "commandUnavailable": "命令输入不可用。",
+      "copyCommand": "复制命令",
+      "commandAria": "命令",
+      "recoverable": "可恢复：{value}",
+      "transferFailed": "无法完成文件传输。",
+      "prepareWorkspace": "准备工作区",
+      "collectOutputs": "收集输出文件",
+      "from": "从",
+      "to": "到",
+      "outputLabel": "输出",
+      "truncated": "已截断",
+      "fileReady": "{count} 个文件",
+      "filesReady": "{count} 个文件",
+      "filePlanned": "{count} 个计划文件",
+      "filesPlanned": "{count} 个计划文件",
+      "detailFile": "{count} 个文件",
+      "detailFiles": "{count} 个文件",
+      "detailOutput": "{count} 个输出",
+      "detailOutputs": "{count} 个输出",
+      "detailOutputChar": "{count} 个输出字符",
+      "detailOutputChars": "{count} 个输出字符",
+      "exitCode": "退出码 {code}",
+      "outputTruncated": "输出已截断",
+      "operationFailed": "操作失败。请查看详情后重试。",
+      "op": {
+        "preparedWorkspace": "已准备工作区",
+        "executedCommand": "已执行命令",
+        "collectedOutputs": "已收集输出",
+        "releasedWorkspace": "已释放工作区",
+        "fallback": "沙盒操作"
+      },
+      "safeError": {
+        "SANDBOX_BINARY_OUTPUT_UNSUPPORTED": "该输出似乎是二进制内容。此处暂不支持收集二进制输出；如有可用的制品流程，请改用该流程。",
+        "SANDBOX_COLLECT_CONFLICT": "目标 /files 文件已存在。请选择其他目标位置，或在再次审批操作时启用覆盖。",
+        "SANDBOX_COLLECT_PATH_DENIED": "请求的输出路径超出了提供方允许的收集范围。请使用已授权的输出目录。",
+        "SANDBOX_COMMAND_TIMEOUT": "命令超出了配置的超时时间。请尝试更短的命令，或将工作拆分为更小的步骤。",
+        "SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT": "该操作返回了不受支持的下载结果。请改为收集纯文本输出文件。",
+        "SANDBOX_EXECUTE_CWD_DENIED": "命令的工作目录必须保持在已授权的工作区内。",
+        "SANDBOX_EXECUTE_COMMAND_DENIED": "命令在执行前被拒绝，因为它为空或包含不安全的控制字符。请修改命令后重试。",
+        "SANDBOX_EXECUTE_VFS_PATH_DENIED": "命令引用了工作目录中不存在的文件。请在运行命令前先准备好所需文件。",
+        "SANDBOX_FILE_NOT_FOUND": "未找到请求的文件。请重新运行命令，或在收集前检查输出路径。",
+        "SANDBOX_SKILL_STAGING_UNAVAILABLE": "无法在工作目录中准备所需的技能文件。请检查技能文件后重试。",
+        "SANDBOX_FILE_TOO_LARGE": "所选文件超出了文件传输上限。请减小文件大小，或收集更小的输出。",
+        "SANDBOX_NOT_CONFIGURED": "尚未配置命令执行。请联系管理员。",
+        "SANDBOX_NOT_FOUND_OR_EXPIRED": "未找到执行会话或会话已过期。请重试以启动新的会话。",
+        "SANDBOX_PREPARE_PATH_DENIED": "请选择一个已存在的工作文件和一个已授权的目标目录。",
+        "SANDBOX_PROVIDER_AUTH_FAILED": "执行服务无法完成身份验证。请联系管理员。",
+        "SANDBOX_PROVIDER_ERROR": "操作失败。请重试或联系支持团队。",
+        "SANDBOX_TOTAL_SIZE_EXCEEDED": "所选文件超出了文件传输总量上限。请减少文件数量或大小后重试。"
+      }
+    },
+    "userQuestionPanel": {
+      "other": "其他…",
+      "otherFreeText": "其他…（可选的自由文本）",
+      "typeAnswer": "输入你的回答",
+      "otherAnswerAria": "其他回答",
+      "answerAria": "回答",
+      "optional": "（可选）",
+      "required": "此问题为必答。",
+      "answerRequired": "发送前请回答必答问题。",
+      "cancel": "取消",
+      "sending": "正在发送…",
+      "sendAnswer": "发送回答",
+      "needsInput": "助手需要你的输入",
+      "dismissQuestion": "忽略问题",
+      "end": "结束"
+    }
+  },
+  "dashboardChatFiles": {
+    "actions": {
+      "close": "关闭",
+      "artifactsBack": "制品",
+      "share": "分享制品",
+      "openInNewTab": "在新标签页中打开制品",
+      "download": "下载制品",
+      "delete": "删除制品",
+      "cancel": "取消",
+      "deleteConfirm": "删除",
+      "deleting": "正在删除…",
+      "copy": "复制",
+      "copied": "已复制",
+      "tryAgain": "重试",
+      "refreshPreview": "刷新预览",
+      "downloadFile": "下载文件",
+      "copyPreview": "复制预览",
+      "save": "保存",
+      "openCurrent": "打开当前版本"
+    },
+    "labels": {
+      "artifactPreview": "制品预览",
+      "public": "公开",
+      "sharedManageTitle": "已公开分享 — 管理链接",
+      "completedAt": "完成于 {date}",
+      "prompt": "提示词"
+    },
+    "errors": {
+      "noDetails": "未保存错误详情。"
+    },
+    "toasts": {
+      "openHandledByPreview": "该制品预览会自行处理打开操作。",
+      "noPreviewFile": "此制品没有可预览的文件。",
+      "downloadHandledByPreview": "请使用此制品预览内的下载操作。",
+      "noDownloadableFile": "此制品没有可下载的文件。",
+      "deleted": "制品已删除。",
+      "deleteFailed": "无法删除该制品。",
+      "shareChangeFailed": "无法更改分享设置。",
+      "searchVisibilityFailed": "无法更新搜索可见性。",
+      "copyLinkFailed": "无法复制链接。",
+      "noCitationContent": "此网页暂无可用的引用内容。",
+      "saveNotWired": "保存到来源功能尚未接入。"
+    },
+    "deleteDialog": {
+      "title": "删除制品？",
+      "description": "此操作将永久删除该制品并停用其公开链接，且无法撤销。"
+    },
+    "fallback": {
+      "pendingTitle": "制品仍在生成中",
+      "pendingDetail": "制品就绪后即可预览。",
+      "failedTitle": "制品生成失败",
+      "unsupportedTitle": "暂不支持预览",
+      "unsupportedDetail": "当有可用文件时，你仍可从工具栏打开或下载此制品。"
+    },
+    "video": {
+      "previewTitle": "视频预览"
+    },
+    "share": {
+      "title": "分享制品",
+      "anyoneWithLink": "任何拥有链接的人",
+      "onlyYourWorkspace": "仅限你的工作区",
+      "publicDescription": "公开的只读页面，托管在隔离的独立源上。",
+      "turnOnDescription": "开启后即可发布公开链接。",
+      "publicLinkLabel": "公开链接",
+      "hideFromSearch": "对搜索引擎隐藏",
+      "hideFromSearchDescription": "公开链接默认会被索引以扩大触达；如果是敏感的一次性内容，请开启此项。",
+      "views": "浏览量"
+    },
+    "filePreview": {
+      "titleFallback": "文件预览",
+      "contentsAria": "文件内容",
+      "loading": "正在加载文件预览…",
+      "empty": "此文件为空。"
+    },
+    "citation": {
+      "filesLabel": "文件",
+      "thisComputer": "这台电脑",
+      "cloud": "云端",
+      "aiCreated": "AI 创建的文件",
+      "tabExcerpt": "引用摘录",
+      "tabOriginal": "原始文件",
+      "fileChanged": "文件在被引用后已更改。下方摘录属于被引用的版本。",
+      "checkingVersion": "正在核对文件版本…",
+      "citedVerified": "{path} · 已验证引用版本",
+      "fileUnavailable": "文件不可用。"
+    },
+    "location": {
+      "page": "第 {page} 页",
+      "slide": "第 {slide} 张幻灯片",
+      "paragraph": "第 {index} 段",
+      "line": "第 {line} 行",
+      "lines": "第 {start}–{end} 行",
+      "image": "图片"
+    },
+    "desktop": {
+      "opening": "正在打开预览窗口…"
+    },
+    "workfile": {
+      "pathAria": "工作文件路径",
+      "tabPreview": "预览",
+      "tabSource": "源码"
+    },
+    "web": {
+      "referencedPages": "引用的网页",
+      "expand": "展开引用的网页",
+      "collapse": "收起引用的网页"
+    }
+  },
+  "dashboardConnectors": {
+    "common": {
+      "returnToSourceweft": "返回 SourceWeft",
+      "closeTab": "关闭标签页"
+    },
+    "start": {
+      "loadingTitle": "正在打开授权",
+      "loadingMessage": "正在启动连接器授权…",
+      "errorTitle": "无法启动授权",
+      "missingContext": "此连接器授权链接缺少必要的上下文信息。",
+      "startFailed": "启动连接器授权失败。"
+    },
+    "complete": {
+      "successTitle": "连接器已授权",
+      "errorTitle": "授权失败",
+      "redirectSuccess": "正在返回 SourceWeft 以完成设置。",
+      "redirectError": "正在带着授权错误返回 SourceWeft。",
+      "popupSuccess": "SourceWeft 正在原始标签页中更新连接器状态。",
+      "fallbackError": "连接器授权未完成。"
+    }
+  },
+  "dashboardMcpPanel": {
+    "filters": {
+      "title": "MCP 市场",
+      "clearAll": "全部清除",
+      "drawerTitle": "MCP 筛选",
+      "searchPlaceholder": "搜索 MCP",
+      "searchSummaryAll": "全部",
+      "categorySummaryAll": "全部",
+      "facets": {
+        "search": "搜索",
+        "category": "分类",
+        "trust": "信任",
+        "device": "设备",
+        "status": "状态"
+      },
+      "status": {
+        "all": "全部",
+        "installed": "已安装",
+        "not_installed": "未安装"
+      },
+      "trust": {
+        "all": "所有信任级别",
+        "trusted": "官方或已验证",
+        "unverified": "未验证"
+      },
+      "device": {
+        "all": "所有设备",
+        "web": "可在网页运行",
+        "desktop": "桌面端主机"
+      }
+    },
+    "sort": {
+      "label": "排序方式",
+      "recommended": "推荐",
+      "name_asc": "名称 A-Z",
+      "installed_first": "已安装优先",
+      "trusted_first": "受信任优先"
+    },
+    "workspace": {
+      "select": "选择工作区",
+      "none": "暂无工作区"
+    },
+    "toolbar": {
+      "filters": "筛选",
+      "deviceFilterAria": "MCP 设备筛选",
+      "deviceShortAll": "全部",
+      "deviceShortWeb": "网页",
+      "loadMore": "加载更多"
+    },
+    "badges": {
+      "official": "官方",
+      "verified": "已验证",
+      "unverified": "未验证",
+      "desktopOnly": "仅桌面端",
+      "webExecutable": "可在网页运行",
+      "installed": "已安装"
+    },
+    "installStatus": {
+      "active": "使用中",
+      "disabled": "已停用",
+      "error": "错误"
+    },
+    "card": {
+      "viewDetailsAria": "查看 {name} 详情",
+      "openSourceAria": "打开 {name} 来源",
+      "openGithub": "打开 GitHub 仓库",
+      "openSource": "打开来源",
+      "credentialsRequired": "需要凭据",
+      "toolsSyncedTitle": "已同步 {count} 个工具",
+      "tested": "已测试 {time}",
+      "notTestedYet": "尚未测试",
+      "testAria": "测试 {name}",
+      "testConnection": "测试连接",
+      "configureAria": "配置 {name}",
+      "configureRequired": "配置所需凭据",
+      "settings": "设置",
+      "uninstallAria": "卸载 {name}",
+      "uninstall": "卸载",
+      "enableAria": "启用 {name}",
+      "disableAria": "停用 {name}",
+      "enable": "启用",
+      "disable": "停用",
+      "install": "安装",
+      "unverifiedWarning": "未验证的 MCP 可以接收本回合的工具参数，并可能执行外部操作。启用前请先查看该服务器。"
+    },
+    "empty": {
+      "none": "此工作区暂无可用的 MCP 服务器。",
+      "noMatch": "没有符合当前筛选条件的 MCP 服务器。"
+    },
+    "errors": {
+      "loadTitle": "无法加载 MCP 市场",
+      "loadFailed": "加载 MCP 市场失败。",
+      "switchFailed": "切换工作区失败。"
+    },
+    "toasts": {
+      "installed": "MCP 已安装",
+      "installFailed": "安装 MCP 失败。",
+      "uninstalled": "MCP 已卸载",
+      "uninstallFailed": "卸载 MCP 失败。",
+      "enabled": "MCP 已启用",
+      "disabled": "MCP 已停用",
+      "updateFailed": "更新 MCP 失败。",
+      "tested": "已测试 MCP 连接：{count} 个工具",
+      "testFailed": "测试 MCP 失败。",
+      "loadMoreFailed": "加载更多 MCP 服务器失败。",
+      "connected": "MCP 服务器已连接",
+      "authFailed": "MCP 授权失败。请重试。"
+    },
+    "risk": {
+      "destructive": "破坏性",
+      "write": "写入",
+      "read": "读取",
+      "unknown": "未知"
+    },
+    "detail": {
+      "backAria": "返回 MCP 市场",
+      "titleFallback": "MCP 详情",
+      "loadingDescription": "正在加载 MCP 详情。",
+      "test": "测试",
+      "settings": "设置",
+      "uninstall": "卸载",
+      "install": "安装",
+      "loading": "正在加载 MCP…",
+      "retry": "重试",
+      "notFound": "在此工作区目录中未找到该 MCP 服务器。",
+      "loadFailedDetail": "加载 MCP 详情失败。",
+      "loadFailedShort": "加载 MCP 失败。",
+      "identifierMissing": "缺少 MCP 标识符。",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "configureCredentials": "配置凭据",
+      "toolsSynced": "已同步 {count} 个工具",
+      "testedSuffix": " · 已测试 {time}",
+      "notTestedSuffix": " · 尚未测试",
+      "unverifiedNoticeLong": "此 MCP 服务器未经验证。它可以接收对话的工具参数，并可能执行外部操作。启用前请先查看该服务器。",
+      "unverifiedNoticeMedium": "此 MCP 服务器未经验证。在允许其访问对话工具参数之前，请先查看它。",
+      "toolsHeading": "工具",
+      "toolsTotal": "共 {count} 个",
+      "toolsPending": "工具详情将在服务器被索引或安装后公布。",
+      "serverDetails": "服务器详情",
+      "fields": {
+        "identifier": "标识符",
+        "version": "版本",
+        "transport": "传输方式",
+        "runtime": "运行时",
+        "auth": "认证",
+        "tools": "工具",
+        "license": "许可证",
+        "updated": "更新时间"
+      },
+      "fieldValues": {
+        "unknown": "未知",
+        "authRequired": "必需",
+        "authNotRequired": "非必需"
+      },
+      "links": {
+        "homepage": "主页",
+        "repository": "代码仓库",
+        "source": "来源"
+      },
+      "categories": "分类",
+      "runtimeSecurity": "运行时与安全",
+      "security": "凭据按工作区私密配置，静态加密存储，且仅在工具调用期间发送给此服务器。",
+      "securityDesktop": "此服务器仅在桌面端主机上运行。",
+      "securityWeb": "此服务器在完成配置后可通过网页运行时运行。",
+      "securityShort": "凭据按工作区加密，且仅在工具调用期间发送给此服务器。"
+    },
+    "credentials": {
+      "title": "配置 MCP 凭据",
+      "description": "凭据在 SourceWeft 中加密存储，且仅在工具调用期间发送给此 MCP 服务器。",
+      "serverFallback": "MCP 服务器",
+      "authType": {
+        "bearer": "Bearer 令牌",
+        "api_key_header": "API 密钥请求头",
+        "custom_headers": "自定义请求头",
+        "oauth": "OAuth",
+        "none": "无需认证"
+      },
+      "fields": {
+        "bearerToken": "Bearer 令牌",
+        "headerName": "请求头名称",
+        "apiKey": "API 密钥",
+        "headers": "请求头"
+      },
+      "placeholders": {
+        "pasteToken": "粘贴令牌",
+        "pasteKey": "粘贴密钥"
+      },
+      "headersHint": "每行填写一个请求头。保存后将不再显示机密值。",
+      "noAuthNote": "此 MCP 服务器无需凭据。",
+      "oauthNote": "此 MCP 服务器使用 OAuth。请与提供方连接你的账户——你将被重定向以授予访问权限，然后返回此处。你的令牌将加密存储并自动刷新。",
+      "connect": "连接",
+      "close": "关闭",
+      "cancel": "取消",
+      "save": "保存",
+      "errors": {
+        "oneHeaderPerLine": "每行填写一个请求头，例如：X-API-Key: value",
+        "nameAndValueRequired": "请求头的名称和值均为必填。",
+        "bearerRequired": "保存前请输入 Bearer 令牌。",
+        "apiKeyRequired": "保存前请输入请求头名称和 API 密钥。",
+        "headerRequired": "保存前请至少添加一个请求头。"
+      },
+      "toasts": {
+        "saved": "MCP 凭据已保存",
+        "saveFailed": "保存凭据失败。",
+        "alreadyConnected": "MCP 服务器已连接",
+        "authStartFailed": "启动授权失败。"
+      }
+    },
+    "submit": {
+      "trigger": "提交 MCP",
+      "title": "提交 MCP 服务器",
+      "description": "粘贴一个公开的 GitHub 仓库链接。我们会自动解析并进行安全扫描——干净的仓库将直接发布，可疑的则转入人工审核。",
+      "urlRequired": "请输入公开的 GitHub 仓库 URL。",
+      "published": "已发布：{identifier}",
+      "queued": "已提交 {identifier}，已加入人工审核队列（有 {count} 项待确认）。",
+      "failed": "提交失败。请确认这是一个公开的 MCP 仓库。",
+      "submit": "提交"
+    }
+  },
+  "dashboardSourcesHub": {
+    "common": {
+      "cancel": "取消",
+      "save": "保存",
+      "delete": "删除",
+      "remove": "移除",
+      "retry": "重试",
+      "close": "关闭",
+      "open": "打开",
+      "download": "下载",
+      "preview": "预览",
+      "refresh": "刷新",
+      "loading": "加载中…",
+      "working": "处理中…",
+      "saving": "保存中…",
+      "deleting": "删除中…"
+    },
+    "hub": {
+      "title": "资料中心",
+      "openWindow": "在独立窗口中打开资料中心",
+      "finishBeforeMove": "移动资料中心前请先完成编辑或上传",
+      "close": "关闭资料中心",
+      "syncing": "正在同步 {count}",
+      "executionError": "无法读取文件位置：{error}",
+      "scrollTabsLeft": "向左滚动标签",
+      "scrollTabsRight": "向右滚动标签"
+    },
+    "tabs": {
+      "Sources": "来源",
+      "Files": "文件",
+      "Artifacts": "制品",
+      "Connectors": "连接器",
+      "Skills": "技能",
+      "MCP": "MCP",
+      "Citations": "引用"
+    },
+    "search": {
+      "placeholder": {
+        "Sources": "搜索来源…",
+        "Files": "按名称或路径筛选文件…",
+        "Artifacts": "搜索制品…",
+        "Skills": "搜索已安装的技能…",
+        "MCP": "搜索 MCP 工具…",
+        "Citations": "搜索引用…",
+        "Connectors": "搜索连接器…"
+      }
+    },
+    "counts": {
+      "found": "找到 {count} 个",
+      "selected": "已选 {count} 个",
+      "available": "{count} 个可用",
+      "installed": "已安装 {count} 个",
+      "files": "{count} 个文件",
+      "artifacts": "{count} 个制品",
+      "active": "{count} 个活跃",
+      "inThread": "对话中 {count} 个",
+      "current": "当前 {count} 个"
+    },
+    "sources": {
+      "refresh": "刷新来源",
+      "selectAll": "全选来源",
+      "unselectAll": "取消全选来源",
+      "deleteSelected": "删除所选来源",
+      "createFolder": "新建文件夹",
+      "addSource": "添加来源",
+      "loading": "正在加载来源…",
+      "emptyTitle": "来源将显示在此处。",
+      "emptyDescription": "添加文档、链接、笔记或文件夹，为该项目构建来源集合。",
+      "noMatchTitle": "没有来源匹配“{query}”",
+      "noMatchDescription": "试试其他来源标题、文件夹、类型或状态。",
+      "emptyFolder": "空文件夹",
+      "row": {
+        "select": "选择 {title}",
+        "retryOrDelete": "重试或删除此失败的来源",
+        "selectFolder": "选择文件夹",
+        "openPreview": "打开预览",
+        "actions": "来源操作",
+        "retry": "重试",
+        "addSource": "添加来源",
+        "newFolder": "新建文件夹",
+        "editReadme": "编辑 README",
+        "preview": "预览",
+        "download": "下载",
+        "rename": "重命名",
+        "moveTo": "移动到…",
+        "reindex": "重新索引",
+        "delete": "删除",
+        "collapseFolder": "收起文件夹",
+        "expandFolder": "展开文件夹",
+        "itemCount": "{count, plural, other {# 个项目}}",
+        "connectorFallback": "连接器",
+        "openConnectorSettings": "打开 {label} 连接器设置"
+      }
+    },
+    "addSourceDialog": {
+      "title": "添加来源",
+      "description": "将网页、文本笔记或上传的文件添加为来源。",
+      "selectedFolderFallback": "所选文件夹",
+      "tab": {
+        "Text": "文本",
+        "URL": "URL",
+        "File": "文件"
+      },
+      "textTitlePlaceholder": "标题（可选）",
+      "textContentPlaceholder": "粘贴或撰写来源内容…",
+      "urlTitlePlaceholder": "标题（可选）",
+      "urlHint": "SourceWeft 将抓取网页内容并为其建立搜索索引。",
+      "dropHere": "将文件拖放到此处",
+      "dragHere": "将文件拖到此处",
+      "browseHint": "或<browse>浏览</browse>文件",
+      "fileLimits": "最多 {maxFiles} 个文件，每个不超过 {maxSize}MB",
+      "removeFile": "移除文件",
+      "noFilesSelected": "未选择文件",
+      "uploading": "上传中",
+      "createSource": "创建来源",
+      "addUrl": "添加 URL",
+      "uploadFiles": "上传文件",
+      "sourcesRoot": "来源根目录"
+    },
+    "createDirectoryDialog": {
+      "title": "新建文件夹",
+      "description": "添加文件夹以整理来源。",
+      "namePlaceholder": "文件夹名称",
+      "readmePlaceholder": "README 说明（可选）",
+      "create": "新建文件夹"
+    },
+    "moveSourceDialog": {
+      "title": "移动来源",
+      "description": "在根目录下选择一个目标位置。",
+      "moving": "正在移动",
+      "movingProgress": "移动中…",
+      "move": "移动"
+    },
+    "readmeDialog": {
+      "title": "编辑 README",
+      "description": "更新附加到此文件夹的说明。",
+      "folder": "文件夹",
+      "placeholder": "该文件夹的 README 说明…",
+      "save": "保存 README"
+    },
+    "deleteSourceDialog": {
+      "titleFolder": "删除文件夹？",
+      "titleSource": "删除来源？",
+      "descriptionFolder": "此操作将从该工作区移除此文件夹及其来源，且无法撤销。",
+      "descriptionSource": "此操作将从该工作区移除此来源，且无法撤销。"
+    },
+    "deleteSelectedSourcesDialog": {
+      "title": "删除所选来源？",
+      "description": "此操作将删除 {count} 个所选来源，包含所选文件夹中的内容，且无法撤销。"
+    },
+    "files": {
+      "refresh": "刷新文件",
+      "storageNote": "云端 · 随此对话保存",
+      "willAppearNew": "对话开始后文件将显示在此处。",
+      "loadingLocation": "正在加载文件位置…",
+      "loading": "正在加载文件…",
+      "emptyTitle": "文件将显示在此处。",
+      "emptyDescription": "你上传的文件以及在此对话中创建的文件将显示在此处。",
+      "noMatchTitle": "没有文件匹配“{query}”",
+      "noMatchDescription": "试试其他路径、用途或文件类型。",
+      "actions": "文件操作",
+      "uploadFiles": "上传文件",
+      "chooseFiles": "选择要上传的文件",
+      "purpose": {
+        "scratch": "草稿区",
+        "draft": "草稿",
+        "note": "笔记",
+        "output_candidate": "候选产出",
+        "file": "文件"
+      },
+      "uploaded": "{count, plural, other {已上传 # 个文件。}}",
+      "uploadedBeforeError": "{count, plural, other {出错前已上传 # 个文件。}}",
+      "uploadFailed": "上传失败。",
+      "sizeLimit": "{name} 超过了 20 MiB 的文件大小上限。",
+      "deleteTitle": "删除文件？",
+      "deleteDescription": "此操作将从该对话中移除此文件，且无法撤销。",
+      "previewDescription": "云端 · {path} · {size} · {purpose}",
+      "previewFallbackDescription": "此对话中的文件。",
+      "readError": "无法读取文件。"
+    },
+    "artifacts": {
+      "refresh": "刷新制品",
+      "loading": "正在加载制品…",
+      "emptyTitle": "完成的制品将显示在此处。",
+      "emptyDescription": "报告、幻灯片、图片、表格、音频简报及其他已完成的成果将显示在此处。",
+      "noMatchTitle": "没有制品匹配“{query}”",
+      "noMatchDescription": "试试其他标题、制品类型或提示词。",
+      "loadMore": "加载更多",
+      "preview": "预览 {title}",
+      "completed": "完成于 {date}",
+      "public": "公开",
+      "couldNotLoad": "无法加载该制品。",
+      "loadFailed": "加载制品失败。",
+      "loadMoreFailed": "加载更多制品失败。"
+    },
+    "skills": {
+      "gallery": "技能库",
+      "emptyTitle": "技能将显示在此处。",
+      "emptyDescription": "安装技能，为该项目添加可复用的创作流程与智能体能力。",
+      "noMatchTitle": "没有已安装的技能匹配“{query}”",
+      "noMatchDescription": "试试其他技能名称、标识、描述或来源。",
+      "openIntro": "打开技能介绍",
+      "toolOff": "工具已关闭",
+      "hubOn": "资料中心已启用",
+      "hubOff": "资料中心未启用",
+      "shipsScripts": "附带脚本 — 启用后才会运行",
+      "source": {
+        "builtin": "官方",
+        "team": "团队",
+        "community": "社区",
+        "workspace": "工作区"
+      },
+      "enableFailed": "启用技能失败。",
+      "disableFailed": "停用技能失败。",
+      "readmeFallbackTitle": "技能",
+      "readmeFallbackDescription": "选择前先了解此技能。",
+      "readmeLoading": "正在加载技能…",
+      "readmeLoadFailed": "加载技能详情失败。",
+      "galleryDialogTitle": "技能库",
+      "galleryDialogDescription": "为 {workspace} 安装可复用的技能。",
+      "currentWorkspaceFallback": "当前工作区"
+    },
+    "mcp": {
+      "refresh": "刷新 MCP 工具",
+      "market": "MCP 市场",
+      "marketDialogTitle": "MCP 市场",
+      "marketDialogDescription": "为 {workspace} 安装并配置 MCP 服务器。",
+      "loadError": "无法加载 MCP 工具。",
+      "loadFailed": "加载 MCP 工具失败。",
+      "loading": "正在加载 MCP 工具…",
+      "emptyTitle": "尚未安装 MCP 工具。",
+      "emptyDescription": "从 MCP 市场安装 MCP 服务器，即可在对话中使用。",
+      "noMatchTitle": "没有 MCP 工具匹配“{query}”",
+      "noMatchDescription": "试试其他服务器、工具或描述。",
+      "official": "官方",
+      "verified": "已验证",
+      "unverified": "未验证",
+      "authConfigured": "已配置凭据",
+      "authRequired": "需要凭据",
+      "desktopOnly": "仅限桌面端",
+      "disabled": "已停用",
+      "tested": "{time} 测试",
+      "notTested": "未测试",
+      "moreTools": "选择该服务器后还有 {count} 个工具可用。"
+    },
+    "citations": {
+      "untitledSource": "未命名来源",
+      "reference": "引用 {number}",
+      "scopeCurrent": "当前（{count}）",
+      "scopeThread": "对话（{count}）",
+      "noMatch": "没有引用匹配“{query}”。",
+      "noneInThread": "此对话中没有找到引用。",
+      "noneInAnswer": "所选回答中未使用引用。",
+      "open": "打开"
+    },
+    "connectors": {
+      "manage": "管理",
+      "emptyTitle": "尚无活跃的连接器。",
+      "emptyDescription": "打开目录以连接 Notion，或预览即将推出的集成。",
+      "openSettings": "打开 {name} 设置",
+      "syncPausedManual": "手动同步已暂停的 {name}",
+      "isDisabled": "{name} 已停用",
+      "sync": "同步 {name}",
+      "configure": "配置 {name}",
+      "resume": "恢复 {name}",
+      "pause": "暂停 {name}",
+      "resumeShort": "恢复",
+      "pauseShort": "暂停",
+      "enableShort": "启用",
+      "disconnect": "断开 {name}",
+      "removeAria": "移除 {name}",
+      "removeShort": "移除",
+      "syncNow": "立即同步",
+      "backToCatalog": "返回目录",
+      "cancel": "取消",
+      "statusLabel": {
+        "active": "活跃",
+        "paused": "已暂停",
+        "disabled": "已停用",
+        "error": "错误",
+        "syncing": "同步中",
+        "connected": "已连接"
+      },
+      "status": {
+        "active": "活跃",
+        "syncing": "同步中",
+        "connected": "已连接",
+        "available": "可用",
+        "needs_setup": "待设置",
+        "error": "错误",
+        "coming_soon": "即将推出",
+        "disabled": "已停用",
+        "paused": "已暂停",
+        "searchApi": "Search API",
+        "indexable": "可索引"
+      },
+      "type": {
+        "indexable": "可索引",
+        "searchApi": "Search API"
+      },
+      "schedule": {
+        "manual": "手动同步",
+        "auto": "自动同步",
+        "everyDays": "{count, plural, other {每 # 天自动同步}}",
+        "everyHours": "{count, plural, other {每 # 小时自动同步}}",
+        "everyMinutes": "每 {count} 分钟自动同步"
+      },
+      "lastSync": "上次同步 {date}",
+      "neverSynced": "从未同步",
+      "never": "从未",
+      "readinessNoPages": "已连接 · 未共享任何页面",
+      "readinessSetupRequired": "已连接 · 需要设置",
+      "readinessNotReady": "连接器尚未就绪，无法同步。",
+      "cta": {
+        "request": "申请",
+        "connecting": "连接中…",
+        "connected": "已连接",
+        "configure": "配置",
+        "connect": "连接"
+      },
+      "detail": {
+        "syncing": "连接器操作正在运行。",
+        "disabled": "同步已停用。启用此连接器以恢复。",
+        "needsAttention": "连接器需要关注。",
+        "paused": "同步已暂停，恢复此连接器后继续。",
+        "needsSetupWebhook": "配置一个公开的 HTTPS webhook 端点。",
+        "lastSync": "上次同步 {date}",
+        "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
+        "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
+        "available": "可通过 {name} OAuth 进行连接。",
+        "comingSoonSearch": "用于实时智能体搜索的不可索引连接器。",
+        "comingSoonIndexable": "规划中的可索引数据源连接器。",
+        "comingSoonNonIndexable": "规划中的不可索引连接器。"
+      },
+      "webhookUrl": "Webhook URL",
+      "webhookLocal": "本地",
+      "copyWebhook": "复制 webhook URL",
+      "webhookNote": "完成 OAuth 后，在 {name} 连接设置中添加此 URL。提供方 webhook 需要公开的 HTTPS。",
+      "manageTitle": "管理连接器",
+      "disabledCount": "{count} 个已停用",
+      "manageDescription": "将 SourceWeft 连接到知识、项目和沟通工具。",
+      "filter": "筛选：",
+      "filterAll": "全部连接器",
+      "filterManaged": "已管理",
+      "searchPlaceholder": "搜索连接器",
+      "loading": "正在加载连接器…",
+      "noMatchTitle": "没有连接器匹配“{query}”",
+      "noMatchDescription": "试试其他提供方、能力或分类。",
+      "noConnectorsTitle": "尚无连接器。",
+      "managedEmptyDescription": "连接 Notion，或从目录中选择即将推出的集成。",
+      "managedNoMatchDescription": "试试其他连接器名称或状态。",
+      "category": {
+        "Knowledge & Docs": "知识与文档",
+        "File Storage": "文件存储",
+        "Communication": "沟通协作",
+        "Projects & Data": "项目与数据",
+        "Publishing": "发布"
+      },
+      "settingsDescription": "连接器设置、执行历史和提供方事件。",
+      "settingsTab": {
+        "overview": "概览",
+        "configuration": "配置",
+        "sync": "同步历史",
+        "actions": "操作",
+        "webhooks": "Webhook",
+        "danger": "危险区"
+      },
+      "overview": {
+        "status": "状态",
+        "lastSuccessfulSync": "上次成功同步",
+        "latestRun": "最近一次运行",
+        "nextScheduled": "下次计划",
+        "never": "从未",
+        "noActivity": "暂无活动",
+        "notScheduled": "未计划",
+        "needsAttention": "需要关注",
+        "latestRunValue": "{kind} · {status}",
+        "activityDescription": "同步、操作和 webhook 的最近连接器执行记录。",
+        "activityEmpty": "尚无连接器活动。"
+      },
+      "config": {
+        "general": "常规",
+        "name": "名称",
+        "syncSchedule": "同步计划",
+        "customIntervalMinutes": "自定义间隔（分钟）",
+        "nonIndexableNote": "不可索引的搜索连接器无法运行周期性索引。",
+        "saveSettings": "保存设置",
+        "schedule": "计划",
+        "provider": "提供方",
+        "connection": "连接",
+        "accountId": "账户 ID",
+        "none": "无",
+        "defaultConnection": "默认连接",
+        "capabilities": "能力",
+        "indexableSource": "可索引来源",
+        "nonIndexableSearch": "不可索引搜索",
+        "periodicSync": "周期性同步",
+        "actions": "操作",
+        "webhooks": "Webhook",
+        "connector": "连接器",
+        "webhookUrlLabel": "{name} webhook URL",
+        "needsPublicHttps": "需要公开的 HTTPS",
+        "webhookNoteSuffix": "{note} 事件会记录在 Webhook 和活动中。",
+        "saveError": "请输入连接器名称和一个正数的同步间隔。",
+        "cannotPeriodic": "此连接器无法使用周期性同步。"
+      },
+      "syncHistory": {
+        "description": "手动、计划、webhook、回填和跳过的同步尝试。",
+        "empty": "尚无同步运行。"
+      },
+      "actionsHistory": {
+        "description": "已批准的连接器写入、更新、删除、评论和文件上传。",
+        "empty": "尚无连接器操作。"
+      },
+      "webhooksHistory": {
+        "description": "从连接器 webhook 收到的提供方事件。",
+        "empty": "尚无 webhook 事件。"
+      },
+      "danger": {
+        "note": "移除会停止此连接器的同步。除非单独移除，否则已索引的来源会保留。"
+      },
+      "frequency": {
+        "15": "15 分钟",
+        "60": "1 小时",
+        "360": "6 小时",
+        "720": "12 小时",
+        "1440": "每天",
+        "10080": "每周",
+        "manual": "手动",
+        "custom": "自定义"
+      },
+      "disconnectTitle": "管理连接器移除",
+      "disconnectDescription": "选择临时停用此连接器，还是将其从 SourceWeft 中永久删除。",
+      "disableOption": "停用连接器",
+      "disableOptionDesc": "停止同步。保留授权、配置、历史和已索引的内容。稍后可再次启用。",
+      "deleteOption": "删除连接器及其所有已索引内容",
+      "deleteOptionDesc": "永久删除此连接器、其本地授权，以及它导入的所有内容。此操作无法撤销。",
+      "disconnectNote": "SourceWeft 不会撤销第三方提供方中的访问权限。",
+      "deleting": "删除中…",
+      "disabling": "停用中…",
+      "deleteConfirm": "删除连接器及内容",
+      "disableConfirm": "停用连接器"
+    },
+    "connectorActivity": {
+      "trigger": {
+        "manual": "手动",
+        "scheduled": "计划",
+        "webhook": "Webhook",
+        "backfill": "回填"
+      },
+      "syncTitle": "{trigger}同步",
+      "connectorAction": "连接器操作",
+      "webhookEvent": "Webhook 事件",
+      "yes": "是",
+      "no": "否",
+      "none": "无",
+      "loading": "正在加载活动…",
+      "executionResult": "执行结果",
+      "emptyDescription": "同步、操作或 webhook 运行后，连接器活动将显示在此处。",
+      "summary": {
+        "actionType": "操作",
+        "attempts": "尝试次数",
+        "discoveredCount": "已发现",
+        "eventType": "事件",
+        "externalId": "外部 ID",
+        "failedCount": "失败",
+        "fullResync": "完整重新同步",
+        "heartbeatAt": "心跳",
+        "indexedCount": "已索引",
+        "objectId": "对象 ID",
+        "objectType": "对象",
+        "providerEventId": "提供方事件",
+        "reason": "原因",
+        "requestPreview": "请求",
+        "riskLevel": "风险",
+        "source": "来源",
+        "targetExternalIds": "目标",
+        "targetExternalIdCount": "目标数量",
+        "targeted": "已定向",
+        "syncRunId": "关联同步",
+        "triggerType": "触发方式"
+      }
+    },
+    "sourcePreview": {
+      "mode": {
+        "preview": "预览",
+        "chunks": "分块",
+        "raw": "原始 MD",
+        "sourceFile": "文件"
+      },
+      "sourceFallback": "来源",
+      "chunkLabel": "分块 {number}",
+      "citedChunk": "引用的分块",
+      "sourcePreview": "来源预览",
+      "chunksCount": "{count} 个分块",
+      "historical": "历史版本",
+      "sourceDeleted": "来源已删除",
+      "jumpToCited": "跳转到被引用处",
+      "webCitation": "网页引用",
+      "webCitationNote": "此引用指向一个公开网页。",
+      "open": "打开",
+      "noContentSaved": "未保存任何引用内容。",
+      "loading": "正在加载来源预览…",
+      "sourceUnavailable": "来源已不可用",
+      "sourceUnavailableNote": "原始来源已被删除，因此只能显示随此回答保存的引用快照。",
+      "deletedSourceFallback": "已删除的来源",
+      "preservedCitation": "已保留的引用",
+      "noExcerptSaved": "未保存任何引用摘录。",
+      "loadFailed": "加载来源预览失败。",
+      "download": "下载",
+      "noSourceFile": "没有可用的来源文件。",
+      "fileDetails": "文件详情",
+      "fileDetailsNote": "原始来源资源的快速元数据。",
+      "metaName": "名称",
+      "metaType": "类型",
+      "metaFormat": "格式",
+      "metaSize": "大小",
+      "metaUpdated": "更新时间",
+      "metaIndexedChunks": "已索引分块",
+      "unknown": "未知",
+      "noMarkdown": "没有可用的 Markdown 内容。",
+      "citedSource": "被引用的来源",
+      "raw": "原始",
+      "noRawChunk": "没有原始分块内容。",
+      "noChunks": "此来源尚无已索引的分块。"
+    },
+    "localFiles": {
+      "ariaLabel": "本地文件",
+      "heading": "文件",
+      "refresh": "刷新文件",
+      "lastListingNote": " 正在显示上次加载的列表；文件当前不可访问。",
+      "parentFolder": "上级文件夹",
+      "loading": "正在从这台电脑加载文件…",
+      "emptyFolder": "此文件夹为空。在此创建的文件会自动显示。",
+      "noMatch": "没有文件匹配你的搜索。",
+      "openFolder": "打开文件夹",
+      "previewInApp": "在应用中预览",
+      "openFolderAria": "打开文件夹 {name}",
+      "previewAria": "预览 {name}",
+      "downloadAria": "下载 {name}"
+    },
+    "toasts": {
+      "sources": {
+        "loadFailed": "加载来源失败。",
+        "processingFailed": "来源处理失败。",
+        "renamed": "来源已重命名。",
+        "renameFailed": "重命名来源失败。",
+        "deleted": "来源已删除。",
+        "deleteFailed": "删除来源失败。",
+        "selectedDeleted": "{count, plural, other {已删除 # 个所选来源。}}",
+        "selectedDeleteFailed": "删除所选来源失败。",
+        "retryQueued": "已加入重试队列。",
+        "retryFailed": "重试来源失败。",
+        "reindexQueued": "已加入重新索引队列。",
+        "reindexFailed": "重新索引来源失败。",
+        "readmeLoadFailed": "加载 README 内容失败。",
+        "folderNameRequired": "请填写文件夹名称。",
+        "folderCreated": "文件夹已创建。",
+        "folderCreateFailed": "创建文件夹失败。",
+        "readmeUpdated": "README 已更新。",
+        "readmeUpdateFailed": "更新 README 失败。",
+        "moved": "来源已移动。",
+        "moveFailed": "移动来源失败。",
+        "noOriginalFile": "此来源没有原始上传文件。",
+        "noWorkspace": "尚未选择工作区。",
+        "contentEmpty": "来源内容不能为空。",
+        "added": "来源已添加，索引已开始。",
+        "createFailed": "创建来源失败。",
+        "urlEmpty": "URL 不能为空。",
+        "urlAdded": "URL 来源已添加，处理已开始。",
+        "urlAddFailed": "添加 URL 来源失败。",
+        "selectFilesFirst": "请先选择要上传的文件。",
+        "uploaded": "{count, plural, other {已上传 # 个来源，处理已开始。}}",
+        "uploadFailed": "上传文件失败。"
+      },
+      "workfiles": {
+        "loadFailed": "加载文件失败。",
+        "fileDeleted": "文件已删除。",
+        "deleteFailed": "无法删除文件。"
+      },
+      "connectors": {
+        "loadFailed": "加载连接器失败。",
+        "activityLoadFailed": "加载连接器活动失败。",
+        "settingsUnavailable": "连接器设置暂不可用。",
+        "noWorkspace": "尚未选择工作区。",
+        "notAvailableOAuth": "{name} 暂不支持 OAuth。",
+        "redirecting": "正在跳转到 {name} 授权。",
+        "reconnectFirst": "创建连接器前请先重新连接 {name}。",
+        "connectedConfigureNext": "{name} 已连接。接下来配置同步。",
+        "connectedConfigureDone": "{name} 已连接。接下来配置同步。",
+        "connectedFallback": "{name} 已连接。",
+        "syncAlreadyRunningNamed": "{name} 同步已在运行中。",
+        "enabledInitialSync": "{name} 连接器已启用。已加入首次同步队列。",
+        "alreadyConnected": "{name} 连接器已连接。",
+        "disabledConflict": "已存在同名的已停用连接器。请先启用或删除后再重新连接。",
+        "enableFailed": "启用 {name} 连接器失败。",
+        "authFailed": "{name} 授权失败。",
+        "onRoadmap": "{name} 已在规划中。",
+        "connectionCanceled": "{name} 连接已取消。",
+        "webhookCopied": "Webhook URL 已复制。",
+        "webhookCopyFailed": "无法复制 webhook URL。",
+        "syncSkipped": "连接器同步已跳过。",
+        "syncAlreadyRunning": "连接器同步已在运行中。",
+        "syncQueued": "连接器同步已加入队列。",
+        "syncFailed": "同步连接器失败。",
+        "enabled": "连接器已启用。",
+        "resumed": "连接器已恢复。",
+        "paused": "连接器已暂停。",
+        "updateFailed": "更新连接器失败。",
+        "settingsSaved": "连接器设置已保存。",
+        "settingsSaveFailed": "保存连接器设置失败。",
+        "deletedAll": "连接器、授权及已索引内容均已删除。",
+        "disabledCanReenable": "连接器已停用。稍后可再次启用。",
+        "oauthAccountInUse": "此授权已关联到其他连接器，无法安全删除。",
+        "removeFailed": "移除连接器失败。"
+      }
+    }
+  },
+  "dashboardAdmin": {
+    "eyebrow": "市场 · 管理",
+    "heading": "审核 MCP 提交",
+    "description": "通过自动检查的提交将自动发布。此队列包含需要人工审核的被标记提交。",
+    "loading": "正在加载审核队列…",
+    "empty": "没有需要审核的提交。",
+    "submittedBy": "由 {name} 提交",
+    "approve": "批准并发布",
+    "reject": "拒绝",
+    "errors": {
+      "forbidden": "你没有审核市场提交的权限。",
+      "loadFailed": "加载审核队列失败。请重试。",
+      "actionFailed": "操作失败：{identifier}"
+    },
+    "relativeTime": {
+      "justNow": "刚刚",
+      "minutes": "{count} 分钟前",
+      "hours": "{count} 小时前",
+      "days": "{count} 天前"
+    },
+    "flags": {
+      "pipeToShell": "安装器命令：curl | sh",
+      "sudo": "sudo",
+      "eval": "eval(",
+      "base64Exec": "base64 | sh",
+      "chmodExec": "chmod +x",
+      "internalAddress": "内部/元数据地址"
+    },
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。"
+  },
+  "dashboardObservability": {
+    "notices": {
+      "payloadExcluded": "此次轻量追踪加载已排除载荷。",
+      "payloadHidden": "载荷已被可观测性访问策略隐藏：{reason}",
+      "redactedTooltip": "敏感值已在存储前移除",
+      "redactedValue": "已脱敏的敏感值"
+    },
+    "roles": {
+      "system": "系统",
+      "assistant": "助手",
+      "tool": "工具",
+      "user": "用户"
+    },
+    "message": {
+      "toolCalls": "工具调用：",
+      "afterTool": "工具调用后",
+      "beforeTool": "工具调用前",
+      "toolResult": "工具结果",
+      "noData": "未记录数据。",
+      "noToolCalls": "无工具调用。",
+      "showFullText": "显示全文",
+      "hideFullText": "隐藏全文",
+      "longMarkdown": "较长的 Markdown 输出（{count} 字符）",
+      "show": "展开",
+      "hide": "收起",
+      "chars": "{count} 字符",
+      "toolCallCount": "{count, plural, other {# 个工具调用}}"
+    },
+    "mcp": {
+      "title": "MCP 活动",
+      "subtitle": "所选工作区的脱敏 MCP 工具调用与批准提案。",
+      "toolCallsBadge": "{count} 个工具调用",
+      "approvalsBadge": "{count} 个批准",
+      "unknown": "未知 MCP",
+      "empty": "未找到此工作区的 MCP 工具调用。",
+      "loadOlder": "加载更早的 MCP 调用",
+      "approvals": "批准提案",
+      "columns": {
+        "time": "时间",
+        "server": "服务器",
+        "tool": "工具",
+        "status": "状态",
+        "risk": "风险",
+        "latency": "延迟",
+        "input": "输入",
+        "outputError": "输出 / 错误",
+        "thread": "线程"
+      }
+    },
+    "tree": {
+      "showChildren": "显示子观测",
+      "hideChildren": "隐藏子观测",
+      "empty": "选择一行追踪以查看其调用树。"
+    },
+    "log": {
+      "empty": "选择一条追踪以查看时间线。",
+      "title": "时间线",
+      "subtitle": "按时间顺序排列的观测，含相对起始时间和持续时长。",
+      "count": "{count} 个观测",
+      "columns": {
+        "observation": "观测",
+        "type": "类型",
+        "timeline": "时间线",
+        "latency": "延迟"
+      }
+    },
+    "filters": {
+      "title": "筛选器",
+      "clearAll": "全部清除",
+      "workspace": "工作区",
+      "workspacesLabel": "工作区",
+      "allWorkspaces": "所有工作区",
+      "addWorkspace": "添加工作区",
+      "name": "名称",
+      "noTraceNames": "尚未加载追踪名称。",
+      "summaryAll": "全部",
+      "summarySelected": "已选 {count} 项",
+      "traceId": "追踪 ID",
+      "traceIdPlaceholder": "精确的追踪 ID",
+      "userId": "用户 ID",
+      "userIdPlaceholder": "按用户筛选",
+      "sessionId": "会话 ID",
+      "sessionIdPlaceholder": "按会话筛选",
+      "status": "状态",
+      "apply": "应用筛选"
+    },
+    "summary": {
+      "status": "状态：",
+      "latency": "延迟：",
+      "session": "会话：",
+      "user": "用户：",
+      "env": "环境：",
+      "observations": "观测：",
+      "showing": "显示 {count} 条",
+      "loadMore": "加载更多",
+      "model": "模型：",
+      "tokens": "令牌：",
+      "error": "错误：{reason}"
+    },
+    "detail": {
+      "empty": "从追踪树中选择一项。",
+      "latency": "延迟：{value}",
+      "tokenSummary": "{prompt} 提示 -> {completion} 补全（合计 {total}）",
+      "tabs": {
+        "preview": "预览",
+        "log": "日志视图",
+        "formatted": "格式化",
+        "json": "JSON"
+      },
+      "sections": {
+        "input": "输入",
+        "reasoning": "推理",
+        "output": "输出",
+        "toolCalls": "工具调用",
+        "modelParameters": "模型参数",
+        "metrics": "指标",
+        "metadata": "元数据"
+      }
+    },
+    "table": {
+      "filters": "筛选器",
+      "hideFilters": "隐藏筛选器",
+      "showFilters": "显示筛选器",
+      "allTime": "全部时间",
+      "loaded": "已加载 {count}",
+      "shown": "显示 {count}",
+      "pageSize": "每页 {count}",
+      "allWorkspaces": "所有工作区",
+      "tabTraces": "LLM 追踪",
+      "tabMcp": "MCP 活动",
+      "refresh": "刷新",
+      "mcpScoped": "MCP 活动仅限单个工作区。请从筛选器中选择一个工作区以查看 MCP 工具调用。",
+      "sessionPrefix": "会话：{value}",
+      "emptyNoTraces": "未找到追踪。",
+      "emptyNoMatch": "没有符合当前搜索条件的追踪。",
+      "loadOlder": "加载更早的追踪",
+      "columns": {
+        "timestamp": "时间戳",
+        "name": "名称",
+        "workspace": "工作区",
+        "status": "状态",
+        "latency": "延迟",
+        "model": "模型",
+        "tokens": "令牌",
+        "obs": "观测",
+        "sessionId": "会话 ID",
+        "user": "用户",
+        "traceId": "追踪 ID"
+      }
+    },
+    "drawer": {
+      "filtersTitle": "可观测性筛选器",
+      "traceFallback": "追踪",
+      "sessionId": "会话 ID：{value}",
+      "traceDetail": "追踪详情",
+      "timeline": "时间线",
+      "detail": "详情"
+    },
+    "errors": {
+      "loadTraces": "加载追踪失败",
+      "loadMcp": "加载 MCP 活动失败",
+      "traceWorkspaceRequired": "加载团队追踪详情需要指定追踪所属工作区",
+      "loadDetail": "加载追踪详情失败",
+      "loadMoreObservations": "加载更多观测失败"
+    }
+  },
+  "dashboardWindows": {
+    "hub": {
+      "uploadRunningToast": "仍有上传或资源操作正在进行。请等待其完成后再关闭 Hub。",
+      "discardCloseConfirm": "放弃已打开的 Hub 表单并关闭此窗口？",
+      "accountMismatch": "Hub 账户与主窗口不一致。",
+      "mainWindowRestarted": "主窗口已重启。请在重试前检查所选内容。",
+      "connectionInterrupted": "与主窗口的连接已中断。",
+      "notResponding": "主窗口无响应。请在更改前重新连接。",
+      "sessionEnded": "Hub 会话已结束。",
+      "disconnected": "Hub 已断开连接。",
+      "actionNotConfirmed": "Hub 操作未确认。请刷新后重试。",
+      "dockNotConfirmed": "主窗口未确认停靠。Hub 仍保留在此窗口中。",
+      "dockFailed": "无法停靠 Hub。",
+      "openFromDesktop": "请从 SourceWeft 桌面应用打开 Hub。",
+      "signInAgain": "请在主窗口重新登录以使用 Hub。",
+      "connecting": "正在将 Hub 连接到主窗口…",
+      "followingPaused": "跟随已暂停",
+      "followingCurrent": "正在跟随当前对话",
+      "closeTitleBusy": "请先完成编辑或上传，再停靠 Hub",
+      "closeTitleReturn": "关闭窗口并将 Hub 返回主窗口",
+      "closeTitlePlain": "关闭 Hub 窗口",
+      "closeAria": "关闭 Hub 窗口",
+      "reconnectAria": "重新连接 Hub",
+      "pausedCrossWorkspace": "主窗口已切换工作区。请返回原工作区以完成已打开的表单。",
+      "pausedFollow": "请完成或取消“{current}”中打开的表单，以跟随“{target}”。",
+      "discardFollowConfirm": "放弃已打开的 Hub 表单并跟随当前对话？",
+      "discardFollow": "放弃并跟随",
+      "operationContinues": "该操作将在其原工作区中继续。",
+      "mainWindowLeft": "主窗口已离开此对话。",
+      "returnToConversation": "返回对话",
+      "loadingConversation": "正在加载对话…",
+      "backToHub": "返回 Hub"
+    },
+    "preview": {
+      "title": "文件预览",
+      "downloadAria": "下载文件",
+      "closeAria": "关闭预览窗口",
+      "loading": "正在加载文件预览…",
+      "empty": "此文件为空。",
+      "accountMismatch": "此预览属于其他账户。"
+    }
+  },
+  "dashboardHome": {
+    "sections": {
+      "home": "首页",
+      "recentWorkspaces": "最近的工作区",
+      "searchResults": "搜索结果"
+    },
+    "search": {
+      "placeholder": "搜索工作区…"
+    },
+    "rail": {
+      "scrollLeft": "向左滚动最近的工作区",
+      "scrollRight": "向右滚动最近的工作区"
+    },
+    "overview": {
+      "resumeIn": "在 {name} 中继续",
+      "createFirstTitle": "创建你的第一个工作区",
+      "resumeDescription": "接着处理最近的来源，查看最新动态，并在已选定的工作区中回到有据可依的对话。",
+      "setupDescription": "创建工作区来整理来源、集中管理上下文，并直接进入对话。",
+      "openWorkspace": "打开工作区",
+      "activityColumn": "活动",
+      "typeColumn": "类型",
+      "activityEmpty": "工作区、来源和对话的活动将显示在此处。"
+    },
+    "actions": {
+      "createWorkspace": "创建工作区"
+    },
+    "createCard": {
+      "title": "创建工作区",
+      "description": "开启一个干净的空间，用于存放来源与对话。"
+    },
+    "workspace": {
+      "defaultName": "工作区 {number}",
+      "updated": "更新于 {time}",
+      "files": "{count} 个文件",
+      "sources": "{count} 个来源"
+    },
+    "cover": {
+      "noFilesYet": "还没有文件",
+      "addSourcesDescription": "添加来源，开始构建上下文。",
+      "extraFiles": "+{count} 个文件"
+    },
+    "empty": {
+      "title": "还没有工作区",
+      "description": "创建工作区，开始整理来源与对话。",
+      "searchTitle": "没有工作区匹配你的搜索",
+      "searchDescription": "试试其他关键词，或清除搜索以重新浏览最近的工作区。"
+    },
+    "activity": {
+      "created": "已创建",
+      "added": "已添加",
+      "updated": "已更新",
+      "sourceCount": "{count, plural, other {# 个来源}}"
+    },
+    "badge": {
+      "workspace": "工作区",
+      "chat": "对话"
+    },
+    "sourceType": {
+      "file": "文件",
+      "web": "网页",
+      "video": "视频",
+      "note": "笔记",
+      "artifact": "制品",
+      "connector": "连接器",
+      "source": "来源"
+    },
+    "fallback": {
+      "untitledSource": "未命名",
+      "untitledChat": "未命名对话"
+    },
+    "relativeTime": {
+      "justNow": "刚刚",
+      "minutes": "{count} 分钟前",
+      "hours": "{count} 小时前",
+      "days": "{count} 天前"
+    },
+    "toasts": {
+      "created": "已创建“{name}”",
+      "createFailed": "创建工作区失败。",
+      "loadFailed": "加载工作区失败。",
+      "noActiveTeam": "尚未选择活跃团队。"
+    }
+  }
+}

@@ -1,4 +1,7 @@
 import type { ToolUIPart } from "ai";
+import type { useTranslations } from "next-intl";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export type SandboxToolResultDisplay = {
   code: string | null;
@@ -467,27 +470,27 @@ function formatDurationMs(value: number | null) {
   return `${seconds >= 10 ? Math.round(seconds) : seconds.toFixed(1)}s`;
 }
 
-function formatOperationLabel(value: string | null) {
+function formatOperationLabel(value: string | null, t: Translate) {
   switch (value) {
     case "prepare":
     case "prepare_sandbox_workspace":
-      return "Prepared workspace";
+      return t("sandbox.op.preparedWorkspace");
     case "execute":
-      return "Executed command";
+      return t("sandbox.op.executedCommand");
     case "collect":
     case "collect_sandbox_outputs":
-      return "Collected outputs";
+      return t("sandbox.op.collectedOutputs");
     case "create":
-      return "Prepared workspace";
+      return t("sandbox.op.preparedWorkspace");
     case "cleanup":
     case "delete":
-      return "Released workspace";
+      return t("sandbox.op.releasedWorkspace");
     default:
       return value
         ? value
             .replace(/[_-]+/g, " ")
             .replace(/\b\w/g, (match) => match.toUpperCase())
-        : "Sandbox operation";
+        : t("sandbox.op.fallback");
   }
 }
 
@@ -511,13 +514,10 @@ function operationDuration(value: Record<string, unknown>) {
   return finiteNumber(value.durationMs) ?? finiteNumber(value.latencyMs);
 }
 
-function plural(count: number, singular: string, pluralValue = `${singular}s`) {
-  return `${count} ${count === 1 ? singular : pluralValue}`;
-}
-
 function resultDetailFromOperation(
   operation: Record<string, unknown>,
   type: string | null,
+  t: Translate,
 ) {
   const explicitDetail =
     trimmedStringValue(operation.summary) ??
@@ -536,25 +536,37 @@ function resultDetailFromOperation(
     const fileCount =
       finiteNumber(result.fileCount) ?? arrayRecord(result.files).length;
     if (fileCount > 0) {
-      details.push(plural(fileCount, "file"));
+      details.push(
+        fileCount === 1
+          ? t("sandbox.detailFile", { count: fileCount })
+          : t("sandbox.detailFiles", { count: fileCount }),
+      );
     }
   } else if (type === "collect" || type === "collect_sandbox_outputs") {
     const outputCount =
       finiteNumber(result.outputCount) ?? arrayRecord(result.outputs).length;
     if (outputCount > 0) {
-      details.push(plural(outputCount, "output"));
+      details.push(
+        outputCount === 1
+          ? t("sandbox.detailOutput", { count: outputCount })
+          : t("sandbox.detailOutputs", { count: outputCount }),
+      );
     }
   } else if (type === "execute") {
     const exitCode = finiteNumber(result.exitCode);
     const outputChars = finiteNumber(result.outputChars);
     if (exitCode !== null) {
-      details.push(`Exit code ${exitCode}`);
+      details.push(t("sandbox.exitCode", { code: exitCode }));
     }
     if (outputChars !== null) {
-      details.push(plural(outputChars, "output char"));
+      details.push(
+        outputChars === 1
+          ? t("sandbox.detailOutputChar", { count: outputChars })
+          : t("sandbox.detailOutputChars", { count: outputChars }),
+      );
     }
     if (booleanValue(result.truncated)) {
-      details.push("Output truncated");
+      details.push(t("sandbox.outputTruncated"));
     }
   }
 
@@ -710,10 +722,13 @@ export function getSandboxCollectedWorkfilePaths(input: {
   );
 }
 
-export function getSandboxToolOperationTimeline(input: {
-  output: unknown;
-  toolName: string;
-}): SandboxToolOperationTimelineItem[] {
+export function getSandboxToolOperationTimeline(
+  input: {
+    output: unknown;
+    toolName: string;
+  },
+  t: Translate,
+): SandboxToolOperationTimelineItem[] {
   if (!SANDBOX_TOOL_NAMES.has(input.toolName)) {
     return [];
   }
@@ -749,9 +764,9 @@ export function getSandboxToolOperationTimeline(input: {
         startMs,
         item: {
           key: `${index}-${type ?? "operation"}`,
-          label: formatOperationLabel(type),
+          label: formatOperationLabel(type, t),
           status: trimmedStringValue(operation.status),
-          detail: resultDetailFromOperation(operation, type),
+          detail: resultDetailFromOperation(operation, type, t),
           duration: formatDurationMs(operationDuration(operation)),
           timestamp: operationTimestamp(operation),
           output: trimmedStringValue(opResult.output),
@@ -768,46 +783,33 @@ function extractSandboxErrorCode(error: string) {
   return match?.[1] ?? null;
 }
 
-const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
-  SANDBOX_BINARY_OUTPUT_UNSUPPORTED:
-    "This output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
-  SANDBOX_COLLECT_CONFLICT:
-    "A target /files file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
-  SANDBOX_COLLECT_PATH_DENIED:
-    "The requested output path is outside the provider-allowed collection area. Use an authorized output directory.",
-  SANDBOX_COMMAND_TIMEOUT:
-    "The command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
-  SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT:
-    "The operation returned an unsupported download result. Try collecting a plain text output file instead.",
-  SANDBOX_EXECUTE_CWD_DENIED:
-    "The command working directory must stay inside the authorized workspace.",
-  SANDBOX_EXECUTE_COMMAND_DENIED:
-    "The command was rejected before execution because it was empty or contained unsafe control characters. Revise the command and try again.",
-  SANDBOX_EXECUTE_VFS_PATH_DENIED:
-    "The command referenced a file that is not available in the working directory. Prepare the required files before running the command.",
-  SANDBOX_FILE_NOT_FOUND:
-    "The requested file was not found. Re-run the command or check the output path before collecting.",
-  SANDBOX_SKILL_STAGING_UNAVAILABLE:
-    "The required skill files could not be prepared in the working directory. Check the skill files and try again.",
-  SANDBOX_FILE_TOO_LARGE:
-    "The selected file exceeds the file transfer limit. Reduce the file size or collect a smaller output.",
-  SANDBOX_NOT_CONFIGURED:
-    "Command execution is not configured. Contact your administrator.",
-  SANDBOX_NOT_FOUND_OR_EXPIRED:
-    "The execution session was not found or has expired. Retry to start a new session.",
-  SANDBOX_PREPARE_PATH_DENIED:
-    "Choose an existing workfile and an authorized destination directory.",
-  SANDBOX_PROVIDER_AUTH_FAILED:
-    "The execution service could not authenticate. Contact your administrator.",
-  SANDBOX_PROVIDER_ERROR: "The operation failed. Try again or contact support.",
-  SANDBOX_TOTAL_SIZE_EXCEEDED:
-    "The selected files exceed the total file transfer limit. Reduce the number or size of files and try again.",
-};
+const SANDBOX_SAFE_ERROR_CODES = new Set<string>([
+  "SANDBOX_BINARY_OUTPUT_UNSUPPORTED",
+  "SANDBOX_COLLECT_CONFLICT",
+  "SANDBOX_COLLECT_PATH_DENIED",
+  "SANDBOX_COMMAND_TIMEOUT",
+  "SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT",
+  "SANDBOX_EXECUTE_CWD_DENIED",
+  "SANDBOX_EXECUTE_COMMAND_DENIED",
+  "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+  "SANDBOX_FILE_NOT_FOUND",
+  "SANDBOX_SKILL_STAGING_UNAVAILABLE",
+  "SANDBOX_FILE_TOO_LARGE",
+  "SANDBOX_NOT_CONFIGURED",
+  "SANDBOX_NOT_FOUND_OR_EXPIRED",
+  "SANDBOX_PREPARE_PATH_DENIED",
+  "SANDBOX_PROVIDER_AUTH_FAILED",
+  "SANDBOX_PROVIDER_ERROR",
+  "SANDBOX_TOTAL_SIZE_EXCEEDED",
+]);
 
-export function getSandboxToolSafeErrorMessage(input: {
-  error: string | null | undefined;
-  toolName: string;
-}) {
+export function getSandboxToolSafeErrorMessage(
+  input: {
+    error: string | null | undefined;
+    toolName: string;
+  },
+  t: Translate,
+) {
   if (!input.error || !SANDBOX_TOOL_NAMES.has(input.toolName)) {
     return input.error ?? null;
   }
@@ -820,11 +822,10 @@ export function getSandboxToolSafeErrorMessage(input: {
     if (exitCodeMatch) {
       return input.error;
     }
-    return "Operation failed. Review the details and try again.";
+    return t("sandbox.operationFailed");
   }
 
-  return (
-    SANDBOX_SAFE_ERROR_MESSAGES[code] ??
-    "Operation failed. Review the details and try again."
-  );
+  return SANDBOX_SAFE_ERROR_CODES.has(code)
+    ? t(`sandbox.safeError.${code}`)
+    : t("sandbox.operationFailed");
 }

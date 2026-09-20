@@ -54,8 +54,6 @@ export function composerOptionValues(
 /** Re-exported so the composer and the API boundary cannot drift apart. */
 export const MAX_SELECTED_SKILL_IDS_PER_TURN = MAX_SELECTED_SKILLS_PER_TURN;
 
-export const SKILL_SELECTION_LIMIT_MESSAGE = `You can enable at most ${MAX_SELECTED_SKILLS_PER_TURN} skills per message.`;
-
 export function normalizeSkillIdsForRequest(skillIds: readonly string[]) {
   const seen = new Set<string>();
   const normalized: string[] = [];

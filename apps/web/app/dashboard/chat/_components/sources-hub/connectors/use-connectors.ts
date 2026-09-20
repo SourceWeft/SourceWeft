@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import {
   HttpClientError,
@@ -99,11 +100,9 @@ function readConnectorOAuthCompletionFromUrl(): ConnectorOAuthCompletionMessage 
     connectorType,
     accountId,
     status,
-    error:
-      status === "error"
-        ? (url.searchParams.get("error") ??
-          "Connector authorization did not complete.")
-        : null,
+    // A localized fallback is applied at the display site
+    // (`toasts.connectors.authFailed`) when no provider error message is present.
+    error: status === "error" ? (url.searchParams.get("error") ?? "") : null,
     createdAt: new Date().toISOString(),
   };
 }
@@ -126,11 +125,16 @@ function clearConnectorOAuthCompletionFromUrl() {
   );
 }
 
-function mapConnectorToUi(connector: SourceConnector): ConnectorItem {
+function mapConnectorToUi(
+  connector: SourceConnector,
+  t: ReturnType<typeof useTranslations>,
+): ConnectorItem {
   const lastSync = connector.lastIndexedAt
-    ? `Last sync ${new Date(connector.lastIndexedAt).toLocaleString()}`
-    : "Never synced";
-  const schedule = formatConnectorSchedule(connector);
+    ? t("connectors.lastSync", {
+        date: new Date(connector.lastIndexedAt).toLocaleString(),
+      })
+    : t("connectors.neverSynced");
+  const schedule = formatConnectorSchedule(connector, t);
   return {
     id: connector.id,
     name: connector.name,
@@ -161,6 +165,7 @@ export function useConnectors(input: {
     manualConnectorSyncSourcesRef,
   } = input;
 
+  const t = useTranslations("dashboardSourcesHub");
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
@@ -251,7 +256,9 @@ export function useConnectors(input: {
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
       }
-      const uiConnectors = result.items.map(mapConnectorToUi);
+      const uiConnectors = result.items.map((connector) =>
+        mapConnectorToUi(connector, t),
+      );
       onConnectorsChange?.(result.items);
       setConnectorReadinessById((prev) => {
         const liveIds = new Set(uiConnectors.map((connector) => connector.id));
@@ -265,7 +272,7 @@ export function useConnectors(input: {
           }
         }
         for (const connector of uiConnectors) {
-          const readiness = getConnectorReadinessFromConfig(connector.raw);
+          const readiness = getConnectorReadinessFromConfig(connector.raw, t);
           if (readiness) {
             next[connector.id] = readiness;
             if (prev[connector.id]?.reason !== readiness.reason) {
@@ -332,14 +339,14 @@ export function useConnectors(input: {
       );
     } catch (error) {
       setConnectorsLoadingError(
-        getErrorMessage(error, "Failed to load connectors."),
+        getErrorMessage(error, t("toasts.connectors.loadFailed")),
       );
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
         setIsLoadingConnectors(false);
       }
     }
-  }, [currentWorkspaceIdRef, onConnectorsChange, workspaceId]);
+  }, [currentWorkspaceIdRef, onConnectorsChange, workspaceId, t]);
 
   const refreshConnectorSettingsActivity = useCallback(
     async (connectorId?: string | null, options: { silent?: boolean } = {}) => {
@@ -364,7 +371,7 @@ export function useConnectors(input: {
       } catch (error) {
         setConnectorSettingsActivity([]);
         setConnectorSettingsActivityError(
-          getErrorMessage(error, "Failed to load connector activity."),
+          getErrorMessage(error, t("toasts.connectors.activityLoadFailed")),
         );
       } finally {
         if (!options.silent) {
@@ -372,7 +379,7 @@ export function useConnectors(input: {
         }
       }
     },
-    [workspaceId],
+    [workspaceId, t],
   );
 
   useEffect(() => {
@@ -457,12 +464,12 @@ export function useConnectors(input: {
     (connectorId: string) => {
       const connector = connectors.find((item) => item.id === connectorId);
       if (!connector) {
-        toast.error("Connector settings are not available yet.");
+        toast.error(t("toasts.connectors.settingsUnavailable"));
         return;
       }
       openConnectorSettings(connector);
     },
-    [connectors, openConnectorSettings],
+    [connectors, openConnectorSettings, t],
   );
 
   const openManageConnectors = useCallback(
@@ -495,12 +502,12 @@ export function useConnectors(input: {
   const handleConnectConnector = useCallback(
     (item: ConnectorCatalogItem) => {
       if (!workspaceId) {
-        toast.error("No workspace selected yet.");
+        toast.error(t("toasts.connectors.noWorkspace"));
         return;
       }
 
       if (item.connectMode !== "oauth_connector") {
-        toast.error(`${item.name} is not available for OAuth yet.`);
+        toast.error(t("toasts.connectors.notAvailableOAuth", { name: item.name }));
         return;
       }
 
@@ -516,10 +523,10 @@ export function useConnectors(input: {
       connectorWaitingStartedAtRef.current[item.id] = Date.now();
       setConnectorWaiting(item.id, true);
       openManageConnectors("all");
-      toast.info(`Redirecting to ${item.name} authorization.`);
+      toast.info(t("toasts.connectors.redirecting", { name: item.name }));
       window.location.assign(startUrl.toString());
     },
-    [openManageConnectors, workspaceId],
+    [openManageConnectors, workspaceId, t],
   );
 
   const ensureConnector = useCallback(
@@ -552,7 +559,9 @@ export function useConnectors(input: {
 
       if (!accountId) {
         if (!options.silentMissingAccount) {
-          toast.error(`Reconnect ${item.name} before creating a connector.`);
+          toast.error(
+            t("toasts.connectors.reconnectFirst", { name: item.name }),
+          );
         }
         return null;
       }
@@ -574,14 +583,18 @@ export function useConnectors(input: {
           if (!account) {
             if (!options.silentMissingAccount) {
               toast.error(
-                `Reconnect ${item.name} before creating a connector.`,
+                t("toasts.connectors.reconnectFirst", { name: item.name }),
               );
             }
             return null;
           }
 
           if (item.id !== "notion") {
-            toast.info(`${item.name} is connected. Configure syncing next.`);
+            toast.info(
+              t("toasts.connectors.connectedConfigureNext", {
+                name: item.name,
+              }),
+            );
             await refreshConnectors();
             return null;
           }
@@ -606,25 +619,33 @@ export function useConnectors(input: {
             markConnectorNotReady(
               created.connector.id,
               syncResult.reason ?? "connector_not_ready",
-              syncResult.message ?? "Connector is not ready to sync.",
+              syncResult.message ?? t("connectors.readinessNotReady"),
             );
-            toast.info(syncResult.message ?? `${item.name} connected.`);
+            toast.info(
+              syncResult.message ??
+                t("toasts.connectors.connectedFallback", { name: item.name }),
+            );
           } else if (syncResult.alreadyRunning) {
             toast.info(
-              syncResult.message ?? `${item.name} sync is already running.`,
+              syncResult.message ??
+                t("toasts.connectors.syncAlreadyRunningNamed", {
+                  name: item.name,
+                }),
             );
           } else {
             clearConnectorReadiness(created.connector.id);
             toast.success(
-              `${item.name} connector enabled. Initial sync queued.`,
+              t("toasts.connectors.enabledInitialSync", { name: item.name }),
             );
           }
           await refreshConnectors();
-          return mapConnectorToUi(created.connector);
+          return mapConnectorToUi(created.connector, t);
         } catch (error) {
           if (isConnectorAlreadyHandledError(error)) {
             await refreshConnectors();
-            toast.success(`${item.name} connector is already connected.`);
+            toast.success(
+              t("toasts.connectors.alreadyConnected", { name: item.name }),
+            );
             return null;
           }
 
@@ -632,14 +653,12 @@ export function useConnectors(input: {
             error instanceof HttpClientError &&
             error.code === "CONNECTOR_DISABLED_CONFLICT"
           ) {
-            toast.error(
-              "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
-            );
+            toast.error(t("toasts.connectors.disabledConflict"));
           } else {
             toast.error(
               getErrorMessage(
                 error,
-                `Failed to enable ${item.name} connector.`,
+                t("toasts.connectors.enableFailed", { name: item.name }),
               ),
             );
           }
@@ -661,13 +680,14 @@ export function useConnectors(input: {
       trackConnectorSyncRun,
       trackManualConnectorSync,
       workspaceId,
+      t,
     ],
   );
 
   const handleCreateConnector = useCallback(
     async (item: ConnectorCatalogItem) => {
       if (!workspaceId) {
-        toast.error("No workspace selected yet.");
+        toast.error(t("toasts.connectors.noWorkspace"));
         return;
       }
       if (item.postOAuthMode === "auto_create") {
@@ -682,6 +702,7 @@ export function useConnectors(input: {
       handleConnectConnector,
       openManageConnectors,
       workspaceId,
+      t,
     ],
   );
 
@@ -706,7 +727,10 @@ export function useConnectors(input: {
 
       if (message.status === "error") {
         setConnectorWaiting(item.id, false);
-        toast.error(message.error || `${item.name} authorization failed.`);
+        toast.error(
+          message.error ||
+            t("toasts.connectors.authFailed", { name: item.name }),
+        );
         void refreshConnectors();
         return;
       }
@@ -717,10 +741,12 @@ export function useConnectors(input: {
       }
 
       setConnectorWaiting(item.id, false);
-      toast.success(`${item.name} connected. Configure syncing next.`);
+      toast.success(
+        t("toasts.connectors.connectedConfigureDone", { name: item.name }),
+      );
       void refreshConnectors();
     },
-    [ensureConnector, openManageConnectors, refreshConnectors, workspaceId],
+    [ensureConnector, openManageConnectors, refreshConnectors, workspaceId, t],
   );
 
   useEffect(() => {
@@ -820,23 +846,23 @@ export function useConnectors(input: {
   }, [connectorWaitingByType, ensureConnector, refreshConnectors, workspaceId]);
 
   const handleRequestConnector = useCallback((item: ConnectorCatalogItem) => {
-    toast.info(`${item.name} is on the roadmap.`);
-  }, []);
+    toast.info(t("toasts.connectors.onRoadmap", { name: item.name }));
+  }, [t]);
 
   const handleCancelConnector = useCallback((item: ConnectorCatalogItem) => {
     delete connectorWaitingStartedAtRef.current[item.id];
     setConnectorWaiting(item.id, false);
-    toast.info(`${item.name} connection canceled.`);
-  }, []);
+    toast.info(t("toasts.connectors.connectionCanceled", { name: item.name }));
+  }, [t]);
 
   const handleCopyWebhook = useCallback(async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("Webhook URL copied.");
+      toast.success(t("toasts.connectors.webhookCopied"));
     } catch {
-      toast.error("Could not copy webhook URL.");
+      toast.error(t("toasts.connectors.webhookCopyFailed"));
     }
-  }, []);
+  }, [t]);
 
   const handleSyncConnector = useCallback(
     async (connector: ConnectorItem) => {
@@ -851,21 +877,25 @@ export function useConnectors(input: {
           markConnectorNotReady(
             connector.id,
             result.reason ?? "connector_not_ready",
-            result.message ?? "Connector is not ready to sync.",
+            result.message ?? t("connectors.readinessNotReady"),
           );
-          toast.info(result.message ?? "Connector sync skipped.");
+          toast.info(
+            result.message ?? t("toasts.connectors.syncSkipped"),
+          );
         } else if (result.alreadyRunning) {
-          toast.info(result.message ?? "Connector sync is already running.");
+          toast.info(
+            result.message ?? t("toasts.connectors.syncAlreadyRunning"),
+          );
         } else {
           clearConnectorReadiness(connector.id);
-          toast.success("Connector sync queued.");
+          toast.success(t("toasts.connectors.syncQueued"));
         }
         await refreshConnectors();
         if (connectorSettingsConnectorId === connector.id) {
           await refreshConnectorSettingsActivity(connector.id);
         }
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to sync connector."));
+        toast.error(getErrorMessage(error, t("toasts.connectors.syncFailed")));
       } finally {
         setConnectorBusy(connector.id, false);
       }
@@ -879,6 +909,7 @@ export function useConnectors(input: {
       trackConnectorSyncRun,
       trackManualConnectorSync,
       workspaceId,
+      t,
     ],
   );
 
@@ -896,17 +927,17 @@ export function useConnectors(input: {
         });
         toast.success(
           connector.status === "disabled"
-            ? "Connector enabled."
+            ? t("toasts.connectors.enabled")
             : nextStatus === "active"
-              ? "Connector resumed."
-              : "Connector paused.",
+              ? t("toasts.connectors.resumed")
+              : t("toasts.connectors.paused"),
         );
         await refreshConnectors();
         if (connectorSettingsConnectorId === connector.id) {
           await refreshConnectorSettingsActivity(connector.id);
         }
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to update connector."));
+        toast.error(getErrorMessage(error, t("toasts.connectors.updateFailed")));
       } finally {
         setConnectorBusy(connector.id, false);
       }
@@ -916,6 +947,7 @@ export function useConnectors(input: {
       refreshConnectorSettingsActivity,
       refreshConnectors,
       workspaceId,
+      t,
     ],
   );
 
@@ -933,14 +965,14 @@ export function useConnectors(input: {
       setConnectorBusy(connector.id, true);
       try {
         await connectorsClient.update(workspaceId, connector.id, input);
-        toast.success("Connector settings saved.");
+        toast.success(t("toasts.connectors.settingsSaved"));
         await refreshConnectors();
         if (connectorSettingsConnectorId === connector.id) {
           await refreshConnectorSettingsActivity(connector.id);
         }
       } catch (error) {
         toast.error(
-          getErrorMessage(error, "Failed to save connector settings."),
+          getErrorMessage(error, t("toasts.connectors.settingsSaveFailed")),
         );
       } finally {
         setConnectorBusy(connector.id, false);
@@ -951,6 +983,7 @@ export function useConnectors(input: {
       refreshConnectorSettingsActivity,
       refreshConnectors,
       workspaceId,
+      t,
     ],
   );
 
@@ -964,8 +997,8 @@ export function useConnectors(input: {
       });
       toast.success(
         result.hardDeleted
-          ? "Connector, authorization, and indexed content deleted."
-          : "Connector disabled. You can enable it again later.",
+          ? t("toasts.connectors.deletedAll")
+          : t("toasts.connectors.disabledCanReenable"),
       );
       setPendingDisconnectConnector(null);
       setDisconnectConnectorHardDelete(false);
@@ -981,11 +1014,11 @@ export function useConnectors(input: {
         error instanceof HttpClientError &&
         error.code === "CONNECTOR_OAUTH_ACCOUNT_IN_USE"
       ) {
-        toast.error(
-          "This authorization is attached to another connector and cannot be deleted safely.",
-        );
+        toast.error(t("toasts.connectors.oauthAccountInUse"));
       } else {
-        toast.error(getErrorMessage(error, "Failed to remove connector."));
+        toast.error(
+          getErrorMessage(error, t("toasts.connectors.removeFailed")),
+        );
       }
     } finally {
       setConnectorBusy(connector.id, false);
@@ -997,6 +1030,7 @@ export function useConnectors(input: {
     refreshConnectors,
     refreshSources,
     workspaceId,
+    t,
   ]);
 
   return {

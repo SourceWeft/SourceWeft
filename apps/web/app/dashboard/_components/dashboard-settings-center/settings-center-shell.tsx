@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   Info,
   LayoutGrid,
@@ -34,16 +35,16 @@ import type { BillingScope, SettingsCenterTab } from "./types";
 
 const menuItems: Array<{
   key: SettingsCenterTab;
-  label: string;
+  labelKey: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { key: "account", label: "Profile", icon: User },
-  { key: "team", label: "Team", icon: Users },
+  { key: "account", labelKey: "nav.profile", icon: User },
+  { key: "team", labelKey: "nav.team", icon: Users },
   // Workspace membership is per-workspace, not an account setting — it lives in
   // the standalone WorkspaceMembersDialog opened from the sidebar.
-  { key: "usage", label: "Usage", icon: LayoutGrid },
-  { key: "billing", label: "Billing", icon: Receipt },
-  { key: "approvals", label: "Approvals", icon: ShieldCheck },
+  { key: "usage", labelKey: "nav.usage", icon: LayoutGrid },
+  { key: "billing", labelKey: "nav.billing", icon: Receipt },
+  { key: "approvals", labelKey: "nav.approvals", icon: ShieldCheck },
 ];
 
 export function DashboardSettingsCenterModal({
@@ -67,6 +68,7 @@ export function DashboardSettingsCenterModal({
   initialTab: SettingsCenterTab;
   hasTeam?: boolean;
 }) {
+  const t = useTranslations("dashboardSettings");
   const billingAvailable = useBillingAvailable();
   const [requestedTab, setActiveTab] =
     React.useState<SettingsCenterTab>(initialTab);
@@ -94,9 +96,9 @@ export function DashboardSettingsCenterModal({
   const visibleMenuItems = [
     ...menuItems,
     ...(isLocalPc
-      ? [{ key: "local" as const, label: "This computer", icon: Monitor }]
+      ? [{ key: "local" as const, labelKey: "nav.localComputer", icon: Monitor }]
       : []),
-    { key: "about" as const, label: "About", icon: Info },
+    { key: "about" as const, labelKey: "nav.about", icon: Info },
   ];
 
   React.useEffect(() => {
@@ -117,7 +119,7 @@ export function DashboardSettingsCenterModal({
         constrainWidth={false}
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">Settings center</DialogTitle>
+        <DialogTitle className="sr-only">{t("nav.srTitle")}</DialogTitle>
         <div className="settings-center-grid grid h-full min-h-0 grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
           {/* ── Sidebar ── */}
           <aside className="flex min-h-0 flex-col border-b border-border/70 bg-muted/30 sm:border-b-0 sm:border-r">
@@ -129,7 +131,7 @@ export function DashboardSettingsCenterModal({
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-[13px] font-medium text-foreground">
-                    {userName ?? "SourceWeft User"}
+                    {userName ?? t("nav.userFallback")}
                   </p>
                   <p className="truncate text-[11px] text-muted-foreground">
                     {userEmail}
@@ -161,7 +163,7 @@ export function DashboardSettingsCenterModal({
                         type="button"
                       >
                         <Icon className="h-3.5 w-3.5 shrink-0" />
-                        {item.label}
+                        {t(item.labelKey)}
                       </button>
                     );
                   })}
@@ -173,7 +175,7 @@ export function DashboardSettingsCenterModal({
           <div className="relative min-h-0 overflow-hidden">
             {/* Close button */}
             <button
-              aria-label="Close"
+              aria-label={t("nav.close")}
               className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={() => onOpenChange(false)}
               type="button"

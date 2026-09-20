@@ -1,11 +1,27 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import { ThreadDialogs } from "./thread-dialogs";
 import type { WorkfileDetail } from "./message-normalizers";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -43,23 +59,25 @@ async function renderDialogs(input: {
 
   await act(async () => {
     createdRoot.render(
-      createElement(ThreadDialogs, {
-        byokCredentials: [],
-        byokModelConfig: null,
-        byokProviders: [],
-        onByokConfigured: vi.fn(),
-        onByokModelConfigOpenChange: vi.fn(),
-        onByokStateChange: vi.fn(),
-        onPreviewSourceOpenChange: vi.fn(),
-        onPreviewWorkfileOpenChange: vi.fn(),
-        onShortcutsOpenChange: vi.fn(),
-        previewCitation: null,
-        previewSource: null,
-        previewWorkfile: input.previewWorkfile,
-        shortcutDefinitions: [],
-        shortcutsOpen: false,
-        workspaceId: "workspace-1",
-      }),
+      withIntl(
+        createElement(ThreadDialogs, {
+          byokCredentials: [],
+          byokModelConfig: null,
+          byokProviders: [],
+          onByokConfigured: vi.fn(),
+          onByokModelConfigOpenChange: vi.fn(),
+          onByokStateChange: vi.fn(),
+          onPreviewSourceOpenChange: vi.fn(),
+          onPreviewWorkfileOpenChange: vi.fn(),
+          onShortcutsOpenChange: vi.fn(),
+          previewCitation: null,
+          previewSource: null,
+          previewWorkfile: input.previewWorkfile,
+          shortcutDefinitions: [],
+          shortcutsOpen: false,
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
   });
 

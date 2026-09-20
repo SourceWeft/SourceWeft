@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import { SkillIcon } from "../../../../_components/dashboard-icons";
 import {
-  SKILL_SELECTION_LIMIT_MESSAGE,
+  MAX_SELECTED_SKILL_IDS_PER_TURN,
   toggleSkillSelection,
 } from "../../chat-canvas/tool-selection";
 import { HubEmptyState } from "../components/hub-empty-state";
@@ -32,6 +33,8 @@ export function SkillsTab({
   onOpenSkill: (catalogId: string) => void;
   disabledToolNames?: string[];
 }) {
+  const t = useTranslations("dashboardSourcesHub");
+  const tCanvas = useTranslations("dashboardChatCanvas");
   const [busySkillIds, setBusySkillIds] = useState<Set<string>>(new Set());
   const q = searchQuery.trim().toLowerCase();
   const selectedSet = useMemo(
@@ -93,7 +96,9 @@ export function SkillsTab({
       skillId,
     });
     if (wasLimited) {
-      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+      toast.info(
+        tCanvas("composer.skillLimit", { max: MAX_SELECTED_SKILL_IDS_PER_TURN }),
+      );
       return;
     }
     onSkillSelectionChange(skillIds);
@@ -104,14 +109,14 @@ export function SkillsTab({
       <HubEmptyState
         description={
           searchQuery
-            ? "Try a different skill name, slug, description, or source."
-            : "Install skills to add reusable creation workflows and agent capabilities to this project."
+            ? t("skills.noMatchDescription")
+            : t("skills.emptyDescription")
         }
         icon={SkillIcon}
         title={
           searchQuery
-            ? `No installed skills match "${searchQuery}"`
-            : "Skills will appear here."
+            ? t("skills.noMatchTitle", { query: searchQuery })
+            : t("skills.emptyTitle")
         }
       />
     );

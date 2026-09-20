@@ -11,6 +11,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import type { ConnectorActivityItem, SourceConnector } from "@sourceweft/sdk";
 import {
@@ -129,6 +130,7 @@ export function ConnectorSettingsDialog({
   open: boolean;
   webhookConfig: ConnectorWebhookConfig | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const [tab, setTab] = useState<ConnectorSettingsTab>("overview");
   const connectorType = connector?.raw.connectorType ?? "connector";
   const catalogItem =
@@ -139,21 +141,24 @@ export function ConnectorSettingsDialog({
   const isBusy = connector ? Boolean(connectorBusyById[connector.id]) : false;
   const readiness = connector
     ? (connectorReadinessById[connector.id] ??
-      getConnectorReadinessFromConfig(connector.raw))
+      getConnectorReadinessFromConfig(connector.raw, t))
     : null;
   const latestActivity = activity[0] ?? null;
   const latestSuccessfulSync = activity.find(
     (item) => item.kind === "sync" && item.status === "succeeded",
   );
   const overviewStatus = connector?.raw.lastError
-    ? "Needs attention"
-    : (formatConnectorReadinessSummary(readiness) ?? connector?.status);
+    ? t("connectors.overview.needsAttention")
+    : (formatConnectorReadinessSummary(readiness, t) ??
+      (connector
+        ? t(`connectors.statusLabel.${connector.status}`)
+        : undefined));
   const statusToggleLabel =
     connector?.status === "disabled"
-      ? "Enable"
+      ? t("connectors.enableShort")
       : connector?.status === "paused"
-        ? "Resume"
-        : "Pause";
+        ? t("connectors.resumeShort")
+        : t("connectors.pauseShort");
   const StatusToggleIcon =
     connector?.status === "disabled" || connector?.status === "paused"
       ? Play
@@ -211,11 +216,11 @@ export function ConnectorSettingsDialog({
       return;
     }
     if (!isSettingsValid) {
-      toast.error("Enter a connector name and a positive sync interval.");
+      toast.error(t("connectors.config.saveError"));
       return;
     }
     if (!canUsePeriodicSync && frequencyValue !== "manual") {
-      toast.error("This connector cannot use periodic sync.");
+      toast.error(t("connectors.config.cannotPeriodic"));
       return;
     }
     const periodicIndexingEnabled = frequencyValue !== "manual";
@@ -254,12 +259,16 @@ export function ConnectorSettingsDialog({
                 </DialogTitle>
                 {catalogItem ? (
                   <TypeBadge
-                    label={catalogItem.isIndexable ? "Indexable" : "Search API"}
+                    label={
+                      catalogItem.isIndexable
+                        ? t("connectors.type.indexable")
+                        : t("connectors.type.searchApi")
+                    }
                   />
                 ) : null}
               </div>
               <DialogDescription className="mt-1 text-xs leading-5 sm:text-sm">
-                Connector settings, execution history, and provider events.
+                {t("connectors.settingsDescription")}
               </DialogDescription>
             </div>
           </div>
@@ -280,23 +289,47 @@ export function ConnectorSettingsDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="overview">Overview</SelectItem>
-                  <SelectItem value="configuration">Configuration</SelectItem>
-                  <SelectItem value="sync">Sync History</SelectItem>
-                  <SelectItem value="actions">Actions</SelectItem>
-                  <SelectItem value="webhooks">Webhooks</SelectItem>
-                  <SelectItem value="danger">Danger Zone</SelectItem>
+                  <SelectItem value="overview">
+                    {t("connectors.settingsTab.overview")}
+                  </SelectItem>
+                  <SelectItem value="configuration">
+                    {t("connectors.settingsTab.configuration")}
+                  </SelectItem>
+                  <SelectItem value="sync">
+                    {t("connectors.settingsTab.sync")}
+                  </SelectItem>
+                  <SelectItem value="actions">
+                    {t("connectors.settingsTab.actions")}
+                  </SelectItem>
+                  <SelectItem value="webhooks">
+                    {t("connectors.settingsTab.webhooks")}
+                  </SelectItem>
+                  <SelectItem value="danger">
+                    {t("connectors.settingsTab.danger")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <ScrollArea className="hidden sm:block">
               <TabsList className="w-max" variant="line">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="configuration">Configuration</TabsTrigger>
-                <TabsTrigger value="sync">Sync History</TabsTrigger>
-                <TabsTrigger value="actions">Actions</TabsTrigger>
-                <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-                <TabsTrigger value="danger">Danger Zone</TabsTrigger>
+                <TabsTrigger value="overview">
+                  {t("connectors.settingsTab.overview")}
+                </TabsTrigger>
+                <TabsTrigger value="configuration">
+                  {t("connectors.settingsTab.configuration")}
+                </TabsTrigger>
+                <TabsTrigger value="sync">
+                  {t("connectors.settingsTab.sync")}
+                </TabsTrigger>
+                <TabsTrigger value="actions">
+                  {t("connectors.settingsTab.actions")}
+                </TabsTrigger>
+                <TabsTrigger value="webhooks">
+                  {t("connectors.settingsTab.webhooks")}
+                </TabsTrigger>
+                <TabsTrigger value="danger">
+                  {t("connectors.settingsTab.danger")}
+                </TabsTrigger>
               </TabsList>
             </ScrollArea>
           </div>
@@ -306,43 +339,48 @@ export function ConnectorSettingsDialog({
               <TabsContent className="m-0 space-y-4" value="overview">
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-lg border bg-muted/20 p-3">
-                    <p className="text-[10px] text-muted-foreground">Status</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("connectors.overview.status")}
+                    </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {overviewStatus}
                     </p>
                   </div>
                   <div className="rounded-lg border bg-muted/20 p-3">
                     <p className="text-[10px] text-muted-foreground">
-                      Last successful sync
+                      {t("connectors.overview.lastSuccessfulSync")}
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {latestSuccessfulSync
                         ? new Date(
                             latestSuccessfulSync.createdAt,
                           ).toLocaleString()
-                        : "Never"}
+                        : t("connectors.overview.never")}
                     </p>
                   </div>
                   <div className="rounded-lg border bg-muted/20 p-3">
                     <p className="text-[10px] text-muted-foreground">
-                      Latest run
+                      {t("connectors.overview.latestRun")}
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {latestActivity
-                        ? `${latestActivity.kind} · ${latestActivity.status}`
-                        : "No activity"}
+                        ? t("connectors.overview.latestRunValue", {
+                            kind: latestActivity.kind,
+                            status: latestActivity.status,
+                          })
+                        : t("connectors.overview.noActivity")}
                     </p>
                   </div>
                   <div className="rounded-lg border bg-muted/20 p-3">
                     <p className="text-[10px] text-muted-foreground">
-                      Next scheduled
+                      {t("connectors.overview.nextScheduled")}
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {connector.raw.nextScheduledAt
                         ? new Date(
                             connector.raw.nextScheduledAt,
                           ).toLocaleString()
-                        : "Not scheduled"}
+                        : t("connectors.overview.notScheduled")}
                     </p>
                   </div>
                 </div>
@@ -359,8 +397,8 @@ export function ConnectorSettingsDialog({
                   </Alert>
                 ) : null}
                 <ActivityList
-                  description="Most recent connector execution records across syncs, actions, and webhooks."
-                  emptyTitle="No connector activity yet."
+                  description={t("connectors.overview.activityDescription")}
+                  emptyTitle={t("connectors.overview.activityEmpty")}
                   items={activity}
                   kind="all"
                   loading={isLoadingActivity}
@@ -372,12 +410,12 @@ export function ConnectorSettingsDialog({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-3">
                     <p className="text-xs font-medium text-foreground">
-                      General
+                      {t("connectors.config.general")}
                     </p>
                     <div className="mt-3 space-y-3">
                       <label className="block space-y-1.5">
                         <span className="text-[10px] font-medium text-muted-foreground">
-                          Name
+                          {t("connectors.config.name")}
                         </span>
                         <Input
                           className="h-8 text-xs"
@@ -390,7 +428,7 @@ export function ConnectorSettingsDialog({
                       </label>
                       <label className="block space-y-1.5">
                         <span className="text-[10px] font-medium text-muted-foreground">
-                          Sync schedule
+                          {t("connectors.config.syncSchedule")}
                         </span>
                         <Select
                           disabled={!canUsePeriodicSync || isSavingSettings}
@@ -406,7 +444,7 @@ export function ConnectorSettingsDialog({
                                 key={option.value}
                                 value={option.value}
                               >
-                                {option.label}
+                                {t(`connectors.frequency.${option.value}`)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -415,7 +453,7 @@ export function ConnectorSettingsDialog({
                       {frequencyValue === "custom" ? (
                         <label className="block space-y-1.5">
                           <span className="text-[10px] font-medium text-muted-foreground">
-                            Custom interval minutes
+                            {t("connectors.config.customIntervalMinutes")}
                           </span>
                           <Input
                             className="h-8 text-xs"
@@ -431,8 +469,7 @@ export function ConnectorSettingsDialog({
                       ) : null}
                       {!canUsePeriodicSync ? (
                         <p className="text-[10px] leading-4 text-muted-foreground">
-                          Non-indexable search connectors cannot run periodic
-                          indexing.
+                          {t("connectors.config.nonIndexableNote")}
                         </p>
                       ) : null}
                       <Button
@@ -451,40 +488,41 @@ export function ConnectorSettingsDialog({
                         ) : (
                           <Settings2 className="size-3.5" />
                         )}
-                        Save settings
+                        {t("connectors.config.saveSettings")}
                       </Button>
                     </div>
                     <dl className="mt-3 space-y-1 border-t pt-3 text-xs text-muted-foreground">
                       <div className="flex justify-between gap-3">
-                        <dt>Schedule</dt>
+                        <dt>{t("connectors.config.schedule")}</dt>
                         <dd className="truncate text-foreground">
-                          {formatConnectorSchedule(connector.raw)}
+                          {formatConnectorSchedule(connector.raw, t)}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <dt>Provider</dt>
+                        <dt>{t("connectors.config.provider")}</dt>
                         <dd className="truncate text-foreground">
                           {providerName}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <dt>Connection</dt>
+                        <dt>{t("connectors.config.connection")}</dt>
                         <dd className="truncate text-foreground">
                           {getConnectorAccountLabel(connector) ??
-                            "Default connection"}
+                            t("connectors.config.defaultConnection")}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <dt>Account ID</dt>
+                        <dt>{t("connectors.config.accountId")}</dt>
                         <dd className="truncate text-foreground">
-                          {connector.raw.oauthAccountId ?? "None"}
+                          {connector.raw.oauthAccountId ??
+                            t("connectors.config.none")}
                         </dd>
                       </div>
                     </dl>
                   </div>
                   <div className="rounded-lg border p-3">
                     <p className="text-xs font-medium text-foreground">
-                      Capabilities
+                      {t("connectors.config.capabilities")}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {catalogItem ? (
@@ -492,22 +530,24 @@ export function ConnectorSettingsDialog({
                           <TypeBadge
                             label={
                               catalogItem.isIndexable
-                                ? "Indexable source"
-                                : "Non-indexable search"
+                                ? t("connectors.config.indexableSource")
+                                : t("connectors.config.nonIndexableSearch")
                             }
                           />
                           {catalogItem.supportsPeriodicSync ? (
-                            <TypeBadge label="Periodic sync" />
+                            <TypeBadge
+                              label={t("connectors.config.periodicSync")}
+                            />
                           ) : null}
                           {catalogItem.supportsActions ? (
-                            <TypeBadge label="Actions" />
+                            <TypeBadge label={t("connectors.config.actions")} />
                           ) : null}
                           {catalogItem.supportsWebhook ? (
-                            <TypeBadge label="Webhooks" />
+                            <TypeBadge label={t("connectors.config.webhooks")} />
                           ) : null}
                         </>
                       ) : (
-                        <TypeBadge label="Connector" />
+                        <TypeBadge label={t("connectors.config.connector")} />
                       )}
                     </div>
                   </div>
@@ -517,10 +557,14 @@ export function ConnectorSettingsDialog({
                     <div className="flex items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-1 font-medium text-foreground">
                         <Webhook className="size-3.5" />
-                        {providerName} webhook URL
+                        {t("connectors.config.webhookUrlLabel", {
+                          name: providerName,
+                        })}
                       </span>
                       {!webhookConfig.isConfigured ? (
-                        <Badge variant="outline">needs public HTTPS</Badge>
+                        <Badge variant="outline">
+                          {t("connectors.config.needsPublicHttps")}
+                        </Badge>
                       ) : null}
                     </div>
                     <div className="mt-2 flex min-w-0 items-center gap-1.5">
@@ -535,13 +579,16 @@ export function ConnectorSettingsDialog({
                         variant="ghost"
                       >
                         <Copy className="size-3.5" />
-                        <span className="sr-only">Copy webhook URL</span>
+                        <span className="sr-only">
+                          {t("connectors.copyWebhook")}
+                        </span>
                       </Button>
                     </div>
                     {catalogItem?.webhookSupportNote ? (
                       <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-                        {catalogItem.webhookSupportNote} Events are recorded in
-                        Webhooks and Activity.
+                        {t("connectors.config.webhookNoteSuffix", {
+                          note: catalogItem.webhookSupportNote,
+                        })}
                       </p>
                     ) : null}
                   </div>
@@ -550,8 +597,8 @@ export function ConnectorSettingsDialog({
 
               <TabsContent className="m-0" value="sync">
                 <ActivityList
-                  description="Manual, scheduled, webhook, backfill, and skipped sync attempts."
-                  emptyTitle="No sync runs yet."
+                  description={t("connectors.syncHistory.description")}
+                  emptyTitle={t("connectors.syncHistory.empty")}
                   items={activity}
                   kind="sync"
                   loading={isLoadingActivity}
@@ -561,8 +608,8 @@ export function ConnectorSettingsDialog({
 
               <TabsContent className="m-0" value="actions">
                 <ActivityList
-                  description="Approved connector writes, updates, deletes, comments, and file uploads."
-                  emptyTitle="No connector actions yet."
+                  description={t("connectors.actionsHistory.description")}
+                  emptyTitle={t("connectors.actionsHistory.empty")}
                   items={activity}
                   kind="action"
                   loading={isLoadingActivity}
@@ -572,8 +619,8 @@ export function ConnectorSettingsDialog({
 
               <TabsContent className="m-0" value="webhooks">
                 <ActivityList
-                  description="Provider events received from connector webhooks."
-                  emptyTitle="No webhook events yet."
+                  description={t("connectors.webhooksHistory.description")}
+                  emptyTitle={t("connectors.webhooksHistory.empty")}
                   items={activity}
                   kind="webhook"
                   loading={isLoadingActivity}
@@ -584,8 +631,7 @@ export function ConnectorSettingsDialog({
               <TabsContent className="m-0 space-y-3" value="danger">
                 <Alert variant="destructive">
                   <AlertDescription>
-                    Remove stops this connector from syncing. Indexed sources
-                    are kept unless you remove them separately.
+                    {t("connectors.danger.note")}
                   </AlertDescription>
                 </Alert>
                 <Separator />
@@ -597,10 +643,12 @@ export function ConnectorSettingsDialog({
                     size="sm"
                     title={
                       connector.status === "paused"
-                        ? `Sync paused ${providerName} manually`
+                        ? t("connectors.syncPausedManual", {
+                            name: providerName,
+                          })
                         : connector.status === "disabled"
-                          ? `${providerName} is disabled`
-                          : `Sync ${providerName}`
+                          ? t("connectors.isDisabled", { name: providerName })
+                          : t("connectors.sync", { name: providerName })
                     }
                     type="button"
                     variant="outline"
@@ -610,7 +658,7 @@ export function ConnectorSettingsDialog({
                     ) : (
                       <RotateCcw className="size-3.5" />
                     )}
-                    Sync now
+                    {t("connectors.syncNow")}
                   </Button>
                   <Button
                     className={disabledConnectorIconButtonClass}
@@ -629,12 +677,12 @@ export function ConnectorSettingsDialog({
                     disabled={isBusy}
                     onClick={() => onDisconnect(connector)}
                     size="sm"
-                    title={`Remove ${providerName}`}
+                    title={t("connectors.removeAria", { name: providerName })}
                     type="button"
                     variant="destructive"
                   >
                     <Power className="size-3.5" />
-                    Remove
+                    {t("connectors.removeShort")}
                   </Button>
                 </div>
               </TabsContent>

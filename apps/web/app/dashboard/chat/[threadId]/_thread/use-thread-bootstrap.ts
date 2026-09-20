@@ -8,6 +8,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { useTranslations } from "next-intl";
 import {
   normalizeComposerOptionsState,
   type ComposerOptionsState,
@@ -84,6 +85,7 @@ export function useThreadBootstrap({
   threadId,
   workspaceId,
 }: UseThreadBootstrapInput) {
+  const t = useTranslations("dashboardChat");
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const scope = JSON.stringify([userId, workspaceId, threadId]);
   const activeScope = useRef(scope);
@@ -170,8 +172,7 @@ export function useThreadBootstrap({
       .finally(() => {
         if (!accepted)
           recover(
-            failureMessage ??
-              "The first message was not confirmed. Its content is saved below. You can safely retry the same request.",
+            failureMessage ?? t("bootstrap.firstMessageNotConfirmed"),
           );
       });
   }, [
@@ -182,6 +183,7 @@ export function useThreadBootstrap({
     streamThreadAction,
     threadId,
     retry,
+    t,
   ]);
   useEffect(() => {
     if (
@@ -197,11 +199,10 @@ export function useThreadBootstrap({
       scope,
       turn,
       message:
-        localStatus.message ??
-        "The computer is unavailable. Your first message is saved.",
+        localStatus.message ?? t("bootstrap.computerUnavailableSaved"),
     });
     setPrepared({ scope, turn });
-  }, [localStatus.ready, localStatus.message, scope, currentTurn, save]);
+  }, [localStatus.ready, localStatus.message, scope, currentTurn, save, t]);
 
   useBrowserLayoutEffect(() => {
     if (!workspaceId || !userId) {
@@ -258,9 +259,7 @@ export function useThreadBootstrap({
               )
             : [];
           if ((await persistActiveSourceIds(pendingSourceIds)) === false) {
-            throw new Error(
-              "Could not save Sources before starting this conversation.",
-            );
+            throw new Error(t("bootstrap.saveSourcesFailed"));
           }
           if (activeScope.current !== scope) return;
           setActiveSkillIds(pendingSkillIds);
@@ -317,8 +316,7 @@ export function useThreadBootstrap({
             setRecovery({
               scope,
               turn: pendingTurn,
-              message:
-                "Your first message is saved. Check the conversation before retrying the same request.",
+              message: t("bootstrap.firstMessageSavedCheck"),
             });
         } catch (error) {
           if (activeScope.current !== scope) return;

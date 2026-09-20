@@ -6,6 +6,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -20,7 +21,7 @@ import { memoComponent } from "../memo-component";
 import { TypeBadge } from "../type-badge";
 import {
   workfileMatchesQuery,
-  workfilePurposeLabel,
+  workfilePurposeKey,
   type WorkfileListItem,
 } from "./use-workfiles";
 
@@ -43,6 +44,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
   rowBusyByPath: Record<string, boolean>;
   searchQuery: string;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const q = searchQuery.trim().toLowerCase();
   const filtered = useMemo(
     () => (q ? files.filter((file) => workfileMatchesQuery(file, q)) : files),
@@ -53,7 +55,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
     return (
       <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
         <Loader2 className="mr-2 size-3.5 animate-spin" />
-        Loading files...
+        {t("files.loading")}
       </div>
     );
   }
@@ -70,7 +72,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
           variant="outline"
         >
           <RotateCcw className="size-3.5" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -81,14 +83,14 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
       <HubEmptyState
         description={
           searchQuery
-            ? "Try a different path, purpose, or file type."
-            : "Files you upload and files created during this conversation appear here."
+            ? t("files.noMatchDescription")
+            : t("files.emptyDescription")
         }
         icon={FileText}
         title={
           searchQuery
-            ? `No files match "${searchQuery}"`
-            : "Files will appear here."
+            ? t("files.noMatchTitle", { query: searchQuery })
+            : t("files.emptyTitle")
         }
       />
     );
@@ -121,7 +123,9 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
               </div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {file.purpose ? (
-                  <TypeBadge label={workfilePurposeLabel(file.purpose)} />
+                  <TypeBadge
+                    label={t(`files.purpose.${workfilePurposeKey(file.purpose)}`)}
+                  />
                 ) : null}
                 <TypeBadge label={file.mimeType} />
               </div>
@@ -133,7 +137,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
                   disabled={busy}
                   onClick={(event) => event.stopPropagation()}
                   size="icon-xs"
-                  title="Workfile actions"
+                  title={t("files.actions")}
                   type="button"
                   variant="ghost"
                 >
@@ -142,7 +146,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
                   ) : (
                     <MoreHorizontal className="size-3.5" />
                   )}
-                  <span className="sr-only">Workfile actions</span>
+                  <span className="sr-only">{t("files.actions")}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
@@ -151,7 +155,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
                   onClick={() => onOpen(file)}
                 >
                   <FileText className="size-3.5" />
-                  Preview
+                  {t("common.preview")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="whitespace-nowrap"
@@ -159,7 +163,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
                   variant="destructive"
                 >
                   <Trash2 className="size-3.5" />
-                  Delete
+                  {t("common.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

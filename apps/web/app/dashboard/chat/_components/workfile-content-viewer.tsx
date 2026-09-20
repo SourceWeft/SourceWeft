@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   CodeBlock,
   CodeBlockActions,
@@ -43,6 +44,7 @@ export function WorkfilePathSnippet({
   className?: string;
   path: string;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   return (
     <div
       className={cn(
@@ -51,7 +53,10 @@ export function WorkfilePathSnippet({
       )}
     >
       <Snippet className="min-w-0 flex-1" code={path}>
-        <SnippetInput aria-label="Workfile path" className="min-w-0 text-xs" />
+        <SnippetInput
+          aria-label={t("workfile.pathAria")}
+          className="min-w-0 text-xs"
+        />
         <SnippetCopyButton />
       </Snippet>
       {action}
@@ -72,6 +77,7 @@ export function WorkfileCodeBlock({
   language: WorkfileCodeLanguage;
   showLineNumbers?: boolean;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   return (
     <CodeBlock
       className={cn("overflow-hidden text-xs", className)}
@@ -83,7 +89,7 @@ export function WorkfileCodeBlock({
         <CodeBlockFilename>{fileName}</CodeBlockFilename>
         <CodeBlockActions>
           <CodeBlockCopyButton
-            aria-label="Copy preview"
+            aria-label={t("actions.copyPreview")}
             className="size-7"
             size="icon"
           />
@@ -122,6 +128,7 @@ export function WorkfileContentViewer({
   mimeType,
   path,
 }: WorkfileContentViewerProps) {
+  const t = useTranslations("dashboardChatFiles");
   const preview = resolveWorkfileContentPreview({
     contentText,
     mimeType,
@@ -146,8 +153,8 @@ export function WorkfileContentViewer({
       defaultValue={defaultMode ?? "preview"}
     >
       <TabsList className="mb-3 grid w-fit grid-cols-2">
-        <TabsTrigger value="preview">Preview</TabsTrigger>
-        <TabsTrigger value="source">Source</TabsTrigger>
+        <TabsTrigger value="preview">{t("workfile.tabPreview")}</TabsTrigger>
+        <TabsTrigger value="source">{t("workfile.tabSource")}</TabsTrigger>
       </TabsList>
       <TabsContent
         className="min-h-0 flex-1 overflow-auto rounded-md border bg-background px-4 py-3"

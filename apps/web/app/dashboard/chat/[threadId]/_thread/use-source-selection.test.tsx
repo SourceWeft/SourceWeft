@@ -1,8 +1,24 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import { useSourceSelection } from "./use-source-selection";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), error: vi.fn() }));
 vi.mock("../../../../../lib/sdk", () => ({
@@ -37,7 +53,9 @@ async function renderSelection(thread = "thread") {
     return null;
   }
   async function rerender(thread: string) {
-    await act(async () => root.render(createElement(Probe, { thread })));
+    await act(async () =>
+      root.render(withIntl(createElement(Probe, { thread }))),
+    );
   }
   await rerender(thread);
   return { result, rerender };

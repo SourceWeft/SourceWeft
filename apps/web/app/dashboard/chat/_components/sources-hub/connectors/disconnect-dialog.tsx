@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   AlertDialog,
@@ -31,14 +32,14 @@ export function ConnectorDisconnectDialog({
   onHardDeleteChange: (hardDelete: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   return (
     <AlertDialog onOpenChange={onOpenChange} open={Boolean(connector)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Manage connector removal</AlertDialogTitle>
+          <AlertDialogTitle>{t("connectors.disconnectTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            Choose whether to temporarily disable this connector or permanently
-            delete it from SourceWeft.
+            {t("connectors.disconnectDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {connector ? (
@@ -71,11 +72,10 @@ export function ConnectorDisconnectDialog({
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-medium">
-                Disable connector
+                {t("connectors.disableOption")}
               </span>
               <span className="block text-xs text-muted-foreground">
-                Stops syncing. Keeps authorization, configuration, history, and
-                indexed content. You can enable it again later.
+                {t("connectors.disableOptionDesc")}
               </span>
             </span>
           </button>
@@ -101,20 +101,21 @@ export function ConnectorDisconnectDialog({
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-medium text-destructive">
-                Delete connector and all indexed content
+                {t("connectors.deleteOption")}
               </span>
               <span className="block text-xs text-muted-foreground">
-                Permanently deletes this connector, its local authorization, and
-                all content imported by it. This cannot be undone.
+                {t("connectors.deleteOptionDesc")}
               </span>
             </span>
           </button>
           <p className="text-xs text-muted-foreground">
-            SourceWeft will not revoke access in the third-party provider.
+            {t("connectors.disconnectNote")}
           </p>
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isBusy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isBusy}>
+            {t("common.cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             className={cn(
               hardDelete && buttonVariants({ variant: "destructive" }),
@@ -129,12 +130,14 @@ export function ConnectorDisconnectDialog({
             {isBusy ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                {hardDelete ? "Deleting..." : "Disabling..."}
+                {hardDelete
+                  ? t("connectors.deleting")
+                  : t("connectors.disabling")}
               </>
             ) : hardDelete ? (
-              "Delete connector and content"
+              t("connectors.deleteConfirm")
             ) : (
-              "Disable connector"
+              t("connectors.disableConfirm")
             )}
           </AlertDialogAction>
         </AlertDialogFooter>

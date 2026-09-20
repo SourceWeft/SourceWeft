@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import {
   Sheet,
   SheetContent,
@@ -35,6 +36,7 @@ export function ThreadSidePanels({
   sourcesVisible: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardChat");
   return (
     <Sheet
       open={Boolean(sourcesVisible && previewArtifact && !isDesktopPanel)}
@@ -49,7 +51,7 @@ export function ThreadSidePanels({
         side="bottom"
       >
         <SheetTitle className="sr-only">
-          {previewArtifact ? "Artifact preview" : "Artifact"}
+          {previewArtifact ? t("artifact.srPreview") : t("artifact.srTitle")}
         </SheetTitle>
         {previewArtifact ? (
           <ArtifactPreviewPanel

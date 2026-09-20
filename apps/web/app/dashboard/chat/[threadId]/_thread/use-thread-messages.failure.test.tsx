@@ -1,11 +1,27 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import { ChatErrorNotice } from "../../_components/chat-canvas/chat-error-notice";
 import { useThreadMessages } from "./use-thread-messages";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -79,7 +95,7 @@ afterEach(async () => {
 });
 
 test("reload exposes a persisted early failure without inventing a message", async () => {
-  await act(async () => root.render(createElement(Harness)));
+  await act(async () => root.render(withIntl(createElement(Harness))));
   await act(async () => latest.loadThreadMessages());
   assert.equal(latest.messages.length, 0);
   assert.deepEqual(latest.latestRunFailure, failure);
@@ -91,7 +107,7 @@ test("reload exposes a persisted early failure without inventing a message", asy
 });
 
 test("the same local error suppresses a duplicate banner, while an older run does not", async () => {
-  await act(async () => root.render(createElement(Harness)));
+  await act(async () => root.render(withIntl(createElement(Harness))));
   await act(async () => latest.loadThreadMessages());
   const message = {
     id: "temp-assistant",
@@ -125,7 +141,7 @@ test("the same local error suppresses a duplicate banner, while an older run doe
 });
 
 test("a new active run and a later clear status remove the old failure", async () => {
-  await act(async () => root.render(createElement(Harness)));
+  await act(async () => root.render(withIntl(createElement(Harness))));
   await act(async () => latest.loadThreadMessages());
   mocks.active.mockResolvedValue({
     threadRun: {
@@ -149,20 +165,22 @@ test("a new active run and a later clear status remove the old failure", async (
 });
 
 test("switching workspace or thread never flashes the previous failure", async () => {
-  await act(async () => root.render(createElement(Harness)));
+  await act(async () => root.render(withIntl(createElement(Harness))));
   await act(async () => latest.loadThreadMessages());
   await act(async () =>
-    root.render(createElement(Harness, { workspaceId: "workspace-2" })),
+    root.render(withIntl(createElement(Harness, { workspaceId: "workspace-2" }))),
   );
   assert.equal(latest.latestRunFailure, null);
   assert.equal(container.querySelector('[role="alert"]'), null);
   await act(async () => latest.setLatestRunFailure(failure));
   await act(async () =>
     root.render(
-      createElement(Harness, {
-        workspaceId: "workspace-2",
-        threadId: "thread-2",
-      }),
+      withIntl(
+        createElement(Harness, {
+          workspaceId: "workspace-2",
+          threadId: "thread-2",
+        }),
+      ),
     ),
   );
   assert.equal(latest.latestRunFailure, null);

@@ -1,3 +1,4 @@
+import type { useTranslations } from "next-intl";
 import {
   hasAgentToolCapability,
   isAgentToolDomain,
@@ -24,6 +25,8 @@ import {
 } from "./artifact-progress";
 import { resolveToolCallArtifactId } from "./artifact-work-state";
 import { getRecordValue } from "../../../../../lib/records";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 function isVisionFallbackStep(step: ThinkingStepRecord) {
   return step.metadata?.strategy === "vision_fallback";
@@ -217,6 +220,7 @@ function getConnectorToolMetadata(toolCall: ToolCallRecord) {
 
 export function getConnectorToolDisplayLabel(
   toolCall: ToolCallRecord,
+  t: Translate,
 ): string | null {
   const connectorMetadata = getConnectorToolMetadata(toolCall);
   if (!connectorMetadata) {
@@ -225,15 +229,15 @@ export function getConnectorToolDisplayLabel(
 
   const toolName = formatToolName(connectorMetadata.toolName);
   if (toolCall.status === "error") {
-    return `${toolName} failed`;
+    return t("toolCard.connector.failed", { tool: toolName });
   }
   if (
     toolCall.status === "running" ||
     toolCall.status === "approval_requested"
   ) {
-    return `Running ${toolName}`;
+    return t("toolCard.connector.running", { tool: toolName });
   }
-  return `${toolName} completed`;
+  return t("toolCard.connector.completed", { tool: toolName });
 }
 
 function getToolFetchUrls(toolCall: ToolCallRecord) {
@@ -295,38 +299,41 @@ function formatToolName(toolName: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-export function getResolvedToolConfirmationMessage(input: {
-  confirmation: ReturnType<typeof getToolConfirmationOutput>;
-  confirmationResolution?: ToolConfirmationResolution | null;
-}) {
+export function getResolvedToolConfirmationMessage(
+  input: {
+    confirmation: ReturnType<typeof getToolConfirmationOutput>;
+    confirmationResolution?: ToolConfirmationResolution | null;
+  },
+  t: Translate,
+) {
   if (!input.confirmation) {
     return null;
   }
   if (input.confirmationResolution?.expired) {
-    return "Approval expired without a decision. The action was not run.";
+    return t("toolConfirmation.resolved.expired");
   }
   if (input.confirmationResolution?.stopped) {
-    return "Approval stopped. The action was not run.";
+    return t("toolConfirmation.resolved.stopped");
   }
   if (input.confirmationResolution?.decision === "reject") {
-    return "Approval rejected. The action was not run.";
+    return t("toolConfirmation.resolved.rejected");
   }
   if (input.confirmationResolution?.decision === "approve") {
-    return "Approval recorded. Waiting for the run to continue.";
+    return t("toolConfirmation.resolved.approvedWaiting");
   }
 
   switch (input.confirmation.status) {
     case "approved":
-      return "Approval recorded. The action may now run.";
+      return t("toolConfirmation.resolved.approvedMayRun");
     case "rejected":
     case "canceled":
-      return "Approval rejected. The action was not run.";
+      return t("toolConfirmation.resolved.rejected");
     case "failed":
-      return "Approval failed. The action was not run.";
+      return t("toolConfirmation.resolved.failed");
     case "running":
-      return "Approval recorded. The action is running.";
+      return t("toolConfirmation.resolved.running");
     case "succeeded":
-      return "Approval recorded. The action completed.";
+      return t("toolConfirmation.resolved.completed");
     case "proposed":
     default:
       return null;
@@ -346,22 +353,23 @@ export function isToolConfirmationResolved(input: {
 
 export function getToolApprovalDisplayLabel(
   toolCall: ToolCallRecord,
-  confirmationResolution?: ToolConfirmationResolution | null,
+  confirmationResolution: ToolConfirmationResolution | null | undefined,
+  t: Translate,
 ) {
   const confirmation = getToolConfirmationOutput(toolCall.output);
   if (confirmation) {
     const toolName = formatToolName(toolCall.tool);
     if (toolCall.status === "error") {
-      return `${toolName} approval failed`;
+      return t("toolConfirmation.approvalLabel.failed", { tool: toolName });
     }
     if (confirmationResolution?.expired) {
-      return `${toolName} approval expired`;
+      return t("toolConfirmation.approvalLabel.expired", { tool: toolName });
     }
     if (confirmationResolution?.stopped) {
-      return `${toolName} approval stopped`;
+      return t("toolConfirmation.approvalLabel.stopped", { tool: toolName });
     }
     if (confirmationResolution?.decision === "reject") {
-      return `${toolName} approval rejected`;
+      return t("toolConfirmation.approvalLabel.rejected", { tool: toolName });
     }
     if (
       confirmationResolution?.decision === "approve" ||
@@ -369,25 +377,27 @@ export function getToolApprovalDisplayLabel(
       confirmation.status === "running" ||
       confirmation.status === "succeeded"
     ) {
-      return `${toolName} approval recorded`;
+      return t("toolConfirmation.approvalLabel.recorded", { tool: toolName });
     }
     if (isPendingToolConfirmation(confirmation)) {
-      return `${toolName} waiting for approval`;
+      return t("toolConfirmation.approvalLabel.waiting", { tool: toolName });
     }
     if (
       confirmation.status === "rejected" ||
       confirmation.status === "canceled"
     ) {
-      return `${toolName} approval rejected`;
+      return t("toolConfirmation.approvalLabel.rejected", { tool: toolName });
     }
     if (confirmation.status === "failed") {
-      return `${toolName} approval failed`;
+      return t("toolConfirmation.approvalLabel.failed", { tool: toolName });
     }
-    return `${toolName} approval recorded`;
+    return t("toolConfirmation.approvalLabel.recorded", { tool: toolName });
   }
 
   if (toolCall.approvalState === "approved" && toolCall.status === "error") {
-    return `${formatToolName(toolCall.tool)} approved action failed`;
+    return t("toolConfirmation.approvalLabel.actionFailed", {
+      tool: formatToolName(toolCall.tool),
+    });
   }
 
   return null;

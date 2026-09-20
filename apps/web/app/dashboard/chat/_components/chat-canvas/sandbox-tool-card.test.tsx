@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { createElement, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { SandboxToolCard } from "./sandbox-tool-card";
 import type { ToolCallRecord, ToolConfirmationResolution } from "./types";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 const toolCall: ToolCallRecord = {
   id: "execute-1",
   tool: "execute",
@@ -44,7 +55,7 @@ const toolCall: ToolCallRecord = {
 };
 test("pending approval still shows the waiting indicator", () => {
   const html = renderToStaticMarkup(
-    createElement(SandboxToolCard, { toolCall, defaultOpen: true }),
+    withIntl(createElement(SandboxToolCard, { toolCall, defaultOpen: true })),
   );
   assert.ok(html.includes("Waiting for approval before execution."));
   assert.ok(html.includes("Needs approval"));
@@ -66,11 +77,11 @@ for (const [flag, label] of [
           : {}),
     };
     const html = renderToStaticMarkup(
-      createElement(SandboxToolCard, {
+      withIntl(createElement(SandboxToolCard, {
         toolCall,
         defaultOpen: true,
         resolvedConfirmations: [resolution],
-      }),
+      })),
     );
     assert.ok(html.includes(`approval ${label}`));
     assert.ok(!html.includes("Waiting for approval before execution."));
@@ -81,7 +92,7 @@ for (const [flag, label] of [
 
 test("command cards use plain operation labels instead of implementation terminology", () => {
   const html = renderToStaticMarkup(
-    createElement(SandboxToolCard, { toolCall, defaultOpen: true }),
+    withIntl(createElement(SandboxToolCard, { toolCall, defaultOpen: true })),
   );
   assert.ok(html.includes("Run command"));
   assert.ok(!html.includes("Execute sandbox command"));

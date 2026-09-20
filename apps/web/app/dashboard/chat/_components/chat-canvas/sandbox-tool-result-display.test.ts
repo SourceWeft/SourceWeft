@@ -3,15 +3,37 @@ import { test } from "vitest";
 import {
   getSandboxExecuteView,
   getSandboxCollectedWorkfilePaths,
-  getSandboxToolOperationTimeline,
+  getSandboxToolOperationTimeline as getSandboxToolOperationTimelineRaw,
   getSandboxToolResultDetails,
   getSandboxToolResultSummary,
-  getSandboxToolSafeErrorMessage,
+  getSandboxToolSafeErrorMessage as getSandboxToolSafeErrorMessageRaw,
   getSandboxTransferView,
   isSandboxToolResultFailure,
   parseSandboxToolResultDisplay,
   resolveSandboxToolUiState,
 } from "./sandbox-tool-result-display";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+// `getSandboxToolOperationTimeline` and `getSandboxToolSafeErrorMessage` gained a
+// required translator argument. Build one without a React context — the en
+// catalog carries the same English copy these helpers used to hardcode, so every
+// assertion below still holds — and thread it through thin wrappers so each
+// test's call site stays byte-for-byte unchanged. The cast pins the translator to
+// the loose type the helpers accept (createTranslator otherwise infers the
+// concrete catalog/namespace shape).
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
+const getSandboxToolOperationTimeline = (
+  input: Parameters<typeof getSandboxToolOperationTimelineRaw>[0],
+) => getSandboxToolOperationTimelineRaw(input, t);
+const getSandboxToolSafeErrorMessage = (
+  input: Parameters<typeof getSandboxToolSafeErrorMessageRaw>[0],
+) => getSandboxToolSafeErrorMessageRaw(input, t);
 
 test("parses sandbox prepare result JSON", () => {
   assert.deepEqual(

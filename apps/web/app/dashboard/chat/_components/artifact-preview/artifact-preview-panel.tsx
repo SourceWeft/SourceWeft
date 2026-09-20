@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ArrowLeft,
   Download,
@@ -70,6 +71,7 @@ export function ArtifactPreviewPanel({
   onDeleted?: () => void;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   const pageUrl = resolveArtifactPageUrl({ artifact, workspaceId });
   const proxyFileUrl = resolveArtifactProxyFileUrl({ artifact, workspaceId });
   const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
@@ -158,11 +160,11 @@ export function ArtifactPreviewPanel({
 
   const handleOpenExternal = () => {
     if (!canUseDefaultOpen) {
-      toast.error("Open is handled by this artifact preview.");
+      toast.error(t("toasts.openHandledByPreview"));
       return;
     }
     if (!canOpenFile || !pageUrl) {
-      toast.error("This artifact has no preview file.");
+      toast.error(t("toasts.noPreviewFile"));
       return;
     }
     window.open(pageUrl, "_blank", "noopener,noreferrer");
@@ -170,11 +172,11 @@ export function ArtifactPreviewPanel({
 
   const handleDownload = () => {
     if (!canUseDefaultDownload) {
-      toast.error("Use the download action inside this artifact preview.");
+      toast.error(t("toasts.downloadHandledByPreview"));
       return;
     }
     if (!canDownloadFile || !downloadUrl) {
-      toast.error("This artifact has no downloadable file.");
+      toast.error(t("toasts.noDownloadableFile"));
       return;
     }
 
@@ -194,11 +196,11 @@ export function ArtifactPreviewPanel({
     try {
       await contentClient.deleteArtifact(workspaceId, artifact.id);
       emitArtifactDeleted({ workspaceId, artifactId: artifact.id });
-      toast.success("Artifact deleted.");
+      toast.success(t("toasts.deleted"));
       setDeleteOpen(false);
       (onDeleted ?? onClose)?.();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Could not delete the artifact."));
+      toast.error(getErrorMessage(error, t("toasts.deleteFailed")));
     } finally {
       setIsDeleting(false);
     }
@@ -243,12 +245,12 @@ export function ArtifactPreviewPanel({
               ) : (
                 <ArrowLeft className="size-3.5" />
               )}
-              {isPageLayout ? "Close" : "Artifacts"}
+              {isPageLayout ? t("actions.close") : t("actions.artifactsBack")}
             </Button>
           ) : (
             <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Artifact Preview
+                {t("labels.artifactPreview")}
               </p>
             </div>
           )}
@@ -257,24 +259,24 @@ export function ArtifactPreviewPanel({
               <Button
                 onClick={() => setShareOpen(true)}
                 size="icon-xs"
-                title="Share artifact"
+                title={t("actions.share")}
                 type="button"
                 variant="ghost"
               >
                 <Share2 className="size-3.5" />
-                <span className="sr-only">Share artifact</span>
+                <span className="sr-only">{t("actions.share")}</span>
               </Button>
             ) : null}
             <Button
               disabled={!pageUrl || !canOpenFile || !canUseDefaultOpen}
               onClick={handleOpenExternal}
               size="icon-xs"
-              title="Open artifact in new tab"
+              title={t("actions.openInNewTab")}
               type="button"
               variant="ghost"
             >
               <ExternalLink className="size-3.5" />
-              <span className="sr-only">Open artifact in new tab</span>
+              <span className="sr-only">{t("actions.openInNewTab")}</span>
             </Button>
             <Button
               disabled={
@@ -282,24 +284,24 @@ export function ArtifactPreviewPanel({
               }
               onClick={handleDownload}
               size="icon-xs"
-              title="Download artifact"
+              title={t("actions.download")}
               type="button"
               variant="ghost"
             >
               <Download className="size-3.5" />
-              <span className="sr-only">Download artifact</span>
+              <span className="sr-only">{t("actions.download")}</span>
             </Button>
             {canDelete ? (
               <Button
                 className="text-muted-foreground hover:text-destructive"
                 onClick={() => setDeleteOpen(true)}
                 size="icon-xs"
-                title="Delete artifact"
+                title={t("actions.delete")}
                 type="button"
                 variant="ghost"
               >
                 <Trash2 className="size-3.5" />
-                <span className="sr-only">Delete artifact</span>
+                <span className="sr-only">{t("actions.delete")}</span>
               </Button>
             ) : null}
           </div>
@@ -314,11 +316,11 @@ export function ArtifactPreviewPanel({
               <button
                 className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
                 onClick={() => setShareOpen(true)}
-                title="Shared publicly — manage the link"
+                title={t("labels.sharedManageTitle")}
                 type="button"
               >
                 <Globe className="size-3" />
-                Public
+                {t("labels.public")}
               </button>
             ) : null}
           </div>
@@ -328,7 +330,9 @@ export function ArtifactPreviewPanel({
             <span>{new Date(artifact.createdAt).toLocaleString()}</span>
             {artifact.completedAt ? (
               <span>
-                completed {new Date(artifact.completedAt).toLocaleString()}
+                {t("labels.completedAt", {
+                  date: new Date(artifact.completedAt).toLocaleString(),
+                })}
               </span>
             ) : null}
           </div>
@@ -341,7 +345,7 @@ export function ArtifactPreviewPanel({
                 </p>
               ) : null}
               <p className="mt-0.5 break-words text-xs leading-5 text-destructive/80">
-                {artifact.errorMessage || "No error details were saved."}
+                {artifact.errorMessage || t("errors.noDetails")}
               </p>
             </div>
           ) : null}
@@ -359,7 +363,7 @@ export function ArtifactPreviewPanel({
         {artifact.promptText ? (
           <div className="mt-3 rounded-xl border bg-background/70 p-3">
             <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Prompt
+              {t("labels.prompt")}
             </p>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               {artifact.promptText}
@@ -384,17 +388,18 @@ export function ArtifactPreviewPanel({
       <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete artifact?</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteDialog.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes the artifact and disables its public
-              link. This action cannot be undone.
+              {t("deleteDialog.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
             <span className="line-clamp-2 break-words">{title}</span>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>
+              {t("actions.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               className={buttonVariants({ variant: "destructive" })}
               disabled={isDeleting}
@@ -406,10 +411,10 @@ export function ArtifactPreviewPanel({
               {isDeleting ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
-                  Deleting...
+                  {t("actions.deleting")}
                 </>
               ) : (
-                "Delete"
+                t("actions.deleteConfirm")
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

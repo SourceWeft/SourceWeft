@@ -16,6 +16,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { ArtifactStatusSnapshot } from "./types";
 import { formatCompactDuration } from "./duration-format";
@@ -36,10 +37,7 @@ import {
   ASSISTANT_ACTIVITY_LABEL_CLASS,
   ASSISTANT_ACTIVITY_ROW_CLASS,
 } from "./assistant-activity-layout";
-import {
-  resolveAssistantToolCardDefaultOpen,
-  TOOL_STATUS_LABELS,
-} from "./assistant-tool-card-state";
+import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card-state";
 import type { ToolStatusKey } from "./assistant-tool-card-state";
 import { compactText, getToolOutputContent } from "./message-assets";
 import {
@@ -55,6 +53,7 @@ import {
 import {
   getReadFileBinaryUnsupported,
   getReadFilePreview,
+  NO_VISIBLE_READ_FILE_CONTENT,
   type ReadFileBinaryUnsupported,
   type ReadFilePreview,
 } from "./read-file-preview";
@@ -220,7 +219,9 @@ function getOutputSummary(toolCall: ToolCallRecord) {
 }
 
 function ReadFilePreviewDetails({ preview }: { preview: ReadFilePreview }) {
-  const pathLabel = preview.path ?? preview.fileName ?? "unknown file";
+  const t = useTranslations("dashboardChatCanvas");
+  const pathLabel =
+    preview.path ?? preview.fileName ?? t("toolCard.readFile.unknownFile");
   const fileLabel =
     preview.fileName && preview.path && preview.fileName !== preview.path
       ? `${preview.path} (${preview.fileName})`
@@ -229,14 +230,23 @@ function ReadFilePreviewDetails({ preview }: { preview: ReadFilePreview }) {
   return (
     <div className="space-y-1.5">
       <p className="break-words">
-        Read file: <span className="text-foreground/75">{fileLabel}</span>
+        {t("toolCard.readFile.label")}{" "}
+        <span className="text-foreground/75">{fileLabel}</span>
       </p>
       <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/35 px-2 py-1.5 font-mono text-[12px] text-foreground/80 leading-5">
-        {preview.lines.join("\n")}
+        {preview.lines
+          .map((line) =>
+            line === NO_VISIBLE_READ_FILE_CONTENT
+              ? t("toolCard.readFile.noVisibleContent")
+              : line,
+          )
+          .join("\n")}
       </pre>
       {preview.isTruncated ? (
         <p className="text-muted-foreground/65 text-xs">
-          Preview truncated to {preview.lineLimit} lines.
+          {t("toolCard.readFile.previewTruncatedLines", {
+            count: preview.lineLimit,
+          })}
         </p>
       ) : null}
     </div>
@@ -248,8 +258,9 @@ function ReadFileBinaryUnsupportedDetails({
 }: {
   unsupported: ReadFileBinaryUnsupported;
 }) {
-  const pathLabel = unsupported.path ?? "this file";
-  const message = `${pathLabel} is not a UTF-8 text file. Use artifact preview, media-aware inspection, or publish it as an artifact instead of read_file.`;
+  const t = useTranslations("dashboardChatCanvas");
+  const pathLabel = unsupported.path ?? t("toolCard.readFile.thisFile");
+  const message = t("toolCard.readFile.binaryUnsupported", { path: pathLabel });
   return <p className="break-words text-muted-foreground/80">{message}</p>;
 }
 
@@ -300,6 +311,7 @@ function GenericAssistantToolCard({
   toolStep,
   workspaceId,
 }: AssistantToolCardProps) {
+  const t = useTranslations("dashboardChatCanvas");
   const confirmation = getToolConfirmationOutput(toolCall.output);
   const confirmationResolution = confirmation
     ? resolvedConfirmations.find(
@@ -332,9 +344,10 @@ function GenericAssistantToolCard({
     confirmationResolution,
     toolCall,
   });
-  const statusLabel = TOOL_STATUS_LABELS[statusKey];
+  const statusLabel = t(`toolCard.status.${statusKey}`);
   const title = getAssistantToolTitle(
     toolCall,
+    t,
     toolStep,
     confirmationResolution,
   );
@@ -415,10 +428,13 @@ function GenericAssistantToolCard({
       : statusKey === "generating" && activeStageLabel
         ? activeStageLabel
         : statusLabel;
-  const resolvedConfirmationMessage = getResolvedToolConfirmationMessage({
-    confirmation,
-    confirmationResolution,
-  });
+  const resolvedConfirmationMessage = getResolvedToolConfirmationMessage(
+    {
+      confirmation,
+      confirmationResolution,
+    },
+    t,
+  );
   const hasReadFilePreview = Boolean(readFilePreview);
   const effectiveDefaultOpen = resolveAssistantToolCardDefaultOpen({
     defaultOpen,
@@ -490,7 +506,9 @@ function GenericAssistantToolCard({
             <p className="break-words">{visibleDetailParts.join(" · ")}</p>
           ) : null}
           {hasDetails && skillReadFileLabel ? (
-            <p className="break-words">Read file: {skillReadFileLabel}</p>
+            <p className="break-words">
+              {t("toolCard.readFile.label")} {skillReadFileLabel}
+            </p>
           ) : null}
           {hasDetails && readFilePreview ? (
             <ReadFilePreviewDetails preview={readFilePreview} />

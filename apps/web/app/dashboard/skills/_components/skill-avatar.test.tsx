@@ -1,8 +1,23 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { SkillAvatar } from "./skill-avatar";
+import messages from "../../../../messages/en.json";
+
+// SkillAvatar reads its aria/title labels through next-intl; supply the shell
+// catalog so the rendered accessibility text matches the English source.
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages} timeZone="UTC">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -27,7 +42,7 @@ test("publisher attribution, image failure and version changes are visible and r
       source: "publisher" as const,
     },
   };
-  act(() => root.render(<SkillAvatar item={item} />));
+  act(() => root.render(withIntl(<SkillAvatar item={item} />)));
   const image = container.querySelector("img")!;
   expect(image.alt).toContain("publisher avatar");
   expect(image.getAttribute("referrerpolicy")).toBe("no-referrer");
@@ -39,12 +54,17 @@ test("publisher attribution, image failure and version changes are visible and r
   );
   act(() =>
     root.render(
-      <SkillAvatar
-        item={{
-          ...item,
-          logo: { url: "https://example.com/new-version.png", source: "skill" },
-        }}
-      />,
+      withIntl(
+        <SkillAvatar
+          item={{
+            ...item,
+            logo: {
+              url: "https://example.com/new-version.png",
+              source: "skill",
+            },
+          }}
+        />,
+      ),
     ),
   );
   expect(container.querySelector("img")?.src).toBe(
@@ -57,25 +77,29 @@ test("builtins use capability icons and custom skills have name-based placeholde
   root = createRoot(container);
   act(() =>
     root.render(
-      <SkillAvatar
-        item={{
-          displayName: "Feynman",
-          slug: "feynman",
-          sourceType: "builtin",
-        }}
-      />,
+      withIntl(
+        <SkillAvatar
+          item={{
+            displayName: "Feynman",
+            slug: "feynman",
+            sourceType: "builtin",
+          }}
+        />,
+      ),
     ),
   );
   expect(container.querySelector("svg")).not.toBeNull();
   act(() =>
     root.render(
-      <SkillAvatar
-        item={{
-          displayName: "Team Writer",
-          slug: "writer",
-          sourceType: "workspace_custom",
-        }}
-      />,
+      withIntl(
+        <SkillAvatar
+          item={{
+            displayName: "Team Writer",
+            slug: "writer",
+            sourceType: "workspace_custom",
+          }}
+        />,
+      ),
     ),
   );
   expect(container.textContent).toBe("TW");

@@ -6,6 +6,7 @@ import {
   CircleDot,
   XCircle,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatErrorNotice } from "./chat-error-notice";
 
@@ -81,6 +82,7 @@ function PipelineStepRow({
   errorCode?: string;
   step: ArtifactPipelineStepView;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const hasDetails = Boolean(
     step.display ||
     (step.logTail && step.logTail.length > 0) ||
@@ -126,14 +128,18 @@ function PipelineStepRow({
             </span>
           ) : null}
           {step.status === "running" ? (
-            <span className="ml-1 text-primary">· Running</span>
+            <span className="ml-1 text-primary">· {t("common.running")}</span>
           ) : null}
           {(step.status === "running" || step.status === "failed") &&
           typeof step.attempt === "number" &&
           typeof step.maxAttempts === "number" &&
           step.maxAttempts > 1 ? (
             <span className="ml-1 text-muted-foreground/70">
-              · attempt {step.attempt}/{step.maxAttempts}
+              ·{" "}
+              {t("artifact.attempt", {
+                attempt: step.attempt,
+                maxAttempts: step.maxAttempts,
+              })}
             </span>
           ) : null}
         </span>
@@ -192,6 +198,7 @@ export function ArtifactPipeline({
   steps: ArtifactPipelineStepView[];
   title: string;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const [historyOpen, setHistoryOpen] = useState(mode !== "history");
   // A failed step row auto-opens and already shows its own error, so the
   // pipeline-level error line would repeat it when the history is expanded.
@@ -252,8 +259,11 @@ export function ArtifactPipeline({
         </ol>
       ) : (
         <p className="text-xs text-muted-foreground">
-          {steps.filter((step) => step.status === "completed").length}/
-          {steps.length} stages completed
+          {t("artifact.stagesCompleted", {
+            completed: steps.filter((step) => step.status === "completed")
+              .length,
+            total: steps.length,
+          })}
         </p>
       )}
       {status === "failed" && errorMessage && !errorShownByFailedStep ? (

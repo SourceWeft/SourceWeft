@@ -7,6 +7,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   Alert,
@@ -126,6 +127,7 @@ export function ManageConnectorsDialog({
   webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
   webhookEventsByConnectorId: Record<string, ConnectorWebhookEventItem[]>;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const [tab, setTab] = useState<ManageConnectorsTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const activeConnectors = connectors.filter(
@@ -140,7 +142,10 @@ export function ManageConnectorsDialog({
   const visibleManagedConnectors = connectors.filter((connector) =>
     connectorMatchesSearch(connector, searchQuery),
   );
-  const filterLabel = tab === "active" ? "Managed" : "All connectors";
+  const filterLabel =
+    tab === "active"
+      ? t("connectors.filterManaged")
+      : t("connectors.filterAll");
 
   useEffect(() => {
     if (open) {
@@ -159,26 +164,27 @@ export function ManageConnectorsDialog({
             <div className="min-w-0">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <DialogTitle className="text-lg sm:text-xl">
-                  Manage Connectors
+                  {t("connectors.manageTitle")}
                 </DialogTitle>
                 <Badge
                   className="h-5 shrink-0 px-1.5 text-[10px]"
                   variant="secondary"
                 >
-                  {activeConnectors.length} active
+                  {t("counts.active", { count: activeConnectors.length })}
                 </Badge>
                 {disabledConnectors.length > 0 ? (
                   <Badge
                     className="h-5 shrink-0 px-1.5 text-[10px]"
                     variant="outline"
                   >
-                    {disabledConnectors.length} disabled
+                    {t("connectors.disabledCount", {
+                      count: disabledConnectors.length,
+                    })}
                   </Badge>
                 ) : null}
               </div>
               <DialogDescription className="mt-1 max-w-[680px] text-xs leading-5 sm:text-sm">
-                Connect SourceWeft to knowledge, project, and communication
-                tools.
+                {t("connectors.manageDescription")}
               </DialogDescription>
             </div>
             <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-[minmax(0,auto)_minmax(220px,320px)] md:items-center md:justify-between">
@@ -190,7 +196,9 @@ export function ManageConnectorsDialog({
                     variant="outline"
                   >
                     <span className="min-w-0 truncate text-left">
-                      <span className="text-muted-foreground">Filter:</span>{" "}
+                      <span className="text-muted-foreground">
+                        {t("connectors.filter")}
+                      </span>{" "}
                       {filterLabel}
                     </span>
                     <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -201,7 +209,7 @@ export function ManageConnectorsDialog({
                     <CheckCircle2
                       className={cn("size-3.5", tab !== "all" && "opacity-0")}
                     />
-                    All connectors
+                    {t("connectors.filterAll")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setTab("active")}>
                     <CheckCircle2
@@ -210,7 +218,7 @@ export function ManageConnectorsDialog({
                         tab !== "active" && "opacity-0",
                       )}
                     />
-                    Managed
+                    {t("connectors.filterManaged")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -219,7 +227,7 @@ export function ManageConnectorsDialog({
                 <Input
                   className="h-9 rounded-lg bg-muted/35 pr-8 pl-8 text-sm"
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search connectors"
+                  placeholder={t("connectors.searchPlaceholder")}
                   value={searchQuery}
                 />
                 {searchQuery ? (
@@ -245,7 +253,7 @@ export function ManageConnectorsDialog({
               {isLoading ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 size-4 animate-spin" />
-                  Loading connectors...
+                  {t("connectors.loading")}
                 </div>
               ) : null}
 
@@ -260,7 +268,7 @@ export function ManageConnectorsDialog({
                       <section className="space-y-2" key={category}>
                         <div className="flex items-center justify-between gap-2">
                           <h3 className="text-xs font-medium text-muted-foreground">
-                            {category}
+                            {t(`connectors.category.${category}`)}
                           </h3>
                           <span className="text-[10px] text-muted-foreground">
                             {items.length}
@@ -280,6 +288,7 @@ export function ManageConnectorsDialog({
                               connectorWaitingByType,
                               connectorReadinessById,
                               webhookConfigsById,
+                              t,
                             });
                             return (
                               <ConnectorCatalogCard
@@ -308,9 +317,11 @@ export function ManageConnectorsDialog({
                   })}
                   {visibleCatalog.length === 0 ? (
                     <HubEmptyState
-                      description="Try a different provider, capability, or category."
+                      description={t("connectors.noMatchDescription")}
                       icon={Search}
-                      title={`No connectors match "${searchQuery}"`}
+                      title={t("connectors.noMatchTitle", {
+                        query: searchQuery,
+                      })}
                     />
                   ) : null}
                 </div>
@@ -339,14 +350,14 @@ export function ManageConnectorsDialog({
                     <HubEmptyState
                       description={
                         searchQuery
-                          ? "Try another connector name or status."
-                          : "Connect Notion or choose an upcoming integration from the catalog."
+                          ? t("connectors.managedNoMatchDescription")
+                          : t("connectors.managedEmptyDescription")
                       }
                       icon={Link2}
                       title={
                         searchQuery
-                          ? `No connectors match "${searchQuery}"`
-                          : "No connectors yet."
+                          ? t("connectors.noMatchTitle", { query: searchQuery })
+                          : t("connectors.noConnectorsTitle")
                       }
                     />
                   )}

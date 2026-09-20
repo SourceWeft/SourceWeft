@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Avatar,
   AvatarFallback,
@@ -8,14 +9,6 @@ import {
 import type { PresenceViewer } from "./use-thread-presence";
 
 const MAX_SHOWN = 4;
-
-function viewerLabel(viewer: PresenceViewer): string {
-  const name = viewer.name || "";
-  if (viewer.isGuest) {
-    return name ? `${name} · Guest` : "Guest";
-  }
-  return name || "Member";
-}
 
 function viewerInitials(viewer: PresenceViewer): string {
   const source = (viewer.name || viewer.userId).trim();
@@ -32,6 +25,14 @@ export function ThreadPresenceAvatars({
 }: {
   viewers: PresenceViewer[];
 }) {
+  const t = useTranslations("dashboardChat");
+  const viewerLabel = (viewer: PresenceViewer): string => {
+    const name = viewer.name || "";
+    if (viewer.isGuest) {
+      return name ? t("presence.guestWithName", { name }) : t("presence.guest");
+    }
+    return name || t("presence.member");
+  };
   if (viewers.length <= 1) {
     return null;
   }
@@ -40,7 +41,10 @@ export function ThreadPresenceAvatars({
   const overflow = viewers.length - shown.length;
 
   return (
-    <div className="flex items-center -space-x-2" aria-label="Who's viewing">
+    <div
+      className="flex items-center -space-x-2"
+      aria-label={t("presence.whosViewing")}
+    >
       {shown.map((viewer) => (
         <Avatar
           key={viewer.userId}

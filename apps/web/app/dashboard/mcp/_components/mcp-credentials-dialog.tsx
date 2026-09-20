@@ -3,7 +3,8 @@
 import * as React from "react";
 import { KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type { McpAuthType, WorkspaceMcpInstall } from "@sourceweft/sdk";
+import { useTranslations } from "next-intl";
+import type { WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -17,27 +18,27 @@ import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { contentClient } from "../../../../lib/sdk";
 
-export function authTypeLabel(authType: McpAuthType) {
-  if (authType === "bearer") return "Bearer token";
-  if (authType === "api_key_header") return "API key header";
-  if (authType === "custom_headers") return "Custom headers";
-  if (authType === "oauth") return "OAuth";
-  return "No auth";
-}
-
-export function parseCustomHeaders(value: string) {
+export function parseCustomHeaders(
+  value: string,
+  messages?: { oneHeaderPerLine: string; nameAndValueRequired: string },
+) {
   const headers: Record<string, string> = {};
   for (const rawLine of value.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
     const separatorIndex = line.indexOf(":");
     if (separatorIndex <= 0) {
-      throw new Error("Use one header per line, for example: X-API-Key: value");
+      throw new Error(
+        messages?.oneHeaderPerLine ??
+          "Use one header per line, for example: X-API-Key: value",
+      );
     }
     const name = line.slice(0, separatorIndex).trim();
     const headerValue = line.slice(separatorIndex + 1).trim();
     if (!name || !headerValue) {
-      throw new Error("Header name and value are required.");
+      throw new Error(
+        messages?.nameAndValueRequired ?? "Header name and value are required.",
+      );
     }
     headers[name] = headerValue;
   }
@@ -57,6 +58,7 @@ export function CredentialsDialog({
   open: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardMcpPanel");
   const [bearerToken, setBearerToken] = React.useState("");
   const [apiKeyHeaderName, setApiKeyHeaderName] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
@@ -75,24 +77,28 @@ export function CredentialsDialog({
     if (!workspaceId || !install) return;
     setSaving(true);
     try {
+      const headerMessages = {
+        oneHeaderPerLine: t("credentials.errors.oneHeaderPerLine"),
+        nameAndValueRequired: t("credentials.errors.nameAndValueRequired"),
+      };
       // Fail fast on a blank Save (the server rejects it too now): an empty
       // submission would otherwise clobber a previously configured credential.
       if (install.authType === "bearer" && !bearerToken.trim()) {
-        toast.error("Enter a bearer token before saving.");
+        toast.error(t("credentials.errors.bearerRequired"));
         return;
       }
       if (
         install.authType === "api_key_header" &&
         (!apiKeyHeaderName.trim() || !apiKey.trim())
       ) {
-        toast.error("Enter the header name and API key before saving.");
+        toast.error(t("credentials.errors.apiKeyRequired"));
         return;
       }
       if (
         install.authType === "custom_headers" &&
-        Object.keys(parseCustomHeaders(headersText)).length === 0
+        Object.keys(parseCustomHeaders(headersText, headerMessages)).length === 0
       ) {
-        toast.error("Add at least one header before saving.");
+        toast.error(t("credentials.errors.headerRequired"));
         return;
       }
       const input =
@@ -110,7 +116,7 @@ export function CredentialsDialog({
             : install.authType === "custom_headers"
               ? {
                   authType: "custom_headers" as const,
-                  headers: parseCustomHeaders(headersText),
+                  headers: parseCustomHeaders(headersText, headerMessages),
                 }
               : { authType: "none" as const };
       const result = await contentClient.upsertWorkspaceMcpCredentials(
@@ -118,12 +124,14 @@ export function CredentialsDialog({
         install.id,
         input,
       );
-      toast.success("MCP credentials saved");
+      toast.success(t("credentials.toasts.saved"));
       onSaved(result.install);
       onClose();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to save credentials.",
+        error instanceof Error
+          ? error.message
+          : t("credentials.toasts.saveFailed"),
       );
     } finally {
       setSaving(false);
@@ -144,7 +152,7 @@ export function CredentialsDialog({
         window.location.href = result.authorizationUrl;
         return;
       }
-      toast.success("MCP server already connected");
+      toast.success(t("credentials.toasts.alreadyConnected"));
       // Reflect the connected state immediately: the pre-auth `install` still
       // carries credentialStatus "required", which would keep Run/selection
       // disabled until a full reload.
@@ -152,7 +160,9 @@ export function CredentialsDialog({
       onClose();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to start authorization.",
+        error instanceof Error
+          ? error.message
+          : t("credentials.toasts.authStartFailed"),
       );
       setSaving(false);
     }
@@ -165,20 +175,17 @@ export function CredentialsDialog({
     <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open={open}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Configure MCP credentials</DialogTitle>
-          <DialogDescription>
-            Credentials are encrypted in SourceWeft and sent only to this MCP
-            server during tool calls.
-          </DialogDescription>
+          <DialogTitle>{t("credentials.title")}</DialogTitle>
+          <DialogDescription>{t("credentials.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
             <div className="font-medium text-foreground">
-              {install?.name ?? "MCP server"}
+              {install?.name ?? t("credentials.serverFallback")}
             </div>
             <div className="mt-0.5 text-muted-foreground">
-              {authTypeLabel(authType)}
+              {t(`credentials.authType.${authType}`)}
             </div>
           </div>
 
@@ -191,13 +198,13 @@ export function CredentialsDialog({
           {authType === "bearer" ? (
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-foreground" htmlFor="mcp-bearer">
-                Bearer token
+                {t("credentials.fields.bearerToken")}
               </label>
               <Input
                 autoComplete="off"
                 id="mcp-bearer"
                 onChange={(event) => setBearerToken(event.target.value)}
-                placeholder="Paste token"
+                placeholder={t("credentials.placeholders.pasteToken")}
                 type="password"
                 value={bearerToken}
               />
@@ -208,7 +215,7 @@ export function CredentialsDialog({
             <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_1fr]">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-foreground" htmlFor="mcp-api-header">
-                  Header name
+                  {t("credentials.fields.headerName")}
                 </label>
                 <Input
                   autoComplete="off"
@@ -220,13 +227,13 @@ export function CredentialsDialog({
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-foreground" htmlFor="mcp-api-key">
-                  API key
+                  {t("credentials.fields.apiKey")}
                 </label>
                 <Input
                   autoComplete="off"
                   id="mcp-api-key"
                   onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="Paste key"
+                  placeholder={t("credentials.placeholders.pasteKey")}
                   type="password"
                   value={apiKey}
                 />
@@ -237,7 +244,7 @@ export function CredentialsDialog({
           {authType === "custom_headers" ? (
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-foreground" htmlFor="mcp-custom-headers">
-                Headers
+                {t("credentials.fields.headers")}
               </label>
               <Textarea
                 className="min-h-28 font-mono text-xs"
@@ -247,26 +254,20 @@ export function CredentialsDialog({
                 value={headersText}
               />
               <p className="text-[11px] text-muted-foreground">
-                Use one header per line. Secret values are not shown again after
-                saving.
+                {t("credentials.headersHint")}
               </p>
             </div>
           ) : null}
 
           {authType === "none" ? (
             <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-              This MCP server does not require credentials.
+              {t("credentials.noAuthNote")}
             </div>
           ) : null}
 
           {authType === "oauth" ? (
             <div className="space-y-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-              <p>
-                This MCP server uses OAuth. Connect your account with the
-                provider — you&apos;ll be redirected to grant access, then
-                returned here. Your token is stored encrypted and refreshed
-                automatically.
-              </p>
+              <p>{t("credentials.oauthNote")}</p>
               <Button
                 disabled={saving || !install}
                 onClick={() => void connectOAuth()}
@@ -278,7 +279,7 @@ export function CredentialsDialog({
                 ) : (
                   <KeyRound className="h-4 w-4" />
                 )}
-                Connect
+                {t("credentials.connect")}
               </Button>
             </div>
           ) : null}
@@ -286,12 +287,14 @@ export function CredentialsDialog({
 
         <DialogFooter>
           <Button disabled={saving} onClick={onClose} type="button" variant="outline">
-            {authType === "oauth" ? "Close" : "Cancel"}
+            {authType === "oauth"
+              ? t("credentials.close")
+              : t("credentials.cancel")}
           </Button>
           {authType === "oauth" ? null : (
             <Button disabled={saving || !install} onClick={() => void saveCredentials()} type="button">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-              Save
+              {t("credentials.save")}
             </Button>
           )}
         </DialogFooter>

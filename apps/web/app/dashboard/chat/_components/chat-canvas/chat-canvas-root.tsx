@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { FileUIPart } from "ai";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
@@ -20,7 +21,7 @@ import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import {
   coerceSkillIdsSelection,
-  SKILL_SELECTION_LIMIT_MESSAGE,
+  MAX_SELECTED_SKILL_IDS_PER_TURN,
 } from "./tool-selection";
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
@@ -293,6 +294,7 @@ export function ChatCanvas({
   composerOptions?: ComposerOptionsState;
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   void sourcesVisible;
   const lastTrackedSkillCountRef = useRef(selectedSkillIds.length);
   const lastTrackedSourceCountRef = useRef(selectedSources.length);
@@ -512,7 +514,7 @@ export function ChatCanvas({
           const message =
             error instanceof Error
               ? error.message
-              : "Failed to reload thread messages.";
+              : t("errors.reloadFailed");
           toast.error(message);
         });
       }
@@ -533,7 +535,7 @@ export function ChatCanvas({
         },
       );
       toast.error(
-        "Confirmation message is missing. Refresh the thread and try again.",
+        t("errors.confirmationMissing"),
       );
       return;
     }
@@ -548,7 +550,7 @@ export function ChatCanvas({
         },
       );
       toast.error(
-        "Confirmation message is missing. Refresh the thread and try again.",
+        t("errors.confirmationMissing"),
       );
       return;
     }
@@ -557,10 +559,11 @@ export function ChatCanvas({
       const message =
         error instanceof Error
           ? error.message
-          : "Failed to reload thread messages.";
+          : t("errors.reloadFailed");
       toast.error(message);
     });
   }, [
+    t,
     activeThreadRun,
     hasLiveConfirmationSignal,
     onReloadMessages,
@@ -621,7 +624,7 @@ export function ChatCanvas({
 
   function handleSendMessage(input: ChatSendInput) {
     if (!workspaceId) {
-      toast.error("No workspace selected yet.");
+      toast.error(t("errors.noWorkspaceSelected"));
       return;
     }
     const sourceCount =
@@ -653,7 +656,9 @@ export function ChatCanvas({
     const { skillIds: nextSkillIds, wasLimited } =
       coerceSkillIdsSelection(skillIds);
     if (wasLimited) {
-      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+      toast.info(
+        t("composer.skillLimit", { max: MAX_SELECTED_SKILL_IDS_PER_TURN }),
+      );
     }
     if (
       nextSkillIds.length > 0 &&
@@ -748,7 +753,7 @@ export function ChatCanvas({
           applyToolConfirmationState(settled.state);
 
           if (settled.missingResume) {
-            toast.error("Confirmation response did not include resume data.");
+            toast.error(t("errors.noResumeData"));
             return;
           }
 
@@ -757,7 +762,7 @@ export function ChatCanvas({
           }
 
           if (!onResumeToolConfirmation) {
-            toast.error("Tool confirmation resume handler is not available.");
+            toast.error(t("errors.resumeHandlerUnavailable"));
             return;
           }
 
@@ -780,7 +785,7 @@ export function ChatCanvas({
             const message =
               error instanceof Error
                 ? error.message
-                : "Failed to reload thread messages.";
+                : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -800,7 +805,7 @@ export function ChatCanvas({
             const message =
               error instanceof Error
                 ? error.message
-                : "Failed to reload thread messages.";
+                : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -819,7 +824,7 @@ export function ChatCanvas({
             const message =
               error instanceof Error
                 ? error.message
-                : "Failed to reload thread messages.";
+                : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -838,7 +843,7 @@ export function ChatCanvas({
             new Set(previous).add(item.question.id),
           );
           if (!onResumeToolConfirmation) {
-            toast.error("Tool confirmation resume handler is not available.");
+            toast.error(t("errors.resumeHandlerUnavailable"));
             return;
           }
           // A question is not an approval: resume with an empty `decisions` and
@@ -887,7 +892,7 @@ export function ChatCanvas({
             const message =
               error instanceof Error
                 ? error.message
-                : "Failed to reload thread messages.";
+                : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -903,7 +908,7 @@ export function ChatCanvas({
                   className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground"
                 >
                   <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                    Queued
+                    {t("chatRoot.queued")}
                   </span>
                   <span className="min-w-0 flex-1 truncate">
                     {queued.preview}
@@ -913,7 +918,7 @@ export function ChatCanvas({
                       type="button"
                       onClick={() => onCancelQueuedSend(queued.id)}
                       className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground/70 hover:bg-muted hover:text-foreground"
-                      aria-label="Cancel queued message"
+                      aria-label={t("chatRoot.cancelQueued")}
                     >
                       ✕
                     </button>
@@ -927,7 +932,7 @@ export function ChatCanvas({
             draftKey={composerDraftKey}
             placeholder={
               localStatus.blocked
-                ? `${localStatus.message ?? "Computer unavailable."} You can keep writing a draft.`
+                ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
                 : undefined
             }
             workingFolderSlot={workingFolderSlot}

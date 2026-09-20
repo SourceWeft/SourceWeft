@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import { getAssistantToolTitle } from "./assistant-tool-display";
 import type { ToolCallRecord } from "./types";
+import messages from "../../../../../messages/en.json";
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 function skillRead(path: string): ToolCallRecord {
   return {
@@ -14,7 +23,7 @@ function skillRead(path: string): ToolCallRecord {
 describe("getAssistantToolTitle — skill instruction reads", () => {
   it("labels SKILL.md as loading the skill's instructions", () => {
     expect(
-      getAssistantToolTitle(skillRead("/skills/internal-comms/SKILL.md")),
+      getAssistantToolTitle(skillRead("/skills/internal-comms/SKILL.md"), t),
     ).toBe("Load Internal Comms skill instructions");
   });
 
@@ -26,7 +35,7 @@ describe("getAssistantToolTitle — skill instruction reads", () => {
       "/skills/internal-comms/SKILL.md",
       "/skills/internal-comms/examples/company-newsletter.md",
       "/skills/internal-comms/examples/general-comms.md",
-    ].map((path) => getAssistantToolTitle(skillRead(path)));
+    ].map((path) => getAssistantToolTitle(skillRead(path), t));
 
     expect(new Set(titles).size).toBe(3);
     expect(titles[1]).toBe(
@@ -35,7 +44,7 @@ describe("getAssistantToolTitle — skill instruction reads", () => {
   });
 
   it("falls back to the plain label when the skill cannot be named", () => {
-    expect(getAssistantToolTitle(skillRead("/skills"))).toBe(
+    expect(getAssistantToolTitle(skillRead("/skills"), t)).toBe(
       "Load skill instructions",
     );
   });

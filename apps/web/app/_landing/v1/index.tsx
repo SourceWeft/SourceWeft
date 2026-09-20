@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { LayoutDashboard } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { SourceWeftFooter } from "../components/sourceweft-footer";
 import { SourceWeftHeader } from "../components/sourceweft-header";
 import { SourceWeftBrandMark } from "../components/sourceweft-brand";
@@ -99,10 +100,11 @@ function IconCheck() {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection({ authState }: { authState: LandingAuthState }) {
+  const t = useTranslations("landing");
   const primaryHref = authState.isSignedIn ? "/dashboard" : "/auth/sign-in";
   const primaryLabel = authState.isSignedIn
-    ? "Open Dashboard"
-    : "Start for free";
+    ? t("hero.ctaSignedIn")
+    : t("hero.ctaSignedOut");
 
   return (
     <section className="relative overflow-hidden pt-32 pb-20 md:pt-40 md:pb-28">
@@ -140,22 +142,19 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
           <div>
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Now in early access
+              {t("hero.badge")}
             </div>
 
             <h1 className="text-4xl font-bold tracking-tight text-zinc-900 md:text-5xl lg:text-[3.5rem] lg:leading-[1.1] dark:text-white">
-              Your AI Notebook
+              {t("hero.headlineLine1")}
               <br />
               <span className="text-zinc-400 dark:text-zinc-400">
-                Workspace.
+                {t("hero.headlineLine2")}
               </span>
             </h1>
 
             <p className="mt-5 max-w-md text-base leading-relaxed text-zinc-500 md:text-lg dark:text-zinc-400">
-              Upload sources, connect Notion, Google Drive, Gmail, Slack and
-              more. Generate source-grounded answers with citations, audio
-              overviews, study guides, FAQs, and deep AI insights from your own
-              content.
+              {t("hero.subtitle")}
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -177,23 +176,25 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                 href="#how-it-works"
                 className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
               >
-                See how it works
+                {t("hero.seeHowItWorks")}
               </a>
             </div>
 
             {/* Stats */}
             <div className="mt-10 flex flex-wrap gap-6 border-t border-zinc-200 pt-8 dark:border-white/8">
-              {[
-                ["10+", "LLM providers"],
-                ["5+", "output formats"],
-                ["10+", "integrations"],
-              ].map(([num, label]) => (
-                <div key={label}>
+              {(
+                [
+                  ["10+", "hero.stats.llmProviders"],
+                  ["5+", "hero.stats.outputFormats"],
+                  ["10+", "hero.stats.integrations"],
+                ] as const
+              ).map(([num, labelKey]) => (
+                <div key={labelKey}>
                   <p className="text-xl font-bold text-zinc-900 dark:text-white">
                     {num}
                   </p>
                   <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                    {label}
+                    {t(labelKey)}
                   </p>
                 </div>
               ))}
@@ -388,24 +389,23 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
 // ─── Social proof strip ───────────────────────────────────────────────────────
 
 function SocialProof() {
+  const t = useTranslations("landing.socialProof");
+  const roleKeys = ["researchers", "writers", "developers", "students"] as const;
   return (
     <section className="border-y border-zinc-200 py-10 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
         <p className="mb-8 text-center text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-          For researchers, students, and creators who go deep
+          {t("heading")}
         </p>
         <div className="flex flex-wrap justify-center gap-x-12 gap-y-6">
-          {[
-            ["Researchers", "who need to trust their sources"],
-            ["Writers", "who connect ideas across notes"],
-            ["Developers", "who live in docs and RFCs"],
-            ["Students", "who want to learn, not just read"],
-          ].map(([role, desc]) => (
-            <div key={role} className="text-center">
+          {roleKeys.map((key) => (
+            <div key={key} className="text-center">
               <p className="text-sm font-semibold text-zinc-900 dark:text-white">
-                {role}
+                {t(`roles.${key}.title`)}
               </p>
-              <p className="text-xs text-zinc-400 dark:text-zinc-600">{desc}</p>
+              <p className="text-xs text-zinc-400 dark:text-zinc-600">
+                {t(`roles.${key}.desc`)}
+              </p>
             </div>
           ))}
         </div>
@@ -417,76 +417,43 @@ function SocialProof() {
 // ─── Features ─────────────────────────────────────────────────────────────────
 
 function FeaturesSection() {
+  const t = useTranslations("landing.features");
   const features = [
-    {
-      icon: <IconBrain />,
-      title: "Multiple outputs from your sources",
-      description:
-        "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations.",
-      bullets: [
-        "Audio overviews & podcasts",
-        "Study guides, FAQs & timelines",
-        "Inline source citations",
-      ],
-    },
-    {
-      icon: <IconDatabase />,
-      title: "Connect everything",
-      description:
-        "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. SourceWeft indexes your existing tools so your knowledge is always at hand.",
-      bullets: [
-        "Notion, Google Drive, Gmail, Slack",
-        "25+ file formats supported",
-        "Browser extension for instant capture",
-      ],
-    },
-    {
-      icon: <IconLayers />,
-      title: "Works everywhere you do",
-      description:
-        "Web app, desktop, and browser extension — all in sync. Capture a page anywhere, continue the conversation on any device. Your notebook travels with you.",
-      bullets: [
-        "macOS & Windows desktop",
-        "Chrome & Edge extension",
-        "Mobile app (coming soon)",
-      ],
-    },
-  ];
+    { key: "outputs", icon: <IconBrain /> },
+    { key: "connect", icon: <IconDatabase /> },
+    { key: "everywhere", icon: <IconLayers /> },
+  ] as const;
 
   return (
     <section id="features" className="py-24">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mb-14 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-            Features
+            {t("eyebrow")}
           </p>
           <h2 className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
-            Everything your AI knowledge workspace needs
+            {t("heading")}
           </h2>
-          <p className="mt-3 text-zinc-500 dark:text-zinc-400">
-            Upload sources. Connect your tools. Get answers, audio overviews,
-            study guides and more — all grounded in what you know, with
-            citations you can inspect.
-          </p>
+          <p className="mt-3 text-zinc-500 dark:text-zinc-400">{t("intro")}</p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
           {features.map((f) => (
             <div
-              key={f.title}
+              key={f.key}
               className="group rounded-2xl border border-zinc-200 bg-zinc-50 p-6 transition-all duration-200 hover:-translate-y-1 hover:border-zinc-300 hover:bg-white hover:shadow-sm dark:border-white/8 dark:bg-zinc-900/40 dark:hover:border-white/16 dark:hover:bg-zinc-900/60"
             >
               <div className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-300">
                 {f.icon}
               </div>
               <h3 className="mb-2 text-base font-semibold text-zinc-900 dark:text-white">
-                {f.title}
+                {t(`items.${f.key}.title`)}
               </h3>
               <p className="mb-4 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-                {f.description}
+                {t(`items.${f.key}.description`)}
               </p>
               <ul className="space-y-1.5">
-                {f.bullets.map((b) => (
+                {(t.raw(`items.${f.key}.bullets`) as string[]).map((b) => (
                   <li
                     key={b}
                     className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500"
@@ -507,11 +474,11 @@ function FeaturesSection() {
 // ─── How it works ─────────────────────────────────────────────────────────────
 
 function HowItWorks() {
+  const t = useTranslations("landing.howItWorks");
   const steps = [
     {
       num: "01",
-      title: "Create your workspace",
-      body: "Set up a personal or team workspace in seconds. Organise knowledge into spaces — one for each project, topic, or area of your life.",
+      key: "step1",
       visual: (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
           <div className="mb-3 flex items-center gap-2">
@@ -538,8 +505,7 @@ function HowItWorks() {
     },
     {
       num: "02",
-      title: "Connect your knowledge sources",
-      body: "Connect Notion, Google Drive, Gmail, or Slack — or drop in PDFs, paste URLs, and capture any web page. SourceWeft indexes everything, wherever your knowledge lives.",
+      key: "step2",
       visual: (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
           <p className="mb-3 text-zinc-400 dark:text-zinc-500">Sources added</p>
@@ -587,8 +553,7 @@ function HowItWorks() {
     },
     {
       num: "03",
-      title: "Chat with your AI",
-      body: "Ask questions, get summaries, explore connections. Every answer is grounded in your own sources with inline citations you can inspect.",
+      key: "step3",
       visual: (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
           <div className="mb-2 flex justify-end">
@@ -619,10 +584,10 @@ function HowItWorks() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="mb-14 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-            How it works
+            {t("eyebrow")}
           </p>
           <h2 className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
-            From zero to AI-powered in minutes
+            {t("heading")}
           </h2>
         </div>
 
@@ -639,10 +604,10 @@ function HowItWorks() {
                   {step.num}
                 </span>
                 <h3 className="mt-3 text-xl font-semibold text-zinc-900 dark:text-white">
-                  {step.title}
+                  {t(`steps.${step.key}.title`)}
                 </h3>
                 <p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-                  {step.body}
+                  {t(`steps.${step.key}.body`)}
                 </p>
               </div>
               <div>{step.visual}</div>
@@ -657,8 +622,19 @@ function HowItWorks() {
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
 function PricingSection({ authState }: { authState: LandingAuthState }) {
+  const t = useTranslations("landing.pricing");
+  const tp = useTranslations("pricing");
   const state = useDeploymentCapabilities();
   const plans = getPricingConfig();
+  // Overlay localized display copy onto the canonical plans; prices, ids and CTA
+  // hrefs stay untouched (the marketing-vs-canonical split, §20).
+  const localizedPlans = plans.map((plan) => ({
+    ...plan,
+    name: tp(`plans.${plan.id}.name`),
+    description: tp(`plans.${plan.id}.description`),
+    cta: tp(`plans.${plan.id}.cta`),
+    features: tp.raw(`plans.${plan.id}.features`) as string[],
+  }));
   if (state.status !== "ready" || !state.capabilities.billing.checkout)
     return null;
 
@@ -670,17 +646,15 @@ function PricingSection({ authState }: { authState: LandingAuthState }) {
       <div className="mx-auto max-w-6xl px-6">
         <div className="mb-12 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-            Pricing
+            {t("eyebrow")}
           </p>
           <h2 className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
-            Simple, transparent pricing
+            {t("heading")}
           </h2>
-          <p className="mt-3 text-zinc-500 dark:text-zinc-400">
-            Start free. Upgrade when you need more. No surprise bills.
-          </p>
+          <p className="mt-3 text-zinc-500 dark:text-zinc-400">{t("intro")}</p>
         </div>
 
-        <PricingToggle authState={authState} plans={plans} />
+        <PricingToggle authState={authState} plans={localizedPlans} />
       </div>
     </section>
   );

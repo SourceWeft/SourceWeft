@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 
-import { act, createElement, StrictMode } from "react";
+import { act, createElement, StrictMode, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 
 import type { SourceItem } from "../source-types";
+import enMessages from "../../../../../messages/en.json";
+
+const intlMessages = enMessages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -120,7 +126,11 @@ async function renderHub(
   };
   await act(async () => {
     const hub = createElement(SourcesHub, merged);
-    created.render(options.strict ? createElement(StrictMode, null, hub) : hub);
+    created.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {options.strict ? <StrictMode>{hub}</StrictMode> : hub}
+      </NextIntlClientProvider>,
+    );
   });
   return container;
 }

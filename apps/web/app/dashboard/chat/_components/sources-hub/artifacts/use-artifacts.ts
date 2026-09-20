@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { contentClient } from "../../../../../../lib/sdk";
 import { cloneItems } from "../cache";
@@ -37,6 +38,7 @@ export function useArtifacts(input: {
   const { workspaceId, artifactsRefreshKey, currentWorkspaceIdRef, enabled } =
     input;
 
+  const t = useTranslations("dashboardSourcesHub");
   const [artifacts, setArtifacts] = useState<ArtifactSummaryItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [isLoadingMoreArtifacts, setIsLoadingMoreArtifacts] = useState(false);
@@ -98,14 +100,14 @@ export function useArtifacts(input: {
       );
     } catch (error) {
       setArtifactsLoadingError(
-        getErrorMessage(error, "Failed to load artifacts."),
+        getErrorMessage(error, t("artifacts.loadFailed")),
       );
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
         setIsLoadingArtifacts(false);
       }
     }
-  }, [currentWorkspaceIdRef, enabled, workspaceId]);
+  }, [currentWorkspaceIdRef, enabled, workspaceId, t]);
 
   const loadMoreArtifacts = useCallback(async () => {
     if (
@@ -161,7 +163,7 @@ export function useArtifacts(input: {
       );
     } catch (error) {
       setArtifactsLoadingError(
-        getErrorMessage(error, "Failed to load more artifacts."),
+        getErrorMessage(error, t("artifacts.loadMoreFailed")),
       );
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
@@ -174,6 +176,7 @@ export function useArtifacts(input: {
     enabled,
     isLoadingMoreArtifacts,
     workspaceId,
+    t,
   ]);
 
   useEffect(() => {

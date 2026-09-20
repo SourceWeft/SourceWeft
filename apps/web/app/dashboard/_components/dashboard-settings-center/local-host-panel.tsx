@@ -1,6 +1,7 @@
 "use client";
 import { authClient } from "../../../../lib/auth-client";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
@@ -12,6 +13,7 @@ import {
 } from "../../../../lib/local-execution";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 export function LocalHostPanel() {
+  const t = useTranslations("dashboardSettings");
   const userId = authClient.useSession().data?.user.id;
   const [dataOwner, setDataOwner] = useState<string | null>(null);
   const [status, setStatus] = useState<LocalHostStatus | null>(null);
@@ -64,34 +66,31 @@ export function LocalHostPanel() {
   if (dataOwner && dataOwner !== userId)
     return (
       <section>
-        <h2 className="text-lg font-semibold">This computer</h2>
+        <h2 className="text-lg font-semibold">{t("localHost.title")}</h2>
         <p className="mt-3 text-sm text-muted-foreground">
-          Checking your account…
+          {t("localHost.checkingAccount")}
         </p>
       </section>
     );
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">This computer</h2>
+        <h2 className="text-lg font-semibold">{t("localHost.title")}</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Work with files and run commands on this Mac. Each conversation gets
-          its own folder unless you select one.
+          {t("localHost.description")}
         </p>
         <p role="status" className="mt-3 text-sm">
           {status?.connected
-            ? "This computer is online"
+            ? t("localHost.statusOnline")
             : status?.deviceId
-              ? "Connecting this computer…"
-              : "Setting up this computer…"}
+              ? t("localHost.statusConnecting")
+              : t("localHost.statusSettingUp")}
         </p>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="font-medium">Allow access from other devices</h3>
+        <h3 className="font-medium">{t("localHost.remoteAccessTitle")}</h3>
         <p className="text-sm text-muted-foreground">
-          Let your other devices use this computer with the same account. They
-          can access task folders and authorized working directories. You can
-          still work on this computer when remote access is off.
+          {t("localHost.remoteAccessDescription")}
         </p>
         <Button
           disabled={busy || !device}
@@ -114,16 +113,14 @@ export function LocalHostPanel() {
           }}
         >
           {device?.remoteEnabled
-            ? "Turn off remote access"
-            : "Allow access from other devices"}
+            ? t("localHost.turnOffRemoteAccess")
+            : t("localHost.remoteAccessTitle")}
         </Button>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="font-medium">Working directories</h3>
+        <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>
         <p className="text-sm text-muted-foreground">
-          Each conversation gets a separate task folder. Removing folder access
-          stops further local operations for affected tasks and preserves the
-          files.
+          {t("localHost.workingDirectoriesDescription")}
         </p>
         {folders.map((folder) => (
           <div key={folder.id} className="flex items-center gap-3">
@@ -154,7 +151,7 @@ export function LocalHostPanel() {
                 }
               }}
             >
-              Remove access
+              {t("localHost.removeAccess")}
             </Button>
           </div>
         ))}
@@ -181,7 +178,7 @@ export function LocalHostPanel() {
             }
           }}
         >
-          Add folder
+          {t("localHost.addFolder")}
         </Button>
       </div>
       {error && (

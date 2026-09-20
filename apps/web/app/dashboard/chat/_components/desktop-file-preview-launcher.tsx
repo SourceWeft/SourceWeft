@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import type { PreviewSource } from "@sourceweft/preview";
 import { toast } from "sonner";
 import { openDesktopPreview } from "../../../../lib/desktop-preview-bridge";
@@ -23,6 +24,7 @@ export function DesktopFilePreviewLauncher({
   onOpened: () => void;
   onRetry?: () => void;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   const callbacks = useRef({ onOpened, onRetry });
   callbacks.current = { onOpened, onRetry };
   const [attempt, setAttempt] = useState(0);
@@ -30,12 +32,12 @@ export function DesktopFilePreviewLauncher({
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    const notification = toast.loading("Opening preview window…");
+    const notification = toast.loading(t("desktop.opening"));
     const fail = (message: string) =>
       toast.error(message, {
         id: notification,
         action: {
-          label: "Try again",
+          label: t("actions.tryAgain"),
           onClick: () => {
             callbacks.current.onRetry?.();
             setAttempt((value) => value + 1);
@@ -82,6 +84,7 @@ export function DesktopFilePreviewLauncher({
     text,
     url,
     attempt,
+    t,
   ]);
   return null;
 }

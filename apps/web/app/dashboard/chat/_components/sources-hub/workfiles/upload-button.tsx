@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Upload, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
 import { contentClient } from "../../../../../../lib/sdk";
@@ -13,6 +14,7 @@ export function UploadFilesButton({
   threadId: string;
   onUploaded: () => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -22,7 +24,7 @@ export function UploadFilesButton({
         type="file"
         multiple
         className="hidden"
-        aria-label="Choose files to upload"
+        aria-label={t("files.chooseFiles")}
         onChange={async (event) => {
           const files = [...(event.target.files ?? [])];
           event.target.value = "";
@@ -32,7 +34,9 @@ export function UploadFilesButton({
           try {
             for (const file of files) {
               if (file.size > 20 * 1024 * 1024)
-                throw new Error(`${file.name} exceeds the 20 MiB file limit.`);
+                throw new Error(
+                  t("files.sizeLimit", { name: file.name }),
+                );
               await contentClient.uploadFileBytes(
                 workspaceId,
                 threadId,
@@ -41,13 +45,16 @@ export function UploadFilesButton({
               );
               completed += 1;
             }
-            toast.success(
-              `${completed} file${completed === 1 ? "" : "s"} uploaded.`,
-            );
+            toast.success(t("files.uploaded", { count: completed }));
           } catch (error) {
-            toast.error(
-              `${error instanceof Error ? error.message : "Upload failed."}${completed ? ` ${completed} file(s) were uploaded before the error.` : ""}`,
-            );
+            const base =
+              error instanceof Error
+                ? error.message
+                : t("files.uploadFailed");
+            const suffix = completed
+              ? ` ${t("files.uploadedBeforeError", { count: completed })}`
+              : "";
+            toast.error(`${base}${suffix}`);
           } finally {
             setBusy(false);
             onUploaded();
@@ -66,7 +73,7 @@ export function UploadFilesButton({
         ) : (
           <Upload className="size-3.5" />
         )}{" "}
-        Upload files
+        {t("files.uploadFiles")}
       </Button>
     </>
   );

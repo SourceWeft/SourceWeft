@@ -1,15 +1,18 @@
 import { type ToolConfirmationRequest } from "@sourceweft/sdk";
+import type { useTranslations } from "next-intl";
 import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import { compactText } from "./message-assets";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 type ToolConfirmationDisplayInput = Pick<
   ToolConfirmationRequest,
   "action" | "preview" | "editableArgs"
 >;
 
-function formatBytes(value: unknown) {
+function formatBytes(value: unknown, t: Translate) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return "size not provided";
+    return t("toolConfirmation.detail.sizeNotProvided");
   }
   if (value < 1024) {
     return `${value} B`;
@@ -36,31 +39,39 @@ function arrayRecord(value: unknown) {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
-function sandboxRiskLine(confirmation: ToolConfirmationDisplayInput) {
-  return `Risk: ${titleCase(confirmation.action.riskLevel ?? "unknown")}`;
+function sandboxRiskLine(confirmation: ToolConfirmationDisplayInput, t: Translate) {
+  return t("toolConfirmation.detail.risk", {
+    level: titleCase(confirmation.action.riskLevel ?? "unknown"),
+  });
 }
 
-function sandboxPrepareDetailLines(confirmation: ToolConfirmationDisplayInput) {
+function sandboxPrepareDetailLines(
+  confirmation: ToolConfirmationDisplayInput,
+  t: Translate,
+) {
   const request = record(confirmation.preview.requestJson);
   const files = arrayRecord(request.files);
+  const fileCount = files.length || 0;
   const lines = [
-    sandboxRiskLine(confirmation),
-    `Prepare ${files.length || 0} file${files.length === 1 ? "" : "s"}`,
+    sandboxRiskLine(confirmation, t),
+    fileCount === 1
+      ? t("toolConfirmation.detail.prepareFile", { count: fileCount })
+      : t("toolConfirmation.detail.prepareFiles", { count: fileCount }),
   ];
   for (const file of files) {
     const sourcePath =
-      typeof file.sourcePath === "string" ? file.sourcePath : "unknown source";
+      typeof file.sourcePath === "string"
+        ? file.sourcePath
+        : t("toolConfirmation.detail.unknownSource");
     const sandboxPath =
       typeof file.sandboxPath === "string"
         ? file.sandboxPath
-        : "unknown sandbox path";
+        : t("toolConfirmation.detail.unknownSandboxPath");
     lines.push(
-      `${sourcePath} -> ${sandboxPath} · ${formatBytes(file.sizeBytes)}`,
+      `${sourcePath} -> ${sandboxPath} · ${formatBytes(file.sizeBytes, t)}`,
     );
   }
-  lines.push(
-    "Selected SourceWeft /files Workfile content will be materialized as ordinary sandbox files.",
-  );
+  lines.push(t("toolConfirmation.detail.workfileMaterialized"));
   return lines;
 }
 
@@ -87,75 +98,95 @@ export function sandboxExecuteCommandText(input: {
   return command;
 }
 
-function sandboxExecuteSummary(command: string) {
+function sandboxExecuteSummary(command: string, t: Translate) {
   const firstLine = command.split("\n").find((line) => line.trim().length > 0);
   const trimmed = firstLine?.trim() ?? "";
   if (trimmed.length <= 120) {
     return trimmed;
   }
   const lineCount = command.split("\n").length;
-  return `${trimmed.slice(0, 117)}... (${lineCount} lines, ${command.length} chars)`;
+  return t("toolConfirmation.detail.execSummaryTruncated", {
+    text: trimmed.slice(0, 117),
+    lines: lineCount,
+    chars: command.length,
+  });
 }
+
+const WORKING_DIRECTORY_PREFIX_KEY =
+  "toolConfirmation.detail.workingDirectoryPrefix";
 
 function sandboxExecuteDetailLines(
   confirmation: ToolConfirmationDisplayInput,
-  toolCallInput?: Record<string, unknown>,
+  toolCallInput: Record<string, unknown> | undefined,
+  t: Translate,
 ) {
   const command = sandboxExecuteCommandText({ confirmation, toolCallInput });
   const cwdRecord = record(confirmation.preview.requestJson).cwd;
   const cwd =
     typeof cwdRecord === "string" && cwdRecord
       ? cwdRecord
-      : "conversation working directory";
+      : t("toolConfirmation.detail.conversationWorkingDir");
   const summary = command
-    ? sandboxExecuteSummary(command)
-    : "command not provided";
+    ? sandboxExecuteSummary(command, t)
+    : t("toolConfirmation.detail.commandNotProvided");
   return [
-    sandboxRiskLine(confirmation),
-    `Command: ${summary}`,
-    `Working directory: ${cwd}`,
-    "Review network, dependency, and secret-access risk before approving.",
-    confirmation.editableArgs ? "Editable before approval" : null,
+    sandboxRiskLine(confirmation, t),
+    t("toolConfirmation.detail.command", { summary }),
+    `${t(WORKING_DIRECTORY_PREFIX_KEY)}${cwd}`,
+    t("toolConfirmation.detail.reviewRisk"),
+    confirmation.editableArgs
+      ? t("toolConfirmation.detail.editableBeforeApproval")
+      : null,
   ].filter((line): line is string => Boolean(line));
 }
 
-function sandboxCollectDetailLines(confirmation: ToolConfirmationDisplayInput) {
+function sandboxCollectDetailLines(
+  confirmation: ToolConfirmationDisplayInput,
+  t: Translate,
+) {
   const request = record(confirmation.preview.requestJson);
   const outputs = arrayRecord(request.outputs);
+  const outputCount = outputs.length || 0;
   const lines = [
-    sandboxRiskLine(confirmation),
-    `Collect ${outputs.length || 0} output${outputs.length === 1 ? "" : "s"}`,
+    sandboxRiskLine(confirmation, t),
+    outputCount === 1
+      ? t("toolConfirmation.detail.collectOutput", { count: outputCount })
+      : t("toolConfirmation.detail.collectOutputs", { count: outputCount }),
   ];
   for (const output of outputs) {
     const target = record(output.target);
     const sandboxPath =
       typeof output.sandboxPath === "string"
         ? output.sandboxPath
-        : "unknown sandbox path";
+        : t("toolConfirmation.detail.unknownSandboxPath");
     const targetPath =
-      typeof target.path === "string" ? target.path : "unknown target";
-    const overwrite = target.overwrite === true ? "yes" : "no";
+      typeof target.path === "string"
+        ? target.path
+        : t("toolConfirmation.detail.unknownTarget");
+    const overwrite =
+      target.overwrite === true
+        ? t("toolConfirmation.detail.overwriteYes")
+        : t("toolConfirmation.detail.overwriteNo");
     lines.push(
-      `${sandboxPath} -> ${targetPath} · overwrite: ${overwrite} · ${formatBytes(output.sizeBytes)}`,
+      `${sandboxPath} -> ${targetPath} · ${t("toolConfirmation.detail.overwrite", { value: overwrite })} · ${formatBytes(output.sizeBytes, t)}`,
     );
   }
-  lines.push(
-    "Outputs become durable only after collection into /files or a supported artifact path.",
-  );
+  lines.push(t("toolConfirmation.detail.outputsDurable"));
   return lines;
 }
 
 function sandboxRequestDetailLines(
   confirmation: ToolConfirmationDisplayInput,
-  toolCallInput?: Record<string, unknown>,
+  toolCallInput: Record<string, unknown> | undefined,
+  t: Translate,
 ) {
   switch (confirmation.action.toolName) {
     case "prepare_sandbox_workspace":
-      return sandboxPrepareDetailLines(confirmation);
+      return sandboxPrepareDetailLines(confirmation, t);
     case "execute":
-      return sandboxExecuteDetailLines(confirmation, toolCallInput);
+      return sandboxExecuteDetailLines(confirmation, toolCallInput, t);
     case "collect_sandbox_outputs":
-      return sandboxCollectDetailLines(confirmation);
+      return sandboxCollectDetailLines(confirmation, t);
     default:
       return null;
   }
@@ -177,7 +208,10 @@ export function confirmationToolMetadata(
   return getAgentToolSlashCommand(confirmation.action.toolName);
 }
 
-export function confirmationTitle(confirmation: ToolConfirmationDisplayInput) {
+export function confirmationTitle(
+  confirmation: ToolConfirmationDisplayInput,
+  t: Translate,
+) {
   const toolMetadata = confirmationToolMetadata(confirmation);
   const actionLabel = confirmation.action.label;
   const generatedActionLabel = formatActionTypeLabel(confirmation.action.type);
@@ -193,18 +227,23 @@ export function confirmationTitle(confirmation: ToolConfirmationDisplayInput) {
     toolMetadata?.displayName ??
     confirmation.preview.title ??
     confirmation.preview.summary ??
-    "Tool action"
+    t("toolConfirmation.detail.toolAction")
   );
 }
 
-export function requestSummary(confirmation: ToolConfirmationDisplayInput) {
+export function requestSummary(
+  confirmation: ToolConfirmationDisplayInput,
+  t: Translate,
+) {
   const summary = confirmation.preview.summary ?? confirmation.preview.title;
   if (!summary) {
     return null;
   }
   const actionPrefix = `${confirmation.action.type} on `;
   if (summary.startsWith(actionPrefix)) {
-    return `Target: ${summary.slice(actionPrefix.length)}`;
+    return t("toolConfirmation.detail.target", {
+      value: summary.slice(actionPrefix.length),
+    });
   }
   if (summary === `${confirmation.action.type} connector action`) {
     return null;
@@ -214,27 +253,39 @@ export function requestSummary(confirmation: ToolConfirmationDisplayInput) {
 
 export function requestDetailLines(
   confirmation: ToolConfirmationDisplayInput,
-  toolCallInput?: Record<string, unknown>,
+  toolCallInput: Record<string, unknown> | undefined,
+  t: Translate,
 ) {
-  const sandboxLines = sandboxRequestDetailLines(confirmation, toolCallInput);
+  const sandboxLines = sandboxRequestDetailLines(
+    confirmation,
+    toolCallInput,
+    t,
+  );
   if (sandboxLines) {
+    const workingDirectoryPrefix = t(WORKING_DIRECTORY_PREFIX_KEY);
     return sandboxLines.map((line) =>
-      line.startsWith("Working directory: ") ? line : compactText(line, 160),
+      line.startsWith(workingDirectoryPrefix) ? line : compactText(line, 160),
     );
   }
   const toolMetadata = confirmationToolMetadata(confirmation);
   const lines = [
-    requestSummary(confirmation),
+    requestSummary(confirmation, t),
     confirmation.action.description ?? toolMetadata?.description,
     confirmation.preview.target?.label
-      ? `Target: ${confirmation.preview.target.label}`
+      ? t("toolConfirmation.detail.target", {
+          value: confirmation.preview.target.label,
+        })
       : null,
   ];
   const seen = new Set<string>();
   return lines
     .map((line) => (line ? compactText(line, 160) : null))
     .filter((line): line is string => {
-      if (!line || seen.has(line) || line === confirmationTitle(confirmation)) {
+      if (
+        !line ||
+        seen.has(line) ||
+        line === confirmationTitle(confirmation, t)
+      ) {
         return false;
       }
       seen.add(line);

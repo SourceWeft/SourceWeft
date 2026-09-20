@@ -1,4 +1,7 @@
+"use client";
+
 import { Video } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { ArtifactPreviewRenderer } from "../types";
 import { payloadString } from "../utils";
 
@@ -19,12 +22,13 @@ function VideoFilePreview({
   fileUrl: string;
   title: string;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   return (
     <div className="overflow-hidden rounded-xl border bg-background shadow-sm">
       <div className="flex items-center gap-2 border-b px-3 py-2.5">
         <Video className="size-3.5 text-muted-foreground" />
         <p className="truncate text-xs font-medium text-foreground">
-          Video Preview
+          {t("video.previewTitle")}
         </p>
       </div>
       <div className="bg-[#0b1017] p-2">

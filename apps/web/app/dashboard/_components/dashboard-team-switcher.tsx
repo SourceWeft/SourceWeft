@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   Check,
   ChevronDown,
@@ -53,6 +54,7 @@ export function DashboardTeamSwitcher({
   onAddTeam,
   size = "default",
 }: DashboardTeamSwitcherProps) {
+  const t = useTranslations("dashboardNav");
   const { activeOrg, currentItem, items, switchTeam, user } =
     useDashboardTeamSelector();
   const [open, setOpen] = React.useState(false);
@@ -66,7 +68,7 @@ export function DashboardTeamSwitcher({
       await switchTeam(item);
       setOpen(false);
     } catch {
-      toast.error("Failed to switch team.");
+      toast.error(t("team.switchError"));
     }
   }
 
@@ -136,7 +138,7 @@ export function DashboardTeamSwitcher({
               <div className="flex h-5 w-5 items-center justify-center rounded-md border bg-background">
                 <Plus className="h-3.5 w-3.5 text-muted-foreground" />
               </div>
-              <span className="text-muted-foreground">Add team</span>
+              <span className="text-muted-foreground">{t("team.add")}</span>
             </button>
           </>
         ) : null}
@@ -149,6 +151,7 @@ export function DashboardRailTeamSwitcher({
   className,
   onAddTeam,
 }: Pick<DashboardTeamSwitcherProps, "className" | "onAddTeam">) {
+  const t = useTranslations("dashboardNav");
   const { isMobile } = useSidebar();
   const { activeOrg, currentItem, items, switchTeam, user } =
     useDashboardTeamSelector();
@@ -157,13 +160,13 @@ export function DashboardRailTeamSwitcher({
     return null;
   }
 
-  const triggerLabel = `Switch team: ${currentItem.name}`;
+  const triggerLabel = t("team.switchLabel", { name: currentItem.name });
 
   async function handleSwitch(item: DashboardTeamItem) {
     try {
       await switchTeam(item);
     } catch {
-      toast.error("Failed to switch team.");
+      toast.error(t("team.switchError"));
     }
   }
 
@@ -182,7 +185,7 @@ export function DashboardRailTeamSwitcher({
                 <GalleryVerticalEnd className="size-4" />
               </div>
               <ChevronsUpDown className="absolute -right-1 -top-1 flex size-4 rounded-full border border-sidebar bg-background p-0.5 text-muted-foreground shadow-xs" />
-              <span className="sr-only">Team switcher</span>
+              <span className="sr-only">{t("team.switcher")}</span>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -192,7 +195,7 @@ export function DashboardRailTeamSwitcher({
             sideOffset={4}
           >
             <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Teams
+              {t("team.teams")}
             </DropdownMenuLabel>
             {items.map((item) => {
               const isActive = isTeamItemActive(activeOrg, item);
@@ -225,7 +228,7 @@ export function DashboardRailTeamSwitcher({
                     <Plus className="size-4 text-muted-foreground" />
                   </div>
                   <div className="font-medium text-muted-foreground">
-                    Add team
+                    {t("team.add")}
                   </div>
                 </DropdownMenuItem>
               </>

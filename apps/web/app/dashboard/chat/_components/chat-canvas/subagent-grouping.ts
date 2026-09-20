@@ -1,5 +1,8 @@
+import type { useTranslations } from "next-intl";
 import type { AssistantWorkflowBlock } from "./assistant-render-segments";
 import type { ToolProducer } from "./types";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 /** A block paired with its original index within the workflow segment. */
 export type WorkflowBlockEntry = {
@@ -149,10 +152,13 @@ export function partitionWorkflowBlocksBySubagent(
 }
 
 /** Display name for a delegate's Agent card header. */
-export function subagentDisplayName(subagentType?: string): string {
+export function subagentDisplayName(
+  subagentType: string | undefined,
+  t: Translate,
+): string {
   const trimmed = subagentType?.trim();
   if (!trimmed) {
-    return "Sub-agent";
+    return t("common.subagent");
   }
   // "general-purpose" → "General purpose"; keep already-spaced names intact.
   const spaced = trimmed.replace(/[-_]+/g, " ");

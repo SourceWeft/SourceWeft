@@ -8,6 +8,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { useLocalOperationStatus } from "../local-conversation-status";
 import type { ToolConfirmationDecision as ToolConfirmationWireDecision } from "@sourceweft/sdk";
 import {
@@ -46,8 +47,8 @@ import {
   defaultTrustDurationChoiceId,
   describeDecisionOutcome,
   getConfirmationDecisionOptions,
+  getTrustDurationChoices,
   hasAlwaysAllowOption,
-  trustDurationChoices,
   type ToolConfirmationDecisionOption,
 } from "./tool-confirmation-trust";
 import type { ToolConfirmationResolution } from "./types";
@@ -158,6 +159,7 @@ function ToolConfirmationPanel({
   workspaceId?: string | null;
 }) {
   const { confirmation } = item;
+  const t = useTranslations("dashboardChatCanvas");
   const localStatus = useLocalOperationStatus();
   const initialStatus = confirmation.status ?? confirmation.action.status;
   const [state, setState] = useState<ConfirmationState>(
@@ -179,10 +181,10 @@ function ToolConfirmationPanel({
     setHasSubmitted(false);
   }, [confirmation.id]);
 
-  const title = confirmationTitle(confirmation);
+  const title = confirmationTitle(confirmation, t);
   const toolCallInput = item.toolCall.input as
     Record<string, unknown> | undefined;
-  const requestLines = requestDetailLines(confirmation, toolCallInput);
+  const requestLines = requestDetailLines(confirmation, toolCallInput, t);
   const commandText = sandboxExecuteCommandText({
     confirmation,
     toolCallInput,
@@ -191,7 +193,8 @@ function ToolConfirmationPanel({
   // Decisions are whatever the server offered for this confirmation. The card
   // has no list of its own, so a producer that never offers `approve_always`
   // can never grow an "Always allow" button by accident.
-  const decisionOptions = getConfirmationDecisionOptions(confirmation);
+  const decisionOptions = getConfirmationDecisionOptions(confirmation, t);
+  const durationChoices = getTrustDurationChoices(t);
   const offersAlwaysAllow = hasAlwaysAllowOption(confirmation);
   const respondable = canDecide(
     confirmation,
@@ -207,11 +210,11 @@ function ToolConfirmationPanel({
       return;
     }
     if (!workspaceId) {
-      toast.error("SourceWeft confirmation is missing workspace context.");
+      toast.error(t("toolConfirmation.missingWorkspace"));
       return;
     }
     if (!threadRunId) {
-      toast.error("This confirmation is no longer attached to an active run.");
+      toast.error(t("toolConfirmation.notAttached"));
       return;
     }
     submittedConfirmationIdRef.current = confirmation.id;
@@ -228,15 +231,15 @@ function ToolConfirmationPanel({
       id: confirmation.id,
       approved: !isRejectDecision,
       reason: isRejectDecision
-        ? "Rejected in SourceWeft."
-        : "Approved in SourceWeft.",
+        ? t("toolConfirmation.rejectedInSourceweft")
+        : t("toolConfirmation.approvedInSourceweft"),
     });
     // Optimistic copy never mentions remembering: only the server's response
     // can say whether a standing approval was actually created.
     setMessage(
       isRejectDecision
-        ? "Rejected in SourceWeft. The action was not run."
-        : "Approved in SourceWeft.",
+        ? t("toolConfirmation.rejectedNotRun")
+        : t("toolConfirmation.approvedInSourceweft"),
     );
     try {
       const result = await connectorsClient.respondToConfirmation(
@@ -256,31 +259,36 @@ function ToolConfirmationPanel({
       // `trustRule` is the only truthful signal that anything was remembered.
       // It is absent whenever the server degraded `approve_always` to a plain
       // approve, and the copy has to follow it rather than the button pressed.
-      const outcomeMessage = describeDecisionOutcome({
-        decision,
-        trustRule: result.trustRule ?? null,
-      });
+      const outcomeMessage = describeDecisionOutcome(
+        {
+          decision,
+          trustRule: result.trustRule ?? null,
+        },
+        t,
+      );
       if (isRejectDecision || status === "rejected") {
         setState("output-denied");
-        setMessage("Rejected in SourceWeft. The action was not run.");
+        setMessage(t("toolConfirmation.rejectedNotRun"));
         onSettled?.({ decision: settledDecision, item, result });
       } else if (status === "failed") {
         setState("output-error");
-        setMessage("Action failed.");
-        toast.error("Action failed.");
+        setMessage(t("toolConfirmation.actionFailed"));
+        toast.error(t("toolConfirmation.actionFailed"));
       } else {
         setState(confirmationStatusToState(status));
         setApproval({
           id: confirmation.id,
           approved: !isRejectDecision,
-          reason: "Approved in SourceWeft.",
+          reason: t("toolConfirmation.approvedInSourceweft"),
         });
         setMessage(outcomeMessage);
         onSettled?.({ decision: settledDecision, item, result });
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Confirmation failed.";
+        error instanceof Error
+          ? error.message
+          : t("toolConfirmation.confirmationFailed");
       if (isExpiredToolConfirmationResponse(error)) {
         onExpired?.({ item });
         return;
@@ -329,8 +337,10 @@ function ToolConfirmationPanel({
               {commandText ? (
                 <details className="mt-1">
                   <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                    View command ({commandText.split("\n").length} lines,{" "}
-                    {commandText.length} characters)
+                    {t("toolConfirmation.viewCommand", {
+                      lines: commandText.split("\n").length,
+                      characters: commandText.length,
+                    })}
                   </summary>
                   <pre className="mt-1 max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-5">
                     {commandText}
@@ -349,7 +359,7 @@ function ToolConfirmationPanel({
             <CheckIcon className="mt-0.5 size-4 shrink-0 text-green-600" />
           )}
           <ConfirmationTitle className="block">
-            {message ?? "Approved in SourceWeft."}
+            {message ?? t("toolConfirmation.approvedInSourceweft")}
           </ConfirmationTitle>
         </div>
       </ConfirmationAccepted>
@@ -357,7 +367,7 @@ function ToolConfirmationPanel({
         <div className="flex items-start gap-2">
           <XIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
           <ConfirmationTitle className="block">
-            {message ?? "Rejected in SourceWeft."}
+            {message ?? t("toolConfirmation.rejectedInSourceweft")}
           </ConfirmationTitle>
         </div>
       </ConfirmationRejected>
@@ -372,22 +382,22 @@ function ToolConfirmationPanel({
         >
           <XIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
           <ConfirmationTitle className="block">
-            {message ?? "Action failed."}
+            {message ?? t("toolConfirmation.actionFailed")}
           </ConfirmationTitle>
         </div>
       ) : null}
       <ConfirmationActions className="shrink-0 flex-wrap border-t border-border/50 bg-background pt-2">
         {offersAlwaysAllow ? (
           <label className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            Remember for
+            {t("toolConfirmation.rememberFor")}
             <select
-              aria-label="How long to remember this approval"
+              aria-label={t("toolConfirmation.rememberAria")}
               className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
               disabled={!respondable}
               onChange={(event) => setTrustDurationId(event.target.value)}
               value={trustDurationId}
             >
-              {trustDurationChoices.map((choice) => (
+              {durationChoices.map((choice) => (
                 <option key={choice.id} value={choice.id}>
                   {choice.label}
                 </option>
@@ -407,7 +417,7 @@ function ToolConfirmationPanel({
             variant={decisionButtonVariant(option.decision)}
           >
             {isBusy && option.decision !== "reject"
-              ? "Approving..."
+              ? t("toolConfirmation.approving")
               : option.label}
           </ConfirmationAction>
         ))}
@@ -443,6 +453,7 @@ export function ToolInterventionBar({
   resolvedConfirmations?: ToolConfirmationResolution[];
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const visibleItems = getVisibleToolConfirmationItems(
     items ?? [],
     resolvedConfirmations,
@@ -488,30 +499,35 @@ export function ToolInterventionBar({
                         value={item.confirmation.id}
                       >
                         {index + 1}.{" "}
-                        {compactText(confirmationTitle(item.confirmation), 32)}
+                        {compactText(
+                          confirmationTitle(item.confirmation, t),
+                          32,
+                        )}
                       </TabsTrigger>
                     ))}
                   </TabsList>
                   <span className="text-muted-foreground text-xs">
-                    {visibleItems.length} pending
+                    {t("toolConfirmation.pending", {
+                      count: visibleItems.length,
+                    })}
                   </span>
                 </>
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  Waiting for approval
+                  {t("toolConfirmation.waitingForApproval")}
                 </span>
               )}
             </div>
             {onStopWaiting ? (
               <button
-                aria-label="End approval wait"
+                aria-label={t("toolConfirmation.endApprovalWait")}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/20 disabled:opacity-60"
                 onClick={onStopWaiting}
-                title="End approval wait"
+                title={t("toolConfirmation.endApprovalWait")}
                 type="button"
               >
                 <CircleStopIcon className="size-3.5" />
-                End
+                {t("toolConfirmation.end")}
               </button>
             ) : null}
           </div>

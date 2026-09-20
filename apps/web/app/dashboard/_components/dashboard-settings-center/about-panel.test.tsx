@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, test, vi } from "vitest";
+
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const isAvailable = vi.fn();
 const info = vi.fn();
@@ -38,7 +45,11 @@ async function render() {
   const createdRoot = createRoot(container);
   root = createdRoot;
   await act(async () => {
-    createdRoot.render(createElement(AboutPanel));
+    createdRoot.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(AboutPanel)}
+      </NextIntlClientProvider>,
+    );
   });
   return container;
 }

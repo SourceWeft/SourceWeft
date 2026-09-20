@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { type ToolApprovalResume } from "@sourceweft/sdk";
 import type { ByokModelSelection } from "../../_components/byok-state";
 import {
@@ -201,18 +202,19 @@ export function useThreadStreamAction({
   updateChatTitle,
   workspaceId,
 }: UseThreadStreamActionInput) {
+  const t = useTranslations("dashboardChat");
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const streamThreadAction = useCallback(
     async (input: ThreadStreamActionInput) => {
       if (!workspaceId) {
-        input.onBlocked?.("The workspace is not ready.");
+        input.onBlocked?.(t("toasts.workspaceNotReady"));
         return;
       }
       if (!input.attachOnly && !localStatus.ready) {
         input.onBlocked?.(
-          localStatus.message ?? "The computer is unavailable.",
+          localStatus.message ?? t("toasts.computerUnavailable"),
         );
-        toast.error(localStatus.message ?? "The computer is unavailable.");
+        toast.error(localStatus.message ?? t("toasts.computerUnavailable"));
         return;
       }
 
@@ -990,6 +992,7 @@ export function useThreadStreamAction({
       }
     },
     [
+      t,
       catalogKindEnabled,
       clearAttachedRunKeyIfCurrent,
       clearEditingState,

@@ -1,11 +1,31 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { beforeEach, test, vi } from "vitest";
 import "../artifact-render-host";
 import type { ArtifactStatusSnapshot, MessageRenderBlock } from "./types";
+
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 const getArtifactMock = vi.hoisted(() => vi.fn());
 
@@ -65,11 +85,13 @@ test("renders a committed sub-agent artifact without generation motion", async (
 
   await act(async () => {
     root.render(
-      createElement(ArtifactOutputCard, {
-        artifactStatuses: new Map([[snapshot.id, snapshot]]),
-        block,
-        workspaceId: snapshot.workspaceId,
-      }),
+      withIntl(
+        createElement(ArtifactOutputCard, {
+          artifactStatuses: new Map([[snapshot.id, snapshot]]),
+          block,
+          workspaceId: snapshot.workspaceId,
+        }),
+      ),
     );
   });
 
@@ -143,13 +165,15 @@ test("a stale non-terminal parent snapshot does not permanently block the card f
 
   await act(async () => {
     root.render(
-      createElement(ArtifactOutputCard, {
-        artifactStatuses: new Map([
-          [staleRunningSnapshot.id, staleRunningSnapshot],
-        ]),
-        block,
-        workspaceId: staleRunningSnapshot.workspaceId,
-      }),
+      withIntl(
+        createElement(ArtifactOutputCard, {
+          artifactStatuses: new Map([
+            [staleRunningSnapshot.id, staleRunningSnapshot],
+          ]),
+          block,
+          workspaceId: staleRunningSnapshot.workspaceId,
+        }),
+      ),
     );
   });
   // Let the corrective fetch's promise resolve and the resulting state update flush.

@@ -6,6 +6,7 @@ import {
   RotateCcw,
   Settings2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   Alert,
@@ -51,6 +52,7 @@ export function ConnectorsTab({
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
@@ -58,9 +60,11 @@ export function ConnectorsTab({
     <section className="space-y-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-xs font-medium text-foreground">Connectors</h3>
+          <h3 className="text-xs font-medium text-foreground">
+            {t("tabs.Connectors")}
+          </h3>
           <span className="text-[10px] text-muted-foreground">
-            {activeConnectors.length} active
+            {t("counts.active", { count: activeConnectors.length })}
           </span>
         </div>
         <Button
@@ -75,7 +79,7 @@ export function ConnectorsTab({
           ) : (
             <Settings2 className="size-3.5" />
           )}
-          Manage
+          {t("connectors.manage")}
         </Button>
       </div>
 
@@ -95,8 +99,8 @@ export function ConnectorsTab({
               (item) => item.id === connector.raw.connectorType,
             );
             const subtitle =
-              formatConnectorReadinessSummary(readiness) ??
-              compactConnectorProviderMeta(connector);
+              formatConnectorReadinessSummary(readiness, t) ??
+              compactConnectorProviderMeta(connector, t);
             return (
               <div
                 className="rounded-lg border bg-background p-2 text-xs"
@@ -117,13 +121,15 @@ export function ConnectorsTab({
                       <button
                         className="min-w-0 truncate text-left font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         onClick={() => onConfigureConnector(connector)}
-                        title={`Open ${providerName} settings`}
+                        title={t("connectors.openSettings", {
+                          name: providerName,
+                        })}
                         type="button"
                       >
                         {providerName}
                       </button>
                       <span className="shrink-0 text-[10px] text-muted-foreground">
-                        {connector.status}
+                        {t(`connectors.statusLabel.${connector.status}`)}
                       </span>
                     </div>
                     <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
@@ -138,10 +144,12 @@ export function ConnectorsTab({
                       size="icon-xs"
                       title={
                         connector.status === "paused"
-                          ? `Sync paused ${providerName} manually`
+                          ? t("connectors.syncPausedManual", {
+                              name: providerName,
+                            })
                           : connector.status === "disabled"
-                            ? `${providerName} is disabled`
-                            : `Sync ${providerName}`
+                            ? t("connectors.isDisabled", { name: providerName })
+                            : t("connectors.sync", { name: providerName })
                       }
                       type="button"
                       variant="ghost"
@@ -151,18 +159,24 @@ export function ConnectorsTab({
                       ) : (
                         <RotateCcw className="size-3.5" />
                       )}
-                      <span className="sr-only">Sync {providerName}</span>
+                      <span className="sr-only">
+                        {t("connectors.sync", { name: providerName })}
+                      </span>
                     </Button>
                     <Button
                       className="size-7"
                       onClick={() => onConfigureConnector(connector)}
                       size="icon-xs"
-                      title={`Open ${providerName} settings`}
+                      title={t("connectors.openSettings", {
+                        name: providerName,
+                      })}
                       type="button"
                       variant="ghost"
                     >
                       <Settings2 className="size-3.5" />
-                      <span className="sr-only">Configure {providerName}</span>
+                      <span className="sr-only">
+                        {t("connectors.configure", { name: providerName })}
+                      </span>
                     </Button>
                     <Button
                       className={cn("size-7", disabledConnectorIconButtonClass)}
@@ -171,8 +185,8 @@ export function ConnectorsTab({
                       size="icon-xs"
                       title={
                         connector.status === "paused"
-                          ? `Resume ${providerName}`
-                          : `Pause ${providerName}`
+                          ? t("connectors.resume", { name: providerName })
+                          : t("connectors.pause", { name: providerName })
                       }
                       type="button"
                       variant="ghost"
@@ -183,8 +197,9 @@ export function ConnectorsTab({
                         <PowerOff className="size-3.5" />
                       )}
                       <span className="sr-only">
-                        {connector.status === "paused" ? "Resume" : "Pause"}{" "}
-                        {providerName}
+                        {connector.status === "paused"
+                          ? t("connectors.resume", { name: providerName })
+                          : t("connectors.pause", { name: providerName })}
                       </span>
                     </Button>
                   </div>
@@ -195,9 +210,9 @@ export function ConnectorsTab({
         </div>
       ) : (
         <HubEmptyState
-          description="Open the catalog to connect Notion or preview upcoming integrations."
+          description={t("connectors.emptyDescription")}
           icon={Link2}
-          title="No active connectors yet."
+          title={t("connectors.emptyTitle")}
         />
       )}
     </section>

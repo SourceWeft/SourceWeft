@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Download, X } from "lucide-react";
 import { Preview } from "@sourceweft/preview/react";
@@ -12,6 +13,7 @@ import {
 } from "../../../lib/desktop-preview-bridge";
 
 export function DesktopPreviewWindow() {
+  const t = useTranslations("dashboardWindows");
   const id = useSearchParams().get("id");
   const { data: session, isPending } = authClient.useSession();
   const [file, setFile] = useState<{
@@ -30,7 +32,7 @@ export function DesktopPreviewWindow() {
         if (!live) return;
         if (metadata.accountId !== session?.user.id) {
           void desktopPreviewBridge.close();
-          throw new Error("This preview belongs to a different account.");
+          throw new Error(t("preview.accountMismatch"));
         }
         const blob = new Blob(
           [Uint8Array.from(atob(metadata.base64), (c) => c.charCodeAt(0))],
@@ -45,7 +47,7 @@ export function DesktopPreviewWindow() {
     return () => {
       live = false;
     };
-  }, [id, isPending, session?.user.id]);
+  }, [id, isPending, session?.user.id, t]);
 
   const close = () =>
     void desktopPreviewBridge.close().catch((cause) => setError(cause.message));
@@ -66,12 +68,12 @@ export function DesktopPreviewWindow() {
             className="min-w-0 flex-1 truncate text-sm font-semibold"
             title={file?.metadata.name}
           >
-            {file?.metadata.name.split(/[\\/]/).pop() ?? "File preview"}
+            {file?.metadata.name.split(/[\\/]/).pop() ?? t("preview.title")}
           </h1>
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Download file"
+            aria-label={t("preview.downloadAria")}
             disabled={!file}
             onClick={download}
           >
@@ -80,7 +82,7 @@ export function DesktopPreviewWindow() {
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Close preview window"
+            aria-label={t("preview.closeAria")}
             onClick={close}
           >
             <X className="size-4" />
@@ -102,11 +104,11 @@ export function DesktopPreviewWindow() {
           </p>
         ) : !file ? (
           <p role="status" className="p-6 text-sm text-muted-foreground">
-            Loading file preview…
+            {t("preview.loading")}
           </p>
         ) : !file.blob.size ? (
           <p className="p-6 text-sm text-muted-foreground">
-            This file is empty.
+            {t("preview.empty")}
           </p>
         ) : (
           <Preview

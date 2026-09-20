@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { connectorsClient } from "../../../../../lib/sdk";
 
@@ -59,10 +60,11 @@ export function ConnectorOAuthStartClient({
   returnTo: string | null;
   workspaceId: string | null;
 }) {
-  const [state, setState] = useState<OAuthStartState>({
+  const t = useTranslations("dashboardConnectors");
+  const [state, setState] = useState<OAuthStartState>(() => ({
     kind: "loading",
-    message: "Starting connector authorization...",
-  });
+    message: t("start.loadingMessage"),
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +73,7 @@ export function ConnectorOAuthStartClient({
       if (!workspaceId || !connectorType) {
         setState({
           kind: "error",
-          message: "This connector authorization link is missing required context.",
+          message: t("start.missingContext"),
         });
         return;
       }
@@ -96,10 +98,7 @@ export function ConnectorOAuthStartClient({
         if (!cancelled) {
           setState({
             kind: "error",
-            message: getErrorMessage(
-              error,
-              "Failed to start connector authorization.",
-            ),
+            message: getErrorMessage(error, t("start.startFailed")),
           });
         }
       }
@@ -110,7 +109,7 @@ export function ConnectorOAuthStartClient({
     return () => {
       cancelled = true;
     };
-  }, [connectorType, mode, returnTo, workspaceId]);
+  }, [connectorType, mode, returnTo, workspaceId, t]);
 
   const isRedirectMode = mode === "redirect";
   const fallbackReturnTo =
@@ -126,8 +125,8 @@ export function ConnectorOAuthStartClient({
           <div className="min-w-0">
             <h1 className="text-base font-semibold">
               {state.kind === "loading"
-                ? "Opening authorization"
-                : "Authorization could not start"}
+                ? t("start.loadingTitle")
+                : t("start.errorTitle")}
             </h1>
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {state.message}
@@ -147,7 +146,9 @@ export function ConnectorOAuthStartClient({
             type="button"
             variant="outline"
           >
-            {isRedirectMode ? "Return to SourceWeft" : "Close tab"}
+            {isRedirectMode
+              ? t("common.returnToSourceweft")
+              : t("common.closeTab")}
           </Button>
         ) : null}
       </section>

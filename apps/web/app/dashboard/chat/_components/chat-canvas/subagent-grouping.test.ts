@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import {
   partitionWorkflowBlocksBySubagent,
   subagentDisplayName,
 } from "./subagent-grouping";
 import type { AssistantWorkflowBlock } from "./assistant-render-segments";
 import type { ToolProducer } from "./types";
+import messages from "../../../../../messages/en.json";
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 function toolBlock(id: string): AssistantWorkflowBlock {
   return { id, type: "tool", toolCallId: id };
@@ -219,8 +228,8 @@ test("orphan children (parent not in segment) still fall back to a group", () =>
 });
 
 test("subagentDisplayName humanizes the delegate type", () => {
-  assert.equal(subagentDisplayName("general-purpose"), "General purpose");
-  assert.equal(subagentDisplayName("explore"), "Explore");
-  assert.equal(subagentDisplayName(undefined), "Sub-agent");
-  assert.equal(subagentDisplayName("  "), "Sub-agent");
+  assert.equal(subagentDisplayName("general-purpose", t), "General purpose");
+  assert.equal(subagentDisplayName("explore", t), "Explore");
+  assert.equal(subagentDisplayName(undefined, t), "Sub-agent");
+  assert.equal(subagentDisplayName("  ", t), "Sub-agent");
 });

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ArrowLeft, X, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ import {
 } from "../chat/_components/hub-protocol";
 
 export function DesktopHubWindow() {
+  const t = useTranslations("dashboardWindows");
   const { data: session, isPending } = authClient.useSession();
   const [available, setAvailable] = useState(false);
   useEffect(() => {
@@ -98,18 +100,16 @@ export function DesktopHubWindow() {
 
   const close = useCallback(async () => {
     if (activityRef.current.busy) {
-      toast.error(
-        "An upload or resource operation is still running. Wait for it to finish before closing Hub.",
-      );
+      toast.error(t("hub.uploadRunningToast"));
       return;
     }
     if (
       activityRef.current.editing &&
-      !window.confirm("Discard the open Hub form and close this window?")
+      !window.confirm(t("hub.discardCloseConfirm"))
     )
       return;
     await bridge.action("close");
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!desktopBridge.isAvailable() || !session?.user.id) return;
@@ -140,7 +140,7 @@ export function DesktopHubWindow() {
           setSnapshot(null);
           newest.current = null;
           setConnected(false);
-          setError("Hub account does not match the main window.");
+          setError(t("hub.accountMismatch"));
           return;
         }
         if (
@@ -151,11 +151,7 @@ export function DesktopHubWindow() {
         if (newest.current && newest.current.sessionId !== next.sessionId) {
           for (const p of pendingCommands.values()) {
             clearTimeout(p.timer);
-            p.reject(
-              new Error(
-                "The main window restarted. Review selections before trying again.",
-              ),
-            );
+            p.reject(new Error(t("hub.mainWindowRestarted")));
           }
           pendingCommands.clear();
           setPendingCount(0);
@@ -186,7 +182,7 @@ export function DesktopHubWindow() {
         else command.resolve();
       } else if (message.kind === "disconnected") {
         setConnected(false);
-        setError("The connection to the main window was interrupted.");
+        setError(t("hub.connectionInterrupted"));
       } else if (message.kind === "close-requested") {
         void close().catch((e) => setError(e.message));
       } else if (
@@ -219,9 +215,7 @@ export function DesktopHubWindow() {
     const heartbeat = setInterval(() => {
       if (lastSeen.current && Date.now() - lastSeen.current > 15000) {
         setConnected(false);
-        setError(
-          "The main window is not responding. Reconnect before making changes.",
-        );
+        setError(t("hub.notResponding"));
       }
       void hello().catch((e) => {
         setConnected(false);
@@ -231,19 +225,19 @@ export function DesktopHubWindow() {
     return () => {
       disposed = true;
       unregisterFiles();
-      fileClient.cancel("Hub session ended.");
+      fileClient.cancel(t("hub.sessionEnded"));
       clearInterval(heartbeat);
       if (dockTimer.current) clearTimeout(dockTimer.current);
       void unlisten?.();
       for (const p of pendingCommands.values()) {
         clearTimeout(p.timer);
-        p.reject(new Error("Hub session ended."));
+        p.reject(new Error(t("hub.sessionEnded")));
       }
       pendingCommands.clear();
       newest.current = null;
       visible.current = null;
     };
-  }, [session?.user.id, apply, close, fileClient]);
+  }, [session?.user.id, apply, close, fileClient, t]);
 
   useEffect(() => {
     if (
@@ -299,15 +293,13 @@ export function DesktopHubWindow() {
   const command = useCallback((action: HubAction, quiet = false) => {
     const s = visible.current;
     if (!s || !connectedRef.current)
-      return Promise.reject(new Error("Hub is disconnected."));
+      return Promise.reject(new Error(t("hub.disconnected")));
     const id = crypto.randomUUID();
     const promise = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.current.delete(id);
         setPendingCount(pending.current.size);
-        reject(
-          new Error("Hub action was not confirmed. Refresh before retrying."),
-        );
+        reject(new Error(t("hub.actionNotConfirmed")));
       }, 10000);
       pending.current.set(id, { resolve, reject, timer });
       setPendingCount(pending.current.size);
@@ -333,7 +325,7 @@ export function DesktopHubWindow() {
       if (!quiet) toast.error(e.message);
       throw e;
     });
-  }, []);
+  }, [t]);
   const fire = useCallback(
     (action: HubAction) => {
       void command(action).catch(() => {});
@@ -424,36 +416,30 @@ export function DesktopHubWindow() {
       });
       dockTimer.current = setTimeout(() => {
         setDocking(false);
-        setError(
-          "The main window did not confirm docking. Hub remains in this window.",
-        );
+        setError(t("hub.dockNotConfirmed"));
       }, 10000);
     } catch (e) {
       setDocking(false);
-      setError(e instanceof Error ? e.message : "Could not dock Hub.");
+      setError(e instanceof Error ? e.message : t("hub.dockFailed"));
     }
   };
 
   if (!available)
     return (
       <div className="p-6 text-sm text-muted-foreground">
-        Open Hub from the SourceWeft desktop app.
+        {t("hub.openFromDesktop")}
       </div>
     );
   if (
     !isPending &&
     (!session?.user.id || (snapshot && snapshot.accountId !== session.user.id))
   )
-    return (
-      <div className="p-6 text-sm">
-        Sign in again in the main window to use Hub.
-      </div>
-    );
+    return <div className="p-6 text-sm">{t("hub.signInAgain")}</div>;
   if (isPending || !snapshot)
     return (
       <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
-        {error ?? "Connecting Hub to the main window…"}
+        {error ?? t("hub.connecting")}
       </div>
     );
   const paused =
@@ -479,7 +465,7 @@ export function DesktopHubWindow() {
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {r.workspaceName} ·{" "}
-            {paused ? "Following paused" : "Following current conversation"}
+            {paused ? t("hub.followingPaused") : t("hub.followingCurrent")}
           </p>
         </div>
         <Button
@@ -487,12 +473,12 @@ export function DesktopHubWindow() {
           size="icon-sm"
           title={
             activity.editing || activity.busy
-              ? "Finish editing or uploading before docking Hub"
+              ? t("hub.closeTitleBusy")
               : snapshot.phase === "active" && connected
-                ? "Close window and return Hub to main window"
-                : "Close Hub window"
+                ? t("hub.closeTitleReturn")
+                : t("hub.closeTitlePlain")
           }
-          aria-label="Close Hub window"
+          aria-label={t("hub.closeAria")}
           className="size-7 shrink-0 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
           disabled={
             docking || pendingCount > 0 || activity.editing || activity.busy
@@ -520,7 +506,7 @@ export function DesktopHubWindow() {
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Reconnect Hub"
+            aria-label={t("hub.reconnectAria")}
             onClick={() => {
               if (session?.user.id)
                 void bridge
@@ -543,30 +529,27 @@ export function DesktopHubWindow() {
           className="border-b bg-muted/50 p-3 text-xs"
         >
           {crossWorkspace
-            ? "The main window changed workspaces. Return to the original workspace to finish your open form."
-            : `Finish or cancel the open form in “${snapshot.title}” to follow “${newest.current?.title}”.`}
+            ? t("hub.pausedCrossWorkspace")
+            : t("hub.pausedFollow", {
+                current: snapshot.title,
+                target: newest.current?.title ?? "",
+              })}
           {!activity.busy ? (
             <Button
               size="sm"
               variant="ghost"
               onClick={() => {
-                if (
-                  window.confirm(
-                    "Discard the open Hub form and follow the current conversation?",
-                  )
-                ) {
+                if (window.confirm(t("hub.discardFollowConfirm"))) {
                   setActivity({ editing: false, busy: false });
                   setResetKey((v) => v + 1);
                   if (newest.current) apply(newest.current);
                 }
               }}
             >
-              Discard and follow
+              {t("hub.discardFollow")}
             </Button>
           ) : (
-            <p className="mt-1">
-              The operation continues in its original workspace.
-            </p>
+            <p className="mt-1">{t("hub.operationContinues")}</p>
           )}
         </div>
       ) : null}
@@ -575,13 +558,13 @@ export function DesktopHubWindow() {
           data-hub-toolbar
           className="border-b p-3 text-xs text-muted-foreground"
         >
-          The main window has left this conversation.
+          {t("hub.mainWindowLeft")}
           <Button
             size="sm"
             variant="ghost"
             onClick={() => fire({ type: "return" })}
           >
-            Return to conversation
+            {t("hub.returnToConversation")}
           </Button>
         </div>
       ) : null}
@@ -596,7 +579,7 @@ export function DesktopHubWindow() {
       {snapshot.phase === "transition" ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Loading conversation…
+          {t("hub.loadingConversation")}
         </div>
       ) : (
         <div className="relative min-h-0 flex-1" hidden={crossWorkspace}>
@@ -613,7 +596,7 @@ export function DesktopHubWindow() {
                   onClick={closeArtifact}
                 >
                   <ArrowLeft className="mr-2 size-4" />
-                  Back to Hub
+                  {t("hub.backToHub")}
                 </Button>
                 <ArtifactPreviewPanel
                   artifact={preview}

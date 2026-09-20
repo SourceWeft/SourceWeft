@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { authClient } from "../../../../lib/auth-client";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -38,6 +39,7 @@ import { LocalFilesPanel } from "./local-files-panel";
 import { useLocalConversationStatus } from "./local-conversation-status";
 
 export function useChatCreationContext() {
+  const t = useTranslations("dashboardChat");
   const { setWorkTarget, workspaceId } = useDashboardChatState();
   const session = authClient.useSession();
   const query = useSearchParams();
@@ -88,17 +90,15 @@ export function useChatCreationContext() {
           typeof value !== "object" ||
           Object.values(value).some((folder) => typeof folder !== "string")
         )
-          throw new Error("Working directory draft data is unavailable.");
+          throw new Error(t("work.draftDataUnavailable"));
         folderByComputer.current = value;
       }
     } catch (e) {
       setDraftMetadataError(
-        e instanceof Error
-          ? e.message
-          : "Could not restore the working directory selection.",
+        e instanceof Error ? e.message : t("work.restoreSelectionFailed"),
       );
     }
-  }, [folderStorageKey]);
+  }, [folderStorageKey, t]);
 
   const folderId = query.get("folder");
   const target = useMemo<ThreadExecutionTarget | null>(
@@ -189,9 +189,7 @@ export function useChatCreationContext() {
           JSON.stringify(folderByComputer.current),
         );
       } catch {
-        setDraftMetadataError(
-          "Could not save the working directory selection. Keep this page open and try again.",
-        );
+        setDraftMetadataError(t("work.saveSelectionFailed"));
         return;
       }
     }
@@ -219,7 +217,7 @@ export function useChatCreationContext() {
     devicesLoading,
     nativeId,
     error: invalid
-      ? "This computer is unavailable. Choose another computer."
+      ? t("work.computerUnavailableChooseAnother")
       : (draftMetadataError ?? error),
     ready,
     select,
@@ -254,6 +252,7 @@ export function ChatWorkContext({
   disabled?: boolean;
   compact?: boolean;
 }) {
+  const t = useTranslations("dashboardChat");
   const { setWorkTarget } = useDashboardChatState();
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const info = localStatus.info;
@@ -276,20 +275,20 @@ export function ChatWorkContext({
     error || (threadId && localStatus.message) || creation?.error;
   const label =
     target?.kind === "cloud"
-      ? "Cloud"
+      ? t("work.cloud")
       : device
-        ? `${device.name}${contextError ? " · Status unavailable" : device.online ? "" : " · Offline"}`
+        ? `${device.name}${contextError ? ` · ${t("work.statusUnavailable")}` : device.online ? "" : ` · ${t("work.offline")}`}`
         : contextError || (info && target?.kind === "local")
-          ? "Computer unavailable"
-          : "Connecting…";
+          ? t("work.computerUnavailable")
+          : t("work.connecting");
   const workingDirectory =
     threadId && target?.kind === "local" ? info?.workingDirectory : null;
   const directoryLabel = workingDirectory
     ? target?.kind === "local" && (target.folderId || target.directoryGrantId)
       ? (workingDirectory.split(/[\\/]/).filter(Boolean).at(-1) ??
         workingDirectory)
-      : "Task folder"
-    : "Directory pending";
+      : t("work.taskFolder")
+    : t("work.directoryPending");
   const triggerClassName = compact
     ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
@@ -314,7 +313,7 @@ export function ChatWorkContext({
           <PopoverTrigger asChild>
             <button
               type="button"
-              aria-label="Conversation details"
+              aria-label={t("work.conversationDetails")}
               className={triggerClassName}
               title={workingDirectory ? `${label}\n${workingDirectory}` : label}
             >
@@ -350,27 +349,29 @@ export function ChatWorkContext({
             <p className="break-words font-medium">{device?.name ?? label}</p>
             <p className="text-xs text-muted-foreground">
               {target?.kind === "cloud"
-                ? "This conversation runs in the cloud."
-                : "This conversation uses a fixed computer and working directory."}
+                ? t("work.runsInCloud")
+                : t("work.fixedComputer")}
               {device &&
                 !contextError &&
                 (device.online
-                  ? " The computer is online."
-                  : " The computer is offline. Local tasks can continue when it reconnects.")}
+                  ? ` ${t("work.computerOnline")}`
+                  : ` ${t("work.computerOffline")}`)}
             </p>
             {target?.kind === "local" && (
               <div className="space-y-2 border-t pt-2">
-                <p className="text-xs font-medium">Working directory</p>
+                <p className="text-xs font-medium">
+                  {t("work.workingDirectory")}
+                </p>
                 <p className="break-all text-xs text-muted-foreground">
                   {info?.workingDirectory ??
-                    "The working directory will be connected when first used."}
+                    t("work.directoryConnectedWhenUsed")}
                 </p>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setFilesOpen(true)}
                 >
-                  Files
+                  {t("common.files")}
                 </Button>
               </div>
             )}
@@ -393,7 +394,7 @@ export function ChatWorkContext({
             <button
               type="button"
               disabled={disabled}
-              aria-label="Choose cloud or computer"
+              aria-label={t("work.chooseCloudOrComputer")}
               className={triggerClassName}
               title={label}
             >
@@ -415,7 +416,7 @@ export function ChatWorkContext({
               }}
             >
               <Cloud className="size-4" />
-              Cloud
+              {t("work.cloud")}
               {target?.kind === "cloud" && <Check className="ml-auto size-4" />}
             </Button>
             {contextError && (
@@ -427,17 +428,19 @@ export function ChatWorkContext({
               </p>
             )}
             <p className="px-2 py-2 text-xs text-muted-foreground">
-              My computers
+              {t("work.myComputers")}
             </p>
             {creation?.devicesLoading && (
               <p role="status" className="px-2 py-1 text-xs">
-                Loading computers…
+                {t("work.loadingComputers")}
               </p>
             )}
             {creation?.devicesError &&
               creation.devicesError !== contextError && (
                 <p role="alert" className="px-2 py-1 text-xs text-destructive">
-                  Could not load computers: {creation.devicesError}
+                  {t("work.couldNotLoadComputers", {
+                    error: creation.devicesError,
+                  })}
                 </p>
               )}
             <div className="max-h-64 overflow-y-auto">
@@ -456,7 +459,9 @@ export function ChatWorkContext({
                   >
                     <Laptop className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate text-left">
-                      {d.id === creation.nativeId ? "This computer · " : ""}
+                      {d.id === creation.nativeId
+                        ? `${t("work.thisComputer")} · `
+                        : ""}
                       {d.name}
                       {creation.devices.filter((other) => other.name === d.name)
                         .length > 1
@@ -464,7 +469,7 @@ export function ChatWorkContext({
                         : ""}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {d.online ? "Online" : "Offline"}
+                      {d.online ? t("work.online") : t("work.offline")}
                     </span>
                     {target?.kind === "local" && target.deviceId === d.id && (
                       <Check className="size-4 shrink-0" />
@@ -482,7 +487,7 @@ export function ChatWorkContext({
               }}
             >
               <Plus className="mr-2 size-4" />
-              Connect a computer…
+              {t("work.connectComputerEllipsis")}
             </Button>
           </PopoverContent>
         </Popover>
@@ -491,9 +496,9 @@ export function ChatWorkContext({
         <Dialog open={filesOpen} onOpenChange={setFilesOpen}>
           <DialogContent className="max-w-3xl overflow-hidden">
             <DialogHeader>
-              <DialogTitle>Files</DialogTitle>
+              <DialogTitle>{t("common.files")}</DialogTitle>
               <DialogDescription>
-                Files in this conversation’s working directory.
+                {t("work.filesDescription")}
               </DialogDescription>
             </DialogHeader>
             {filesOpen && (
@@ -510,10 +515,9 @@ export function ChatWorkContext({
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Connect a computer</DialogTitle>
+            <DialogTitle>{t("work.connectComputerTitle")}</DialogTitle>
             <DialogDescription>
-              Sign in with the same account on that computer, then enable access
-              from other devices in Settings → This computer.
+              {t("work.connectComputerDescription")}
             </DialogDescription>
           </DialogHeader>
           {creation?.devices
@@ -547,25 +551,31 @@ export function ChatWorkContext({
                   {busy === d.id ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : d.connected ? (
-                    "Open"
+                    t("work.open")
                   ) : d.remoteEnabled ? (
-                    "Connect"
+                    t("work.connect")
                   ) : (
-                    "Access disabled"
+                    t("work.accessDisabled")
                   )}
                 </Button>
               </div>
             ))}
-          {creation?.devicesLoading && <p role="status">Loading computers…</p>}
+          {creation?.devicesLoading && (
+            <p role="status">{t("work.loadingComputers")}</p>
+          )}
           {creation?.devicesError && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
-              <p>Could not load computers: {creation.devicesError}</p>
+              <p>
+                {t("work.couldNotLoadComputers", {
+                  error: creation.devicesError,
+                })}
+              </p>
               <Button
                 variant="outline"
                 disabled={creation.devicesLoading}
                 onClick={() => void creation.refresh()}
               >
-                Try again
+                {t("common.tryAgain")}
               </Button>
             </div>
           )}
@@ -573,7 +583,7 @@ export function ChatWorkContext({
             !creation?.devicesLoading &&
             !creation?.devicesError && (
               <p className="text-sm text-muted-foreground">
-                No computers are available yet.
+                {t("work.noComputers")}
               </p>
             )}
           {error && (
@@ -594,6 +604,7 @@ export function WorkingFolderPicker({
   creation: ChatCreationContext;
   disabled?: boolean;
 }) {
+  const t = useTranslations("dashboardChat");
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -632,7 +643,9 @@ export function WorkingFolderPicker({
         >
           <span className="truncate">
             {folder?.name ??
-              (target.folderId ? "Folder unavailable" : "Working directory")}
+              (target.folderId
+                ? t("folderPicker.folderUnavailable")
+                : t("work.workingDirectory"))}
           </span>
           <ChevronDown className="size-3 shrink-0" />
         </button>
@@ -649,7 +662,7 @@ export function WorkingFolderPicker({
             setOpen(false);
           }}
         >
-          Default task folder
+          {t("folderPicker.defaultTaskFolder")}
         </Button>
         {folders.map((f) => (
           <Button
@@ -688,7 +701,7 @@ export function WorkingFolderPicker({
             }}
           >
             <Plus className="mr-2 size-4" />
-            Select folder…
+            {t("folderPicker.selectFolder")}
           </Button>
         )}
         {error && (

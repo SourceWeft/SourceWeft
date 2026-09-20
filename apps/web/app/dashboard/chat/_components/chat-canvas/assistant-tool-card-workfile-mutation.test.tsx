@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { AssistantToolCard } from "./assistant-tool-card";
 import type { ToolCallRecord } from "./types";
 import { WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT } from "./workfile-mutation-state";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -35,11 +41,13 @@ async function renderToolCard(input: {
 
   await act(async () => {
     createdRoot.render(
-      createElement(AssistantToolCard, {
-        defaultOpen: true,
-        onWorkfileClick: input.onWorkfileClick,
-        toolCall: input.toolCall,
-      }),
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(AssistantToolCard, {
+          defaultOpen: true,
+          onWorkfileClick: input.onWorkfileClick,
+          toolCall: input.toolCall,
+        })}
+      </NextIntlClientProvider>,
     );
   });
 

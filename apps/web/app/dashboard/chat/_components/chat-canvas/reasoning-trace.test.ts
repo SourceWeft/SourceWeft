@@ -12,6 +12,18 @@ import {
 } from "./reasoning-trace-state";
 import { formatThoughtDuration } from "./duration-format";
 import type { ToolConfirmationRequestOutput } from "./tool-confirmation-state";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+// Server-side translator (no React context); the en catalog carries the same
+// English these helpers used to hardcode, so the assertions still hold. The cast
+// pins it to the loose translator type the helpers accept.
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 test("completed tool-only traces do not show thinking title", () => {
   assert.equal(
@@ -526,7 +538,7 @@ test("approval replay trace distinguishes recorded approval, failed execution, a
 
   assert.deepEqual(
     [approvalRecorded, approvedFailure, nextPending].map((toolCall) =>
-      getToolApprovalDisplayLabel(toolCall),
+      getToolApprovalDisplayLabel(toolCall, undefined, t),
     ),
     [
       "Delete Notion Page approval recorded",
@@ -644,11 +656,11 @@ test("connector action labels stay action-oriented across rejected and completed
   };
 
   assert.equal(
-    getToolApprovalDisplayLabel(rejected),
+    getToolApprovalDisplayLabel(rejected, undefined, t),
     "Delete Notion Page approval rejected",
   );
   assert.equal(
-    getConnectorToolDisplayLabel(completed),
+    getConnectorToolDisplayLabel(completed, t),
     "Delete Notion Page completed",
   );
 });
@@ -699,10 +711,13 @@ test("persisted approved confirmations are resolved without local resolution sta
     true,
   );
   assert.equal(
-    getResolvedToolConfirmationMessage({
-      confirmation: approvedConfirmation,
-      confirmationResolution: null,
-    }),
+    getResolvedToolConfirmationMessage(
+      {
+        confirmation: approvedConfirmation,
+        confirmationResolution: null,
+      },
+      t,
+    ),
     "Approval recorded. The action may now run.",
   );
 });
@@ -759,10 +774,13 @@ test("stopped confirmations are shown as stopped instead of waiting", () => {
     true,
   );
   assert.equal(
-    getResolvedToolConfirmationMessage({
-      confirmation: pendingConfirmation,
-      confirmationResolution: resolution,
-    }),
+    getResolvedToolConfirmationMessage(
+      {
+        confirmation: pendingConfirmation,
+        confirmationResolution: resolution,
+      },
+      t,
+    ),
     "Approval stopped. The action was not run.",
   );
   assert.equal(
@@ -777,6 +795,7 @@ test("stopped confirmations are shown as stopped instead of waiting", () => {
         error: null,
       },
       resolution,
+      t,
     ),
     "Delete Notion Page approval stopped",
   );
@@ -834,10 +853,13 @@ test("expired confirmations are shown as unhandled expired decisions", () => {
     true,
   );
   assert.equal(
-    getResolvedToolConfirmationMessage({
-      confirmation: pendingConfirmation,
-      confirmationResolution: resolution,
-    }),
+    getResolvedToolConfirmationMessage(
+      {
+        confirmation: pendingConfirmation,
+        confirmationResolution: resolution,
+      },
+      t,
+    ),
     "Approval expired without a decision. The action was not run.",
   );
   assert.equal(
@@ -852,6 +874,7 @@ test("expired confirmations are shown as unhandled expired decisions", () => {
         error: null,
       },
       resolution,
+      t,
     ),
     "Delete Notion Page approval expired",
   );

@@ -14,7 +14,7 @@ test("normalizeUserSettings applies defaults and drops unknown fields", () => {
       workspaceId: "workspace-1",
     }),
     {
-      appearance: { theme: "dark" },
+      appearance: { theme: "dark", language: "system" },
     },
   );
 });
@@ -51,10 +51,10 @@ test("normalizeUserSettings rejects oversized json", () => {
 test("mergeUserSettings keeps existing appearance fields", () => {
   assert.deepEqual(
     mergeUserSettings(
-      { appearance: { theme: "light" } },
+      { appearance: { theme: "light", language: "system" } },
       { appearance: { theme: "dark" } },
     ),
-    { appearance: { theme: "dark" } },
+    { appearance: { theme: "dark", language: "system" } },
   );
 });
 

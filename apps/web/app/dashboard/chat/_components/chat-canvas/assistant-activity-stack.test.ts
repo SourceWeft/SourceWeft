@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
+import messages from "../../../../../messages/en.json";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import {
@@ -17,6 +20,12 @@ import {
   isRedactedSkillInstructionRead,
 } from "./assistant-tool-display";
 import type { TracePartRecord } from "./types";
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 const testDisplayImageArtifactTool = defineAgentTool({
   id: "testDisplayImageArtifact",
@@ -169,7 +178,7 @@ test("redacted skill read tools render private skill instruction title", () => {
 
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
-    getAssistantToolTitle(toolCall),
+    getAssistantToolTitle(toolCall, t),
     "Load Feynman skill instructions",
   );
   assert.equal(getSkillInstructionReadFileLabel(toolCall), "SKILL.md");
@@ -199,7 +208,7 @@ test("running redacted skill read tools render named skill instruction title", (
 
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
-    getAssistantToolTitle(toolCall),
+    getAssistantToolTitle(toolCall, t),
     "Loading Frontend Design skill instructions",
   );
   assert.equal(getSkillInstructionReadFileLabel(toolCall), "SKILL.md");
@@ -222,7 +231,7 @@ test("legacy skill read tool inputs are treated as private instruction reads", (
 
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
-    getAssistantToolTitle(toolCall),
+    getAssistantToolTitle(toolCall, t),
     "Load Feynman skill instructions",
   );
   assert.equal(
@@ -241,7 +250,7 @@ test("tool cards use registry display names for image artifact tools", () => {
       output: null,
       status: "completed" as const,
       tool: "test_display_image_artifact",
-    }),
+    }, t),
     "Test display image artifact",
   );
 });
@@ -259,7 +268,7 @@ test("tool cards title workfile writes by basename", () => {
       output: { path: "/files/ppt/deck.js" },
       status: "completed" as const,
       tool: "write_file",
-    }),
+    }, t),
     "Wrote Workfile: deck.js",
   );
 });
@@ -278,7 +287,7 @@ test("tool cards title workfile edits by basename", () => {
       output: { occurrences: 1, path: "/files/ppt/deck.js" },
       status: "completed" as const,
       tool: "edit_file",
-    }),
+    }, t),
     "Edited Workfile: deck.js",
   );
 });
@@ -296,7 +305,7 @@ test("tool cards keep default titles for non-workfile writes", () => {
       output: { path: "/tmp/deck.js" },
       status: "completed" as const,
       tool: "write_file",
-    }),
+    }, t),
     "Write File",
   );
 });
@@ -323,5 +332,5 @@ test("tool cards prefer backend filesystem display titles", () => {
     title: "Read Workfile",
   };
 
-  assert.equal(getAssistantToolTitle(toolCall, toolStep), "Read Workfile");
+  assert.equal(getAssistantToolTitle(toolCall, t, toolStep), "Read Workfile");
 });

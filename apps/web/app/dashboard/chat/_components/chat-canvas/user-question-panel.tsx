@@ -8,6 +8,7 @@ import {
   SendHorizontalIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { AgentQuestionItem } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
@@ -26,8 +27,6 @@ import type { UserQuestionItem } from "./tool-confirmation-state";
 
 export type UserQuestionAnswer =
   { status: "answered"; answers: string[] } | { status: "cancelled" };
-
-const OTHER_LABEL = "Other…";
 
 type QuestionDraft = {
   /** Selected choice label for single-select multiple_choice; null when none. */
@@ -92,6 +91,7 @@ function UserQuestionPanel({
     item: UserQuestionItem;
   }) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const localStatus = useLocalOperationStatus();
   const questions = item.question.questions;
   const [drafts, setDrafts] = useState<QuestionDraft[]>(() =>
@@ -127,7 +127,7 @@ function UserQuestionPanel({
     );
     if (firstMissing >= 0) {
       setShowErrors(true);
-      toast.error("Please answer the required question(s) before sending.");
+      toast.error(t("userQuestionPanel.answerRequired"));
       return;
     }
     const answers = questions.map((question, index) =>
@@ -167,7 +167,7 @@ function UserQuestionPanel({
                     {question.question}
                     {required ? null : (
                       <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        (optional)
+                        {t("userQuestionPanel.optional")}
                       </span>
                     )}
                   </p>
@@ -248,14 +248,14 @@ function UserQuestionPanel({
                         type="button"
                         variant={draft.otherSelected ? "default" : "outline"}
                       >
-                        {OTHER_LABEL}
+                        {t("userQuestionPanel.other")}
                       </Button>
                     </div>
                   )}
 
                   {question.multiSelect || draft.otherSelected ? (
                     <Textarea
-                      aria-label="Other answer"
+                      aria-label={t("userQuestionPanel.otherAnswerAria")}
                       className="min-h-9 text-sm"
                       disabled={submitted}
                       onChange={(event) =>
@@ -266,8 +266,8 @@ function UserQuestionPanel({
                       }
                       placeholder={
                         question.multiSelect
-                          ? "Other… (optional free text)"
-                          : "Type your answer"
+                          ? t("userQuestionPanel.otherFreeText")
+                          : t("userQuestionPanel.typeAnswer")
                       }
                       value={draft.otherText}
                     />
@@ -276,7 +276,7 @@ function UserQuestionPanel({
               ) : (
                 <div className="pl-6">
                   <Textarea
-                    aria-label="Answer"
+                    aria-label={t("userQuestionPanel.answerAria")}
                     className={cn(
                       "min-h-9 text-sm",
                       invalid ? "border-destructive" : undefined,
@@ -288,7 +288,7 @@ function UserQuestionPanel({
                         text: event.target.value,
                       }))
                     }
-                    placeholder="Type your answer"
+                    placeholder={t("userQuestionPanel.typeAnswer")}
                     value={draft.text}
                   />
                 </div>
@@ -296,7 +296,7 @@ function UserQuestionPanel({
 
               {invalid ? (
                 <p className="pl-6 text-xs text-destructive">
-                  This question is required.
+                  {t("userQuestionPanel.required")}
                 </p>
               ) : null}
             </div>
@@ -312,7 +312,7 @@ function UserQuestionPanel({
           type="button"
           variant="ghost"
         >
-          Cancel
+          {t("userQuestionPanel.cancel")}
         </Button>
         <Button
           className="h-8 gap-1.5 px-3 text-sm"
@@ -321,7 +321,9 @@ function UserQuestionPanel({
           type="button"
         >
           <SendHorizontalIcon className="size-3.5" />
-          {submitted ? "Sending…" : "Send answer"}
+          {submitted
+            ? t("userQuestionPanel.sending")
+            : t("userQuestionPanel.sendAnswer")}
         </Button>
       </div>
     </div>
@@ -342,6 +344,7 @@ export function UserQuestionInterventionBar({
   }) => void;
   onStopWaiting?: () => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   if (!items || items.length === 0) {
     return null;
   }
@@ -356,18 +359,18 @@ export function UserQuestionInterventionBar({
       <div className="mx-auto w-full max-w-4xl space-y-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-muted-foreground">
-            The assistant needs your input
+            {t("userQuestionPanel.needsInput")}
           </span>
           {onStopWaiting ? (
             <button
-              aria-label="Dismiss question"
+              aria-label={t("userQuestionPanel.dismissQuestion")}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/20 disabled:opacity-60"
               onClick={onStopWaiting}
-              title="Dismiss question"
+              title={t("userQuestionPanel.dismissQuestion")}
               type="button"
             >
               <CircleStopIcon className="size-3.5" />
-              End
+              {t("userQuestionPanel.end")}
             </button>
           ) : null}
         </div>

@@ -6,6 +6,7 @@ import { authClient } from "../../../../../lib/auth-client";
 import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import type {
   ChatSkillItem,
   ChatToolName,
@@ -35,7 +36,7 @@ import { removeDisabledToolSkills } from "./thread-utils";
 import {
   coerceSkillIdsSelection,
   resolveDefaultActiveSkillIds,
-  SKILL_SELECTION_LIMIT_MESSAGE,
+  MAX_SELECTED_SKILL_IDS_PER_TURN,
 } from "../../_components/chat-canvas/tool-selection";
 import { toast } from "sonner";
 
@@ -136,6 +137,8 @@ export function useThreadSources({
   threadId,
   workspaceId,
 }: UseThreadSourcesInput) {
+  const t = useTranslations("dashboardChat");
+  const tCanvas = useTranslations("dashboardChatCanvas");
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const { activeSourceIds, persistActiveSourceIds, sourceSelectionReady, sourceSelectionRevision } = useSourceSelection(workspaceId, threadId);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
@@ -176,10 +179,12 @@ export function useThreadSources({
     const { skillIds: nextSkillIds, wasLimited } =
       coerceSkillIdsSelection(skillIds);
     if (wasLimited) {
-      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+      toast.info(
+        tCanvas("composer.skillLimit", { max: MAX_SELECTED_SKILL_IDS_PER_TURN }),
+      );
     }
     setActiveSkillIds(nextSkillIds);
-  }, []);
+  }, [tCanvas]);
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
@@ -252,17 +257,17 @@ export function useThreadSources({
           id: source.id,
           meta:
             source.status === "failed"
-              ? "Processing failed"
+              ? t("sourceMeta.processingFailed")
               : source.status === "queued" || source.status === "processing"
-                ? "Sync in progress"
+                ? t("sourceMeta.syncInProgress")
                 : new Date(source.updatedAt).toLocaleString(),
-          title: source.title || "Untitled",
+          title: source.title || t("sourceMeta.untitled"),
           type: source.mimeType ?? source.sourceType,
         })),
         nextCursor: result.nextCursor,
       };
     },
-    [workspaceId],
+    [workspaceId, t],
   );
 
   const handleLibrarySourcesLoad = useCallback(

@@ -6,12 +6,15 @@ import {
   type ReactNode,
 } from "react";
 import { FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { resolveMessageAssetUrl } from "./message-assets";
 import { shouldShowPossibleEvidence } from "./message-evidence";
 import type { CitationRecord } from "./types";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 const CITATION_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
@@ -38,10 +41,13 @@ function resolveCitationFromId(input: {
 function getCitationLabel(
   citation: CitationRecord | undefined,
   fallback: string,
+  t: Translate,
 ) {
   return (
     citation?.sourceTitle?.trim() ||
-    (citation ? "Source" : fallback || "Source")
+    (citation
+      ? t("messageResponse.source")
+      : fallback || t("messageResponse.source"))
   );
 }
 
@@ -54,6 +60,7 @@ function CitationBadge({
   label: string;
   onCitationClick?: (citation: CitationRecord) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   return (
     <button
       className={cn(
@@ -67,7 +74,10 @@ function CitationBadge({
           onCitationClick?.(citation);
         }
       }}
-      title={citation?.excerpt ?? `Citation ${label}`}
+      title={
+        citation?.excerpt ??
+        t("messageResponse.citationTitle", { label })
+      }
       type="button"
     >
       <span className="min-w-0 truncate">{label}</span>
@@ -81,9 +91,10 @@ function makeCitationNode(input: {
   id: string;
   instanceIndex: number;
   onCitationClick?: (citation: CitationRecord) => void;
+  t: Translate;
 }) {
   const citation = resolveCitationFromId(input);
-  const label = getCitationLabel(citation, input.id);
+  const label = getCitationLabel(citation, input.id, input.t);
 
   return (
     <CitationBadge
@@ -102,11 +113,12 @@ function WorkfilePathLink({
   onWorkfileClick?: (path: string) => void;
   path: string;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   return (
     <button
       className="inline cursor-pointer bg-transparent p-0 align-baseline font-medium text-primary underline decoration-primary/35 underline-offset-2 transition-colors hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => onWorkfileClick?.(path)}
-      title={`Open preview: ${path}`}
+      title={t("common.openPreview", { value: path })}
       type="button"
     >
       {path}
@@ -120,6 +132,7 @@ function parseCitationText(input: {
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   text: string;
+  t: Translate;
 }) {
   const parts: ReactNode[] = [];
   let lastIndex = 0;
@@ -140,6 +153,7 @@ function parseCitationText(input: {
           id,
           instanceIndex: instanceIndex++,
           onCitationClick: input.onCitationClick,
+          t: input.t,
         }),
       );
     }
@@ -212,6 +226,7 @@ function processMessageChildren(input: {
   citationByKey: Map<string, CitationRecord>;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
+  t: Translate;
 }): ReactNode {
   if (typeof input.children === "string") {
     return parseWorkfilePaths({
@@ -221,6 +236,7 @@ function processMessageChildren(input: {
         onCitationClick: input.onCitationClick,
         onWorkfileClick: input.onWorkfileClick,
         text: input.children,
+        t: input.t,
       }),
       onWorkfileClick: input.onWorkfileClick,
     });
@@ -270,6 +286,7 @@ export function CitationAwareMessageResponse({
   onWorkfileClick?: (path: string) => void;
   showLoading?: boolean;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const citationByKey = new Map(
     (citations ?? []).map((citation) => [citation.citation, citation]),
   );
@@ -300,6 +317,7 @@ export function CitationAwareMessageResponse({
         citationByKey,
         onCitationClick,
         onWorkfileClick,
+        t,
       })}
     </>
   );
@@ -438,6 +456,7 @@ function PossibleEvidenceStrip({
   evidence: CitationRecord[];
   onCitationClick?: (citation: CitationRecord) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   if (evidence.length === 0) {
     return null;
   }
@@ -449,7 +468,7 @@ function PossibleEvidenceStrip({
     <div className="mt-3 rounded-2xl border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
       <div className="mb-2 flex items-center gap-1.5 font-medium text-foreground/80">
         <FileText className="size-3.5" />
-        <span>Possible evidence</span>
+        <span>{t("messageResponse.possibleEvidence")}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {visibleEvidence.map((citation, index) => (
@@ -464,19 +483,19 @@ function PossibleEvidenceStrip({
               {index + 1}
             </span>
             <span className="truncate">
-              {citation.sourceTitle?.trim() || "Untitled source"}
+              {citation.sourceTitle?.trim() ||
+                t("messageResponse.untitledSource")}
             </span>
           </button>
         ))}
         {hiddenCount > 0 ? (
           <span className="inline-flex items-center rounded-full border border-input bg-background/80 px-2 py-1 text-xs shadow-xs">
-            +{hiddenCount} more
+            {t("messageResponse.moreCount", { count: hiddenCount })}
           </span>
         ) : null}
       </div>
       <p className="mt-2 leading-5">
-        The answer did not include inline citation markers; these sources were
-        read or retrieved during generation.
+        {t("messageResponse.noInlineCitations")}
       </p>
     </div>
   );

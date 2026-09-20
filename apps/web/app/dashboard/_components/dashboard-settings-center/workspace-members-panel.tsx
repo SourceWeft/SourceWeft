@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -40,22 +41,19 @@ import { workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../dashboard-chat-state";
 import { WorkspaceGuestsSection } from "./workspace-guests-section";
 
+type RoleKey = "admin" | "editor" | "viewer";
+
 const ASSIGNABLE_ROLES: {
   value: WorkspaceRole;
-  label: string;
-  hint: string;
+  roleKey: RoleKey;
 }[] = [
-  {
-    value: "workspace_admin",
-    label: "Admin",
-    hint: "Manage members, credentials and settings",
-  },
-  { value: "editor", label: "Editor", hint: "Create and edit content" },
-  { value: "viewer", label: "Viewer", hint: "Read-only access" },
+  { value: "workspace_admin", roleKey: "admin" },
+  { value: "editor", roleKey: "editor" },
+  { value: "viewer", roleKey: "viewer" },
 ];
 
-function roleLabel(role: WorkspaceRole) {
-  return ASSIGNABLE_ROLES.find((entry) => entry.value === role)?.label ?? role;
+function roleKeyFor(role: WorkspaceRole): RoleKey | undefined {
+  return ASSIGNABLE_ROLES.find((entry) => entry.value === role)?.roleKey;
 }
 
 function initialsFor(member: WorkspaceMember) {
@@ -127,6 +125,14 @@ function useOrganizationMembers(): OrganizationMember[] {
 }
 
 export function WorkspaceMembersPanel() {
+  const t = useTranslations("dashboardSettings");
+  const roleLabel = React.useCallback(
+    (role: WorkspaceRole) => {
+      const key = roleKeyFor(role);
+      return key ? t(`roles.${key}`) : role;
+    },
+    [t],
+  );
   const { workspaceId, organizationId, workspaces } = useDashboardChatState();
   const { data: session } = authClient.useSession();
   const currentUserId = session?.user?.id ?? null;
@@ -163,11 +169,11 @@ export function WorkspaceMembersPanel() {
         await workspaceClient.listWorkspaceMembers(managedWorkspaceId);
       setMembers(result.items);
     } catch {
-      setLoadError("Could not load workspace members.");
+      setLoadError(t("members.loadError"));
     } finally {
       setIsLoading(false);
     }
-  }, [managedWorkspaceId]);
+  }, [managedWorkspaceId, t]);
 
   React.useEffect(() => {
     void refresh();
@@ -208,9 +214,14 @@ export function WorkspaceMembersPanel() {
             : entry,
         ),
       );
-      toast.success(`${displayName(member)} is now ${roleLabel(role)}`);
+      toast.success(
+        t("members.roleChanged", {
+          name: displayName(member),
+          role: roleLabel(role),
+        }),
+      );
     } catch {
-      toast.error("Could not change this member's role.");
+      toast.error(t("members.roleChangeError"));
     } finally {
       setPendingUserId(null);
     }
@@ -227,9 +238,11 @@ export function WorkspaceMembersPanel() {
       setMembers((value) =>
         value.filter((entry) => entry.userId !== member.userId),
       );
-      toast.success(`${displayName(member)} removed from workspace`);
+      toast.success(
+        t("members.memberRemovedWorkspace", { name: displayName(member) }),
+      );
     } catch {
-      toast.error("Could not remove this member.");
+      toast.error(t("members.removeError"));
     } finally {
       setPendingUserId(null);
       setRemoveTarget(null);
@@ -245,13 +258,17 @@ export function WorkspaceMembersPanel() {
         role: addRole,
       });
       toast.success(
-        `${candidate.name || candidate.email || "Member"} added as ${roleLabel(addRole)}`,
+        t("members.memberAdded", {
+          name:
+            candidate.name || candidate.email || t("common.memberFallback"),
+          role: roleLabel(addRole),
+        }),
       );
       setAddOpen(false);
       setAddRole("editor");
       await refresh();
     } catch {
-      toast.error("Could not add that member.");
+      toast.error(t("members.addError"));
     } finally {
       setAddingUserId(null);
     }
@@ -260,7 +277,7 @@ export function WorkspaceMembersPanel() {
   if (!managedWorkspaceId || !organizationId) {
     return (
       <p className="px-1 py-6 text-sm text-muted-foreground">
-        Select a workspace to manage its members.
+        {t("members.selectWorkspacePrompt")}
       </p>
     );
   }
@@ -269,10 +286,9 @@ export function WorkspaceMembersPanel() {
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-medium">Workspace members</h3>
+          <h3 className="text-sm font-medium">{t("members.title")}</h3>
           <p className="text-xs text-muted-foreground">
-            Each workspace has its own members and roles. Team owners and admins
-            can always administer every workspace.
+            {t("members.description")}
           </p>
         </div>
         {canManage ? (
@@ -283,21 +299,24 @@ export function WorkspaceMembersPanel() {
             type="button"
           >
             <UserPlus className="size-3.5" />
-            Add member
+            {t("members.addMember")}
           </Button>
         ) : null}
       </div>
 
       {/* Membership is per-workspace: pick which workspace this panel manages. */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Workspace</span>
+        <span className="text-xs text-muted-foreground">
+          {t("members.workspaceLabel")}
+        </span>
         <Select
           value={managedWorkspaceId}
           onValueChange={(value) => setManagedWorkspaceId(value)}
         >
           <SelectTrigger className="h-8 w-60 text-xs">
-            <SelectValue placeholder="Select a workspace">
-              {managedWorkspaceName ?? "Select a workspace"}
+            <SelectValue placeholder={t("members.selectWorkspacePlaceholder")}>
+              {managedWorkspaceName ??
+                t("members.selectWorkspacePlaceholder")}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -313,7 +332,7 @@ export function WorkspaceMembersPanel() {
       {isLoading ? (
         <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Loading members...
+          {t("members.loading")}
         </div>
       ) : loadError ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -324,7 +343,7 @@ export function WorkspaceMembersPanel() {
             type="button"
             variant="outline"
           >
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : (
@@ -360,7 +379,7 @@ export function WorkspaceMembersPanel() {
                     </span>
                     {isSelf ? (
                       <span className="text-[10px] text-muted-foreground">
-                        (you)
+                        {t("members.you")}
                       </span>
                     ) : null}
                     {member.source === "derived" ? (
@@ -369,7 +388,9 @@ export function WorkspaceMembersPanel() {
                         variant="secondary"
                       >
                         <ShieldCheck className="size-2.5" />
-                        Team {member.organizationRole || "member"}
+                        {t("members.teamRoleBadge", {
+                          role: member.organizationRole || "member",
+                        })}
                       </Badge>
                     ) : null}
                   </div>
@@ -398,7 +419,7 @@ export function WorkspaceMembersPanel() {
                           value={role.value}
                           className="text-xs"
                         >
-                          {role.label}
+                          {t(`roles.${role.roleKey}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -428,7 +449,9 @@ export function WorkspaceMembersPanel() {
                     ) : (
                       <Trash2 className="size-3.5" />
                     )}
-                    <span className="sr-only">Remove member</span>
+                    <span className="sr-only">
+                      {t("members.removeMemberSr")}
+                    </span>
                   </Button>
                 ) : (
                   <span className="w-8" aria-hidden="true" />
@@ -452,16 +475,19 @@ export function WorkspaceMembersPanel() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove member?</DialogTitle>
+            <DialogTitle>{t("members.removeDialogTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {removeTarget ? displayName(removeTarget) : "This member"} will lose
-            access to this workspace. They remain part of the team.
+            {t("members.removeDialogBody", {
+              name: removeTarget
+                ? displayName(removeTarget)
+                : t("members.thisMember"),
+            })}
           </p>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button
@@ -470,7 +496,7 @@ export function WorkspaceMembersPanel() {
               type="button"
               variant="destructive"
             >
-              Remove
+              {t("common.remove")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -479,15 +505,16 @@ export function WorkspaceMembersPanel() {
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="gap-3">
           <DialogHeader>
-            <DialogTitle>Add a workspace member</DialogTitle>
+            <DialogTitle>{t("members.addDialogTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground">
-            Pick a teammate to give access to this workspace. To bring someone
-            new onto the team, invite them from the Team panel first.
+            {t("members.addDialogDescription")}
           </p>
 
           <div className="space-y-1.5">
-            <span className="text-xs font-medium">Role for new members</span>
+            <span className="text-xs font-medium">
+              {t("members.roleForNewMembers")}
+            </span>
             <Select
               onValueChange={(value) => setAddRole(value as WorkspaceRole)}
               value={addRole}
@@ -499,9 +526,9 @@ export function WorkspaceMembersPanel() {
                 {ASSIGNABLE_ROLES.map((role) => (
                   <SelectItem key={role.value} value={role.value}>
                     <span className="flex flex-col">
-                      <span>{role.label}</span>
+                      <span>{t(`roles.${role.roleKey}`)}</span>
                       <span className="text-[10px] text-muted-foreground">
-                        {role.hint}
+                        {t(`roles.${role.roleKey}Hint`)}
                       </span>
                     </span>
                   </SelectItem>
@@ -511,12 +538,12 @@ export function WorkspaceMembersPanel() {
           </div>
 
           <Command className="rounded-lg border">
-            <CommandInput placeholder="Search teammates by name or email..." />
+            <CommandInput placeholder={t("members.searchPlaceholder")} />
             <CommandList>
               <CommandEmpty>
                 {organizationMembers.length === 0
-                  ? "No teammates found."
-                  : "Everyone on the team is already in this workspace."}
+                  ? t("members.noTeammates")
+                  : t("members.everyoneAdded")}
               </CommandEmpty>
               <CommandGroup>
                 {addableMembers.map((candidate) => {

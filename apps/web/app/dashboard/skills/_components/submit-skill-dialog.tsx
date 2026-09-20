@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/contracts";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,7 @@ export function SubmitSkillDialog({
   workspaceId: string | null;
   onSubmitted?: () => void | Promise<void>;
 }) {
+  const t = useTranslations("dashboardSkills");
   const [open, setOpen] = React.useState(false);
   const [repoUrl, setRepoUrl] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
@@ -43,11 +45,11 @@ export function SubmitSkillDialog({
   async function handleSubmit() {
     const trimmed = repoUrl.trim();
     if (!trimmed) {
-      toast.error("Enter a public GitHub repository URL.");
+      toast.error(t("submit.enterUrl"));
       return;
     }
     if (!workspaceId) {
-      toast.error("Select a workspace before submitting a skill.");
+      toast.error(t("submit.selectWorkspace"));
       return;
     }
     setSubmitting(true);
@@ -74,7 +76,7 @@ export function SubmitSkillDialog({
       if (parsed.success) setResults(parsed.data);
       else
         setFailure(
-          `${error instanceof Error ? error.message : "Submission interrupted."} Some items may already be saved; refresh the catalog before retrying.`,
+          `${error instanceof Error ? error.message : t("submit.interrupted")} ${t("submit.partialWarning")}`,
         );
     } finally {
       setSubmitting(false);
@@ -90,17 +92,13 @@ export function SubmitSkillDialog({
           variant="outline"
         >
           <Plus className="h-3.5 w-3.5" />
-          Submit skill
+          {t("submit.button")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Submit a skill</DialogTitle>
-          <DialogDescription>
-            Import skills from a public GitHub repository at a fixed version. We
-            store the skill files and check them before use. Flagged skills wait
-            for review.
-          </DialogDescription>
+          <DialogTitle>{t("submit.title")}</DialogTitle>
+          <DialogDescription>{t("submit.description")}</DialogDescription>
         </DialogHeader>
         <Input
           onChange={(event) => setRepoUrl(event.target.value)}
@@ -109,7 +107,7 @@ export function SubmitSkillDialog({
               void handleSubmit();
             }
           }}
-          aria-label="GitHub skill repository"
+          aria-label={t("submit.repoAriaLabel")}
           placeholder="https://github.com/owner/repo"
           value={repoUrl}
         />
@@ -119,12 +117,16 @@ export function SubmitSkillDialog({
           </p>
         ) : null}
         {results.length ? (
-          <section aria-label="Import results" className="space-y-3 text-sm">
+          <section
+            aria-label={t("submit.resultsAriaLabel")}
+            className="space-y-3 text-sm"
+          >
             <p role="status">
-              {results.filter((r) => r.status === "indexed").length} indexed ·{" "}
-              {results.filter((r) => r.status === "queued").length} awaiting
-              review · {results.filter((r) => r.status === "failed").length}{" "}
-              failed
+              {t("submit.resultsSummary", {
+                indexed: results.filter((r) => r.status === "indexed").length,
+                queued: results.filter((r) => r.status === "queued").length,
+                failed: results.filter((r) => r.status === "failed").length,
+              })}
             </p>
             {results.map((result, index) => (
               <div
@@ -132,11 +134,14 @@ export function SubmitSkillDialog({
                 className="rounded-md border p-3"
               >
                 <p className="font-medium">
-                  {result.name ?? result.sourcePath ?? "Skill"} —{" "}
-                  {result.status}
+                  {result.name ?? result.sourcePath ?? t("submit.skillFallback")}{" "}
+                  —{" "}
+                  {t.has(`submit.status.${result.status}`)
+                    ? t(`submit.status.${result.status}`)
+                    : result.status}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {result.sourcePath || "Repository root"}
+                  {result.sourcePath || t("submit.repositoryRoot")}
                   {result.version ? ` · ${result.version}` : ""}
                 </p>
                 {result.diagnostics.map((d, i) => (
@@ -156,7 +161,11 @@ export function SubmitSkillDialog({
                   </p>
                 ))}
                 {result.flags.length ? (
-                  <p>Review flags: {result.flags.join(", ")}</p>
+                  <p>
+                    {t("submit.reviewFlags", {
+                      flags: result.flags.join(", "),
+                    })}
+                  </p>
                 ) : null}
               </div>
             ))}
@@ -169,7 +178,7 @@ export function SubmitSkillDialog({
             type="button"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Submit
+            {t("submit.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -7,6 +7,13 @@ import {
 import { GoogleTagManager } from "@next/third-parties/google";
 import type { Metadata } from "next";
 import { connection } from "next/server";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
+import {
+  DEFAULT_LOCALE,
+  getLocaleMeta,
+  isLocale,
+} from "@sourceweft/i18n/locales";
 
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
@@ -66,8 +73,21 @@ export default async function RootLayout({
   const gtmId = runtimeConfig.gtmId;
   const capabilities = await resolveDeploymentCapabilities();
 
+  // The proxy resolves the locale per request and next-intl surfaces it here, so
+  // `<html lang/dir>` is correct even for crawlers (D6). `getMessages()` returns
+  // the catalog from `i18n/request.ts` for the client provider.
+  const resolvedLocale = await getLocale();
+  const localeMeta = getLocaleMeta(
+    isLocale(resolvedLocale) ? resolvedLocale : DEFAULT_LOCALE,
+  );
+  const messages = await getMessages();
+
   return (
-    <html lang="en" dir="ltr" suppressHydrationWarning>
+    <html
+      lang={localeMeta.htmlLang}
+      dir={localeMeta.dir}
+      suppressHydrationWarning
+    >
       <head>
         <Script
           id="sourceweft-runtime-config"
@@ -80,10 +100,12 @@ export default async function RootLayout({
       </head>
       {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
       <body className="flex min-h-svh flex-col antialiased">
-        <Providers initialCapabilities={capabilities}>
-          <DesktopWindowChrome />
-          {children}
-        </Providers>
+        <NextIntlClientProvider locale={resolvedLocale} messages={messages}>
+          <Providers initialCapabilities={capabilities}>
+            <DesktopWindowChrome />
+            {children}
+          </Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

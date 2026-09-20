@@ -3,6 +3,7 @@
 import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
 import { toObjectRecord } from "../../../lib/records";
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   Activity,
   Boxes,
@@ -193,6 +194,7 @@ function TraceListSkeletonRows({
 }: {
   allWorkspacesSelected: boolean;
 }) {
+  const t = useTranslations("dashboardObservability");
   return (
     <>
       <div className="md:hidden">
@@ -222,19 +224,41 @@ function TraceListSkeletonRows({
         >
           <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
             <tr>
-              <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
-              <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
+              <th className="w-[150px] px-3 py-1.5 font-medium">
+                {t("table.columns.timestamp")}
+              </th>
+              <th className="w-[300px] px-3 py-1.5 font-medium">
+                {t("table.columns.name")}
+              </th>
               {allWorkspacesSelected ? (
-                <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th>
+                <th className="w-[160px] px-3 py-1.5 font-medium">
+                  {t("table.columns.workspace")}
+                </th>
               ) : null}
-              <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
-              <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
-              <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
-              <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
-              <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
-              <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
-              <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
-              <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">
+                {t("table.columns.status")}
+              </th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">
+                {t("table.columns.latency")}
+              </th>
+              <th className="w-[150px] px-3 py-1.5 font-medium">
+                {t("table.columns.model")}
+              </th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">
+                {t("table.columns.tokens")}
+              </th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">
+                {t("table.columns.obs")}
+              </th>
+              <th className="w-[190px] px-3 py-1.5 font-medium">
+                {t("table.columns.sessionId")}
+              </th>
+              <th className="w-[140px] px-3 py-1.5 font-medium">
+                {t("table.columns.user")}
+              </th>
+              <th className="w-[190px] px-3 py-1.5 font-medium">
+                {t("table.columns.traceId")}
+              </th>
               <th className="w-[36px] px-3 py-1.5 font-medium" />
             </tr>
           </thead>
@@ -1029,12 +1053,15 @@ function messageRoleClassName(role: string) {
   return "text-emerald-700 dark:text-emerald-300";
 }
 
-function messageRoleLabel(role: string) {
+function messageRoleLabel(
+  role: string,
+  t: ReturnType<typeof useTranslations>,
+) {
   const normalized = role.toLowerCase();
-  if (normalized === "system") return "System";
-  if (normalized === "assistant") return "Assistant";
-  if (normalized === "tool") return "Tool";
-  if (normalized === "user") return "User";
+  if (normalized === "system") return t("roles.system");
+  if (normalized === "assistant") return t("roles.assistant");
+  if (normalized === "tool") return t("roles.tool");
+  if (normalized === "user") return t("roles.user");
   return role;
 }
 
@@ -1085,10 +1112,11 @@ function MessageEnvelopeSummary({
 }
 
 function MessageToolCallSummary({ calls }: { calls: unknown[] }) {
+  const t = useTranslations("dashboardObservability");
   if (calls.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-      <span>Tool calls:</span>
+      <span>{t("message.toolCalls")}</span>
       {calls.map((call, index) => {
         const record = toObjectRecord(call) ?? {};
         const fn = toObjectRecord(record.function);
@@ -1156,10 +1184,11 @@ function PreviewSection({
   );
 }
 
-function EmptySection({ label = "No data recorded." }: { label?: string }) {
+function EmptySection({ label }: { label?: string }) {
+  const t = useTranslations("dashboardObservability");
   return (
     <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-      {label}
+      {label ?? t("message.noData")}
     </div>
   );
 }
@@ -1169,6 +1198,7 @@ function DashValue() {
 }
 
 function TextValue({ value }: { value: string }) {
+  const t = useTranslations("dashboardObservability");
   const isLong = value.length > 900 || value.split("\n").length > 14;
   if (!isLong) {
     return (
@@ -1188,10 +1218,10 @@ function TextValue({ value }: { value: string }) {
             {value.length > 360 ? "..." : ""}
           </span>
           <span className="shrink-0 font-medium text-foreground group-open:hidden">
-            Show full text
+            {t("message.showFullText")}
           </span>
           <span className="hidden shrink-0 font-medium text-foreground group-open:inline">
-            Hide full text
+            {t("message.hideFullText")}
           </span>
         </div>
       </summary>
@@ -1205,6 +1235,7 @@ function TextValue({ value }: { value: string }) {
 }
 
 function MarkdownValue({ value }: { value: string }) {
+  const t = useTranslations("dashboardObservability");
   const isLong = value.length > 6000;
   if (!isLong) {
     return (
@@ -1221,13 +1252,15 @@ function MarkdownValue({ value }: { value: string }) {
       <summary className="cursor-pointer list-none border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words">
-            Long markdown output ({value.length.toLocaleString()} chars)
+            {t("message.longMarkdown", {
+              count: value.length.toLocaleString(),
+            })}
           </span>
           <span className="font-medium text-foreground group-open:hidden">
-            Show
+            {t("message.show")}
           </span>
           <span className="hidden font-medium text-foreground group-open:inline">
-            Hide
+            {t("message.hide")}
           </span>
         </div>
       </summary>
@@ -1256,6 +1289,7 @@ function DisplayValue({
 }
 
 function MessageTextValue({ value }: { value: string }) {
+  const t = useTranslations("dashboardObservability");
   const isLong = value.length > 900 || value.split("\n").length > 14;
   if (!isLong) {
     return (
@@ -1274,10 +1308,10 @@ function MessageTextValue({ value }: { value: string }) {
             {value.length > 320 ? "..." : ""}
           </span>
           <span className="shrink-0 font-medium text-foreground group-open:hidden">
-            Show full text
+            {t("message.showFullText")}
           </span>
           <span className="hidden shrink-0 font-medium text-foreground group-open:inline">
-            Hide full text
+            {t("message.hideFullText")}
           </span>
         </div>
       </summary>
@@ -1533,8 +1567,10 @@ function structuredRecordView(value: unknown) {
 }
 
 function ToolCallList({ value }: { value: unknown }) {
+  const t = useTranslations("dashboardObservability");
   const calls = Array.isArray(value) ? value : extractToolCalls(value);
-  if (calls.length === 0) return <EmptySection label="No tool calls." />;
+  if (calls.length === 0)
+    return <EmptySection label={t("message.noToolCalls")} />;
   return (
     <div className="space-y-2">
       {calls.map((call, index) => {
@@ -1588,6 +1624,7 @@ function ReasoningView({
   reasoning: unknown;
   segments?: unknown[];
 }) {
+  const t = useTranslations("dashboardObservability");
   if (segments?.length) {
     return (
       <div className="space-y-2">
@@ -1608,7 +1645,9 @@ function ReasoningView({
               <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
                 <Badge variant="secondary">#{index + 1}</Badge>
                 <span className="font-medium text-foreground">
-                  {phase === "after_tool" ? "After tool" : "Before tool"}
+                  {phase === "after_tool"
+                    ? t("message.afterTool")
+                    : t("message.beforeTool")}
                 </span>
                 {tool ? (
                   <span className="inline-flex min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]">
@@ -1664,14 +1703,15 @@ function normalizeToolMessage(value: unknown) {
 }
 
 function RedactionNotice({ value }: { value: unknown }) {
+  const t = useTranslations("dashboardObservability");
   const unwrapped = unwrapPayload(value);
   if (!unwrapped || typeof unwrapped !== "object" || !("redacted" in unwrapped))
     return null;
   const reason = (unwrapped as { reason?: string }).reason ?? "redacted";
   const message =
     reason === "payload_excluded"
-      ? "Payload was excluded from this lightweight trace load."
-      : `Payload hidden by observability access policy: ${reason}`;
+      ? t("notices.payloadExcluded")
+      : t("notices.payloadHidden", { reason });
   return (
     <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-sm text-muted-foreground">
       {message}
@@ -1680,12 +1720,13 @@ function RedactionNotice({ value }: { value: unknown }) {
 }
 
 function RedactedValueNotice() {
+  const t = useTranslations("dashboardObservability");
   return (
     <span
       className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-      title="Sensitive value removed before storage"
+      title={t("notices.redactedTooltip")}
     >
-      redacted sensitive value
+      {t("notices.redactedValue")}
     </span>
   );
 }
@@ -1706,6 +1747,7 @@ function StructuredValue({
   fallbackRole?: string;
   unwrapToolOutput?: boolean;
 }) {
+  const t = useTranslations("dashboardObservability");
   if (value === null || value === undefined || value === "")
     return <DashValue />;
   if (isRedactedPayload(value)) return <RedactionNotice value={value} />;
@@ -1722,7 +1764,7 @@ function StructuredValue({
       <article className="overflow-hidden rounded-lg border border-border">
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
           <Wrench className="h-3.5 w-3.5" />
-          {toolMessage.name ? String(toolMessage.name) : "tool result"}
+          {toolMessage.name ? String(toolMessage.name) : t("message.toolResult")}
           {toolMessage.id ? (
             <span className="truncate opacity-70">
               {String(toolMessage.id)}
@@ -1766,6 +1808,7 @@ function MessageList({
   value: unknown;
   fallbackRole?: string;
 }) {
+  const t = useTranslations("dashboardObservability");
   const envelope = extractMessageEnvelope(value);
   const messages = envelope?.messages ?? extractMessages(value);
   if (messages.length === 0) {
@@ -1808,7 +1851,7 @@ function MessageList({
                     messageRoleClassName(role),
                   )}
                 >
-                  {messageRoleLabel(role)}
+                  {messageRoleLabel(role, t)}
                 </div>
                 <div className="font-mono">#{index + 1}</div>
               </div>
@@ -1821,13 +1864,14 @@ function MessageList({
                   ) : null}
                   {toolCalls.length > 0 ? (
                     <span>
-                      {toolCalls.length} tool call
-                      {toolCalls.length === 1 ? "" : "s"}
+                      {t("message.toolCallCount", { count: toolCalls.length })}
                     </span>
                   ) : null}
                   {contentLength !== null ? (
                     <span className="ml-auto shrink-0 font-mono max-sm:ml-0">
-                      {contentLength.toLocaleString()} chars
+                      {t("message.chars", {
+                        count: contentLength.toLocaleString(),
+                      })}
                     </span>
                   ) : null}
                 </div>
@@ -1872,6 +1916,7 @@ function McpRunTable({
   onLoadMore: () => void;
   toolRuns: WorkspaceMcpToolRun[];
 }) {
+  const t = useTranslations("dashboardObservability");
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
       <ScrollArea className="h-full">
@@ -1879,19 +1924,18 @@ function McpRunTable({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-foreground">
-                MCP Activity
+                {t("mcp.title")}
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Redacted MCP tool calls and approval proposals for the selected
-                workspace.
+                {t("mcp.subtitle")}
               </p>
             </div>
             <div className="flex gap-2">
               <Badge className="h-6 px-2 text-[11px]" variant="outline">
-                {toolRuns.length} tool calls
+                {t("mcp.toolCallsBadge", { count: toolRuns.length })}
               </Badge>
               <Badge className="h-6 px-2 text-[11px]" variant="outline">
-                {actionRuns.length} approvals
+                {t("mcp.approvalsBadge", { count: actionRuns.length })}
               </Badge>
             </div>
           </div>
@@ -1901,17 +1945,33 @@ function McpRunTable({
           <table className="w-full min-w-[1320px] table-fixed text-xs">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
               <tr>
-                <th className="w-[150px] px-3 py-1.5 font-medium">Time</th>
-                <th className="w-[190px] px-3 py-1.5 font-medium">Server</th>
-                <th className="w-[180px] px-3 py-1.5 font-medium">Tool</th>
-                <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
-                <th className="w-[90px] px-3 py-1.5 font-medium">Risk</th>
-                <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
-                <th className="w-[240px] px-3 py-1.5 font-medium">Input</th>
-                <th className="w-[240px] px-3 py-1.5 font-medium">
-                  Output / Error
+                <th className="w-[150px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.time")}
                 </th>
-                <th className="w-[120px] px-3 py-1.5 font-medium">Thread</th>
+                <th className="w-[190px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.server")}
+                </th>
+                <th className="w-[180px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.tool")}
+                </th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.status")}
+                </th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.risk")}
+                </th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.latency")}
+                </th>
+                <th className="w-[240px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.input")}
+                </th>
+                <th className="w-[240px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.outputError")}
+                </th>
+                <th className="w-[120px] px-3 py-1.5 font-medium">
+                  {t("mcp.columns.thread")}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1922,7 +1982,7 @@ function McpRunTable({
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="truncate font-medium text-foreground">
-                      {run.install?.name ?? "Unknown MCP"}
+                      {run.install?.name ?? t("mcp.unknown")}
                     </div>
                     <div className="truncate text-[11px] text-muted-foreground">
                       {run.install?.marketIdentifier ?? run.installId ?? "--"}
@@ -1977,7 +2037,7 @@ function McpRunTable({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-foreground">
-                    {run.install?.name ?? "Unknown MCP"}
+                    {run.install?.name ?? t("mcp.unknown")}
                   </div>
                   <div className="truncate font-mono text-[11px] text-muted-foreground">
                     {run.serverToolName}
@@ -1996,7 +2056,7 @@ function McpRunTable({
 
         {toolRuns.length === 0 && !loading ? (
           <div className="p-6 text-sm text-muted-foreground">
-            No MCP tool calls found for this workspace.
+            {t("mcp.empty")}
           </div>
         ) : null}
 
@@ -2011,7 +2071,7 @@ function McpRunTable({
               variant="outline"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Load older MCP calls
+              {t("mcp.loadOlder")}
             </Button>
           </div>
         ) : null}
@@ -2019,7 +2079,7 @@ function McpRunTable({
         {actionRuns.length > 0 ? (
           <div className="border-t border-border bg-muted/20 px-4 py-3">
             <h3 className="text-xs font-semibold text-foreground">
-              Approval Proposals
+              {t("mcp.approvals")}
             </h3>
             <div className="mt-2 grid gap-2 lg:grid-cols-2">
               {actionRuns.slice(0, 8).map((run) => (
@@ -2197,12 +2257,15 @@ function WorkspaceFilter({
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
 }) {
+  const t = useTranslations("dashboardObservability");
   const selectedLabel =
-    selectedScope === ALL_WORKSPACES ? "All workspaces" : workspaceName;
+    selectedScope === ALL_WORKSPACES
+      ? t("filters.allWorkspaces")
+      : workspaceName;
   return (
     <FilterFacet
       defaultOpen
-      label="Workspace"
+      label={t("filters.workspace")}
       summary={selectedLabel ?? undefined}
     >
       <DropdownMenu>
@@ -2212,7 +2275,7 @@ function WorkspaceFilter({
             type="button"
           >
             <span className="flex-1 truncate text-left font-medium">
-              {selectedLabel ?? "Workspace"}
+              {selectedLabel ?? t("filters.workspace")}
             </span>
             <ChevronDown className="size-3.5 text-muted-foreground" />
           </button>
@@ -2224,7 +2287,7 @@ function WorkspaceFilter({
           sideOffset={4}
         >
           <DropdownMenuLabel className="text-xs text-muted-foreground">
-            Workspaces
+            {t("filters.workspacesLabel")}
           </DropdownMenuLabel>
           <DropdownMenuItem
             className={cn(
@@ -2234,7 +2297,7 @@ function WorkspaceFilter({
             onClick={() => onWorkspaceChange(ALL_WORKSPACES)}
           >
             <span className="flex-1 truncate text-left font-medium">
-              All workspaces
+              {t("filters.allWorkspaces")}
             </span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -2260,7 +2323,7 @@ function WorkspaceFilter({
           <DropdownMenuSeparator />
           <DropdownMenuItem className="gap-2 p-2">
             <span className="flex-1 truncate text-left font-medium text-muted-foreground">
-              Add workspace
+              {t("filters.addWorkspace")}
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -2278,18 +2341,19 @@ function NameFilter({
   selectedNames: string[];
   onSelectedNamesChange: (names: string[]) => void;
 }) {
+  const t = useTranslations("dashboardObservability");
   const summary =
     selectedNames.length === 0
-      ? "all"
+      ? t("filters.summaryAll")
       : selectedNames.length === 1
         ? selectedNames[0]
-        : `${selectedNames.length} selected`;
+        : t("filters.summarySelected", { count: selectedNames.length });
   return (
-    <FilterFacet defaultOpen label="Name" summary={summary}>
+    <FilterFacet defaultOpen label={t("filters.name")} summary={summary}>
       <div className="space-y-1">
         {options.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No trace names loaded.
+            {t("filters.noTraceNames")}
           </p>
         ) : (
           options.map((name) => {
@@ -2372,6 +2436,7 @@ function FilterPanel({
   onClear: () => void;
   placement?: "desktop" | "drawer";
 }) {
+  const t = useTranslations("dashboardObservability");
   if (!visible) return null;
   return (
     <aside
@@ -2384,13 +2449,15 @@ function FilterPanel({
     >
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-foreground">Filters</h2>
+          <h2 className="text-sm font-semibold text-foreground">
+            {t("filters.title")}
+          </h2>
           <button
             className="text-[11px] text-muted-foreground hover:text-foreground"
             onClick={onClear}
             type="button"
           >
-            Clear all
+            {t("filters.clearAll")}
           </button>
         </div>
       </div>
@@ -2413,43 +2480,43 @@ function FilterPanel({
           />
 
           <FilterFacet
-            label="Trace ID"
+            label={t("filters.traceId")}
             summary={traceId ? `= ${traceId}` : undefined}
           >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onTraceIdChange(event.target.value)}
-              placeholder="Exact trace ID"
+              placeholder={t("filters.traceIdPlaceholder")}
               value={traceId}
             />
           </FilterFacet>
 
           <FilterFacet
-            label="User ID"
+            label={t("filters.userId")}
             summary={userId ? `= ${userId}` : undefined}
           >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onUserIdChange(event.target.value)}
-              placeholder="Filter by user"
+              placeholder={t("filters.userIdPlaceholder")}
               value={userId}
             />
           </FilterFacet>
 
           <FilterFacet
-            label="Session ID"
+            label={t("filters.sessionId")}
             summary={threadId ? `= ${threadId}` : undefined}
           >
             <Input
               className="h-7 text-xs"
               onChange={(event) => onThreadIdChange(event.target.value)}
-              placeholder="Filter by session"
+              placeholder={t("filters.sessionIdPlaceholder")}
               value={threadId}
             />
           </FilterFacet>
 
           <FilterFacet
-            label="Status"
+            label={t("filters.status")}
             summary={status === "all" ? undefined : status}
           >
             <div className="flex flex-wrap gap-1.5">
@@ -2479,7 +2546,7 @@ function FilterPanel({
               type="button"
             >
               <Search className="h-4 w-4" />
-              Apply filters
+              {t("filters.apply")}
             </Button>
           </div>
         </div>
@@ -2499,6 +2566,7 @@ function TraceSummaryBar({
   onLoadMoreObservations?: () => void;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const t = useTranslations("dashboardObservability");
   if (!detail) return null;
   const rootGeneration = viewModel?.rootGeneration;
   const totalTokens = viewModel?.totalTokens ?? 0;
@@ -2508,7 +2576,7 @@ function TraceSummaryBar({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
         <span>{formatTime(detail.trace.startedAt)}</span>
         <span>
-          Status:{" "}
+          {t("summary.status")}{" "}
           <span
             className={cn(
               "font-medium",
@@ -2521,31 +2589,31 @@ function TraceSummaryBar({
           </span>
         </span>
         <span>
-          Latency:{" "}
+          {t("summary.latency")}{" "}
           <span className="font-medium text-foreground">
             {formatLatency(detail.trace.latencyMs)}
           </span>
         </span>
         <span>
-          Session:{" "}
+          {t("summary.session")}{" "}
           <span className="font-medium text-foreground">
             {detail.trace.sessionId ?? detail.trace.threadId ?? "--"}
           </span>
         </span>
         <span>
-          User:{" "}
+          {t("summary.user")}{" "}
           <span className="font-medium text-foreground">
             {detail.trace.userDisplayName ?? detail.trace.userId ?? "--"}
           </span>
         </span>
         <span>
-          Env:{" "}
+          {t("summary.env")}{" "}
           <span className="font-medium text-foreground">
             {detail.trace.environment ?? "--"}
           </span>
         </span>
         <span>
-          Observations:{" "}
+          {t("summary.observations")}{" "}
           <span className="font-medium text-foreground">
             {detail.trace.observationCount ??
               detail.spans.length + detail.generations.length}
@@ -2553,7 +2621,9 @@ function TraceSummaryBar({
         </span>
         {detail.observationsTruncated ? (
           <span className="font-medium text-amber-600 dark:text-amber-300">
-            Showing {detail.spans.length + detail.generations.length}
+            {t("summary.showing", {
+              count: detail.spans.length + detail.generations.length,
+            })}
           </span>
         ) : null}
         {detail.nextObservationCursor ? (
@@ -2568,17 +2638,17 @@ function TraceSummaryBar({
             {isLoadingMoreObservations ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : null}
-            Load more
+            {t("summary.loadMore")}
           </Button>
         ) : null}
         <span>
-          Model:{" "}
+          {t("summary.model")}{" "}
           <span className="font-medium text-foreground">
             {detail.trace.model ?? rootGeneration?.model ?? "--"}
           </span>
         </span>
         <span>
-          Tokens:{" "}
+          {t("summary.tokens")}{" "}
           <span className="font-medium text-foreground">
             {totalTokens > 0 ? totalTokens : "--"}
           </span>
@@ -2586,7 +2656,7 @@ function TraceSummaryBar({
       </div>
       {reason ? (
         <div className="mt-2">
-          <ErrorMessageBlock>Error: {reason}</ErrorMessageBlock>
+          <ErrorMessageBlock>{t("summary.error", { reason })}</ErrorMessageBlock>
         </div>
       ) : null}
     </div>
@@ -2606,6 +2676,7 @@ function TraceTree({
   onSelect: (node: SelectedNode) => void;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const t = useTranslations("dashboardObservability");
   const rows = viewModel?.treeRows ?? EMPTY_TREE_ROWS;
   const defaultCollapsedIds = React.useMemo(
     () =>
@@ -2673,7 +2744,7 @@ function TraceTree({
   if (!detail) {
     return (
       <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-        Select a trace row to view its call tree.
+        {t("tree.empty")}
       </div>
     );
   }
@@ -2707,7 +2778,7 @@ function TraceTree({
             role="button"
             tabIndex={-1}
             title={
-              collapsed ? "Show child observations" : "Hide child observations"
+              collapsed ? t("tree.showChildren") : t("tree.hideChildren")
             }
           >
             <ChevronRight
@@ -2776,6 +2847,7 @@ function TraceLogView({
   onSelect: (node: SelectedNode) => void;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const t = useTranslations("dashboardObservability");
   const rows = viewModel?.logRows ?? EMPTY_TREE_ROWS;
   const traceStart = viewModel?.traceStartMs ?? 0;
   const traceDuration = Math.max(detail?.trace.latencyMs ?? 1, 1);
@@ -2790,7 +2862,7 @@ function TraceLogView({
     : rows;
 
   if (!detail) {
-    return <EmptySection label="Select a trace to view the timeline." />;
+    return <EmptySection label={t("log.empty")} />;
   }
 
   const renderRow = (row: TreeRow) => {
@@ -2846,18 +2918,22 @@ function TraceLogView({
     <div className="overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
         <div>
-          <h4 className="text-sm font-medium text-foreground">Timeline</h4>
+          <h4 className="text-sm font-medium text-foreground">
+            {t("log.title")}
+          </h4>
           <p className="text-xs text-muted-foreground">
-            Chronological observations with relative start and duration.
+            {t("log.subtitle")}
           </p>
         </div>
-        <Badge variant="secondary">{rows.length} observations</Badge>
+        <Badge variant="secondary">
+          {t("log.count", { count: rows.length })}
+        </Badge>
       </div>
       <div className="grid grid-cols-[260px_96px_minmax(240px,1fr)_92px] border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
-        <div>Observation</div>
-        <div>Type</div>
-        <div>Timeline</div>
-        <div>Latency</div>
+        <div>{t("log.columns.observation")}</div>
+        <div>{t("log.columns.type")}</div>
+        <div>{t("log.columns.timeline")}</div>
+        <div>{t("log.columns.latency")}</div>
       </div>
       {shouldVirtualize ? (
         <div
@@ -2895,6 +2971,7 @@ function NodeDetail({
   selected: SelectedNode | null;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const t = useTranslations("dashboardObservability");
   const [activeTab, setActiveTab] = React.useState("preview");
   const node = React.useMemo(
     () => selectedNodeData(detail, selected, viewModel),
@@ -2908,7 +2985,7 @@ function NodeDetail({
   if (!node) {
     return (
       <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-        Select an item from the trace tree.
+        {t("detail.empty")}
       </div>
     );
   }
@@ -2959,16 +3036,18 @@ function NodeDetail({
             <p className="mt-1 text-xs text-muted-foreground">{node.kind}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Badge variant="secondary">
-                Latency: {formatLatency(node.latencyMs)}
+                {t("detail.latency", { value: formatLatency(node.latencyMs) })}
               </Badge>
               {inputTokens || outputTokens || totalTokens ? (
                 <Badge
                   className="h-auto max-w-full whitespace-normal text-left"
                   variant="secondary"
                 >
-                  {String(inputTokens ?? 0)} prompt -&gt;{" "}
-                  {String(outputTokens ?? 0)} completion (sum{" "}
-                  {String(totalTokens ?? 0)})
+                  {t("detail.tokenSummary", {
+                    prompt: String(inputTokens ?? 0),
+                    completion: String(outputTokens ?? 0),
+                    total: String(totalTokens ?? 0),
+                  })}
                 </Badge>
               ) : null}
             </div>
@@ -2993,10 +3072,12 @@ function NodeDetail({
         value={activeTab}
       >
         <TabsList className="h-auto max-w-full overflow-x-auto">
-          <TabsTrigger value="preview">Preview</TabsTrigger>
-          <TabsTrigger value="log">Log View</TabsTrigger>
-          <TabsTrigger value="formatted">Formatted</TabsTrigger>
-          <TabsTrigger value="json">JSON</TabsTrigger>
+          <TabsTrigger value="preview">{t("detail.tabs.preview")}</TabsTrigger>
+          <TabsTrigger value="log">{t("detail.tabs.log")}</TabsTrigger>
+          <TabsTrigger value="formatted">
+            {t("detail.tabs.formatted")}
+          </TabsTrigger>
+          <TabsTrigger value="json">{t("detail.tabs.json")}</TabsTrigger>
         </TabsList>
         <TabsContent
           className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2"
@@ -3005,18 +3086,18 @@ function NodeDetail({
           <div className="px-2 text-sm font-semibold text-foreground">
             {selectedObservationTitle}
           </div>
-          <PreviewSection title="Input">
+          <PreviewSection title={t("detail.sections.input")}>
             <StructuredValue value={node.input} />
           </PreviewSection>
           {hasReasoning ? (
-            <PreviewSection title="Reasoning">
+            <PreviewSection title={t("detail.sections.reasoning")}>
               <ReasoningView
                 reasoning={node.reasoning}
                 segments={node.reasoningSegments}
               />
             </PreviewSection>
           ) : null}
-          <PreviewSection title="Output">
+          <PreviewSection title={t("detail.sections.output")}>
             <StructuredValue
               fallbackRole="assistant"
               unwrapToolOutput={node.kind === "tool"}
@@ -3024,22 +3105,22 @@ function NodeDetail({
             />
           </PreviewSection>
           {outputToolCalls.length > 0 ? (
-            <PreviewSection title="Tool calls">
+            <PreviewSection title={t("detail.sections.toolCalls")}>
               <ToolCallList value={outputToolCalls} />
             </PreviewSection>
           ) : null}
           {hasUsefulPayload(node.parameters) ? (
-            <PreviewSection title="Model parameters">
+            <PreviewSection title={t("detail.sections.modelParameters")}>
               <KeyValueTable value={node.parameters} />
             </PreviewSection>
           ) : null}
           {hasUsefulPayload(node.metrics) ? (
-            <PreviewSection title="Metrics">
+            <PreviewSection title={t("detail.sections.metrics")}>
               <KeyValueTable value={node.metrics} />
             </PreviewSection>
           ) : null}
           {hasUsefulPayload(node.metadata) ? (
-            <PreviewSection title="Metadata">
+            <PreviewSection title={t("detail.sections.metadata")}>
               <KeyValueTable value={node.metadata} />
             </PreviewSection>
           ) : null}
@@ -3063,18 +3144,18 @@ function NodeDetail({
         >
           {activeTab === "formatted" ? (
             <>
-              <Section title="Input">
+              <Section title={t("detail.sections.input")}>
                 <StructuredValue value={node.input} />
               </Section>
               {hasReasoning ? (
-                <Section title="Reasoning">
+                <Section title={t("detail.sections.reasoning")}>
                   <ReasoningView
                     reasoning={node.reasoning}
                     segments={node.reasoningSegments}
                   />
                 </Section>
               ) : null}
-              <Section title="Output">
+              <Section title={t("detail.sections.output")}>
                 <StructuredValue
                   fallbackRole="assistant"
                   unwrapToolOutput={node.kind === "tool"}
@@ -3082,17 +3163,17 @@ function NodeDetail({
                 />
               </Section>
               {hasUsefulPayload(node.parameters) ? (
-                <Section title="Model parameters">
+                <Section title={t("detail.sections.modelParameters")}>
                   <KeyValueTable value={node.parameters} />
                 </Section>
               ) : null}
               {hasUsefulPayload(node.metrics) ? (
-                <Section title="Metrics">
+                <Section title={t("detail.sections.metrics")}>
                   <KeyValueTable value={node.metrics} />
                 </Section>
               ) : null}
               {hasUsefulPayload(node.metadata) ? (
-                <Section title="Metadata">
+                <Section title={t("detail.sections.metadata")}>
                   <KeyValueTable value={node.metadata} />
                 </Section>
               ) : null}
@@ -3111,6 +3192,7 @@ function NodeDetail({
 }
 
 export default function ObservabilityPage() {
+  const t = useTranslations("dashboardObservability");
   const {
     organizationId,
     switchWorkspace,
@@ -3214,7 +3296,7 @@ export default function ObservabilityPage() {
         if (requestId !== listRequestIdRef.current) {
           return;
         }
-        setError(err instanceof Error ? err.message : "Failed to load traces");
+        setError(err instanceof Error ? err.message : t("errors.loadTraces"));
       } finally {
         if (requestId === listRequestIdRef.current) {
           setLoadingList(false);
@@ -3230,6 +3312,7 @@ export default function ObservabilityPage() {
       threadId,
       traceId,
       userId,
+      t,
     ],
   );
 
@@ -3278,7 +3361,7 @@ export default function ObservabilityPage() {
           return;
         }
         setError(
-          err instanceof Error ? err.message : "Failed to load MCP activity",
+          err instanceof Error ? err.message : t("errors.loadMcp"),
         );
       } finally {
         if (requestId === mcpRequestIdRef.current) {
@@ -3286,7 +3369,7 @@ export default function ObservabilityPage() {
         }
       }
     },
-    [selectedWorkspaceId],
+    [selectedWorkspaceId, t],
   );
 
   const loadMcpRunsRef = React.useRef(loadMcpRuns);
@@ -3350,7 +3433,7 @@ export default function ObservabilityPage() {
         ? traceWorkspaceId
         : selectedWorkspaceId;
       if (!detailWorkspaceId) {
-        setError("Trace workspace is required to load team trace detail");
+        setError(t("errors.traceWorkspaceRequired"));
         return;
       }
       setSelectedTraceKey(traceSelectionKey(traceId, detailWorkspaceId));
@@ -3389,7 +3472,7 @@ export default function ObservabilityPage() {
           return;
         }
         setError(
-          err instanceof Error ? err.message : "Failed to load trace detail",
+          err instanceof Error ? err.message : t("errors.loadDetail"),
         );
         setDetail(null);
       } finally {
@@ -3403,6 +3486,7 @@ export default function ObservabilityPage() {
       organizationId,
       selectedWorkspaceId,
       selectedWorkspaceScope,
+      t,
     ],
   );
 
@@ -3443,12 +3527,14 @@ export default function ObservabilityPage() {
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to load more observations",
+        err instanceof Error
+          ? err.message
+          : t("errors.loadMoreObservations"),
       );
     } finally {
       setLoadingMoreObservations(false);
     }
-  }, [allWorkspacesSelected, detail, loadingMoreObservations, organizationId]);
+  }, [allWorkspacesSelected, detail, loadingMoreObservations, organizationId, t]);
 
   const handleWorkspaceChange = React.useCallback(
     (nextWorkspaceId: string) => {
@@ -3537,7 +3623,7 @@ export default function ObservabilityPage() {
                   variant="outline"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
-                  Filters
+                  {t("table.filters")}
                 </Button>
                 <Button
                   className="hidden h-8 gap-1.5 px-2 text-xs md:inline-flex"
@@ -3547,40 +3633,42 @@ export default function ObservabilityPage() {
                   variant="outline"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
-                  {filtersVisible ? "Hide filters" : "Show filters"}
+                  {filtersVisible
+                    ? t("table.hideFilters")
+                    : t("table.showFilters")}
                 </Button>
                 <Badge
                   className="h-6 shrink-0 px-2 text-[11px]"
                   variant="secondary"
                 >
-                  All time
+                  {t("table.allTime")}
                 </Badge>
                 <Badge
                   className="h-6 shrink-0 px-2 text-[11px]"
                   variant="outline"
                 >
-                  {traces.length} loaded
+                  {t("table.loaded", { count: traces.length })}
                 </Badge>
                 {hasTraceNameFilter ? (
                   <Badge
                     className="h-6 shrink-0 px-2 text-[11px]"
                     variant="outline"
                   >
-                    {visibleTraces.length} shown
+                    {t("table.shown", { count: visibleTraces.length })}
                   </Badge>
                 ) : null}
                 <Badge
                   className="h-6 shrink-0 px-2 text-[11px]"
                   variant="secondary"
                 >
-                  Page size {LIST_LIMIT}
+                  {t("table.pageSize", { count: LIST_LIMIT })}
                 </Badge>
                 {allWorkspacesSelected ? (
                   <Badge
                     className="h-6 shrink-0 px-2 text-[11px]"
                     variant="outline"
                   >
-                    All workspaces
+                    {t("table.allWorkspaces")}
                   </Badge>
                 ) : null}
               </div>
@@ -3593,10 +3681,10 @@ export default function ObservabilityPage() {
                 >
                   <TabsList className="h-8" variant="line">
                     <TabsTrigger className="px-2.5 text-xs" value="traces">
-                      LLM Traces
+                      {t("table.tabTraces")}
                     </TabsTrigger>
                     <TabsTrigger className="px-2.5 text-xs" value="mcp">
-                      MCP Activity
+                      {t("table.tabMcp")}
                     </TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -3616,7 +3704,7 @@ export default function ObservabilityPage() {
                   ) : (
                     <RefreshCw className="h-4 w-4" />
                   )}
-                  Refresh
+                  {t("table.refresh")}
                 </Button>
               </div>
             </div>
@@ -3629,8 +3717,7 @@ export default function ObservabilityPage() {
           {activeView === "mcp" ? (
             allWorkspacesSelected ? (
               <div className="p-6 text-sm text-muted-foreground">
-                MCP activity is scoped to a single workspace. Select a workspace
-                from the filters to inspect MCP tool calls.
+                {t("table.mcpScoped")}
               </div>
             ) : (
               <McpRunTable
@@ -3678,39 +3765,39 @@ export default function ObservabilityPage() {
                       <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
                         <tr>
                           <th className="w-[150px] px-3 py-1.5 font-medium">
-                            Timestamp
+                            {t("table.columns.timestamp")}
                           </th>
                           <th className="w-[300px] px-3 py-1.5 font-medium">
-                            Name
+                            {t("table.columns.name")}
                           </th>
                           {allWorkspacesSelected ? (
                             <th className="w-[160px] px-3 py-1.5 font-medium">
-                              Workspace
+                              {t("table.columns.workspace")}
                             </th>
                           ) : null}
                           <th className="w-[90px] px-3 py-1.5 font-medium">
-                            Status
+                            {t("table.columns.status")}
                           </th>
                           <th className="w-[90px] px-3 py-1.5 font-medium">
-                            Latency
+                            {t("table.columns.latency")}
                           </th>
                           <th className="w-[150px] px-3 py-1.5 font-medium">
-                            Model
+                            {t("table.columns.model")}
                           </th>
                           <th className="w-[90px] px-3 py-1.5 font-medium">
-                            Tokens
+                            {t("table.columns.tokens")}
                           </th>
                           <th className="w-[90px] px-3 py-1.5 font-medium">
-                            Obs.
+                            {t("table.columns.obs")}
                           </th>
                           <th className="w-[190px] px-3 py-1.5 font-medium">
-                            Session ID
+                            {t("table.columns.sessionId")}
                           </th>
                           <th className="w-[140px] px-3 py-1.5 font-medium">
-                            User
+                            {t("table.columns.user")}
                           </th>
                           <th className="w-[190px] px-3 py-1.5 font-medium">
-                            Trace ID
+                            {t("table.columns.traceId")}
                           </th>
                           <th className="w-[36px] px-3 py-1.5 font-medium" />
                         </tr>
@@ -3739,7 +3826,9 @@ export default function ObservabilityPage() {
                                 {trace.name}
                               </div>
                               <div className="truncate font-mono text-[11px] text-muted-foreground">
-                                Session: {sessionLabel(trace)}
+                                {t("table.sessionPrefix", {
+                                  value: sessionLabel(trace),
+                                })}
                               </div>
                             </td>
                             {allWorkspacesSelected ? (
@@ -3792,8 +3881,8 @@ export default function ObservabilityPage() {
               {!loadingList && visibleTraces.length === 0 ? (
                 <div className="p-6 text-sm text-muted-foreground">
                   {traces.length === 0
-                    ? "No traces found."
-                    : "No traces match the current search."}
+                    ? t("table.emptyNoTraces")
+                    : t("table.emptyNoMatch")}
                 </div>
               ) : null}
               {nextCursor ? (
@@ -3805,7 +3894,7 @@ export default function ObservabilityPage() {
                     type="button"
                     variant="outline"
                   >
-                    Load older traces
+                    {t("table.loadOlder")}
                   </Button>
                 </div>
               ) : null}
@@ -3818,7 +3907,9 @@ export default function ObservabilityPage() {
           className="w-[min(100vw,320px)] max-w-none gap-0 overflow-hidden p-0 [&>button]:hidden"
           side="left"
         >
-          <SheetTitle className="sr-only">Observability filters</SheetTitle>
+          <SheetTitle className="sr-only">
+            {t("drawer.filtersTitle")}
+          </SheetTitle>
           {drawerFiltersPanel}
         </SheetContent>
       </Sheet>
@@ -3841,12 +3932,17 @@ export default function ObservabilityPage() {
             <SheetTitle className="truncate text-base">
               {detail
                 ? `${detail.trace.name}: ${detail.trace.traceId}`
-                : "Trace"}
+                : t("drawer.traceFallback")}
             </SheetTitle>
             <SheetDescription className="truncate">
               {detail
-                ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}`
-                : (selectedTraceKey ?? "Trace detail")}
+                ? t("drawer.sessionId", {
+                    value:
+                      detail.trace.sessionId ??
+                      detail.trace.threadId ??
+                      "--",
+                  })
+                : (selectedTraceKey ?? t("drawer.traceDetail"))}
             </SheetDescription>
           </SheetHeader>
           <TraceSummaryBar
@@ -3860,12 +3956,12 @@ export default function ObservabilityPage() {
               <div className="flex h-[49px] shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
                 <div className="min-w-0">
                   <h3 className="truncate text-xs font-medium text-foreground">
-                    Timeline
+                    {t("drawer.timeline")}
                   </h3>
                   <p className="truncate text-[11px] text-muted-foreground">
                     {detail
                       ? detail.trace.name
-                      : (selectedTraceKey ?? "Trace detail")}
+                      : (selectedTraceKey ?? t("drawer.traceDetail"))}
                   </p>
                 </div>
               </div>
@@ -3883,7 +3979,7 @@ export default function ObservabilityPage() {
             <div className="flex h-full min-w-0 flex-1 flex-col">
               <div className="flex h-[49px] shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
                 <div className="min-w-0 text-xs font-medium text-muted-foreground">
-                  Detail
+                  {t("drawer.detail")}
                 </div>
                 <Button
                   className="h-8 shrink-0 gap-1.5 px-2 text-xs md:hidden"
@@ -3893,7 +3989,7 @@ export default function ObservabilityPage() {
                   variant="outline"
                 >
                   <GitBranch className="h-4 w-4" />
-                  Timeline
+                  {t("drawer.timeline")}
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
@@ -3915,11 +4011,13 @@ export default function ObservabilityPage() {
           constrainWidth={false}
         >
           <DialogHeader className="border-b border-border px-4 py-3 pr-12 text-left">
-            <DialogTitle className="text-base">Timeline</DialogTitle>
+            <DialogTitle className="text-base">
+              {t("drawer.timeline")}
+            </DialogTitle>
             <DialogDescription className="truncate">
               {detail
                 ? detail.trace.name
-                : (selectedTraceKey ?? "Trace detail")}
+                : (selectedTraceKey ?? t("drawer.traceDetail"))}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden p-2">

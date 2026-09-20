@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { ArtifactStatusSnapshot } from "./types";
 
@@ -13,6 +19,19 @@ vi.mock("../../../../../lib/sdk", () => ({
 }));
 
 import { useArtifactSnapshot } from "./use-artifact-snapshot";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -94,14 +113,16 @@ afterEach(async () => {
 test("changing artifact identity clears the old terminal snapshot before fetching", async () => {
   await act(async () => {
     root?.render(
-      createElement(Probe, {
-        artifactId: "artifact-1",
-        artifactSnapshot: snapshot({
-          id: "artifact-1",
+      withIntl(
+        createElement(Probe, {
+          artifactId: "artifact-1",
+          artifactSnapshot: snapshot({
+            id: "artifact-1",
+            workspaceId: "workspace-1",
+          }),
           workspaceId: "workspace-1",
         }),
-        workspaceId: "workspace-1",
-      }),
+      ),
     );
   });
   assert.match(container?.textContent ?? "", /artifact-1\|artifact-1/u);
@@ -114,10 +135,12 @@ test("changing artifact identity clears the old terminal snapshot before fetchin
   );
   await act(async () => {
     root?.render(
-      createElement(Probe, {
-        artifactId: "artifact-2",
-        workspaceId: "workspace-1",
-      }),
+      withIntl(
+        createElement(Probe, {
+          artifactId: "artifact-2",
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
   });
 
@@ -142,10 +165,12 @@ test("a mismatched artifact detail response is rejected", async () => {
 
   await act(async () => {
     root?.render(
-      createElement(Probe, {
-        artifactId: "artifact-1",
-        workspaceId: "workspace-1",
-      }),
+      withIntl(
+        createElement(Probe, {
+          artifactId: "artifact-1",
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
   });
 
@@ -162,14 +187,16 @@ test("a mismatched parent snapshot is rejected without suppressing the requested
 
   await act(async () => {
     root?.render(
-      createElement(Probe, {
-        artifactId: "artifact-1",
-        artifactSnapshot: snapshot({
-          id: "artifact-other",
+      withIntl(
+        createElement(Probe, {
+          artifactId: "artifact-1",
+          artifactSnapshot: snapshot({
+            id: "artifact-other",
+            workspaceId: "workspace-1",
+          }),
           workspaceId: "workspace-1",
         }),
-        workspaceId: "workspace-1",
-      }),
+      ),
     );
   });
 

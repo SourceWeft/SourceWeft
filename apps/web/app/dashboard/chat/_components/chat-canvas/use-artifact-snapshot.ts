@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { contentClient } from "../../../../../lib/sdk";
 import {
   isArtifactSnapshotTerminal,
@@ -14,6 +15,7 @@ export function useArtifactSnapshot(input: {
   toolCallOutput?: unknown;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const artifactId = resolveToolCallArtifactId(input.toolCallOutput);
   const identity =
     input.workspaceId && artifactId
@@ -93,7 +95,7 @@ export function useArtifactSnapshot(input: {
           setState((current) =>
             current.identity === expectedIdentity
               ? {
-                  error: "Artifact details did not match the request.",
+                  error: t("artifact.detailsMismatch"),
                   identity: expectedIdentity,
                   snapshot: undefined,
                 }
@@ -119,7 +121,7 @@ export function useArtifactSnapshot(input: {
           current.identity === expectedIdentity
             ? {
                 ...current,
-                error: "Artifact details could not be loaded.",
+                error: t("artifact.detailsLoadFailed"),
               }
             : current,
         );

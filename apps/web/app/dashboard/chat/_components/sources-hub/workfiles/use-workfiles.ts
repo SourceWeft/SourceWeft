@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import { contentClient } from "../../../../../../lib/sdk";
 import { cloneItems, getThreadWorkfilesCacheKey } from "../cache";
@@ -25,6 +26,23 @@ export function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
   if (purpose === "note") return "Note";
   if (purpose === "output_candidate") return "Candidate";
   return "File";
+}
+
+/**
+ * Stable i18n key suffix for a workfile purpose. UI renders the label via
+ * `t("files.purpose.<key>")`; the English `workfilePurposeLabel` above remains
+ * the search-matching vocabulary.
+ */
+export function workfilePurposeKey(purpose: WorkfileListItem["purpose"]) {
+  if (
+    purpose === "scratch" ||
+    purpose === "draft" ||
+    purpose === "note" ||
+    purpose === "output_candidate"
+  ) {
+    return purpose;
+  }
+  return "file";
 }
 
 export function workfileMatchesQuery(file: WorkfileListItem, q: string) {
@@ -53,6 +71,7 @@ export function useWorkfiles(input: {
     currentWorkspaceIdRef,
   } = input;
 
+  const t = useTranslations("dashboardSourcesHub");
   const liveScope = useRef("");
   liveScope.current = `${enabled}:${workspaceId}:${threadId}:${mode}`;
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
@@ -114,7 +133,7 @@ export function useWorkfiles(input: {
     } catch (error) {
       if (liveScope.current !== requestScope) return;
       setWorkfilesLoadingError(
-        getErrorMessage(error, "Failed to load files."),
+        getErrorMessage(error, t("toasts.workfiles.loadFailed")),
       );
     } finally {
       if (
@@ -124,7 +143,7 @@ export function useWorkfiles(input: {
         setIsLoadingWorkfiles(false);
       }
     }
-  }, [currentWorkspaceIdRef, enabled, mode, threadId, workspaceId]);
+  }, [currentWorkspaceIdRef, enabled, mode, threadId, workspaceId, t]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || !threadId || mode !== "thread") {
@@ -166,12 +185,12 @@ export function useWorkfiles(input: {
         );
         setPreviewWorkfile(result.file);
       } catch (error) {
-        toast.error(getErrorMessage(error, "Could not read file."));
+        toast.error(getErrorMessage(error, t("files.readError")));
       } finally {
         setWorkfileBusy(file.path, false);
       }
     },
-    [setWorkfileBusy, threadId, workspaceId],
+    [setWorkfileBusy, threadId, workspaceId, t],
   );
 
   const handleConfirmDeleteWorkfile = useCallback(async () => {
@@ -184,14 +203,14 @@ export function useWorkfiles(input: {
         threadId,
         deleteWorkfile.path,
       );
-      toast.success("File deleted.");
+      toast.success(t("toasts.workfiles.fileDeleted"));
       setDeleteWorkfile(null);
       if (previewWorkfile?.path === deleteWorkfile.path) {
         setPreviewWorkfile(null);
       }
       await refreshWorkfiles();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Could not delete file."));
+      toast.error(getErrorMessage(error, t("toasts.workfiles.deleteFailed")));
     } finally {
       setWorkfileBusy(deleteWorkfile.path, false);
     }
@@ -202,6 +221,7 @@ export function useWorkfiles(input: {
     setWorkfileBusy,
     threadId,
     workspaceId,
+    t,
   ]);
 
   return {

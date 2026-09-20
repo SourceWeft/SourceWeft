@@ -19,6 +19,7 @@ import {
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   Sheet,
   SheetContent,
@@ -160,14 +161,15 @@ function ChatCanvasSkeleton() {
 }
 
 function ModelCatalogErrorState() {
+  const t = useTranslations("dashboardChat");
   return (
     <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
       <div className="max-w-sm text-center">
         <h2 className="text-sm font-semibold text-foreground">
-          Model catalog failed to load
+          {t("modelCatalog.failedTitle")}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Refresh the page before sending a message.
+          {t("modelCatalog.failedRefresh")}
         </p>
       </div>
     </section>
@@ -262,6 +264,7 @@ function normalizeThinkingSettingsForModel(input: {
 }
 
 export function DashboardChatPageClient() {
+  const t = useTranslations("dashboardChat");
   const creationContext = useChatCreationContext();
   const [visitedContexts, setVisitedContexts] = useState<string[]>([]);
   useEffect(() => {
@@ -732,13 +735,13 @@ export function DashboardChatPageClient() {
       workspaces
         .slice(0, DASHBOARD_WORKSPACE_SHORTCUT_LIMIT)
         .map((workspace, index) => ({
-          group: "Workspace",
+          group: t("shortcuts.workspaceGroup"),
           id: `workspace-${workspace.id}`,
           keys: getDashboardWorkspaceShortcutKeys(index, shortcutPlatform),
           onRun: () => handleWorkspaceShortcut(workspace.id),
-          title: `Switch to ${workspace.name}`,
+          title: t("shortcuts.switchToWorkspace", { name: workspace.name }),
         })),
-    [handleWorkspaceShortcut, shortcutPlatform, workspaces],
+    [handleWorkspaceShortcut, shortcutPlatform, t, workspaces],
   );
 
   useDashboardShortcuts(shortcutDefinitions);
@@ -852,7 +855,7 @@ export function DashboardChatPageClient() {
     appliedMcpRunRef.current = runKey;
     setActiveMcpInstallIds([mcpInstallIdFromQuery]);
     setActiveMcpToolIds([]);
-    toast.success("MCP selected for this chat");
+    toast.success(t("toasts.mcpSelected"));
 
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.delete("mcp_install_id");
@@ -861,6 +864,7 @@ export function DashboardChatPageClient() {
       nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat",
     );
   }, [
+    t,
     mcpInstallIdFromQuery,
     router,
     searchParams,
@@ -882,7 +886,7 @@ export function DashboardChatPageClient() {
       try {
         await synchronizeHubBeforeSend();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Hub is updating.");
+        toast.error(e instanceof Error ? e.message : t("toasts.hubUpdating"));
         return;
       }
       if (isStartingChatRef.current) {
@@ -890,21 +894,21 @@ export function DashboardChatPageClient() {
       }
       if (!workspaceId) {
         preserveDraft();
-        toast.error("No workspace selected yet.");
+        toast.error(t("toasts.noWorkspace"));
         return;
       }
       if (modelCatalogStatus !== "ready") {
         preserveDraft();
         toast.error(
           modelCatalogStatus === "error"
-            ? "Model catalog failed to load. Refresh and try again."
-            : "Model catalog is still loading. Try again in a moment.",
+            ? t("modelCatalog.failedToast")
+            : t("modelCatalog.loadingToast"),
         );
         return;
       }
       if (!selectedModels.llm?.capabilities) {
         preserveDraft();
-        toast.error("Chat model capabilities are not loaded yet.");
+        toast.error(t("toasts.modelCapabilitiesNotLoaded"));
         return;
       }
 
@@ -957,7 +961,7 @@ export function DashboardChatPageClient() {
 
       if (!creationContext.target || creationContext.error) {
         preserveDraft();
-        toast.error(creationContext.error || "Please wait for the computer to finish initializing.");
+        toast.error(creationContext.error || t("toasts.waitInitializing"));
         return;
       }
       if (
@@ -965,7 +969,7 @@ export function DashboardChatPageClient() {
         !creationContext.selectedDevice?.connected
       ) {
         preserveDraft();
-        toast.error("Connect to the selected computer first.");
+        toast.error(t("toasts.connectComputerFirst"));
         return;
       }
       isStartingChatRef.current = true;
@@ -1040,9 +1044,7 @@ export function DashboardChatPageClient() {
           // Await the composer's queued Blob write before handing over metadata.
           const savedDraft = await readChatDraft(pendingTurn.imageDraftKey);
           if (!savedDraft || savedDraft.files.length !== images?.length) {
-            throw new Error(
-              "Could not save the first message's attachments. Keep this page open and try again.",
-            );
+            throw new Error(t("toasts.attachmentsSaveFailed"));
           }
         }
         setPendingThreadTurn(result.thread.id, pendingTurn);
@@ -1056,9 +1058,7 @@ export function DashboardChatPageClient() {
             `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`,
           ).catch((e) =>
             toast.error(
-              e instanceof Error
-                ? e.message
-                : "The conversation was created, but the draft could not be cleared.",
+              e instanceof Error ? e.message : t("toasts.draftClearFailed"),
             ),
           );
         }
@@ -1079,7 +1079,7 @@ export function DashboardChatPageClient() {
         toast.error(
           error instanceof Error
             ? error.message
-            : "Failed to create conversation.",
+            : t("toasts.createConversationFailed"),
         );
         isStartingChatRef.current = false;
         setIsStartingChat(false);
@@ -1097,6 +1097,7 @@ export function DashboardChatPageClient() {
       }
     },
     [
+      t,
       chatHubContext?.desktop,
       workspaceId,
       creationContext,
@@ -1124,7 +1125,7 @@ export function DashboardChatPageClient() {
           workspaceId={workspaceId}
           creationContext={creationContext}
           creationDisabled={isCreatingFirstThread}
-          threadTitle="New chat"
+          threadTitle={t("newChat.title")}
           isPersistentLayout={isPersistentLayout}
           sourcesVisible={sourcesVisible}
           onToggleSources={toggleSourcesVisible}
@@ -1245,7 +1246,7 @@ export function DashboardChatPageClient() {
                 onComposerOptionsChange={setComposerOptions}
                 thinkingSettings={thinkingSettings}
                 onThinkingSettingsChange={handleThinkingSettingsChange}
-                threadTitle="New chat"
+                threadTitle={t("newChat.title")}
                 workspaceId={workspaceId}
               />
             </div>
@@ -1316,7 +1317,7 @@ export function DashboardChatPageClient() {
           side="bottom"
         >
           <SheetTitle className="sr-only">
-            {previewArtifact ? "Artifact preview" : "Artifact"}
+            {previewArtifact ? t("artifact.srPreview") : t("artifact.srTitle")}
           </SheetTitle>
           {previewArtifact ? (
             <ArtifactPreviewPanel

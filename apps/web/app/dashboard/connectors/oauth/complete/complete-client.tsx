@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, CircleAlert } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   publishConnectorOAuthCompletion,
@@ -26,13 +27,16 @@ function safeReturnUrl(value: string | null) {
   }
 }
 
-function createMessage(input: {
-  accountId: string | null;
-  connectorOAuth: string | null;
-  connectorType: string | null;
-  error: string | null;
-  workspaceId: string | null;
-}): ConnectorOAuthCompletionMessage {
+function createMessage(
+  input: {
+    accountId: string | null;
+    connectorOAuth: string | null;
+    connectorType: string | null;
+    error: string | null;
+    workspaceId: string | null;
+  },
+  fallbackError: string,
+): ConnectorOAuthCompletionMessage {
   const status: OAuthCompleteState =
     input.connectorOAuth === "success" && input.accountId ? "success" : "error";
   return {
@@ -44,10 +48,7 @@ function createMessage(input: {
     connectorType: input.connectorType ?? "",
     accountId: input.accountId,
     status,
-    error:
-      status === "error"
-        ? input.error ?? "Connector authorization did not complete."
-        : null,
+    error: status === "error" ? input.error ?? fallbackError : null,
     createdAt: new Date().toISOString(),
   };
 }
@@ -69,17 +70,21 @@ export function ConnectorOAuthCompleteClient({
   returnTo: string | null;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardConnectors");
   const [closeAttempted, setCloseAttempted] = useState(false);
   const message = useMemo(
     () =>
-      createMessage({
-        accountId,
-        connectorOAuth,
-        connectorType,
-        error,
-        workspaceId,
-      }),
-    [accountId, connectorOAuth, connectorType, error, workspaceId],
+      createMessage(
+        {
+          accountId,
+          connectorOAuth,
+          connectorType,
+          error,
+          workspaceId,
+        },
+        t("complete.fallbackError"),
+      ),
+    [accountId, connectorOAuth, connectorType, error, workspaceId, t],
   );
   const isSuccess = message.status === "success";
 
@@ -126,15 +131,17 @@ export function ConnectorOAuthCompleteClient({
           />
           <div className="min-w-0">
             <h1 className="text-base font-semibold">
-              {isSuccess ? "Connector authorized" : "Authorization failed"}
+              {isSuccess
+                ? t("complete.successTitle")
+                : t("complete.errorTitle")}
             </h1>
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {mode === "redirect"
                 ? isSuccess
-                  ? "Returning to SourceWeft to finish setup."
-                  : "Returning to SourceWeft with the authorization error."
+                  ? t("complete.redirectSuccess")
+                  : t("complete.redirectError")
                 : isSuccess
-                  ? "SourceWeft is updating the connector status in the original tab."
+                  ? t("complete.popupSuccess")
                   : message.error}
             </p>
           </div>
@@ -143,7 +150,7 @@ export function ConnectorOAuthCompleteClient({
           <div className="mt-4 flex gap-2">
             {returnTo ? (
               <Button asChild className="flex-1" type="button">
-                <a href={returnTo}>Return to SourceWeft</a>
+                <a href={returnTo}>{t("common.returnToSourceweft")}</a>
               </Button>
             ) : null}
             <Button
@@ -152,7 +159,7 @@ export function ConnectorOAuthCompleteClient({
               type="button"
               variant={returnTo ? "outline" : "default"}
             >
-              Close tab
+              {t("common.closeTab")}
             </Button>
           </div>
         ) : null}

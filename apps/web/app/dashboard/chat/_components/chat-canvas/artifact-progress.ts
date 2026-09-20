@@ -1,3 +1,4 @@
+import type { useTranslations } from "next-intl";
 import { getArtifactProgressProtocol } from "@sourceweft/agent-tool-registry";
 import type {
   ArtifactProgressProtocol,
@@ -7,6 +8,8 @@ import type {
 import { readArtifactOutputField } from "@sourceweft/contracts/artifact-progress";
 import type { ArtifactPipelineGenerationStatus } from "@sourceweft/contracts/artifact-pipeline";
 import type { ArtifactStatusSnapshot, ToolCallRecord } from "./types";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 /**
  * Capability-agnostic progress rendering.
@@ -121,8 +124,8 @@ export function resolveDeliverableElapsedMs(
 }
 
 /** Display name of what the capability produces, for progress headings. */
-export function resolveDeliverableTitle(toolName: string) {
-  return getArtifactProgressProtocol(toolName)?.title ?? "Artifact";
+export function resolveDeliverableTitle(toolName: string, t: Translate) {
+  return getArtifactProgressProtocol(toolName)?.title ?? t("artifact.fallback");
 }
 
 /**

@@ -2,11 +2,12 @@
 
 import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
-import { AuthUIProvider } from "@daveyplate/better-auth-ui";
+import { AuthUIProvider, type AuthLocalization } from "@daveyplate/better-auth-ui";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider, useTheme } from "next-themes";
+import { useMessages } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
@@ -21,6 +22,7 @@ import {
   customOrganizationViewPaths,
 } from "../lib/auth-ui-config";
 import { userSettingsClient } from "../lib/sdk";
+import { clearLocaleCookie, setLocaleCookie } from "../lib/i18n/cookie";
 
 import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
 
@@ -53,7 +55,7 @@ function isCancelledPasskeyRejection(reason: unknown) {
   return false;
 }
 
-function ThemeSettingsSync() {
+function UserSettingsSync() {
   const { data: session } = authClient.useSession();
   const { setTheme } = useTheme();
   const userId = session?.user?.id;
@@ -67,12 +69,23 @@ function ThemeSettingsSync() {
     void userSettingsClient
       .getSettings()
       .then((result) => {
-        if (!cancelled) {
-          setTheme(result.settings.appearance.theme);
+        if (cancelled) {
+          return;
+        }
+        const { theme, language } = result.settings.appearance;
+        setTheme(theme);
+        // Mirror the saved language into the cookie the proxy reads, so a signed-in
+        // user's choice follows them across devices (§5). "system" means "follow the
+        // browser", so we clear the explicit cookie. The switcher (Phase 1A) adds the
+        // in-place refresh; here the new locale takes effect on the next navigation.
+        if (language === "system") {
+          clearLocaleCookie();
+        } else {
+          setLocaleCookie(language);
         }
       })
       .catch(() => {
-        // Keep next-themes local cache as the first-paint fallback.
+        // Keep next-themes local cache and the existing cookie as the fallback.
       });
 
     return () => {
@@ -93,6 +106,12 @@ export function Providers({
   const router = useRouter();
   const pathname = usePathname();
   const webBaseUrl = resolveWebBaseUrl();
+  // Resolve the current locale's Better Auth UI labels from the next-intl catalog.
+  // The provider deep-merges this partial over its English defaults, so any key we
+  // don't ship (or the `en` locale) falls back to English automatically. Error
+  // messages stay on the backend path — see `localizeErrors={false}` below.
+  const messages = useMessages();
+  const authUiLocalization = messages.authUi as unknown as AuthLocalization;
 
   const handleSessionChange = useCallback(() => {
     const normalizedPathname = pathname?.replace(/\/+$/, "") || "/";
@@ -142,6 +161,7 @@ export function Providers({
         credentials={{
           forgotPassword: true,
         }}
+        localization={authUiLocalization}
         localizeErrors={false}
         magicLink
         multiSession
@@ -187,7 +207,7 @@ export function Providers({
         twoFactor={["otp", "totp"]}
         viewPaths={customAuthViewPaths}
       >
-        <ThemeSettingsSync />
+        <UserSettingsSync />
         <GoogleOneTap />
         <TooltipProvider>
           <DeploymentCapabilitiesProvider

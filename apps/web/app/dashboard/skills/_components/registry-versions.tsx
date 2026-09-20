@@ -4,6 +4,7 @@ import type {
   RegistryVersionDetail,
   RegistryVersionsResponse,
 } from "@sourceweft/contracts";
+import { useTranslations } from "next-intl";
 import {
   ChevronRight,
   ExternalLink,
@@ -34,6 +35,7 @@ export function RegistryVersions({
   onView: (detail: RegistryVersionDetail | null) => void;
   onChanged: () => void;
 }) {
+  const t = useTranslations("dashboardSkills");
   const [list, setList] = React.useState<RegistryVersionsResponse | null>(null);
   const [selected, setSelected] = React.useState(initialVersionId);
   const [detail, setDetail] = React.useState<RegistryVersionDetail | null>(
@@ -93,17 +95,17 @@ export function RegistryVersions({
       setReload((v) => v + 1);
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Version switch failed");
+      setError(e instanceof Error ? e.message : t("versions.switchFailed"));
     } finally {
       setBusy(false);
     }
   }
   const current = detail?.version;
   const statusLabels = {
-    draft: "Under review",
-    published: "Published",
-    deprecated: "Deprecated",
-    disabled: "Disabled",
+    draft: t("versions.status.draft"),
+    published: t("versions.status.published"),
+    deprecated: t("versions.status.deprecated"),
+    disabled: t("versions.status.disabled"),
   };
   const shortVersion = (version: string) =>
     /^[a-f0-9]{12,40}$/i.test(version) ? version.slice(0, 8) : version;
@@ -113,15 +115,15 @@ export function RegistryVersions({
 
   return (
     <section
-      aria-label="Skill versions"
+      aria-label={t("versions.ariaLabel")}
       className="overflow-hidden rounded-lg border border-border bg-muted/15 text-xs"
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
         <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />
-        <span className="text-muted-foreground">Version</span>
+        <span className="text-muted-foreground">{t("versions.versionLabel")}</span>
         <Select value={selected} onValueChange={setSelected}>
           <SelectTrigger
-            aria-label="Version"
+            aria-label={t("versions.versionLabel")}
             size="sm"
             className="h-7 w-auto min-w-32 gap-2 border-0 bg-transparent px-2 font-mono text-xs shadow-none"
             title={current?.version}
@@ -130,13 +132,15 @@ export function RegistryVersions({
               {shortVersion(
                 current?.version ??
                   list?.items.find((v) => v.id === selected)?.version ??
-                  "Selected version",
+                  t("versions.selectedVersion"),
               )}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {!list?.items.some((v) => v.id === selected) ? (
-              <SelectItem value={selected}>Selected version</SelectItem>
+              <SelectItem value={selected}>
+                {t("versions.selectedVersion")}
+              </SelectItem>
             ) : null}
             {list?.items.map((v) => (
               <SelectItem
@@ -147,9 +151,9 @@ export function RegistryVersions({
                 <span className="font-mono">{shortVersion(v.version)}</span>
                 <span className="text-xs text-muted-foreground">
                   {statusLabels[v.status]}
-                  {v.isCurrent ? " · Recommended" : ""}
+                  {v.isCurrent ? ` · ${t("versions.recommended")}` : ""}
                   {list.installed?.skillVersionId === v.id
-                    ? " · Installed"
+                    ? ` · ${t("versions.installed")}`
                     : ""}
                 </span>
               </SelectItem>
@@ -158,7 +162,7 @@ export function RegistryVersions({
         </Select>
         {busy ? (
           <Loader2
-            aria-label="Loading version"
+            aria-label={t("versions.loadingVersion")}
             className="size-3.5 animate-spin text-muted-foreground"
           />
         ) : null}
@@ -175,11 +179,12 @@ export function RegistryVersions({
               {statusLabels[current.status]}
             </Badge>
             {current.isCurrent ? (
-              <Badge variant="secondary">Recommended</Badge>
+              <Badge variant="secondary">{t("versions.recommended")}</Badge>
             ) : null}
             {installedHere ? (
               <Badge variant="secondary">
-                Installed{list?.installed?.enabled ? "" : " · Off"}
+                {t("versions.installed")}
+                {list?.installed?.enabled ? "" : ` · ${t("versions.off")}`}
               </Badge>
             ) : null}
           </>
@@ -190,9 +195,9 @@ export function RegistryVersions({
             href={current.sourceUrl}
             target="_blank"
             rel="noreferrer"
-            title="View this exact source version"
+            title={t("versions.sourceTitle")}
           >
-            Source <ExternalLink className="size-3" />
+            {t("actions.source")} <ExternalLink className="size-3" />
           </a>
         ) : null}
       </div>
@@ -201,7 +206,7 @@ export function RegistryVersions({
           {list?.installed && !installedHere ? (
             <>
               <span className="text-muted-foreground">
-                Viewing a different version from the one installed.
+                {t("versions.viewingDifferent")}
               </span>
               <Button
                 size="sm"
@@ -209,7 +214,7 @@ export function RegistryVersions({
                 disabled={busy || current?.status !== "published"}
                 onClick={switchVersion}
               >
-                Use this version
+                {t("versions.useThisVersion")}
               </Button>
             </>
           ) : null}
@@ -228,12 +233,14 @@ export function RegistryVersions({
                   setList({ ...next, items: [...list.items, ...next.items] });
                 } catch (e) {
                   setError(
-                    e instanceof Error ? e.message : "Could not load versions",
+                    e instanceof Error
+                      ? e.message
+                      : t("versions.loadFailed"),
                   );
                 }
               }}
             >
-              More versions
+              {t("versions.moreVersions")}
             </Button>
           ) : null}
         </div>
@@ -249,7 +256,7 @@ export function RegistryVersions({
             size="sm"
             onClick={() => setReload((value) => value + 1)}
           >
-            Retry
+            {t("actions.retry")}
           </Button>
         </div>
       ) : null}
@@ -260,20 +267,22 @@ export function RegistryVersions({
         >
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-            Version details
+            {t("versions.detailsSummary")}
             <span className="ml-auto">
-              {detail.files.length} files
-              {issueCount ? ` · ${issueCount} review notes` : ""}
+              {t("versions.files", { count: detail.files.length })}
+              {issueCount
+                ? ` · ${t("versions.reviewNotes", { count: issueCount })}`
+                : ""}
             </span>
           </summary>
           <div className="space-y-3 border-t border-border/60 px-3 py-3">
             <p className="break-all text-muted-foreground">
-              Source revision{" "}
+              {t("versions.sourceRevision")}{" "}
               <code className="text-foreground">{detail.version.version}</code>
             </p>
             {!detail.version.hasIngestion ? (
               <p className="text-muted-foreground">
-                No import diagnostics were recorded for this version.
+                {t("versions.noDiagnostics")}
               </p>
             ) : null}
             {detail.version.diagnostics.map((d, i) => (
@@ -284,13 +293,13 @@ export function RegistryVersions({
             ))}
             {detail.version.findings.map((f, i) => (
               <p key={i}>
-                Review: {f.ruleId} {f.file}
+                {t("versions.reviewLabel")}: {f.ruleId} {f.file}
                 {f.line ? `:${f.line}` : ""}
               </p>
             ))}
             {detail.version.moderation ? (
               <p>
-                Review: {detail.version.moderation.action}
+                {t("versions.reviewLabel")}: {detail.version.moderation.action}
                 {detail.version.moderation.reason
                   ? ` — ${detail.version.moderation.reason}`
                   : ""}
@@ -298,7 +307,7 @@ export function RegistryVersions({
             ) : null}
             <details>
               <summary className="cursor-pointer text-muted-foreground">
-                Files ({detail.files.length})
+                {t("versions.filesSummary", { count: detail.files.length })}
               </summary>
               <div className="mt-2 max-h-48 overflow-y-auto rounded-md border px-2">
                 {detail.files.map((f) => (

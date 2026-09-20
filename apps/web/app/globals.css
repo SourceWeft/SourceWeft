@@ -24,6 +24,23 @@
   pointer-events: none;
 }
 
+/* CJK typography guardrails: wide letter-spacing and uppercasing are Latin
+   conventions that read as broken in Chinese, so neutralize them for zh locales.
+   Marketing pages intentionally render CJK with system fonts (see the font note
+   above), so no extra @font-face is loaded here. */
+:root[lang="zh-CN"] .uppercase,
+:root[lang="zh-TW"] .uppercase {
+  text-transform: none;
+}
+:root[lang="zh-CN"] .tracking-wide,
+:root[lang="zh-CN"] .tracking-wider,
+:root[lang="zh-TW"] .tracking-widest,
+:root[lang="zh-CN"] .tracking-widest,
+:root[lang="zh-TW"] .tracking-wide,
+:root[lang="zh-TW"] .tracking-wider {
+  letter-spacing: normal;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

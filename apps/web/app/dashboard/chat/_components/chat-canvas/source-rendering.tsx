@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
 import { FileText, Folder, Globe, Music2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SourceItem } from "../source-types";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export function toAttachmentData(source: SourceItem) {
   return {
@@ -101,6 +104,7 @@ function inferMentionSourceType(label: string): SourceItem["type"] {
 function createFallbackMentionSource(input: {
   label: string;
   sourceId: string;
+  t: Translate;
 }): SourceItem {
   const title = input.label.startsWith("@")
     ? input.label.slice(1)
@@ -113,7 +117,7 @@ function createFallbackMentionSource(input: {
     parentSourceId: null,
     type: inferMentionSourceType(title),
     status: "Indexed",
-    meta: "Mentioned source",
+    meta: input.t("sources.mentionedSource"),
     contentText: "",
     storageKey: null,
   };
@@ -128,11 +132,12 @@ function SourceMentionLink({
   onSourcePreview?: (source: SourceItem) => void;
   source: SourceItem;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   return (
     <button
       className="inline cursor-pointer bg-transparent p-0 align-baseline font-medium text-primary underline decoration-primary/35 underline-offset-2 transition-colors hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => onSourcePreview?.(source)}
-      title={`Open preview: ${source.title}`}
+      title={t("common.openPreview", { value: source.title })}
       type="button"
     >
       {label}
@@ -151,6 +156,7 @@ export function UserMessageText({
   sources: SourceItem[];
   sourceIds?: string[];
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const mentionSources = sources.filter(
     (source) => source.sourceType !== "directory" && source.type !== "DIR",
   );
@@ -192,7 +198,7 @@ export function UserMessageText({
     }
     labelToSource.set(
       token,
-      createFallbackMentionSource({ label: token, sourceId }),
+      createFallbackMentionSource({ label: token, sourceId, t }),
     );
   }
 

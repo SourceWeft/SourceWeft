@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
 import {
   confirmationTitle,
   requestDetailLines,
 } from "./tool-confirmation-display";
 import type { ToolConfirmationRequest } from "@sourceweft/sdk";
+import messages from "../../../../../messages/en.json";
+
+// Server-side translator (no React context); the en catalog carries the same
+// English these helpers used to hardcode, so the assertions still hold. The cast
+// pins it to the loose translator type the helpers accept.
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardChatCanvas",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 function confirmation(
   input: {
@@ -37,8 +49,8 @@ function confirmation(
 test("confirmation display uses agent tool metadata for legacy internal action labels", () => {
   const legacyConfirmation = confirmation();
 
-  assert.equal(confirmationTitle(legacyConfirmation), "Delete Notion page");
-  assert.deepEqual(requestDetailLines(legacyConfirmation), [
+  assert.equal(confirmationTitle(legacyConfirmation, t), "Delete Notion page");
+  assert.deepEqual(requestDetailLines(legacyConfirmation, undefined, t), [
     "Target: page_1",
     "Move Notion pages to trash by page ID",
   ]);
@@ -53,10 +65,10 @@ test("confirmation display prefers payload action description when provided", ()
   });
 
   assert.equal(
-    confirmationTitle(describedConfirmation),
+    confirmationTitle(describedConfirmation, t),
     "Move Notion page to trash",
   );
-  assert.deepEqual(requestDetailLines(describedConfirmation), [
+  assert.deepEqual(requestDetailLines(describedConfirmation, undefined, t), [
     "Target: 2 pages",
     "Move one or more existing Notion pages to trash by page ID.",
   ]);
@@ -77,7 +89,7 @@ test("confirmation display shows sandbox prepare review details", () => {
     ],
   };
 
-  assert.deepEqual(requestDetailLines(sandboxConfirmation), [
+  assert.deepEqual(requestDetailLines(sandboxConfirmation, undefined, t), [
     "Risk: High",
     "Prepare 1 file",
     "/files/input.md -> /workspace/input/input.md · 2.0 KB",
@@ -99,7 +111,7 @@ test("confirmation display shows sandbox execute review details", () => {
     value: { command: "npm test", cwd: "/workspace/ppt-deck" },
   };
 
-  assert.deepEqual(requestDetailLines(sandboxConfirmation), [
+  assert.deepEqual(requestDetailLines(sandboxConfirmation, undefined, t), [
     "Risk: High",
     "Command: npm test",
     "Working directory: /workspace/ppt-deck",
@@ -127,7 +139,7 @@ test("confirmation display shows sandbox collect review details", () => {
     ],
   };
 
-  assert.deepEqual(requestDetailLines(sandboxConfirmation), [
+  assert.deepEqual(requestDetailLines(sandboxConfirmation, undefined, t), [
     "Risk: High",
     "Collect 1 output",
     "/workspace/output/report.md -> /files/report.md · overwrite: yes · 512 B",
@@ -139,12 +151,16 @@ test("approval retains the complete local directory even when it is long", () =>
   const value = confirmation({ toolName: "execute" });
   const cwd = `/Users/example/Library/Application Support/${"project-".repeat(24)}/files`;
   value.preview.requestJson = { command: "pwd", cwd };
-  assert.ok(requestDetailLines(value).includes(`Working directory: ${cwd}`));
+  assert.ok(
+    requestDetailLines(value, undefined, t).includes(
+      `Working directory: ${cwd}`,
+    ),
+  );
 });
 test("command approval never invents a cloud cwd when the directory is omitted", () => {
   const request = confirmation({ toolName: "execute" });
   request.action.type = "sandbox.execute";
-  expectNoGuessedCloudPath(requestDetailLines(request));
+  expectNoGuessedCloudPath(requestDetailLines(request, undefined, t));
 });
 function expectNoGuessedCloudPath(lines: string[]) {
   assert.ok(!lines.some((line) => line === "CWD: /workspace"));

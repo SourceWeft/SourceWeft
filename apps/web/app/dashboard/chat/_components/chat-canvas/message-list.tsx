@@ -8,6 +8,7 @@ import {
   Pencil,
   RotateCcw,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Task,
   TaskContent,
@@ -117,6 +118,8 @@ import type {
   VersionedMessageGroup,
 } from "./types";
 import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 const messageTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -338,6 +341,7 @@ function UserMessageContent({
   sourceById: Map<string, SourceItem>;
   sources: SourceItem[];
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const tokens = parseMarkerContent(content);
 
   const sourceFromToken = (
@@ -346,7 +350,7 @@ function UserMessageContent({
     sourceById.get(token.sourceId) ?? {
       contentText: "",
       id: token.sourceId,
-      meta: "Mentioned source",
+      meta: t("sources.mentionedSource"),
       parentSourceId: null,
       sourceType: "file_upload" as const,
       status: "Indexed" as const,
@@ -400,17 +404,21 @@ function UserMessageReferences({
   images: ChatMessageImagePart[];
   sources: SourceItem[];
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   if (sources.length === 0 && images.length === 0) {
     return null;
   }
 
   const showSourceCountOnly = sources.length > 2;
   const visibleSources = showSourceCountOnly ? [] : sources;
+  const sourceCountLabel = t("messageList.sourceCount", {
+    count: sources.length,
+  });
 
   return (
     <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-2 pb-1 text-xs text-muted-foreground">
       <span className="inline-flex h-8 items-center px-1 font-medium text-foreground/70">
-        Referenced
+        {t("messageList.referenced")}
       </span>
       <Attachments className="gap-2" variant="inline">
         {showSourceCountOnly ? (
@@ -420,11 +428,11 @@ function UserMessageReferences({
               id: "source-count",
               mediaType: "text/plain",
               sourceId: "source-count",
-              title: `${sources.length} sources`,
+              title: sourceCountLabel,
               type: "source-document",
             }}
           >
-            {sources.length} sources
+            {sourceCountLabel}
           </Attachment>
         ) : (
           visibleSources.map((source) => (
@@ -467,6 +475,7 @@ function AssistantMessageBody({
   resolvedConfirmations?: ToolConfirmationResolution[];
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const version = renderState.raw;
   const mergedArtifactStatuses = useArtifactStatuses({
     artifactStatuses,
@@ -476,7 +485,7 @@ function AssistantMessageBody({
   const renderBlocks = renderState.bodyBlocks;
   const cancelledNotice =
     renderState.status === "cancelled"
-      ? "Generation stopped by the user."
+      ? t("messageList.generationStopped")
       : null;
   const isWorkflowRunning = renderState.status === "running";
   const segments = buildAssistantRenderSegments(renderBlocks);
@@ -691,7 +700,7 @@ function AssistantMessageBody({
             <div className="mt-2 max-w-3xl space-y-3" key={segment.id}>
               {artifactCount > 1 ? (
                 <p className="text-xs font-medium text-muted-foreground">
-                  {artifactCount} artifacts
+                  {t("messageList.artifactCount", { count: artifactCount })}
                 </p>
               ) : null}
               {segment.blocks.map((block) => (
@@ -735,6 +744,7 @@ function AssistantMessageBody({
                     (view ? getDelegateChipTitle(view.prompt) : null) ??
                     subagentDisplayName(
                       view?.subagentType ?? item.subagentType,
+                      t,
                     );
                   const duration =
                     toolCall?.latencyMs != null &&
@@ -745,7 +755,7 @@ function AssistantMessageBody({
                     // LobeChat-style delegate row: "Call sub-agent" + a task pill
                     // + duration, collapsible into the brief / steps / report.
                     <Task defaultOpen key={item.key}>
-                      <TaskTrigger title="Call sub-agent">
+                      <TaskTrigger title={t("messageList.callSubagent")}>
                         <div
                           className={cn(
                             ASSISTANT_ACTIVITY_ROW_CLASS,
@@ -761,7 +771,7 @@ function AssistantMessageBody({
                           </span>
                           <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
                             <span className="shrink-0 font-medium text-foreground/80">
-                              Call sub-agent
+                              {t("messageList.callSubagent")}
                             </span>
                             <Badge
                               className="min-w-0 truncate font-normal text-foreground/70"
@@ -776,7 +786,7 @@ function AssistantMessageBody({
                             ) : null}
                             {view?.status === "error" ? (
                               <span className="shrink-0 text-destructive text-xs">
-                                Failed
+                                {t("common.failed")}
                               </span>
                             ) : null}
                           </span>
@@ -790,7 +800,7 @@ function AssistantMessageBody({
                           {view?.prompt ? (
                             <section className="space-y-1">
                               <span className="block pl-1 font-medium text-[11px] text-muted-foreground/50 tracking-wide">
-                                Instruction
+                                {t("messageList.instruction")}
                               </span>
                               <div className="pl-1 text-[13px] text-muted-foreground/75">
                                 <MessageResponse>{view.prompt}</MessageResponse>
@@ -807,13 +817,13 @@ function AssistantMessageBody({
                           ))}
                           {item.entries.length === 0 && isRunning ? (
                             <p className="pl-1 text-[13px] text-muted-foreground/75 leading-5">
-                              Working…
+                              {t("common.working")}
                             </p>
                           ) : null}
                           {view?.report ? (
                             <section className="space-y-1 border-border/50 border-t pt-2">
                               <span className="block pl-1 font-medium text-[11px] text-muted-foreground/50 tracking-wide">
-                                Result
+                                {t("messageList.result")}
                               </span>
                               <div className="pl-1 text-sm">
                                 <CitationAwareMessageResponse
@@ -1101,12 +1111,12 @@ function resolveSelectedAssistantVersionForUser(input: {
   return null;
 }
 
-async function copyMessageText(text: string) {
+async function copyMessageText(text: string, t: Translate) {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success("Message copied.");
+    toast.success(t("messageList.toastCopied"));
   } catch {
-    toast.error("Couldn't copy the message.");
+    toast.error(t("messageList.toastCopyFailed"));
   }
 }
 
@@ -1157,6 +1167,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
   sourceById,
   workspaceId,
 }: MessageGroupItemProps) {
+  const t = useTranslations("dashboardChatCanvas");
   const isAssistant = group.role === "assistant";
   const versionEntries = resolveVersionEntries({
     group,
@@ -1221,7 +1232,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
           });
           const messageText =
             renderState.error && !version.isCancelled
-              ? (sanitizeClientErrorMessage(renderState.error.message) ??
+              ? (sanitizeClientErrorMessage(renderState.error.message, t) ??
                 renderState.error.message)
               : renderState.text;
           const referencedSources = !isAssistant
@@ -1306,9 +1317,10 @@ const MessageGroupItem = memo(function MessageGroupItem({
                           message={
                             sanitizeClientErrorMessage(
                               renderState.error.message,
-                            ) ?? "Model error"
+                              t,
+                            ) ?? t("messageList.modelError")
                           }
-                          title="Message failed"
+                          title={t("messageList.messageFailed")}
                         />
                       ) : null}
                     </div>
@@ -1327,10 +1339,10 @@ const MessageGroupItem = memo(function MessageGroupItem({
                   <MessageActions>
                     <MessageAction
                       className="text-muted-foreground hover:text-foreground"
-                      label="Copy"
-                      onClick={() => void copyMessageText(messageText)}
+                      label={t("messageList.copy")}
+                      onClick={() => void copyMessageText(messageText, t)}
                       size="icon-sm"
-                      tooltip="Copy"
+                      tooltip={t("messageList.copy")}
                       type="button"
                       variant="ghost"
                     >
@@ -1343,7 +1355,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     !isStreaming ? (
                       <MessageAction
                         className="text-muted-foreground hover:text-foreground"
-                        label="Edit prompt"
+                        label={t("messageList.editPrompt")}
                         disabled={!onRestartFromMessage}
                         onClick={() => {
                           onRestartFromMessage?.({
@@ -1356,7 +1368,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                           });
                         }}
                         size="icon-sm"
-                        tooltip="Edit and restart"
+                        tooltip={t("messageList.editAndRestart")}
                         type="button"
                         variant="ghost"
                       >
@@ -1370,7 +1382,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     !isStreaming ? (
                       <MessageAction
                         className="text-muted-foreground hover:text-foreground"
-                        label="Refresh"
+                        label={t("messageList.refresh")}
                         disabled={!onRefreshLatest}
                         onClick={() => {
                           onRefreshLatest?.({
@@ -1380,7 +1392,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                           });
                         }}
                         size="icon-sm"
-                        tooltip="Refresh"
+                        tooltip={t("messageList.refresh")}
                         type="button"
                         variant="ghost"
                       >
@@ -1425,6 +1437,7 @@ export function MessageList({
   onRefreshLatest,
   workspaceId,
 }: MessageListProps) {
+  const t = useTranslations("dashboardChatCanvas");
   const sourceById = useMemo(
     () => new Map(allSources.map((source) => [source.id, source])),
     [allSources],
@@ -1503,15 +1516,14 @@ export function MessageList({
                 {isLoadingOlderMessages ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : null}
-                Load earlier messages
+                {t("messageList.loadEarlier")}
               </Button>
             </div>
           ) : null}
           {collapsedHistoryCount > 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed bg-muted/20 px-4 py-3 text-center text-xs text-muted-foreground">
               <span>
-                {collapsedHistoryCount} older message groups hidden to keep this
-                long thread responsive.
+                {t("messageList.olderHidden", { count: collapsedHistoryCount })}
               </span>
               <Button
                 onClick={() => setShowCollapsedHistory(true)}
@@ -1519,7 +1531,7 @@ export function MessageList({
                 type="button"
                 variant="outline"
               >
-                Show hidden history
+                {t("messageList.showHiddenHistory")}
               </Button>
             </div>
           ) : null}

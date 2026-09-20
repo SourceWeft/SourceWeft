@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import { apiBaseUrl, contentClient } from "../../../../../../lib/sdk";
 import { expandSelectedSources, type SourceItem } from "../../source-types";
@@ -147,6 +148,7 @@ export function useSources(input: {
     addSourceDialog,
   } = input;
 
+  const t = useTranslations("dashboardSourcesHub");
   const [sources, setSources] = useState<SourceItem[]>(initialSources);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -474,7 +476,7 @@ export function useSources(input: {
         return;
       }
 
-      const message = getErrorMessage(error, "Failed to load sources.");
+      const message = getErrorMessage(error, t("toasts.sources.loadFailed"));
       setLoadingError(message);
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
@@ -490,6 +492,7 @@ export function useSources(input: {
     selectPendingAutoSources,
     selectNewManualConnectorSources,
     workspaceId,
+    t,
   ]);
 
   const handleDirectoryExpandedChange = useCallback(
@@ -688,7 +691,7 @@ export function useSources(input: {
         );
         setPendingSourceIds((prev) => prev.filter((id) => !finishedIds.has(id)));
         if (mapped.some((source) => source.status === "Failed")) {
-          toast.error("Source processing failed.");
+          toast.error(t("toasts.sources.processingFailed"));
         }
       } catch {
         // Keep pending IDs so the next poll retries without reloading the list.
@@ -706,6 +709,7 @@ export function useSources(input: {
     pendingSourceIds,
     mergeIncrementalSources,
     currentWorkspaceIdRef,
+    t,
   ]);
 
   useEffect(() => {
@@ -790,17 +794,17 @@ export function useSources(input: {
       setRowBusy(id, true);
       try {
         await contentClient.updateSource(workspaceId, id, { title });
-        toast.success("Source renamed.");
+        toast.success(t("toasts.sources.renamed"));
         setEditingSourceId(null);
         setEditingTitle("");
         await refreshSources();
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to rename source."));
+        toast.error(getErrorMessage(error, t("toasts.sources.renameFailed")));
       } finally {
         setRowBusy(id, false);
       }
     },
-    [workspaceId, editingTitle, refreshSources],
+    [workspaceId, editingTitle, refreshSources, t],
   );
 
   const handleRequestDeleteSource = useCallback((source: SourceItem) => {
@@ -814,7 +818,7 @@ export function useSources(input: {
       setRowBusy(source.id, true);
       try {
         await contentClient.deleteSource(workspaceId, source.id);
-        toast.success("Source deleted.");
+        toast.success(t("toasts.sources.deleted"));
         const deletedNode = findNodePath(fullSourceTree, source.id)?.at(-1);
         const deletedIds = new Set(
           deletedNode ? collectTreeIds(deletedNode) : [source.id],
@@ -823,7 +827,7 @@ export function useSources(input: {
         setDeleteSource(null);
         await refreshSources();
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to delete source."));
+        toast.error(getErrorMessage(error, t("toasts.sources.deleteFailed")));
       } finally {
         setRowBusy(source.id, false);
       }
@@ -834,6 +838,7 @@ export function useSources(input: {
       refreshSources,
       onSelectionChange,
       selectedIds,
+      t,
     ],
   );
 
@@ -862,13 +867,13 @@ export function useSources(input: {
       onSelectionChange(selectedIds.filter((id) => !deletedIds.has(id)));
       setDeleteSelectedSourcesOpen(false);
       toast.success(
-        `Deleted ${result.deletedCount} selected source${
-          result.deletedCount === 1 ? "" : "s"
-        }.`,
+        t("toasts.sources.selectedDeleted", { count: result.deletedCount }),
       );
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to delete selected sources."));
+      toast.error(
+        getErrorMessage(error, t("toasts.sources.selectedDeleteFailed")),
+      );
     } finally {
       setIsDeletingSelectedSources(false);
       setRowBusyById((prev) => {
@@ -886,6 +891,7 @@ export function useSources(input: {
     selectedIds,
     selectedSourceIdsForBulkDelete,
     workspaceId,
+    t,
   ]);
 
   const handleRetrySource = useCallback(
@@ -898,15 +904,15 @@ export function useSources(input: {
         setPendingSourceIds((prev) =>
           prev.includes(source.id) ? prev : [...prev, source.id],
         );
-        toast.success("Source retry queued.");
+        toast.success(t("toasts.sources.retryQueued"));
         await refreshSources();
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to retry source."));
+        toast.error(getErrorMessage(error, t("toasts.sources.retryFailed")));
       } finally {
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId, refreshSources],
+    [workspaceId, refreshSources, t],
   );
 
   const handleReindexSource = useCallback(
@@ -919,15 +925,15 @@ export function useSources(input: {
         setPendingSourceIds((prev) =>
           prev.includes(source.id) ? prev : [...prev, source.id],
         );
-        toast.success("Re-index queued.");
+        toast.success(t("toasts.sources.reindexQueued"));
         await refreshSources();
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to re-index source."));
+        toast.error(getErrorMessage(error, t("toasts.sources.reindexFailed")));
       } finally {
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId, refreshSources],
+    [workspaceId, refreshSources, t],
   );
 
   const handlePreviewSource = useCallback((source: SourceItem) => {
@@ -947,10 +953,12 @@ export function useSources(input: {
         const detail = await contentClient.getSource(workspaceId, source.id);
         setReadmeContent(detail.source.contentText);
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to load README content."));
+        toast.error(
+          getErrorMessage(error, t("toasts.sources.readmeLoadFailed")),
+        );
       }
     },
-    [workspaceId],
+    [workspaceId, t],
   );
 
   const handleOpenCreateDirectory = useCallback(
@@ -967,7 +975,7 @@ export function useSources(input: {
     if (!workspaceId) return;
     const title = directoryTitle.trim();
     if (!title) {
-      toast.error("Folder name is required.");
+      toast.error(t("toasts.sources.folderNameRequired"));
       return;
     }
 
@@ -988,13 +996,13 @@ export function useSources(input: {
         );
       }
       selectNewSourceIds([created.source.id]);
-      toast.success("Folder created.");
+      toast.success(t("toasts.sources.folderCreated"));
       setIsCreateDirectoryOpen(false);
       setDirectoryTitle("");
       setDirectoryContext("");
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to create folder."));
+      toast.error(getErrorMessage(error, t("toasts.sources.folderCreateFailed")));
     } finally {
       setIsSubmitting(false);
     }
@@ -1005,6 +1013,7 @@ export function useSources(input: {
     directoryParentSourceId,
     refreshSources,
     selectNewSourceIds,
+    t,
   ]);
 
   const handleUpdateReadme = useCallback(async () => {
@@ -1016,17 +1025,17 @@ export function useSources(input: {
       await contentClient.updateSource(workspaceId, readmeSource.id, {
         contentText: readmeContent,
       });
-      toast.success("README updated.");
+      toast.success(t("toasts.sources.readmeUpdated"));
       setReadmeSource(null);
       setReadmeContent("");
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to update README."));
+      toast.error(getErrorMessage(error, t("toasts.sources.readmeUpdateFailed")));
     } finally {
       setIsSubmitting(false);
       setRowBusy(readmeSource.id, false);
     }
-  }, [workspaceId, readmeSource, readmeContent, refreshSources]);
+  }, [workspaceId, readmeSource, readmeContent, refreshSources, t]);
 
   const handleOpenMoveDialog = useCallback((source: SourceItem) => {
     setMoveSource(source);
@@ -1041,22 +1050,22 @@ export function useSources(input: {
       await contentClient.updateSource(workspaceId, moveSource.id, {
         parentSourceId: moveParentSourceId,
       });
-      toast.success("Source moved.");
+      toast.success(t("toasts.sources.moved"));
       setMoveSource(null);
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to move source."));
+      toast.error(getErrorMessage(error, t("toasts.sources.moveFailed")));
     } finally {
       setIsSubmitting(false);
       setRowBusy(moveSource.id, false);
     }
-  }, [workspaceId, moveSource, moveParentSourceId, refreshSources]);
+  }, [workspaceId, moveSource, moveParentSourceId, refreshSources, t]);
 
   const handleDownloadSource = useCallback(
     async (source: SourceItem) => {
       if (!workspaceId) return;
       if (!source.storageKey) {
-        toast.error("This source has no original uploaded file.");
+        toast.error(t("toasts.sources.noOriginalFile"));
         return;
       }
 
@@ -1067,18 +1076,18 @@ export function useSources(input: {
       link.click();
       link.remove();
     },
-    [workspaceId],
+    [workspaceId, t],
   );
 
   const handleCreateTextSource = useCallback(async () => {
     if (!workspaceId) {
-      toast.error("No workspace selected yet.");
+      toast.error(t("toasts.sources.noWorkspace"));
       return;
     }
 
     const contentText = addSourceDialog.textContent.trim();
     if (!contentText) {
-      toast.error("Source content cannot be empty.");
+      toast.error(t("toasts.sources.contentEmpty"));
       return;
     }
 
@@ -1096,25 +1105,25 @@ export function useSources(input: {
       );
       selectNewSourceIds([created.source.id]);
 
-      toast.success("Source added and indexing started.");
+      toast.success(t("toasts.sources.added"));
       addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to create source."));
+      toast.error(getErrorMessage(error, t("toasts.sources.createFailed")));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds]);
+  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds, t]);
 
   const handleCreateUrlSource = useCallback(async () => {
     if (!workspaceId) {
-      toast.error("No workspace selected yet.");
+      toast.error(t("toasts.sources.noWorkspace"));
       return;
     }
 
     const url = addSourceDialog.urlValue.trim();
     if (!url) {
-      toast.error("URL cannot be empty.");
+      toast.error(t("toasts.sources.urlEmpty"));
       return;
     }
 
@@ -1131,23 +1140,23 @@ export function useSources(input: {
       );
       selectNewSourceIds([created.source.id]);
 
-      toast.success("URL source added. Processing started.");
+      toast.success(t("toasts.sources.urlAdded"));
       addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to add URL source."));
+      toast.error(getErrorMessage(error, t("toasts.sources.urlAddFailed")));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds]);
+  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds, t]);
 
   const handleUploadFiles = useCallback(async () => {
     if (!workspaceId) {
-      toast.error("No workspace selected yet.");
+      toast.error(t("toasts.sources.noWorkspace"));
       return;
     }
     if (addSourceDialog.files.length === 0) {
-      toast.error("Select files to upload first.");
+      toast.error(t("toasts.sources.selectFilesFirst"));
       return;
     }
 
@@ -1179,18 +1188,16 @@ export function useSources(input: {
       }
 
       toast.success(
-        createdSourceIds.length === 1
-          ? "1 source uploaded. Processing started."
-          : `${createdSourceIds.length} sources uploaded. Processing started.`,
+        t("toasts.sources.uploaded", { count: createdSourceIds.length }),
       );
       addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to upload files."));
+      toast.error(getErrorMessage(error, t("toasts.sources.uploadFailed")));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds]);
+  }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds, t]);
 
   return {
     sources,

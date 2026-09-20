@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const respondToConfirmation = vi.fn();
 
@@ -80,14 +86,16 @@ async function render(item: Item, blocked = false) {
   root = createdRoot;
   await act(async () => {
     createdRoot.render(
-      createElement(
-        LocalOperationContext.Provider,
-        { value: { blocked, message: blocked ? "Computer offline" : null } },
-        createElement(ToolInterventionBar, {
-          items: [item],
-          workspaceId: "workspace-1",
-        }),
-      ),
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(
+          LocalOperationContext.Provider,
+          { value: { blocked, message: blocked ? "Computer offline" : null } },
+          createElement(ToolInterventionBar, {
+            items: [item],
+            workspaceId: "workspace-1",
+          }),
+        )}
+      </NextIntlClientProvider>,
     );
   });
   return container;

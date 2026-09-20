@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -415,19 +416,19 @@ export function MobileLoginView({ path }: { path: string }) {
 
           <p className="mt-6 px-5 text-center text-xs leading-5 text-muted-foreground [@media(max-height:760px)]:mt-3 [@media(max-height:680px)]:px-2 [@media(max-height:680px)]:leading-4">
             By continuing, you agree to SourceWeft&apos;s{" "}
-            <a
+            <Link
               className="text-foreground underline underline-offset-4"
               href="/terms"
             >
               Terms
-            </a>{" "}
+            </Link>{" "}
             and acknowledge our{" "}
-            <a
+            <Link
               className="text-foreground underline underline-offset-4"
               href="/privacy"
             >
               Privacy Policy
-            </a>
+            </Link>
             .
           </p>
         </div>

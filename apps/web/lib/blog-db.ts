@@ -3,6 +3,8 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { Pool } from "pg";
+import { addLocalePrefix } from "@sourceweft/i18n/resolve";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@sourceweft/i18n/locales";
 import { SITE_URL } from "../app/seo";
 
 export const BLOG_LOCALES = [
@@ -89,8 +91,6 @@ const globalForBlogPool = globalThis as typeof globalThis & {
   sourceweftBlogPool?: Pool;
 };
 
-const PUBLIC_BLOG_LOCALE: BlogLocale = "en";
-
 function getPool() {
   if (!globalForBlogPool.sourceweftBlogPool) {
     globalForBlogPool.sourceweftBlogPool = new Pool({
@@ -116,12 +116,12 @@ export function absoluteBlogPostUrl(slug: string) {
 const BLOG_CACHE_REVALIDATE_SECONDS = 300;
 
 const cachedBlogPostRows = unstable_cache(
-  async () => (await queryPublishedBlogPostRows()).rows,
+  async (locale: string) => (await queryPublishedBlogPostRows(locale)).rows,
   ["blog-published-posts"],
   { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
 );
 
-async function queryPublishedBlogPostRows() {
+async function queryPublishedBlogPostRows(locale: string) {
   return getPool().query<BlogRow>(
     `
       select
@@ -171,21 +171,36 @@ async function queryPublishedBlogPostRows() {
         p.published_at desc nulls last,
         p.synced_at desc
     `,
-    [PUBLIC_BLOG_LOCALE],
+    [locale],
   );
 }
 
-export async function listPublishedBlogPosts() {
-  return (await cachedBlogPostRows()).map(mapSummaryRow);
+// Per-article fallback: show the requested-locale row for each article group, and
+// for groups with no translation in that locale, fall back to the default-locale
+// row so the listing is never sparser than English (§17.3 B2).
+export async function listPublishedBlogPosts(
+  browsingLocale: Locale = DEFAULT_BLOG_LOCALE,
+) {
+  const requested = await cachedBlogPostRows(browsingLocale);
+  if (browsingLocale === DEFAULT_BLOG_LOCALE) {
+    return requested.map((row) => mapSummaryRow(row, browsingLocale));
+  }
+  const seen = new Set(requested.map((row) => row.article_id));
+  const fallback = (await cachedBlogPostRows(DEFAULT_BLOG_LOCALE)).filter(
+    (row) => !seen.has(row.article_id),
+  );
+  return [...requested, ...fallback]
+    .sort(compareBlogRows)
+    .map((row) => mapSummaryRow(row, browsingLocale));
 }
 
 const cachedBlogTagRows = unstable_cache(
-  async () => (await queryPublishedBlogTagRows()).rows,
+  async (locales: string[]) => (await queryPublishedBlogTagRows(locales)).rows,
   ["blog-published-tags"],
   { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
 );
 
-async function queryPublishedBlogTagRows() {
+async function queryPublishedBlogTagRows(locales: string[]) {
   return getPool().query<{ tag: string }>(
     `
       select distinct tag.value as tag
@@ -193,16 +208,19 @@ async function queryPublishedBlogTagRows() {
       cross join lateral unnest(p.tags) as tag(value)
       where p.sync_enabled = true
         and p.status = 'published'
-        and p.locale = $1
+        and p.locale = any($1::text[])
         and tag.value <> ''
       order by tag.value asc
     `,
-    [PUBLIC_BLOG_LOCALE],
+    [locales],
   );
 }
 
-export async function listPublishedBlogTags() {
-  return (await cachedBlogTagRows()).map((row) => row.tag);
+export async function listPublishedBlogTags(
+  browsingLocale: Locale = DEFAULT_BLOG_LOCALE,
+) {
+  const locales = [...new Set([browsingLocale, DEFAULT_BLOG_LOCALE])];
+  return (await cachedBlogTagRows(locales)).map((row) => row.tag);
 }
 
 const cachedBlogPostRow = unstable_cache(
@@ -246,25 +264,60 @@ async function queryPublishedBlogPostRow(slug: string) {
       left join blog_assets og on og.id = p.og_image_asset_id
       where p.sync_enabled = true
         and p.status = 'published'
-        and p.locale = $1
-        and p.slug = $2
+        and p.slug = $1
       limit 1
     `,
-    [PUBLIC_BLOG_LOCALE, slug],
+    [slug],
   );
 }
 
-// `cache` dedupes the generateMetadata + page render pair within one request.
-export const getPublishedBlogPost = cache(async (slug: string) => {
-  const row = await cachedBlogPostRow(slug);
-  return row
-    ? ({
-        ...mapSummaryRow(row),
-        contentHtml: row.content_html ?? "",
-        contentText: row.content_text ?? "",
-      } satisfies BlogPostDetail)
-    : null;
-});
+// A slug identifies one row (one article in one locale), so the lookup is by
+// slug alone; the URL's locale segment only drives the surrounding chrome. The
+// post renders in its own stored language, and `generateMetadata` points the
+// canonical at that language's URL (§17.3 B3/B4).
+export const getPublishedBlogPost = cache(
+  async (slug: string, browsingLocale: Locale = DEFAULT_BLOG_LOCALE) => {
+    const row = await cachedBlogPostRow(slug);
+    return row
+      ? ({
+          ...mapSummaryRow(row, browsingLocale),
+          contentHtml: row.content_html ?? "",
+          contentText: row.content_text ?? "",
+        } satisfies BlogPostDetail)
+      : null;
+  },
+);
+
+type BlogSiblingRow = { locale: string; slug: string };
+
+const cachedBlogArticleSiblings = unstable_cache(
+  async (articleId: string) =>
+    (
+      await getPool().query<BlogSiblingRow>(
+        `
+          select locale, slug
+          from blog_posts
+          where sync_enabled = true
+            and status = 'published'
+            and article_id = $1
+        `,
+        [articleId],
+      )
+    ).rows,
+  ["blog-article-siblings"],
+  { revalidate: BLOG_CACHE_REVALIDATE_SECONDS },
+);
+
+// The published locale variants of one article, for hreflang: only real
+// translations are linked, never a locale the article was never translated into
+// (§17.3 B4). Non-supported content locales (e.g. ja) are dropped since they
+// have no route.
+export async function getBlogArticleSiblings(articleId: string) {
+  const rows = await cachedBlogArticleSiblings(articleId);
+  return rows
+    .filter((row): row is { locale: Locale; slug: string } => isLocale(row.locale))
+    .map((row) => ({ locale: row.locale, slug: row.slug }));
+}
 
 type BlogSitemapRow = {
   article_id: string;
@@ -287,25 +340,29 @@ async function queryBlogSitemapRows() {
       from blog_posts
       where sync_enabled = true
         and status = 'published'
-        and locale = $1
       order by published_at desc nulls last
     `,
-    [PUBLIC_BLOG_LOCALE],
   );
 }
 
+// Every published row across supported locales, each at its own locale's URL,
+// so the sitemap lists real translations (not a cartesian product) with a
+// prefix-free default-locale URL (§17.3 B5). Content locales without a route
+// (e.g. ja) are dropped.
 export async function listPublishedBlogSitemapEntries() {
-  return (await cachedBlogSitemapRows()).map(
-    (row) =>
-      ({
-        articleId: row.article_id,
-        locale: PUBLIC_BLOG_LOCALE,
-        slug: row.slug,
-        urlPath: blogPostPath(row.slug),
-        updatedAt: normalizeDate(row.updated_at),
-        publishedAt: normalizeDate(row.published_at),
-      }) satisfies BlogSitemapEntry,
-  );
+  return (await cachedBlogSitemapRows())
+    .filter((row) => isLocale(row.locale))
+    .map(
+      (row) =>
+        ({
+          articleId: row.article_id,
+          locale: row.locale as BlogLocale,
+          slug: row.slug,
+          urlPath: addLocalePrefix(blogPostPath(row.slug), row.locale as Locale),
+          updatedAt: normalizeDate(row.updated_at),
+          publishedAt: normalizeDate(row.published_at),
+        }) satisfies BlogSitemapEntry,
+    );
 }
 
 const cachedRelatedBlogPostRows = unstable_cache(
@@ -327,7 +384,10 @@ export async function listRelatedBlogPosts(input: {
     input.tags,
     input.limit ?? 3,
   );
-  return rows.map(mapSummaryRow);
+  const browsingLocale: Locale = isLocale(input.locale)
+    ? input.locale
+    : DEFAULT_BLOG_LOCALE;
+  return rows.map((row) => mapSummaryRow(row, browsingLocale));
 }
 
 async function queryRelatedBlogPostRows(input: {
@@ -384,13 +444,28 @@ async function queryRelatedBlogPostRows(input: {
   );
 }
 
-function mapSummaryRow(row: BlogRow): BlogPostSummary {
+// Fallback / default content locale; also the locale whose URLs carry no prefix.
+const DEFAULT_BLOG_LOCALE: Locale = DEFAULT_LOCALE;
+
+function compareBlogRows(a: BlogRow, b: BlogRow): number {
+  if (a.featured !== b.featured) {
+    return a.featured ? -1 : 1;
+  }
+  const aTime = a.published_at ? new Date(a.published_at).getTime() : 0;
+  const bTime = b.published_at ? new Date(b.published_at).getTime() : 0;
+  return bTime - aTime;
+}
+
+// `urlPath` is prefixed with the *browsing* locale (the `[locale]` segment), so
+// a card always keeps the reader in their chosen language even when the post
+// itself is a default-locale fallback (§17.3 B2).
+function mapSummaryRow(row: BlogRow, browsingLocale: Locale): BlogPostSummary {
   return {
     id: row.id,
     articleId: row.article_id,
-    locale: PUBLIC_BLOG_LOCALE,
+    locale: (row.locale as BlogLocale) ?? DEFAULT_BLOG_LOCALE,
     slug: row.slug,
-    urlPath: blogPostPath(row.slug),
+    urlPath: addLocalePrefix(blogPostPath(row.slug), browsingLocale),
     title: row.title,
     excerpt: row.excerpt,
     seoTitle: row.seo_title,

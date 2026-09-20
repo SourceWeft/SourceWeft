@@ -41,6 +41,12 @@ export type TemplateMailSendInput = {
   templateId: string;
   variables?: Record<string, unknown>;
   messageType: MailMessageType;
+  /**
+   * Locale used to pick a `<id>.<locale>.html` template variant (design §16.7).
+   * Falls back to the English `<id>.html` when omitted or when no variant
+   * exists, so English stays the default.
+   */
+  locale?: string;
 };
 
 export interface MailProvider {

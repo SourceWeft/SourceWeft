@@ -2,6 +2,7 @@
 
 import type { ComponentProps, ReactNode } from "react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -59,6 +60,7 @@ export function ChatHeader({
   presenceSlot,
   ...models
 }: Props) {
+  const t = useTranslations("dashboardChatCanvas");
   const { ref, width } = useElementSize<HTMLDivElement>();
   const {
     conversationsOpen,
@@ -71,19 +73,19 @@ export function ChatHeader({
   const hubOpen = isPersistentLayout && sourcesVisible;
   const hubLabel =
     hub?.desktop.mode === "detached"
-      ? "Show Hub window"
+      ? t("header.showHubWindow")
       : isPersistentLayout
         ? hubOpen
-          ? "Hide sources"
-          : "Show sources"
-        : "Open Hub";
+          ? t("header.hideSources")
+          : t("header.showSources")
+        : t("header.openHub");
   const conversationLabel = canDockConversations
     ? conversationsOpen
-      ? "Collapse sidebar"
-      : "Expand sidebar"
+      ? t("header.collapseSidebar")
+      : t("header.expandSidebar")
     : conversationsOpen
-      ? "Hide sidebar"
-      : "Show sidebar";
+      ? t("header.hideSidebar")
+      : t("header.showSidebar");
   return (
     <header
       ref={ref}

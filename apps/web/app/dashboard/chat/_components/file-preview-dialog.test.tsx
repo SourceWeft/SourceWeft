@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 vi.mock("@sourceweft/preview/react", () => ({
   Preview: ({ source }: { source: { name: string; text?: string } }) =>
     createElement(
@@ -12,6 +13,17 @@ vi.mock("@sourceweft/preview/react", () => ({
     ),
 }));
 import { FilePreviewDialog } from "./file-preview-dialog";
+import messages from "../../../../messages/en.json";
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -28,13 +40,15 @@ test("file actions stay in the dialog header, including when preview fails", asy
   const download = vi.fn();
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, {
-        open: true,
-        onOpenChange: () => {},
-        path: "/local/report.pdf",
-        error: "Could not load file",
-        onDownload: download,
-      }),
+      withIntl(
+        createElement(FilePreviewDialog, {
+          open: true,
+          onOpenChange: () => {},
+          path: "/local/report.pdf",
+          error: "Could not load file",
+          onDownload: download,
+        }),
+      ),
     ),
   );
   const dialog = document.querySelector('[role="dialog"]');
@@ -48,12 +62,14 @@ test("file actions stay in the dialog header, including when preview fails", asy
 test("text preview forwards its source to the shared preview inside the application dialog", async () => {
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, {
-        open: true,
-        onOpenChange: () => {},
-        path: "/local/report.txt",
-        contentText: "first line\nsecond line",
-      }),
+      withIntl(
+        createElement(FilePreviewDialog, {
+          open: true,
+          onOpenChange: () => {},
+          path: "/local/report.txt",
+          contentText: "first line\nsecond line",
+        }),
+      ),
     ),
   );
   const dialog = document.querySelector('[role="dialog"]');
@@ -74,12 +90,14 @@ test("text preview forwards its source to the shared preview inside the applicat
 test("markdown uses the shared preview while empty text is explicit", async () => {
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, {
-        open: true,
-        onOpenChange: () => {},
-        path: "/local/readme.md",
-        contentText: "# Local document\n\nPreview this text.",
-      }),
+      withIntl(
+        createElement(FilePreviewDialog, {
+          open: true,
+          onOpenChange: () => {},
+          path: "/local/readme.md",
+          contentText: "# Local document\n\nPreview this text.",
+        }),
+      ),
     ),
   );
   const dialog = document.querySelector('[role="dialog"]');
@@ -88,12 +106,14 @@ test("markdown uses the shared preview while empty text is explicit", async () =
   assert.match(dialog.textContent ?? "", /Local document/);
   await act(async () =>
     root.render(
-      createElement(FilePreviewDialog, {
-        open: true,
-        onOpenChange: () => {},
-        path: "/local/empty.txt",
-        contentText: "",
-      }),
+      withIntl(
+        createElement(FilePreviewDialog, {
+          open: true,
+          onOpenChange: () => {},
+          path: "/local/empty.txt",
+          contentText: "",
+        }),
+      ),
     ),
   );
   assert.match(

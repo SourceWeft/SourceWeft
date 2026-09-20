@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, File, ImageIcon, Presentation } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { artifactRenderHost } from "@sourceweft/agent-tool-registry/ui";
 import { ArtifactCard } from "@sourceweft/ui-web/components/artifact-block/artifact-card";
 import type {
@@ -44,6 +45,7 @@ export function ArtifactOutputCard({
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   workspaceId?: string | null;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const host = artifactRenderHost();
   const parentSnapshot = artifactStatuses?.get(block.artifactId);
   // This card only ever renders for a COMMITTED artifact_output block, so the
@@ -102,11 +104,13 @@ export function ArtifactOutputCard({
   if (effectiveError || (snapshot && snapshot.status !== "ready")) {
     return (
       <div className="max-w-xl rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground/80">Artifact unavailable</p>
+        <p className="font-medium text-foreground/80">
+          {t("artifact.unavailable")}
+        </p>
         <p className="mt-0.5 text-xs">
           {effectiveError ??
             snapshot?.errorMessage ??
-            "The published artifact is no longer available."}
+            t("artifact.noLongerAvailable")}
         </p>
       </div>
     );
@@ -118,12 +122,12 @@ export function ArtifactOutputCard({
         action={{
           disabled: true,
           icon: <ExternalLink className="size-3.5" />,
-          label: "Open",
+          label: t("artifact.open"),
           onClick: () => {},
         }}
-        badges={[{ label: "Published artifact" }]}
+        badges={[{ label: t("artifact.publishedArtifact") }]}
         fallbackIcon={<File className="size-5 text-muted-foreground" />}
-        title="Loading published artifact…"
+        title={t("artifact.loadingPublished")}
       />
     );
   }
@@ -156,21 +160,21 @@ export function ArtifactOutputCard({
       action={{
         disabled: !canPreview,
         icon: <ExternalLink className="size-3.5" />,
-        label: "Open",
+        label: t("artifact.open"),
         onClick: handlePreview,
-        title: "Open artifact",
+        title: t("artifact.openArtifact"),
       }}
       badges={[
         { label: effectiveSnapshot.artifactType.replaceAll("_", " ") },
         ...(block.producer.kind === "subagent"
-          ? [{ label: block.producer.subagentType ?? "Sub-agent" }]
+          ? [{ label: block.producer.subagentType ?? t("common.subagent") }]
           : []),
       ]}
       description={effectiveSnapshot.promptText}
       fallbackIcon={artifactIcon(effectiveSnapshot.artifactType)}
       onActivate={canPreview ? handlePreview : undefined}
       thumbnailUrl={previewImageUrl}
-      title={effectiveSnapshot.title ?? "Published artifact"}
+      title={effectiveSnapshot.title ?? t("artifact.publishedArtifact")}
     />
   );
 }

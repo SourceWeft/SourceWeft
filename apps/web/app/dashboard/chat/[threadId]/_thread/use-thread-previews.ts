@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type {
   ArtifactPreviewRecord,
   CitationRecord,
@@ -26,6 +27,7 @@ export function useThreadPreviews({
   toggleSourcesVisible: () => void;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardChat");
   const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(
     null,
   );
@@ -113,7 +115,7 @@ export function useThreadPreviews({
   const handleWorkfilePreview = useCallback(
     async (path: string) => {
       if (!workspaceId || !threadId) {
-        toast.error("No thread workspace selected.");
+        toast.error(t("toasts.noThreadWorkspace"));
         return;
       }
 
@@ -128,11 +130,13 @@ export function useThreadPreviews({
         setPreviewWorkfile(result.file);
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Failed to load workfile.",
+          error instanceof Error
+            ? error.message
+            : t("toasts.workfileLoadFailed"),
         );
       }
     },
-    [threadId, workspaceId],
+    [threadId, workspaceId, t],
   );
 
   useEffect(() => {

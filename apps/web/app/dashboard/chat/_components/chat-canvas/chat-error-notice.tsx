@@ -1,6 +1,9 @@
 import { AlertTriangle } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export type ChatErrorNoticeProps = {
   /** Optional bold heading, e.g. "Message failed". */
@@ -17,7 +20,11 @@ export type ChatErrorNoticeProps = {
   className?: string;
 };
 
-export function formatChatErrorMessage(message: string, code?: string | null) {
+export function formatChatErrorMessage(
+  message: string,
+  code: string | null | undefined,
+  t: Translate,
+) {
   const codePrefix = code ? `${code}:` : null;
   const withoutCode =
     codePrefix && message.startsWith(codePrefix)
@@ -25,7 +32,7 @@ export function formatChatErrorMessage(message: string, code?: string | null) {
       : message;
   return withoutCode.replace(
     /Provider returned invalid structured output(?: \(length=\d+, sha256=[a-f0-9]{64}\))?/giu,
-    "The model did not return valid structured content",
+    t("errors.invalidStructuredContent"),
   );
 }
 
@@ -42,7 +49,8 @@ export function ChatErrorNotice({
   compact = false,
   className,
 }: ChatErrorNoticeProps) {
-  const displayMessage = formatChatErrorMessage(message, code);
+  const t = useTranslations("dashboardChatCanvas");
+  const displayMessage = formatChatErrorMessage(message, code, t);
 
   return (
     <div

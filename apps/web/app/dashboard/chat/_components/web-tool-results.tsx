@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChevronDown, ChevronUp, Files, FileText, Globe } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +72,7 @@ export function WebToolResults({
   toolCalls?: ToolCallRecord[] | undefined;
   variant?: "activity-row" | "pill";
 }) {
+  const t = useTranslations("dashboardChatFiles");
   const resolvedToolCalls = toolCall ? [toolCall] : (toolCalls ?? []);
   const webToolCalls = resolvedToolCalls.filter((toolCall) =>
     isAgentToolDomain(toolCall.tool, "web"),
@@ -89,11 +91,7 @@ export function WebToolResults({
       <div className={cn("text-muted-foreground", className)}>
         <button
           aria-expanded={isOpen}
-          aria-label={
-            isOpen
-              ? "Collapse referenced web pages"
-              : "Expand referenced web pages"
-          }
+          aria-label={isOpen ? t("web.collapse") : t("web.expand")}
           className={ASSISTANT_ACTIVITY_ROW_CLASS}
           onClick={() => setIsOpen((value) => !value)}
           type="button"
@@ -103,7 +101,7 @@ export function WebToolResults({
           </span>
           <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
             <span className="truncate text-[13px] text-foreground/80">
-              Referenced web pages
+              {t("web.referencedPages")}
             </span>
             <span className="shrink-0 text-muted-foreground/60 text-xs">
               {pages.length}
@@ -133,17 +131,13 @@ export function WebToolResults({
   return (
     <div className={cn("mt-2 w-full max-w-xl text-foreground", className)}>
       <button
-        aria-label={
-          isOpen
-            ? "Collapse referenced web pages"
-            : "Expand referenced web pages"
-        }
+        aria-label={isOpen ? t("web.collapse") : t("web.expand")}
         className="inline-flex h-7 items-center gap-2 rounded-full border border-border/60 bg-card px-2.5 text-xs font-normal text-foreground shadow-xs transition-colors hover:bg-muted/50"
         onClick={() => setIsOpen((value) => !value)}
         type="button"
       >
         <Files className="size-4" />
-        <span>Referenced web pages</span>
+        <span>{t("web.referencedPages")}</span>
         <span className="text-muted-foreground">{pages.length}</span>
         {isOpen ? (
           <ChevronUp className="size-3.5" />
@@ -175,6 +169,7 @@ function WebPageList({
   pages: WebPageToolResult[];
   variant: "activity-row" | "pill";
 }) {
+  const t = useTranslations("dashboardChatFiles");
   return (
     <div
       className={cn(
@@ -200,9 +195,7 @@ function WebPageList({
                   onCitationClick?.(citation);
                   return;
                 }
-                toast.info(
-                  "No citation content is available for this page yet.",
-                );
+                toast.info(t("toasts.noCitationContent"));
               }}
               title={`${title}\n${page.url}`}
               type="button"
@@ -242,12 +235,12 @@ function WebPageList({
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  toast.info("Save to sources is not wired yet.");
+                  toast.info(t("toasts.saveNotWired"));
                 }}
                 size="xs"
                 type="button"
               >
-                Save
+                {t("actions.save")}
               </Button>
             </div>
           </div>

@@ -3,6 +3,7 @@
 import { contentClient } from "../../../lib/sdk";
 import { toast } from "sonner";
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -38,7 +39,7 @@ import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
 
 type NavItem = {
-  title: string;
+  labelKey: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   match: (pathname: string) => boolean;
@@ -46,25 +47,25 @@ type NavItem = {
 
 const navMain: NavItem[] = [
   {
-    title: "Overview",
+    labelKey: "nav.overview",
     href: "/dashboard",
     icon: LayoutDashboard,
     match: (p) => p === "/dashboard",
   },
   {
-    title: "Skills",
+    labelKey: "nav.skills",
     href: "/dashboard/skills",
     icon: SkillIcon,
     match: (p) => p.startsWith("/dashboard/skills"),
   },
   {
-    title: "MCP",
+    labelKey: "nav.mcp",
     href: "/dashboard/mcp",
     icon: McpIcon,
     match: (p) => p.startsWith("/dashboard/mcp"),
   },
   {
-    title: "Observability",
+    labelKey: "nav.observability",
     href: "/dashboard/observability",
     icon: Activity,
     match: (p) => p.startsWith("/dashboard/observability"),
@@ -101,6 +102,7 @@ function NavigationLink({
 }
 
 export function DashboardSidebar() {
+  const t = useTranslations("dashboardNav");
   const pathname = usePathname();
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
@@ -210,7 +212,7 @@ export function DashboardSidebar() {
         toast.error(
           error instanceof Error
             ? error.message
-            : "Could not load the conversation details",
+            : t("sidebar.conversationLoadError"),
         );
         return;
       }
@@ -267,17 +269,17 @@ export function DashboardSidebar() {
 
   const renderNavigation = () => (
     <nav
-      aria-label="Main navigation"
+      aria-label={t("nav.mainNavigation")}
       className="shrink-0 border-b border-sidebar-border/60 px-3 pb-2"
     >
       <div className="space-y-0">
         {navMain.slice(0, 3).map((item) => (
           <NavigationLink
-            key={item.title}
+            key={item.href}
             active={item.match(pathname)}
             href={item.href}
             icon={item.icon}
-            label={item.title}
+            label={t(item.labelKey)}
             onNavigate={() => setOpenMobile(false)}
           />
         ))}
@@ -293,13 +295,13 @@ export function DashboardSidebar() {
             )}
           >
             <MoreHorizontal className="size-4 shrink-0" />
-            More
+            {t("nav.more")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-52">
           {navMain.map((item, index) => (
             <DropdownMenuItem
-              key={item.title}
+              key={item.href}
               asChild
               className={index < 3 ? "hidden" : undefined}
             >
@@ -309,7 +311,7 @@ export function DashboardSidebar() {
                 aria-current={item.match(pathname) ? "page" : undefined}
               >
                 <item.icon className="size-4" />
-                {item.title}
+                {t(item.labelKey)}
               </Link>
             </DropdownMenuItem>
           ))}
@@ -332,7 +334,9 @@ export function DashboardSidebar() {
             className="size-8 shrink-0 text-muted-foreground"
             data-sidebar-collapse
             aria-label={
-              canDockConversations ? "Collapse sidebar" : "Hide sidebar"
+              canDockConversations
+                ? t("sidebar.collapseSidebar")
+                : t("sidebar.hideSidebar")
             }
             onClick={toggleConversations}
           >
@@ -385,7 +389,7 @@ export function DashboardSidebar() {
           variant="ghost"
           size="icon-sm"
           className="mb-3 size-9"
-          aria-label="Expand sidebar"
+          aria-label={t("sidebar.expandSidebar")}
           onClick={toggleConversations}
         >
           <PanelLeftOpen className="size-4" />
@@ -395,8 +399,8 @@ export function DashboardSidebar() {
         variant="ghost"
         size="icon-sm"
         className="size-9"
-        aria-label="New chat"
-        title="New chat"
+        aria-label={t("sidebar.newChat")}
+        title={t("sidebar.newChat")}
         onClick={handleStartNewChat}
       >
         <PenSquare className="size-4" />
@@ -405,19 +409,19 @@ export function DashboardSidebar() {
         variant="ghost"
         size="icon-sm"
         className="mb-3 size-9"
-        aria-label="Show conversations"
-        title="Show conversations"
+        aria-label={t("sidebar.showConversations")}
+        title={t("sidebar.showConversations")}
         onClick={toggleConversations}
       >
         <Search className="size-4" />
       </Button>
-      <nav aria-label="Main navigation" className="flex flex-col gap-1">
+      <nav aria-label={t("nav.mainNavigation")} className="flex flex-col gap-1">
         {navMain.map((item) => (
           <Link
             key={item.href}
             href={item.href}
-            aria-label={item.title}
-            title={item.title}
+            aria-label={t(item.labelKey)}
+            title={t(item.labelKey)}
             aria-current={item.match(pathname) ? "page" : undefined}
             className={cn(
               "flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
@@ -462,7 +466,7 @@ export function DashboardSidebar() {
           side="left"
         >
           <SheetTitle className="sr-only">
-            Navigation and conversations
+            {t("sidebar.sheetTitle")}
           </SheetTitle>
           {renderPanel()}
         </SheetContent>

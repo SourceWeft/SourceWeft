@@ -1,8 +1,11 @@
+import type { useTranslations } from "next-intl";
 import { agentQuestionItemSchema } from "@sourceweft/contracts";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { toObjectRecord } from "../../../../../lib/records";
 import { getUserQuestionOutput } from "./tool-confirmation-state";
 import type { ToolCallRecord } from "./types";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export function isUserQuestionTool(toolName: string) {
   return toolName === AGENT_TOOL_NAMES.askUser;
@@ -58,7 +61,10 @@ function readAnswerTranscript(toolCall: ToolCallRecord): string | null {
     : null;
 }
 
-export function getUserQuestionDisplay(toolCall: ToolCallRecord) {
+export function getUserQuestionDisplay(
+  toolCall: ToolCallRecord,
+  t: Translate,
+) {
   const pendingRequest = getUserQuestionOutput(toolCall.output);
   const request =
     pendingRequest?.toolCallId === toolCall.id ? pendingRequest : null;
@@ -75,19 +81,27 @@ export function getUserQuestionDisplay(toolCall: ToolCallRecord) {
       Boolean(interrupt));
   const asking = waiting || toolCall.status === "running";
   const count = questions.length;
-  const noun = count > 1 ? "questions" : "question";
+  const title = asking
+    ? count > 1
+      ? t("userQuestion.askingPlural")
+      : t("userQuestion.askingSingular")
+    : count
+      ? count > 1
+        ? t("userQuestion.askedPlural", { count })
+        : t("userQuestion.askedSingular", { count })
+      : t("userQuestion.askedFallback");
   return {
-    title: asking
-      ? `Asking ${noun}`
-      : count
-        ? `Asked ${count} ${noun}`
-        : "Asked a question",
+    title,
     questions,
     transcript:
-      transcript?.replace(/^A: \(cancelled\)$/gm, "A: No answer provided") ??
-      null,
+      transcript?.replace(
+        /^A: \(cancelled\)$/gm,
+        `A: ${t("userQuestion.noAnswerProvided")}`,
+      ) ?? null,
     waiting,
     failed,
-    error: failed ? (toolCall.error ?? "Unable to get your answer.") : null,
+    error: failed
+      ? (toolCall.error ?? t("userQuestion.errorFallback"))
+      : null,
   };
 }

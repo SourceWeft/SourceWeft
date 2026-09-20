@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
 import {
@@ -60,6 +61,7 @@ export function useThreadMessages({
   threadId,
   workspaceId,
 }: UseThreadMessagesInput) {
+  const t = useTranslations("dashboardChat");
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [failureState, setFailureState] = useState<{
     workspaceId: string | null;
@@ -398,11 +400,11 @@ export function useThreadMessages({
       });
       setOlderMessagesCursor(result.nextCursor ?? null);
     } catch {
-      toast.error("Failed to load earlier messages.");
+      toast.error(t("toasts.earlierMessagesLoadFailed"));
     } finally {
       setIsLoadingOlderMessages(false);
     }
-  }, [isLoadingOlderMessages, olderMessagesCursor, threadId, workspaceId]);
+  }, [isLoadingOlderMessages, olderMessagesCursor, threadId, workspaceId, t]);
 
   return {
     appendNewerThreadMessages,

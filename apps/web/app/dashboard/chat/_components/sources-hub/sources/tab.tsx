@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   buildSourceSelectionStateMap,
@@ -69,6 +70,7 @@ export function SourcesTab({
   userCollapsedDirectoryIds: Set<string>;
   onDirectoryExpandedChange: (sourceId: string, open: boolean) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const tree = useMemo(
     () =>
       buildSourceTreeFromIndex(
@@ -111,14 +113,14 @@ export function SourcesTab({
       <HubEmptyState
         description={
           searchQuery
-            ? "Try a different source title, folder, type, or status."
-            : "Add documents, links, notes, or folders to build the source set for this project."
+            ? t("sources.noMatchDescription")
+            : t("sources.emptyDescription")
         }
         icon={FileText}
         title={
           searchQuery
-            ? `No sources match "${searchQuery}"`
-            : "Sources will appear here."
+            ? t("sources.noMatchTitle", { query: searchQuery })
+            : t("sources.emptyTitle")
         }
       />
     );

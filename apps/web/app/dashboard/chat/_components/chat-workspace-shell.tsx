@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   Sheet,
   SheetContent,
@@ -118,6 +119,7 @@ export function HubSlot() {
 }
 
 function MobileHubDrawer() {
+  const t = useTranslations("dashboardChat");
   const context = useChatHubContext();
   const registration = context?.registration;
 
@@ -143,7 +145,7 @@ function MobileHubDrawer() {
         className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
         side="right"
       >
-        <SheetTitle className="sr-only">Hub</SheetTitle>
+        <SheetTitle className="sr-only">{t("hub.srTitle")}</SheetTitle>
         <SourcesHub
           key={`${context.desktop.contextKey}:${context.desktop.viewVersion}`}
           activeCitationIndex={registration.activeCitationIndex}

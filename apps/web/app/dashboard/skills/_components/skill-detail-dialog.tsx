@@ -15,6 +15,7 @@ import {
   Scale,
   Trash2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -42,17 +43,6 @@ type SkillCatalogDetail = Awaited<
   ReturnType<typeof contentClient.getSkillCatalogDetail>
 >;
 
-function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
-  if (sourceType === "builtin") return "Official";
-  if (sourceType === "team_custom") return "Team";
-  if (sourceType === "registry_github") return "Community";
-  return "Workspace";
-}
-
-function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
-  return visibility.charAt(0).toUpperCase() + visibility.slice(1);
-}
-
 export function SkillDetailDialog({
   item,
   onInstall,
@@ -70,6 +60,17 @@ export function SkillDetailDialog({
   pending: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardSkills");
+  const publisherLabel = (sourceType: SkillCatalogItem["sourceType"]) => {
+    if (sourceType === "builtin") return t("publisher.official");
+    if (sourceType === "team_custom") return t("publisher.team");
+    if (sourceType === "registry_github") return t("publisher.community");
+    return t("publisher.workspace");
+  };
+  const visibilityLabel = (visibility: SkillCatalogItem["visibility"]) =>
+    t.has(`visibility.${visibility}`)
+      ? t(`visibility.${visibility}`)
+      : visibility.charAt(0).toUpperCase() + visibility.slice(1);
   const [detail, setDetail] = React.useState<SkillCatalogDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -107,13 +108,13 @@ export function SkillDetailDialog({
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Failed to load skill details.",
+            : t("dialog.loadFailed"),
         );
       })
       .finally(() => {
         if (generationRef.current === generation) setLoading(false);
       });
-  }, [item, reloadKey, workspaceId]);
+  }, [item, reloadKey, workspaceId, t]);
 
   const baseItem = detail?.skill ?? item;
   const activeItem =
@@ -164,10 +165,10 @@ export function SkillDetailDialog({
               {activeItem ? <SkillAvatar item={activeItem} /> : null}
               <div className="min-w-0">
                 <DialogTitle className="truncate">
-                  {activeItem?.displayName ?? "Skill details"}
+                  {activeItem?.displayName ?? t("dialog.titleFallback")}
                 </DialogTitle>
                 <DialogDescription className="mt-1 line-clamp-2 text-xs">
-                  {activeItem?.description ?? "Loading skill details."}
+                  {activeItem?.description ?? t("dialog.descriptionLoading")}
                 </DialogDescription>
               </div>
             </div>
@@ -193,7 +194,7 @@ export function SkillDetailDialog({
                 ) : (
                   <SkillIcon className="size-4" />
                 )}
-                {installed ? "Uninstall" : "Install"}
+                {installed ? t("actions.uninstall") : t("actions.install")}
               </Button>
             ) : null}
           </div>
@@ -203,7 +204,7 @@ export function SkillDetailDialog({
           {loading ? (
             <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading skill...
+              {t("loading.skill")}
             </div>
           ) : error ? (
             <div className="flex min-h-80 flex-col items-center justify-center gap-3 px-5 text-center">
@@ -215,7 +216,7 @@ export function SkillDetailDialog({
                 variant="outline"
               >
                 <RotateCw className="size-4" />
-                Retry
+                {t("actions.retry")}
               </Button>
             </div>
           ) : activeItem ? (
@@ -236,17 +237,14 @@ export function SkillDetailDialog({
                 {activeItem.flagged ? (
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    Automated checks found review flags in this skill. See the
-                    selected version for its current review decision.
+                    {t("dialog.flaggedNotice")}
                   </section>
                 ) : null}
                 {activeItem.sourceType === "registry_github" &&
                 !activeItem.verified ? (
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    This is an unverified community skill indexed from GitHub.
-                    Review the source before installing — its instructions run
-                    in your conversations.
+                    {t("dialog.unverifiedNotice")}
                   </section>
                 ) : null}
                 <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
@@ -258,7 +256,7 @@ export function SkillDetailDialog({
                             className="px-2.5 text-xs"
                             value="overview"
                           >
-                            Overview
+                            {t("tabs.overview")}
                           </TabsTrigger>
                           <TabsTrigger className="px-2.5 text-xs" value="skill">
                             SKILL.md
@@ -285,14 +283,14 @@ export function SkillDetailDialog({
                           </MessageResponse>
                         ) : (
                           <div className="py-10 text-sm text-muted-foreground">
-                            This skill does not include SKILL.md content.
+                            {t("content.noSkillMd")}
                           </div>
                         )}
                       </TabsContent>
                     </Tabs>
                   ) : (
                     <p className="px-5 py-10 text-sm text-muted-foreground">
-                      Documentation will appear when the selected version loads.
+                      {t("dialog.docsPending")}
                     </p>
                   )}
                 </article>
@@ -302,20 +300,28 @@ export function SkillDetailDialog({
                 <div className="flex items-center gap-2">
                   <FileText className="size-4 text-muted-foreground" />
                   <h2 className="text-sm font-semibold text-foreground">
-                    Details
+                    {t("fields.heading")}
                   </h2>
                 </div>
                 <dl className="mt-3 space-y-3 text-xs">
                   {[
-                    ["Name", activeItem.name],
-                    ["Publisher", publisherLabel(activeItem.sourceType)],
-                    ["Version", activeItem.version],
-                    ["Visibility", visibilityLabel(activeItem.visibility)],
-                    [
-                      "README",
-                      activeItem.hasReadme ? "Included" : "Not included",
-                    ],
-                  ].map(([label, value]) => (
+                    { label: t("fields.name"), value: activeItem.name },
+                    {
+                      label: t("fields.publisher"),
+                      value: publisherLabel(activeItem.sourceType),
+                    },
+                    { label: t("fields.version"), value: activeItem.version },
+                    {
+                      label: t("fields.visibility"),
+                      value: visibilityLabel(activeItem.visibility),
+                    },
+                    {
+                      label: t("fields.readme"),
+                      value: activeItem.hasReadme
+                        ? t("fields.included")
+                        : t("fields.notIncluded"),
+                    },
+                  ].map(({ label, value }) => (
                     <div key={label}>
                       <dt className="text-muted-foreground">{label}</dt>
                       <dd className="mt-1 break-words font-medium text-foreground">
@@ -325,7 +331,9 @@ export function SkillDetailDialog({
                   ))}
                   {activeItem.license ? (
                     <div>
-                      <dt className="text-muted-foreground">License</dt>
+                      <dt className="text-muted-foreground">
+                        {t("fields.license")}
+                      </dt>
                       <dd className="mt-1 inline-flex items-center gap-1 break-words font-medium text-foreground">
                         <Scale className="size-3 shrink-0" />
                         {activeItem.license}
@@ -342,7 +350,7 @@ export function SkillDetailDialog({
                       target="_blank"
                     >
                       <ExternalLink className="size-3" />
-                      Source
+                      {t("actions.source")}
                     </a>
                   </div>
                 ) : null}
@@ -357,7 +365,7 @@ export function SkillDetailDialog({
                       variant="outline"
                     >
                       <AlertTriangle className="size-2.5" />
-                      Unverified
+                      {t("status.unverified")}
                     </Badge>
                   ) : null}
                   {activeItem.flagged ? (
@@ -365,7 +373,7 @@ export function SkillDetailDialog({
                       className="h-5 gap-1 border-amber-500/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
                       variant="outline"
                     >
-                      Under review
+                      {t("status.underReview")}
                     </Badge>
                   ) : null}
                   {installed && canManageInstall ? (
@@ -373,7 +381,7 @@ export function SkillDetailDialog({
                       className="h-5 px-1.5 text-[10px]"
                       variant="secondary"
                     >
-                      Installed
+                      {t("status.installed")}
                     </Badge>
                   ) : null}
                   {!canManageInstall && activeItem.sourceType === "builtin" ? (
@@ -381,7 +389,7 @@ export function SkillDetailDialog({
                       className="h-5 px-1.5 text-[10px]"
                       variant="secondary"
                     >
-                      Built-in
+                      {t("status.builtin")}
                     </Badge>
                   ) : null}
                 </div>

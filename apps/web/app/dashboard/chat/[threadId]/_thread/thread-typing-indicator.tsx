@@ -1,10 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { PresenceViewer } from "./use-thread-presence";
-
-function viewerName(viewer: PresenceViewer): string {
-  return viewer.name || (viewer.isGuest ? "A guest" : "Someone");
-}
 
 /**
  * "Alice is typing…" shown above the composer. Self is already filtered upstream
@@ -15,6 +12,9 @@ export function ThreadTypingIndicator({
 }: {
   typing: PresenceViewer[];
 }) {
+  const t = useTranslations("dashboardChat");
+  const viewerName = (viewer: PresenceViewer): string =>
+    viewer.name || (viewer.isGuest ? t("typing.guest") : t("typing.someone"));
   const [first, second] = typing;
   if (!first) {
     return null;
@@ -22,11 +22,14 @@ export function ThreadTypingIndicator({
 
   let text: string;
   if (!second) {
-    text = `${viewerName(first)} is typing…`;
+    text = t("typing.one", { name: viewerName(first) });
   } else if (typing.length === 2) {
-    text = `${viewerName(first)} and ${viewerName(second)} are typing…`;
+    text = t("typing.two", {
+      first: viewerName(first),
+      second: viewerName(second),
+    });
   } else {
-    text = "Several people are typing…";
+    text = t("typing.several");
   }
 
   return (

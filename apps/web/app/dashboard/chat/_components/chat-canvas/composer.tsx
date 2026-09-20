@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   Attachment,
   AttachmentHoverCard,
@@ -106,7 +107,7 @@ import {
   mergeChatToolsSelection,
   skillActivatedToolNames,
   skillSupportsConnector,
-  SKILL_SELECTION_LIMIT_MESSAGE,
+  MAX_SELECTED_SKILL_IDS_PER_TURN,
   thinkingEffortOptions,
   toggleSkillSelection,
 } from "./tool-selection";
@@ -328,11 +329,17 @@ type ComposerOptionDescriptor = Pick<
   "id" | "title" | "description" | "valueType" | "defaultValue" | "values"
 >;
 
-function connectorOptionSummary(enabled: boolean, connectorId: string | null) {
+type Translate = ReturnType<typeof useTranslations>;
+
+function connectorOptionSummary(
+  enabled: boolean,
+  connectorId: string | null,
+  t: Translate,
+) {
   if (!connectorId) {
-    return "Unavailable";
+    return t("composer.unavailable");
   }
-  return enabled ? "On" : "Off";
+  return enabled ? t("composer.on") : t("composer.off");
 }
 
 function normalizeSlashValue(value: string) {
@@ -372,6 +379,7 @@ function capabilityOptionValueKey(value: ComposerOptionValue | undefined) {
 function capabilityOptionValueLabel(
   option: ComposerOptionDescriptor,
   value: ComposerOptionValue | undefined,
+  t: Translate,
 ) {
   const configured = option.values.find(
     (candidate) => candidate.value === value,
@@ -380,9 +388,9 @@ function capabilityOptionValueLabel(
     return configured.label;
   }
   if (typeof value === "boolean") {
-    return value ? "On" : "Off";
+    return value ? t("composer.on") : t("composer.off");
   }
-  return value === undefined ? "Default" : String(value);
+  return value === undefined ? t("composer.default") : String(value);
 }
 
 function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
@@ -487,6 +495,7 @@ function ComposerBody({
   composerOptions?: ComposerOptionsState;
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [draftText, setDraftText] = useState(initialInput);
   const [draftSegments, setDraftSegments] = useState<PromptInputSegment[]>([]);
@@ -786,8 +795,10 @@ function ComposerBody({
         return [
           {
             children: childCommands,
-            description: `Use ${connectorType} tools`,
-            group: "Tools",
+            description: t("composer.slashUseConnectorTools", {
+              connector: connectorType,
+            }),
+            group: t("composer.slashGroup.tools"),
             id: `tool-group:${connectorType}`,
             ...(firstIconTool ? getPromptInputActionIcon(firstIconTool) : {}),
             kind: "tool" as const,
@@ -817,7 +828,7 @@ function ComposerBody({
         const tool = capabilityToolByName.get(command.action.targetId);
         capabilityCommandOptions.push({
           description: tool?.description,
-          group: command.category ?? "Tools",
+          group: command.category ?? t("composer.slashGroup.tools"),
           id: `capability-command:${command.id}`,
           ...getPromptInputActionIcon(command.action.targetId),
           kind: "tool" as const,
@@ -839,7 +850,7 @@ function ComposerBody({
       if (item.kind === "capability-skill-command") {
         return {
           description: item.skill.description,
-          group: item.command.category ?? "Skills",
+          group: item.command.category ?? t("composer.slashGroup.skills"),
           id: `capability-command:${item.command.id}`,
           ...getCapabilityCommandIcon(item.command),
           kind: "skill" as const,
@@ -856,7 +867,7 @@ function ComposerBody({
       }
       return {
         description: item.skill.description,
-        group: "Skills",
+        group: t("composer.slashGroup.skills"),
         id: `skill:${item.skill.id}`,
         kind: "skill" as const,
         label: item.skill.displayName,
@@ -878,6 +889,7 @@ function ComposerBody({
     capabilityToolByName,
     connectorTypes,
     searchEnabled,
+    t,
   ]);
   function supportsSkillSlash(
     skill: ChatSkillItem | undefined,
@@ -975,7 +987,9 @@ function ComposerBody({
         skillId: skill.id,
       });
       if (wasLimited) {
-        toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+        toast.info(
+          t("composer.skillLimit", { max: MAX_SELECTED_SKILL_IDS_PER_TURN }),
+        );
         return;
       }
       onSkillSelectionChange?.(skillIds);
@@ -1608,10 +1622,7 @@ function ComposerBody({
                   event.preventDefault();
                 }
               }}
-              placeholder={
-                placeholder ||
-                "Message your documents, links, or connected tools..."
-              }
+              placeholder={placeholder || t("composer.placeholder")}
               onValueChange={({ segments, text }) => {
                 setDraftText(text);
                 setDraftSegments(segments);
@@ -1657,7 +1668,7 @@ function ComposerBody({
                           "bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background",
                       )}
                       size="icon-sm"
-                      tooltip="Options"
+                      tooltip={t("composer.options")}
                       type="button"
                       variant={optionCount > 0 ? "secondary" : "ghost"}
                     >
@@ -1667,12 +1678,12 @@ function ComposerBody({
                           {optionCount}
                         </span>
                       ) : null}
-                      <span className="sr-only">Options</span>
+                      <span className="sr-only">{t("composer.options")}</span>
                     </PromptInputButton>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64 p-1">
                     <DropdownMenuLabel className="px-2 py-1.5 text-[11px] text-muted-foreground">
-                      Options
+                      {t("composer.options")}
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {connectorTypes.map((connectorType) => {
@@ -1686,6 +1697,7 @@ function ComposerBody({
                       const connectorSummary = connectorOptionSummary(
                         connectorEnabled,
                         resolvedConnectorIds[connectorType] ?? null,
+                        t,
                       );
                       const displayName =
                         connectorType.charAt(0).toUpperCase() +
@@ -1719,7 +1731,9 @@ function ComposerBody({
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="min-w-0">
                                     <div className="text-xs font-medium text-foreground">
-                                      {displayName} tools
+                                      {t("composer.connectorTools", {
+                                        name: displayName,
+                                      })}
                                     </div>
                                   </div>
                                   <Switch
@@ -1748,7 +1762,7 @@ function ComposerBody({
                                     type="button"
                                   >
                                     <RotateCcw className="size-3" />
-                                    Reset
+                                    {t("composer.reset")}
                                   </button>
                                 </div>
                               </div>
@@ -1774,13 +1788,13 @@ function ComposerBody({
                         toolEnabled !==
                           isAgentToolEnabledByDefault(tool.toolName);
                       const summary = !toolEnabled
-                        ? "Off"
+                        ? t("composer.off")
                         : changedCount > 0
-                          ? `${changedCount} changed`
+                          ? t("composer.changed", { count: changedCount })
                           : capabilityToolEnabledOverrides[tool.toolName] ===
                               true
-                            ? "On"
-                            : "Default";
+                            ? t("composer.on")
+                            : t("composer.default");
                       const toolChanged = changedCount > 0 || toolToggleChanged;
                       return (
                         <Fragment key={tool.id}>
@@ -1810,7 +1824,7 @@ function ComposerBody({
                                 <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5">
                                   <div className="min-w-0">
                                     <div className="text-xs font-medium text-foreground">
-                                      Enable tool
+                                      {t("composer.enableTool")}
                                     </div>
                                     <div className="truncate text-[11px] text-muted-foreground">
                                       {tool.description}
@@ -1847,6 +1861,7 @@ function ComposerBody({
                                         capabilityOptionValueLabel(
                                           option,
                                           value,
+                                          t,
                                         );
                                       if (option.valueType === "boolean") {
                                         return (
@@ -1895,7 +1910,7 @@ function ComposerBody({
                                               {option.title}
                                             </span>
                                             <span className="shrink-0 text-[11px] text-muted-foreground">
-                                              Unavailable
+                                              {t("composer.unavailable")}
                                             </span>
                                           </div>
                                         );
@@ -1985,7 +2000,7 @@ function ComposerBody({
                                   </div>
                                 ) : (
                                   <div className="rounded-lg bg-muted/40 px-2 py-2 text-[11px] text-muted-foreground">
-                                    No configurable options
+                                    {t("composer.noConfigurableOptions")}
                                   </div>
                                 )}
                                 <div className="flex items-center justify-between border-border/60 border-t pt-2">
@@ -2001,7 +2016,7 @@ function ComposerBody({
                                     type="button"
                                   >
                                     <RotateCcw className="size-3" />
-                                    Reset
+                                    {t("composer.reset")}
                                   </button>
                                 </div>
                               </div>
@@ -2028,10 +2043,10 @@ function ComposerBody({
                             disabledToolNameSet,
                           );
                           const summary = !skillEnabled
-                            ? "Off"
+                            ? t("composer.off")
                             : changedCount > 0
-                              ? `${changedCount} changed`
-                              : "Default";
+                              ? t("composer.changed", { count: changedCount })
+                              : t("composer.default");
                           const skillChanged = changedCount > 0;
                           const skillCommandIcon =
                             capabilitySkillCommandBySkillId.get(skill.id);
@@ -2074,7 +2089,7 @@ function ComposerBody({
                                     <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5">
                                       <div className="min-w-0">
                                         <div className="text-xs font-medium text-foreground">
-                                          Enable skill
+                                          {t("composer.enableSkill")}
                                         </div>
                                         <div className="truncate text-[11px] text-muted-foreground">
                                           {skill.description}
@@ -2115,6 +2130,7 @@ function ComposerBody({
                                           capabilityOptionValueLabel(
                                             option,
                                             value,
+                                            t,
                                           );
                                         const disabled =
                                           !skillEnabled || skillUnavailable;
@@ -2165,7 +2181,7 @@ function ComposerBody({
                                                 {option.title}
                                               </span>
                                               <span className="shrink-0 text-[11px] text-muted-foreground">
-                                                Unavailable
+                                                {t("composer.unavailable")}
                                               </span>
                                             </div>
                                           );
@@ -2264,7 +2280,7 @@ function ComposerBody({
                                         type="button"
                                       >
                                         <RotateCcw className="size-3" />
-                                        Reset
+                                        {t("composer.reset")}
                                       </button>
                                     </div>
                                   </div>
@@ -2281,16 +2297,17 @@ function ComposerBody({
                         <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
                           <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                             <Brain className="size-3.5 shrink-0 text-muted-foreground" />
-                            <span className="shrink-0">Thinking</span>
+                            <span className="shrink-0">
+                              {t("composer.thinking")}
+                            </span>
                             <span className="ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground">
                               {selectedThinkingValue === "off"
-                                ? "Off"
+                                ? t("composer.off")
                                 : selectedThinkingValue === "auto"
-                                  ? "Auto"
-                                  : thinkingEffortOptions.find(
-                                      (option) =>
-                                        option.value === selectedThinkingValue,
-                                    )?.label}
+                                  ? t("composer.auto")
+                                  : t(
+                                      `composer.thinkingEffort.${selectedThinkingValue}`,
+                                    )}
                             </span>
                           </span>
                         </DropdownMenuSubTrigger>
@@ -2330,13 +2347,13 @@ function ComposerBody({
                               className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
                               value="off"
                             >
-                              Off
+                              {t("composer.off")}
                             </DropdownMenuRadioItem>
                             <DropdownMenuRadioItem
                               className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
                               value="auto"
                             >
-                              Auto
+                              {t("composer.auto")}
                             </DropdownMenuRadioItem>
                             {supportedThinkingEfforts.map((option) => (
                               <DropdownMenuRadioItem
@@ -2344,7 +2361,7 @@ function ComposerBody({
                                 key={option.value}
                                 value={option.value}
                               >
-                                {option.label}
+                                {t(`composer.thinkingEffort.${option.value}`)}
                               </DropdownMenuRadioItem>
                             ))}
                           </DropdownMenuRadioGroup>
@@ -2356,8 +2373,8 @@ function ComposerBody({
                         disabled
                       >
                         {supportsThinking
-                          ? "Thinking effort unavailable"
-                          : "No reasoning options available"}
+                          ? t("composer.thinkingEffortUnavailable")
+                          : t("composer.noReasoningOptions")}
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>
@@ -2372,18 +2389,20 @@ function ComposerBody({
                   }
                   onClick={() => onSearchEnabledChange?.(!searchEnabled)}
                   size="icon-sm"
-                  tooltip={{ content: "Web access", shortcut: "S" }}
+                  tooltip={{ content: t("composer.webAccess"), shortcut: "S" }}
                   type="button"
                   variant={searchEnabled ? "secondary" : "ghost"}
                 >
                   <Globe className="size-4" />
-                  <span className="sr-only">Web access</span>
+                  <span className="sr-only">{t("composer.webAccess")}</span>
                 </PromptInputButton>
 
                 {supportsThinking ? (
                   <button
                     aria-label={
-                      thinkingEnabled ? "Disable Thinking" : "Enable Thinking"
+                      thinkingEnabled
+                        ? t("composer.disableThinking")
+                        : t("composer.enableThinking")
                     }
                     aria-pressed={thinkingEnabled}
                     className={cn(
@@ -2394,7 +2413,9 @@ function ComposerBody({
                     )}
                     onClick={toggleThinking}
                     title={
-                      thinkingEnabled ? "Disable Thinking" : "Enable Thinking"
+                      thinkingEnabled
+                        ? t("composer.disableThinking")
+                        : t("composer.enableThinking")
                     }
                     type="button"
                   >
@@ -2414,7 +2435,7 @@ function ComposerBody({
                           : "max-w-0 opacity-0",
                       )}
                     >
-                      Thinking
+                      {t("composer.thinking")}
                     </span>
                   </button>
                 ) : null}
@@ -2426,12 +2447,14 @@ function ComposerBody({
                     className="size-7 rounded-full bg-muted/60 text-red-500/90 ring-1 ring-border/55 transition-colors hover:bg-muted/80 hover:text-red-500"
                     onClick={onCancelEditing}
                     size="icon-sm"
-                    tooltip="Cancel edit (Esc)"
+                    tooltip={t("composer.cancelEdit")}
                     type="button"
                     variant="ghost"
                   >
                     <X className="size-3.5" />
-                    <span className="sr-only">Cancel edit</span>
+                    <span className="sr-only">
+                      {t("composer.cancelEditSr")}
+                    </span>
                   </PromptInputButton>
                 ) : null}
 
@@ -2448,7 +2471,9 @@ function ComposerBody({
                       disabled={isStopping}
                       onStop={isStopping ? undefined : onStopStreaming}
                       status={isStopping ? "submitted" : "streaming"}
-                      title={isStopping ? "Stopping" : "Stop"}
+                      title={
+                        isStopping ? t("composer.stopping") : t("composer.stop")
+                      }
                       type="button"
                     />
                   ) : (
@@ -2466,7 +2491,7 @@ function ComposerBody({
                       type={submitDisabled ? "button" : "submit"}
                     >
                       <ArrowUp className="size-4" />
-                      <span className="sr-only">Send</span>
+                      <span className="sr-only">{t("composer.send")}</span>
                     </PromptInputSubmit>
                   )}
                 </div>
@@ -2486,6 +2511,7 @@ function ComposerAttachmentsHeader({
   onRemoveSource?: (id: string) => void;
   selectedSources: SourceItem[];
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const attachments = usePromptInputAttachments();
   const images = attachments.files.filter((file) =>
     file.mediaType?.startsWith("image/"),
@@ -2515,11 +2541,13 @@ function ComposerAttachmentsHeader({
               id: "source-count",
               mediaType: "text/plain",
               sourceId: "source-count",
-              title: `${selectedSources.length} selected sources`,
+              title: t("composer.selectedSources", {
+                count: selectedSources.length,
+              }),
               type: "source-document",
             }}
           >
-            {selectedSources.length} selected sources
+            {t("composer.selectedSources", { count: selectedSources.length })}
           </Attachment>
         ) : (
           visibleSources.map((source) => (
@@ -2536,7 +2564,7 @@ function ComposerAttachmentsHeader({
               <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
               <AttachmentRemove
                 className="text-foreground/55 hover:bg-background/60"
-                label={`Remove ${source.title}`}
+                label={t("composer.remove", { name: source.title })}
               />
             </Attachment>
           ))
@@ -2548,7 +2576,8 @@ function ComposerAttachmentsHeader({
             aria-expanded={showAllImages}
             onClick={() => setShowAllImages((value) => !value)}
           >
-            {images.length} images · {showAllImages ? "Collapse" : "Show"}
+            {t("composer.imagesCount", { count: images.length })} ·{" "}
+            {showAllImages ? t("composer.collapse") : t("composer.show")}
           </button>
         ) : null}
         {visibleImages.map((file) => (
@@ -2570,6 +2599,7 @@ function ComposerImageAttachment({
   attachment: ReturnType<typeof usePromptInputAttachments>["files"][number];
   onRemove: () => void;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const label = getAttachmentLabel(attachment);
 
   return (
@@ -2587,7 +2617,7 @@ function ComposerImageAttachment({
               </div>
               <AttachmentRemove
                 className="absolute inset-0 text-foreground/55 hover:bg-background/60"
-                label={`Remove ${label}`}
+                label={t("composer.remove", { name: label })}
               />
             </div>
             <AttachmentInfo className="max-w-[180px] text-[13px] font-medium" />
@@ -2631,6 +2661,7 @@ function ComposerImageAttachment({
 }
 
 function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
+  const t = useTranslations("dashboardChatCanvas");
   const attachments = usePromptInputAttachments();
 
   return (
@@ -2646,12 +2677,12 @@ function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
         }
       }}
       size="icon-sm"
-      tooltip="Add image"
+      tooltip={t("composer.addImage")}
       type="button"
       variant="ghost"
     >
       <ImageIcon className="size-4" />
-      <span className="sr-only">Add image</span>
+      <span className="sr-only">{t("composer.addImage")}</span>
     </PromptInputButton>
   );
 }
@@ -2663,6 +2694,7 @@ function DraftMirror({
   draftKey: string;
   paused: boolean;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   const { textInput, attachments } = usePromptInputController();
   const [status, setStatus] = useState("saved");
   useEffect(() => {
@@ -2679,7 +2711,7 @@ function DraftMirror({
           toast.error(
             error instanceof Error
               ? error.message
-              : "Failed to save your draft. Please do not refresh yet.",
+              : t("composer.draftSaveFailedNoRefresh"),
           );
         }
       },
@@ -2687,7 +2719,7 @@ function DraftMirror({
     return () => {
       live = false;
     };
-  }, [draftKey, paused, textInput.value, attachments.files]);
+  }, [draftKey, paused, textInput.value, attachments.files, t]);
   return <span hidden data-draft-status={status} />;
 }
 function PersistentComposer(
@@ -2695,6 +2727,7 @@ function PersistentComposer(
     draftKey: string;
   },
 ) {
+  const t = useTranslations("dashboardChatCanvas");
   const [loaded, setLoaded] = useState<{
     key: string;
     draft: ChatDraft | null;
@@ -2714,13 +2747,16 @@ function PersistentComposer(
         }
       },
       (e) => {
-        if (active) setError(e instanceof Error ? e.message : "Unable to restore your draft.");
+        if (active)
+          setError(
+            e instanceof Error ? e.message : t("composer.draftRestoreFailed"),
+          );
       },
     );
     return () => {
       active = false;
     };
-  }, [props.draftKey, loadKey]);
+  }, [props.draftKey, loadKey, t]);
   const files = useMemo(
     () =>
       loaded?.draft?.files.map((file) => ({
@@ -2747,14 +2783,14 @@ function PersistentComposer(
           className="ml-2 underline"
           onClick={() => setRetry((value) => value + 1)}
         >
-          Retry
+          {t("composer.retry")}
         </button>
       </div>
     );
   if (loaded?.key !== loadKey)
     return (
       <div className="min-h-24 text-sm text-muted-foreground">
-        Restoring your draft…
+        {t("composer.restoringDraft")}
       </div>
     );
   return (
@@ -2771,7 +2807,9 @@ function PersistentComposer(
           args[4] ?? args[0].text,
           args[0].files,
         ).catch((e) =>
-          toast.error(e instanceof Error ? e.message : "Failed to save your draft."),
+          toast.error(
+            e instanceof Error ? e.message : t("composer.draftSaveFailed"),
+          ),
         );
         props.onSubmit?.(...args);
       }}

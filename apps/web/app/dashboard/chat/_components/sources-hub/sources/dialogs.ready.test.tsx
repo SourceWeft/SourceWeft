@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { AddSourceDialog } from "./dialogs";
+import enMessages from "../../../../../../messages/en.json";
+
+const intlMessages = enMessages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 test("file submission waits for a usable workspace, then resumes without a timer", async () => {
   const element = document.createElement("div");
@@ -47,7 +53,9 @@ test("file submission waits for a usable workspace, then resumes without a timer
   try {
     await act(async () =>
       root.render(
-        createElement(AddSourceDialog, { ...props, workspaceReady: false }),
+        <NextIntlClientProvider locale="en" messages={intlMessages}>
+          {createElement(AddSourceDialog, { ...props, workspaceReady: false })}
+        </NextIntlClientProvider>,
       ),
     );
     expect(button().disabled).toBe(true);
@@ -55,7 +63,9 @@ test("file submission waits for a usable workspace, then resumes without a timer
     expect(upload).not.toHaveBeenCalled();
     await act(async () =>
       root.render(
-        createElement(AddSourceDialog, { ...props, workspaceReady: true }),
+        <NextIntlClientProvider locale="en" messages={intlMessages}>
+          {createElement(AddSourceDialog, { ...props, workspaceReady: true })}
+        </NextIntlClientProvider>,
       ),
     );
     expect(button().disabled).toBe(false);

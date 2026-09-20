@@ -1,20 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
+import { addLocalePrefix } from "@sourceweft/i18n/resolve";
+import { useLocale, useTranslations } from "next-intl";
+
 import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import type { LandingAuthState } from "./use-landing-auth-state";
-
-const COMPANY_LINKS = [
-  ["/about", "About"],
-  ["/changelog", "Changelog"],
-] as const;
-
-const LEGAL_LINKS = [
-  ["/privacy", "Privacy"],
-  ["/terms", "Terms"],
-] as const;
 
 function FooterColumn({
   title,
@@ -51,18 +45,38 @@ export function SourceWeftFooter({
   authState?: LandingAuthState;
   containerClassName?: string;
 }) {
-  const productLinks = [
-    ["/#features", "Features"],
-    ["/#how-it-works", "How it works"],
-    ["/#pricing", "Pricing"],
-    ["/mcp", "MCP Servers"],
-    ["/blog", "Blog"],
-    [
-      authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",
-      authState?.isSignedIn ? "Dashboard" : "Get started",
-    ],
-  ] as const;
+  const t = useTranslations("footer");
+  const activeLocale = useLocale();
   const checkoutAvailable = useCheckoutAvailable();
+
+  const localePrefix = isLocale(activeLocale) ? activeLocale : DEFAULT_LOCALE;
+  const landingBase = addLocalePrefix("/", localePrefix);
+
+  const productLinks = (
+    [
+      [`${landingBase}#features`, t("links.features"), false],
+      [`${landingBase}#how-it-works`, t("links.howItWorks"), false],
+      [`${landingBase}#pricing`, t("links.pricing"), true],
+      [addLocalePrefix("/mcp", localePrefix), t("links.mcpServers"), false],
+      [addLocalePrefix("/blog", localePrefix), t("links.blog"), false],
+      [
+        authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",
+        authState?.isSignedIn ? t("links.dashboard") : t("links.getStarted"),
+        false,
+      ],
+    ] as const
+  )
+    .filter(([, , gated]) => !gated || checkoutAvailable)
+    .map(([href, label]) => [href, label] as const);
+
+  const companyLinks = [
+    [addLocalePrefix("/about", localePrefix), t("links.about")],
+    [addLocalePrefix("/changelog", localePrefix), t("links.changelog")],
+  ] as const;
+  const legalLinks = [
+    ["/privacy", t("links.privacy")],
+    ["/terms", t("links.terms")],
+  ] as const;
 
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
@@ -71,23 +85,18 @@ export function SourceWeftFooter({
           <div>
             <SourceWeftBrandLockup size="footer" />
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
-              Your AI notebook workspace. Connect everything. Think deeper.
+              {t("tagline")}
             </p>
           </div>
 
-          <FooterColumn
-            title="Product"
-            links={productLinks.filter(
-              ([href]) => href !== "/#pricing" || checkoutAvailable,
-            )}
-          />
-          <FooterColumn title="Company" links={COMPANY_LINKS} />
-          <FooterColumn title="Legal" links={LEGAL_LINKS} />
+          <FooterColumn title={t("product")} links={productLinks} />
+          <FooterColumn title={t("company")} links={companyLinks} />
+          <FooterColumn title={t("legal")} links={legalLinks} />
         </div>
 
         <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-100 pt-8 text-xs text-zinc-400 dark:border-white/[0.06] dark:text-zinc-700">
-          <p>© {new Date().getFullYear()} SourceWeft. All rights reserved.</p>
-          <span>Built by SourceWeft</span>
+          <p>{t("copyright", { year: new Date().getFullYear() })}</p>
+          <span>{t("builtBy")}</span>
         </div>
       </div>
     </footer>

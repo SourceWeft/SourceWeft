@@ -1,8 +1,26 @@
 // @vitest-environment jsdom
-import { act, createElement, StrictMode, useRef } from "react";
+import {
+  act,
+  createElement,
+  StrictMode,
+  useRef,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 import {
   setPendingThreadTurn,
   readPendingThreadTurn,
@@ -68,7 +86,9 @@ const turn = {
 async function render(threadId = "first") {
   await act(async () =>
     root.render(
-      createElement(StrictMode, null, createElement(Harness, { threadId })),
+      withIntl(
+        createElement(StrictMode, null, createElement(Harness, { threadId })),
+      ),
     ),
   );
 }

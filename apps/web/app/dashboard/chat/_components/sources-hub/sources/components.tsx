@@ -16,6 +16,8 @@ import {
   Upload,
 } from "lucide-react";
 
+import { useTranslations } from "next-intl";
+
 import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
@@ -121,11 +123,14 @@ function SourceProviderBadge({
   onOpenConnectorSettings?: (connectorId: string) => void;
   source: SourceItem;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   if (source.sourceType !== "connector") {
     return null;
   }
   const catalogItem = sourceConnectorCatalogItem(source);
-  const label = sourceConnectorLabel(source);
+  const connectorType = sourceConnectorType(source);
+  const label =
+    catalogItem?.name ?? connectorType ?? t("sources.row.connectorFallback");
   const connectorId = source.connectorId ?? null;
   const openSettings = onOpenConnectorSettings ?? null;
   const canOpenSettings = Boolean(connectorId && openSettings);
@@ -165,7 +170,7 @@ function SourceProviderBadge({
         event.stopPropagation();
         openSettings(connectorId);
       }}
-      title={`Open ${label} connector settings`}
+      title={t("sources.row.openConnectorSettings", { label })}
       type="button"
     >
       {content}
@@ -222,6 +227,7 @@ const SourceRow = memoComponent(function SourceRow({
   onRetry: () => void;
   onOpenConnectorSettings?: (connectorId: string) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const isDirectory = source.sourceType === "directory";
   const isFailed = source.status === "Failed";
   const isSelectable = isSelectableSource(source);
@@ -230,7 +236,7 @@ const SourceRow = memoComponent(function SourceRow({
   const canSelect = isSelectable && !isBusy && !isEditing;
   const metaLabel =
     isDirectory && childCount > 0
-      ? `${childCount} item${childCount === 1 ? "" : "s"}`
+      ? t("sources.row.itemCount", { count: childCount })
       : source.meta;
 
   function handleRowClick(event: MouseEvent<HTMLDivElement>) {
@@ -269,7 +275,7 @@ const SourceRow = memoComponent(function SourceRow({
       style={{ paddingLeft: `${4 + depth * SOURCE_TREE_INDENT_PX}px` }}
     >
       <Checkbox
-        aria-label={`Select ${source.title}`}
+        aria-label={t("sources.row.select", { title: source.title })}
         checked={selectionState}
         className={cn(
           "border-muted-foreground/70 disabled:border-muted-foreground/40 disabled:bg-muted disabled:opacity-100",
@@ -313,7 +319,7 @@ const SourceRow = memoComponent(function SourceRow({
                 type="button"
                 variant="outline"
               >
-                Save
+                {t("common.save")}
               </Button>
               <Button
                 disabled={isBusy}
@@ -322,7 +328,7 @@ const SourceRow = memoComponent(function SourceRow({
                 type="button"
                 variant="ghost"
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           </div>
@@ -340,10 +346,10 @@ const SourceRow = memoComponent(function SourceRow({
                 onClick={isDirectory ? onToggle : onPreview}
                 title={
                   isFailed
-                    ? "Retry or delete this failed source"
+                    ? t("sources.row.retryOrDelete")
                     : isDirectory
-                      ? "Select folder"
-                      : "Open preview"
+                      ? t("sources.row.selectFolder")
+                      : t("sources.row.openPreview")
                 }
                 type="button"
               >
@@ -390,7 +396,7 @@ const SourceRow = memoComponent(function SourceRow({
               disabled={isBusy}
               onClick={(event) => event.stopPropagation()}
               size="icon-xs"
-              title="Source actions"
+              title={t("sources.row.actions")}
               type="button"
               variant="ghost"
             >
@@ -399,7 +405,7 @@ const SourceRow = memoComponent(function SourceRow({
               ) : (
                 <MoreHorizontal className="size-3.5" />
               )}
-              <span className="sr-only">Source actions</span>
+              <span className="sr-only">{t("sources.row.actions")}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
@@ -409,7 +415,7 @@ const SourceRow = memoComponent(function SourceRow({
                 onClick={(event) => handleMenuAction(event, onRetry)}
               >
                 <RotateCcw className="size-3.5" />
-                Retry
+                {t("sources.row.retry")}
               </DropdownMenuItem>
             ) : null}
             {isDirectory ? (
@@ -419,7 +425,7 @@ const SourceRow = memoComponent(function SourceRow({
                   onClick={(event) => handleMenuAction(event, onAddSource)}
                 >
                   <Upload className="size-3.5" />
-                  Add source
+                  {t("sources.row.addSource")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="whitespace-nowrap"
@@ -428,14 +434,14 @@ const SourceRow = memoComponent(function SourceRow({
                   }
                 >
                   <FolderPlus className="size-3.5" />
-                  New folder
+                  {t("sources.row.newFolder")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="whitespace-nowrap"
                   onClick={(event) => handleMenuAction(event, onEditReadme)}
                 >
                   <FileText className="size-3.5" />
-                  Edit README
+                  {t("sources.row.editReadme")}
                 </DropdownMenuItem>
               </>
             ) : (
@@ -445,7 +451,7 @@ const SourceRow = memoComponent(function SourceRow({
                   onClick={(event) => handleMenuAction(event, onPreview)}
                 >
                   <FileText className="size-3.5" />
-                  Preview
+                  {t("sources.row.preview")}
                 </DropdownMenuItem>
                 {source.storageKey ? (
                   <DropdownMenuItem
@@ -453,7 +459,7 @@ const SourceRow = memoComponent(function SourceRow({
                     onClick={(event) => handleMenuAction(event, onDownload)}
                   >
                     <Download className="size-3.5" />
-                    Download
+                    {t("sources.row.download")}
                   </DropdownMenuItem>
                 ) : null}
               </>
@@ -463,14 +469,14 @@ const SourceRow = memoComponent(function SourceRow({
               onClick={(event) => handleMenuAction(event, onStartRename)}
             >
               <Pencil className="size-3.5" />
-              Rename
+              {t("sources.row.rename")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="whitespace-nowrap"
               onClick={(event) => handleMenuAction(event, onMove)}
             >
               <MoveRight className="size-3.5" />
-              Move to...
+              {t("sources.row.moveTo")}
             </DropdownMenuItem>
             {!isDirectory ? (
               <DropdownMenuItem
@@ -478,7 +484,7 @@ const SourceRow = memoComponent(function SourceRow({
                 onClick={(event) => handleMenuAction(event, onReindex)}
               >
                 <RotateCcw className="size-3.5" />
-                Re-index
+                {t("sources.row.reindex")}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
@@ -487,7 +493,7 @@ const SourceRow = memoComponent(function SourceRow({
               variant="destructive"
             >
               <Trash2 className="size-3.5" />
-              Delete
+              {t("sources.row.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -568,6 +574,7 @@ export const SourceTreeRow = memoComponent(function SourceTreeRow({
   userCollapsedDirectoryIds: Set<string>;
   onDirectoryExpandedChange: (sourceId: string, open: boolean) => void;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const source = node.source;
   const isDirectory = source.sourceType === "directory";
   const selectionState = selectionStateById.get(source.id) ?? false;
@@ -587,7 +594,9 @@ export const SourceTreeRow = memoComponent(function SourceTreeRow({
         event.stopPropagation();
         handleDirectoryOpenChange(!open);
       }}
-      title={open ? "Collapse folder" : "Expand folder"}
+      title={
+        open ? t("sources.row.collapseFolder") : t("sources.row.expandFolder")
+      }
       type="button"
     >
       {open ? (
@@ -706,7 +715,7 @@ export const SourceTreeRow = memoComponent(function SourceTreeRow({
                 paddingLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px`,
               }}
             >
-              Empty folder
+              {t("sources.emptyFolder")}
             </div>
           ) : null}
         </div>

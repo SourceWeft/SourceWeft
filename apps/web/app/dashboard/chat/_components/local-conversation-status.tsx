@@ -18,6 +18,7 @@ import {
 } from "../../../../lib/local-conversation-store";
 import { subscribeLocalAvailabilityErrors } from "../../../../lib/local-availability-events";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 const stores = new Map<
   string,
@@ -104,6 +105,7 @@ export function LocalConversationNotice({
 }: {
   status: ReturnType<typeof useLocalConversationStatus>;
 }) {
+  const t = useTranslations("dashboardChat");
   if (status.ready) return null;
   return (
     <div
@@ -114,14 +116,14 @@ export function LocalConversationNotice({
         {status.info?.target?.name && (
           <strong>{status.info.target.name} · </strong>
         )}
-        {status.message} History remains readable and drafts are preserved.
+        {status.message} {t("local.historyPreserved")}
       </div>
       <button
         type="button"
         className="shrink-0 underline"
         onClick={() => void status.refresh()}
       >
-        Check again
+        {t("local.checkAgain")}
       </button>
       {status.code === "LOCAL_CONNECTION_REQUIRED" && (
         <button
@@ -132,13 +134,13 @@ export function LocalConversationNotice({
               toast.error(
                 error instanceof Error
                   ? error.message
-                  : "Could not connect to the computer.",
+                  : t("local.couldNotConnect"),
               );
               void status.refresh();
             })
           }
         >
-          Connect computer
+          {t("local.connectComputer")}
         </button>
       )}
     </div>

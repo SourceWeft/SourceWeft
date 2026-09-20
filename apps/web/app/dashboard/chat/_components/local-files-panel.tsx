@@ -10,6 +10,7 @@ import {
   Eye,
   ChevronRight,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { localRequest } from "../../../../lib/local-execution";
 import { downloadLocalFile } from "../../../../lib/local-file-download";
 import { FilePreviewDialog } from "./file-preview-dialog";
@@ -62,6 +63,7 @@ function LocalFilesBrowser({
 }: LocalFilesPanelProps & {
   availability: ReturnType<typeof useLocalConversationStatus>;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const localStatus = availability;
   const [directory, setDirectory] = useState<Directory | null>(null);
@@ -179,7 +181,7 @@ function LocalFilesBrowser({
 
   return (
     <section
-      aria-label="Local files"
+      aria-label={t("localFiles.ariaLabel")}
       className={
         variant === "hub"
           ? "flex min-h-0 flex-col bg-background"
@@ -188,11 +190,11 @@ function LocalFilesBrowser({
     >
       <header className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
         <Folder size={16} />
-        <strong>Files</strong>
+        <strong>{t("localFiles.heading")}</strong>
         <span className="text-xs text-muted-foreground">{sourceLabel}</span>
         <button
           type="button"
-          aria-label="Refresh files"
+          aria-label={t("localFiles.refresh")}
           onClick={() => setRevision((value) => value + 1)}
           className="ml-auto rounded p-1 hover:bg-accent"
         >
@@ -202,16 +204,14 @@ function LocalFilesBrowser({
       {!localStatus.ready && (
         <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
           {localStatus.message}
-          {directory
-            ? " Showing the last loaded listing; files are currently inaccessible."
-            : ""}
+          {directory ? t("localFiles.lastListingNote") : ""}
         </p>
       )}
       {directory && (
         <div className="flex items-center gap-2 border-y px-4 py-1 text-xs">
           <button
             type="button"
-            aria-label="Parent folder"
+            aria-label={t("localFiles.parentFolder")}
             disabled={!localStatus.ready || directory.path === directory.root}
             onClick={() =>
               setPath(directory.path.slice(0, directory.path.lastIndexOf("/")))
@@ -225,7 +225,7 @@ function LocalFilesBrowser({
       )}
       {loading && (
         <p role="status" className="p-4 text-sm text-muted-foreground">
-          Loading files from the computer…
+          {t("localFiles.loading")}
         </p>
       )}
       {error && (
@@ -237,13 +237,12 @@ function LocalFilesBrowser({
         <div className="min-h-0 overflow-auto p-2">
           {directory.files.length === 0 && (
             <p className="p-2 text-sm text-muted-foreground">
-              This folder is empty. Files created here will appear
-              automatically.
+              {t("localFiles.emptyFolder")}
             </p>
           )}
           {directory.files.length > 0 && visibleFiles.length === 0 && (
             <p className="p-2 text-sm text-muted-foreground">
-              No files match your search.
+              {t("localFiles.noMatch")}
             </p>
           )}
           {[...visibleFiles]
@@ -259,9 +258,21 @@ function LocalFilesBrowser({
               >
                 <button
                   type="button"
-                  aria-label={`${file.is_dir ? "Open folder" : "Preview"} ${basename(file.path)}`}
+                  aria-label={
+                    file.is_dir
+                      ? t("localFiles.openFolderAria", {
+                          name: basename(file.path),
+                        })
+                      : t("localFiles.previewAria", {
+                          name: basename(file.path),
+                        })
+                  }
                   disabled={!localStatus.ready}
-                  title={file.is_dir ? "Open folder" : "Preview in app"}
+                  title={
+                    file.is_dir
+                      ? t("localFiles.openFolder")
+                      : t("localFiles.previewInApp")
+                  }
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 py-2 text-left text-sm"
                   onClick={(event) => {
                     if (file.is_dir) setPath(file.path);
@@ -297,7 +308,9 @@ function LocalFilesBrowser({
                 {!file.is_dir && (
                   <button
                     type="button"
-                    aria-label={`Download ${basename(file.path)}`}
+                    aria-label={t("localFiles.downloadAria", {
+                      name: basename(file.path),
+                    })}
                     disabled={!localStatus.ready}
                     className="p-2 text-muted-foreground"
                     onClick={() => download(file.path)}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -41,12 +42,6 @@ import {
 } from "./byok-state";
 
 const CUSTOM_PROVIDER_NAME = "custom";
-
-const modelTypeLabels: Record<ModelType, string> = {
-  image: "Image",
-  llm: "LLM",
-  vision: "Vision",
-};
 
 function getProviderLabel(providerName: string) {
   return providerName === CUSTOM_PROVIDER_NAME
@@ -143,6 +138,16 @@ export function ByokModelConfigDialog({
   providers: ByokProviderOption[];
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardChatCanvas");
+  const modelTypeLabels: Record<ModelType, string> = {
+    image: t("modelSelector.type.image"),
+    llm: t("modelSelector.type.llm"),
+    vision: t("modelSelector.type.vision"),
+  };
+  const providerLabelFor = (providerName: string) =>
+    providerName === CUSTOM_PROVIDER_NAME
+      ? t("byokDialog.customProvider")
+      : toProviderLabel(providerName);
   const type = defaults?.type ?? "llm";
   const providerOptions = useMemo(
     () => buildProviderOptions(providers),
@@ -377,12 +382,10 @@ export function ByokModelConfigDialog({
 
       onConfigured({ model, selection, type });
       onOpenChange(false);
-      toast.success("BYOK model configured.");
+      toast.success(t("byokDialog.toastConfigured"));
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to configure BYOK model.",
+        error instanceof Error ? error.message : t("byokDialog.toastFailed"),
       );
     } finally {
       setSaving(false);
@@ -396,9 +399,11 @@ export function ByokModelConfigDialog({
         constrainWidth={false}
       >
         <DialogHeader>
-          <DialogTitle>Add New Configuration</DialogTitle>
+          <DialogTitle>{t("byokDialog.title")}</DialogTitle>
           <DialogDescription>
-            Set up a new {modelTypeLabels[type].toLowerCase()} BYOK model.
+            {t("byokDialog.description", {
+              type: modelTypeLabels[type].toLowerCase(),
+            })}
           </DialogDescription>
         </DialogHeader>
 
@@ -409,7 +414,7 @@ export function ByokModelConfigDialog({
         >
           <div className="space-y-4">
             <div className="text-xs font-medium text-muted-foreground sm:text-sm">
-              Model Configuration
+              {t("byokDialog.modelConfiguration")}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -418,7 +423,7 @@ export function ByokModelConfigDialog({
                   className="text-xs font-medium sm:text-sm"
                   htmlFor="byok-model-provider"
                 >
-                  Provider
+                  {t("byokDialog.provider")}
                 </label>
                 <Select
                   disabled={saving}
@@ -426,7 +431,7 @@ export function ByokModelConfigDialog({
                   value={providerName}
                 >
                   <SelectTrigger className="h-9 w-full rounded-md">
-                    <SelectValue placeholder="Select a provider" />
+                    <SelectValue placeholder={t("byokDialog.selectProvider")} />
                   </SelectTrigger>
                   <SelectContent className="max-h-72">
                     {providerOptions.map((provider) => (
@@ -434,7 +439,7 @@ export function ByokModelConfigDialog({
                         key={provider.providerName}
                         value={provider.providerName}
                       >
-                        {getProviderLabel(provider.providerName)}
+                        {providerLabelFor(provider.providerName)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -446,7 +451,7 @@ export function ByokModelConfigDialog({
                   className="text-xs font-medium sm:text-sm"
                   htmlFor="byok-model-name"
                 >
-                  Model ID
+                  {t("byokDialog.modelId")}
                 </label>
                 {credentialMode === "existing" && modelCandidates.length > 0 ? (
                   <Select
@@ -461,7 +466,7 @@ export function ByokModelConfigDialog({
                     value={modelName}
                   >
                     <SelectTrigger className="h-9 w-full rounded-md">
-                      <SelectValue placeholder="Select a model" />
+                      <SelectValue placeholder={t("byokDialog.selectModel")} />
                     </SelectTrigger>
                     <SelectContent className="max-h-72">
                       {modelCandidates.map((candidate) => (
@@ -481,7 +486,7 @@ export function ByokModelConfigDialog({
                   onChange={(event) => setModelName(event.target.value)}
                   placeholder={
                     loadingModels
-                      ? "Loading provider models..."
+                      ? t("byokDialog.loadingProviderModels")
                       : "openai/gpt-oss-120b:free"
                   }
                   value={modelName}
@@ -494,7 +499,7 @@ export function ByokModelConfigDialog({
                 className="text-xs font-medium sm:text-sm"
                 htmlFor="byok-model-display-name"
               >
-                Display Name
+                {t("byokDialog.displayName")}
               </label>
               <Input
                 disabled={saving}
@@ -510,7 +515,7 @@ export function ByokModelConfigDialog({
                 className="text-xs font-medium sm:text-sm"
                 htmlFor="byok-model-credential-alias"
               >
-                Saved credential
+                {t("byokDialog.savedCredential")}
               </label>
               {providerCredentials.length > 0 &&
               credentialMode === "existing" ? (
@@ -520,7 +525,9 @@ export function ByokModelConfigDialog({
                   value={credentialId}
                 >
                   <SelectTrigger className="h-9 w-full rounded-md">
-                    <SelectValue placeholder="Select a saved credential" />
+                    <SelectValue
+                      placeholder={t("byokDialog.selectSavedCredential")}
+                    />
                   </SelectTrigger>
                   <SelectContent className="max-h-72">
                     {providerCredentials.map((item) => (
@@ -540,8 +547,7 @@ export function ByokModelConfigDialog({
                 />
               )}
               <p className="text-[10px] text-muted-foreground sm:text-xs">
-                The credential alias identifies the saved API key. Models are
-                stored under this credential.
+                {t("byokDialog.credentialAliasHelp")}
               </p>
               {providerCredentials.length > 0 ? (
                 <Button
@@ -563,8 +569,8 @@ export function ByokModelConfigDialog({
                   variant="link"
                 >
                   {credentialMode === "existing"
-                    ? "Use a new API key instead"
-                    : "Use an existing saved credential"}
+                    ? t("byokDialog.useNewApiKey")
+                    : t("byokDialog.useExistingCredential")}
                 </Button>
               ) : null}
             </div>
@@ -576,7 +582,7 @@ export function ByokModelConfigDialog({
                     className="text-xs font-medium sm:text-sm"
                     htmlFor="byok-model-api-key"
                   >
-                    API Key
+                    {t("byokDialog.apiKey")}
                   </label>
                   <Input
                     disabled={saving}
@@ -593,7 +599,7 @@ export function ByokModelConfigDialog({
                     className="text-xs font-medium sm:text-sm"
                     htmlFor="byok-model-base-url"
                   >
-                    API Base URL
+                    {t("byokDialog.apiBaseUrl")}
                   </label>
                   <Input
                     disabled={!isCustomProvider || saving}
@@ -602,7 +608,7 @@ export function ByokModelConfigDialog({
                     placeholder={
                       isCustomProvider
                         ? "https://api.example.com/v1"
-                        : "System default"
+                        : t("byokDialog.systemDefault")
                     }
                     value={effectiveBaseUrl}
                   />
@@ -612,8 +618,7 @@ export function ByokModelConfigDialog({
 
             {isCustomProvider ? (
               <p className="text-[10px] text-muted-foreground sm:text-xs">
-                OpenAI-compatible providers and private proxies are configured
-                under Custom Provider.
+                {t("byokDialog.customProviderHelp")}
               </p>
             ) : null}
           </div>
@@ -626,7 +631,7 @@ export function ByokModelConfigDialog({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("byokDialog.cancel")}
           </Button>
           <Button
             className="min-w-[120px]"
@@ -634,7 +639,11 @@ export function ByokModelConfigDialog({
             form="byok-model-config-form"
             type="submit"
           >
-            {saving ? <Loader2 className="size-4 animate-spin" /> : "Add Model"}
+            {saving ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              t("byokDialog.addModel")
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

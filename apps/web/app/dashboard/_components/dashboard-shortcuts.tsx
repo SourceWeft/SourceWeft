@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import {
   Command,
   CommandEmpty,
@@ -220,6 +221,7 @@ export function DashboardShortcutsDialog({
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
+  const t = useTranslations("dashboardNav");
   const enabledDefinitions = definitions.filter(
     (definition) => !definition.disabled,
   );
@@ -239,15 +241,13 @@ export function DashboardShortcutsDialog({
         constrainWidth={false}
       >
         <DialogHeader className="border-b px-4 py-3">
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>
-            Quick actions available in the chat workspace.
-          </DialogDescription>
+          <DialogTitle>{t("shortcuts.title")}</DialogTitle>
+          <DialogDescription>{t("shortcuts.description")}</DialogDescription>
         </DialogHeader>
         <Command className="rounded-none">
-          <CommandInput placeholder="Search shortcuts..." />
+          <CommandInput placeholder={t("shortcuts.searchPlaceholder")} />
           <CommandList className="max-h-[360px]">
-            <CommandEmpty>No shortcuts found.</CommandEmpty>
+            <CommandEmpty>{t("shortcuts.empty")}</CommandEmpty>
             {groups.map(([group, items]) => (
               <CommandGroup heading={group} key={group}>
                 {items.map((definition) => (

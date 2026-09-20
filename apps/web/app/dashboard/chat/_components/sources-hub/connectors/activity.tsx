@@ -1,4 +1,5 @@
 import { Clock3, Loader2, RotateCcw, Sparkles, Webhook } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import type { ConnectorActivityItem } from "@sourceweft/sdk";
 import {
@@ -10,6 +11,9 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HubEmptyState } from "../components/hub-empty-state";
 import { formatDuration, formatJsonPreview } from "../lib/format";
 import type { ConnectorActivityKindFilter } from "./types";
+
+/** Translator handed to the module-level activity formatters. */
+type ActivityT = ReturnType<typeof useTranslations>;
 
 function activityTone(status: string) {
   if (status === "succeeded" || status === "processed") {
@@ -38,29 +42,31 @@ function ActivityStatusBadge({ status }: { status: string }) {
   );
 }
 
-const connectorActivitySummaryLabels: Record<string, string> = {
-  actionType: "Action",
-  attempts: "Attempts",
-  discoveredCount: "Discovered",
-  eventType: "Event",
-  externalId: "External ID",
-  failedCount: "Failed",
-  fullResync: "Full resync",
-  heartbeatAt: "Heartbeat",
-  indexedCount: "Indexed",
-  objectId: "Object ID",
-  objectType: "Object",
-  providerEventId: "Provider event",
-  reason: "Reason",
-  requestPreview: "Request",
-  riskLevel: "Risk",
-  source: "Source",
-  targetExternalIds: "Targets",
-  targetExternalIdCount: "Target count",
-  targeted: "Targeted",
-  syncRunId: "Linked sync",
-  triggerType: "Trigger",
-};
+// Known summary keys carry a localized label under
+// `connectorActivity.summary.<key>`; any other key falls back to its raw name.
+const knownConnectorActivitySummaryKeys = new Set<string>([
+  "actionType",
+  "attempts",
+  "discoveredCount",
+  "eventType",
+  "externalId",
+  "failedCount",
+  "fullResync",
+  "heartbeatAt",
+  "indexedCount",
+  "objectId",
+  "objectType",
+  "providerEventId",
+  "reason",
+  "requestPreview",
+  "riskLevel",
+  "source",
+  "targetExternalIds",
+  "targetExternalIdCount",
+  "targeted",
+  "syncRunId",
+  "triggerType",
+]);
 
 const hiddenConnectorActivitySummaryKeys = new Set([
   "approvedBy",
@@ -68,40 +74,40 @@ const hiddenConnectorActivitySummaryKeys = new Set([
   "executedBy",
 ]);
 
-function formatConnectorActivityTitle(item: ConnectorActivityItem) {
+function formatConnectorActivityTitle(
+  item: ConnectorActivityItem,
+  t: ActivityT,
+) {
   if (item.kind === "sync") {
     const trigger =
       typeof item.summaryJson.triggerType === "string"
         ? item.summaryJson.triggerType
         : "connector";
     const triggerLabel =
-      trigger === "manual"
-        ? "Manual"
-        : trigger === "scheduled"
-          ? "Scheduled"
-          : trigger === "webhook"
-            ? "Webhook"
-            : trigger === "backfill"
-              ? "Backfill"
-              : trigger;
-    return `${triggerLabel} sync`;
+      trigger === "manual" ||
+      trigger === "scheduled" ||
+      trigger === "webhook" ||
+      trigger === "backfill"
+        ? t(`connectorActivity.trigger.${trigger}`)
+        : trigger;
+    return t("connectorActivity.syncTitle", { trigger: triggerLabel });
   }
   if (item.kind === "action") {
     return typeof item.summaryJson.actionType === "string"
       ? item.summaryJson.actionType
-      : "Connector action";
+      : t("connectorActivity.connectorAction");
   }
   if (item.kind === "webhook") {
     return typeof item.summaryJson.eventType === "string"
       ? item.summaryJson.eventType
-      : "Webhook event";
+      : t("connectorActivity.webhookEvent");
   }
   return item.title;
 }
 
-function formatConnectorActivityValue(value: unknown) {
+function formatConnectorActivityValue(value: unknown, t: ActivityT) {
   if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+    return value ? t("connectorActivity.yes") : t("connectorActivity.no");
   }
   if (typeof value === "string") {
     const date = new Date(value);
@@ -111,7 +117,7 @@ function formatConnectorActivityValue(value: unknown) {
     return value;
   }
   if (Array.isArray(value)) {
-    return value.length ? value.join(", ") : "None";
+    return value.length ? value.join(", ") : t("connectorActivity.none");
   }
   if (typeof value === "object" && value !== null) {
     return JSON.stringify(value);
@@ -120,6 +126,7 @@ function formatConnectorActivityValue(value: unknown) {
 }
 
 function ActivityRow({ item }: { item: ConnectorActivityItem }) {
+  const t = useTranslations("dashboardSourcesHub");
   const Icon =
     item.kind === "sync"
       ? RotateCcw
@@ -144,7 +151,7 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
           <div className="flex min-w-0 items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-foreground">
-                {formatConnectorActivityTitle(item)}
+                {formatConnectorActivityTitle(item, t)}
               </p>
               <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
                 {new Date(item.createdAt).toLocaleString()} ·{" "}
@@ -161,10 +168,12 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
                   key={key}
                 >
                   <span className="block text-[10px] text-muted-foreground">
-                    {connectorActivitySummaryLabels[key] ?? key}
+                    {knownConnectorActivitySummaryKeys.has(key)
+                      ? t(`connectorActivity.summary.${key}`)
+                      : key}
                   </span>
                   <span className="block truncate text-[11px] text-foreground">
-                    {formatConnectorActivityValue(value)}
+                    {formatConnectorActivityValue(value, t)}
                   </span>
                 </div>
               ))}
@@ -178,7 +187,7 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
           {Object.keys(item.resultJson).length > 0 ? (
             <details className="mt-2">
               <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
-                Execution result
+                {t("connectorActivity.executionResult")}
               </summary>
               <pre className="mt-2 max-h-44 overflow-auto rounded-md bg-muted/45 p-2 text-[10px] leading-4 text-muted-foreground">
                 {formatJsonPreview(item.resultJson)}
@@ -206,6 +215,7 @@ export function ActivityList({
   loading: boolean;
   loadingError: string | null;
 }) {
+  const t = useTranslations("dashboardSourcesHub");
   const filtered =
     kind === "all" ? items : items.filter((item) => item.kind === kind);
   return (
@@ -214,7 +224,7 @@ export function ActivityList({
       {loading ? (
         <div className="flex items-center justify-center rounded-lg border bg-muted/20 py-8 text-sm text-muted-foreground">
           <Loader2 className="mr-2 size-4 animate-spin" />
-          Loading activity...
+          {t("connectorActivity.loading")}
         </div>
       ) : null}
       {loadingError ? (
@@ -224,7 +234,7 @@ export function ActivityList({
       ) : null}
       {!loading && !loadingError && filtered.length === 0 ? (
         <HubEmptyState
-          description="Connector activity will appear here after syncs, actions, or webhooks run."
+          description={t("connectorActivity.emptyDescription")}
           icon={Clock3}
           title={emptyTitle}
         />

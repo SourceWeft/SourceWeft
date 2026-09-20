@@ -1,10 +1,30 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
+import { NextIntlClientProvider } from "next-intl";
 import { test, vi } from "vitest";
 import type { ArtifactStatusSnapshot, MessageRenderBlock } from "./types";
+
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+
+function withIntl(node: ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 const getArtifactVersionMedia = vi.hoisted(() => vi.fn());
 const getArtifact = vi.hoisted(() => vi.fn());
@@ -99,12 +119,14 @@ test("artifact-output card renders the recorded version and never the current pa
 
   await act(async () => {
     root.render(
-      createElement(ArtifactOutputCard, {
-        artifactStatuses: new Map([["artifact-1", currentSnapshot()]]),
-        block,
-        onArtifactPreview,
-        workspaceId: "workspace-1",
-      }),
+      withIntl(
+        createElement(ArtifactOutputCard, {
+          artifactStatuses: new Map([["artifact-1", currentSnapshot()]]),
+          block,
+          onArtifactPreview,
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
     await Promise.resolve();
   });
@@ -176,10 +198,12 @@ test("an invalid current version cannot block a valid recorded version", async (
 
   await act(async () => {
     root.render(
-      createElement(ArtifactOutputCard, {
-        block,
-        workspaceId: "workspace-1",
-      }),
+      withIntl(
+        createElement(ArtifactOutputCard, {
+          block,
+          workspaceId: "workspace-1",
+        }),
+      ),
     );
     await Promise.resolve();
     await Promise.resolve();

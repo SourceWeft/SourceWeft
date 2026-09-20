@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { ShieldCheck } from "lucide-react";
 import type { AgentToolTrustRule } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -26,6 +27,7 @@ export function TrustRulesPanelContent({
 }: {
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardSettings");
   const [rules, setRules] = React.useState<AgentToolTrustRule[]>([]);
   const [loading, setLoading] = React.useState(Boolean(workspaceId));
   const [error, setError] = React.useState<string | null>(null);
@@ -53,9 +55,7 @@ export function TrustRulesPanelContent({
           return;
         }
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not load remembered approvals.",
+          cause instanceof Error ? cause.message : t("approvals.loadError"),
         );
       })
       .finally(() => {
@@ -66,7 +66,7 @@ export function TrustRulesPanelContent({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, t]);
 
   async function handleRevoke(ruleId: string) {
     if (!workspaceId) {
@@ -76,10 +76,10 @@ export function TrustRulesPanelContent({
     try {
       await connectorsClient.revokeAgentToolTrustRule(workspaceId, ruleId);
       setRules((current) => current.filter((rule) => rule.id !== ruleId));
-      toast.success("Approval revoked. You will be asked again next time.");
+      toast.success(t("approvals.revokedToast"));
     } catch (cause) {
       toast.error(
-        cause instanceof Error ? cause.message : "Could not revoke approval.",
+        cause instanceof Error ? cause.message : t("approvals.revokeError"),
       );
     } finally {
       setRevokingId(null);
@@ -91,15 +91,18 @@ export function TrustRulesPanelContent({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-foreground">Approvals</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          {t("approvals.title")}
+        </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Actions you chose to always allow in this workspace. Each grant is
-          yours alone, expires on its own, and can be revoked here at any time.
+          {t("approvals.description")}
         </p>
       </div>
 
       {loading ? (
-        <p className="text-xs text-muted-foreground">Loading approvals...</p>
+        <p className="text-xs text-muted-foreground">
+          {t("approvals.loading")}
+        </p>
       ) : null}
 
       {!loading && error ? (
@@ -110,8 +113,7 @@ export function TrustRulesPanelContent({
         <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/20 p-4">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <p className="text-xs text-muted-foreground">
-            No remembered approvals. Every action that needs approval will ask
-            you first.
+            {t("approvals.empty")}
           </p>
         </div>
       ) : null}
@@ -129,13 +131,21 @@ export function TrustRulesPanelContent({
                   {row.toolName}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  Connector: {row.connectorLabel} · Risk: {row.riskLabel}
+                  {t("approvals.connectorRisk", {
+                    connector: row.connectorLabel,
+                    risk: row.riskLabel,
+                  })}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  Expires: {row.expiryLabel} · Last used: {row.lastUsedLabel}
+                  {t("approvals.expiresLastUsed", {
+                    expiry: row.expiryLabel,
+                    lastUsed: row.lastUsedLabel,
+                  })}
                 </p>
                 <p className="truncate text-[11px] text-muted-foreground/80">
-                  From confirmation {row.sourceConfirmationLabel}
+                  {t("approvals.fromConfirmation", {
+                    source: row.sourceConfirmationLabel,
+                  })}
                 </p>
               </div>
               <Button
@@ -145,7 +155,9 @@ export function TrustRulesPanelContent({
                 type="button"
                 variant="outline"
               >
-                {revokingId === row.id ? "Revoking..." : "Revoke"}
+                {revokingId === row.id
+                  ? t("approvals.revoking")
+                  : t("approvals.revoke")}
               </Button>
             </li>
           ))}

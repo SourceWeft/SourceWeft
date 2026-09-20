@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { DesktopFilePreviewLauncher } from "./desktop-file-preview-launcher";
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 const mocks = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock("../../../../lib/desktop-preview-bridge", () => ({
   openDesktopPreview: mocks.open,
@@ -23,13 +29,15 @@ afterEach(async () => {
 async function render(text: string) {
   await act(async () =>
     root.render(
-      createElement(DesktopFilePreviewLauncher, {
-        open: true,
-        loading: false,
-        source: { name: "file.txt", text },
-        description: "file",
-        onOpened: opened,
-      }),
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(DesktopFilePreviewLauncher, {
+          open: true,
+          loading: false,
+          source: { name: "file.txt", text },
+          description: "file",
+          onOpened: opened,
+        })}
+      </NextIntlClientProvider>,
     ),
   );
 }

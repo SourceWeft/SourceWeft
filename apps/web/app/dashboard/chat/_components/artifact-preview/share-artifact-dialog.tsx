@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Check, Copy, Eye, Globe, Lock } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
@@ -44,6 +45,7 @@ export function ShareArtifactDialog({
   isShareLoading: boolean;
   onShareChange: (share: ShareLink | null) => void;
 }) {
+  const t = useTranslations("dashboardChatFiles");
   const [isBusy, setIsBusy] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
 
@@ -61,7 +63,7 @@ export function ShareArtifactDialog({
         onShareChange(null);
       }
     } catch {
-      toast.error("Could not change sharing.");
+      toast.error(t("toasts.shareChangeFailed"));
     } finally {
       setIsBusy(false);
     }
@@ -80,7 +82,7 @@ export function ShareArtifactDialog({
       onShareChange(result.share);
     } catch {
       onShareChange(previous);
-      toast.error("Could not update search visibility.");
+      toast.error(t("toasts.searchVisibilityFailed"));
     }
   }
 
@@ -91,7 +93,7 @@ export function ShareArtifactDialog({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast.error("Could not copy the link.");
+      toast.error(t("toasts.copyLinkFailed"));
     }
   }
 
@@ -104,7 +106,7 @@ export function ShareArtifactDialog({
         constrainWidth={false}
       >
         <DialogHeader className="text-left">
-          <DialogTitle>Share artifact</DialogTitle>
+          <DialogTitle>{t("share.title")}</DialogTitle>
           <DialogDescription className="truncate">{title}</DialogDescription>
         </DialogHeader>
 
@@ -142,12 +144,14 @@ export function ShareArtifactDialog({
                       isPublic && "text-emerald-700 dark:text-emerald-300",
                     )}
                   >
-                    {isPublic ? "Anyone with the link" : "Only your workspace"}
+                    {isPublic
+                      ? t("share.anyoneWithLink")
+                      : t("share.onlyYourWorkspace")}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {isPublic
-                      ? "Public, view-only page on an isolated origin."
-                      : "Turn on to publish a public link."}
+                      ? t("share.publicDescription")
+                      : t("share.turnOnDescription")}
                   </p>
                 </div>
               </div>
@@ -162,7 +166,7 @@ export function ShareArtifactDialog({
               <>
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">
-                    Public link
+                    {t("share.publicLinkLabel")}
                   </p>
                   <div className="flex items-stretch overflow-hidden rounded-lg border bg-muted/40 focus-within:ring-2 focus-within:ring-ring/40">
                     <input
@@ -183,7 +187,7 @@ export function ShareArtifactDialog({
                       ) : (
                         <Copy className="size-3.5" />
                       )}
-                      {copied ? "Copied" : "Copy"}
+                      {copied ? t("actions.copied") : t("actions.copy")}
                     </Button>
                   </div>
                 </div>
@@ -192,11 +196,10 @@ export function ShareArtifactDialog({
                   <label className="flex cursor-pointer items-start justify-between gap-4 p-4">
                     <span className="min-w-0">
                       <span className="block text-sm font-medium">
-                        Hide from search engines
+                        {t("share.hideFromSearch")}
                       </span>
                       <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                        A public link is indexed by default for reach; turn this
-                        on for a sensitive one-off.
+                        {t("share.hideFromSearchDescription")}
                       </span>
                     </span>
                     <Switch
@@ -207,7 +210,9 @@ export function ShareArtifactDialog({
                   <div className="flex items-center justify-between gap-4 p-4">
                     <div className="flex min-w-0 items-center gap-2">
                       <Eye className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="text-sm font-medium">Views</span>
+                      <span className="text-sm font-medium">
+                        {t("share.views")}
+                      </span>
                     </div>
                     <span className="text-sm tabular-nums text-muted-foreground">
                       {share.viewCount}

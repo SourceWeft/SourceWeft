@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -18,6 +19,7 @@ export function DashboardMobileContent({
 }: {
   children: React.ReactNode;
 }) {
+  const t = useTranslations("dashboardNav");
   const { openMe, view } = useDashboardMobileNav();
 
   if (view === "me") {
@@ -44,10 +46,10 @@ export function DashboardMobileContent({
               variant="ghost"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">Back</span>
+              <span className="sr-only">{t("common.back")}</span>
             </Button>
             <div className="min-w-0 text-sm font-semibold text-foreground">
-              Observe
+              {t("common.observe")}
             </div>
           </header>
           <div className="min-h-0 flex-1 overflow-hidden">

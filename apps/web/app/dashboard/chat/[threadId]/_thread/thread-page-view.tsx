@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import {
   LocalOperationContext,
   LocalConversationNotice,
@@ -24,14 +25,15 @@ import {
 } from "../../_components/chat-hub-context";
 
 function ModelCatalogErrorState() {
+  const t = useTranslations("dashboardChat");
   return (
     <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
       <div className="max-w-sm text-center">
         <h2 className="text-sm font-semibold text-foreground">
-          Model catalog failed to load
+          {t("modelCatalog.failedTitle")}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Refresh the page before sending a message.
+          {t("modelCatalog.failedRefresh")}
         </p>
       </div>
     </section>
@@ -39,15 +41,15 @@ function ModelCatalogErrorState() {
 }
 
 function ThreadUnavailableState() {
+  const t = useTranslations("dashboardChat");
   return (
     <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
       <div className="max-w-sm text-center">
         <h2 className="text-sm font-semibold text-foreground">
-          Thread unavailable
+          {t("thread.unavailableTitle")}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          This chat may have been deleted, moved, or you may no longer have
-          access to it.
+          {t("thread.unavailableBody")}
         </p>
       </div>
     </section>
@@ -173,6 +175,7 @@ export function DashboardChatThreadPageView({
   localQueuePaused,
   resumeLocalQueue,
 }: ReturnType<typeof useThreadPageController>) {
+  const t = useTranslations("dashboardChat");
   const chatHubContext = useChatHubContext();
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const chatHubRegistration = useMemo<ChatHubRegistration>(
@@ -286,7 +289,9 @@ export function DashboardChatThreadPageView({
               </p>
               {!!firstTurn.recovery.turn.images?.length && (
                 <p>
-                  {firstTurn.recovery.turn.images.length} attached images saved
+                  {t("thread.imagesSaved", {
+                    count: firstTurn.recovery.turn.images.length,
+                  })}
                 </p>
               )}
               <button
@@ -295,26 +300,26 @@ export function DashboardChatThreadPageView({
                 disabled={!localStatus.ready}
                 onClick={() => void firstTurn.retry()}
               >
-                Retry first message
+                {t("thread.retryFirstMessage")}
               </button>
             </div>
           )}
           {localQueuePaused && localStatus.ready && queuedSends.length > 0 && (
             <div className="border-b px-4 py-2 text-sm" role="status">
-              Queued messages were paused while the computer was unavailable.
+              {t("thread.queuePaused")}
               <button
                 type="button"
                 className="ml-3 underline"
                 onClick={resumeLocalQueue}
               >
-                Resume queued messages
+                {t("thread.resumeQueued")}
               </button>
             </div>
           )}
           {latestRunFailure && !activeThreadRun && !isStreaming && (
             <div className="shrink-0 px-4 pt-3">
               <ChatErrorNotice
-                title="Message could not be started"
+                title={t("thread.messageNotStarted")}
                 message={latestRunFailure.errorMessage}
                 code={latestRunFailure.errorCode}
               />

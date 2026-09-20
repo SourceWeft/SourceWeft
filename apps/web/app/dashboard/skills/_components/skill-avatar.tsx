@@ -10,6 +10,7 @@ import {
   Video,
 } from "lucide-react";
 import type { SkillLogo } from "@sourceweft/contracts";
+import { useTranslations } from "next-intl";
 import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
@@ -37,6 +38,7 @@ export function SkillAvatar({
   className?: string;
   icon?: { iconName?: string; iconTone?: "brand" | "mono" };
 }) {
+  const t = useTranslations("dashboardSkills");
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const url = item.logo?.url;
@@ -53,10 +55,10 @@ export function SkillAvatar({
     .join("")
     .toUpperCase();
   const label = failed
-    ? `Logo unavailable: ${item.displayName}`
+    ? t("avatar.logoUnavailable", { name: item.displayName })
     : item.logo?.source === "publisher"
-      ? `GitHub publisher avatar for ${item.displayName}`
-      : `${item.displayName} logo`;
+      ? t("avatar.publisherAvatar", { name: item.displayName })
+      : t("avatar.logo", { name: item.displayName });
   return (
     <span
       title={label}

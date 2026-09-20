@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { BUILD_TIME, SHORT_BUILD_SHA } from "../../../../lib/app-version";
@@ -24,6 +25,7 @@ function formatBuildDate(value: string) {
 }
 
 export function AboutPanel() {
+  const t = useTranslations("dashboardSettings");
   const isDesktop = React.useSyncExternalStore(
     subscribe,
     desktopBridge.isAvailable,
@@ -53,24 +55,34 @@ export function AboutPanel() {
 
   let versionLabel: string;
   if (!isDesktop) {
-    versionLabel = `build ${SHORT_BUILD_SHA}`;
+    versionLabel = t("about.buildLabel", { sha: SHORT_BUILD_SHA });
   } else if (info) {
     versionLabel = info.appVersion;
   } else {
-    versionLabel = infoFailed ? "Unavailable" : "Loading...";
+    versionLabel = infoFailed
+      ? t("about.versionUnavailable")
+      : t("about.versionLoading");
   }
 
   const detail = isDesktop
     ? info
-      ? `Desktop app · ${info.platform} ${info.arch}`
-      : "Desktop app"
+      ? t("about.detailDesktop", { platform: info.platform, arch: info.arch })
+      : t("about.detailDesktopShort")
     : buildDate
-      ? `Web · ${buildDate}`
-      : "Web";
+      ? t("about.detailWeb", { date: buildDate })
+      : t("about.detailWebShort");
 
   const copyValue = isDesktop
-    ? `SourceWeft desktop ${info?.appVersion ?? "unknown"}${info ? ` (${info.platform} ${info.arch})` : ""}`
-    : `SourceWeft web build ${SHORT_BUILD_SHA}${buildDate ? ` (${buildDate})` : ""}`;
+    ? info
+      ? t("about.copyDesktopWithInfo", {
+          version: info.appVersion,
+          platform: info.platform,
+          arch: info.arch,
+        })
+      : t("about.copyDesktopNoInfo", { version: t("about.versionUnavailable") })
+    : buildDate
+      ? t("about.copyWebWithDate", { sha: SHORT_BUILD_SHA, date: buildDate })
+      : t("about.copyWebNoDate", { sha: SHORT_BUILD_SHA });
 
   const handleCopy = async () => {
     try {
@@ -85,10 +97,11 @@ export function AboutPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-foreground">About</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          {t("about.title")}
+        </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Details about the SourceWeft client you are running. Include them when
-          you report a problem.
+          {t("about.description")}
         </p>
       </div>
 
@@ -104,7 +117,7 @@ export function AboutPanel() {
           {versionLabel}
         </span>
         <Button
-          aria-label="Copy version details"
+          aria-label={t("about.copyAria")}
           onClick={handleCopy}
           size="icon-sm"
           type="button"
@@ -126,14 +139,14 @@ export function AboutPanel() {
           }}
           type="button"
         >
-          View changelog
+          {t("about.viewChangelog")}
         </button>
       ) : (
         <Link
           className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
           href="/changelog"
         >
-          View changelog
+          {t("about.viewChangelog")}
         </Link>
       )}
     </div>

@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 
 import { SkillRow } from "./skill-row";
 import type { HubSkillItem } from "./use-skills";
+import enMessages from "../../../../../../messages/en.json";
+
+const intlMessages = enMessages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -27,12 +33,14 @@ function render(skill: HubSkillItem, selected: boolean): string {
   root = createRoot(container);
   act(() => {
     root?.render(
-      createElement(SkillRow, {
-        onOpenSkill: () => {},
-        onToggle: () => {},
-        selected,
-        skill,
-      }),
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(SkillRow, {
+          onOpenSkill: () => {},
+          onToggle: () => {},
+          selected,
+          skill,
+        })}
+      </NextIntlClientProvider>,
     );
   });
   return container.textContent ?? "";

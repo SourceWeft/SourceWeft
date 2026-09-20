@@ -1,0 +1,3087 @@
+{
+  "metadata": {
+    "home": {
+      "title": "SourceWeft - AI Notebook Workspace",
+      "description": "SourceWeft is an AI notebook workspace for connected knowledge sources: upload documents, connect your tools, and get source-grounded answers with citations."
+    }
+  },
+  "header": {
+    "nav": {
+      "features": "Features",
+      "howItWorks": "How it works",
+      "pricing": "Pricing",
+      "mcpServers": "MCP Servers",
+      "blog": "Blog"
+    },
+    "signIn": "Sign in",
+    "getStarted": "Get Started",
+    "openDashboard": "Open Dashboard"
+  },
+  "footer": {
+    "tagline": "Your AI notebook workspace. Connect everything. Think deeper.",
+    "product": "Product",
+    "company": "Company",
+    "legal": "Legal",
+    "links": {
+      "features": "Features",
+      "howItWorks": "How it works",
+      "pricing": "Pricing",
+      "mcpServers": "MCP Servers",
+      "blog": "Blog",
+      "dashboard": "Dashboard",
+      "getStarted": "Get started",
+      "about": "About",
+      "changelog": "Changelog",
+      "privacy": "Privacy",
+      "terms": "Terms"
+    },
+    "copyright": "© {year} SourceWeft. All rights reserved.",
+    "builtBy": "Built by SourceWeft"
+  },
+  "landing": {
+    "hero": {
+      "badge": "Now in early access",
+      "headlineLine1": "Your AI Notebook",
+      "headlineLine2": "Workspace.",
+      "subtitle": "Upload sources, connect Notion, Google Drive, Gmail, Slack and more. Generate source-grounded answers with citations, audio overviews, study guides, FAQs, and deep AI insights from your own content.",
+      "ctaSignedIn": "Open Dashboard",
+      "ctaSignedOut": "Start for free",
+      "seeHowItWorks": "See how it works",
+      "stats": {
+        "llmProviders": "LLM providers",
+        "outputFormats": "output formats",
+        "integrations": "integrations"
+      }
+    },
+    "socialProof": {
+      "heading": "For researchers, students, and creators who go deep",
+      "roles": {
+        "researchers": {
+          "title": "Researchers",
+          "desc": "who need to trust their sources"
+        },
+        "writers": {
+          "title": "Writers",
+          "desc": "who connect ideas across notes"
+        },
+        "developers": {
+          "title": "Developers",
+          "desc": "who live in docs and RFCs"
+        },
+        "students": {
+          "title": "Students",
+          "desc": "who want to learn, not just read"
+        }
+      }
+    },
+    "features": {
+      "eyebrow": "Features",
+      "heading": "Everything your AI knowledge workspace needs",
+      "intro": "Upload sources. Connect your tools. Get answers, audio overviews, study guides and more — all grounded in what you know, with citations you can inspect.",
+      "items": {
+        "outputs": {
+          "title": "Multiple outputs from your sources",
+          "description": "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations.",
+          "bullets": [
+            "Audio overviews & podcasts",
+            "Study guides, FAQs & timelines",
+            "Inline source citations"
+          ]
+        },
+        "connect": {
+          "title": "Connect everything",
+          "description": "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. SourceWeft indexes your existing tools so your knowledge is always at hand.",
+          "bullets": [
+            "Notion, Google Drive, Gmail, Slack",
+            "25+ file formats supported",
+            "Browser extension for instant capture"
+          ]
+        },
+        "everywhere": {
+          "title": "Works everywhere you do",
+          "description": "Web app, desktop, and browser extension — all in sync. Capture a page anywhere, continue the conversation on any device. Your notebook travels with you.",
+          "bullets": [
+            "macOS & Windows desktop",
+            "Chrome & Edge extension",
+            "Mobile app (coming soon)"
+          ]
+        }
+      }
+    },
+    "howItWorks": {
+      "eyebrow": "How it works",
+      "heading": "From zero to AI-powered in minutes",
+      "steps": {
+        "step1": {
+          "title": "Create your workspace",
+          "body": "Set up a personal or team workspace in seconds. Organise knowledge into spaces — one for each project, topic, or area of your life."
+        },
+        "step2": {
+          "title": "Connect your knowledge sources",
+          "body": "Connect Notion, Google Drive, Gmail, or Slack — or drop in PDFs, paste URLs, and capture any web page. SourceWeft indexes everything, wherever your knowledge lives."
+        },
+        "step3": {
+          "title": "Chat with your AI",
+          "body": "Ask questions, get summaries, explore connections. Every answer is grounded in your own sources with inline citations you can inspect."
+        }
+      }
+    },
+    "pricing": {
+      "eyebrow": "Pricing",
+      "heading": "Simple, transparent pricing",
+      "intro": "Start free. Upgrade when you need more. No surprise bills."
+    }
+  },
+  "about": {
+    "meta": {
+      "title": "About SourceWeft",
+      "description": "SourceWeft is an AI notebook workspace for source-grounded thinking, connected knowledge, citations, study guides, FAQs, and audio overviews."
+    },
+    "hero": {
+      "eyebrow": "About SourceWeft",
+      "heading": "An AI notebook workspace for source-grounded thinking.",
+      "subtitle": "SourceWeft helps people collect, connect, and reason over their own material. It is designed for work where the source matters: research, learning, writing, analysis, and team knowledge.",
+      "ctaSignedIn": "Open Dashboard",
+      "ctaSignedOut": "Start for free",
+      "exploreFeatures": "Explore features",
+      "card": {
+        "title": "Built for connected knowledge",
+        "subtitle": "Sources in, cited outputs out",
+        "items": [
+          "Connected sources",
+          "Inline citations",
+          "Study guides and FAQs",
+          "Audio overviews"
+        ],
+        "footnote": "Each output is meant to stay close to the documents, notes, and connected sources that shaped it."
+      }
+    },
+    "principles": {
+      "eyebrow": "Product principles",
+      "heading": "Keep the thread back to the original material.",
+      "items": {
+        "grounded": {
+          "title": "Answers should stay attached to sources",
+          "body": "SourceWeft is built around grounded work: citations, inspectable context, and outputs that make it clear where an answer came from."
+        },
+        "workspace": {
+          "title": "Your workspace should meet your knowledge",
+          "body": "Upload files or connect tools like Notion, Google Drive, Gmail, and Slack so your existing material becomes usable without copying it into another silo."
+        },
+        "artifacts": {
+          "title": "AI should help people make durable artifacts",
+          "body": "Beyond chat, SourceWeft is designed to turn source material into study guides, FAQs, timelines, briefings, and audio overviews you can revisit."
+        }
+      }
+    },
+    "audiences": {
+      "eyebrow": "Who it is for",
+      "heading": "People who need answers they can trace.",
+      "items": [
+        "Researchers comparing notes, papers, and source collections",
+        "Students turning class material into study guides and grounded explanations",
+        "Writers and creators connecting ideas across drafts, clips, and references",
+        "Teams that need shared context without losing the trail back to original documents"
+      ]
+    },
+    "direction": {
+      "eyebrow": "Current direction",
+      "heading": "Early access is focused on making connected knowledge feel dependable.",
+      "items": [
+        "Deeper connected-source coverage across web, desktop, and browser extension workflows",
+        "More source-grounded output formats for learning, briefing, and synthesis",
+        "Sharper citation review patterns so generated work stays easy to inspect"
+      ]
+    },
+    "buildLabel": "build {sha}"
+  },
+  "changelog": {
+    "meta": {
+      "title": "Changelog",
+      "description": "Product updates for SourceWeft, the AI notebook workspace for connected knowledge sources and source-grounded outputs."
+    },
+    "badge": "Product updates",
+    "heading": "Changelog",
+    "subtitle": "A concise record of SourceWeft releases, written from Git tags so public updates stay tied to shipped code.",
+    "ctaAbout": "About SourceWeft",
+    "ctaFeatures": "View features",
+    "category": {
+      "Release": "Release"
+    }
+  },
+  "blog": {
+    "meta": {
+      "title": "Blog",
+      "description": "Read SourceWeft essays, product updates, and technical guides on source-grounded AI notebooks, research workflows, and trustworthy retrieval.",
+      "ogTitle": "SourceWeft Blog"
+    },
+    "badge": "SourceWeft Blog",
+    "heading": "Field notes for AI workspaces.",
+    "lead": "Product essays, implementation guides, and research operating patterns for teams building with connected knowledge sources.",
+    "sublead": "Browse essays by topic, from model evaluation to research operations and product updates.",
+    "latestWriting": "Latest writing",
+    "latestHeading": "Guides, updates, and systems notes",
+    "count": "{count, plural, =0 {No essays} one {# essay} other {# essays}} from the product and engineering team",
+    "allPosts": "All Posts",
+    "articleFallbackTag": "Article",
+    "unscheduled": "Unscheduled",
+    "minRead": "{minutes} min read",
+    "featured": "Featured",
+    "latest": "Latest",
+    "readEssay": "Read essay",
+    "empty": {
+      "title": "Essays are on the way.",
+      "body": "No posts have been published yet. Check back soon for product essays, implementation guides, and research operating patterns."
+    },
+    "article": {
+      "backToBlog": "Back to blog",
+      "shareableUrl": "Shareable URL",
+      "readNext": "Read next",
+      "keepReading": "Keep reading",
+      "relatedEssays": "Related essays",
+      "allPosts": "All posts"
+    },
+    "tag": {
+      "back": "Back to blog",
+      "topicBadge": "Topic",
+      "notFound": "Tag Not Found",
+      "metaTitle": "#{tag} essays",
+      "description": "{count, plural, one {# SourceWeft essay} other {# SourceWeft essays}} tagged #{tag}: product notes, implementation guides, and research workflows.",
+      "emptyText": "No published essays carry this tag yet.",
+      "browseAll": "Browse all essays"
+    }
+  },
+  "mcp": {
+    "meta": {
+      "title": "MCP Server Marketplace",
+      "description": "Browse public MCP servers for SourceWeft and other MCP clients. Discover HTTP, SSE, and desktop MCP servers with tools, runtime, and verification details.",
+      "socialDescription": "A public directory of MCP servers with tools, transport, runtime, and verification details."
+    },
+    "hero": {
+      "badge": "SourceWeft MCP Market",
+      "subtitle": "{count, plural, =0 {Explore MCP servers} other {Explore # MCP servers}} with tools, transport, auth, and trust details up front, then add them to a SourceWeft workspace."
+    },
+    "getStarted": {
+      "install": {
+        "title": "Install",
+        "description": "Add any listed server to a SourceWeft workspace in three steps.",
+        "ctaSignedIn": "Open MCP in dashboard",
+        "ctaSignedOut": "Sign in to install",
+        "steps": [
+          "Pick a server and review its tools, auth, and trust level.",
+          "Add it from the MCP page in your workspace dashboard.",
+          "Connect credentials privately, then enable it for chats."
+        ]
+      },
+      "publish": {
+        "title": "Publish",
+        "description": "List your own MCP server for every SourceWeft workspace.",
+        "ctaSignedIn": "Submit your server",
+        "ctaSignedOut": "Sign in to submit",
+        "steps": [
+          "Publish your server source in a public GitHub repository.",
+          "Submit the repository from the MCP page in the dashboard.",
+          "It goes live after review; trusted publishers get a badge."
+        ]
+      }
+    },
+    "directory": {
+      "featuredTitle": "Featured",
+      "featuredDescription": "Servers from official publishers or verified by review.",
+      "recentTitle": "Recently updated",
+      "recentDescription": "Freshly indexed servers and recently updated listings.",
+      "categoryPopular": "Popular {category} MCP servers.",
+      "browseByCategory": "Browse by category"
+    },
+    "results": "Results for “{query}”",
+    "allServers": "All MCP servers",
+    "search": {
+      "ariaLabel": "Search MCP servers",
+      "placeholder": "Search by name, provider, or capability",
+      "button": "Search"
+    },
+    "listing": {
+      "categories": "Categories",
+      "allServersLabel": "All servers",
+      "marketHome": "Market home",
+      "serverCount": "{count, plural, one {# server} other {# servers}}",
+      "serverCountOnPage": "{count, plural, one {# server} other {# servers}} on this page",
+      "clearFilters": "Clear filters",
+      "noMatchTitle": "No MCP servers match these filters.",
+      "noMatchBody": "Try a broader search or another category.",
+      "syncingTitle": "MCP servers are syncing.",
+      "syncingBody": "The public market is available, but no published MCP servers are listed yet.",
+      "paginationLabel": "Pagination",
+      "firstPage": "First page",
+      "nextPage": "Next page"
+    },
+    "category": {
+      "backToMarket": "Back to MCP market",
+      "notFound": "MCP Category",
+      "title": "{name} MCP Servers",
+      "descriptionTemplate": "Browse public {name} MCP servers with tools, transport, runtime, and verification details.",
+      "bodyDescription": "Public {name} MCP servers available to SourceWeft and other MCP clients.",
+      "resultsIn": "Results for “{query}” in {category}"
+    },
+    "badges": {
+      "verification": {
+        "official": "Official",
+        "verified": "Verified",
+        "unverified": "Unverified"
+      },
+      "runtime": {
+        "hybrid": "Web + Desktop",
+        "desktop": "Desktop only",
+        "web": "Web executable"
+      },
+      "risk": {
+        "read": "Read",
+        "write": "Write",
+        "destructive": "Destructive",
+        "unknown": "Unknown"
+      }
+    },
+    "card": {
+      "auth": "Auth",
+      "tools": "{count, plural, one {# tool} other {# tools}}",
+      "viewAll": "View all"
+    },
+    "tools": {
+      "empty": "Tool metadata has not been indexed yet.",
+      "inputFields": "Input fields: {fields}",
+      "schemaObject": "schema object"
+    },
+    "faq": {
+      "eyebrow": "MCP FAQ",
+      "heading": "MCP server basics",
+      "items": {
+        "what": {
+          "question": "What is an MCP server?",
+          "answer": "An MCP server exposes tools and context through the Model Context Protocol, so an AI client can call external systems in a structured way."
+        },
+        "use": {
+          "question": "How do I use an MCP server in SourceWeft?",
+          "answer": "Open the MCP server in SourceWeft, install it into a workspace, configure credentials if required, then enable it for chat runs from the dashboard."
+        },
+        "safe": {
+          "question": "Are unverified MCP servers safe?",
+          "answer": "Unverified MCP servers can receive tool arguments from a conversation and may perform external actions. Review the provider, tools, and requested credentials before enabling one."
+        },
+        "transport": {
+          "question": "What is the difference between HTTP/SSE and STDIO MCP?",
+          "answer": "HTTP and SSE MCP servers run remotely and can be used from web runtimes. STDIO MCP servers require a local desktop host because they start a local process."
+        },
+        "keys": {
+          "question": "Do MCP servers need API keys?",
+          "answer": "Some MCP servers require Bearer tokens, API keys, or custom headers. SourceWeft stores workspace credentials privately and does not expose them on public market pages."
+        }
+      }
+    },
+    "detail": {
+      "metaFallback": "MCP Server",
+      "breadcrumbHome": "Home",
+      "breadcrumbServers": "MCP Servers",
+      "updated": "Updated {date}",
+      "tools": "Tools",
+      "auth": "Auth",
+      "license": "License",
+      "language": "Language",
+      "required": "Required",
+      "notRequired": "Not required",
+      "unknown": "Unknown",
+      "addToWorkspace": "Add to workspace",
+      "signInToInstall": "Sign in to install",
+      "homepage": "Homepage",
+      "repository": "Repository",
+      "source": "Source",
+      "nav": {
+        "overview": "Overview",
+        "installation": "Installation",
+        "tools": "Tools ({count})",
+        "versions": "Versions ({count})",
+        "related": "Related"
+      },
+      "overviewHeading": "Overview",
+      "riskSummary": "Risk summary: ",
+      "installationHeading": "Installation",
+      "inSourceWeft": "In SourceWeft",
+      "step1": "Open <link>{name} in the dashboard</link> and add it to a workspace.",
+      "step2": "Connect {name} credentials. They are stored privately and never shown on public pages.",
+      "step2Fallback": "the required",
+      "step3": "Enable the server for the chats that should use its tools.",
+      "runtimeVia": "{runtime} via {transport}.",
+      "stdioNote": " STDIO servers start a local process, so they need the SourceWeft desktop host.",
+      "remoteNote": " Remote servers run from the web runtime once configured in a workspace.",
+      "otherClients": "Other MCP clients",
+      "otherClientsConfig": "Add this to your client's <code>mcpServers</code> config.",
+      "oauthNote": " The client completes OAuth sign-in on first connect.",
+      "followRepo": "Follow the launch instructions in the <link>repository</link>.",
+      "toolsHeading": "Tools",
+      "versionsHeading": "Version history",
+      "latest": "Latest",
+      "serverDetails": "Server details",
+      "identifier": "Identifier",
+      "transport": "Transport",
+      "runtime": "Runtime",
+      "trust": "Trust",
+      "published": "Published",
+      "securityHeading": "Security note",
+      "securityBody": "MCP servers receive tool arguments from a conversation and may perform external actions. Unverified listings are allowed, but SourceWeft marks them so you can review the server before enabling it.",
+      "relatedHeading": "More servers like {name}"
+    }
+  },
+  "languageSwitcher": {
+    "label": "Language",
+    "ariaLabel": "Change language"
+  },
+  "authUi": {
+    "APP": "App",
+    "ACCOUNT": "Account",
+    "ACCOUNTS": "Accounts",
+    "ACCOUNTS_DESCRIPTION": "Manage your currently signed in accounts.",
+    "ACCOUNTS_INSTRUCTIONS": "Sign in to an additional account.",
+    "ADD_ACCOUNT": "Add Account",
+    "ADD_PASSKEY": "Add Passkey",
+    "ALREADY_HAVE_AN_ACCOUNT": "Already have an account?",
+    "AVATAR": "Avatar",
+    "AVATAR_DESCRIPTION": "Click on the avatar to upload a custom one from your files.",
+    "AVATAR_INSTRUCTIONS": "An avatar is optional but strongly recommended.",
+    "BACKUP_CODE_REQUIRED": "Backup code is required",
+    "BACKUP_CODES": "Backup Codes",
+    "BACKUP_CODES_DESCRIPTION": "Save these backup codes in a secure place. You can use them to access your account if you lose your two-factor authentication method.",
+    "BACKUP_CODE_PLACEHOLDER": "Backup Code.",
+    "BACKUP_CODE": "Backup Code",
+    "CANCEL": "Cancel",
+    "CHANGE_PASSWORD": "Change Password",
+    "CHANGE_PASSWORD_DESCRIPTION": "Enter your current password and a new password.",
+    "CHANGE_PASSWORD_INSTRUCTIONS": "Please use 8 characters at minimum.",
+    "CHANGE_PASSWORD_SUCCESS": "Your password has been changed.",
+    "CONFIRM_PASSWORD": "Confirm Password",
+    "CONFIRM_PASSWORD_PLACEHOLDER": "Confirm Password",
+    "CONFIRM_PASSWORD_REQUIRED": "Confirm password is required",
+    "CONTINUE_WITH_AUTHENTICATOR": "Continue with Authenticator",
+    "COPIED_TO_CLIPBOARD": "Copied to clipboard",
+    "COPY_TO_CLIPBOARD": "Copy to clipboard",
+    "COPY_ALL_CODES": "Copy all codes",
+    "CONTINUE": "Continue",
+    "CURRENT_PASSWORD": "Current Password",
+    "CURRENT_PASSWORD_PLACEHOLDER": "Current Password",
+    "CURRENT_SESSION": "Current Session",
+    "UPDATE": "Update",
+    "DELETE": "Delete",
+    "DELETE_AVATAR": "Delete Avatar",
+    "DELETE_ACCOUNT": "Delete Account",
+    "DELETE_ACCOUNT_DESCRIPTION": "Permanently remove your account and all of its contents. This action is not reversible, so please continue with caution.",
+    "DELETE_ACCOUNT_INSTRUCTIONS": "Please confirm the deletion of your account. This action is not reversible, so please continue with caution.",
+    "DELETE_ACCOUNT_VERIFY": "Please check your email to verify the deletion of your account.",
+    "DELETE_ACCOUNT_SUCCESS": "Your account has been deleted.",
+    "DISABLE_TWO_FACTOR": "Disable Two-Factor",
+    "DONT_HAVE_AN_ACCOUNT": "Don't have an account?",
+    "DONE": "Done",
+    "EMAIL": "Email",
+    "EMAIL_DESCRIPTION": "Enter the email address you want to use to log in.",
+    "EMAIL_INSTRUCTIONS": "Please enter a valid email address.",
+    "EMAIL_IS_THE_SAME": "Email is the same",
+    "EMAIL_PLACEHOLDER": "m@example.com",
+    "EMAIL_REQUIRED": "Email address is required",
+    "EMAIL_VERIFY_CHANGE": "Please check your email to verify the change.",
+    "EMAIL_VERIFICATION": "Email Verification",
+    "EMAIL_VERIFICATION_DESCRIPTION": "Please check your email for the verification code to complete your registration.",
+    "EMAIL_VERIFICATION_SUCCESS": "Email verification successful.",
+    "ENABLE_TWO_FACTOR": "Enable Two-Factor",
+    "IS_INVALID": "is invalid",
+    "IS_REQUIRED": "is required",
+    "IS_THE_SAME": "is the same",
+    "FORGOT_AUTHENTICATOR": "Forgot authenticator?",
+    "FORGOT_PASSWORD": "Forgot Password",
+    "FORGOT_PASSWORD_ACTION": "Send reset link",
+    "FORGOT_PASSWORD_DESCRIPTION": "Enter your email to reset your password",
+    "FORGOT_PASSWORD_EMAIL": "Check your email for the password reset link.",
+    "FORGOT_PASSWORD_LINK": "Forgot your password?",
+    "LINK": "Link",
+    "MAGIC_LINK": "Magic Link",
+    "MAGIC_LINK_ACTION": "Send magic link",
+    "MAGIC_LINK_DESCRIPTION": "Enter your email to receive a magic link",
+    "MAGIC_LINK_EMAIL": "Check your email for the magic link",
+    "NAME": "Name",
+    "NAME_DESCRIPTION": "Please enter your full name, or a display name.",
+    "NAME_INSTRUCTIONS": "Please use 32 characters at maximum.",
+    "NAME_PLACEHOLDER": "Name",
+    "NEW_PASSWORD": "New Password",
+    "NEW_PASSWORD_PLACEHOLDER": "New Password",
+    "NEW_PASSWORD_REQUIRED": "New password is required",
+    "ONE_TIME_PASSWORD": "One-Time Password",
+    "OR_CONTINUE_WITH": "Or continue with",
+    "PASSKEY": "Passkey",
+    "PASSKEYS": "Passkeys",
+    "PASSKEYS_DESCRIPTION": "Manage your passkeys for secure access.",
+    "PASSKEYS_INSTRUCTIONS": "Securely access your account without a password.",
+    "PERSONAL_ACCOUNT": "Personal Account",
+    "API_KEYS": "API Keys",
+    "API_KEYS_DESCRIPTION": "Manage your API keys for secure access.",
+    "API_KEYS_INSTRUCTIONS": "Generate API keys to access your account programmatically.",
+    "CREATE_API_KEY": "Create API Key",
+    "CREATE_API_KEY_DESCRIPTION": "Enter a unique name for your API key to differentiate it from other keys.",
+    "API_KEY_NAME_PLACEHOLDER": "New API Key",
+    "API_KEY_CREATED": "API Key Created",
+    "CREATE_API_KEY_SUCCESS": "Please copy your API key and store it in a safe place. For security reasons we cannot show it again.",
+    "NEVER_EXPIRES": "Never Expires",
+    "EXPIRES": "Expires",
+    "NO_EXPIRATION": "No Expiration",
+    "CREATE_ORGANIZATION": "Create Organization",
+    "ORGANIZATION": "Organization",
+    "ORGANIZATION_NAME": "Name",
+    "ORGANIZATION_NAME_PLACEHOLDER": "Acme Inc.",
+    "ORGANIZATION_NAME_DESCRIPTION": "This is your organization's visible name.",
+    "ORGANIZATION_NAME_INSTRUCTIONS": "Please use 32 characters at maximum.",
+    "ORGANIZATION_SLUG": "Slug URL",
+    "ORGANIZATION_SLUG_DESCRIPTION": "This is your organization's URL namespace.",
+    "ORGANIZATION_SLUG_INSTRUCTIONS": "Please use 48 characters at maximum.",
+    "ORGANIZATION_SLUG_PLACEHOLDER": "acme-inc",
+    "CREATE_ORGANIZATION_SUCCESS": "Organization created successfully",
+    "PASSWORD": "Password",
+    "PASSWORD_PLACEHOLDER": "Password",
+    "PASSWORD_REQUIRED": "Password is required",
+    "PASSWORDS_DO_NOT_MATCH": "Passwords do not match",
+    "PROVIDERS": "Providers",
+    "PROVIDERS_DESCRIPTION": "Connect your account with a third-party service.",
+    "RECOVER_ACCOUNT": "Recover Account",
+    "RECOVER_ACCOUNT_ACTION": "Recover account",
+    "RECOVER_ACCOUNT_DESCRIPTION": "Please enter a backup code to access your account",
+    "REMEMBER_ME": "Remember me",
+    "RESEND_CODE": "Resend code",
+    "RESEND_VERIFICATION_EMAIL": "Resend verification email",
+    "RESET_PASSWORD": "Reset Password",
+    "RESET_PASSWORD_ACTION": "Save new password",
+    "RESET_PASSWORD_DESCRIPTION": "Enter your new password below",
+    "RESET_PASSWORD_SUCCESS": "Password reset successfully",
+    "REQUEST_FAILED": "Request failed",
+    "REVOKE": "Revoke",
+    "DELETE_API_KEY": "Delete API Key",
+    "DELETE_API_KEY_CONFIRM": "Are you sure you want to delete this API key?",
+    "API_KEY": "API Key",
+    "SIGN_IN": "Sign In",
+    "SIGN_IN_ACTION": "Login",
+    "SIGN_IN_DESCRIPTION": "Enter your email below to login to your account",
+    "SIGN_IN_WITH": "Sign in with",
+    "SIGN_OUT": "Sign Out",
+    "SIGN_UP": "Sign Up",
+    "SIGN_UP_ACTION": "Create an account",
+    "SIGN_UP_DESCRIPTION": "Enter your information to create an account",
+    "SIGN_UP_EMAIL": "Check your email for the verification link.",
+    "SESSIONS": "Sessions",
+    "SESSIONS_DESCRIPTION": "Manage your active sessions and revoke access.",
+    "SET_PASSWORD": "Set Password",
+    "SET_PASSWORD_DESCRIPTION": "Click the button below to receive an email to set up a password for your account.",
+    "SETTINGS": "Settings",
+    "SAVE": "Save",
+    "SECURITY": "Security",
+    "SWITCH_ACCOUNT": "Switch Account",
+    "TRUST_DEVICE": "Trust this device",
+    "TWO_FACTOR": "Two-Factor",
+    "TWO_FACTOR_ACTION": "Verify code",
+    "TWO_FACTOR_DESCRIPTION": "Please enter your one-time password to continue",
+    "TWO_FACTOR_CARD_DESCRIPTION": "Add an extra layer of security to your account.",
+    "TWO_FACTOR_DISABLE_INSTRUCTIONS": "Please enter your password to disable 2FA.",
+    "TWO_FACTOR_ENABLE_INSTRUCTIONS": "Please enter your password to enable 2FA",
+    "TWO_FACTOR_ENABLED": "Two-factor authentication has been enabled",
+    "TWO_FACTOR_DISABLED": "Two-Factor Authentication has been disabled",
+    "TWO_FACTOR_PROMPT": "Two-Factor Authentication",
+    "TWO_FACTOR_TOTP_LABEL": "Scan the QR Code with your Authenticator",
+    "SEND_VERIFICATION_CODE": "Send verification code",
+    "UNLINK": "Unlink",
+    "UPDATED_SUCCESSFULLY": "Updated successfully",
+    "OPTIONAL_BRACKETS": "(Optional)",
+    "VERIFY_YOUR_EMAIL": "Verify Your Email",
+    "VERIFY_YOUR_EMAIL_DESCRIPTION": "Please verify your email address. Check your inbox for the verification email. If you haven't received the email, click the button below to resend.",
+    "GO_BACK": "Go back",
+    "SESSION_NOT_FRESH": "Your session is not fresh. Please sign in again.",
+    "UPLOAD_AVATAR": "Upload Avatar",
+    "LOGO": "Logo",
+    "LOGO_DESCRIPTION": "Click on the logo to upload a custom one from your files.",
+    "LOGO_INSTRUCTIONS": "A logo is optional but strongly recommended.",
+    "UPLOAD": "Upload",
+    "UPLOAD_LOGO": "Upload Logo",
+    "DELETE_LOGO": "Delete Logo",
+    "PRIVACY_POLICY": "Privacy Policy",
+    "TERMS_OF_SERVICE": "Terms of Service",
+    "BY_CONTINUING_YOU_AGREE": "By continuing, you agree to the",
+    "USER": "User",
+    "ORGANIZATIONS": "Organizations",
+    "ORGANIZATIONS_DESCRIPTION": "Manage your organizations and memberships.",
+    "ORGANIZATIONS_INSTRUCTIONS": "Create an organization to collaborate with other users.",
+    "LEAVE_ORGANIZATION": "Leave Organization",
+    "LEAVE_ORGANIZATION_CONFIRM": "Are you sure you want to leave this organization?",
+    "LEAVE_ORGANIZATION_SUCCESS": "You have successfully left the organization.",
+    "MANAGE_ORGANIZATION": "Manage Organization",
+    "REMOVE_MEMBER": "Remove Member",
+    "REMOVE_MEMBER_CONFIRM": "Are you sure you want to remove this member from the organization?",
+    "REMOVE_MEMBER_SUCCESS": "Member removed successfully",
+    "INVITE_MEMBER": "Invite Member",
+    "MEMBERS": "Members",
+    "MEMBERS_DESCRIPTION": "Add or remove members and manage their roles.",
+    "MEMBERS_INSTRUCTIONS": "Invite new members to your organization.",
+    "INVITE_MEMBER_DESCRIPTION": "Send an invitation to add a new member to your organization.",
+    "ROLE": "Role",
+    "SELECT_ROLE": "Select a role",
+    "ADMIN": "Admin",
+    "MEMBER": "Member",
+    "GUEST": "Guest",
+    "OWNER": "Owner",
+    "UPDATE_ROLE_DESCRIPTION": "Update the role for this member",
+    "UPDATE_ROLE": "Update Role",
+    "MEMBER_ROLE_UPDATED": "Member role updated successfully",
+    "SEND_INVITATION": "Send Invitation",
+    "SEND_INVITATION_SUCCESS": "Invitation sent successfully",
+    "PENDING_INVITATIONS": "Pending Invitations",
+    "PENDING_INVITATIONS_DESCRIPTION": "Manage pending invitations to your organization.",
+    "PENDING_USER_INVITATIONS_DESCRIPTION": "Invitations you've received from organizations.",
+    "CANCEL_INVITATION": "Cancel Invitation",
+    "INVITATION_CANCELLED": "Invitation cancelled successfully",
+    "ACCEPT_INVITATION": "Accept Invitation",
+    "ACCEPT_INVITATION_DESCRIPTION": "You have been invited to join an organization.",
+    "INVITATION_ACCEPTED": "Invitation accepted successfully",
+    "INVITATION_REJECTED": "Invitation rejected successfully",
+    "ACCEPT": "Accept",
+    "REJECT": "Reject",
+    "INVITATION_EXPIRED": "This invitation has expired",
+    "DELETE_ORGANIZATION": "Delete Organization",
+    "DELETE_ORGANIZATION_DESCRIPTION": "Permanently remove your organization and all of its contents. This action is not reversible — please continue with caution.",
+    "DELETE_ORGANIZATION_SUCCESS": "Organization deleted successfully",
+    "DELETE_ORGANIZATION_INSTRUCTIONS": "Enter the organization slug to continue:",
+    "SLUG_REQUIRED": "Organization slug is required",
+    "SLUG_DOES_NOT_MATCH": "The slug does not match",
+    "MEMBER_SINGULAR": "member",
+    "MEMBER_PLURAL": "members",
+    "UNKNOWN": "Unknown"
+  },
+  "dashboardNav": {
+    "nav": {
+      "overview": "Overview",
+      "skills": "Skills",
+      "mcp": "MCP",
+      "observability": "Observability",
+      "chat": "Chat",
+      "more": "More",
+      "me": "Me",
+      "mainNavigation": "Main navigation"
+    },
+    "sidebar": {
+      "newChat": "New chat",
+      "showConversations": "Show conversations",
+      "expandSidebar": "Expand sidebar",
+      "collapseSidebar": "Collapse sidebar",
+      "hideSidebar": "Hide sidebar",
+      "showSidebar": "Show sidebar",
+      "sheetTitle": "Navigation and conversations",
+      "inviteManageMembers": "Invite & manage members",
+      "conversationLoadError": "Could not load the conversation details"
+    },
+    "workspace": {
+      "workspaces": "Workspaces",
+      "rename": "Rename workspace",
+      "add": "Add workspace",
+      "addDescription": "Create a workspace to keep sources and chats in a separate context.",
+      "renameDescription": "Update the display name for this workspace.",
+      "namePlaceholder": "Workspace name",
+      "defaultName": "Workspace {number}",
+      "creating": "Creating...",
+      "create": "Create",
+      "saving": "Saving...",
+      "save": "Save",
+      "createError": "Failed to create workspace.",
+      "renameError": "Failed to rename workspace."
+    },
+    "chats": {
+      "heading": "Chats",
+      "searchAll": "Search all chats",
+      "searchPlaceholder": "Search all chats…",
+      "filter": "Filter chats",
+      "all": "All chats",
+      "shared": "Shared",
+      "private": "Private",
+      "archived": "Archived",
+      "clearFilter": "Clear {filter} filter",
+      "openActions": "Open chat actions",
+      "makePrivate": "Make private",
+      "makeVisible": "Make visible to workspace",
+      "archive": "Archive",
+      "delete": "Delete",
+      "nowPrivate": "Chat is now private",
+      "nowVisible": "Chat is now visible to the workspace",
+      "visibilityError": "Could not change who can see this chat.",
+      "anyoneWithLink": "Anyone with the link",
+      "visibleToWorkspace": "Visible to workspace",
+      "sourceCount": "{count} sources",
+      "status": {
+        "ready": "ready",
+        "running": "running",
+        "attention": "attention"
+      },
+      "loadingChats": "Loading chats...",
+      "noMatching": "No matching chats loaded. Load more to see older chats.",
+      "noneYet": "No chats yet.",
+      "filterEmpty": {
+        "shared": "No shared chats.",
+        "private": "No private chats.",
+        "archived": "No archived chats."
+      },
+      "loading": "Loading...",
+      "loadMore": "Load more",
+      "clearScope": {
+        "archived": "archived chats",
+        "private": "private chats"
+      },
+      "clearAll": "Clear all {scope}",
+      "clearConfirmTitle": "Clear all {scope}?",
+      "clearConfirmDescription": "This will remove {count} {scope}, including chats hidden by the current filter. This action cannot be undone.",
+      "clearing": "Clearing...",
+      "clearAllButton": "Clear all"
+    },
+    "account": {
+      "accountAndSettings": "Account and settings",
+      "userAlt": "User",
+      "userAvatarAlt": "User avatar",
+      "accountFallback": "Account",
+      "sourceweftUser": "SourceWeft User",
+      "signedIn": "Signed in",
+      "profile": "Profile",
+      "usage": "Usage",
+      "billing": "Billing",
+      "logOut": "Log out"
+    },
+    "team": {
+      "add": "Add team",
+      "teams": "Teams",
+      "switcher": "Team switcher",
+      "switchLabel": "Switch team: {name}",
+      "switchError": "Failed to switch team."
+    },
+    "mobileMe": {
+      "signOut": "Sign out",
+      "signingOut": "Signing out...",
+      "endSession": "End this session",
+      "observeDescription": "LLM traces, metrics, and timeline",
+      "panels": {
+        "account": {
+          "label": "Profile",
+          "description": "Account, avatar, theme, and preferences"
+        },
+        "team": {
+          "label": "Team",
+          "description": "Team switcher, members, and invitations"
+        },
+        "workspace": {
+          "label": "Workspace",
+          "description": "Who can see and work in this workspace"
+        },
+        "usage": {
+          "label": "Usage",
+          "description": "Plan usage and recent activity"
+        },
+        "billing": {
+          "label": "Billing",
+          "description": "Subscription, plan, and billing portal"
+        },
+        "approvals": {
+          "label": "Approvals",
+          "description": "Actions you chose to always allow"
+        },
+        "about": {
+          "label": "About",
+          "description": "Version and build details"
+        }
+      }
+    },
+    "members": {
+      "dialogTitle": "Workspace members"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "description": "Quick actions available in the chat workspace.",
+      "searchPlaceholder": "Search shortcuts...",
+      "empty": "No shortcuts found."
+    },
+    "common": {
+      "cancel": "Cancel",
+      "back": "Back",
+      "observe": "Observe"
+    }
+  },
+  "dashboardSettings": {
+    "common": {
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "retry": "Retry",
+      "memberFallback": "Member"
+    },
+    "nav": {
+      "profile": "Profile",
+      "team": "Team",
+      "usage": "Usage",
+      "billing": "Billing",
+      "approvals": "Approvals",
+      "localComputer": "This computer",
+      "about": "About",
+      "userFallback": "SourceWeft User",
+      "close": "Close",
+      "srTitle": "Settings center"
+    },
+    "account": {
+      "profileTitle": "Profile",
+      "changeAvatar": "Change avatar",
+      "changeAvatarOverlay": "Change",
+      "displayName": "Display name",
+      "displayNamePlaceholder": "Your display name",
+      "nameRequired": "Name is required.",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "profileSaved": "Profile saved",
+      "saveError": "Unable to save.",
+      "accountTitle": "Account",
+      "signedInAccount": "Signed-in account",
+      "signOut": "Sign out",
+      "signingOut": "Signing out…",
+      "deleteAccount": "Delete account",
+      "deleteAccountDescription": "Permanently removes your account and all data. Cannot be undone.",
+      "delete": "Delete",
+      "deleting": "Deleting…",
+      "deleteError": "Unable to delete account.",
+      "deleteStarted": "Account deletion started"
+    },
+    "appearance": {
+      "title": "Appearance",
+      "theme": {
+        "label": "Theme",
+        "description": "Choose how SourceWeft looks to you.",
+        "light": "Light",
+        "system": "System",
+        "dark": "Dark",
+        "saveError": "Unable to save theme."
+      }
+    },
+    "language": {
+      "title": "Language",
+      "label": "Interface language",
+      "description": "Choose the language SourceWeft's interface is shown in.",
+      "system": "System",
+      "saveError": "Unable to save your language preference.",
+      "responseLabel": "Response language",
+      "responseUnavailable": "Not available yet",
+      "comingSoon": "Coming soon"
+    },
+    "team": {
+      "title": "Team",
+      "createTeam": "Create team",
+      "switchError": "Failed to switch team.",
+      "membersTitle": "Members",
+      "invite": "Invite",
+      "colName": "Name",
+      "colEmail": "Email",
+      "colRole": "Role",
+      "removeMember": "Remove member",
+      "transferOwnershipFirst": "Transfer ownership before removing this member",
+      "noMembers": "No members yet. Invite someone to get started.",
+      "pendingInvites": "Pending invites",
+      "revoke": "Revoke",
+      "revoking": "Revoking…",
+      "personalNoMembers": "Personal team does not support members or invites. Create or switch to a team to collaborate.",
+      "inviteMemberTitle": "Invite team member",
+      "emailAddress": "Email address",
+      "emailPlaceholder": "colleague@company.com",
+      "roleLabel": "Role",
+      "roleMember": "Member",
+      "roleAdmin": "Admin",
+      "sendInvite": "Send invite",
+      "sending": "Sending…",
+      "inviteSent": "Invitation sent to {email}",
+      "inviteFailed": "Failed to send invite.",
+      "inviteFailedGeneric": "Failed to send invitation.",
+      "personalCannotInvite": "Personal team cannot invite members.",
+      "revokeFailed": "Failed to revoke invitation.",
+      "invitationRevoked": "Invitation revoked.",
+      "removeMemberFailed": "Failed to remove member.",
+      "memberRemoved": "{name} removed."
+    },
+    "members": {
+      "selectWorkspacePrompt": "Select a workspace to manage its members.",
+      "title": "Workspace members",
+      "description": "Each workspace has its own members and roles. Team owners and admins can always administer every workspace.",
+      "addMember": "Add member",
+      "workspaceLabel": "Workspace",
+      "selectWorkspacePlaceholder": "Select a workspace",
+      "loading": "Loading members...",
+      "loadError": "Could not load workspace members.",
+      "you": "(you)",
+      "teamRoleBadge": "Team {role}",
+      "removeMemberSr": "Remove member",
+      "thisMember": "This member",
+      "removeDialogTitle": "Remove member?",
+      "removeDialogBody": "{name} will lose access to this workspace. They remain part of the team.",
+      "addDialogTitle": "Add a workspace member",
+      "addDialogDescription": "Pick a teammate to give access to this workspace. To bring someone new onto the team, invite them from the Team panel first.",
+      "roleForNewMembers": "Role for new members",
+      "searchPlaceholder": "Search teammates by name or email...",
+      "noTeammates": "No teammates found.",
+      "everyoneAdded": "Everyone on the team is already in this workspace.",
+      "roleChanged": "{name} is now {role}",
+      "roleChangeError": "Could not change this member's role.",
+      "memberRemovedWorkspace": "{name} removed from workspace",
+      "removeError": "Could not remove this member.",
+      "memberAdded": "{name} added as {role}",
+      "addError": "Could not add that member."
+    },
+    "roles": {
+      "admin": "Admin",
+      "adminHint": "Manage members, credentials and settings",
+      "editor": "Editor",
+      "editorHint": "Create and edit content",
+      "viewer": "Viewer",
+      "viewerHint": "Read-only access"
+    },
+    "guests": {
+      "title": "Guests",
+      "description": "External collaborators invited to this workspace only. Guests are not part of your team and never exceed editor access.",
+      "inviteGuest": "Invite guest",
+      "loading": "Loading guests...",
+      "loadError": "Could not load guests.",
+      "emptyGuests": "No guests yet.",
+      "emptyGuestsHint": "Invite an external collaborator to get started.",
+      "guestBadge": "Guest",
+      "pendingBadge": "Pending",
+      "removeGuestSr": "Remove guest",
+      "revokeInvitationSr": "Revoke invitation",
+      "removeDialogTitle": "Remove guest?",
+      "thisGuest": "This guest",
+      "removeDialogBody": "{name} will lose access to this workspace.",
+      "inviteDialogTitle": "Invite a guest",
+      "inviteDialogDescription": "Invite someone outside your team to collaborate in this workspace only. They receive an email link to accept.",
+      "emailAddress": "Email address",
+      "emailPlaceholder": "guest@example.com",
+      "roleLabel": "Role",
+      "sendInvitation": "Send invitation",
+      "enterEmail": "Enter an email address to invite.",
+      "invitationSent": "Invitation sent",
+      "inviteError": "Could not send that invitation.",
+      "guestRemoved": "{name} removed from workspace",
+      "removeGuestError": "Could not remove this guest.",
+      "invitationRevoked": "Invitation revoked",
+      "revokeGuestError": "Could not revoke this invitation."
+    },
+    "localHost": {
+      "title": "This computer",
+      "checkingAccount": "Checking your account…",
+      "description": "Work with files and run commands on this Mac. Each conversation gets its own folder unless you select one.",
+      "statusOnline": "This computer is online",
+      "statusConnecting": "Connecting this computer…",
+      "statusSettingUp": "Setting up this computer…",
+      "remoteAccessTitle": "Allow access from other devices",
+      "remoteAccessDescription": "Let your other devices use this computer with the same account. They can access task folders and authorized working directories. You can still work on this computer when remote access is off.",
+      "turnOffRemoteAccess": "Turn off remote access",
+      "workingDirectoriesTitle": "Working directories",
+      "workingDirectoriesDescription": "Each conversation gets a separate task folder. Removing folder access stops further local operations for affected tasks and preserves the files.",
+      "removeAccess": "Remove access",
+      "addFolder": "Add folder"
+    },
+    "approvals": {
+      "title": "Approvals",
+      "description": "Actions you chose to always allow in this workspace. Each grant is yours alone, expires on its own, and can be revoked here at any time.",
+      "loading": "Loading approvals...",
+      "empty": "No remembered approvals. Every action that needs approval will ask you first.",
+      "connectorRisk": "Connector: {connector} · Risk: {risk}",
+      "expiresLastUsed": "Expires: {expiry} · Last used: {lastUsed}",
+      "fromConfirmation": "From confirmation {source}",
+      "revoke": "Revoke",
+      "revoking": "Revoking...",
+      "revokedToast": "Approval revoked. You will be asked again next time.",
+      "revokeError": "Could not revoke approval.",
+      "loadError": "Could not load remembered approvals."
+    },
+    "about": {
+      "title": "About",
+      "description": "Details about the SourceWeft client you are running. Include them when you report a problem.",
+      "detailDesktop": "Desktop app · {platform} {arch}",
+      "detailDesktopShort": "Desktop app",
+      "detailWeb": "Web · {date}",
+      "detailWebShort": "Web",
+      "buildLabel": "build {sha}",
+      "versionUnavailable": "Unavailable",
+      "versionLoading": "Loading...",
+      "copyAria": "Copy version details",
+      "viewChangelog": "View changelog",
+      "copyDesktopWithInfo": "SourceWeft desktop {version} ({platform} {arch})",
+      "copyDesktopNoInfo": "SourceWeft desktop {version}",
+      "copyWebWithDate": "SourceWeft web build {sha} ({date})",
+      "copyWebNoDate": "SourceWeft web build {sha}"
+    }
+  },
+  "dashboardSkills": {
+    "actions": {
+      "install": "Install",
+      "uninstall": "Uninstall",
+      "details": "Details",
+      "retry": "Retry",
+      "source": "Source"
+    },
+    "status": {
+      "installed": "Installed",
+      "builtin": "Built-in",
+      "unavailable": "Unavailable",
+      "unverified": "Unverified",
+      "underReview": "Under review"
+    },
+    "tabs": {
+      "overview": "Overview"
+    },
+    "loading": {
+      "skill": "Loading skill…"
+    },
+    "content": {
+      "noSkillMd": "This skill does not include SKILL.md content."
+    },
+    "publisher": {
+      "official": "Official",
+      "team": "Team",
+      "community": "Community",
+      "workspace": "Workspace"
+    },
+    "visibility": {
+      "public": "Public",
+      "restricted": "Restricted",
+      "workspace": "Workspace",
+      "team": "Team"
+    },
+    "fields": {
+      "heading": "Details",
+      "name": "Name",
+      "publisher": "Publisher",
+      "version": "Version",
+      "visibility": "Visibility",
+      "readme": "README",
+      "license": "License",
+      "included": "Included",
+      "notIncluded": "Not included"
+    },
+    "toasts": {
+      "installed": "Skill installed",
+      "uninstalled": "Skill uninstalled",
+      "installFailed": "Failed to install skill.",
+      "uninstallFailed": "Failed to uninstall skill.",
+      "installRecordMissing": "Skill install record is missing. Refresh and try again."
+    },
+    "gallery": {
+      "filters": "Filters",
+      "clearAll": "Clear all",
+      "filtersDrawerTitle": "Skill filters",
+      "searchPlaceholder": "Search skills",
+      "summaryAll": "all",
+      "sortBy": "Sort by",
+      "submitSkill": "Submit skill",
+      "facets": {
+        "search": "Search",
+        "category": "Category",
+        "publisher": "Publisher",
+        "status": "Status"
+      },
+      "categories": {
+        "all": "All",
+        "learn": "Learn",
+        "research": "Research",
+        "write": "Write",
+        "review": "Review",
+        "operate": "Operate"
+      },
+      "publishers": {
+        "all": "All publishers",
+        "official": "Official",
+        "community": "Community",
+        "not_official": "Not official"
+      },
+      "statuses": {
+        "all": "All",
+        "installed": "Installed",
+        "not_installed": "Not installed"
+      },
+      "sort": {
+        "recommended": "Recommended",
+        "name_asc": "Name A-Z",
+        "installed_first": "Installed first",
+        "official_first": "Official first"
+      },
+      "workspace": {
+        "select": "Select workspace",
+        "none": "No workspaces",
+        "current": "Current workspace"
+      },
+      "empty": {
+        "none": "No skills are available for this workspace.",
+        "noMatch": "No skills match the current filters."
+      },
+      "error": {
+        "title": "Skills could not be loaded",
+        "loadFailed": "Failed to load skills.",
+        "switchFailed": "Failed to switch workspace."
+      }
+    },
+    "detail": {
+      "back": "Back to skills",
+      "titleFallback": "Skill details",
+      "noSkillLoaded": "No skill loaded.",
+      "errors": {
+        "slugMissing": "Skill slug is missing.",
+        "notFound": "Skill was not found.",
+        "loadFailed": "Failed to load skill."
+      }
+    },
+    "dialog": {
+      "titleFallback": "Skill details",
+      "descriptionLoading": "Loading skill details.",
+      "loadFailed": "Failed to load skill details.",
+      "docsPending": "Documentation will appear when the selected version loads.",
+      "flaggedNotice": "Automated checks found review flags in this skill. See the selected version for its current review decision.",
+      "unverifiedNotice": "This is an unverified community skill indexed from GitHub. Review the source before installing — its instructions run in your conversations."
+    },
+    "versions": {
+      "ariaLabel": "Skill versions",
+      "versionLabel": "Version",
+      "loadingVersion": "Loading version",
+      "selectedVersion": "Selected version",
+      "recommended": "Recommended",
+      "installed": "Installed",
+      "off": "Off",
+      "status": {
+        "draft": "Under review",
+        "published": "Published",
+        "deprecated": "Deprecated",
+        "disabled": "Disabled"
+      },
+      "sourceTitle": "View this exact source version",
+      "viewingDifferent": "Viewing a different version from the one installed.",
+      "useThisVersion": "Use this version",
+      "moreVersions": "More versions",
+      "switchFailed": "Version switch failed",
+      "loadFailed": "Could not load versions",
+      "detailsSummary": "Version details",
+      "files": "{count} files",
+      "reviewNotes": "{count} review notes",
+      "sourceRevision": "Source revision",
+      "noDiagnostics": "No import diagnostics were recorded for this version.",
+      "reviewLabel": "Review",
+      "filesSummary": "Files ({count})"
+    },
+    "submit": {
+      "button": "Submit skill",
+      "title": "Submit a skill",
+      "description": "Import skills from a public GitHub repository at a fixed version. We store the skill files and check them before use. Flagged skills wait for review.",
+      "repoAriaLabel": "GitHub skill repository",
+      "enterUrl": "Enter a public GitHub repository URL.",
+      "selectWorkspace": "Select a workspace before submitting a skill.",
+      "interrupted": "Submission interrupted.",
+      "partialWarning": "Some items may already be saved; refresh the catalog before retrying.",
+      "resultsAriaLabel": "Import results",
+      "resultsSummary": "{indexed} indexed · {queued} awaiting review · {failed} failed",
+      "skillFallback": "Skill",
+      "repositoryRoot": "Repository root",
+      "reviewFlags": "Review flags: {flags}",
+      "submit": "Submit",
+      "status": {
+        "indexed": "indexed",
+        "queued": "queued",
+        "failed": "failed"
+      }
+    },
+    "introduction": {
+      "from": "From {source}",
+      "noDescription": "No detailed description provided."
+    },
+    "avatar": {
+      "logoUnavailable": "Logo unavailable: {name}",
+      "publisherAvatar": "GitHub publisher avatar for {name}",
+      "logo": "{name} logo"
+    }
+  },
+  "dashboardChat": {
+    "common": {
+      "files": "Files",
+      "tryAgain": "Try again"
+    },
+    "modelCatalog": {
+      "failedTitle": "Model catalog failed to load",
+      "failedRefresh": "Refresh the page before sending a message.",
+      "failedToast": "Model catalog failed to load. Refresh and try again.",
+      "loadingToast": "Model catalog is still loading. Try again in a moment."
+    },
+    "newChat": {
+      "title": "New chat"
+    },
+    "thread": {
+      "fallbackTitle": "Chat",
+      "unavailableTitle": "Thread unavailable",
+      "unavailableBody": "This chat may have been deleted, moved, or you may no longer have access to it.",
+      "messageNotStarted": "Message could not be started",
+      "retryFirstMessage": "Retry first message",
+      "imagesSaved": "{count} attached images saved",
+      "queuePaused": "Queued messages were paused while the computer was unavailable.",
+      "resumeQueued": "Resume queued messages"
+    },
+    "hub": {
+      "srTitle": "Hub"
+    },
+    "artifact": {
+      "srTitle": "Artifact",
+      "srPreview": "Artifact preview"
+    },
+    "presence": {
+      "whosViewing": "Who's viewing",
+      "guest": "Guest",
+      "guestWithName": "{name} · Guest",
+      "member": "Member"
+    },
+    "typing": {
+      "guest": "A guest",
+      "someone": "Someone",
+      "one": "{name} is typing…",
+      "two": "{first} and {second} are typing…",
+      "several": "Several people are typing…"
+    },
+    "workfile": {
+      "title": "Workfile",
+      "fallbackDescription": "Assistant-created working material from this thread.",
+      "purpose": {
+        "scratch": "Scratch",
+        "draft": "Draft",
+        "note": "Note",
+        "candidate": "Candidate",
+        "fallback": "Workfile"
+      }
+    },
+    "sourceMeta": {
+      "processingFailed": "Processing failed",
+      "syncInProgress": "Sync in progress",
+      "untitled": "Untitled"
+    },
+    "queue": {
+      "imagesPreview": "{count, plural, one {# image} other {# images}}",
+      "messagePreview": "Queued message"
+    },
+    "work": {
+      "conversationDetails": "Conversation details",
+      "chooseCloudOrComputer": "Choose cloud or computer",
+      "cloud": "Cloud",
+      "statusUnavailable": "Status unavailable",
+      "offline": "Offline",
+      "online": "Online",
+      "computerUnavailable": "Computer unavailable",
+      "connecting": "Connecting…",
+      "taskFolder": "Task folder",
+      "directoryPending": "Directory pending",
+      "runsInCloud": "This conversation runs in the cloud.",
+      "fixedComputer": "This conversation uses a fixed computer and working directory.",
+      "computerOnline": "The computer is online.",
+      "computerOffline": "The computer is offline. Local tasks can continue when it reconnects.",
+      "workingDirectory": "Working directory",
+      "directoryConnectedWhenUsed": "The working directory will be connected when first used.",
+      "myComputers": "My computers",
+      "loadingComputers": "Loading computers…",
+      "couldNotLoadComputers": "Could not load computers: {error}",
+      "thisComputer": "This computer",
+      "connectComputerEllipsis": "Connect a computer…",
+      "filesDescription": "Files in this conversation’s working directory.",
+      "connectComputerTitle": "Connect a computer",
+      "connectComputerDescription": "Sign in with the same account on that computer, then enable access from other devices in Settings → This computer.",
+      "open": "Open",
+      "connect": "Connect",
+      "accessDisabled": "Access disabled",
+      "noComputers": "No computers are available yet.",
+      "draftDataUnavailable": "Working directory draft data is unavailable.",
+      "restoreSelectionFailed": "Could not restore the working directory selection.",
+      "saveSelectionFailed": "Could not save the working directory selection. Keep this page open and try again.",
+      "computerUnavailableChooseAnother": "This computer is unavailable. Choose another computer."
+    },
+    "folderPicker": {
+      "folderUnavailable": "Folder unavailable",
+      "defaultTaskFolder": "Default task folder",
+      "selectFolder": "Select folder…"
+    },
+    "local": {
+      "historyPreserved": "History remains readable and drafts are preserved.",
+      "checkAgain": "Check again",
+      "connectComputer": "Connect computer",
+      "couldNotConnect": "Could not connect to the computer."
+    },
+    "shortcuts": {
+      "workspaceGroup": "Workspace",
+      "switchToWorkspace": "Switch to {name}"
+    },
+    "toasts": {
+      "mcpSelected": "MCP selected for this chat",
+      "hubUpdating": "Hub is updating.",
+      "noWorkspace": "No workspace selected yet.",
+      "modelCapabilitiesNotLoaded": "Chat model capabilities are not loaded yet.",
+      "waitInitializing": "Please wait for the computer to finish initializing.",
+      "connectComputerFirst": "Connect to the selected computer first.",
+      "attachmentsSaveFailed": "Could not save the first message's attachments. Keep this page open and try again.",
+      "draftClearFailed": "The conversation was created, but the draft could not be cleared.",
+      "createConversationFailed": "Failed to create conversation.",
+      "chatStayedBusy": "The chat stayed busy — please try again.",
+      "computerUnavailable": "The computer is unavailable.",
+      "queuedWillSend": "Queued — will send when the thread is free.",
+      "sourcesLoadingOrSaving": "Sources are still loading or saving.",
+      "sourcesLoadingOrSavingWait": "Sources are still loading or saving. Wait for completion before sending.",
+      "workspaceNotReady": "The workspace is not ready.",
+      "thinkingPreferenceSaveFailed": "Failed to save Thinking preference for this chat.",
+      "webAccessPreferenceSaveFailed": "Failed to save web access preference for this chat.",
+      "optionsSaveFailed": "Failed to save options for this chat.",
+      "modelUpdateFailedDetail": "Failed to update model for this thread: {message}",
+      "modelUpdateFailed": "Failed to update model for this thread.",
+      "noThreadWorkspace": "No thread workspace selected.",
+      "workfileLoadFailed": "Failed to load workfile.",
+      "sourcesLoadFailed": "Failed to load Sources. Reload this conversation.",
+      "sourcesSaveFailed": "Failed to save Sources. Reload this conversation.",
+      "earlierMessagesLoadFailed": "Failed to load earlier messages."
+    },
+    "bootstrap": {
+      "firstMessageNotConfirmed": "The first message was not confirmed. Its content is saved below. You can safely retry the same request.",
+      "computerUnavailableSaved": "The computer is unavailable. Your first message is saved.",
+      "saveSourcesFailed": "Could not save Sources before starting this conversation.",
+      "firstMessageSavedCheck": "Your first message is saved. Check the conversation before retrying the same request."
+    }
+  },
+  "dashboardChatCanvas": {
+    "header": {
+      "collapseSidebar": "Collapse sidebar",
+      "expandSidebar": "Expand sidebar",
+      "hideSidebar": "Hide sidebar",
+      "showSidebar": "Show sidebar",
+      "showHubWindow": "Show Hub window",
+      "hideSources": "Hide sources",
+      "showSources": "Show sources",
+      "openHub": "Open Hub"
+    },
+    "modelSelector": {
+      "type": {
+        "image": "Image",
+        "llm": "LLM",
+        "vision": "Vision"
+      },
+      "noModelsAvailable": "No models available.",
+      "searchModels": "Search models",
+      "searchModelsEllipsis": "Search models...",
+      "global": "Global",
+      "byokTab": "BYOK",
+      "auto": "Auto",
+      "none": "None",
+      "loadingModels": "Loading models…",
+      "modelsAriaLabel": "Models: {model}",
+      "selectModelsTitle": "Select language, image and vision models",
+      "selectModelTitle": "Select model",
+      "typeModelsLoading": "{type} models loading",
+      "typeModelAria": "{type} model: {model}",
+      "noTypeModel": "No {type}",
+      "byokTooltip": "{type}: {model} via {provider}",
+      "typeTooltip": "{type}: {model}",
+      "noTypeModelAvailable": "No {type} model available",
+      "byok": {
+        "customProvider": "Custom Provider",
+        "system": "System",
+        "custom": "Custom",
+        "status": {
+          "addModelId": "Add model id",
+          "customEndpoint": "Custom endpoint",
+          "addCredential": "Add credential to use",
+          "byokModels": "BYOK models",
+          "notConfigured": "Not configured"
+        },
+        "addModel": {
+          "image": "Add Image Model",
+          "llm": "Add Model",
+          "vision": "Add Vision Model"
+        },
+        "addCredential": {
+          "image": "Add Image Credential",
+          "llm": "Add Credential",
+          "vision": "Add Vision Credential"
+        },
+        "noModelsConfigured": "No {provider} models configured",
+        "getStartedAddModel": "Add a model with this provider to get started.",
+        "getStartedSaveKey": "Save an API key for this provider to get started.",
+        "noModelsMatchSearch": "No models match this search.",
+        "noSavedModels": "No {type} models have been saved for {provider} yet."
+      }
+    },
+    "byokDialog": {
+      "customProvider": "Custom Provider",
+      "toastConfigured": "BYOK model configured.",
+      "toastFailed": "Failed to configure BYOK model.",
+      "title": "Add New Configuration",
+      "description": "Set up a new {type} BYOK model.",
+      "modelConfiguration": "Model Configuration",
+      "provider": "Provider",
+      "selectProvider": "Select a provider",
+      "modelId": "Model ID",
+      "selectModel": "Select a model",
+      "loadingProviderModels": "Loading provider models...",
+      "displayName": "Display Name",
+      "savedCredential": "Saved credential",
+      "selectSavedCredential": "Select a saved credential",
+      "credentialAliasHelp": "The credential alias identifies the saved API key. Models are stored under this credential.",
+      "useNewApiKey": "Use a new API key instead",
+      "useExistingCredential": "Use an existing saved credential",
+      "apiKey": "API Key",
+      "apiBaseUrl": "API Base URL",
+      "systemDefault": "System default",
+      "customProviderHelp": "OpenAI-compatible providers and private proxies are configured under Custom Provider.",
+      "cancel": "Cancel",
+      "addModel": "Add Model"
+    },
+    "common": {
+      "running": "Running",
+      "failed": "Failed",
+      "working": "Working…",
+      "openPreview": "Open preview: {value}",
+      "subagent": "Sub-agent",
+      "yes": "Yes",
+      "no": "No"
+    },
+    "emptyState": {
+      "title": "What would you like to work on?",
+      "description": "Start with a prompt, compare evidence, or have the agent synthesize what matters most before you open a thread.",
+      "suggestions": {
+        "summarize": "Summarize the selected sources",
+        "compareClaims": "Compare the main claims across these documents",
+        "whatChanged": "What changed between these reports?",
+        "strongestEvidence": "List the strongest supporting evidence"
+      }
+    },
+    "composer": {
+      "placeholder": "Message your documents, links, or connected tools...",
+      "unavailable": "Unavailable",
+      "on": "On",
+      "off": "Off",
+      "default": "Default",
+      "changed": "{count} changed",
+      "skillLimit": "You can enable at most {max} skills per message.",
+      "options": "Options",
+      "connectorTools": "{name} tools",
+      "reset": "Reset",
+      "enableTool": "Enable tool",
+      "noConfigurableOptions": "No configurable options",
+      "enableSkill": "Enable skill",
+      "thinking": "Thinking",
+      "auto": "Auto",
+      "thinkingEffortUnavailable": "Thinking effort unavailable",
+      "noReasoningOptions": "No reasoning options available",
+      "webAccess": "Web access",
+      "disableThinking": "Disable Thinking",
+      "enableThinking": "Enable Thinking",
+      "cancelEdit": "Cancel edit (Esc)",
+      "cancelEditSr": "Cancel edit",
+      "stopping": "Stopping",
+      "stop": "Stop",
+      "send": "Send",
+      "selectedSources": "{count} selected sources",
+      "remove": "Remove {name}",
+      "imagesCount": "{count} images",
+      "collapse": "Collapse",
+      "show": "Show",
+      "addImage": "Add image",
+      "draftSaveFailedNoRefresh": "Failed to save your draft. Please do not refresh yet.",
+      "draftRestoreFailed": "Unable to restore your draft.",
+      "retry": "Retry",
+      "restoringDraft": "Restoring your draft…",
+      "draftSaveFailed": "Failed to save your draft.",
+      "slashUseConnectorTools": "Use {connector} tools",
+      "slashGroup": {
+        "tools": "Tools",
+        "skills": "Skills"
+      },
+      "thinkingEffort": {
+        "minimal": "Minimal",
+        "low": "Low",
+        "medium": "Standard",
+        "high": "High",
+        "xhigh": "XHigh"
+      }
+    },
+    "assistantActivity": {
+      "responding": "Responding...",
+      "working": "Working",
+      "thinking": "Thinking...",
+      "metadata": {
+        "sources": "sources",
+        "results": "results",
+        "hits": "hits",
+        "ms": "ms"
+      }
+    },
+    "delegate": {
+      "status": {
+        "running": "Running",
+        "approval_requested": "Awaiting approval",
+        "completed": "Completed",
+        "error": "Failed"
+      },
+      "delegatedTo": "Delegated to {agent}",
+      "delegatedToStatus": "Delegated to {agent} · {status}"
+    },
+    "userQuestion": {
+      "waitingForAnswer": "Waiting for your answer",
+      "noAnswerProvided": "No answer provided",
+      "askingSingular": "Asking question",
+      "askingPlural": "Asking questions",
+      "askedSingular": "Asked {count} question",
+      "askedPlural": "Asked {count} questions",
+      "askedFallback": "Asked a question",
+      "errorFallback": "Unable to get your answer."
+    },
+    "toolCard": {
+      "status": {
+        "running": "Running",
+        "generating": "Generating",
+        "needs-approval": "Needs approval",
+        "failed": "Failed",
+        "rejected": "Rejected",
+        "done": "Done"
+      },
+      "connector": {
+        "failed": "{tool} failed",
+        "running": "Running {tool}",
+        "completed": "{tool} completed"
+      },
+      "skill": {
+        "readingBundleFile": "Reading {file} from {skill}",
+        "readBundleFile": "Read {file} from {skill}",
+        "loadingInstructions": "Loading {skill} skill instructions",
+        "loadInstructions": "Load {skill} skill instructions",
+        "loadingInstructionsGeneric": "Loading skill instructions",
+        "loadInstructionsGeneric": "Load skill instructions"
+      },
+      "readFile": {
+        "unknownFile": "unknown file",
+        "label": "Read file:",
+        "previewTruncatedLines": "Preview truncated to {count} lines.",
+        "thisFile": "this file",
+        "binaryUnsupported": "{path} is not a UTF-8 text file. Use artifact preview, media-aware inspection, or publish it as an artifact instead of read_file.",
+        "noVisibleContent": "(no visible content)"
+      }
+    },
+    "toolConfirmation": {
+      "resolved": {
+        "expired": "Approval expired without a decision. The action was not run.",
+        "stopped": "Approval stopped. The action was not run.",
+        "rejected": "Approval rejected. The action was not run.",
+        "approvedWaiting": "Approval recorded. Waiting for the run to continue.",
+        "approvedMayRun": "Approval recorded. The action may now run.",
+        "failed": "Approval failed. The action was not run.",
+        "running": "Approval recorded. The action is running.",
+        "completed": "Approval recorded. The action completed."
+      },
+      "approvalLabel": {
+        "failed": "{tool} approval failed",
+        "expired": "{tool} approval expired",
+        "stopped": "{tool} approval stopped",
+        "rejected": "{tool} approval rejected",
+        "recorded": "{tool} approval recorded",
+        "waiting": "{tool} waiting for approval",
+        "actionFailed": "{tool} approved action failed"
+      },
+      "approvedInSourceweft": "Approved in SourceWeft.",
+      "rejectedInSourceweft": "Rejected in SourceWeft.",
+      "rejectedNotRun": "Rejected in SourceWeft. The action was not run.",
+      "actionFailed": "Action failed.",
+      "confirmationFailed": "Confirmation failed.",
+      "missingWorkspace": "SourceWeft confirmation is missing workspace context.",
+      "notAttached": "This confirmation is no longer attached to an active run.",
+      "approving": "Approving...",
+      "rememberFor": "Remember for",
+      "rememberAria": "How long to remember this approval",
+      "viewCommand": "View command ({lines} lines, {characters} characters)",
+      "pending": "{count} pending",
+      "waitingForApproval": "Waiting for approval",
+      "endApprovalWait": "End approval wait",
+      "end": "End",
+      "decision": {
+        "reject": "Reject",
+        "approve": "Approve"
+      },
+      "outcome": {
+        "approvedNotRemembered": "Approved in SourceWeft. This approval was not remembered — it applies to this action only.",
+        "approvedUntil": "Approved in SourceWeft. This action will be approved automatically until {expiry}. Manage it in Settings → Approvals.",
+        "approvedAlways": "Approved in SourceWeft. This action will be approved automatically. Manage it in Settings → Approvals."
+      },
+      "trustDuration": {
+        "day": "{count} day",
+        "days": "{count} days",
+        "default": "{days} (default)",
+        "maximum": "{days} (maximum)",
+        "expired": "expired"
+      },
+      "detail": {
+        "sizeNotProvided": "size not provided",
+        "risk": "Risk: {level}",
+        "prepareFile": "Prepare {count} file",
+        "prepareFiles": "Prepare {count} files",
+        "unknownSource": "unknown source",
+        "unknownSandboxPath": "unknown sandbox path",
+        "unknownTarget": "unknown target",
+        "workfileMaterialized": "Selected SourceWeft /files Workfile content will be materialized as ordinary sandbox files.",
+        "execSummaryTruncated": "{text}... ({lines} lines, {chars} chars)",
+        "conversationWorkingDir": "conversation working directory",
+        "commandNotProvided": "command not provided",
+        "command": "Command: {summary}",
+        "workingDirectoryPrefix": "Working directory: ",
+        "reviewRisk": "Review network, dependency, and secret-access risk before approving.",
+        "editableBeforeApproval": "Editable before approval",
+        "collectOutput": "Collect {count} output",
+        "collectOutputs": "Collect {count} outputs",
+        "overwriteYes": "yes",
+        "overwriteNo": "no",
+        "overwrite": "overwrite: {value}",
+        "outputsDurable": "Outputs become durable only after collection into /files or a supported artifact path.",
+        "toolAction": "Tool action",
+        "target": "Target: {value}"
+      }
+    },
+    "workfile": {
+      "locationWorkfile": "Workfile",
+      "locationSandboxFile": "sandbox file",
+      "wrote": "Wrote {location}: {name}",
+      "edited": "Edited {location}: {name}"
+    },
+    "duration": {
+      "thoughtFor": "Thought for {duration}",
+      "thoughtForFew": "Thought for a few seconds"
+    },
+    "messageResponse": {
+      "source": "Source",
+      "citationTitle": "Citation {label}",
+      "possibleEvidence": "Possible evidence",
+      "untitledSource": "Untitled source",
+      "moreCount": "+{count} more",
+      "noInlineCitations": "The answer did not include inline citation markers; these sources were read or retrieved during generation."
+    },
+    "sources": {
+      "mentionedSource": "Mentioned source"
+    },
+    "artifact": {
+      "unavailable": "Artifact unavailable",
+      "noLongerAvailable": "The published artifact is no longer available.",
+      "open": "Open",
+      "publishedArtifact": "Published artifact",
+      "loadingPublished": "Loading published artifact…",
+      "openArtifact": "Open artifact",
+      "attempt": "attempt {attempt}/{maxAttempts}",
+      "stagesCompleted": "{completed}/{total} stages completed",
+      "fallback": "Artifact",
+      "titleFailed": "{label} failed",
+      "titlePipeline": "{label} pipeline",
+      "titleBuilding": "Building {label}",
+      "detailsMismatch": "Artifact details did not match the request.",
+      "detailsLoadFailed": "Artifact details could not be loaded.",
+      "versionMismatch": "Artifact version details did not match the request.",
+      "versionLoadFailed": "Artifact version could not be loaded."
+    },
+    "errors": {
+      "invalidStructuredContent": "The model did not return valid structured content",
+      "toolArgsInvalidNamed": "{tool} failed because the generated tool arguments were invalid. Please retry.",
+      "toolArgsInvalid": "The generated tool arguments were invalid. Please retry.",
+      "reloadFailed": "Failed to reload thread messages.",
+      "confirmationMissing": "Confirmation message is missing. Refresh the thread and try again.",
+      "noWorkspaceSelected": "No workspace selected yet.",
+      "noResumeData": "Confirmation response did not include resume data.",
+      "resumeHandlerUnavailable": "Tool confirmation resume handler is not available."
+    },
+    "chatRoot": {
+      "queued": "Queued",
+      "cancelQueued": "Cancel queued message",
+      "computerUnavailable": "Computer unavailable.",
+      "keepWritingDraft": "You can keep writing a draft."
+    },
+    "messageList": {
+      "generationStopped": "Generation stopped by the user.",
+      "artifactCount": "{count} artifacts",
+      "callSubagent": "Call sub-agent",
+      "instruction": "Instruction",
+      "result": "Result",
+      "sourceCount": "{count} sources",
+      "referenced": "Referenced",
+      "copy": "Copy",
+      "editPrompt": "Edit prompt",
+      "editAndRestart": "Edit and restart",
+      "refresh": "Refresh",
+      "messageFailed": "Message failed",
+      "modelError": "Model error",
+      "toastCopied": "Message copied.",
+      "toastCopyFailed": "Couldn't copy the message.",
+      "loadEarlier": "Load earlier messages",
+      "olderHidden": "{count} older message groups hidden to keep this long thread responsive.",
+      "showHiddenHistory": "Show hidden history"
+    },
+    "sandbox": {
+      "placeholder": {
+        "waitingApproval": "Waiting for approval before execution.",
+        "notApproved": "Execution was not approved.",
+        "running": "Command is running. Output will appear when execution completes.",
+        "error": "The command could not be executed.",
+        "noOutput": "Command completed without output."
+      },
+      "details": "Details",
+      "commandDetails": "Command details",
+      "runCommand": "Run command",
+      "commandUnavailable": "Command input is unavailable.",
+      "copyCommand": "Copy command",
+      "commandAria": "Command",
+      "recoverable": "Recoverable: {value}",
+      "transferFailed": "The file transfer could not be completed.",
+      "prepareWorkspace": "Prepare workspace",
+      "collectOutputs": "Collect output files",
+      "from": "From",
+      "to": "To",
+      "outputLabel": "output",
+      "truncated": "truncated",
+      "fileReady": "{count} file",
+      "filesReady": "{count} files",
+      "filePlanned": "{count} planned file",
+      "filesPlanned": "{count} planned files",
+      "detailFile": "{count} file",
+      "detailFiles": "{count} files",
+      "detailOutput": "{count} output",
+      "detailOutputs": "{count} outputs",
+      "detailOutputChar": "{count} output char",
+      "detailOutputChars": "{count} output chars",
+      "exitCode": "Exit code {code}",
+      "outputTruncated": "Output truncated",
+      "operationFailed": "Operation failed. Review the details and try again.",
+      "op": {
+        "preparedWorkspace": "Prepared workspace",
+        "executedCommand": "Executed command",
+        "collectedOutputs": "Collected outputs",
+        "releasedWorkspace": "Released workspace",
+        "fallback": "Sandbox operation"
+      },
+      "safeError": {
+        "SANDBOX_BINARY_OUTPUT_UNSUPPORTED": "This output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
+        "SANDBOX_COLLECT_CONFLICT": "A target /files file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+        "SANDBOX_COLLECT_PATH_DENIED": "The requested output path is outside the provider-allowed collection area. Use an authorized output directory.",
+        "SANDBOX_COMMAND_TIMEOUT": "The command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
+        "SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT": "The operation returned an unsupported download result. Try collecting a plain text output file instead.",
+        "SANDBOX_EXECUTE_CWD_DENIED": "The command working directory must stay inside the authorized workspace.",
+        "SANDBOX_EXECUTE_COMMAND_DENIED": "The command was rejected before execution because it was empty or contained unsafe control characters. Revise the command and try again.",
+        "SANDBOX_EXECUTE_VFS_PATH_DENIED": "The command referenced a file that is not available in the working directory. Prepare the required files before running the command.",
+        "SANDBOX_FILE_NOT_FOUND": "The requested file was not found. Re-run the command or check the output path before collecting.",
+        "SANDBOX_SKILL_STAGING_UNAVAILABLE": "The required skill files could not be prepared in the working directory. Check the skill files and try again.",
+        "SANDBOX_FILE_TOO_LARGE": "The selected file exceeds the file transfer limit. Reduce the file size or collect a smaller output.",
+        "SANDBOX_NOT_CONFIGURED": "Command execution is not configured. Contact your administrator.",
+        "SANDBOX_NOT_FOUND_OR_EXPIRED": "The execution session was not found or has expired. Retry to start a new session.",
+        "SANDBOX_PREPARE_PATH_DENIED": "Choose an existing workfile and an authorized destination directory.",
+        "SANDBOX_PROVIDER_AUTH_FAILED": "The execution service could not authenticate. Contact your administrator.",
+        "SANDBOX_PROVIDER_ERROR": "The operation failed. Try again or contact support.",
+        "SANDBOX_TOTAL_SIZE_EXCEEDED": "The selected files exceed the total file transfer limit. Reduce the number or size of files and try again."
+      }
+    },
+    "userQuestionPanel": {
+      "other": "Other…",
+      "otherFreeText": "Other… (optional free text)",
+      "typeAnswer": "Type your answer",
+      "otherAnswerAria": "Other answer",
+      "answerAria": "Answer",
+      "optional": "(optional)",
+      "required": "This question is required.",
+      "answerRequired": "Please answer the required question(s) before sending.",
+      "cancel": "Cancel",
+      "sending": "Sending…",
+      "sendAnswer": "Send answer",
+      "needsInput": "The assistant needs your input",
+      "dismissQuestion": "Dismiss question",
+      "end": "End"
+    }
+  },
+  "dashboardChatFiles": {
+    "actions": {
+      "close": "Close",
+      "artifactsBack": "Artifacts",
+      "share": "Share artifact",
+      "openInNewTab": "Open artifact in new tab",
+      "download": "Download artifact",
+      "delete": "Delete artifact",
+      "cancel": "Cancel",
+      "deleteConfirm": "Delete",
+      "deleting": "Deleting…",
+      "copy": "Copy",
+      "copied": "Copied",
+      "tryAgain": "Try again",
+      "refreshPreview": "Refresh preview",
+      "downloadFile": "Download file",
+      "copyPreview": "Copy preview",
+      "save": "Save",
+      "openCurrent": "Open current version"
+    },
+    "labels": {
+      "artifactPreview": "Artifact Preview",
+      "public": "Public",
+      "sharedManageTitle": "Shared publicly — manage the link",
+      "completedAt": "completed {date}",
+      "prompt": "Prompt"
+    },
+    "errors": {
+      "noDetails": "No error details were saved."
+    },
+    "toasts": {
+      "openHandledByPreview": "Open is handled by this artifact preview.",
+      "noPreviewFile": "This artifact has no preview file.",
+      "downloadHandledByPreview": "Use the download action inside this artifact preview.",
+      "noDownloadableFile": "This artifact has no downloadable file.",
+      "deleted": "Artifact deleted.",
+      "deleteFailed": "Could not delete the artifact.",
+      "shareChangeFailed": "Could not change sharing.",
+      "searchVisibilityFailed": "Could not update search visibility.",
+      "copyLinkFailed": "Could not copy the link.",
+      "noCitationContent": "No citation content is available for this page yet.",
+      "saveNotWired": "Save to sources is not wired yet."
+    },
+    "deleteDialog": {
+      "title": "Delete artifact?",
+      "description": "This permanently deletes the artifact and disables its public link. This action cannot be undone."
+    },
+    "fallback": {
+      "pendingTitle": "Artifact is still generating",
+      "pendingDetail": "Preview will be available when the artifact is ready.",
+      "failedTitle": "Artifact generation failed",
+      "unsupportedTitle": "Preview is not available",
+      "unsupportedDetail": "This artifact can still be opened or downloaded from the toolbar when a file is available."
+    },
+    "video": {
+      "previewTitle": "Video Preview"
+    },
+    "share": {
+      "title": "Share artifact",
+      "anyoneWithLink": "Anyone with the link",
+      "onlyYourWorkspace": "Only your workspace",
+      "publicDescription": "Public, view-only page on an isolated origin.",
+      "turnOnDescription": "Turn on to publish a public link.",
+      "publicLinkLabel": "Public link",
+      "hideFromSearch": "Hide from search engines",
+      "hideFromSearchDescription": "A public link is indexed by default for reach; turn this on for a sensitive one-off.",
+      "views": "Views"
+    },
+    "filePreview": {
+      "titleFallback": "File preview",
+      "contentsAria": "File contents",
+      "loading": "Loading file preview…",
+      "empty": "This file is empty."
+    },
+    "citation": {
+      "filesLabel": "Files",
+      "thisComputer": "This computer",
+      "cloud": "Cloud",
+      "aiCreated": "AI-created file",
+      "tabExcerpt": "Cited excerpt",
+      "tabOriginal": "Original file",
+      "fileChanged": "File changed since cited. The excerpt below belongs to the cited version.",
+      "checkingVersion": "Checking file version…",
+      "citedVerified": "{path} · Cited version verified",
+      "fileUnavailable": "File is unavailable."
+    },
+    "location": {
+      "page": "Page {page}",
+      "slide": "Slide {slide}",
+      "paragraph": "Paragraph {index}",
+      "line": "Line {line}",
+      "lines": "Lines {start}–{end}",
+      "image": "Image"
+    },
+    "desktop": {
+      "opening": "Opening preview window…"
+    },
+    "workfile": {
+      "pathAria": "Workfile path",
+      "tabPreview": "Preview",
+      "tabSource": "Source"
+    },
+    "web": {
+      "referencedPages": "Referenced web pages",
+      "expand": "Expand referenced web pages",
+      "collapse": "Collapse referenced web pages"
+    }
+  },
+  "dashboardConnectors": {
+    "common": {
+      "returnToSourceweft": "Return to SourceWeft",
+      "closeTab": "Close tab"
+    },
+    "start": {
+      "loadingTitle": "Opening authorization",
+      "loadingMessage": "Starting connector authorization...",
+      "errorTitle": "Authorization could not start",
+      "missingContext": "This connector authorization link is missing required context.",
+      "startFailed": "Failed to start connector authorization."
+    },
+    "complete": {
+      "successTitle": "Connector authorized",
+      "errorTitle": "Authorization failed",
+      "redirectSuccess": "Returning to SourceWeft to finish setup.",
+      "redirectError": "Returning to SourceWeft with the authorization error.",
+      "popupSuccess": "SourceWeft is updating the connector status in the original tab.",
+      "fallbackError": "Connector authorization did not complete."
+    }
+  },
+  "dashboardMcpPanel": {
+    "filters": {
+      "title": "MCP Market",
+      "clearAll": "Clear all",
+      "drawerTitle": "MCP filters",
+      "searchPlaceholder": "Search MCP",
+      "searchSummaryAll": "all",
+      "categorySummaryAll": "All",
+      "facets": {
+        "search": "Search",
+        "category": "Category",
+        "trust": "Trust",
+        "device": "Device",
+        "status": "Status"
+      },
+      "status": {
+        "all": "All",
+        "installed": "Installed",
+        "not_installed": "Not installed"
+      },
+      "trust": {
+        "all": "All trust levels",
+        "trusted": "Official or verified",
+        "unverified": "Unverified"
+      },
+      "device": {
+        "all": "All devices",
+        "web": "Web executable",
+        "desktop": "Desktop host"
+      }
+    },
+    "sort": {
+      "label": "Sort by",
+      "recommended": "Recommended",
+      "name_asc": "Name A-Z",
+      "installed_first": "Installed first",
+      "trusted_first": "Trusted first"
+    },
+    "workspace": {
+      "select": "Select workspace",
+      "none": "No workspaces"
+    },
+    "toolbar": {
+      "filters": "Filters",
+      "deviceFilterAria": "MCP device filter",
+      "deviceShortAll": "All",
+      "deviceShortWeb": "Web",
+      "loadMore": "Load more"
+    },
+    "badges": {
+      "official": "Official",
+      "verified": "Verified",
+      "unverified": "Unverified",
+      "desktopOnly": "Desktop only",
+      "webExecutable": "Web executable",
+      "installed": "Installed"
+    },
+    "installStatus": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "error": "Error"
+    },
+    "card": {
+      "viewDetailsAria": "View {name} details",
+      "openSourceAria": "Open {name} source",
+      "openGithub": "Open GitHub repository",
+      "openSource": "Open source",
+      "credentialsRequired": "Credentials required",
+      "toolsSyncedTitle": "{count} tools synced",
+      "tested": "Tested {time}",
+      "notTestedYet": "Not tested yet",
+      "testAria": "Test {name}",
+      "testConnection": "Test connection",
+      "configureAria": "Configure {name}",
+      "configureRequired": "Configure required credentials",
+      "settings": "Settings",
+      "uninstallAria": "Uninstall {name}",
+      "uninstall": "Uninstall",
+      "enableAria": "Enable {name}",
+      "disableAria": "Disable {name}",
+      "enable": "Enable",
+      "disable": "Disable",
+      "install": "Install",
+      "unverifiedWarning": "Unverified MCP can receive this turn's tool arguments and may perform external actions. Review the server before enabling."
+    },
+    "empty": {
+      "none": "No MCP servers are available for this workspace.",
+      "noMatch": "No MCP servers match the current filters."
+    },
+    "errors": {
+      "loadTitle": "MCP market could not be loaded",
+      "loadFailed": "Failed to load MCP market.",
+      "switchFailed": "Failed to switch workspace."
+    },
+    "toasts": {
+      "installed": "MCP installed",
+      "installFailed": "Failed to install MCP.",
+      "uninstalled": "MCP uninstalled",
+      "uninstallFailed": "Failed to uninstall MCP.",
+      "enabled": "MCP enabled",
+      "disabled": "MCP disabled",
+      "updateFailed": "Failed to update MCP.",
+      "tested": "MCP connection tested: {count} tools",
+      "testFailed": "Failed to test MCP.",
+      "loadMoreFailed": "Failed to load more MCP servers.",
+      "connected": "MCP server connected",
+      "authFailed": "MCP authorization failed. Please try again."
+    },
+    "risk": {
+      "destructive": "Destructive",
+      "write": "Write",
+      "read": "Read",
+      "unknown": "Unknown"
+    },
+    "detail": {
+      "backAria": "Back to MCP market",
+      "titleFallback": "MCP details",
+      "loadingDescription": "Loading MCP details.",
+      "test": "Test",
+      "settings": "Settings",
+      "uninstall": "Uninstall",
+      "install": "Install",
+      "loading": "Loading MCP...",
+      "retry": "Retry",
+      "notFound": "MCP server was not found in this workspace catalog.",
+      "loadFailedDetail": "Failed to load MCP details.",
+      "loadFailedShort": "Failed to load MCP.",
+      "identifierMissing": "MCP identifier is missing.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "configureCredentials": "Configure credentials",
+      "toolsSynced": "{count, plural, one {# tool synced} other {# tools synced}}",
+      "testedSuffix": " · tested {time}",
+      "notTestedSuffix": " · not tested yet",
+      "unverifiedNoticeLong": "This MCP server is unverified. It can receive a conversation's tool arguments and may perform external actions. Review the server before enabling it.",
+      "unverifiedNoticeMedium": "This MCP server is unverified. Review it before enabling access to conversation tool arguments.",
+      "toolsHeading": "Tools",
+      "toolsTotal": "{count} total",
+      "toolsPending": "Tool details are published after the server is indexed or installed.",
+      "serverDetails": "Server details",
+      "fields": {
+        "identifier": "Identifier",
+        "version": "Version",
+        "transport": "Transport",
+        "runtime": "Runtime",
+        "auth": "Auth",
+        "tools": "Tools",
+        "license": "License",
+        "updated": "Updated"
+      },
+      "fieldValues": {
+        "unknown": "Unknown",
+        "authRequired": "Required",
+        "authNotRequired": "Not required"
+      },
+      "links": {
+        "homepage": "Homepage",
+        "repository": "Repository",
+        "source": "Source"
+      },
+      "categories": "Categories",
+      "runtimeSecurity": "Runtime & security",
+      "security": "Credentials are configured privately per workspace, encrypted at rest, and sent only to this server during tool calls.",
+      "securityDesktop": " This server runs on the desktop host only.",
+      "securityWeb": " This server runs from the web runtime when configured.",
+      "securityShort": "Credentials are encrypted per workspace and sent only to this server during tool calls."
+    },
+    "credentials": {
+      "title": "Configure MCP credentials",
+      "description": "Credentials are encrypted in SourceWeft and sent only to this MCP server during tool calls.",
+      "serverFallback": "MCP server",
+      "authType": {
+        "bearer": "Bearer token",
+        "api_key_header": "API key header",
+        "custom_headers": "Custom headers",
+        "oauth": "OAuth",
+        "none": "No auth"
+      },
+      "fields": {
+        "bearerToken": "Bearer token",
+        "headerName": "Header name",
+        "apiKey": "API key",
+        "headers": "Headers"
+      },
+      "placeholders": {
+        "pasteToken": "Paste token",
+        "pasteKey": "Paste key"
+      },
+      "headersHint": "Use one header per line. Secret values are not shown again after saving.",
+      "noAuthNote": "This MCP server does not require credentials.",
+      "oauthNote": "This MCP server uses OAuth. Connect your account with the provider — you'll be redirected to grant access, then returned here. Your token is stored encrypted and refreshed automatically.",
+      "connect": "Connect",
+      "close": "Close",
+      "cancel": "Cancel",
+      "save": "Save",
+      "errors": {
+        "oneHeaderPerLine": "Use one header per line, for example: X-API-Key: value",
+        "nameAndValueRequired": "Header name and value are required.",
+        "bearerRequired": "Enter a bearer token before saving.",
+        "apiKeyRequired": "Enter the header name and API key before saving.",
+        "headerRequired": "Add at least one header before saving."
+      },
+      "toasts": {
+        "saved": "MCP credentials saved",
+        "saveFailed": "Failed to save credentials.",
+        "alreadyConnected": "MCP server already connected",
+        "authStartFailed": "Failed to start authorization."
+      }
+    },
+    "submit": {
+      "trigger": "Submit MCP",
+      "title": "Submit an MCP server",
+      "description": "Paste a public GitHub repository link. We parse it automatically and run a security scan — clean repos are published directly, suspicious ones go to manual review.",
+      "urlRequired": "Enter a public GitHub repository URL.",
+      "published": "Published: {identifier}",
+      "queued": "Submitted {identifier}, queued for manual review ({count, plural, one {# item} other {# items}} to confirm).",
+      "failed": "Submission failed. Make sure this is a public MCP repository.",
+      "submit": "Submit"
+    }
+  },
+  "dashboardSourcesHub": {
+    "common": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "delete": "Delete",
+      "remove": "Remove",
+      "retry": "Retry",
+      "close": "Close",
+      "open": "Open",
+      "download": "Download",
+      "preview": "Preview",
+      "refresh": "Refresh",
+      "loading": "Loading…",
+      "working": "Working...",
+      "saving": "Saving...",
+      "deleting": "Deleting..."
+    },
+    "hub": {
+      "title": "Hub",
+      "openWindow": "Open Hub in a separate window",
+      "finishBeforeMove": "Finish editing or uploading before moving Hub",
+      "close": "Close Hub",
+      "syncing": "syncing {count}",
+      "executionError": "Unable to read the file location: {error}",
+      "scrollTabsLeft": "Scroll tabs left",
+      "scrollTabsRight": "Scroll tabs right"
+    },
+    "tabs": {
+      "Sources": "Sources",
+      "Files": "Files",
+      "Artifacts": "Artifacts",
+      "Connectors": "Connectors",
+      "Skills": "Skills",
+      "MCP": "MCP",
+      "Citations": "Citations"
+    },
+    "search": {
+      "placeholder": {
+        "Sources": "Search sources...",
+        "Files": "Filter files by name or path...",
+        "Artifacts": "Search artifacts...",
+        "Skills": "Search installed skills...",
+        "MCP": "Search MCP tools...",
+        "Citations": "Search citations...",
+        "Connectors": "Search connectors..."
+      }
+    },
+    "counts": {
+      "found": "{count} found",
+      "selected": "{count} selected",
+      "available": "{count} available",
+      "installed": "{count} installed",
+      "files": "{count} files",
+      "artifacts": "{count} artifacts",
+      "active": "{count} active",
+      "inThread": "{count} in thread",
+      "current": "{count} current"
+    },
+    "sources": {
+      "refresh": "Refresh sources",
+      "selectAll": "Select all sources",
+      "unselectAll": "Unselect all sources",
+      "deleteSelected": "Delete selected sources",
+      "createFolder": "Create folder",
+      "addSource": "Add source",
+      "loading": "Loading sources...",
+      "emptyTitle": "Sources will appear here.",
+      "emptyDescription": "Add documents, links, notes, or folders to build the source set for this project.",
+      "noMatchTitle": "No sources match “{query}”",
+      "noMatchDescription": "Try a different source title, folder, type, or status.",
+      "emptyFolder": "Empty folder",
+      "row": {
+        "select": "Select {title}",
+        "retryOrDelete": "Retry or delete this failed source",
+        "selectFolder": "Select folder",
+        "openPreview": "Open preview",
+        "actions": "Source actions",
+        "retry": "Retry",
+        "addSource": "Add source",
+        "newFolder": "New folder",
+        "editReadme": "Edit README",
+        "preview": "Preview",
+        "download": "Download",
+        "rename": "Rename",
+        "moveTo": "Move to...",
+        "reindex": "Re-index",
+        "delete": "Delete",
+        "collapseFolder": "Collapse folder",
+        "expandFolder": "Expand folder",
+        "itemCount": "{count, plural, one {# item} other {# items}}",
+        "connectorFallback": "Connector",
+        "openConnectorSettings": "Open {label} connector settings"
+      }
+    },
+    "addSourceDialog": {
+      "title": "Add source",
+      "description": "Add web pages, text notes, or uploaded files as sources.",
+      "selectedFolderFallback": "Selected folder",
+      "tab": {
+        "Text": "Text",
+        "URL": "URL",
+        "File": "File"
+      },
+      "textTitlePlaceholder": "Title (optional)",
+      "textContentPlaceholder": "Paste or write source content...",
+      "urlTitlePlaceholder": "Title (optional)",
+      "urlHint": "SourceWeft will fetch the page content and index it for search.",
+      "dropHere": "Drop files here",
+      "dragHere": "Drag files here",
+      "browseHint": "or <browse>browse</browse> files",
+      "fileLimits": "Up to {maxFiles} files, {maxSize}MB each",
+      "removeFile": "Remove file",
+      "noFilesSelected": "No files selected",
+      "uploading": "Uploading",
+      "createSource": "Create source",
+      "addUrl": "Add URL",
+      "uploadFiles": "Upload files",
+      "sourcesRoot": "Sources root"
+    },
+    "createDirectoryDialog": {
+      "title": "Create folder",
+      "description": "Add a folder to organize Sources.",
+      "namePlaceholder": "Folder name",
+      "readmePlaceholder": "README context (optional)",
+      "create": "Create folder"
+    },
+    "moveSourceDialog": {
+      "title": "Move source",
+      "description": "Choose a destination under the root directory.",
+      "moving": "Moving",
+      "movingProgress": "Moving...",
+      "move": "Move"
+    },
+    "readmeDialog": {
+      "title": "Edit README",
+      "description": "Update the context attached to this folder.",
+      "folder": "Folder",
+      "placeholder": "README context for this folder...",
+      "save": "Save README"
+    },
+    "deleteSourceDialog": {
+      "titleFolder": "Delete folder?",
+      "titleSource": "Delete source?",
+      "descriptionFolder": "This will remove the folder and its sources from this workspace. This action cannot be undone.",
+      "descriptionSource": "This will remove the source from this workspace. This action cannot be undone."
+    },
+    "deleteSelectedSourcesDialog": {
+      "title": "Delete selected sources?",
+      "description": "This will delete {count, plural, one {# selected source} other {# selected sources}}, including contents of any selected folders. This cannot be undone."
+    },
+    "files": {
+      "refresh": "Refresh files",
+      "storageNote": "Cloud · saved with this conversation",
+      "willAppearNew": "Files will appear when the conversation starts.",
+      "loadingLocation": "Loading Files location…",
+      "loading": "Loading files...",
+      "emptyTitle": "Files will appear here.",
+      "emptyDescription": "Files you upload and files created during this conversation appear here.",
+      "noMatchTitle": "No files match “{query}”",
+      "noMatchDescription": "Try a different path, purpose, or file type.",
+      "actions": "Workfile actions",
+      "uploadFiles": "Upload files",
+      "chooseFiles": "Choose files to upload",
+      "purpose": {
+        "scratch": "Scratch",
+        "draft": "Draft",
+        "note": "Note",
+        "output_candidate": "Candidate",
+        "file": "File"
+      },
+      "uploaded": "{count, plural, one {# file uploaded.} other {# files uploaded.}}",
+      "uploadedBeforeError": "{count, plural, one {# file was uploaded before the error.} other {# files were uploaded before the error.}}",
+      "uploadFailed": "Upload failed.",
+      "sizeLimit": "{name} exceeds the 20 MiB file limit.",
+      "deleteTitle": "Delete file?",
+      "deleteDescription": "This will remove the file from this conversation. This action cannot be undone.",
+      "previewDescription": "Cloud · {path} · {size} · {purpose}",
+      "previewFallbackDescription": "Files in this conversation.",
+      "readError": "Could not read file."
+    },
+    "artifacts": {
+      "refresh": "Refresh artifacts",
+      "loading": "Loading artifacts...",
+      "emptyTitle": "Finished artifacts will appear here.",
+      "emptyDescription": "Reports, slides, images, tables, audio briefs, and other finished deliverables will appear here.",
+      "noMatchTitle": "No artifacts match “{query}”",
+      "noMatchDescription": "Try a different title, artifact type, or prompt.",
+      "loadMore": "Load more",
+      "preview": "Preview {title}",
+      "completed": "completed {date}",
+      "public": "Public",
+      "couldNotLoad": "Could not load the artifact.",
+      "loadFailed": "Failed to load artifacts.",
+      "loadMoreFailed": "Failed to load more artifacts."
+    },
+    "skills": {
+      "gallery": "Skills gallery",
+      "emptyTitle": "Skills will appear here.",
+      "emptyDescription": "Install skills to add reusable creation workflows and agent capabilities to this project.",
+      "noMatchTitle": "No installed skills match “{query}”",
+      "noMatchDescription": "Try a different skill name, slug, description, or source.",
+      "openIntro": "Open skill introduction",
+      "toolOff": "Tool off",
+      "hubOn": "Hub on",
+      "hubOff": "Hub off",
+      "shipsScripts": "Ships scripts — off until you enable it",
+      "source": {
+        "builtin": "Official",
+        "team": "Team",
+        "community": "Community",
+        "workspace": "Workspace"
+      },
+      "enableFailed": "Failed to enable skill.",
+      "disableFailed": "Failed to disable skill.",
+      "readmeFallbackTitle": "Skill",
+      "readmeFallbackDescription": "Review this skill before selecting it.",
+      "readmeLoading": "Loading skill...",
+      "readmeLoadFailed": "Failed to load skill details.",
+      "galleryDialogTitle": "Skills gallery",
+      "galleryDialogDescription": "Install reusable skills for {workspace}.",
+      "currentWorkspaceFallback": "the current workspace"
+    },
+    "mcp": {
+      "refresh": "Refresh MCP tools",
+      "market": "MCP Market",
+      "marketDialogTitle": "MCP Market",
+      "marketDialogDescription": "Install and configure MCP servers for {workspace}.",
+      "loadError": "MCP tools could not be loaded.",
+      "loadFailed": "Failed to load MCP tools.",
+      "loading": "Loading MCP tools...",
+      "emptyTitle": "No MCP tools installed.",
+      "emptyDescription": "Install MCP servers from the MCP Market to use them in chat.",
+      "noMatchTitle": "No MCP tools match “{query}”",
+      "noMatchDescription": "Try a different server, tool, or description.",
+      "official": "Official",
+      "verified": "Verified",
+      "unverified": "Unverified",
+      "authConfigured": "Auth configured",
+      "authRequired": "Auth required",
+      "desktopOnly": "Desktop only",
+      "disabled": "Disabled",
+      "tested": "Tested {time}",
+      "notTested": "Not tested",
+      "moreTools": "{count} more tools are available when the server is selected."
+    },
+    "citations": {
+      "untitledSource": "Untitled source",
+      "reference": "Reference {number}",
+      "scopeCurrent": "Current ({count})",
+      "scopeThread": "Thread ({count})",
+      "noMatch": "No citations match “{query}”.",
+      "noneInThread": "No citations found in this thread.",
+      "noneInAnswer": "No citations used in the selected answer.",
+      "open": "Open"
+    },
+    "connectors": {
+      "manage": "Manage",
+      "emptyTitle": "No active connectors yet.",
+      "emptyDescription": "Open the catalog to connect Notion or preview upcoming integrations.",
+      "openSettings": "Open {name} settings",
+      "syncPausedManual": "Sync paused {name} manually",
+      "isDisabled": "{name} is disabled",
+      "sync": "Sync {name}",
+      "configure": "Configure {name}",
+      "resume": "Resume {name}",
+      "pause": "Pause {name}",
+      "resumeShort": "Resume",
+      "pauseShort": "Pause",
+      "enableShort": "Enable",
+      "disconnect": "Disconnect {name}",
+      "removeAria": "Remove {name}",
+      "removeShort": "Remove",
+      "syncNow": "Sync now",
+      "backToCatalog": "Back to catalog",
+      "cancel": "Cancel",
+      "statusLabel": {
+        "active": "active",
+        "paused": "paused",
+        "disabled": "disabled",
+        "error": "error",
+        "syncing": "syncing",
+        "connected": "connected"
+      },
+      "status": {
+        "active": "Active",
+        "syncing": "Syncing",
+        "connected": "Connected",
+        "available": "Available",
+        "needs_setup": "Needs setup",
+        "error": "Error",
+        "coming_soon": "Coming soon",
+        "disabled": "Disabled",
+        "paused": "Paused",
+        "searchApi": "Search API",
+        "indexable": "Indexable"
+      },
+      "type": {
+        "indexable": "Indexable",
+        "searchApi": "Search API"
+      },
+      "schedule": {
+        "manual": "Manual sync",
+        "auto": "Auto sync",
+        "everyDays": "{count, plural, one {Auto sync every # day} other {Auto sync every # days}}",
+        "everyHours": "{count, plural, one {Auto sync every # hour} other {Auto sync every # hours}}",
+        "everyMinutes": "Auto sync every {count} min"
+      },
+      "lastSync": "Last sync {date}",
+      "neverSynced": "Never synced",
+      "never": "Never",
+      "readinessNoPages": "Connected · No pages shared",
+      "readinessSetupRequired": "Connected · Setup required",
+      "readinessNotReady": "Connector is not ready to sync.",
+      "cta": {
+        "request": "Request",
+        "connecting": "Connecting...",
+        "connected": "Connected",
+        "configure": "Configure",
+        "connect": "Connect"
+      },
+      "detail": {
+        "syncing": "A connector operation is running.",
+        "disabled": "Syncing is disabled. Enable this connector to resume.",
+        "needsAttention": "Connector needs attention.",
+        "paused": "Syncing is paused until you resume this connector.",
+        "needsSetupWebhook": "Configure a public HTTPS webhook endpoint.",
+        "lastSync": "Last sync {date}",
+        "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
+        "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
+        "available": "Ready to connect with {name} OAuth.",
+        "comingSoonSearch": "Non-indexable connector for live agent search.",
+        "comingSoonIndexable": "Indexable data source connector on the roadmap.",
+        "comingSoonNonIndexable": "Non-indexable connector on the roadmap."
+      },
+      "webhookUrl": "Webhook URL",
+      "webhookLocal": "local",
+      "copyWebhook": "Copy webhook URL",
+      "webhookNote": "Add this URL in {name} connection settings after OAuth is complete. Provider webhooks require public HTTPS.",
+      "manageTitle": "Manage Connectors",
+      "disabledCount": "{count} disabled",
+      "manageDescription": "Connect SourceWeft to knowledge, project, and communication tools.",
+      "filter": "Filter:",
+      "filterAll": "All connectors",
+      "filterManaged": "Managed",
+      "searchPlaceholder": "Search connectors",
+      "loading": "Loading connectors...",
+      "noMatchTitle": "No connectors match “{query}”",
+      "noMatchDescription": "Try a different provider, capability, or category.",
+      "noConnectorsTitle": "No connectors yet.",
+      "managedEmptyDescription": "Connect Notion or choose an upcoming integration from the catalog.",
+      "managedNoMatchDescription": "Try another connector name or status.",
+      "category": {
+        "Knowledge & Docs": "Knowledge & Docs",
+        "File Storage": "File Storage",
+        "Communication": "Communication",
+        "Projects & Data": "Projects & Data",
+        "Publishing": "Publishing"
+      },
+      "settingsDescription": "Connector settings, execution history, and provider events.",
+      "settingsTab": {
+        "overview": "Overview",
+        "configuration": "Configuration",
+        "sync": "Sync History",
+        "actions": "Actions",
+        "webhooks": "Webhooks",
+        "danger": "Danger Zone"
+      },
+      "overview": {
+        "status": "Status",
+        "lastSuccessfulSync": "Last successful sync",
+        "latestRun": "Latest run",
+        "nextScheduled": "Next scheduled",
+        "never": "Never",
+        "noActivity": "No activity",
+        "notScheduled": "Not scheduled",
+        "needsAttention": "Needs attention",
+        "latestRunValue": "{kind} · {status}",
+        "activityDescription": "Most recent connector execution records across syncs, actions, and webhooks.",
+        "activityEmpty": "No connector activity yet."
+      },
+      "config": {
+        "general": "General",
+        "name": "Name",
+        "syncSchedule": "Sync schedule",
+        "customIntervalMinutes": "Custom interval minutes",
+        "nonIndexableNote": "Non-indexable search connectors cannot run periodic indexing.",
+        "saveSettings": "Save settings",
+        "schedule": "Schedule",
+        "provider": "Provider",
+        "connection": "Connection",
+        "accountId": "Account ID",
+        "none": "None",
+        "defaultConnection": "Default connection",
+        "capabilities": "Capabilities",
+        "indexableSource": "Indexable source",
+        "nonIndexableSearch": "Non-indexable search",
+        "periodicSync": "Periodic sync",
+        "actions": "Actions",
+        "webhooks": "Webhooks",
+        "connector": "Connector",
+        "webhookUrlLabel": "{name} webhook URL",
+        "needsPublicHttps": "needs public HTTPS",
+        "webhookNoteSuffix": "{note} Events are recorded in Webhooks and Activity.",
+        "saveError": "Enter a connector name and a positive sync interval.",
+        "cannotPeriodic": "This connector cannot use periodic sync."
+      },
+      "syncHistory": {
+        "description": "Manual, scheduled, webhook, backfill, and skipped sync attempts.",
+        "empty": "No sync runs yet."
+      },
+      "actionsHistory": {
+        "description": "Approved connector writes, updates, deletes, comments, and file uploads.",
+        "empty": "No connector actions yet."
+      },
+      "webhooksHistory": {
+        "description": "Provider events received from connector webhooks.",
+        "empty": "No webhook events yet."
+      },
+      "danger": {
+        "note": "Remove stops this connector from syncing. Indexed sources are kept unless you remove them separately."
+      },
+      "frequency": {
+        "15": "15 min",
+        "60": "1 hour",
+        "360": "6 hours",
+        "720": "12 hours",
+        "1440": "Daily",
+        "10080": "Weekly",
+        "manual": "Manual",
+        "custom": "Custom"
+      },
+      "disconnectTitle": "Manage connector removal",
+      "disconnectDescription": "Choose whether to temporarily disable this connector or permanently delete it from SourceWeft.",
+      "disableOption": "Disable connector",
+      "disableOptionDesc": "Stops syncing. Keeps authorization, configuration, history, and indexed content. You can enable it again later.",
+      "deleteOption": "Delete connector and all indexed content",
+      "deleteOptionDesc": "Permanently deletes this connector, its local authorization, and all content imported by it. This cannot be undone.",
+      "disconnectNote": "SourceWeft will not revoke access in the third-party provider.",
+      "deleting": "Deleting...",
+      "disabling": "Disabling...",
+      "deleteConfirm": "Delete connector and content",
+      "disableConfirm": "Disable connector"
+    },
+    "connectorActivity": {
+      "trigger": {
+        "manual": "Manual",
+        "scheduled": "Scheduled",
+        "webhook": "Webhook",
+        "backfill": "Backfill"
+      },
+      "syncTitle": "{trigger} sync",
+      "connectorAction": "Connector action",
+      "webhookEvent": "Webhook event",
+      "yes": "Yes",
+      "no": "No",
+      "none": "None",
+      "loading": "Loading activity...",
+      "executionResult": "Execution result",
+      "emptyDescription": "Connector activity will appear here after syncs, actions, or webhooks run.",
+      "summary": {
+        "actionType": "Action",
+        "attempts": "Attempts",
+        "discoveredCount": "Discovered",
+        "eventType": "Event",
+        "externalId": "External ID",
+        "failedCount": "Failed",
+        "fullResync": "Full resync",
+        "heartbeatAt": "Heartbeat",
+        "indexedCount": "Indexed",
+        "objectId": "Object ID",
+        "objectType": "Object",
+        "providerEventId": "Provider event",
+        "reason": "Reason",
+        "requestPreview": "Request",
+        "riskLevel": "Risk",
+        "source": "Source",
+        "targetExternalIds": "Targets",
+        "targetExternalIdCount": "Target count",
+        "targeted": "Targeted",
+        "syncRunId": "Linked sync",
+        "triggerType": "Trigger"
+      }
+    },
+    "sourcePreview": {
+      "mode": {
+        "preview": "Preview",
+        "chunks": "Chunks",
+        "raw": "Raw MD",
+        "sourceFile": "File"
+      },
+      "sourceFallback": "Source",
+      "chunkLabel": "Chunk {number}",
+      "citedChunk": "Cited chunk",
+      "sourcePreview": "Source preview",
+      "chunksCount": "{count} chunks",
+      "historical": "Historical",
+      "sourceDeleted": "Source deleted",
+      "jumpToCited": "Jump to cited",
+      "webCitation": "Web citation",
+      "webCitationNote": "This citation points to a public web page.",
+      "open": "Open",
+      "noContentSaved": "No citation content was saved.",
+      "loading": "Loading source preview...",
+      "sourceUnavailable": "Source no longer available",
+      "sourceUnavailableNote": "The original source was deleted, so only the citation snapshot saved with this answer can be shown.",
+      "deletedSourceFallback": "Deleted source",
+      "preservedCitation": "Preserved citation",
+      "noExcerptSaved": "No citation excerpt was saved.",
+      "loadFailed": "Failed to load source preview.",
+      "download": "Download",
+      "noSourceFile": "No source file is available.",
+      "fileDetails": "File details",
+      "fileDetailsNote": "Quick metadata for the original source asset.",
+      "metaName": "Name",
+      "metaType": "Type",
+      "metaFormat": "Format",
+      "metaSize": "Size",
+      "metaUpdated": "Updated",
+      "metaIndexedChunks": "Indexed chunks",
+      "unknown": "Unknown",
+      "noMarkdown": "No markdown content available.",
+      "citedSource": "Cited source",
+      "raw": "Raw",
+      "noRawChunk": "No raw chunk content.",
+      "noChunks": "This source has no indexed chunks yet."
+    },
+    "localFiles": {
+      "ariaLabel": "Local files",
+      "heading": "Files",
+      "refresh": "Refresh files",
+      "lastListingNote": " Showing the last loaded listing; files are currently inaccessible.",
+      "parentFolder": "Parent folder",
+      "loading": "Loading files from the computer…",
+      "emptyFolder": "This folder is empty. Files created here will appear automatically.",
+      "noMatch": "No files match your search.",
+      "openFolder": "Open folder",
+      "previewInApp": "Preview in app",
+      "openFolderAria": "Open folder {name}",
+      "previewAria": "Preview {name}",
+      "downloadAria": "Download {name}"
+    },
+    "toasts": {
+      "sources": {
+        "loadFailed": "Failed to load sources.",
+        "processingFailed": "Source processing failed.",
+        "renamed": "Source renamed.",
+        "renameFailed": "Failed to rename source.",
+        "deleted": "Source deleted.",
+        "deleteFailed": "Failed to delete source.",
+        "selectedDeleted": "{count, plural, one {Deleted # selected source.} other {Deleted # selected sources.}}",
+        "selectedDeleteFailed": "Failed to delete selected sources.",
+        "retryQueued": "Source retry queued.",
+        "retryFailed": "Failed to retry source.",
+        "reindexQueued": "Re-index queued.",
+        "reindexFailed": "Failed to re-index source.",
+        "readmeLoadFailed": "Failed to load README content.",
+        "folderNameRequired": "Folder name is required.",
+        "folderCreated": "Folder created.",
+        "folderCreateFailed": "Failed to create folder.",
+        "readmeUpdated": "README updated.",
+        "readmeUpdateFailed": "Failed to update README.",
+        "moved": "Source moved.",
+        "moveFailed": "Failed to move source.",
+        "noOriginalFile": "This source has no original uploaded file.",
+        "noWorkspace": "No workspace selected yet.",
+        "contentEmpty": "Source content cannot be empty.",
+        "added": "Source added and indexing started.",
+        "createFailed": "Failed to create source.",
+        "urlEmpty": "URL cannot be empty.",
+        "urlAdded": "URL source added. Processing started.",
+        "urlAddFailed": "Failed to add URL source.",
+        "selectFilesFirst": "Select files to upload first.",
+        "uploaded": "{count, plural, one {# source uploaded. Processing started.} other {# sources uploaded. Processing started.}}",
+        "uploadFailed": "Failed to upload files."
+      },
+      "workfiles": {
+        "loadFailed": "Failed to load files.",
+        "fileDeleted": "File deleted.",
+        "deleteFailed": "Could not delete file."
+      },
+      "connectors": {
+        "loadFailed": "Failed to load connectors.",
+        "activityLoadFailed": "Failed to load connector activity.",
+        "settingsUnavailable": "Connector settings are not available yet.",
+        "noWorkspace": "No workspace selected yet.",
+        "notAvailableOAuth": "{name} is not available for OAuth yet.",
+        "redirecting": "Redirecting to {name} authorization.",
+        "reconnectFirst": "Reconnect {name} before creating a connector.",
+        "connectedConfigureNext": "{name} is connected. Configure syncing next.",
+        "connectedConfigureDone": "{name} connected. Configure syncing next.",
+        "connectedFallback": "{name} connected.",
+        "syncAlreadyRunningNamed": "{name} sync is already running.",
+        "enabledInitialSync": "{name} connector enabled. Initial sync queued.",
+        "alreadyConnected": "{name} connector is already connected.",
+        "disabledConflict": "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
+        "enableFailed": "Failed to enable {name} connector.",
+        "authFailed": "{name} authorization failed.",
+        "onRoadmap": "{name} is on the roadmap.",
+        "connectionCanceled": "{name} connection canceled.",
+        "webhookCopied": "Webhook URL copied.",
+        "webhookCopyFailed": "Could not copy webhook URL.",
+        "syncSkipped": "Connector sync skipped.",
+        "syncAlreadyRunning": "Connector sync is already running.",
+        "syncQueued": "Connector sync queued.",
+        "syncFailed": "Failed to sync connector.",
+        "enabled": "Connector enabled.",
+        "resumed": "Connector resumed.",
+        "paused": "Connector paused.",
+        "updateFailed": "Failed to update connector.",
+        "settingsSaved": "Connector settings saved.",
+        "settingsSaveFailed": "Failed to save connector settings.",
+        "deletedAll": "Connector, authorization, and indexed content deleted.",
+        "disabledCanReenable": "Connector disabled. You can enable it again later.",
+        "oauthAccountInUse": "This authorization is attached to another connector and cannot be deleted safely.",
+        "removeFailed": "Failed to remove connector."
+      }
+    }
+  },
+  "dashboardAdmin": {
+    "eyebrow": "Market · Admin",
+    "heading": "Review MCP submissions",
+    "description": "Submissions that pass automated checks are published automatically. This queue contains flagged submissions that need manual review.",
+    "loading": "Loading review queue…",
+    "empty": "No submissions need review.",
+    "submittedBy": "Submitted by {name}",
+    "approve": "Approve and publish",
+    "reject": "Reject",
+    "errors": {
+      "forbidden": "You do not have permission to review market submissions.",
+      "loadFailed": "Failed to load the review queue. Please try again.",
+      "actionFailed": "Action failed: {identifier}"
+    },
+    "relativeTime": {
+      "justNow": "Just now",
+      "minutes": "{count} min ago",
+      "hours": "{count} hr ago",
+      "days": "{count} d ago"
+    },
+    "flags": {
+      "pipeToShell": "Installer command: curl | sh",
+      "sudo": "sudo",
+      "eval": "eval(",
+      "base64Exec": "base64 | sh",
+      "chmodExec": "chmod +x",
+      "internalAddress": "Internal / metadata address"
+    },
+    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist."
+  },
+  "dashboardObservability": {
+    "notices": {
+      "payloadExcluded": "Payload was excluded from this lightweight trace load.",
+      "payloadHidden": "Payload hidden by observability access policy: {reason}",
+      "redactedTooltip": "Sensitive value removed before storage",
+      "redactedValue": "redacted sensitive value"
+    },
+    "roles": {
+      "system": "System",
+      "assistant": "Assistant",
+      "tool": "Tool",
+      "user": "User"
+    },
+    "message": {
+      "toolCalls": "Tool calls:",
+      "afterTool": "After tool",
+      "beforeTool": "Before tool",
+      "toolResult": "tool result",
+      "noData": "No data recorded.",
+      "noToolCalls": "No tool calls.",
+      "showFullText": "Show full text",
+      "hideFullText": "Hide full text",
+      "longMarkdown": "Long markdown output ({count} chars)",
+      "show": "Show",
+      "hide": "Hide",
+      "chars": "{count} chars",
+      "toolCallCount": "{count, plural, one {# tool call} other {# tool calls}}"
+    },
+    "mcp": {
+      "title": "MCP Activity",
+      "subtitle": "Redacted MCP tool calls and approval proposals for the selected workspace.",
+      "toolCallsBadge": "{count} tool calls",
+      "approvalsBadge": "{count} approvals",
+      "unknown": "Unknown MCP",
+      "empty": "No MCP tool calls found for this workspace.",
+      "loadOlder": "Load older MCP calls",
+      "approvals": "Approval Proposals",
+      "columns": {
+        "time": "Time",
+        "server": "Server",
+        "tool": "Tool",
+        "status": "Status",
+        "risk": "Risk",
+        "latency": "Latency",
+        "input": "Input",
+        "outputError": "Output / Error",
+        "thread": "Thread"
+      }
+    },
+    "tree": {
+      "showChildren": "Show child observations",
+      "hideChildren": "Hide child observations",
+      "empty": "Select a trace row to view its call tree."
+    },
+    "log": {
+      "empty": "Select a trace to view the timeline.",
+      "title": "Timeline",
+      "subtitle": "Chronological observations with relative start and duration.",
+      "count": "{count} observations",
+      "columns": {
+        "observation": "Observation",
+        "type": "Type",
+        "timeline": "Timeline",
+        "latency": "Latency"
+      }
+    },
+    "filters": {
+      "title": "Filters",
+      "clearAll": "Clear all",
+      "workspace": "Workspace",
+      "workspacesLabel": "Workspaces",
+      "allWorkspaces": "All workspaces",
+      "addWorkspace": "Add workspace",
+      "name": "Name",
+      "noTraceNames": "No trace names loaded.",
+      "summaryAll": "all",
+      "summarySelected": "{count} selected",
+      "traceId": "Trace ID",
+      "traceIdPlaceholder": "Exact trace ID",
+      "userId": "User ID",
+      "userIdPlaceholder": "Filter by user",
+      "sessionId": "Session ID",
+      "sessionIdPlaceholder": "Filter by session",
+      "status": "Status",
+      "apply": "Apply filters"
+    },
+    "summary": {
+      "status": "Status:",
+      "latency": "Latency:",
+      "session": "Session:",
+      "user": "User:",
+      "env": "Env:",
+      "observations": "Observations:",
+      "showing": "Showing {count}",
+      "loadMore": "Load more",
+      "model": "Model:",
+      "tokens": "Tokens:",
+      "error": "Error: {reason}"
+    },
+    "detail": {
+      "empty": "Select an item from the trace tree.",
+      "latency": "Latency: {value}",
+      "tokenSummary": "{prompt} prompt -> {completion} completion (sum {total})",
+      "tabs": {
+        "preview": "Preview",
+        "log": "Log View",
+        "formatted": "Formatted",
+        "json": "JSON"
+      },
+      "sections": {
+        "input": "Input",
+        "reasoning": "Reasoning",
+        "output": "Output",
+        "toolCalls": "Tool calls",
+        "modelParameters": "Model parameters",
+        "metrics": "Metrics",
+        "metadata": "Metadata"
+      }
+    },
+    "table": {
+      "filters": "Filters",
+      "hideFilters": "Hide filters",
+      "showFilters": "Show filters",
+      "allTime": "All time",
+      "loaded": "{count} loaded",
+      "shown": "{count} shown",
+      "pageSize": "Page size {count}",
+      "allWorkspaces": "All workspaces",
+      "tabTraces": "LLM Traces",
+      "tabMcp": "MCP Activity",
+      "refresh": "Refresh",
+      "mcpScoped": "MCP activity is scoped to a single workspace. Select a workspace from the filters to inspect MCP tool calls.",
+      "sessionPrefix": "Session: {value}",
+      "emptyNoTraces": "No traces found.",
+      "emptyNoMatch": "No traces match the current search.",
+      "loadOlder": "Load older traces",
+      "columns": {
+        "timestamp": "Timestamp",
+        "name": "Name",
+        "workspace": "Workspace",
+        "status": "Status",
+        "latency": "Latency",
+        "model": "Model",
+        "tokens": "Tokens",
+        "obs": "Obs.",
+        "sessionId": "Session ID",
+        "user": "User",
+        "traceId": "Trace ID"
+      }
+    },
+    "drawer": {
+      "filtersTitle": "Observability filters",
+      "traceFallback": "Trace",
+      "sessionId": "Session ID: {value}",
+      "traceDetail": "Trace detail",
+      "timeline": "Timeline",
+      "detail": "Detail"
+    },
+    "errors": {
+      "loadTraces": "Failed to load traces",
+      "loadMcp": "Failed to load MCP activity",
+      "traceWorkspaceRequired": "Trace workspace is required to load team trace detail",
+      "loadDetail": "Failed to load trace detail",
+      "loadMoreObservations": "Failed to load more observations"
+    }
+  },
+  "dashboardWindows": {
+    "hub": {
+      "uploadRunningToast": "An upload or resource operation is still running. Wait for it to finish before closing Hub.",
+      "discardCloseConfirm": "Discard the open Hub form and close this window?",
+      "accountMismatch": "Hub account does not match the main window.",
+      "mainWindowRestarted": "The main window restarted. Review selections before trying again.",
+      "connectionInterrupted": "The connection to the main window was interrupted.",
+      "notResponding": "The main window is not responding. Reconnect before making changes.",
+      "sessionEnded": "Hub session ended.",
+      "disconnected": "Hub is disconnected.",
+      "actionNotConfirmed": "Hub action was not confirmed. Refresh before retrying.",
+      "dockNotConfirmed": "The main window did not confirm docking. Hub remains in this window.",
+      "dockFailed": "Could not dock Hub.",
+      "openFromDesktop": "Open Hub from the SourceWeft desktop app.",
+      "signInAgain": "Sign in again in the main window to use Hub.",
+      "connecting": "Connecting Hub to the main window…",
+      "followingPaused": "Following paused",
+      "followingCurrent": "Following current conversation",
+      "closeTitleBusy": "Finish editing or uploading before docking Hub",
+      "closeTitleReturn": "Close window and return Hub to main window",
+      "closeTitlePlain": "Close Hub window",
+      "closeAria": "Close Hub window",
+      "reconnectAria": "Reconnect Hub",
+      "pausedCrossWorkspace": "The main window changed workspaces. Return to the original workspace to finish your open form.",
+      "pausedFollow": "Finish or cancel the open form in “{current}” to follow “{target}”.",
+      "discardFollowConfirm": "Discard the open Hub form and follow the current conversation?",
+      "discardFollow": "Discard and follow",
+      "operationContinues": "The operation continues in its original workspace.",
+      "mainWindowLeft": "The main window has left this conversation.",
+      "returnToConversation": "Return to conversation",
+      "loadingConversation": "Loading conversation…",
+      "backToHub": "Back to Hub"
+    },
+    "preview": {
+      "title": "File preview",
+      "downloadAria": "Download file",
+      "closeAria": "Close preview window",
+      "loading": "Loading file preview…",
+      "empty": "This file is empty.",
+      "accountMismatch": "This preview belongs to a different account."
+    }
+  },
+  "dashboardHome": {
+    "sections": {
+      "home": "Home",
+      "recentWorkspaces": "Recent workspaces",
+      "searchResults": "Search results"
+    },
+    "search": {
+      "placeholder": "Search workspaces..."
+    },
+    "rail": {
+      "scrollLeft": "Scroll recent workspaces left",
+      "scrollRight": "Scroll recent workspaces right"
+    },
+    "overview": {
+      "resumeIn": "Resume in {name}",
+      "createFirstTitle": "Create your first workspace",
+      "resumeDescription": "Pick up recent sources, review the latest activity, and move back into grounded chat with the right workspace already in focus.",
+      "setupDescription": "Set up a workspace to organize sources, keep context together, and route directly into chat.",
+      "openWorkspace": "Open workspace",
+      "activityColumn": "Activity",
+      "typeColumn": "Type",
+      "activityEmpty": "Workspace, source, and chat activity will appear here."
+    },
+    "actions": {
+      "createWorkspace": "Create workspace"
+    },
+    "createCard": {
+      "title": "Create workspace",
+      "description": "Start a clean space for sources and chat."
+    },
+    "workspace": {
+      "defaultName": "Workspace {number}",
+      "updated": "Updated {time}",
+      "files": "{count, plural, one {# file} other {# files}}",
+      "sources": "{count, plural, one {# source} other {# sources}}"
+    },
+    "cover": {
+      "noFilesYet": "No files yet",
+      "addSourcesDescription": "Add sources to start building context.",
+      "extraFiles": "+{count, plural, one {# file} other {# files}}"
+    },
+    "empty": {
+      "title": "No workspaces yet",
+      "description": "Create a workspace to start organizing sources and chats.",
+      "searchTitle": "No workspaces match your search",
+      "searchDescription": "Try a different term, or clear the search to browse recent workspaces again."
+    },
+    "activity": {
+      "created": "Created",
+      "added": "Added",
+      "updated": "Updated",
+      "sourceCount": "{count, plural, one {# source} other {# sources}}"
+    },
+    "badge": {
+      "workspace": "Workspace",
+      "chat": "Chat"
+    },
+    "sourceType": {
+      "file": "File",
+      "web": "Web",
+      "video": "Video",
+      "note": "Note",
+      "artifact": "Artifact",
+      "connector": "Connector",
+      "source": "Source"
+    },
+    "fallback": {
+      "untitledSource": "Untitled",
+      "untitledChat": "Untitled chat"
+    },
+    "relativeTime": {
+      "justNow": "just now",
+      "minutes": "{count}m ago",
+      "hours": "{count}h ago",
+      "days": "{count}d ago"
+    },
+    "toasts": {
+      "created": "Created \"{name}\"",
+      "createFailed": "Failed to create workspace.",
+      "loadFailed": "Failed to load workspaces.",
+      "noActiveTeam": "No active team selected."
+    }
+  }
+}

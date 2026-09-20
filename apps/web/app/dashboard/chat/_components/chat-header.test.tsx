@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import { ChatHeader } from "./chat-header";
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 const layout = vi.hoisted(() => ({
   conversationsOpen: true,
@@ -28,16 +34,18 @@ vi.mock("./chat-hub-context", () => ({
 
 function renderHeader() {
   return renderToStaticMarkup(
-    createElement(ChatHeader, {
-      threadTitle: "Conversation title",
-      workspaceId: "workspace",
-      isPersistentLayout: true,
-      sourcesVisible: false,
-      onToggleSources: () => undefined,
-      onOpenHub: () => undefined,
-      selectedModels: { llm: null, image: null, vision: null },
-      setSelectedModels: () => undefined,
-    }),
+    <NextIntlClientProvider locale="en" messages={intlMessages}>
+      {createElement(ChatHeader, {
+        threadTitle: "Conversation title",
+        workspaceId: "workspace",
+        isPersistentLayout: true,
+        sourcesVisible: false,
+        onToggleSources: () => undefined,
+        onOpenHub: () => undefined,
+        selectedModels: { llm: null, image: null, vision: null },
+        setSelectedModels: () => undefined,
+      })}
+    </NextIntlClientProvider>,
   );
 }
 

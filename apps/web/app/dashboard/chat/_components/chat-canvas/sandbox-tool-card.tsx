@@ -13,6 +13,7 @@ import {
   SquareTerminal,
   Upload,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   CodeBlock,
   CodeBlockActions,
@@ -59,6 +60,8 @@ import type {
   ToolConfirmationResolution,
 } from "./types";
 
+type Translate = ReturnType<typeof useTranslations>;
+
 const SANDBOX_TOOL_CARD_NAMES = new Set([
   "prepare_sandbox_workspace",
   "execute",
@@ -92,6 +95,7 @@ function formatDuration(latencyMs: number | null) {
 function getConfirmationDisplay(input: {
   resolvedConfirmations: ToolConfirmationResolution[];
   toolCall: ToolCallRecord;
+  t: Translate;
 }) {
   const confirmation = getToolConfirmationOutput(input.toolCall.output);
   const resolution = confirmation
@@ -104,11 +108,14 @@ function getConfirmationDisplay(input: {
       confirmation,
       confirmationResolution: resolution,
     }),
-    label: getToolApprovalDisplayLabel(input.toolCall, resolution),
-    message: getResolvedToolConfirmationMessage({
-      confirmation,
-      confirmationResolution: resolution,
-    }),
+    label: getToolApprovalDisplayLabel(input.toolCall, resolution, input.t),
+    message: getResolvedToolConfirmationMessage(
+      {
+        confirmation,
+        confirmationResolution: resolution,
+      },
+      input.t,
+    ),
   };
 }
 
@@ -116,21 +123,22 @@ function outputPlaceholder(input: {
   state: ReturnType<typeof resolveSandboxToolUiState>;
   toolError: string | null;
   viewMessage: string | null;
+  t: Translate;
 }) {
   if (input.toolError || input.viewMessage) {
     return input.toolError ?? input.viewMessage;
   }
   switch (input.state) {
     case "approval-requested":
-      return "Waiting for approval before execution.";
+      return input.t("sandbox.placeholder.waitingApproval");
     case "output-denied":
-      return "Execution was not approved.";
+      return input.t("sandbox.placeholder.notApproved");
     case "input-available":
-      return "Command is running. Output will appear when execution completes.";
+      return input.t("sandbox.placeholder.running");
     case "output-error":
-      return "The command could not be executed.";
+      return input.t("sandbox.placeholder.error");
     default:
-      return "Command completed without output.";
+      return input.t("sandbox.placeholder.noOutput");
   }
 }
 
@@ -165,18 +173,21 @@ function SandboxOperationActivity({
 }: {
   items: SandboxToolOperationTimelineItem[];
 }) {
+  const t = useTranslations("dashboardChatCanvas");
   return (
     // Borderless flat collapsible (matches the CoT/sub-agent grouping idiom);
     // the timeline items sit under TaskContent's left rule. No nested card box.
     // Collapsed by default — it's secondary detail, expand to inspect.
     <Task defaultOpen={false}>
-      <TaskTrigger title="Command details">
+      <TaskTrigger title={t("sandbox.commandDetails")}>
         <button
           className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-muted-foreground text-sm transition-colors hover:text-foreground"
           type="button"
         >
           <ListTree className="size-3.5 text-muted-foreground/75" />
-          <span className="font-medium text-foreground/80">Details</span>
+          <span className="font-medium text-foreground/80">
+            {t("sandbox.details")}
+          </span>
           <ChevronRight className="ml-auto size-3.5 text-muted-foreground/50 transition-transform group-data-[state=open]:rotate-90" />
         </button>
       </TaskTrigger>
@@ -238,14 +249,6 @@ function sandboxToolStatusKey(
   }
 }
 
-const SANDBOX_STATUS_LABELS = {
-  done: "Done",
-  failed: "Failed",
-  "needs-approval": "Needs approval",
-  rejected: "Rejected",
-  running: "Running",
-} as const;
-
 function ExecuteStatusIcon({
   statusKey,
 }: {
@@ -276,6 +279,7 @@ function SandboxExecuteCard({
   toolCall,
   toolStep,
 }: SandboxToolCardProps) {
+  const t = useTranslations("dashboardChatCanvas");
   const view = getSandboxExecuteView({
     input: toolCall.input,
     output: toolCall.output,
@@ -288,13 +292,17 @@ function SandboxExecuteCard({
     toolName: toolCall.tool,
   });
   const statusKey = sandboxToolStatusKey(state);
-  const toolError = getSandboxToolSafeErrorMessage({
-    error: toolCall.error,
-    toolName: toolCall.tool,
-  });
+  const toolError = getSandboxToolSafeErrorMessage(
+    {
+      error: toolCall.error,
+      toolName: toolCall.tool,
+    },
+    t,
+  );
   const confirmation = getConfirmationDisplay({
     resolvedConfirmations,
     toolCall,
+    t,
   });
   const effectiveDefaultOpen = defaultOpen ?? statusKey !== "done";
   const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
@@ -308,17 +316,23 @@ function SandboxExecuteCard({
   }
 
   const duration = formatDuration(toolCall.latencyMs);
-  const operationTimeline = getSandboxToolOperationTimeline({
-    output: toolCall.output,
-    toolName: toolCall.tool,
-  });
+  const operationTimeline = getSandboxToolOperationTimeline(
+    {
+      output: toolCall.output,
+      toolName: toolCall.tool,
+    },
+    t,
+  );
   const failureMessage =
     toolError ??
     (view.resultFailed
-      ? (getSandboxToolSafeErrorMessage({
-          error: view.code ?? view.message,
-          toolName: toolCall.tool,
-        }) ?? "The command could not be executed.")
+      ? (getSandboxToolSafeErrorMessage(
+          {
+            error: view.code ?? view.message,
+            toolName: toolCall.tool,
+          },
+          t,
+        ) ?? t("sandbox.placeholder.error"))
       : null);
   const hasDetails =
     Boolean(view.command) ||
@@ -345,7 +359,7 @@ function SandboxExecuteCard({
         </span>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span className="truncate text-[13px] text-foreground/80">
-            Run command
+            {t("sandbox.runCommand")}
           </span>
           {duration ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
@@ -358,7 +372,7 @@ function SandboxExecuteCard({
               <span aria-hidden="true">· </span>
               {confirmation.resolved
                 ? confirmation.label
-                : SANDBOX_STATUS_LABELS[statusKey]}
+                : t(`toolCard.status.${statusKey}`)}
             </span>
           ) : null}
         </span>
@@ -387,7 +401,9 @@ function SandboxExecuteCard({
               >
                 <CodeBlockHeader className="justify-end">
                   <CodeBlockActions>
-                    <CodeBlockCopyButton aria-label="Copy command" />
+                    <CodeBlockCopyButton
+                      aria-label={t("sandbox.copyCommand")}
+                    />
                   </CodeBlockActions>
                 </CodeBlockHeader>
               </CodeBlock>
@@ -396,12 +412,15 @@ function SandboxExecuteCard({
               // copy — the real code authoring now lives in write_file previews,
               // so the command here is just an identifiable, copyable invocation.
               <Snippet className="w-full" code={view.command}>
-                <SnippetInput aria-label="Command" className="text-xs" />
-                <SnippetCopyButton aria-label="Copy command" />
+                <SnippetInput
+                  aria-label={t("sandbox.commandAria")}
+                  className="text-xs"
+                />
+                <SnippetCopyButton aria-label={t("sandbox.copyCommand")} />
               </Snippet>
             )
           ) : (
-            <p className="break-words">Command input is unavailable.</p>
+            <p className="break-words">{t("sandbox.commandUnavailable")}</p>
           )}
           {failureMessage ? (
             <div
@@ -417,7 +436,7 @@ function SandboxExecuteCard({
               <div className="flex items-center justify-between gap-2 border-b bg-muted/80 px-3 py-1.5 text-muted-foreground text-xs">
                 <span className="flex items-center gap-2">
                   <SquareTerminal className="size-3.5" />
-                  <span className="font-mono">output</span>
+                  <span className="font-mono">{t("sandbox.outputLabel")}</span>
                 </span>
                 <span className="flex items-center gap-2 font-mono">
                   {view.exitCode !== null ? (
@@ -433,7 +452,7 @@ function SandboxExecuteCard({
                   ) : null}
                   {view.truncated ? (
                     <span className="text-amber-600 dark:text-amber-400">
-                      truncated
+                      {t("sandbox.truncated")}
                     </span>
                   ) : null}
                 </span>
@@ -453,12 +472,17 @@ function SandboxExecuteCard({
                 state,
                 toolError,
                 viewMessage: view.message,
+                t,
               })}
             </div>
           )}
           {view.recoverable !== null ? (
             <p className="text-muted-foreground text-xs">
-              Recoverable: {view.recoverable ? "Yes" : "No"}
+              {t("sandbox.recoverable", {
+                value: view.recoverable
+                  ? t("common.yes")
+                  : t("common.no"),
+              })}
             </p>
           ) : null}
           {confirmation.message ? (
@@ -514,6 +538,7 @@ function SandboxTransferCard({
   toolCall,
   toolStep,
 }: SandboxToolCardProps) {
+  const t = useTranslations("dashboardChatCanvas");
   const view = getSandboxTransferView({
     input: toolCall.input,
     output: toolCall.output,
@@ -529,11 +554,15 @@ function SandboxTransferCard({
   const confirmation = getConfirmationDisplay({
     resolvedConfirmations,
     toolCall,
+    t,
   });
-  const toolError = getSandboxToolSafeErrorMessage({
-    error: toolCall.error,
-    toolName: toolCall.tool,
-  });
+  const toolError = getSandboxToolSafeErrorMessage(
+    {
+      error: toolCall.error,
+      toolName: toolCall.tool,
+    },
+    t,
+  );
   const effectiveDefaultOpen = defaultOpen ?? statusKey !== "done";
   const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
 
@@ -547,14 +576,19 @@ function SandboxTransferCard({
 
   const duration = formatDuration(toolCall.latencyMs);
   const title =
-    view.direction === "prepare" ? "Prepare workspace" : "Collect output files";
+    view.direction === "prepare"
+      ? t("sandbox.prepareWorkspace")
+      : t("sandbox.collectOutputs");
   const resultMessage =
     toolError ??
     (view.resultFailed
-      ? (getSandboxToolSafeErrorMessage({
-          error: view.code ?? view.message,
-          toolName: toolCall.tool,
-        }) ?? "The file transfer could not be completed.")
+      ? (getSandboxToolSafeErrorMessage(
+          {
+            error: view.code ?? view.message,
+            toolName: toolCall.tool,
+          },
+          t,
+        ) ?? t("sandbox.transferFailed"))
       : null);
   const hasDetails =
     view.mappings.length > 0 ||
@@ -595,7 +629,7 @@ function SandboxTransferCard({
               <span aria-hidden="true">· </span>
               {confirmation.resolved
                 ? confirmation.label
-                : SANDBOX_STATUS_LABELS[statusKey]}
+                : t(`toolCard.status.${statusKey}`)}
             </span>
           ) : null}
         </span>
@@ -614,14 +648,25 @@ function SandboxTransferCard({
         <div className={cn(ASSISTANT_ACTIVITY_DETAIL_CLASS, contentClassName)}>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span>
-              {view.mappings.length} {view.resultSucceeded ? null : "planned "}
-              {view.mappings.length === 1 ? "file" : "files"}
+              {view.resultSucceeded
+                ? view.mappings.length === 1
+                  ? t("sandbox.fileReady", { count: view.mappings.length })
+                  : t("sandbox.filesReady", { count: view.mappings.length })
+                : view.mappings.length === 1
+                  ? t("sandbox.filePlanned", { count: view.mappings.length })
+                  : t("sandbox.filesPlanned", { count: view.mappings.length })}
             </span>
             {view.totalBytes !== null ? (
               <span>{formatSandboxByteCount(view.totalBytes)}</span>
             ) : null}
             {view.recoverable !== null ? (
-              <span>Recoverable: {view.recoverable ? "Yes" : "No"}</span>
+              <span>
+                {t("sandbox.recoverable", {
+                  value: view.recoverable
+                    ? t("common.yes")
+                    : t("common.no"),
+                })}
+              </span>
             ) : null}
           </div>
           {view.mappings.length > 0 ? (
@@ -639,7 +684,7 @@ function SandboxTransferCard({
                   >
                     <div className="min-w-0">
                       <span className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">
-                        From
+                        {t("sandbox.from")}
                       </span>
                       <code
                         className="block truncate text-foreground/75"
@@ -651,7 +696,7 @@ function SandboxTransferCard({
                     <ArrowRight className="hidden size-3.5 text-muted-foreground/50 sm:block" />
                     <div className="min-w-0">
                       <span className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">
-                        To
+                        {t("sandbox.to")}
                       </span>
                       {canOpenTarget ? (
                         <button

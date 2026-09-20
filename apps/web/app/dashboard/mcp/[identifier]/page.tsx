@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   marketMcpManifestSchema,
   type McpRiskLevel,
@@ -43,37 +44,36 @@ type ResolvedWorkspace = {
   name: string | null;
 };
 
-function riskMeta(risk: McpRiskLevel): { label: string; className: string } {
+function riskMeta(risk: McpRiskLevel): {
+  riskKey: "destructive" | "write" | "read" | "unknown";
+  className: string;
+} {
   if (risk === "destructive") {
     return {
-      label: "Destructive",
+      riskKey: "destructive",
       className:
         "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
     };
   }
   if (risk === "write") {
     return {
-      label: "Write",
+      riskKey: "write",
       className:
         "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     };
   }
   if (risk === "read") {
     return {
-      label: "Read",
+      riskKey: "read",
       className:
         "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
     };
   }
-  return { label: "Unknown", className: "text-muted-foreground" };
-}
-
-function formatUpdated(value: string | null) {
-  if (!value) return "Unknown";
-  return formatShortRelativeTime(value);
+  return { riskKey: "unknown", className: "text-muted-foreground" };
 }
 
 export default function McpDetailPage() {
+  const t = useTranslations("dashboardMcpPanel");
   const params = useParams<{ identifier?: string | string[] }>();
   const rawIdentifier = Array.isArray(params.identifier)
     ? params.identifier[0]
@@ -126,7 +126,7 @@ export default function McpDetailPage() {
       }
       if (!identifier) {
         setDetail(null);
-        setError("MCP identifier is missing.");
+        setError(t("detail.identifierMissing"));
         return;
       }
 
@@ -142,7 +142,9 @@ export default function McpDetailPage() {
       if (detailGenerationRef.current !== generation) return;
       setDetail(null);
       setError(
-        loadError instanceof Error ? loadError.message : "Failed to load MCP.",
+        loadError instanceof Error
+          ? loadError.message
+          : t("detail.loadFailedShort"),
       );
     } finally {
       if (detailGenerationRef.current === generation) {
@@ -150,7 +152,7 @@ export default function McpDetailPage() {
         setIsLoading(false);
       }
     }
-  }, [identifier, resolveWorkspace]);
+  }, [identifier, resolveWorkspace, t]);
 
   React.useEffect(() => {
     void loadDetail();
@@ -199,7 +201,7 @@ export default function McpDetailPage() {
       );
       setInstall(result.install);
       invalidateWorkspaceMcpCache(workspace.id);
-      toast.success("MCP installed");
+      toast.success(t("toasts.installed"));
       // Installing an auth server prompts for credentials; the user then Tests
       // to verify connectivity. Install and Test are deliberately separate.
       if (result.install.authType !== "none") {
@@ -209,7 +211,7 @@ export default function McpDetailPage() {
       toast.error(
         installError instanceof Error
           ? installError.message
-          : "Failed to install MCP.",
+          : t("toasts.installFailed"),
       );
     } finally {
       setPending(false);
@@ -223,12 +225,12 @@ export default function McpDetailPage() {
       await contentClient.deleteWorkspaceMcpInstall(workspace.id, install.id);
       setInstall(null);
       invalidateWorkspaceMcpCache(workspace.id);
-      toast.success("MCP uninstalled");
+      toast.success(t("toasts.uninstalled"));
     } catch (uninstallError) {
       toast.error(
         uninstallError instanceof Error
           ? uninstallError.message
-          : "Failed to uninstall MCP.",
+          : t("toasts.uninstallFailed"),
       );
     } finally {
       setPending(false);
@@ -245,10 +247,12 @@ export default function McpDetailPage() {
       );
       setInstall(result.install);
       invalidateWorkspaceMcpCache(workspace.id);
-      toast.success(`MCP connection tested: ${result.toolCount} tools`);
+      toast.success(t("toasts.tested", { count: result.toolCount }));
     } catch (testError) {
       toast.error(
-        testError instanceof Error ? testError.message : "Failed to test MCP.",
+        testError instanceof Error
+          ? testError.message
+          : t("toasts.testFailed"),
       );
     } finally {
       setPending(false);
@@ -266,12 +270,12 @@ export default function McpDetailPage() {
       );
       setInstall(result.install);
       invalidateWorkspaceMcpCache(workspace.id);
-      toast.success(enabled ? "MCP enabled" : "MCP disabled");
+      toast.success(enabled ? t("toasts.enabled") : t("toasts.disabled"));
     } catch (toggleError) {
       toast.error(
         toggleError instanceof Error
           ? toggleError.message
-          : "Failed to update MCP.",
+          : t("toasts.updateFailed"),
       );
     } finally {
       setPending(false);
@@ -288,7 +292,7 @@ export default function McpDetailPage() {
             <div className="flex min-w-0 items-center gap-3">
               <Button
                 asChild
-                aria-label="Back to MCP market"
+                aria-label={t("detail.backAria")}
                 className="h-8 w-8 rounded-full p-0"
                 size="icon-sm"
                 type="button"
@@ -333,14 +337,14 @@ export default function McpDetailPage() {
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       {item.official ? (
                         <Badge className="h-5 px-1.5 text-[10px]" variant="default">
-                          Official
+                          {t("badges.official")}
                         </Badge>
                       ) : item.verified ? (
                         <Badge
                           className="h-5 px-1.5 text-[10px]"
                           variant="secondary"
                         >
-                          Verified
+                          {t("badges.verified")}
                         </Badge>
                       ) : (
                         <Badge
@@ -348,11 +352,13 @@ export default function McpDetailPage() {
                           variant="outline"
                         >
                           <AlertTriangle className="h-3 w-3" />
-                          Unverified
+                          {t("badges.unverified")}
                         </Badge>
                       )}
                       <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
-                        {desktopOnly ? "Desktop only" : "Web executable"}
+                        {desktopOnly
+                          ? t("badges.desktopOnly")
+                          : t("badges.webExecutable")}
                       </Badge>
                       {install ? (
                         <Badge
@@ -360,7 +366,7 @@ export default function McpDetailPage() {
                           variant="secondary"
                         >
                           <Check className="h-3 w-3" />
-                          Installed
+                          {t("badges.installed")}
                         </Badge>
                       ) : null}
                     </div>
@@ -368,7 +374,7 @@ export default function McpDetailPage() {
                 </>
               ) : (
                 <h1 className="truncate text-base font-semibold text-foreground">
-                  MCP details
+                  {t("detail.titleFallback")}
                 </h1>
               )}
             </div>
@@ -389,7 +395,7 @@ export default function McpDetailPage() {
                       ) : (
                         <PlugZap className="h-3.5 w-3.5" />
                       )}
-                      Test
+                      {t("detail.test")}
                     </Button>
                     <Button
                       className="h-8 px-3 text-xs"
@@ -400,7 +406,7 @@ export default function McpDetailPage() {
                       variant="outline"
                     >
                       <Settings2 className="h-3.5 w-3.5" />
-                      Settings
+                      {t("detail.settings")}
                     </Button>
                     <Button
                       className="h-8 px-3 text-xs"
@@ -415,7 +421,7 @@ export default function McpDetailPage() {
                       ) : (
                         <Trash2 className="h-3.5 w-3.5" />
                       )}
-                      Uninstall
+                      {t("detail.uninstall")}
                     </Button>
                   </>
                 ) : (
@@ -431,7 +437,7 @@ export default function McpDetailPage() {
                     ) : (
                       <McpIcon className="h-3.5 w-3.5" />
                     )}
-                    Install
+                    {t("detail.install")}
                   </Button>
                 )}
               </div>
@@ -449,7 +455,7 @@ export default function McpDetailPage() {
               {pageLoading ? (
                 <div className="flex items-center justify-center rounded-2xl border border-border bg-background px-5 py-16 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading MCP...
+                  {t("detail.loading")}
                 </div>
               ) : error && !item ? (
                 <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-5 py-10 text-sm text-destructive">
@@ -468,11 +474,16 @@ export default function McpDetailPage() {
                       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
                         <div className="min-w-0">
                           <div>
-                            {install.tools.length} tool
-                            {install.tools.length === 1 ? "" : "s"} synced
+                            {t("detail.toolsSynced", {
+                              count: install.tools.length,
+                            })}
                             {install.lastTestedAt
-                              ? ` · tested ${formatShortRelativeTime(install.lastTestedAt)}`
-                              : " · not tested yet"}
+                              ? t("detail.testedSuffix", {
+                                  time: formatShortRelativeTime(
+                                    install.lastTestedAt,
+                                  ),
+                                })
+                              : t("detail.notTestedSuffix")}
                           </div>
                           {install.lastError ? (
                             <div className="mt-1 inline-flex items-center gap-1 text-red-600 dark:text-red-300">
@@ -487,12 +498,16 @@ export default function McpDetailPage() {
                               type="button"
                             >
                               <KeyRound className="h-3 w-3" />
-                              Configure credentials
+                              {t("detail.configureCredentials")}
                             </button>
                           ) : null}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <span>{install.enabled ? "Enabled" : "Disabled"}</span>
+                          <span>
+                            {install.enabled
+                              ? t("detail.enabled")
+                              : t("detail.disabled")}
+                          </span>
                           <Switch
                             checked={install.enabled}
                             disabled={pending}
@@ -508,27 +523,24 @@ export default function McpDetailPage() {
                   {!trusted ? (
                     <section className="flex gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>
-                        This MCP server is unverified. It can receive a
-                        conversation&apos;s tool arguments and may perform
-                        external actions. Review the server before enabling it.
-                      </span>
+                      <span>{t("detail.unverifiedNoticeLong")}</span>
                     </section>
                   ) : null}
 
                   <section className="rounded-2xl border border-border bg-background p-5 shadow-xs">
                     <div className="flex items-center justify-between gap-2">
                       <h2 className="text-sm font-semibold text-foreground">
-                        Tools
+                        {t("detail.toolsHeading")}
                       </h2>
                       <span className="text-xs text-muted-foreground">
-                        {tools.length || item.toolsCount} total
+                        {t("detail.toolsTotal", {
+                          count: tools.length || item.toolsCount,
+                        })}
                       </span>
                     </div>
                     {tools.length === 0 ? (
                       <p className="mt-3 text-xs text-muted-foreground">
-                        Tool details are published after the server is indexed or
-                        installed.
+                        {t("detail.toolsPending")}
                       </p>
                     ) : (
                       <ul className="mt-3 space-y-2">
@@ -550,7 +562,7 @@ export default function McpDetailPage() {
                                   )}
                                   variant="outline"
                                 >
-                                  {meta.label}
+                                  {t(`risk.${meta.riskKey}`)}
                                 </Badge>
                               </div>
                               {tool.description ? (
@@ -567,7 +579,7 @@ export default function McpDetailPage() {
                 </>
               ) : (
                 <div className="rounded-2xl border border-border bg-background px-5 py-10 text-sm text-muted-foreground">
-                  MCP server was not found in this workspace catalog.
+                  {t("detail.notFound")}
                 </div>
               )}
             </article>
@@ -576,25 +588,55 @@ export default function McpDetailPage() {
               <aside className="space-y-4">
                 <section className="h-fit rounded-2xl border border-border bg-background p-4 shadow-xs">
                   <h2 className="text-sm font-semibold text-foreground">
-                    Server details
+                    {t("detail.serverDetails")}
                   </h2>
                   <dl className="mt-3 space-y-3 text-xs">
                     {[
-                      ["Identifier", item.identifier],
-                      ["Version", item.latestVersion ?? "Unknown"],
-                      [
-                        "Transport",
-                        manifest?.transport ?? item.transport ?? "Unknown",
-                      ],
-                      ["Runtime", item.runtime],
-                      [
-                        "Auth",
-                        item.requiresAuth ? "Required" : "Not required",
-                      ],
-                      ["Tools", String(tools.length || item.toolsCount)],
-                      ["Updated", formatUpdated(item.updatedAt)],
-                    ].map(([label, value]) => (
-                      <div key={label}>
+                      {
+                        key: "identifier",
+                        label: t("detail.fields.identifier"),
+                        value: item.identifier,
+                      },
+                      {
+                        key: "version",
+                        label: t("detail.fields.version"),
+                        value:
+                          item.latestVersion ?? t("detail.fieldValues.unknown"),
+                      },
+                      {
+                        key: "transport",
+                        label: t("detail.fields.transport"),
+                        value:
+                          manifest?.transport ??
+                          item.transport ??
+                          t("detail.fieldValues.unknown"),
+                      },
+                      {
+                        key: "runtime",
+                        label: t("detail.fields.runtime"),
+                        value: item.runtime,
+                      },
+                      {
+                        key: "auth",
+                        label: t("detail.fields.auth"),
+                        value: item.requiresAuth
+                          ? t("detail.fieldValues.authRequired")
+                          : t("detail.fieldValues.authNotRequired"),
+                      },
+                      {
+                        key: "tools",
+                        label: t("detail.fields.tools"),
+                        value: String(tools.length || item.toolsCount),
+                      },
+                      {
+                        key: "updated",
+                        label: t("detail.fields.updated"),
+                        value: item.updatedAt
+                          ? formatShortRelativeTime(item.updatedAt)
+                          : t("detail.fieldValues.unknown"),
+                      },
+                    ].map(({ key, label, value }) => (
+                      <div key={key}>
                         <dt className="text-muted-foreground">{label}</dt>
                         <dd className="mt-0.5 font-medium text-foreground capitalize">
                           {value}
@@ -603,7 +645,9 @@ export default function McpDetailPage() {
                     ))}
                     {item.license ? (
                       <div>
-                        <dt className="text-muted-foreground">License</dt>
+                        <dt className="text-muted-foreground">
+                          {t("detail.fields.license")}
+                        </dt>
                         <dd className="mt-0.5 inline-flex items-center gap-1 font-medium text-foreground">
                           <Scale className="h-3 w-3" />
                           {item.license}
@@ -622,7 +666,7 @@ export default function McpDetailPage() {
                           target="_blank"
                         >
                           <ExternalLink className="h-3 w-3" />
-                          Homepage
+                          {t("detail.links.homepage")}
                         </a>
                       ) : null}
                       {repoUrl ? (
@@ -633,7 +677,7 @@ export default function McpDetailPage() {
                           target="_blank"
                         >
                           <ExternalLink className="h-3 w-3" />
-                          Repository
+                          {t("detail.links.repository")}
                         </a>
                       ) : null}
                       {sourceUrl ? (
@@ -644,7 +688,7 @@ export default function McpDetailPage() {
                           target="_blank"
                         >
                           <ExternalLink className="h-3 w-3" />
-                          Source
+                          {t("detail.links.source")}
                         </a>
                       ) : null}
                     </div>
@@ -654,7 +698,7 @@ export default function McpDetailPage() {
                 {item.categories.length > 0 ? (
                   <section className="rounded-2xl border border-border bg-background p-4 shadow-xs">
                     <h2 className="text-sm font-semibold text-foreground">
-                      Categories
+                      {t("detail.categories")}
                     </h2>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {item.categories.map((category) => (
@@ -673,14 +717,13 @@ export default function McpDetailPage() {
                 <section className="rounded-2xl border border-border bg-muted/30 p-4 text-xs leading-5 text-muted-foreground">
                   <div className="mb-1.5 inline-flex items-center gap-1.5 font-medium text-foreground">
                     <ShieldCheck className="h-3.5 w-3.5" />
-                    Runtime & security
+                    {t("detail.runtimeSecurity")}
                   </div>
                   <p>
-                    Credentials are configured privately per workspace, encrypted
-                    at rest, and sent only to this server during tool calls.
+                    {t("detail.security")}
                     {desktopOnly
-                      ? " This server runs on the desktop host only."
-                      : " This server runs from the web runtime when configured."}
+                      ? t("detail.securityDesktop")
+                      : t("detail.securityWeb")}
                   </p>
                 </section>
               </aside>

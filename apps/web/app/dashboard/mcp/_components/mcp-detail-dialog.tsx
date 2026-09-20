@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   marketMcpManifestSchema,
   type McpRiskLevel,
@@ -42,29 +43,32 @@ type MarketMcpDetail = Awaited<
   ReturnType<typeof contentClient.getWorkspaceMarketMcp>
 >;
 
-function riskMeta(risk: McpRiskLevel) {
+function riskMeta(risk: McpRiskLevel): {
+  riskKey: "destructive" | "write" | "read" | "unknown";
+  className: string;
+} {
   if (risk === "destructive") {
     return {
-      label: "Destructive",
+      riskKey: "destructive",
       className:
         "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
     };
   }
   if (risk === "write") {
     return {
-      label: "Write",
+      riskKey: "write",
       className:
         "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     };
   }
   if (risk === "read") {
     return {
-      label: "Read",
+      riskKey: "read",
       className:
         "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
     };
   }
-  return { label: "Unknown", className: "text-muted-foreground" };
+  return { riskKey: "unknown", className: "text-muted-foreground" };
 }
 
 function McpAvatar({ item }: { item: MarketMcpItem["market"] }) {
@@ -121,6 +125,7 @@ export function McpDetailDialog({
   pending: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardMcpPanel");
   const [detail, setDetail] = React.useState<MarketMcpDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -151,13 +156,13 @@ export function McpDetailDialog({
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Failed to load MCP details.",
+            : t("detail.loadFailedDetail"),
         );
       })
       .finally(() => {
         if (generationRef.current === generation) setLoading(false);
       });
-  }, [identifier, reloadKey, workspaceId]);
+  }, [identifier, reloadKey, workspaceId, t]);
 
   const market = item?.market ?? null;
   const install = item?.install ?? null;
@@ -197,12 +202,12 @@ export function McpDetailDialog({
               {market ? <McpAvatar item={market} /> : null}
               <div className="min-w-0">
                 <DialogTitle className="truncate">
-                  {market?.name ?? "MCP details"}
+                  {market?.name ?? t("detail.titleFallback")}
                 </DialogTitle>
                 <DialogDescription className="mt-1 truncate text-xs">
                   {market?.providerName ??
                     market?.identifier ??
-                    "Loading MCP details."}
+                    t("detail.loadingDescription")}
                 </DialogDescription>
               </div>
             </div>
@@ -221,7 +226,7 @@ export function McpDetailDialog({
                       ) : (
                         <PlugZap className="size-3.5" />
                       )}
-                      Test
+                      {t("detail.test")}
                     </Button>
                     <Button
                       disabled={pending}
@@ -231,7 +236,7 @@ export function McpDetailDialog({
                       variant="outline"
                     >
                       <Settings2 className="size-3.5" />
-                      Settings
+                      {t("detail.settings")}
                     </Button>
                     <Button
                       disabled={pending}
@@ -241,7 +246,7 @@ export function McpDetailDialog({
                       variant="ghost"
                     >
                       <Trash2 className="size-3.5" />
-                      Uninstall
+                      {t("detail.uninstall")}
                     </Button>
                   </>
                 ) : (
@@ -256,7 +261,7 @@ export function McpDetailDialog({
                     ) : (
                       <McpIcon className="size-3.5" />
                     )}
-                    Install
+                    {t("detail.install")}
                   </Button>
                 )}
               </div>
@@ -268,7 +273,7 @@ export function McpDetailDialog({
           {loading ? (
             <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading MCP...
+              {t("detail.loading")}
             </div>
           ) : error ? (
             <div className="flex min-h-80 flex-col items-center justify-center gap-3 px-5 text-center">
@@ -280,7 +285,7 @@ export function McpDetailDialog({
                 variant="outline"
               >
                 <RotateCw className="size-4" />
-                Retry
+                {t("detail.retry")}
               </Button>
             </div>
           ) : market ? (
@@ -289,22 +294,24 @@ export function McpDetailDialog({
                 <section className="rounded-lg border border-border bg-background p-5">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {market.official ? (
-                      <Badge variant="default">Official</Badge>
+                      <Badge variant="default">{t("badges.official")}</Badge>
                     ) : market.verified ? (
-                      <Badge variant="secondary">Verified</Badge>
+                      <Badge variant="secondary">{t("badges.verified")}</Badge>
                     ) : (
                       <Badge className="gap-1" variant="outline">
                         <AlertTriangle className="size-3" />
-                        Unverified
+                        {t("badges.unverified")}
                       </Badge>
                     )}
                     <Badge variant="outline">
-                      {desktopOnly ? "Desktop only" : "Web executable"}
+                      {desktopOnly
+                        ? t("badges.desktopOnly")
+                        : t("badges.webExecutable")}
                     </Badge>
                     {install ? (
                       <Badge className="gap-1" variant="secondary">
                         <Check className="size-3" />
-                        Installed
+                        {t("badges.installed")}
                       </Badge>
                     ) : null}
                   </div>
@@ -315,11 +322,16 @@ export function McpDetailDialog({
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
                       <div className="min-w-0">
                         <p>
-                          {install.tools.length} tool
-                          {install.tools.length === 1 ? "" : "s"} synced
+                          {t("detail.toolsSynced", {
+                            count: install.tools.length,
+                          })}
                           {install.lastTestedAt
-                            ? ` · tested ${formatShortRelativeTime(install.lastTestedAt)}`
-                            : " · not tested yet"}
+                            ? t("detail.testedSuffix", {
+                                time: formatShortRelativeTime(
+                                  install.lastTestedAt,
+                                ),
+                              })
+                            : t("detail.notTestedSuffix")}
                         </p>
                         {install.lastError ? (
                           <p className="mt-1 text-destructive">
@@ -333,14 +345,22 @@ export function McpDetailDialog({
                             type="button"
                           >
                             <KeyRound className="size-3" />
-                            Configure credentials
+                            {t("detail.configureCredentials")}
                           </button>
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2">
-                        <span>{install.enabled ? "Enabled" : "Disabled"}</span>
+                        <span>
+                          {install.enabled
+                            ? t("detail.enabled")
+                            : t("detail.disabled")}
+                        </span>
                         <Switch
-                          aria-label={`${install.enabled ? "Disable" : "Enable"} ${market.name}`}
+                          aria-label={
+                            install.enabled
+                              ? t("card.disableAria", { name: market.name })
+                              : t("card.enableAria", { name: market.name })
+                          }
                           checked={install.enabled}
                           disabled={pending}
                           onCheckedChange={(enabled) =>
@@ -355,24 +375,24 @@ export function McpDetailDialog({
                 {!trusted ? (
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    This MCP server is unverified. Review it before enabling
-                    access to conversation tool arguments.
+                    {t("detail.unverifiedNoticeMedium")}
                   </section>
                 ) : null}
 
                 <section className="rounded-lg border border-border bg-background p-5">
                   <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-foreground">
-                      Tools
+                      {t("detail.toolsHeading")}
                     </h2>
                     <span className="text-xs text-muted-foreground">
-                      {tools.length || market.toolsCount} total
+                      {t("detail.toolsTotal", {
+                        count: tools.length || market.toolsCount,
+                      })}
                     </span>
                   </div>
                   {tools.length === 0 ? (
                     <p className="mt-3 text-xs text-muted-foreground">
-                      Tool details are published after the server is indexed or
-                      installed.
+                      {t("detail.toolsPending")}
                     </p>
                   ) : (
                     <ul className="mt-3 grid gap-2 md:grid-cols-2">
@@ -394,7 +414,7 @@ export function McpDetailDialog({
                                 )}
                                 variant="outline"
                               >
-                                {meta.label}
+                                {t(`risk.${meta.riskKey}`)}
                               </Badge>
                             </div>
                             {tool.description ? (
@@ -413,24 +433,49 @@ export function McpDetailDialog({
               <aside className="space-y-4">
                 <section className="rounded-lg border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold text-foreground">
-                    Server details
+                    {t("detail.serverDetails")}
                   </h2>
                   <dl className="mt-3 space-y-3 text-xs">
                     {[
-                      ["Identifier", market.identifier],
-                      ["Version", market.latestVersion ?? "Unknown"],
-                      [
-                        "Transport",
-                        manifest?.transport ?? market.transport ?? "Unknown",
-                      ],
-                      ["Runtime", market.runtime],
-                      [
-                        "Auth",
-                        market.requiresAuth ? "Required" : "Not required",
-                      ],
-                      ["Tools", String(tools.length || market.toolsCount)],
-                    ].map(([label, value]) => (
-                      <div key={label}>
+                      {
+                        key: "identifier",
+                        label: t("detail.fields.identifier"),
+                        value: market.identifier,
+                      },
+                      {
+                        key: "version",
+                        label: t("detail.fields.version"),
+                        value:
+                          market.latestVersion ??
+                          t("detail.fieldValues.unknown"),
+                      },
+                      {
+                        key: "transport",
+                        label: t("detail.fields.transport"),
+                        value:
+                          manifest?.transport ??
+                          market.transport ??
+                          t("detail.fieldValues.unknown"),
+                      },
+                      {
+                        key: "runtime",
+                        label: t("detail.fields.runtime"),
+                        value: market.runtime,
+                      },
+                      {
+                        key: "auth",
+                        label: t("detail.fields.auth"),
+                        value: market.requiresAuth
+                          ? t("detail.fieldValues.authRequired")
+                          : t("detail.fieldValues.authNotRequired"),
+                      },
+                      {
+                        key: "tools",
+                        label: t("detail.fields.tools"),
+                        value: String(tools.length || market.toolsCount),
+                      },
+                    ].map(({ key, label, value }) => (
+                      <div key={key}>
                         <dt className="text-muted-foreground">{label}</dt>
                         <dd className="mt-1 break-words font-medium text-foreground">
                           {value}
@@ -439,7 +484,9 @@ export function McpDetailDialog({
                     ))}
                     {market.license ? (
                       <div>
-                        <dt className="text-muted-foreground">License</dt>
+                        <dt className="text-muted-foreground">
+                          {t("detail.fields.license")}
+                        </dt>
                         <dd className="mt-1 inline-flex items-center gap-1 font-medium text-foreground">
                           <Scale className="size-3" />
                           {market.license}
@@ -450,15 +497,27 @@ export function McpDetailDialog({
                   {homepageUrl || repoUrl || sourceUrl ? (
                     <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3 text-xs">
                       {[
-                        ["Homepage", homepageUrl],
-                        ["Repository", repoUrl],
-                        ["Source", sourceUrl],
-                      ].map(([label, href]) =>
+                        {
+                          key: "homepage",
+                          label: t("detail.links.homepage"),
+                          href: homepageUrl,
+                        },
+                        {
+                          key: "repository",
+                          label: t("detail.links.repository"),
+                          href: repoUrl,
+                        },
+                        {
+                          key: "source",
+                          label: t("detail.links.source"),
+                          href: sourceUrl,
+                        },
+                      ].map(({ key, label, href }) =>
                         href ? (
                           <a
                             className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
                             href={href}
-                            key={label}
+                            key={key}
                             rel="noreferrer noopener"
                             target="_blank"
                           >
@@ -474,10 +533,9 @@ export function McpDetailDialog({
                 <section className="rounded-lg border border-border bg-muted/30 p-4 text-xs leading-5 text-muted-foreground">
                   <div className="mb-1.5 inline-flex items-center gap-1.5 font-medium text-foreground">
                     <ShieldCheck className="size-3.5" />
-                    Runtime & security
+                    {t("detail.runtimeSecurity")}
                   </div>
-                  Credentials are encrypted per workspace and sent only to this
-                  server during tool calls.
+                  {t("detail.securityShort")}
                 </section>
               </aside>
             </div>

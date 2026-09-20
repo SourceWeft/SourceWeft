@@ -2,6 +2,7 @@
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
@@ -40,64 +41,17 @@ import { RawImage } from "../../_components/raw-image";
 type MobileMePanel = Exclude<SettingsCenterTab, "local">;
 
 const panelItems: Array<{
-  description: string;
   icon: React.ComponentType<{ className?: string }>;
   key: MobileMePanel;
-  label: string;
 }> = [
-  {
-    key: "account",
-    label: "Profile",
-    description: "Account, avatar, theme, and preferences",
-    icon: User,
-  },
-  {
-    key: "team",
-    label: "Team",
-    description: "Team switcher, members, and invitations",
-    icon: Users,
-  },
-  {
-    key: "workspace",
-    label: "Workspace",
-    description: "Who can see and work in this workspace",
-    icon: PanelsTopLeft,
-  },
-  {
-    key: "usage",
-    label: "Usage",
-    description: "Plan usage and recent activity",
-    icon: LayoutGrid,
-  },
-  {
-    key: "billing",
-    label: "Billing",
-    description: "Subscription, plan, and billing portal",
-    icon: CreditCard,
-  },
-  {
-    key: "approvals",
-    label: "Approvals",
-    description: "Actions you chose to always allow",
-    icon: ShieldCheck,
-  },
-  {
-    key: "about",
-    label: "About",
-    description: "Version and build details",
-    icon: Info,
-  },
+  { key: "account", icon: User },
+  { key: "team", icon: Users },
+  { key: "workspace", icon: PanelsTopLeft },
+  { key: "usage", icon: LayoutGrid },
+  { key: "billing", icon: CreditCard },
+  { key: "approvals", icon: ShieldCheck },
+  { key: "about", icon: Info },
 ];
-
-const panelTitleByKey: Record<MobileMePanel, string> = {
-  account: "Profile",
-  team: "Team",
-  workspace: "Workspace",
-  usage: "Usage",
-  billing: "Billing",
-  approvals: "Approvals",
-  about: "About",
-};
 
 function getInitials(name?: string, email?: string) {
   const value = name || email || "SW";
@@ -110,6 +64,7 @@ function getInitials(name?: string, email?: string) {
 }
 
 export function DashboardMobileMe() {
+  const t = useTranslations("dashboardNav");
   const billingAvailable = useBillingAvailable();
   const authState = useAuthenticate();
   const sessionState = authState.data as
@@ -165,15 +120,17 @@ export function DashboardMobileMe() {
               variant="ghost"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">Back</span>
+              <span className="sr-only">{t("common.back")}</span>
             </Button>
             <div className="min-w-0 text-base font-semibold text-foreground">
-              {panelTitleByKey[activePanel]}
+              {t(`mobileMe.panels.${activePanel}.label`)}
             </div>
           </div>
         ) : (
           <div className="flex h-8 items-center">
-            <h1 className="text-base font-semibold text-foreground">Me</h1>
+            <h1 className="text-base font-semibold text-foreground">
+              {t("nav.me")}
+            </h1>
           </div>
         )}
       </header>
@@ -185,7 +142,7 @@ export function DashboardMobileMe() {
               <div className="flex items-center gap-3">
                 {userImage ? (
                   <RawImage
-                    alt={userName || "User avatar"}
+                    alt={userName || t("account.userAvatarAlt")}
                     className="h-16 w-16 shrink-0 rounded-2xl object-cover"
                     src={userImage}
                   />
@@ -196,10 +153,10 @@ export function DashboardMobileMe() {
                 )}
                 <div className="min-w-0">
                   <div className="truncate text-base font-semibold text-foreground">
-                    {userName || "SourceWeft User"}
+                    {userName || t("account.sourceweftUser")}
                   </div>
                   <div className="mt-1 truncate text-xs text-muted-foreground">
-                    {userEmail || "Signed in"}
+                    {userEmail || t("account.signedIn")}
                   </div>
                   {teamName ? (
                     <div className="mt-2 inline-flex max-w-full rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -229,10 +186,10 @@ export function DashboardMobileMe() {
                       </span>
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-foreground">
-                          {item.label}
+                          {t(`mobileMe.panels.${item.key}.label`)}
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {item.description}
+                          {t(`mobileMe.panels.${item.key}.description`)}
                         </span>
                       </span>
                     </span>
@@ -251,10 +208,10 @@ export function DashboardMobileMe() {
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium text-foreground">
-                    Observe
+                    {t("common.observe")}
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    LLM traces, metrics, and timeline
+                    {t("mobileMe.observeDescription")}
                   </span>
                 </span>
               </span>
@@ -272,10 +229,12 @@ export function DashboardMobileMe() {
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">
-                    {isSigningOut ? "Signing out..." : "Sign out"}
+                    {isSigningOut
+                      ? t("mobileMe.signingOut")
+                      : t("mobileMe.signOut")}
                   </span>
                   <span className="block truncate text-xs text-destructive/70">
-                    End this session
+                    {t("mobileMe.endSession")}
                   </span>
                 </span>
               </span>
