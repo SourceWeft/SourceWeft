@@ -127,6 +127,25 @@ type SourceweftAuthOptions = {
   mode?: SourceweftAuthMode;
 };
 
+/**
+ * better-auth defaults an email's post-action redirect to "/", which the
+ * browser resolves against the API origin. The web app is served separately,
+ * so that lands on the API's 404 instead of the product. Point any relative
+ * callback at the web origin, which is already a trusted origin.
+ */
+function withWebCallback(url: string, fallbackPath: string) {
+  const parsed = new URL(url);
+  const callback = parsed.searchParams.get("callbackURL");
+  const target = !callback || callback === "/" ? fallbackPath : callback;
+  if (target.startsWith("/")) {
+    parsed.searchParams.set(
+      "callbackURL",
+      new URL(target, config.auth.webBaseUrl).toString(),
+    );
+  }
+  return parsed.toString();
+}
+
 export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
   const mode = options.mode || "runtime";
   const isRuntimeMode = mode === "runtime";
@@ -211,7 +230,11 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
     },
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: false,
+      // An unverified row is no proof that the mailbox owner created it, which
+      // is what lets someone sign up under another person's address. Requiring
+      // the proof also stops better-auth from revoking a password later, when
+      // a magic link or email code finally proves who owns the address.
+      requireEmailVerification: true,
       ...(isRuntimeMode
         ? {
             async sendResetPassword(data) {
@@ -229,7 +252,15 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         : {}),
     },
     emailVerification: {
-      sendOnSignUp: false,
+      sendOnSignUp: true,
+      // Someone who signed up before verification was required gets a fresh
+      // link the next time they try to sign in, so nobody is stranded. This
+      // runs only after the password checks out, so it is not a way to mail
+      // someone uninvited.
+      sendOnSignIn: true,
+      // Clicking the link should land someone in the product, not on a sign-in
+      // form they have already proved they own.
+      autoSignInAfterVerification: true,
       ...(isRuntimeMode
         ? {
             async sendVerificationEmail(data) {
@@ -239,7 +270,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                 templateId: "auth.verify-email",
                 messageType: "auth.verify-email",
                 variables: {
-                  url: data.url,
+                  url: withWebCallback(data.url, "/dashboard"),
                 },
               });
             },
@@ -262,6 +293,12 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         "/api/auth/email-otp/send-verification-otp": {
           window: 60,
           max: 6,
+        },
+        // The verify-email view's resend button only throttles itself in the
+        // browser; this is the limit that actually holds.
+        "/api/auth/send-verification-email": {
+          window: 60,
+          max: 3,
         },
         "/api/auth/organization/invite-member": {
           window: 60,
