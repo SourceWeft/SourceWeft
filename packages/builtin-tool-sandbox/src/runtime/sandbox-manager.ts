@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
+  isSandboxProviderUnavailableError,
   SandboxInstanceChangedError,
   sandboxErrorDiagnostic,
 } from "./errors";
@@ -161,6 +162,9 @@ function failedRetryMessage(input: {
   const requestFingerprint = sandboxRequestFingerprint(input.request);
   return `SANDBOX_OPERATION_FAILED_RETRY_REQUIRED: sandbox ${input.operationType} previously failed for this tool call. Use a new toolCallId or include an explicit retry nonce/request hash to retry. Previous operation: id=${operationId}, messageId=${oldMessageId}, createdAt=${oldCreatedAt}. Current messageId=${currentMessageId}. Request fingerprint=${requestFingerprint}.${error}`;
 }
+
+/** Backoff before each retry of a sandbox creation the provider refused as unavailable. */
+const SANDBOX_CREATE_RETRY_DELAYS_MS = [500, 1500] as const;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -460,18 +464,7 @@ export class SandboxManager {
       const startedAt = Date.now();
       let providerSandboxId: string | undefined;
       try {
-        const sandbox = await this.input.provider.createSandbox({
-          ttlSeconds: this.input.ttlSeconds,
-          labels: {
-            sourceweft: "true",
-            provider: this.input.provider.id,
-            team_id: context.teamId,
-            workspace_id: context.workspaceId,
-            thread_id: context.threadId,
-            user_id: context.userId,
-            environment: this.input.environment ?? "development",
-          },
-        });
+        const sandbox = await this.createProviderSandbox(context, id);
         providerSandboxId = sandbox.id;
         await this.checkReusableSandbox(sandbox.id);
         const ready = await this.input.sandboxStore.markSandboxReady({
@@ -528,6 +521,59 @@ export class SandboxManager {
           });
         }
         throw error;
+      }
+    }
+  }
+
+  /**
+   * Create the provider sandbox, riding out a momentary provider outage.
+   *
+   * One connection reset on the way to the provider used to fail the whole
+   * acquisition, and with it the model's command — a network blip surfaced to
+   * the user as "command failed". Creation has no side effect we depend on
+   * yet, so it is retried; NOTHING else here is: a command that timed out or
+   * lost its connection may already have run.
+   *
+   * Only the adapter's typed `unavailable` code retries — never the message
+   * text, and never auth/unknown errors, which a retry cannot fix. The cost of
+   * being wrong about "it did not happen": if the first create actually
+   * succeeded and only its response was lost, the retry leaves one unused
+   * sandbox behind; it carries our labels and the provider reaps it at its TTL.
+   */
+  private async createProviderSandbox(
+    context: SandboxRuntimeContext,
+    sandboxId: string,
+  ) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.input.provider.createSandbox({
+          ttlSeconds: this.input.ttlSeconds,
+          labels: {
+            sourceweft: "true",
+            provider: this.input.provider.id,
+            team_id: context.teamId,
+            workspace_id: context.workspaceId,
+            thread_id: context.threadId,
+            user_id: context.userId,
+            environment: this.input.environment ?? "development",
+          },
+        });
+      } catch (error) {
+        const delayMs = SANDBOX_CREATE_RETRY_DELAYS_MS[attempt];
+        if (delayMs === undefined || !isSandboxProviderUnavailableError(error)) {
+          throw error;
+        }
+        this.input.logWarn?.("sandbox.create.retry", {
+          provider: this.input.provider.id,
+          ...context,
+          sandboxId,
+          attempt: attempt + 1,
+          maxRetries: SANDBOX_CREATE_RETRY_DELAYS_MS.length,
+          delayMs,
+          error: sandboxErrorDiagnostic(error),
+        });
+        // Jitter so callers that failed together do not retry together.
+        await sleep(delayMs + Math.floor(Math.random() * (delayMs / 4)));
       }
     }
   }
