@@ -682,8 +682,28 @@ async function say(page: Page, message: string) {
     })
     .filter({ visible: true });
   await editor.waitFor({ timeout: 60000 });
-  await editor.fill(message);
-  await editor.press("Enter");
+  // Enter is ignored until the composer has its model list, which can arrive a
+  // second or two after the textbox does. A send that silently did nothing used
+  // to surface minutes later as a poll timeout, so confirm the new thread was
+  // created and press again if it was not.
+  for (let attempt = 0; ; attempt += 1) {
+    const created = page
+      .waitForResponse(
+        (r) =>
+          r.request().method() === "POST" &&
+          new URL(r.url()).pathname.endsWith("/threads") &&
+          r.ok(),
+        { timeout: 15000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    await editor.fill(message);
+    await editor.press("Enter");
+    if (await created) return;
+    if (attempt >= 3) throw new Error("chat message was never sent");
+  }
 }
 test("E9 the chat agent installs a catalog skill and uses it in the same turn", async ({
   page,
