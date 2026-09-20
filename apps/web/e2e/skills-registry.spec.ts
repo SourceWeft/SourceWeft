@@ -674,6 +674,12 @@ async function uninstall(
       ).ok(),
     ).toBeTruthy();
 }
+// That an explanation of the handshake arrived, in words the prompt itself does
+// not contain. Not the literal "SYN": asked to explain simply — which is what
+// the feynman skill is for — the model may well say "起始序号" and never name a
+// flag, and that answer is right.
+const HANDSHAKE_ANSWER = /SYN|ACK|序号|确认|收到/;
+
 async function say(page: Page, message: string) {
   await page.goto("/dashboard/chat");
   const editor = page
@@ -740,7 +746,9 @@ test("E9 the chat agent installs a catalog skill and uses it in the same turn", 
   await expect(page.getByText(/Load Feynman skill instructions/i)).toBeVisible({
     timeout: 120_000,
   });
-  await expect(page.getByText(/SYN/).last()).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText(HANDSHAKE_ANSWER).last()).toBeVisible({
+    timeout: 180_000,
+  });
 });
 
 // The user never mentions a skill: the agent has to decide the catalog is worth
