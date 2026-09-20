@@ -7,7 +7,7 @@ import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider, useTheme } from "next-themes";
-import { useMessages } from "next-intl";
+import { useLocale, useMessages } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
@@ -22,7 +22,12 @@ import {
   customOrganizationViewPaths,
 } from "../lib/auth-ui-config";
 import { userSettingsClient } from "../lib/sdk";
-import { clearLocaleCookie, setLocaleCookie } from "../lib/i18n/cookie";
+import {
+  clearLocaleCookie,
+  getLocaleCookie,
+  setLocaleCookie,
+} from "../lib/i18n/cookie";
+import { desktopBridge } from "../lib/desktop-bridge";
 
 import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
 
@@ -55,9 +60,11 @@ function isCancelledPasskeyRejection(reason: unknown) {
   return false;
 }
 
-function UserSettingsSync() {
+export function UserSettingsSync() {
   const { data: session } = authClient.useSession();
   const { setTheme } = useTheme();
+  const router = useRouter();
+  const locale = useLocale();
   const userId = session?.user?.id;
 
   useEffect(() => {
@@ -75,13 +82,27 @@ function UserSettingsSync() {
         const { theme, language } = result.settings.appearance;
         setTheme(theme);
         // Mirror the saved language into the cookie the proxy reads, so a signed-in
-        // user's choice follows them across devices (§5). "system" means "follow the
-        // browser", so we clear the explicit cookie. The switcher (Phase 1A) adds the
-        // in-place refresh; here the new locale takes effect on the next navigation.
+        // user's choice follows them across devices (§5). The account setting is the
+        // one long-term truth — "system" means "follow the browser", so we clear the
+        // explicit cookie rather than pin one.
+        //
+        // A brand-new browser/device has no `sw_locale` cookie yet, so the very first
+        // SSR render used Accept-Language, not the account setting — on sign-in there,
+        // this can genuinely disagree with what the account says. Refresh only when
+        // what's already rendered (`locale`) would actually change, so a returning
+        // visitor (the common case, cookie already agrees) never sees a needless
+        // extra fetch on every mount.
+        const pinnedCookie = getLocaleCookie();
         if (language === "system") {
           clearLocaleCookie();
+          if (pinnedCookie) {
+            router.refresh();
+          }
         } else {
           setLocaleCookie(language);
+          if (locale !== language) {
+            router.refresh();
+          }
         }
       })
       .catch(() => {
@@ -91,7 +112,29 @@ function UserSettingsSync() {
     return () => {
       cancelled = true;
     };
-  }, [setTheme, userId]);
+  }, [setTheme, userId, router, locale]);
+
+  return null;
+}
+
+function DesktopTraySync() {
+  // `useLocale()` is the fully-resolved locale the page is actually
+  // rendering right now — already through the whole priority chain (user
+  // setting → cookie → Accept-Language → default). The Tauri shell's Rust
+  // side has no visibility into that resolution (no cookie jar access, no
+  // React state), so it relies on this component telling it the answer
+  // whenever it changes, including a live in-app language switch — not just
+  // on mount (see `apps/desktop/src-tauri/src/tray_locale.rs`).
+  const locale = useLocale();
+
+  useEffect(() => {
+    if (!desktopBridge.isAvailable()) {
+      return;
+    }
+    void desktopBridge.syncTrayLocale(locale).catch(() => {
+      // Best-effort: the tray keeps its last-known (or OS-guessed) label.
+    });
+  }, [locale]);
 
   return null;
 }
@@ -208,6 +251,7 @@ export function Providers({
         viewPaths={customAuthViewPaths}
       >
         <UserSettingsSync />
+        <DesktopTraySync />
         <GoogleOneTap />
         <TooltipProvider>
           <DeploymentCapabilitiesProvider

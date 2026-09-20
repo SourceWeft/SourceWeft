@@ -21,3 +21,16 @@ export function clearLocaleCookie() {
   }
   document.cookie = `${SW_LOCALE_COOKIE}=; path=/; max-age=0; samesite=lax`;
 }
+
+/** The raw cookie value, if one is currently pinned (`null` otherwise). Lets a
+ * caller tell "nothing to do" apart from "this needs a refresh to take
+ * effect" without guessing at what the last render actually used. */
+export function getLocaleCookie(): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${SW_LOCALE_COOKIE}=([^;]*)`),
+  );
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}

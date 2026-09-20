@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { setLocaleCookie } from "../../lib/i18n/cookie";
 import { isLocalizedPath } from "../../lib/i18n/routes";
+import { authClient } from "../../lib/auth-client";
+import { userSettingsClient } from "../../lib/sdk";
 
 function IconGlobe() {
   return (
@@ -40,6 +42,13 @@ export function LanguageSwitcher() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // A signed-in user can reach this switcher too (it's on marketing pages
+  // like /blog, not just the logged-out landing page). Their choice must
+  // follow them across devices the same way the dashboard's own language
+  // selector does — a cookie alone is per-browser and would silently
+  // contradict the account setting on their next device.
+  const { data: session } = authClient.useSession();
+  const userId = session?.user?.id;
 
   useEffect(() => {
     if (!open) {
@@ -61,6 +70,16 @@ export function LanguageSwitcher() {
     }
     // Persist the explicit choice so the proxy honors it on later requests (§5).
     setLocaleCookie(next);
+    if (userId) {
+      // Signed in: also persist to the account (mirrors account-panel.tsx's
+      // language selector) so the choice is the same "one long-term truth"
+      // on every device, not a per-browser fork of it. Best-effort — the
+      // cookie already applied, so a failed write only costs a future
+      // device's first-load guess, not this session's UI.
+      void userSettingsClient
+        .updateSettings({ appearance: { language: next } })
+        .catch(() => {});
+    }
 
     // On a localized route, swap the URL's locale prefix; elsewhere the cookie is
     // enough and a refresh re-renders the chrome in the new language.

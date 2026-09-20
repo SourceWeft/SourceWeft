@@ -170,6 +170,11 @@ export const desktopBridge = {
   openExternalUrl(url: string) {
     return invokeDesktop<void>("open_external_url", { url });
   },
+  /** Keeps the system tray's menu text in the locale the dashboard is
+   * actually rendering (see `apps/desktop/src-tauri/src/tray_locale.rs`). */
+  syncTrayLocale(locale: string) {
+    return invokeDesktop<void>("sync_tray_locale", { locale });
+  },
   onDeepLink(handler: DesktopListener<DeepLinkPayload>) {
     return listenDesktop("sourceweft:deep-link", handler);
   },

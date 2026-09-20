@@ -4,6 +4,7 @@ mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
+mod tray_locale;
 mod window_chrome;
 
 use serde::{Deserialize, Serialize};
@@ -37,12 +38,17 @@ static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[serde(rename_all = "camelCase")]
 struct DesktopSettings {
     autostart_requested: bool,
+    /// The dashboard's last-reported resolved locale (§tray_locale). `None`
+    /// on a fresh install or a settings file predating this field — serde
+    /// defaults `Option` fields to `None` on missing/older JSON automatically.
+    tray_locale: Option<String>,
 }
 
 impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
             autostart_requested: false,
+            tray_locale: None,
         }
     }
 }
@@ -117,6 +123,7 @@ fn main() {
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
             local_bridge::choose_working_directory,
+            tray_locale::sync_tray_locale,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
         .on_tray_icon_event(|app, event| {
@@ -138,6 +145,13 @@ fn main() {
             }
             let settings_path = resolve_settings_path(app.handle())?;
             let settings = read_settings(&settings_path);
+            // The page's last-reported locale wins on relaunch, so a returning
+            // user's explicit choice survives a restart; only a settings file
+            // with no prior report (fresh install) falls back to the OS locale.
+            let startup_locale = settings
+                .tray_locale
+                .clone()
+                .unwrap_or_else(|| tray_locale::os_locale().to_string());
             app.manage(DesktopState {
                 settings: Mutex::new(settings),
                 settings_path,
@@ -153,7 +167,7 @@ fn main() {
             app.add_capability(preview_window::opener_capability(&base))?;
             app.add_capability(preview_window::reader_capability(&base))?;
             create_main_window(app)?;
-            setup_tray(app)?;
+            setup_tray(app, &startup_locale)?;
             emit_startup_deep_links(app.handle());
 
             Ok(())
@@ -462,13 +476,16 @@ fn same_origin(left: &Url, right: &Url) -> bool {
         && left.port_or_known_default() == right.port_or_known_default()
 }
 
-fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open SourceWeft", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit SourceWeft", true, None::<&str>)?;
+fn setup_tray(app: &mut tauri::App, startup_locale: &str) -> tauri::Result<()> {
+    let (open_label, quit_label) = tray_locale::tray_labels(startup_locale);
+    let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .menu(&menu)
+        // The tooltip is the brand name, not chrome copy — it stays
+        // untranslated the same way "SourceWeft" does everywhere else.
         .tooltip("SourceWeft")
         .show_menu_on_left_click(true);
 
@@ -477,6 +494,11 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     }
 
     tray.build(app)?;
+    // `Menu::with_items` above only borrowed `open`/`quit`; the owned handles
+    // are still ours to move here. Stashed so `sync_tray_locale` can relabel
+    // them in place once the webview reports its own resolved locale,
+    // without rebuilding the menu.
+    app.manage(tray_locale::TrayState { open, quit });
     Ok(())
 }
 

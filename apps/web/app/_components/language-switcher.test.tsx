@@ -12,17 +12,34 @@ const intlMessages = messages as ComponentProps<
   typeof NextIntlClientProvider
 >["messages"];
 
-const push = vi.fn();
-const refresh = vi.fn();
-let pathname = "/";
+const state = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
+  updateSettings: vi.fn().mockResolvedValue(undefined),
+  pathname: "/",
+  userId: undefined as string | undefined,
+}));
+const { push, refresh, updateSettings } = state;
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, refresh }),
-  usePathname: () => pathname,
+  useRouter: () => ({ push: state.push, refresh: state.refresh }),
+  usePathname: () => state.pathname,
 }));
 
 vi.mock("../../lib/i18n/cookie", () => ({
   setLocaleCookie: vi.fn(),
+}));
+
+vi.mock("../../lib/auth-client", () => ({
+  authClient: {
+    useSession: () => ({
+      data: state.userId ? { user: { id: state.userId } } : null,
+    }),
+  },
+}));
+
+vi.mock("../../lib/sdk", () => ({
+  userSettingsClient: { updateSettings: state.updateSettings },
 }));
 
 import { LanguageSwitcher } from "./language-switcher";
@@ -58,7 +75,9 @@ afterEach(async () => {
   root = null;
   push.mockClear();
   refresh.mockClear();
-  pathname = "/";
+  updateSettings.mockClear();
+  state.pathname = "/";
+  state.userId = undefined;
 });
 
 // Regression for a bug found 2026-09-20: on a localized route, `/` and
@@ -84,10 +103,55 @@ test("switching locale on a localized route pushes the prefixed URL and refreshe
   assert.equal(push.mock.calls.length, 1);
   assert.equal(push.mock.calls[0]?.[0], "/zh-CN");
   assert.equal(refresh.mock.calls.length, 1);
+  // Signed out: no account to persist to, cookie-only per the existing mock.
+  assert.equal(updateSettings.mock.calls.length, 0);
+});
+
+// A signed-in user reaches this switcher too (it's on marketing pages like
+// /blog, not just the logged-out landing page). Their choice must follow
+// them across devices — the account setting is the one long-term truth —
+// not fork into a cookie-only, per-browser choice that a dashboard visit on
+// another device would silently contradict.
+test("switching locale while signed in also persists to the account", async () => {
+  state.userId = "user-1";
+  const element = await render("en");
+  const trigger = element.querySelector("button");
+  assert.ok(trigger);
+  await act(async () => {
+    click(trigger);
+  });
+  const option = [...element.querySelectorAll('button[role="option"]')].find(
+    (node) => node.textContent?.includes("简体中文"),
+  );
+  assert.ok(option);
+  await act(async () => {
+    click(option);
+  });
+  assert.equal(updateSettings.mock.calls.length, 1);
+  assert.deepEqual(updateSettings.mock.calls[0]?.[0], {
+    appearance: { language: "zh-CN" },
+  });
+});
+
+test("switching locale while signed out does not touch the account", async () => {
+  const element = await render("en");
+  const trigger = element.querySelector("button");
+  assert.ok(trigger);
+  await act(async () => {
+    click(trigger);
+  });
+  const option = [...element.querySelectorAll('button[role="option"]')].find(
+    (node) => node.textContent?.includes("简体中文"),
+  );
+  assert.ok(option);
+  await act(async () => {
+    click(option);
+  });
+  assert.equal(updateSettings.mock.calls.length, 0);
 });
 
 test("switching locale on a non-localized (app-tree) route only refreshes", async () => {
-  pathname = "/dashboard";
+  state.pathname = "/dashboard";
   const element = await render("en");
   const trigger = element.querySelector("button");
   assert.ok(trigger);
