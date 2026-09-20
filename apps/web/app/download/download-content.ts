@@ -74,7 +74,7 @@ export const PLATFORM_DISPLAY: readonly PlatformDisplay[] = [
     id: "linux",
     label: "Linux",
     fileType: "AppImage",
-    requirement: "Builds not published yet",
+    requirement: "Ubuntu 22.04 / Debian 12 or later, x64 (AppImage)",
     archLabels: { x64: "x64", arm64: "ARM64" },
     archOrder: ["x64", "arm64"],
   },
@@ -128,17 +128,17 @@ export const DOWNLOAD_FAQ_ITEMS = [
   {
     question: "Why does macOS say the app cannot be verified?",
     answer:
-      "Current builds are not yet signed with an Apple Developer certificate or notarized. Compare the SHA-256 checksum shown on this page, then Control-click the app, choose Open, and confirm.",
+      "Earlier verification builds were not signed or notarized. Check the release’s signing information and compare its SHA-256 checksum before installing. Signed releases are built with an Apple Developer certificate and notarization.",
   },
   {
     question: "Why does Windows SmartScreen warn about the installer?",
     answer:
-      "The installer is not yet signed with a distribution certificate. Verify the SHA-256 checksum first, then choose More info and Run anyway.",
+      "Earlier verification installers were unsigned. Check the release’s signing information and SHA-256 checksum before proceeding. The signed release pipeline uses a Windows code-signing certificate.",
   },
   {
     question: "How do updates work?",
     answer:
-      "In-app updates are not available yet. Download the latest installer from this page and run it over the existing installation. The changelog lists what changed in each release.",
+      "Updater-enabled clients check and download in the background, then ask before installation. Choose Stable or Preview in Settings → About → Software update. Older clients require one manual installation of an updater-enabled release. Linux in-app updates use the AppImage package.",
   },
   {
     question: "What is a preview build?",
@@ -148,6 +148,6 @@ export const DOWNLOAD_FAQ_ITEMS = [
   {
     question: "Is there a Linux build?",
     answer:
-      "Not yet. The web app works in any modern browser on Linux, and Linux installers will appear on this page as soon as they are published.",
+      "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution still requires macOS.",
   },
 ] as const;

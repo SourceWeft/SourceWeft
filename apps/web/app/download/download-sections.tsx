@@ -454,7 +454,12 @@ export function BeforeInstallSection({
   const artifacts = manifest?.artifacts ?? [];
   const unsigned =
     artifacts.length === 0 ||
-    artifacts.some((entry) => !entry.distributionSigned || !entry.notarized);
+    artifacts.some(
+      (entry) =>
+        entry.platform !== "linux" &&
+        (!entry.distributionSigned ||
+          (entry.platform === "macos" && !entry.notarized)),
+    );
   const localExecutionPlatforms = PLATFORM_DISPLAY.filter((display) =>
     artifacts.some(
       (entry) => entry.platform === display.id && entry.localExecutionSupported,
@@ -472,22 +477,20 @@ export function BeforeInstallSection({
             System requirements
           </h2>
           <ul className="mt-7 space-y-3">
-            {PLATFORM_DISPLAY.filter((display) => display.id !== "linux").map(
-              (display) => (
-                <li
-                  key={display.id}
-                  className="flex gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
-                >
-                  <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
-                  <span>
-                    <span className="font-medium text-zinc-900 dark:text-white">
-                      {display.label}
-                    </span>{" "}
-                    · {display.requirement}
-                  </span>
-                </li>
-              ),
-            )}
+            {PLATFORM_DISPLAY.map((display) => (
+              <li
+                key={display.id}
+                className="flex gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
+              >
+                <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
+                <span>
+                  <span className="font-medium text-zinc-900 dark:text-white">
+                    {display.label}
+                  </span>{" "}
+                  · {display.requirement}
+                </span>
+              </li>
+            ))}
             <li className="flex gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
               <span>

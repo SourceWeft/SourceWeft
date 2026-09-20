@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { parse } from "dotenv";
+import pg from "pg";
 const envPath = ".env.skills-test";
 const text = await readFile(envPath, "utf8");
 const env = parse(text);
@@ -27,6 +28,20 @@ for (const role of ["owner", "other", "admin"]) {
   const body = (await response.json()) as { user: { id: string } };
   accounts[role] = { email, password, id: body.user.id };
 }
+// Signing in now requires a verified email, and the browser suite has no
+// mailbox to click a link in. Mark these throwaway accounts verified directly;
+// the guard above already refused anything but the isolated database.
+const db = new pg.Client({ connectionString: env.DATABASE_URL });
+await db.connect();
+try {
+  await db.query(
+    `update "user" set "emailVerified" = true where id = any($1::text[])`,
+    [Object.values(accounts).map((account) => account.id)],
+  );
+} finally {
+  await db.end();
+}
+
 await writeFile(".skills-e2e-accounts.json", JSON.stringify(accounts), {
   mode: 0o600,
 });

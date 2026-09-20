@@ -19,6 +19,7 @@ pub struct Workspace {
 /// The database is outside the task filesystem. Workspace names are generated here,
 /// never assembled from model-controlled paths, account IDs or conversation titles.
 pub struct LocalHost {
+    pub admission: super::maintenance::Admission,
     pub(crate) db: Mutex<Connection>,
     pub(crate) binary_reads:
         Mutex<std::collections::HashMap<String, super::files::BinaryReadSession>>,
@@ -127,6 +128,7 @@ impl LocalHost {
                 tx.commit()?;
             }
             Ok(Self {
+                admission: super::maintenance::Admission::default(),
                 db: Mutex::new(connection),
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,

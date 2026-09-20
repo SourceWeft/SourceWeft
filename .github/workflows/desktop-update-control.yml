@@ -1,0 +1,55 @@
+name: Control desktop update distribution
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [pause, resume, withdraw]
+        required: true
+      channel:
+        type: choice
+        options: [stable, preview, both]
+        required: true
+      expected_version:
+        type: string
+        required: true
+      reason:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  control:
+    environment: desktop-release
+    runs-on: ubuntu-latest
+    env:
+      DOWNLOADS_S3_ENDPOINT: ${{ vars.DOWNLOADS_S3_ENDPOINT }}
+      DOWNLOADS_S3_BUCKET: ${{ vars.DOWNLOADS_S3_BUCKET }}
+      DOWNLOADS_S3_REGION: ${{ vars.DOWNLOADS_S3_REGION }}
+      DOWNLOADS_S3_FORCE_PATH_STYLE: ${{ vars.DOWNLOADS_S3_FORCE_PATH_STYLE }}
+      DOWNLOADS_S3_PREFIX: ${{ vars.DOWNLOADS_S3_PREFIX }}
+      DOWNLOADS_PUBLIC_BASE_URL: ${{ vars.DOWNLOADS_PUBLIC_BASE_URL }}
+      DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+      DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      UPDATE_CHANNEL: ${{ inputs.channel }}
+      UPDATE_EXPECTED_VERSION: ${{ inputs.expected_version }}
+      UPDATE_REASON: ${{ inputs.reason }}
+      UPDATE_ACTION: ${{ inputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/ci/publish-desktop-updates.mjs "$UPDATE_ACTION"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/updates/*receipt.json
+          if-no-files-found: ignore

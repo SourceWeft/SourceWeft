@@ -31,21 +31,42 @@ export async function filesUnder(directory) {
 
 export async function describeInstaller(directory, platform, arch, version) {
   assert(
-    ["darwin", "win32"].includes(platform),
+    ["darwin", "win32", "linux"].includes(platform),
     "Unsupported desktop platform",
   );
   assert(["arm64", "x64"].includes(arch), "Unsupported desktop architecture");
-  const extension = platform === "darwin" ? ".dmg" : ".exe";
-  const files = (await filesUnder(directory)).filter((path) =>
-    path.endsWith(extension),
+  assert(
+    platform !== "linux" || arch === "x64",
+    "Linux packages currently require x64",
   );
+  const extension =
+    platform === "darwin"
+      ? ".dmg"
+      : platform === "linux"
+        ? ".AppImage"
+        : ".exe";
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.name.endsWith(extension))
+    .map((entry) => {
+      assert(
+        entry.isFile() && !entry.isSymbolicLink(),
+        "Installer must be a regular file",
+      );
+      return join(directory, entry.name);
+    });
   assert.equal(files.length, 1, `Expected exactly one ${extension} installer`);
   const path = files[0];
   assert((await stat(path)).size > 0, "Installer cannot be empty");
   return {
     schemaVersion: 1,
     version,
-    platform: platform === "darwin" ? "macos" : "windows",
+    platform:
+      platform === "darwin"
+        ? "macos"
+        : platform === "linux"
+          ? "linux"
+          : "windows",
     arch,
     filename: basename(path),
     ...(await digest(createReadStream(path))),
@@ -68,7 +89,11 @@ if (
   const entry = await describeInstaller(
     join(
       "apps/desktop/src-tauri/target/release/bundle",
-      process.platform === "darwin" ? "dmg" : "nsis",
+      process.platform === "darwin"
+        ? "dmg"
+        : process.platform === "linux"
+          ? "appimage"
+          : "nsis",
     ),
     process.platform,
     process.arch,

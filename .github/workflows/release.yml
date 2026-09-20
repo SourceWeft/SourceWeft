@@ -18,6 +18,8 @@ env:
   DOWNLOADS_S3_FORCE_PATH_STYLE: ${{ vars.DOWNLOADS_S3_FORCE_PATH_STYLE }}
   DOWNLOADS_S3_PREFIX: ${{ vars.DOWNLOADS_S3_PREFIX }}
   DOWNLOADS_PUBLIC_BASE_URL: ${{ vars.DOWNLOADS_PUBLIC_BASE_URL }}
+  TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+  DESKTOP_PUBLICATION_POLICY: signed
 
 concurrency:
   group: release-${{ github.ref }}
@@ -46,6 +48,11 @@ jobs:
         env:
           DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
           DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+      - name: Validate update publication configuration
+        run: node scripts/ci/publish-desktop-updates.mjs validate
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
 
   quality:
     needs: preflight
@@ -56,14 +63,17 @@ jobs:
 
   desktop:
     needs: preflight
-    uses: ./.github/workflows/desktop-build.yml
+    uses: ./.github/workflows/desktop-release.yml
+    secrets: inherit
     permissions:
       contents: read
+      actions: read
 
   release:
     needs: [preflight, quality, desktop]
     name: Build and publish release
     runs-on: ubuntu-latest
+    environment: desktop-release
 
     steps:
       - name: Checkout
@@ -146,7 +156,7 @@ jobs:
       - name: Download desktop installers
         uses: actions/download-artifact@v4
         with:
-          pattern: desktop-verification-*
+          pattern: desktop-release-*-${{ github.sha }}
           path: release-installers
           merge-multiple: true
 
@@ -161,11 +171,14 @@ jobs:
             sourceweft-selfhost-*.tar.gz
             release-installers/**/*.dmg
             release-installers/**/*.exe
+            release-installers/**/*.AppImage
+            release-installers/**/*.app.tar.gz
+            release-installers/**/*.sig
           fail_on_unmatched_files: true
           body: |
-            Self-hosting files for Web/Docker, plus macOS and Windows candidate installers.
+            Self-hosting files for Web/Docker, macOS and Windows installers, and Linux x64 AppImage packages.
 
-            Desktop installers are provided for testing without distribution signing or macOS notarization. Local device execution is not yet supported on Windows.
+            macOS installers are signed and notarized. Windows installers are code-signed. All application update packages have updater signatures. Local device execution currently requires macOS.
             See docker/README.md in the self-hosting archive for installation and upgrade instructions. Translations are provided in separate README files.
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
@@ -173,6 +186,18 @@ jobs:
       - name: Upload and verify public downloads
         run: node scripts/ci/publish-downloads.mjs upload
         env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Build update verifier
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Prepare deterministic update notes
+        run: node scripts/ci/prepare-update-notes.mjs
+      - name: Upload and verify application updates
+        run: node scripts/ci/publish-desktop-updates.mjs upload
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
           DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
           DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
 
@@ -185,8 +210,21 @@ jobs:
             -F draft=false -f tag_name="$GITHUB_REF_NAME" -f name="$GITHUB_REF_NAME" \
             --jq .html_url
 
+      - name: Promote verified application update channels
+        run: node scripts/ci/publish-desktop-updates.mjs promote
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+
       - name: Promote verified download channel
         run: node scripts/ci/publish-downloads.mjs promote
         env:
           DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
           DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: publication-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/
+          if-no-files-found: ignore

@@ -61,6 +61,30 @@ test("parses a published channel manifest", () => {
   assert.equal(findArtifact(parsed, "linux"), null);
 });
 
+test("published Linux AppImage is selectable without claiming local execution or OS code signing", () => {
+  const parsed = parseChannelManifest(
+    manifest({
+      artifacts: [
+        artifact({
+          platform: "linux",
+          arch: "x64",
+          filename: "SourceWeft_linux-x86_64.AppImage",
+          url: "https://download.sourceweft.com/releases/v0.2.0-rc.2/SourceWeft_linux-x86_64.AppImage",
+          distributionSigned: false,
+          notarized: false,
+          localExecutionSupported: false,
+        }),
+      ],
+    }),
+  );
+  assert.ok(parsed);
+  const linux = findArtifact(parsed, "linux", "x64");
+  assert.ok(linux);
+  assert(linux.url.endsWith(".AppImage"));
+  assert.equal(linux.localExecutionSupported, false);
+  assert.equal(findArtifact(parsed, "linux", "arm64"), null);
+});
+
 test("rejects manifests that violate the published schema", () => {
   assert.equal(parseChannelManifest(null), null);
   assert.equal(parseChannelManifest(manifest({ schemaVersion: 2 })), null);

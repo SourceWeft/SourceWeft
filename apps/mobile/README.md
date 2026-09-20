@@ -88,6 +88,13 @@ APPLE_DEVELOPMENT_TEAM=YOUR_TEAM_ID pnpm run ios
 If `project.yml` or the generated Xcode project captures your local Team ID,
 review that diff before committing a public branch.
 
+## Android packaging
+
+Android APK/AAB builds, pinned toolchains, signing inputs and CI verification are
+documented in [Android packaging](../../scripts/ci/README.android.md). The Android
+native project is now tracked; review any reinitialization diff before replacing
+its signing or manifest configuration.
+
 ## Google Sign-In
 
 Mobile Google sign-in uses `tauri-plugin-google-auth` to collect Google tokens

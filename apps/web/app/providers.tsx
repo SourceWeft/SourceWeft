@@ -162,7 +162,12 @@ export function Providers({
           additionalFields={additionalFields}
           authClient={authClient}
           baseURL={webBaseUrl}
-          emailAndPassword={{ forgotPassword: true }}
+          emailAndPassword={{
+            forgotPassword: true,
+            // Mirrors apps/backend's auth config: the views read this to send
+            // someone to verify-email after sign-up instead of the dashboard.
+            requireEmailVerification: true,
+          }}
           Link={Link}
           navigate={({ to, replace }) =>
             replace ? router.replace(to) : router.push(to)

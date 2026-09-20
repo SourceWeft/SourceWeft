@@ -10,6 +10,14 @@ export type ChatDraft = {
 };
 let database: Promise<IDBDatabase> | undefined;
 const queues = new Map<string, Promise<void>>();
+const failures = new Map<string, unknown>();
+const flushers = new Set<() => Promise<void>>();
+export function registerChatDraftFlusher(save: () => Promise<void>) {
+  flushers.add(save);
+  return () => {
+    flushers.delete(save);
+  };
+}
 const fileContents = new WeakMap<object, Promise<Blob>>();
 function openDatabase() {
   return (database ??= new Promise<IDBDatabase>((resolve, reject) => {
@@ -32,11 +40,19 @@ function openDatabase() {
     };
   }));
 }
-function enqueue<T>(key: string, action: () => Promise<T>): Promise<T> {
+function enqueue<T>(
+  key: string,
+  action: () => Promise<T>,
+  repairsFailure = false,
+): Promise<T> {
   const task = (queues.get(key) ?? Promise.resolve()).then(action);
   const settled = task.then(
-    () => {},
-    () => {},
+    () => {
+      if (repairsFailure) failures.delete(key);
+    },
+    (error) => {
+      failures.set(key, error);
+    },
   );
   queues.set(key, settled);
   void settled.then(() => {
@@ -53,10 +69,23 @@ async function transact<T>(
     const tx = db.transaction("drafts", mode);
     const request = action(tx.objectStore("drafts"));
     tx.oncomplete = () => resolve(request.result);
-    tx.onerror = () => reject(tx.error ?? new Error("Unable to save your draft."));
-    tx.onabort = () => reject(tx.error ?? new Error("The draft operation was aborted."));
+    tx.onerror = () =>
+      reject(tx.error ?? new Error("Unable to save your draft."));
+    tx.onabort = () =>
+      reject(tx.error ?? new Error("The draft operation was aborted."));
   });
 }
+export async function flushChatDrafts(): Promise<void> {
+  await Promise.all([...flushers].map((save) => save()));
+  while (queues.size) await Promise.all([...queues.values()]);
+  if (failures.size) {
+    const error = failures.values().next().value;
+    throw error instanceof Error
+      ? error
+      : new Error("A draft could not be saved.");
+  }
+}
+
 export function readChatDraft(key: string): Promise<ChatDraft | null> {
   return enqueue(key, async () => {
     const value = await transact("readonly", (store) => store.get(key));
@@ -72,7 +101,9 @@ export function readChatDraft(key: string): Promise<ChatDraft | null> {
           !(file.blob instanceof Blob),
       )
     )
-      throw new Error("Draft data is unavailable. Keep this page open and try again.");
+      throw new Error(
+        "Draft data is unavailable. Keep this page open and try again.",
+      );
     return value as ChatDraft;
   });
 }
@@ -90,7 +121,8 @@ export function writeChatDraft(
       let content = fileContents.get(file);
       if (!content) {
         content = fetch(file.url).then((response) => {
-          if (!response.ok) throw new Error("Unable to read the draft attachment.");
+          if (!response.ok)
+            throw new Error("Unable to read the draft attachment.");
           return response.blob();
         });
         fileContents.set(file, content);
@@ -104,15 +136,23 @@ export function writeChatDraft(
     }),
   );
   void captured.catch(() => {});
-  return enqueue(key, async () => {
-    const stored = await captured;
-    await transact("readwrite", (store) =>
-      store.put({ text, files: stored }, key),
-    );
-  });
+  return enqueue(
+    key,
+    async () => {
+      const stored = await captured;
+      await transact("readwrite", (store) =>
+        store.put({ text, files: stored }, key),
+      );
+    },
+    true,
+  );
 }
 export function clearChatDraft(key: string): Promise<void> {
-  return enqueue(key, async () => {
-    await transact("readwrite", (store) => store.delete(key));
-  });
+  return enqueue(
+    key,
+    async () => {
+      await transact("readwrite", (store) => store.delete(key));
+    },
+    true,
+  );
 }

@@ -11,6 +11,7 @@ import {
   type DesktopInfo,
 } from "../../../../lib/desktop-bridge";
 import { SourceWeftBrandMark } from "../../../_landing/components/sourceweft-brand";
+import { DesktopUpdatePanel } from "./desktop-update-panel";
 
 // The native host is injected before the app mounts; viewport width does not
 // distinguish a desktop browser from the installed PC client.
@@ -20,7 +21,9 @@ const serverSnapshot = () => false;
 function formatBuildDate(value: string) {
   if (!value) return "";
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+  return Number.isNaN(parsed.getTime())
+    ? ""
+    : parsed.toISOString().slice(0, 10);
 }
 
 export function AboutPanel() {
@@ -113,6 +116,23 @@ export function AboutPanel() {
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
+
+      {isDesktop && info?.updaterProtocolVersion === 1 && (
+        <DesktopUpdatePanel />
+      )}
+      {isDesktop && info && info.updaterProtocolVersion === undefined && (
+        <button
+          className="text-xs underline"
+          type="button"
+          onClick={() => {
+            void desktopBridge.openExternalUrl(
+              `${publicWebBaseUrl()}/download`,
+            );
+          }}
+        >
+          Install the latest desktop app to enable automatic updates
+        </button>
+      )}
 
       {/* The desktop window refuses to navigate outside /dashboard and /auth, so
           the changelog opens in the system browser instead of in-app. */}
