@@ -85,9 +85,32 @@ async function runIsolatedJob(
   return runWorkerJobWithIsolation(job, processor);
 }
 
+// After an uncaught exception: stop taking jobs, give the ones in flight a
+// bounded time to finish, then exit non-zero for the supervisor to restart the
+// worker. Jobs still running at the deadline are redelivered by BullMQ's stall
+// handling, which chat runs already fence against.
+const WORKER_RESTART_DRAIN_TIMEOUT_MS = 30_000;
+let restarting = false;
+function restartAfterException() {
+  if (restarting) {
+    process.exit(1);
+  }
+  restarting = true;
+  logger.error("Worker draining after an uncaught exception, then exiting");
+  const deadline = setTimeout(
+    () => process.exit(1),
+    WORKER_RESTART_DRAIN_TIMEOUT_MS,
+  );
+  void closeWorkers().finally(() => {
+    clearTimeout(deadline);
+    process.exit(1);
+  });
+}
+
 installWorkerProcessErrorGuards({
   persistThreadRunFailure: ({ payload, error }) =>
     failThreadRunAtProcessorBoundary({ payload, error }),
+  restartAfterException,
 });
 
 // How long a job's Redis lock stays valid without renewal before BullMQ
@@ -276,13 +299,19 @@ logger.info("Skill ingest worker started", {
 });
 void agentSandboxService.logStartupWarning("worker");
 
-async function shutdown() {
-  logger.info("Worker shutting down");
-  await Promise.all([
+// A function declaration on purpose: `restartAfterException` above refers to
+// it before the workers exist, and only ever calls it after they do.
+function closeWorkers() {
+  return Promise.all([
     primaryWorker.close(),
     deliverablesWorker.close(),
     skillIngestWorker.close(),
   ]);
+}
+
+async function shutdown() {
+  logger.info("Worker shutting down");
+  await closeWorkers();
   process.exit(0);
 }
 

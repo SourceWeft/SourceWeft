@@ -12,6 +12,10 @@ import { closeQueue } from "../shared/queue";
 import { notifyHub } from "../shared/notify-hub";
 import { metrics } from "../shared/metrics";
 import { createApp } from "./app";
+import {
+  API_DRAIN_TIMEOUT_MS,
+  installApiProcessGuards,
+} from "./process-guards";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
@@ -51,14 +55,38 @@ const closeLocalGateway = attachLocalDeviceGateway(
   httpServer as import("node:http").Server,
 );
 
-async function shutdown() {
+/** Stop taking work and release resources. Does not exit — callers decide how. */
+async function drain() {
   closeLocalGateway();
   logger.info("API shutting down");
+  // Refuse new connections first; requests already in flight keep theirs until
+  // they finish (or the caller's deadline forces the exit).
+  const server = httpServer as import("node:http").Server;
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeIdleConnections?.();
+  await closed;
   metrics.stop();
   // Stop the hub (ends its dedicated LISTEN client) before closing the pool.
   await Promise.allSettled([notifyHub.stop(), closeQueue(), closeDatabase()]);
+}
+
+async function shutdown() {
+  // Chat streams and the collaboration room hold connections open for minutes;
+  // waiting for them unbounded would hang a routine deploy. Same deadline the
+  // crash path uses.
+  await Promise.race([
+    drain(),
+    new Promise((resolve) => setTimeout(resolve, API_DRAIN_TIMEOUT_MS)),
+  ]);
   process.exit(0);
 }
+
+installApiProcessGuards({
+  logger,
+  count: (name) => metrics.inc(name),
+  drain,
+  exit: (code) => process.exit(code),
+});
 
 process.on("SIGINT", () => {
   void shutdown();
