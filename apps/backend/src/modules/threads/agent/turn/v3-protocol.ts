@@ -40,6 +40,36 @@ export type V3RunStream = AsyncIterable<V3ProtocolEvent> & {
   readonly output: Promise<unknown>;
 };
 
+/**
+ * Adopt a raw `streamEvents(…, { version: "v3" })` result as the run stream,
+ * and make its per-tool `output` promises safe.
+ *
+ * langchain's v3 tool-call transformer keeps a `toolCalls` channel beside the
+ * event stream; every entry carries an `output` promise that it REJECTS when
+ * the tool errors. We read events, never those promises — so a tool that threw
+ * (a sandbox that could not be reached, say) left a rejected promise nobody
+ * handled, and Node treats that as fatal: one failed tool call in one turn took
+ * the whole process down, for every user. The event stream already delivers the
+ * failure (`tool-error`), so the promise's copy of it is observed and dropped.
+ */
+export function adoptV3RunStream(raw: unknown): V3RunStream {
+  const toolCalls = (raw as { toolCalls?: unknown } | null)?.toolCalls;
+  if (
+    toolCalls &&
+    typeof (toolCalls as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
+      "function"
+  ) {
+    void (async () => {
+      for await (const call of toolCalls as AsyncIterable<{
+        output?: Promise<unknown>;
+      }>) {
+        call?.output?.catch(() => undefined);
+      }
+    })().catch(() => undefined);
+  }
+  return raw as V3RunStream;
+}
+
 function parseMaybeJson(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;

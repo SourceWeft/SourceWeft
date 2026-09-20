@@ -60,6 +60,7 @@ import {
   adaptToolsEvent,
   interruptsToLegacyUpdatesPayload,
   unwrapCustomEvent,
+  adoptV3RunStream,
   type V3RunStream,
 } from "./v3-protocol";
 import {
@@ -311,14 +312,16 @@ export async function* invokeDeepAgentTurn(input: {
     let stream: V3RunStream =
       input.prepared.agentMode === "replay"
         ? input.prepared.toolApprovalResume
-          ? ((await agent.streamEvents(
-              new Command({
-                resume: commandResumeFromToolApprovalResume(
-                  input.prepared.toolApprovalResume,
-                ),
-              }),
-              { ...(runConfig as object), version: "v3" } as never,
-            )) as unknown as V3RunStream)
+          ? adoptV3RunStream(
+              await agent.streamEvents(
+                new Command({
+                  resume: commandResumeFromToolApprovalResume(
+                    input.prepared.toolApprovalResume,
+                  ),
+                }),
+                { ...(runConfig as object), version: "v3" } as never,
+              ),
+            )
           : (() => {
               throw new ContentError(
                 400,
@@ -326,7 +329,7 @@ export async function* invokeDeepAgentTurn(input: {
                 "DeepAgents HITL replay requires a resume decision payload.",
               );
             })()
-        : ((await runAgentStream(agentMessages)) as V3RunStream);
+        : adoptV3RunStream(await runAgentStream(agentMessages));
     // v3 `tool-finished`/`tool-error` events omit the tool name; the adapter
     // recovers it from this map, populated on each `tool-started`.
     const toolNameByCallId = new Map<string, string>();

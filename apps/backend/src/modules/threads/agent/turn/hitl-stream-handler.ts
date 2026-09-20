@@ -43,7 +43,7 @@ import {
   rememberObservedToolCalls,
 } from "./tool-tracker";
 import type { TurnRuntime } from "./turn-runtime";
-import type { V3RunStream } from "./v3-protocol";
+import { adoptV3RunStream, type V3RunStream } from "./v3-protocol";
 
 type Agent = Awaited<ReturnType<typeof createThreadAgent>>;
 
@@ -165,16 +165,18 @@ export async function* handleHitlStreamChunk(input: {
         autoApprovedHitlResumeCount,
       },
     );
-    const stream = (await input.agent.streamEvents(
-      new Command({
-        resume: commandResumeFromHitlDecisions({
-          decisions: autoApprovedHitlResume.decisions,
-          hitlInterruptId:
-            hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
+    const stream = adoptV3RunStream(
+      await input.agent.streamEvents(
+        new Command({
+          resume: commandResumeFromHitlDecisions({
+            decisions: autoApprovedHitlResume.decisions,
+            hitlInterruptId:
+              hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
+          }),
         }),
-      }),
-      { ...(input.runConfig as object), version: "v3" } as never,
-    )) as unknown as V3RunStream;
+        { ...(input.runConfig as object), version: "v3" } as never,
+      ),
+    );
     return {
       kind: "replace-stream",
       stream,
@@ -228,16 +230,18 @@ export async function* handleHitlStreamChunk(input: {
           autoApprovedHitlResumeCount,
         },
       );
-      const stream = (await input.agent.streamEvents(
-        new Command({
-          resume: commandResumeFromHitlDecisions({
-            decisions: trustedApproval.decisions,
-            hitlInterruptId:
-              hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
+      const stream = adoptV3RunStream(
+        await input.agent.streamEvents(
+          new Command({
+            resume: commandResumeFromHitlDecisions({
+              decisions: trustedApproval.decisions,
+              hitlInterruptId:
+                hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
+            }),
           }),
-        }),
-        { ...(input.runConfig as object), version: "v3" } as never,
-      )) as unknown as V3RunStream;
+          { ...(input.runConfig as object), version: "v3" } as never,
+        ),
+      );
       return {
         kind: "replace-stream",
         stream,
