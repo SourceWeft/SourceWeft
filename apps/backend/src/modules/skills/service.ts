@@ -1686,7 +1686,7 @@ export class ContentSkillsService {
       throw new ContentError(
         400,
         "CUSTOM_SKILL_VISIBILITY_MISMATCH",
-        "Custom skill manifest visibility does not match its scope",
+        `This skill belongs to a ${expectedVisibility}; set "visibility": "${expectedVisibility}" in its manifest`,
       );
     }
     if (bundle.name !== draft.definition.slug) {

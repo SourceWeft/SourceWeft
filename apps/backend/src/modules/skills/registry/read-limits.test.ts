@@ -105,3 +105,38 @@ test("files adding up past 50 MiB are refused", async () => {
   assert.ok(tooLarge(rejection));
   assert.match(rejection!.message, /in total.*50 MiB limit/);
 });
+
+test("skills that each fit but do not fit together are refused with a way forward", async () => {
+  // Two 40 MiB skills: each under the 50 MiB per-skill limit, 80 MiB together.
+  const heavy = (dir: string) =>
+    Object.fromEntries([
+      [
+        `skills/${dir}/SKILL.md`,
+        strToU8(`---\nname: ${dir}\ndescription: Heavy ${dir}\n---\nBody\n`),
+      ],
+      ...Array.from({ length: 4 }, (_, index) => [
+        `skills/${dir}/assets/${index}.bin`,
+        new Uint8Array(10 * MiB),
+      ]),
+    ]);
+  await assert.rejects(
+    readRegistrySkillsFromArchive(
+      zipball({ ...heavy("one"), ...heavy("two") }),
+      source,
+    ),
+    (error: unknown) => {
+      assert.ok(tooLarge(error));
+      assert.match((error as Error).message, /add up to 80 MiB/);
+      assert.match((error as Error).message, /one at a time/);
+      return true;
+    },
+  );
+
+  // The way forward works: the same archive, deep-linked at one of them.
+  const one = await readRegistrySkillsFromArchive(
+    zipball({ ...heavy("one"), ...heavy("two") }),
+    { ...source, subpath: "skills/one" },
+  );
+  assert.equal(one.skills.length, 1);
+  assert.equal(one.skills[0]?.rejection, undefined);
+});

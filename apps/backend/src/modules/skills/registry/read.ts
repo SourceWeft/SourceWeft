@@ -3,6 +3,7 @@ import { SKILL_STORAGE_LIMITS } from "../storage";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
+  GITHUB_ZIP_LIMITS,
   GitHubArchiveError,
   listZipEntries,
   readZipEntries,
@@ -457,6 +458,22 @@ export async function readRegistrySkillsFromArchive(
   const wanted = new Map(
     [...ownerOf].filter(([, skillDir]) => !byDir.get(skillDir)!.rejection),
   );
+  // Every accepted skill of the repository is inflated together, under the
+  // archive reader's cumulative ceiling. One skill always fits under it (the
+  // per-skill limit is lower); several heavy ones may not. Say so in terms the
+  // submitter can act on, before the reader fails with a generic "too large".
+  let wantedBytes = 0;
+  for (const [skillDir, list] of declared) {
+    if (byDir.get(skillDir)!.rejection) continue;
+    for (const file of list) wantedBytes += file.sizeBytes;
+  }
+  if (wantedBytes > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      `The skills in this repository add up to ${formatMiB(wantedBytes)}, more than the ${formatMiB(GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes)} that can be imported at once. Each skill is within the limit on its own — submit them one at a time with a URL like https://github.com/owner/repo/tree/<branch>/skills/<skill>.`,
+    );
+  }
+
   const files = await readZipEntries(
     zip,
     (entryPath) => wanted.has(entryPath),
