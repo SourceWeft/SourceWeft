@@ -8,6 +8,8 @@ import {
   isSkillDeclarableAgentTool,
 } from "@sourceweft/agent-tool-registry";
 import { getSourceWeftFrontmatter, parseSkillFrontmatter } from "./frontmatter";
+import { readAllowedTools } from "./registry/analyze";
+import { SCAN_RULE_VERSION, scanRegistrySkill } from "./registry/scan";
 
 export const CUSTOM_SKILL_LIMITS = {
   skillMdBytes: 256 * 1024,
@@ -596,5 +598,87 @@ export function validateCustomSkillBundle(input: {
     files,
     contentHash,
     manifestJson,
+  };
+}
+
+export type CustomSkillScan = NonNullable<SkillManifestJson["customScan"]>;
+
+// Mirrors `SCRIPT_EXTENSIONS` / `fileRole` in registry/analyze.ts, which does
+// not export them. Keep the two in step: "which files are executable material"
+// must mean the same thing for a community skill and a workspace's own.
+const SCRIPT_EXTENSIONS = new Set([
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".py",
+  ".rb",
+  ".js",
+  ".ts",
+  ".mjs",
+  ".cjs",
+  ".pl",
+  ".php",
+  ".ps1",
+]);
+
+function customSkillFileRole(filePath: string): "model-readable" | "script" {
+  if (filePath === "SKILL.md") {
+    return "model-readable";
+  }
+  const ext = path.posix.extname(filePath).toLowerCase();
+  return filePath.startsWith("scripts/") || SCRIPT_EXTENSIONS.has(ext)
+    ? "script"
+    : "model-readable";
+}
+
+function customSkillAllowedTools(frontmatter: Record<string, unknown>) {
+  try {
+    return readAllowedTools(frontmatter);
+  } catch {
+    // A malformed `allowed-tools` is a rejection for a community submission, but
+    // custom skills have always published with one and the scan must not start
+    // blocking them. Hand the scanner the raw strings instead: its sensitive-tool
+    // match is word-based, so an unsplit declaration still trips it.
+    return ["allowed-tools", "allowedTools", "allowed_tools"]
+      .flatMap((key) => frontmatter[key] ?? [])
+      .filter((value): value is string => typeof value === "string");
+  }
+}
+
+/**
+ * Scan a custom bundle with the community-skill rules (`scanRegistrySkill`) and
+ * classify its capability the way `analyzeRegistrySkill` does: `executable` when
+ * the bundle ships a `script` file or its `allowed-tools` ask for a shell.
+ *
+ * The result is a record, not a verdict. A workspace's own skill is written by a
+ * member, so nothing here blocks or queues a publish; it exists so the UI and
+ * the approval/escalation logic can stop assuming every custom skill is
+ * prompt-only and clean.
+ */
+export function scanCustomSkillBundle(input: {
+  files: Array<Pick<ValidatedCustomSkillFile, "path" | "contentText">>;
+  scannedAt?: Date;
+}): CustomSkillScan {
+  const files = input.files.map((file) => ({
+    path: file.path,
+    contentText: file.contentText,
+    role: customSkillFileRole(file.path),
+  }));
+  const skillMd = files.find((file) => file.path === "SKILL.md");
+  const frontmatter =
+    (skillMd && parseSkillFrontmatter(skillMd.contentText)) ?? {};
+  const scan = scanRegistrySkill({
+    files,
+    allowedTools: customSkillAllowedTools(frontmatter),
+  });
+  const executable =
+    files.some((file) => file.role === "script") ||
+    scan.flags.includes("tool:sensitive");
+  return {
+    capability: executable ? "executable" : "prompt-only",
+    flags: scan.flags,
+    findings: scan.findings,
+    scanRuleVersion: SCAN_RULE_VERSION,
+    scannedAt: (input.scannedAt ?? new Date()).toISOString(),
   };
 }
