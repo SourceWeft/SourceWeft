@@ -28,17 +28,8 @@ import {
  *   verifies by that same digest.
  */
 
-/**
- * One set of limits for ingest AND for running: a skill that can be indexed can
- * be staged. They used to disagree (64 MiB per repository on the way in, 2 MB
- * per skill into the sandbox), so a skill could install cleanly and then fail
- * every turn that had a sandbox.
- */
-export const SKILL_STORAGE_LIMITS = Object.freeze({
-  maxFiles: 200,
-  maxFileBytes: 10 * 1024 * 1024,
-  maxBundleBytes: 50 * 1024 * 1024,
-});
+export { SKILL_STORAGE_LIMITS } from "./limits";
+import { SKILL_STORAGE_LIMITS } from "./limits";
 
 /** Fixed timestamp for deterministic zip output (the zip epoch is 1980). */
 const ZIP_MTIME = new Date("2000-01-01T00:00:00Z");

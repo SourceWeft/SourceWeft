@@ -121,37 +121,61 @@ export function createSkillFileReader(input: {
 }
 
 /**
- * Descriptor content for a skill whose bodies are already in memory as text —
- * builtins, read from disk: local, small, all text. The "lazy" reader is just a
- * lookup, and SKILL.md is there up front like for every other storage type.
+ * Descriptor content for a builtin, read from disk. Text bodies are already in
+ * memory, so the "lazy" reader is just a lookup, and SKILL.md is there up front
+ * like for every other storage type. A binary file is answered as binary — the
+ * model is never handed bytes — and `readBytes` reaches it for the one consumer
+ * that needs them: the sandbox bundle.
  */
 export function inlineSkillContent(
-  bundleFiles: ReadonlyArray<{
-    path: string;
-    contentText: string;
-    mimeType: string;
-    sizeBytes: number;
-    contentHash: string;
-  }>,
-): Pick<EnabledSkillDescriptor, "files" | "skillMd" | "readFile"> {
-  const byPath = new Map(
-    bundleFiles.map((file) => [file.path, file.contentText]),
-  );
+  bundleFiles: ReadonlyArray<
+    {
+      path: string;
+      mimeType: string;
+      sizeBytes: number;
+      contentHash: string;
+    } &
+      // `isText` may be omitted for text: callers holding plain text need not say so.
+      (
+        | { isText?: true; contentText: string }
+        | {
+            isText: false;
+            contentText: null;
+            readBytes: () => Promise<Uint8Array>;
+          }
+      )
+  >,
+): Pick<
+  EnabledSkillDescriptor,
+  "files" | "skillMd" | "readFile" | "readBytes"
+> {
+  const byPath = new Map(bundleFiles.map((file) => [file.path, file]));
+  const missing = (path: string) =>
+    new Error(`ENOENT: no such skill file '${path}'`);
+  const skillMd = byPath.get("SKILL.md");
   return {
     files: bundleFiles.map((file) => ({
       path: file.path,
       mimeType: file.mimeType,
       sizeBytes: file.sizeBytes,
       contentHash: file.contentHash,
-      isText: true,
+      isText: file.isText !== false,
     })),
-    skillMd: byPath.get("SKILL.md"),
+    skillMd:
+      skillMd && skillMd.isText !== false ? skillMd.contentText : undefined,
     readFile: async (path) => {
-      const text = byPath.get(path);
-      if (text === undefined) {
-        throw new Error(`ENOENT: no such skill file '${path}'`);
-      }
-      return { text };
+      const file = byPath.get(path);
+      if (!file) throw missing(path);
+      return file.isText === false
+        ? { binary: true, sizeBytes: file.sizeBytes }
+        : { text: file.contentText };
+    },
+    readBytes: async (path) => {
+      const file = byPath.get(path);
+      if (!file) throw missing(path);
+      return file.isText === false
+        ? file.readBytes()
+        : new TextEncoder().encode(file.contentText);
     },
   };
 }

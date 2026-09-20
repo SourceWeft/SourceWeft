@@ -168,10 +168,13 @@ async function buildSkillZip(skill: EnabledSkillDescriptor): Promise<SkillZip> {
   const encoder = new TextEncoder();
   const files = await Promise.all(
     skill.files.map(async (file) => {
+      // Builtins hand over bytes as they are on disk — fonts and images
+      // included. A `db_text` skill has only text, by construction.
+      if (skill.readBytes) {
+        return { path: file.path, bytes: await skill.readBytes(file.path) };
+      }
       const content = await skill.readFile!(file.path);
       if (!("text" in content)) {
-        // Only `object` versions carry binaries, and those have a stored
-        // bundle; bytes cannot be rebuilt from a text-only loader.
         throw new Error(`'${file.path}' is binary and has no stored bundle`);
       }
       return { path: file.path, bytes: encoder.encode(content.text) };

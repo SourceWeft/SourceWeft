@@ -81,6 +81,9 @@ function skill(
         bundleFile("scripts/validate_pptx.py", "print('ok')"),
       ],
     ),
+    // A caller that supplies its own loader is modelling a skill whose bodies
+    // come from there alone (a `db_text` version), not from memory.
+    ...(rest.readFile ? { readBytes: undefined } : {}),
     ...rest,
   };
 }
@@ -157,7 +160,9 @@ test("an in-process skill gets a deterministic zip targeting the /skills contrac
 
 test("loadContent returns a zip whose bytes hash to the plan sha", async () => {
   const plan = await buildSkillSandboxAssetPlan(
-    skill({ texts: [bundleFile("SKILL.md", "# zip me"), bundleFile("a/b.md", "b")] }),
+    skill({
+      texts: [bundleFile("SKILL.md", "# zip me"), bundleFile("a/b.md", "b")],
+    }),
   );
   const content = await plan.loadContent!();
   assert.ok(content && content.byteLength > 0);
@@ -170,6 +175,54 @@ test("loadContent returns a zip whose bytes hash to the plan sha", async () => {
     new TextDecoder().decode(unzipSync(content)["SKILL.md"]),
     "# zip me",
   );
+});
+
+test("a builtin's font goes into the sandbox bundle byte for byte, and the model is only told it is binary", async () => {
+  // Not valid UTF-8, with NULs: what reading it as text used to destroy.
+  const font = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff, 0xfe, 0x80, 0x00]);
+  let reads = 0;
+  const builtin: EnabledSkillDescriptor = {
+    workspaceSkillId: "ws-skill-1",
+    sourceType: "builtin",
+    name: "ppt-deck",
+    version: "1.2.0",
+    description: "Deck builder",
+    ...inlineSkillContent([
+      bundleFile("SKILL.md", "# ppt-deck"),
+      {
+        path: "assets/Inter.ttf",
+        mimeType: "font/ttf",
+        sizeBytes: font.byteLength,
+        contentHash: createHash("sha256").update(font).digest("hex"),
+        isText: false,
+        contentText: null,
+        readBytes: async () => {
+          reads += 1;
+          return font;
+        },
+      },
+    ]),
+  };
+
+  assert.deepEqual(
+    builtin.files.map((file) => [file.path, file.isText]),
+    [
+      ["SKILL.md", true],
+      ["assets/Inter.ttf", false],
+    ],
+  );
+  assert.deepEqual(await builtin.readFile!("assets/Inter.ttf"), {
+    binary: true,
+    sizeBytes: font.byteLength,
+  });
+  // Listing and reading for the model never touched the disk.
+  assert.equal(reads, 0);
+
+  const plan = await buildSkillSandboxAssetPlan(builtin);
+  const content = (await plan.loadContent!())!;
+  assert.equal(createHash("sha256").update(content).digest("hex"), plan.sha256);
+  assert.deepEqual(unzipSync(content)["assets/Inter.ttf"], font);
+  assert.equal(reads, 1);
 });
 
 test("an object skill's plan is the stored bundle: its sha, a presigned URL, a whole-bundle fallback — never a zip", async () => {
@@ -195,7 +248,9 @@ test("an object skill's plan is the stored bundle: its sha, a presigned URL, a w
 });
 
 test("normalizes unsafe version strings without losing content authority", async () => {
-  const plan = await buildSkillSandboxAssetPlan(skill({ version: "2.0 β/beta" }));
+  const plan = await buildSkillSandboxAssetPlan(
+    skill({ version: "2.0 β/beta" }),
+  );
   assert.match(plan.version, /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u);
 });
 
@@ -207,13 +262,19 @@ test("a skill that cannot be staged is rejected from its manifest, under the sto
   for (const [invalidSkill, expectedReason] of [
     [skill({ name: "../evil" }), "unsafe_name"],
     [
-      skill({ name: "no-skill-md", texts: [bundleFile("README.md", "no entry")] }),
+      skill({
+        name: "no-skill-md",
+        texts: [bundleFile("README.md", "no entry")],
+      }),
       "missing_skill_md",
     ],
     [
       skill({
         name: "traversal",
-        texts: [bundleFile("SKILL.md", "# x"), bundleFile("../outside.txt", "e")],
+        texts: [
+          bundleFile("SKILL.md", "# x"),
+          bundleFile("../outside.txt", "e"),
+        ],
       }),
       "unsafe_file_path",
     ],
@@ -234,7 +295,10 @@ test("a skill that cannot be staged is rejected from its manifest, under the sto
         files: [
           manifestEntry("SKILL.md", 1),
           ...Array.from({ length: 6 }, (_, index) =>
-            manifestEntry(`blob-${index}.txt`, SKILL_STORAGE_LIMITS.maxFileBytes),
+            manifestEntry(
+              `blob-${index}.txt`,
+              SKILL_STORAGE_LIMITS.maxFileBytes,
+            ),
           ),
         ],
       }),
@@ -266,7 +330,10 @@ test("a skill that cannot be staged is rejected from its manifest, under the sto
   assert.equal(
     skillStagingRejection(
       skill({
-        files: [manifestEntry("SKILL.md", 1), manifestEntry("d.csv", 5 * 1024 * 1024)],
+        files: [
+          manifestEntry("SKILL.md", 1),
+          manifestEntry("d.csv", 5 * 1024 * 1024),
+        ],
       }),
     ),
     null,
@@ -294,7 +361,9 @@ test("the turn registry grows, returns the current set, and replaces a re-regist
 
   // Re-registering a name replaces its plan: /skills/<name>/ is one path.
   const before = (await registry.plans())[0]!.sha256;
-  registry.add([skill({ texts: [bundleFile("SKILL.md", "# ppt-deck, edited")] })]);
+  registry.add([
+    skill({ texts: [bundleFile("SKILL.md", "# ppt-deck, edited")] }),
+  ]);
   const after = await registry.plans();
   assert.deepEqual(
     after.map((plan) => plan.name),
@@ -318,7 +387,12 @@ test("an unstageable skill degrades alone: add() never throws and every other sk
     texts: [bundleFile("README.md", "no entry")],
   });
 
-  const { rejected } = registry.add([skill(), tooBig, objectSkill(), malformed]);
+  const { rejected } = registry.add([
+    skill(),
+    tooBig,
+    objectSkill(),
+    malformed,
+  ]);
 
   assert.deepEqual(
     rejected.map((rejection) => [rejection.name, rejection.reason]),

@@ -47,8 +47,7 @@ export type SkillFileManifestEntry = {
 };
 
 export type SkillFileContent =
-  | { text: string }
-  | { binary: true; sizeBytes: number };
+  { text: string } | { binary: true; sizeBytes: number };
 
 /**
  * Fetches one file's content by its bundle-relative path, from wherever the
@@ -104,6 +103,12 @@ export type EnabledSkillDescriptor = {
   skillMd?: string;
   /** Lazy content, bound to the skill's storage type; cached for the turn. */
   readFile?: SkillFileReader;
+  /**
+   * Raw bytes of one file, for building the sandbox bundle in process. Set for
+   * builtins, whose binary files (fonts, images) live on disk and have no
+   * stored bundle. Never used to show the model anything.
+   */
+  readBytes?: (path: string) => Promise<Uint8Array>;
   /**
    * Set for `object` versions only: the sandbox stages this stored bundle.
    * Without it (`db_text`, `repo_builtin`) the bundle is zipped in process.
