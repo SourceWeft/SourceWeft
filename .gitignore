@@ -37,6 +37,8 @@ apps/web/.next-dev-*.log
 # turbo
 .turbo
 *.tsbuildinfo
+__pycache__/
+*.pyc
 
 # extension (wxt)
 .wxt/

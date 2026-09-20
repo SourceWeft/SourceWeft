@@ -1,0 +1,103 @@
+name: Android package verification
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build verification APK or signed release APK and AAB
+        type: choice
+        options: [verification, release]
+        default: verification
+        required: true
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "scripts/ci/android-*"
+      - ".github/workflows/android-build.yml"
+      - "pnpm-lock.yaml"
+  push:
+    branches: [main, "codex/**"]
+    paths:
+      - "apps/mobile/**"
+      - "scripts/ci/android-*"
+      - ".github/workflows/android-build.yml"
+      - "pnpm-lock.yaml"
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'release' && 'android-release' || 'android-verification' }}
+    env:
+      ANDROID_BUILD_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'verification' }}
+      RUSTUP_TOOLCHAIN: 1.94.1
+      CARGO_BUILD_JOBS: 2
+      CARGO_TERM_COLOR: never
+      ANDROID_STORE_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'release' && secrets.ANDROID_STORE_PASSWORD || '' }}
+      ANDROID_KEY_ALIAS: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'release' && secrets.ANDROID_KEY_ALIAS || '' }}
+      ANDROID_KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'release' && secrets.ANDROID_KEY_PASSWORD || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Prepare release keystore
+        if: env.ANDROID_BUILD_MODE == 'release'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          for key in ['ANDROID_KEYSTORE_BASE64','ANDROID_STORE_PASSWORD','ANDROID_KEY_ALIAS','ANDROID_KEY_PASSWORD']:
+              if not os.environ.get(key): raise SystemExit(f'{key} is required for release signing')
+          path = Path(os.environ['RUNNER_TEMP']) / 'sourceweft-android-release.jks'
+          path.write_bytes(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64'], validate=True))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'ANDROID_KEYSTORE_PATH={path}\n')
+          PY
+      - name: Test build configuration and artifact validation
+        run: |
+          node --test scripts/ci/android-build.test.mjs
+          python3 scripts/ci/android-artifacts.test.py
+      - uses: android-actions/setup-android@v3
+      - name: Install pinned Android tools
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            apps/mobile/src-tauri/target
+          key: android-arm64-${{ runner.os }}-1.94.1-ndk28.2-${{ hashFiles('apps/mobile/src-tauri/Cargo.lock', 'apps/mobile/src-tauri/gen/android/**/*.gradle.kts', 'apps/mobile/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked --manifest-path apps/mobile/src-tauri/Cargo.toml
+      - name: Build Android artifacts
+        run: node scripts/ci/android-build.mjs "$ANDROID_BUILD_MODE"
+      - name: Verify APK signature, identity and native libraries
+        run: python3 scripts/ci/android-artifacts.py "$ANDROID_BUILD_MODE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ env.ANDROID_BUILD_MODE }}-arm64-${{ github.sha }}
+          path: output/android/${{ env.ANDROID_BUILD_MODE }}/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary release keystore
+        if: always() && env.ANDROID_BUILD_MODE == 'release'
+        run: rm -f "$RUNNER_TEMP/sourceweft-android-release.jks"
